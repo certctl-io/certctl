@@ -309,7 +309,7 @@ make docker-clean       # Stop + remove volumes
 
 Summary:
 
-- **V1 (current)**: Dashboard, inventory, threshold-based expiration alerting (30/14/7/0 days with dedup), Local CA issuer (end-to-end lifecycle wired), ACME v2 (HTTP-01), NGINX/F5/IIS target connectors, agents with work polling, REST API (40+ endpoints), policies, audit trail, Docker Compose
+- **V1 (current)**: Dashboard, inventory, threshold-based expiration alerting (30/14/7/0 days with dedup), Local CA issuer (end-to-end lifecycle wired), ACME v2 (HTTP-01), NGINX/F5/IIS target connectors, agents with work polling, REST API (40+ endpoints), policies, audit trail, Docker Compose, 120 tests (service + handler + integration)
 - **V2**: Charts/trends, bulk import, OIDC/SSO, deployment rollback, CLI, Slack/Teams
 - **V3**: Certificate discovery, network scanning, unknown cert detection
 - **V4+**: Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
