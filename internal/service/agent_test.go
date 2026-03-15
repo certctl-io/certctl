@@ -30,7 +30,7 @@ func TestRegisterAgent(t *testing.T) {
 
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	agent, apiKey, err := agentService.Register(ctx, "prod-agent-1", "server-01.example.com")
 	if err != nil {
@@ -87,7 +87,7 @@ func TestHeartbeat(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	err := agentService.HeartbeatWithContext(ctx, "agent-001")
 	if err != nil {
@@ -120,7 +120,7 @@ func TestHeartbeat_NotFound(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	err := agentService.HeartbeatWithContext(ctx, "nonexistent")
 	if err == nil {
@@ -175,7 +175,7 @@ func TestGetPendingWork(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	jobs, err := agentService.GetPendingWork(ctx, "agent-001")
 	if err != nil {
@@ -229,7 +229,7 @@ func TestReportJobStatus(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	err := agentService.ReportJobStatus(ctx, "agent-001", "job-001", domain.JobStatusCompleted, "")
 	if err != nil {
@@ -288,7 +288,7 @@ func TestMarkStaleAgentsOffline(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	err := agentService.MarkStaleAgentsOffline(ctx, 1*time.Hour)
 	if err != nil {
@@ -354,7 +354,7 @@ func TestSubmitCSR(t *testing.T) {
 	}
 	issuerRegistry := map[string]IssuerConnector{"iss-local": issuerConnector}
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	csrPEM := "-----BEGIN CERTIFICATE REQUEST-----\ntest-csr\n-----END CERTIFICATE REQUEST-----"
 	err := agentService.SubmitCSR(ctx, "agent-001", "cert-001", []byte(csrPEM))
@@ -403,7 +403,7 @@ func TestSubmitCSR_EmptyCSR(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	err := agentService.SubmitCSR(ctx, "agent-001", "", []byte{})
 	if err == nil {
@@ -451,7 +451,7 @@ func TestListAgents(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	issuerRegistry := make(map[string]IssuerConnector)
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	agents, total, err := agentService.ListAgents(1, 50)
 	if err != nil {
