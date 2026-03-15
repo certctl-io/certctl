@@ -35,11 +35,12 @@ const (
 type JobStatus string
 
 const (
-	JobStatusPending   JobStatus = "Pending"
-	JobStatusRunning   JobStatus = "Running"
-	JobStatusCompleted JobStatus = "Completed"
-	JobStatusFailed    JobStatus = "Failed"
-	JobStatusCancelled JobStatus = "Cancelled"
+	JobStatusPending     JobStatus = "Pending"
+	JobStatusAwaitingCSR JobStatus = "AwaitingCSR"
+	JobStatusRunning     JobStatus = "Running"
+	JobStatusCompleted   JobStatus = "Completed"
+	JobStatusFailed      JobStatus = "Failed"
+	JobStatusCancelled   JobStatus = "Cancelled"
 )
 
 // DeploymentJob represents a job that deploys a certificate to a target via an agent.
@@ -55,6 +56,8 @@ type WorkItem struct {
 	ID            string          `json:"id"`
 	Type          JobType         `json:"type"`
 	CertificateID string          `json:"certificate_id"`
+	CommonName    string          `json:"common_name,omitempty"`
+	SANs          []string        `json:"sans,omitempty"`
 	TargetID      *string         `json:"target_id,omitempty"`
 	TargetType    string          `json:"target_type,omitempty"`
 	TargetConfig  json.RawMessage `json:"target_config,omitempty"`

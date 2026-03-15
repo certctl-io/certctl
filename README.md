@@ -8,7 +8,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (40+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure handle certificate deployment, and key generation moves to agents in M8 so private keys never leave your servers.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (40+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers.
 
 ```mermaid
 flowchart LR
@@ -115,7 +115,7 @@ flowchart TB
 
 ### Key Design Decisions
 
-- **Private keys isolated from the control plane (M8 goal).** Currently, the Local CA issuer generates server-side keys for simplicity. M8 moves key generation to agents — agents generate keys locally and submit CSRs (public key only). The architecture is designed for this separation; server-side keygen will be flagged as demo-only.
+- **Private keys isolated from the control plane.** Agents generate ECDSA P-256 keys locally and submit CSRs (public key only). The server signs the CSR and returns the certificate — private keys never touch the control plane. Server-side keygen is available via `CERTCTL_KEYGEN_MODE=server` for demo/development only.
 - **TEXT primary keys, not UUIDs.** IDs are human-readable prefixed strings (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resource types at a glance in logs and queries.
 - **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
 - **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
@@ -153,6 +153,7 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_LOG_FORMAT` | `json` | Log format: `json` or `text` |
 | `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `jwt`, or `none` |
 | `CERTCTL_AUTH_SECRET` | — | Required for `api-key` and `jwt` auth types |
+| `CERTCTL_KEYGEN_MODE` | `agent` | Key generation mode: `agent` (production) or `server` (demo only) |
 | `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
 | `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
 
@@ -164,6 +165,7 @@ Agent environment variables:
 | `CERTCTL_API_KEY` | — | Agent API key |
 | `CERTCTL_AGENT_NAME` | `certctl-agent` | Agent display name |
 | `CERTCTL_AGENT_ID` | — | Registered agent ID (required) |
+| `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Directory for storing private keys (agent keygen mode) |
 
 Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
@@ -292,8 +294,8 @@ make docker-clean       # Stop + remove volumes
 ## Security
 
 ### Private Key Management
-- **V1 (Local CA)**: The control plane generates ephemeral RSA-2048 keys server-side for certificate issuance. This simplifies the initial implementation but means private keys exist on the control plane temporarily. Keys are stored in certificate version records.
-- **M8+**: Private keys will be generated exclusively on agents, never sent to the control plane. Keys stored with file permissions 0600 and rotated after successful renewal.
+- **Agent keygen mode (default)**: Agents generate ECDSA P-256 keys locally and store them with 0600 permissions in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`). Only the CSR (public key) is sent to the control plane. Private keys never leave agent infrastructure.
+- **Server keygen mode (demo only)**: Set `CERTCTL_KEYGEN_MODE=server` for development/demo with Local CA. The control plane generates RSA-2048 keys server-side. A log warning is emitted at startup.
 
 ### Authentication
 - Agent-to-server: API key (registered at agent creation)
@@ -308,9 +310,7 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (in progress → v1.0.0)
-Backend complete: end-to-end lifecycle, Local CA + ACME v2 issuers, NGINX/F5/IIS targets, threshold alerting. GUI fully wired to real API with 11 views. CI pipeline running. Remaining milestones before v1.0 tag:
-- **M7: Auth + Rate Limiting** — API key auth enforced by default, token bucket rate limiting, CORS configuration, GUI login flow
-- **M8: Agent-Side Key Generation** — agents generate keys locally, submit CSR only, private keys never leave infrastructure, server-side keygen flagged as demo-only
+Backend complete: end-to-end lifecycle, Local CA + ACME v2 issuers, NGINX/F5/IIS targets, threshold alerting, agent-side keygen, auth + rate limiting. GUI fully wired to real API with 11 views. CI pipeline running. Remaining milestone before v1.0 tag:
 - **M9: End-to-End Test Hardening** — handler tests for all 7 files, negative-path integration tests (issuer down, malformed CSR, DB failure), scheduler and connector tests, CI coverage gates (service 70%+, handler 60%+)
 
 ### V2: Operational Maturity

@@ -8,7 +8,7 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ### Design Principles
 
-1. **Private Key Isolation** — Agents generate keys locally and submit CSRs only. Private keys never touch the control plane. (M8 milestone; currently server-side keygen for Local CA demo, flagged explicitly.)
+1. **Private Key Isolation** — Agents generate ECDSA P-256 keys locally and submit CSRs only. Private keys never touch the control plane. Server-side keygen available via `CERTCTL_KEYGEN_MODE=server` for demo only.
 2. **GUI as Primary Interface** — The web dashboard is the operational control plane, not a secondary viewer. Every backend feature ships with its corresponding GUI surface.
 3. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
 4. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
@@ -74,9 +74,9 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents poll the control plane for pending deployment jobs, fetch signed certificates, deploy them to target systems, and report job status back. In M8, agents will also generate private keys locally and create CSRs — private keys will never leave agent infrastructure. Agents communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, F5, IIS) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
 
-The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for pending deployment jobs via `GET /api/v1/agents/{id}/work`. When a job is found, the agent fetches the certificate, executes the deployment, and reports status via `POST /api/v1/agents/{id}/jobs/{job_id}/status`.
+The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
 ### Web Dashboard
 
@@ -234,58 +234,62 @@ sequenceDiagram
 
 ### 2. Certificate Issuance
 
-#### V1: Server-Side Key Generation (Local CA)
+#### Agent-Side Key Generation (Default)
 
-In V1, the control plane generates keys and CSRs server-side for the Local CA. This simplifies the initial implementation — the full agent-side key generation flow is planned for M8.
+In the default `agent` keygen mode (`CERTCTL_KEYGEN_MODE=agent`), the control plane never touches private keys. When a renewal or issuance job is created, it enters `AwaitingCSR` state. The agent picks it up, generates an ECDSA P-256 key pair locally, and submits only the CSR (public key).
+
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant SVC as RenewalService
+    participant DB as PostgreSQL
+    participant A as Agent
+    participant API as Control Plane API
+    participant ISS as Issuer Connector
+
+    S->>SVC: ProcessRenewalJob(job)
+    SVC->>DB: UPDATE job SET status='AwaitingCSR'
+    SVC->>DB: UPDATE cert SET status='RenewalInProgress'
+
+    A->>API: GET /agents/{id}/work
+    API-->>A: [{id, type:"Renewal", status:"AwaitingCSR", common_name, sans}]
+
+    A->>A: Generate ECDSA P-256 key pair
+    A->>A: Store key to CERTCTL_KEY_DIR/certId.key (0600)
+    A->>A: Create CSR with CN + SANs
+
+    A->>API: POST /agents/{id}/csr<br/>{csr_pem, certificate_id}
+    API->>SVC: CompleteAgentCSRRenewal(job, cert, csrPEM)
+    SVC->>ISS: RenewCertificate(CN, SANs, csrPEM)
+    ISS-->>SVC: IssuanceResult{cert_pem, chain_pem, serial}
+    SVC->>DB: INSERT INTO certificate_versions (PEM chain + CSR only)
+    SVC->>DB: UPDATE cert SET status='Active', expires_at
+    SVC->>DB: CREATE deployment jobs for targets
+
+    Note over A: Agent deploys using locally-held private key
+```
+
+#### Server-Side Key Generation (Demo Only)
+
+Set `CERTCTL_KEYGEN_MODE=server` for development/demo with Local CA. The control plane generates RSA-2048 keys server-side. A log warning is emitted at startup.
 
 ```mermaid
 sequenceDiagram
     participant U as User / Scheduler
-    participant API as Control Plane API
     participant SVC as RenewalService
     participant ISS as IssuerConnector
     participant DB as PostgreSQL
 
-    U->>API: POST /api/v1/certificates/{id}/renew
-    API->>SVC: ProcessRenewalJob(job)
-
+    U->>SVC: ProcessRenewalJob(job)
     SVC->>SVC: Generate RSA-2048 key pair (server-side)
     SVC->>SVC: Create CSR with CN + SANs
-    SVC->>ISS: IssueCertificate(commonName, sans, csrPEM)
-    ISS-->>SVC: IssuanceResult{cert_pem, chain_pem, serial, not_after}
+    SVC->>ISS: RenewCertificate(CN, SANs, csrPEM)
+    ISS-->>SVC: IssuanceResult{cert_pem, chain_pem, serial}
+    SVC->>DB: INSERT INTO certificate_versions (PEM + private key)
+    SVC->>DB: UPDATE cert SET status='Active'
+    SVC->>DB: CREATE deployment jobs
 
-    SVC->>SVC: Compute SHA-256 fingerprint
-    SVC->>DB: INSERT INTO certificate_versions (PEM chain + CSR)
-    SVC->>DB: UPDATE managed_certificates SET status='Active', expires_at
-    SVC->>DB: INSERT INTO audit_events
-    SVC->>DB: CREATE deployment jobs for all mapped targets
-
-    Note over SVC: Deployment jobs picked up by agents<br/>via GET /api/v1/agents/{id}/work
-```
-
-#### M8 (Planned): Agent-Side Key Generation
-
-```mermaid
-sequenceDiagram
-    participant A as Agent
-    participant API as Control Plane API
-    participant ISS as Issuer Connector
-    participant DB as PostgreSQL
-
-    A->>A: Generate RSA-2048 key pair locally
-    A->>A: Create CSR (CN + SANs, public key only)
-    A->>API: POST /api/v1/agents/{id}/csr<br/>{csr_pem, certificate_id}
-
-    API->>ISS: IssueCertificate(IssuanceRequest{CSR})
-    ISS-->>API: IssuanceResult{cert_pem, chain_pem, serial, not_after}
-
-    API->>DB: INSERT INTO certificate_versions
-    API->>DB: UPDATE managed_certificates SET status='Active'
-
-    API-->>A: {certificate_pem, chain_pem}<br/>(NO private key in response)
-
-    A->>A: Store cert + chain locally (key never leaves agent)
-    A->>A: Deploy to target system
+    Note over SVC: WARNING: Private keys touch control plane
 ```
 
 ### 3. Deploy Certificate to Target
@@ -296,7 +300,7 @@ The agent deploys certificates using target connectors. Each connector knows how
 - **F5 BIG-IP**: Calls the F5 REST API to upload certificate and update virtual server bindings
 - **IIS**: Uses WinRM to import the certificate into the Windows certificate store and bind it to an IIS site
 
-The agent handles both the certificate (public) and the private key (local only). The control plane never sees the private key.
+The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key.
 
 ### 4. Automatic Renewal
 
@@ -455,16 +459,16 @@ flowchart LR
     style ROT fill:#efe,stroke:#3c3
 ```
 
-**V1 (Current):** The Local CA issuer generates RSA-2048 keys and CSRs server-side within `RenewalService.ProcessRenewalJob`. Private key material is stored alongside the CSR in the `certificate_versions` table. This is a pragmatic V1 trade-off to get the end-to-end lifecycle working.
+**Agent keygen mode (default, `CERTCTL_KEYGEN_MODE=agent`):** Private keys follow a strict lifecycle on agents:
 
-**M8 (Target Architecture):** Private keys follow a strict lifecycle on agents:
+1. **Generated on the agent** — ECDSA P-256, never sent to the control plane
+2. **Stored on the agent** — `CERTCTL_KEY_DIR` with file permissions 0600
+3. **Used by the agent** — for deployment to targets (via `DeploymentRequest.KeyPEM`)
+4. **Rotated by the agent** — old keys overwritten after successful renewal
 
-1. **Generated on the agent** — never sent to the control plane
-2. **Stored on the agent** — file permissions 0600, owned by the agent process user
-3. **Used by the agent** — for deployment to targets and CSR generation
-4. **Rotated by the agent** — old keys deleted after successful renewal
+The control plane only handles public material: certificates, chains, and CSRs.
 
-The M8+ architecture ensures the control plane only handles public material: certificates, chains, and CSRs.
+**Server keygen mode (`CERTCTL_KEYGEN_MODE=server`, demo only):** The control plane generates RSA-2048 keys server-side within `processRenewalServerKeygen`. Private keys are stored in `certificate_versions.csr_pem`. A log warning is emitted at startup. Use only for Local CA development/demo.
 
 ### Authentication
 

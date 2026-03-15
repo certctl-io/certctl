@@ -38,6 +38,7 @@ services:
       CERTCTL_SERVER_PORT: 8443
       CERTCTL_LOG_LEVEL: info
       CERTCTL_AUTH_TYPE: none
+      CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
     ports:
       - "8443:8443"
     networks:

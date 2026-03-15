@@ -3,7 +3,13 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
+	"encoding/pem"
 	"flag"
 	"fmt"
 	"io"
@@ -11,6 +17,7 @@ import (
 	"net/http"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"syscall"
 	"time"
 
@@ -27,10 +34,13 @@ type AgentConfig struct {
 	AgentName string // Agent name for identification
 	AgentID   string // Agent ID for API calls (set after registration or from env)
 	Hostname  string // Server hostname
+	KeyDir    string // Directory for storing private keys (default: /var/lib/certctl/keys)
 }
 
 // Agent represents the local agent that runs on target servers.
-// It periodically sends heartbeats, polls for work, and executes deployment jobs.
+// It periodically sends heartbeats, polls for work, and executes deployment and CSR jobs.
+// In agent keygen mode, private keys are generated and stored locally — they never leave
+// this process or filesystem.
 type Agent struct {
 	config *AgentConfig
 	logger *slog.Logger
@@ -47,11 +57,13 @@ type WorkResponse struct {
 	Count int       `json:"count"`
 }
 
-// JobItem represents a job returned from the control plane, enriched with target details.
+// JobItem represents a job returned from the control plane, enriched with target/cert details.
 type JobItem struct {
 	ID            string          `json:"id"`
 	Type          string          `json:"type"`
 	CertificateID string          `json:"certificate_id"`
+	CommonName    string          `json:"common_name,omitempty"`
+	SANs          []string        `json:"sans,omitempty"`
 	TargetID      *string         `json:"target_id,omitempty"`
 	TargetType    string          `json:"target_type,omitempty"`
 	TargetConfig  json.RawMessage `json:"target_config,omitempty"`
@@ -75,7 +87,13 @@ func (a *Agent) Run(ctx context.Context) error {
 	a.logger.Info("agent starting",
 		"server_url", a.config.ServerURL,
 		"agent_name", a.config.AgentName,
-		"agent_id", a.config.AgentID)
+		"agent_id", a.config.AgentID,
+		"key_dir", a.config.KeyDir)
+
+	// Ensure key directory exists with secure permissions
+	if err := os.MkdirAll(a.config.KeyDir, 0700); err != nil {
+		return fmt.Errorf("failed to create key directory %s: %w", a.config.KeyDir, err)
+	}
 
 	// Create ticker channels for heartbeat and polling
 	heartbeatTicker := time.NewTicker(a.heartbeatInterval)
@@ -131,7 +149,8 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	a.logger.Debug("heartbeat acknowledged")
 }
 
-// pollForWork queries the control plane for pending deployment jobs and processes them.
+// pollForWork queries the control plane for actionable jobs and processes them.
+// Jobs may be deployment jobs (Pending) or CSR jobs (AwaitingCSR).
 // GET /api/v1/agents/{agentID}/work
 func (a *Agent) pollForWork(ctx context.Context) {
 	a.logger.Debug("polling for work", "agent_id", a.config.AgentID)
@@ -165,23 +184,148 @@ func (a *Agent) pollForWork(ctx context.Context) {
 
 	a.logger.Info("received work", "job_count", workResp.Count)
 
-	// Process each job
+	// Process each job based on type and status
 	for _, job := range workResp.Jobs {
-		if job.Type == "Deployment" {
+		switch {
+		case job.Status == "AwaitingCSR":
+			// Agent keygen mode: generate key locally, create CSR, submit to server
+			a.executeCSRJob(ctx, job)
+		case job.Type == "Deployment":
 			a.executeDeploymentJob(ctx, job)
 		}
 	}
 }
 
+// executeCSRJob handles an AwaitingCSR job: generates a private key locally, creates a CSR,
+// and submits it to the control plane for signing. The private key is stored on the local
+// filesystem with 0600 permissions and NEVER sent to the server.
+//
+// Flow:
+// 1. Generate ECDSA P-256 key pair
+// 2. Store private key to disk (keyDir/certID.key) with 0600 permissions
+// 3. Create CSR with common name and SANs from work response
+// 4. Submit CSR to control plane via POST /agents/{id}/csr
+// 5. Server signs the CSR and creates a cert version + deployment jobs
+func (a *Agent) executeCSRJob(ctx context.Context, job JobItem) {
+	a.logger.Info("executing CSR job (agent-side key generation)",
+		"job_id", job.ID,
+		"certificate_id", job.CertificateID,
+		"common_name", job.CommonName)
+
+	// Step 1: Generate ECDSA P-256 key pair
+	privKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		a.logger.Error("failed to generate private key",
+			"job_id", job.ID,
+			"error", err)
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key generation failed: %v", err))
+		return
+	}
+
+	a.logger.Info("generated ECDSA P-256 key pair locally",
+		"job_id", job.ID,
+		"certificate_id", job.CertificateID)
+
+	// Step 2: Store private key to disk with secure permissions
+	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
+	privKeyDER, err := x509.MarshalECPrivateKey(privKey)
+	if err != nil {
+		a.logger.Error("failed to marshal private key",
+			"job_id", job.ID,
+			"error", err)
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key marshal failed: %v", err))
+		return
+	}
+
+	privKeyPEM := pem.EncodeToMemory(&pem.Block{
+		Type:  "EC PRIVATE KEY",
+		Bytes: privKeyDER,
+	})
+
+	if err := os.WriteFile(keyPath, privKeyPEM, 0600); err != nil {
+		a.logger.Error("failed to write private key to disk",
+			"job_id", job.ID,
+			"key_path", keyPath,
+			"error", err)
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key storage failed: %v", err))
+		return
+	}
+
+	a.logger.Info("private key stored securely",
+		"job_id", job.ID,
+		"key_path", keyPath,
+		"permissions", "0600")
+
+	// Step 3: Create CSR with common name and SANs
+	csrTemplate := &x509.CertificateRequest{
+		Subject: pkix.Name{
+			CommonName: job.CommonName,
+		},
+		DNSNames: job.SANs,
+	}
+
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privKey)
+	if err != nil {
+		a.logger.Error("failed to create CSR",
+			"job_id", job.ID,
+			"error", err)
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("CSR creation failed: %v", err))
+		return
+	}
+
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{
+		Type:  "CERTIFICATE REQUEST",
+		Bytes: csrDER,
+	}))
+
+	// Step 4: Submit CSR to the control plane (only the public key leaves the agent)
+	a.logger.Info("submitting CSR to control plane",
+		"job_id", job.ID,
+		"certificate_id", job.CertificateID)
+
+	submitPath := fmt.Sprintf("/api/v1/agents/%s/csr", a.config.AgentID)
+	resp, err := a.makeRequest(ctx, http.MethodPost, submitPath, map[string]string{
+		"csr_pem":        csrPEM,
+		"certificate_id": job.CertificateID,
+	})
+	if err != nil {
+		a.logger.Error("failed to submit CSR",
+			"job_id", job.ID,
+			"error", err)
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("CSR submission failed: %v", err))
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		a.logger.Error("CSR submission rejected",
+			"job_id", job.ID,
+			"status", resp.StatusCode,
+			"body", string(body))
+		_ = a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("CSR rejected: %s", string(body)))
+		return
+	}
+
+	a.logger.Info("CSR submitted and signed successfully",
+		"job_id", job.ID,
+		"certificate_id", job.CertificateID,
+		"key_path", keyPath)
+}
+
 // executeDeploymentJob executes a deployment job by fetching the certificate and deploying it
 // to the target system using the appropriate connector (NGINX, F5 BIG-IP, or IIS).
+//
+// For agent keygen mode, the private key is read from the local key store (keyDir/certID.key)
+// rather than fetched from the server. The deployment includes the locally-held key.
 //
 // Flow:
 // 1. Report job as Running
 // 2. Fetch the certificate PEM from the control plane
-// 3. Instantiate the target connector based on target_type from the work response
-// 4. Call DeployCertificate on the connector
-// 5. Report job as Completed (or Failed)
+// 3. Load local private key if it exists (agent keygen mode)
+// 4. Instantiate the target connector based on target_type from the work response
+// 5. Call DeployCertificate on the connector
+// 6. Report job as Completed (or Failed)
 func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 	a.logger.Info("executing deployment job",
 		"job_id", job.ID,
@@ -210,6 +354,16 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 	// Split PEM into cert and chain (separated by double newline between PEM blocks)
 	certOnly, chainPEM := splitPEMChain(certPEM)
 
+	// Check for locally-stored private key (agent keygen mode)
+	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
+	var keyPEM string
+	if keyData, err := os.ReadFile(keyPath); err == nil {
+		keyPEM = string(keyData)
+		a.logger.Info("loaded local private key for deployment",
+			"job_id", job.ID,
+			"key_path", keyPath)
+	}
+
 	// Deploy to the target using the appropriate connector
 	if job.TargetType != "" {
 		connector, err := a.createTargetConnector(job.TargetType, job.TargetConfig)
@@ -224,6 +378,7 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 
 		deployReq := target.DeploymentRequest{
 			CertPEM:      certOnly,
+			KeyPEM:       keyPEM,
 			ChainPEM:     chainPEM,
 			TargetConfig: job.TargetConfig,
 			Metadata: map[string]string{
@@ -418,6 +573,7 @@ func main() {
 	apiKey := flag.String("api-key", getEnvDefault("CERTCTL_API_KEY", ""), "Agent API key")
 	agentName := flag.String("name", getEnvDefault("CERTCTL_AGENT_NAME", "certctl-agent"), "Agent name")
 	agentID := flag.String("agent-id", getEnvDefault("CERTCTL_AGENT_ID", ""), "Agent ID (from registration)")
+	keyDir := flag.String("key-dir", getEnvDefault("CERTCTL_KEY_DIR", "/var/lib/certctl/keys"), "Directory for storing private keys")
 	flag.Parse()
 
 	if *apiKey == "" {
@@ -453,6 +609,7 @@ func main() {
 		AgentName: *agentName,
 		AgentID:   *agentID,
 		Hostname:  hostname,
+		KeyDir:    *keyDir,
 	}
 
 	// Create and start agent

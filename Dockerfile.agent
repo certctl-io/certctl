@@ -29,7 +29,9 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/agent .
 
-RUN chown -R certctl:certctl /app
+# Create key storage directory for agent-side keygen
+RUN mkdir -p /var/lib/certctl/keys && \
+    chown -R certctl:certctl /app /var/lib/certctl
 
 USER certctl
 

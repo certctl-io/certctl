@@ -20,6 +20,7 @@ type AgentService struct {
 	targetRepo      repository.TargetRepository
 	auditService    *AuditService
 	issuerRegistry  map[string]IssuerConnector
+	renewalService  *RenewalService
 }
 
 // NewAgentService creates a new agent service.
@@ -30,6 +31,7 @@ func NewAgentService(
 	targetRepo repository.TargetRepository,
 	auditService *AuditService,
 	issuerRegistry map[string]IssuerConnector,
+	renewalService *RenewalService,
 ) *AgentService {
 	return &AgentService{
 		agentRepo:      agentRepo,
@@ -38,6 +40,7 @@ func NewAgentService(
 		targetRepo:     targetRepo,
 		auditService:   auditService,
 		issuerRegistry: issuerRegistry,
+		renewalService: renewalService,
 	}
 }
 
@@ -106,8 +109,9 @@ func (s *AgentService) Heartbeat(agentID string) error {
 }
 
 // SubmitCSR validates and processes a Certificate Signing Request from an agent.
-// It forwards the CSR to the appropriate issuer connector for signing, then stores
-// the resulting certificate version.
+// In agent keygen mode, this completes an AwaitingCSR renewal job by signing the CSR
+// and storing the cert version. The private key stays on the agent — only the CSR
+// (public key) reaches the server.
 func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID string, csrPEM []byte) error {
 	// Fetch agent
 	agent, err := s.agentRepo.Get(ctx, agentID)
@@ -120,39 +124,57 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 		return fmt.Errorf("invalid CSR: empty")
 	}
 
-	// If a certificate ID is provided, sign the CSR via the issuer connector
 	if certID != "" {
 		cert, err := s.certRepo.Get(ctx, certID)
 		if err != nil {
 			return fmt.Errorf("failed to fetch certificate: %w", err)
 		}
 
-		// Look up the issuer connector
+		// Check for AwaitingCSR jobs first (agent keygen mode)
+		if s.renewalService != nil {
+			awaitingJobs, err := s.renewalService.GetAwaitingCSRJobs(ctx, certID)
+			if err == nil && len(awaitingJobs) > 0 {
+				// Complete the renewal via the renewal service (signs CSR, stores version, creates deploy jobs)
+				if err := s.renewalService.CompleteAgentCSRRenewal(ctx, awaitingJobs[0], cert, string(csrPEM)); err != nil {
+					return fmt.Errorf("failed to complete agent CSR renewal: %w", err)
+				}
+
+				// Record audit event
+				_ = s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
+					"csr_submitted", "certificate", certID,
+					map[string]interface{}{
+						"agent_hostname": agent.Hostname,
+						"keygen_mode":    "agent",
+						"job_id":         awaitingJobs[0].ID,
+					})
+
+				return nil
+			}
+		}
+
+		// Fallback: direct issuer signing (no AwaitingCSR job — ad-hoc CSR submission)
 		connector, ok := s.issuerRegistry[cert.IssuerID]
 		if ok {
-			// Sign the CSR via the issuer connector
 			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM))
 			if err != nil {
 				return fmt.Errorf("issuer signing failed: %w", err)
 			}
 
-			// Store the signed certificate as a new version
 			version := &domain.CertificateVersion{
-				ID:                generateID("certver"),
-				CertificateID:    certID,
-				SerialNumber:     result.Serial,
-				NotBefore:        result.NotBefore,
-				NotAfter:         result.NotAfter,
-				PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
-				CSRPEM:           string(csrPEM),
-				CreatedAt:        time.Now(),
+				ID:             generateID("certver"),
+				CertificateID: certID,
+				SerialNumber:  result.Serial,
+				NotBefore:     result.NotBefore,
+				NotAfter:      result.NotAfter,
+				PEMChain:      result.CertPEM + "\n" + result.ChainPEM,
+				CSRPEM:        string(csrPEM),
+				CreatedAt:     time.Now(),
 			}
 
 			if err := s.certRepo.CreateVersion(ctx, version); err != nil {
 				return fmt.Errorf("failed to store certificate version: %w", err)
 			}
 
-			// Update certificate status and expiry
 			cert.Status = domain.CertificateStatusActive
 			cert.ExpiresAt = result.NotAfter
 			now := time.Now()
@@ -165,11 +187,9 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 	}
 
 	// Record audit event
-	if err := s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
+	_ = s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
 		"csr_submitted", "certificate", certID,
-		map[string]interface{}{"agent_hostname": agent.Hostname}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
-	}
+		map[string]interface{}{"agent_hostname": agent.Hostname})
 
 	return nil
 }
@@ -210,7 +230,8 @@ func (s *AgentService) GetCertificateForAgent(ctx context.Context, agentID strin
 	return []byte(latestVersion.PEMChain), nil
 }
 
-// GetPendingWork returns deployment jobs assigned to an agent.
+// GetPendingWork returns actionable jobs for an agent: deployment jobs (Pending) and
+// renewal/issuance jobs awaiting CSR submission (AwaitingCSR).
 func (s *AgentService) GetPendingWork(ctx context.Context, agentID string) ([]*domain.Job, error) {
 	// Fetch agent to verify it exists
 	_, err := s.agentRepo.Get(ctx, agentID)
@@ -218,19 +239,26 @@ func (s *AgentService) GetPendingWork(ctx context.Context, agentID string) ([]*d
 		return nil, fmt.Errorf("failed to fetch agent: %w", err)
 	}
 
-	// Get all deployment jobs
-	jobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusPending)
+	var workForAgent []*domain.Job
+
+	// Get pending deployment jobs
+	pendingJobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusPending)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list pending jobs: %w", err)
 	}
-
-	var workForAgent []*domain.Job
-
-	// Filter to only jobs assigned to this agent
-	// Note: In this implementation, agents don't filter jobs by assignment
-	// All deployment jobs are returned for the agent to process
-	for _, job := range jobs {
+	for _, job := range pendingJobs {
 		if job.Type == domain.JobTypeDeployment {
+			workForAgent = append(workForAgent, job)
+		}
+	}
+
+	// Get AwaitingCSR jobs (agent keygen mode — agent needs to generate key + submit CSR)
+	awaitingJobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusAwaitingCSR)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list awaiting CSR jobs: %w", err)
+	}
+	for _, job := range awaitingJobs {
+		if job.Type == domain.JobTypeRenewal || job.Type == domain.JobTypeIssuance {
 			workForAgent = append(workForAgent, job)
 		}
 	}
@@ -381,8 +409,9 @@ func (s *AgentService) GetWork(agentID string) ([]domain.Job, error) {
 	return result, nil
 }
 
-// GetWorkWithTargets returns pending deployment jobs enriched with target type and config.
-// This allows agents to know which connector to invoke for each deployment job.
+// GetWorkWithTargets returns actionable jobs enriched with target/certificate details.
+// Deployment jobs include target type + config. AwaitingCSR jobs include common name + SANs
+// so the agent knows what CSR to generate.
 func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, error) {
 	jobs, err := s.GetPendingWork(context.Background(), agentID)
 	if err != nil {
@@ -402,12 +431,21 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 			Status:        j.Status,
 		}
 
-		// Enrich with target details if target ID is present
+		// Enrich with target details for deployment jobs
 		if j.TargetID != nil && *j.TargetID != "" {
 			target, err := s.targetRepo.Get(context.Background(), *j.TargetID)
 			if err == nil {
 				item.TargetType = string(target.Type)
 				item.TargetConfig = target.Config
+			}
+		}
+
+		// Enrich with certificate details for AwaitingCSR jobs (agent needs CN + SANs for CSR)
+		if j.Status == domain.JobStatusAwaitingCSR {
+			cert, err := s.certRepo.Get(context.Background(), j.CertificateID)
+			if err == nil {
+				item.CommonName = cert.CommonName
+				item.SANs = cert.SANs
 			}
 		}
 

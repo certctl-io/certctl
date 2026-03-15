@@ -18,6 +18,15 @@ type Config struct {
 	Auth      AuthConfig
 	RateLimit RateLimitConfig
 	CORS      CORSConfig
+	Keygen    KeygenConfig
+}
+
+// KeygenConfig controls where private keys are generated.
+type KeygenConfig struct {
+	// Mode: "agent" (default, production) or "server" (demo only, Local CA).
+	// In "agent" mode, renewal/issuance jobs enter AwaitingCSR state and agents generate keys locally.
+	// In "server" mode, the control plane generates keys (private keys touch the server — demo only).
+	Mode string
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -101,6 +110,9 @@ func Load() (*Config, error) {
 		CORS: CORSConfig{
 			AllowedOrigins: getEnvList("CERTCTL_CORS_ORIGINS", nil),
 		},
+		Keygen: KeygenConfig{
+			Mode: getEnv("CERTCTL_KEYGEN_MODE", "agent"),
+		},
 	}
 
 	if err := cfg.Validate(); err != nil {
@@ -159,6 +171,15 @@ func (c *Config) Validate() error {
 	// If using JWT or API-key, secret is required
 	if (c.Auth.Type == "jwt" || c.Auth.Type == "api-key") && c.Auth.Secret == "" {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
+	}
+
+	// Validate keygen mode
+	validKeygenModes := map[string]bool{
+		"agent":  true,
+		"server": true,
+	}
+	if !validKeygenModes[c.Keygen.Mode] {
+		return fmt.Errorf("invalid keygen mode: %s (must be 'agent' or 'server')", c.Keygen.Mode)
 	}
 
 	// Validate scheduler intervals

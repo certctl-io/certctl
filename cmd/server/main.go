@@ -102,10 +102,10 @@ func main() {
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry)
+	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
-	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry)
+	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	issuerService := service.NewIssuerService(issuerRepo, auditService)
 	targetService := service.NewTargetService(targetRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
@@ -206,6 +206,12 @@ func main() {
 		logger.Warn("authentication disabled (CERTCTL_AUTH_TYPE=none) — not suitable for production")
 	} else {
 		logger.Info("authentication enabled", "type", cfg.Auth.Type)
+	}
+
+	if cfg.Keygen.Mode == "server" {
+		logger.Warn("server-side key generation enabled (CERTCTL_KEYGEN_MODE=server) — private keys touch control plane, demo only")
+	} else {
+		logger.Info("agent-side key generation enabled — private keys never leave agent infrastructure")
 	}
 
 	// Apply middleware to API router

@@ -24,6 +24,7 @@ type RenewalService struct {
 	auditService      *AuditService
 	notificationSvc   *NotificationService
 	issuerRegistry    map[string]IssuerConnector
+	keygenMode        string // "agent" (default) or "server" (demo only)
 }
 
 // IssuerConnector defines the service-layer interface for interacting with certificate issuers.
@@ -53,7 +54,11 @@ func NewRenewalService(
 	auditService *AuditService,
 	notificationSvc *NotificationService,
 	issuerRegistry map[string]IssuerConnector,
+	keygenMode string,
 ) *RenewalService {
+	if keygenMode == "" {
+		keygenMode = "agent"
+	}
 	return &RenewalService{
 		certRepo:          certRepo,
 		jobRepo:           jobRepo,
@@ -61,6 +66,7 @@ func NewRenewalService(
 		auditService:      auditService,
 		notificationSvc:   notificationSvc,
 		issuerRegistry:    issuerRegistry,
+		keygenMode:        keygenMode,
 	}
 }
 
@@ -232,13 +238,13 @@ func (s *RenewalService) updateCertExpiryStatus(ctx context.Context, cert *domai
 	}
 }
 
-// ProcessRenewalJob executes a renewal job: generate CSR, call issuer, store new version,
-// update cert status, and create deployment jobs for targets.
+// ProcessRenewalJob executes a renewal job. Behavior depends on keygen mode:
 //
-// V1 Architecture Note: For the Local CA issuer, the control plane generates a server-side
-// ephemeral key + CSR. The private key is stored in the CertificateVersion.CSRPEM field
-// so agents can retrieve it for deployment. In V2+ with ACME/external CAs, agents will
-// generate keys locally and submit CSRs, so private keys never leave the target infrastructure.
+// Agent mode (default, production): Sets job to AwaitingCSR. The agent generates keys
+// locally, submits a CSR, and the server signs it. Private keys never leave the agent.
+//
+// Server mode (demo only, Local CA): Server generates RSA key + CSR, signs via issuer,
+// stores cert version with private key so agent can retrieve it for deployment.
 func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job) error {
 	// Update job status to in-progress
 	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusRunning, ""); err != nil {
@@ -259,14 +265,50 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 		return fmt.Errorf("certificate has no issuer assigned")
 	}
 
-	connector, ok := s.issuerRegistry[issuerID]
+	_, ok := s.issuerRegistry[issuerID]
 	if !ok {
 		s.failJob(ctx, job, fmt.Sprintf("issuer connector not found for %s", issuerID))
 		return fmt.Errorf("issuer connector not found for %s", issuerID)
 	}
 
-	// Generate server-side RSA key + CSR for this renewal
-	// V1: server generates ephemeral key for Local CA. V2+: agent generates key locally.
+	// Branch on keygen mode
+	if s.keygenMode == "agent" {
+		return s.processRenewalAgentKeygen(ctx, job, cert)
+	}
+	return s.processRenewalServerKeygen(ctx, job, cert)
+}
+
+// processRenewalAgentKeygen sets the job to AwaitingCSR so an agent can generate keys
+// locally and submit a CSR. The server never touches the private key.
+func (s *RenewalService) processRenewalAgentKeygen(ctx context.Context, job *domain.Job, cert *domain.ManagedCertificate) error {
+	// Transition job to AwaitingCSR — agent will pick this up during work polling
+	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusAwaitingCSR, ""); err != nil {
+		return fmt.Errorf("failed to set job to AwaitingCSR: %w", err)
+	}
+
+	// Update certificate status
+	cert.Status = domain.CertificateStatusRenewalInProgress
+	cert.UpdatedAt = time.Now()
+	if err := s.certRepo.Update(ctx, cert); err != nil {
+		fmt.Printf("failed to update cert status for %s: %v\n", cert.ID, err)
+	}
+
+	// Record audit event
+	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		"renewal_awaiting_csr", "certificate", job.CertificateID,
+		map[string]interface{}{"job_id": job.ID, "keygen_mode": "agent"})
+
+	return nil
+}
+
+// processRenewalServerKeygen is the legacy server-side keygen flow for Local CA demo.
+// The server generates an ephemeral RSA key + CSR, signs via issuer, and stores the
+// private key in the cert version so agents can retrieve it for deployment.
+// WARNING: Private keys touch the control plane. Use only for development/demo.
+func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *domain.Job, cert *domain.ManagedCertificate) error {
+	connector := s.issuerRegistry[cert.IssuerID]
+
+	// Generate server-side RSA key + CSR
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("key generation failed: %v", err))
@@ -291,7 +333,7 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 		Bytes: csrDER,
 	}))
 
-	// Encode private key to PEM for storage (V1: stored so agent can retrieve for deployment)
+	// Encode private key to PEM for storage (server mode: stored so agent can retrieve)
 	privKeyPEM := string(pem.EncodeToMemory(&pem.Block{
 		Type:  "RSA PRIVATE KEY",
 		Bytes: x509.MarshalPKCS1PrivateKey(privKey),
@@ -301,15 +343,10 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer renewal failed: %v", err))
-
-		// Send failure notification
 		_ = s.notificationSvc.SendRenewalNotification(ctx, cert, false, err)
-
-		// Record audit event
 		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"renewal_job_failed", "certificate", job.CertificateID,
 			map[string]interface{}{"job_id": job.ID, "error": err.Error()})
-
 		return fmt.Errorf("issuer renewal failed: %w", err)
 	}
 
@@ -325,7 +362,7 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 		NotAfter:         result.NotAfter,
 		FingerprintSHA256: fingerprint,
 		PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
-		CSRPEM:           privKeyPEM, // V1: stores private key for agent deployment
+		CSRPEM:           privKeyPEM, // Server mode: stores private key for agent deployment
 		CreatedAt:        time.Now(),
 	}
 
@@ -351,24 +388,7 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 	}
 
 	// Create deployment jobs for each target
-	if len(cert.TargetIDs) > 0 {
-		for _, targetID := range cert.TargetIDs {
-			tid := targetID // capture loop variable
-			deployJob := &domain.Job{
-				ID:            generateID("job"),
-				CertificateID: cert.ID,
-				Type:          domain.JobTypeDeployment,
-				Status:        domain.JobStatusPending,
-				TargetID:      &tid,
-				MaxAttempts:   3,
-				ScheduledAt:   time.Now(),
-				CreatedAt:     time.Now(),
-			}
-			if err := s.jobRepo.Create(ctx, deployJob); err != nil {
-				fmt.Printf("failed to create deployment job for target %s: %v\n", targetID, err)
-			}
-		}
-	}
+	s.createDeploymentJobs(ctx, cert)
 
 	// Send success notification
 	if err := s.notificationSvc.SendRenewalNotification(ctx, cert, true, nil); err != nil {
@@ -379,12 +399,134 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"renewal_job_completed", "certificate", job.CertificateID,
 		map[string]interface{}{
-			"job_id":    job.ID,
-			"serial":    result.Serial,
-			"not_after": result.NotAfter,
+			"job_id":      job.ID,
+			"serial":      result.Serial,
+			"not_after":   result.NotAfter,
+			"keygen_mode": "server",
 		})
 
 	return nil
+}
+
+// CompleteAgentCSRRenewal is called when an agent submits a CSR for an AwaitingCSR job.
+// It signs the CSR via the issuer connector, stores the cert version (without private key),
+// completes the renewal job, and creates deployment jobs.
+func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domain.Job, cert *domain.ManagedCertificate, csrPEM string) error {
+	connector, ok := s.issuerRegistry[cert.IssuerID]
+	if !ok {
+		s.failJob(ctx, job, fmt.Sprintf("issuer connector not found for %s", cert.IssuerID))
+		return fmt.Errorf("issuer connector not found for %s", cert.IssuerID)
+	}
+
+	// Update job to running
+	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusRunning, ""); err != nil {
+		return fmt.Errorf("failed to update job status: %w", err)
+	}
+
+	// Sign the agent-submitted CSR via issuer
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
+	if err != nil {
+		s.failJob(ctx, job, fmt.Sprintf("issuer signing failed: %v", err))
+		_ = s.notificationSvc.SendRenewalNotification(ctx, cert, false, err)
+		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+			"renewal_job_failed", "certificate", job.CertificateID,
+			map[string]interface{}{"job_id": job.ID, "error": err.Error()})
+		return fmt.Errorf("issuer signing failed: %w", err)
+	}
+
+	fingerprint := computeCertFingerprint(result.CertPEM)
+
+	// Store cert version — CSRPEM holds the actual CSR (not the private key!)
+	version := &domain.CertificateVersion{
+		ID:                generateID("certver"),
+		CertificateID:    cert.ID,
+		SerialNumber:     result.Serial,
+		NotBefore:        result.NotBefore,
+		NotAfter:         result.NotAfter,
+		FingerprintSHA256: fingerprint,
+		PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
+		CSRPEM:           csrPEM, // Agent mode: stores actual CSR, not private key
+		CreatedAt:        time.Now(),
+	}
+
+	if err := s.certRepo.CreateVersion(ctx, version); err != nil {
+		s.failJob(ctx, job, fmt.Sprintf("version creation failed: %v", err))
+		return fmt.Errorf("failed to create certificate version: %w", err)
+	}
+
+	// Update certificate status and expiry
+	cert.Status = domain.CertificateStatusActive
+	cert.ExpiresAt = result.NotAfter
+	now := time.Now()
+	cert.LastRenewalAt = &now
+	cert.UpdatedAt = now
+	if err := s.certRepo.Update(ctx, cert); err != nil {
+		s.failJob(ctx, job, fmt.Sprintf("cert update failed: %v", err))
+		return fmt.Errorf("failed to update certificate: %w", err)
+	}
+
+	// Mark job completed
+	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusCompleted, ""); err != nil {
+		return fmt.Errorf("failed to update job status: %w", err)
+	}
+
+	// Create deployment jobs for each target
+	s.createDeploymentJobs(ctx, cert)
+
+	// Send success notification
+	if err := s.notificationSvc.SendRenewalNotification(ctx, cert, true, nil); err != nil {
+		fmt.Printf("failed to send renewal notification: %v\n", err)
+	}
+
+	// Record audit event
+	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		"renewal_job_completed", "certificate", cert.ID,
+		map[string]interface{}{
+			"job_id":      job.ID,
+			"serial":      result.Serial,
+			"not_after":   result.NotAfter,
+			"keygen_mode": "agent",
+		})
+
+	return nil
+}
+
+// createDeploymentJobs creates pending deployment jobs for each target associated with a cert.
+func (s *RenewalService) createDeploymentJobs(ctx context.Context, cert *domain.ManagedCertificate) {
+	if len(cert.TargetIDs) == 0 {
+		return
+	}
+	for _, targetID := range cert.TargetIDs {
+		tid := targetID
+		deployJob := &domain.Job{
+			ID:            generateID("job"),
+			CertificateID: cert.ID,
+			Type:          domain.JobTypeDeployment,
+			Status:        domain.JobStatusPending,
+			TargetID:      &tid,
+			MaxAttempts:   3,
+			ScheduledAt:   time.Now(),
+			CreatedAt:     time.Now(),
+		}
+		if err := s.jobRepo.Create(ctx, deployJob); err != nil {
+			fmt.Printf("failed to create deployment job for target %s: %v\n", targetID, err)
+		}
+	}
+}
+
+// GetAwaitingCSRJobs returns all jobs in AwaitingCSR state for a given certificate.
+func (s *RenewalService) GetAwaitingCSRJobs(ctx context.Context, certID string) ([]*domain.Job, error) {
+	jobs, err := s.jobRepo.ListByCertificate(ctx, certID)
+	if err != nil {
+		return nil, err
+	}
+	var awaiting []*domain.Job
+	for _, j := range jobs {
+		if j.Status == domain.JobStatusAwaitingCSR {
+			awaiting = append(awaiting, j)
+		}
+	}
+	return awaiting, nil
 }
 
 // failJob is a helper to mark a job as failed with an error message.

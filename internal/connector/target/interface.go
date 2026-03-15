@@ -20,9 +20,11 @@ type Connector interface {
 }
 
 // DeploymentRequest contains the parameters for deploying a certificate to a target.
-// Note: This request NEVER contains a private key. The agent generates keys locally.
+// In agent keygen mode, KeyPEM is populated from the agent's local key store.
+// In server keygen mode (demo only), KeyPEM may be empty if the key was embedded in the cert version.
 type DeploymentRequest struct {
 	CertPEM       string          `json:"cert_pem"`
+	KeyPEM        string          `json:"key_pem,omitempty"`
 	ChainPEM      string          `json:"chain_pem"`
 	TargetConfig  json.RawMessage `json:"target_config"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
