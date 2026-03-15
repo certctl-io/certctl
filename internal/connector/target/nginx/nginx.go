@@ -102,7 +102,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			TargetAddress: c.config.CertPath,
 			Message:       errMsg,
 			DeployedAt:    time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	// Write chain with same permissions
@@ -114,7 +114,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			TargetAddress: c.config.ChainPath,
 			Message:       errMsg,
 			DeployedAt:    time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	// Validate NGINX configuration before reload
@@ -128,7 +128,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			TargetAddress: c.config.CertPath,
 			Message:       errMsg,
 			DeployedAt:    time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	// Reload NGINX
@@ -142,7 +142,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			TargetAddress: c.config.CertPath,
 			Message:       errMsg,
 			DeployedAt:    time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	deploymentDuration := time.Since(startTime)
@@ -188,7 +188,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 			TargetAddress: c.config.CertPath,
 			Message:       errMsg,
 			ValidatedAt:   time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	// Verify certificate file exists and is readable
@@ -201,7 +201,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 			TargetAddress: c.config.CertPath,
 			Message:       errMsg,
 			ValidatedAt:   time.Now(),
-		}, fmt.Errorf(errMsg)
+		}, fmt.Errorf("%s", errMsg)
 	}
 
 	validationDuration := time.Since(startTime)

@@ -111,6 +111,20 @@ func (h IssuerHandler) CreateIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", issuer.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateStringLength("name", issuer.Name, 255); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if issuer.Type == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "type is required", requestID)
+		return
+	}
+
 	created, err := h.svc.CreateIssuer(issuer)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create issuer", requestID)

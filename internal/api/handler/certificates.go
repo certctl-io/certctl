@@ -120,6 +120,28 @@ func (h CertificateHandler) CreateCertificate(w http.ResponseWriter, r *http.Req
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("common_name", cert.CommonName); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateCommonName(cert.CommonName); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateRequired("owner_id", cert.OwnerID); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateRequired("team_id", cert.TeamID); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateRequired("issuer_id", cert.IssuerID); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+
 	created, err := h.svc.CreateCertificate(cert)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create certificate", requestID)
@@ -151,6 +173,26 @@ func (h CertificateHandler) UpdateCertificate(w http.ResponseWriter, r *http.Req
 	if err := json.NewDecoder(r.Body).Decode(&cert); err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
 		return
+	}
+
+	// Validate required fields (if provided)
+	if cert.CommonName != "" {
+		if err := ValidateCommonName(cert.CommonName); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+	}
+	if cert.OwnerID != "" {
+		if err := ValidateStringLength("owner_id", cert.OwnerID, 255); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+	}
+	if cert.TeamID != "" {
+		if err := ValidateStringLength("team_id", cert.TeamID, 255); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
 	}
 
 	updated, err := h.svc.UpdateCertificate(id, cert)
@@ -290,7 +332,11 @@ func (h CertificateHandler) TriggerDeployment(w http.ResponseWriter, r *http.Req
 		TargetID string `json:"target_id,omitempty"`
 	}
 	if r.Header.Get("Content-Type") == "application/json" {
-		json.NewDecoder(r.Body).Decode(&req)
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			// Log but don't fail - targetID is optional
+			ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+			return
+		}
 	}
 
 	if err := h.svc.TriggerDeployment(certID, req.TargetID); err != nil {

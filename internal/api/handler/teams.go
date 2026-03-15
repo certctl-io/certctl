@@ -112,6 +112,16 @@ func (h TeamHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", team.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateStringLength("name", team.Name, 255); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+
 	created, err := h.svc.CreateTeam(team)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create team", requestID)

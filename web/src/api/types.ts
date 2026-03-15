@@ -1,0 +1,133 @@
+export interface Certificate {
+  id: string;
+  name: string;
+  common_name: string;
+  sans: string[];
+  status: string;
+  environment: string;
+  issuer_id: string;
+  owner_id: string;
+  team_id: string;
+  renewal_policy_id: string;
+  serial_number: string;
+  fingerprint: string;
+  key_algorithm: string;
+  key_size: number;
+  issued_at: string;
+  expires_at: string;
+  tags: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface CertificateVersion {
+  id: string;
+  certificate_id: string;
+  version: number;
+  serial_number: string;
+  fingerprint: string;
+  cert_pem: string;
+  chain_pem: string;
+  csr_pem: string;
+  not_before: string;
+  not_after: string;
+  created_at: string;
+}
+
+export interface Agent {
+  id: string;
+  name: string;
+  hostname: string;
+  ip_address: string;
+  status: string;
+  version: string;
+  last_heartbeat: string;
+  capabilities: string[];
+  tags: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Job {
+  id: string;
+  certificate_id: string;
+  type: string;
+  status: string;
+  attempts: number;
+  max_attempts: number;
+  error_message: string;
+  scheduled_at: string;
+  started_at: string;
+  completed_at: string;
+  created_at: string;
+}
+
+export interface Notification {
+  id: string;
+  type: string;
+  channel: string;
+  recipient: string;
+  subject: string;
+  message: string;
+  status: string;
+  certificate_id: string;
+  created_at: string;
+}
+
+export interface AuditEvent {
+  id: string;
+  actor: string;
+  actor_type: string;
+  action: string;
+  resource_type: string;
+  resource_id: string;
+  details: Record<string, unknown>;
+  timestamp: string;
+}
+
+export interface PolicyRule {
+  id: string;
+  name: string;
+  type: string;
+  severity: string;
+  config: Record<string, unknown>;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface PolicyViolation {
+  id: string;
+  rule_id: string;
+  certificate_id: string;
+  severity: string;
+  message: string;
+  created_at: string;
+}
+
+export interface Issuer {
+  id: string;
+  name: string;
+  type: string;
+  config: Record<string, unknown>;
+  status: string;
+  created_at: string;
+}
+
+export interface Target {
+  id: string;
+  name: string;
+  type: string;
+  hostname: string;
+  agent_id: string;
+  config: Record<string, unknown>;
+  status: string;
+  created_at: string;
+}
+
+export interface PaginatedResponse<T> {
+  data: T[];
+  total: number;
+  page: number;
+  per_page: number;
+}

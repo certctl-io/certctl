@@ -112,6 +112,16 @@ func (h OwnerHandler) CreateOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", owner.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateStringLength("name", owner.Name, 255); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+
 	created, err := h.svc.CreateOwner(owner)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create owner", requestID)

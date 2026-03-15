@@ -305,6 +305,9 @@ func TestCreateCertificate_Success(t *testing.T) {
 	certBody := domain.ManagedCertificate{
 		Name:       "Production Cert",
 		CommonName: "example.com",
+		OwnerID:    "o-alice",
+		TeamID:     "t-platform",
+		IssuerID:   "iss-local",
 	}
 	body, _ := json.Marshal(certBody)
 
@@ -359,6 +362,9 @@ func TestCreateCertificate_ServiceError(t *testing.T) {
 	certBody := domain.ManagedCertificate{
 		Name:       "Production Cert",
 		CommonName: "example.com",
+		OwnerID:    "o-alice",
+		TeamID:     "t-platform",
+		IssuerID:   "iss-local",
 	}
 	body, _ := json.Marshal(certBody)
 

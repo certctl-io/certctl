@@ -117,6 +117,20 @@ func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", agent.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateStringLength("name", agent.Name, 128); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateRequired("hostname", agent.Hostname); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+
 	created, err := h.svc.RegisterAgent(agent)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to register agent", requestID)
@@ -186,8 +200,9 @@ func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.CSRPEM == "" {
-		ErrorWithRequestID(w, http.StatusBadRequest, "CSR PEM is required", requestID)
+	// Validate CSR PEM
+	if err := ValidateCSRPEM(req.CSRPEM); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 		return
 	}
 

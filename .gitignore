@@ -6,7 +6,10 @@
 *.so.*
 *.dylib
 bin/
-dist/
+
+# Frontend
+web/node_modules/
+web/dist/
 
 # Test binary, built with `go test -c`
 *.test

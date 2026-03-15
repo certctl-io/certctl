@@ -110,6 +110,20 @@ func (h TargetHandler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", target.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateStringLength("name", target.Name, 255); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if target.Type == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "type is required", requestID)
+		return
+	}
+
 	created, err := h.svc.CreateTarget(target)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create target", requestID)

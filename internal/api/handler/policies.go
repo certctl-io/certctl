@@ -113,6 +113,20 @@ func (h PolicyHandler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Validate required fields
+	if err := ValidateRequired("name", policy.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if policy.Type == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "type is required", requestID)
+		return
+	}
+	if err := ValidatePolicyType(policy.Type); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+
 	created, err := h.svc.CreatePolicy(policy)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create policy", requestID)
@@ -144,6 +158,20 @@ func (h PolicyHandler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	if err := json.NewDecoder(r.Body).Decode(&policy); err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
 		return
+	}
+
+	// Validate fields if provided
+	if policy.Name != "" {
+		if err := ValidateStringLength("name", policy.Name, 255); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+	}
+	if policy.Type != "" {
+		if err := ValidatePolicyType(policy.Type); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
 	}
 
 	updated, err := h.svc.UpdatePolicy(id, policy)

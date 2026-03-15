@@ -174,10 +174,15 @@ func main() {
 		middleware.Recovery,
 	)
 
-	// Wrap with dashboard static file serving if web/ directory exists
+	// Wrap with dashboard static file serving
+	// Vite builds to web/dist/; fall back to web/ for legacy single-file SPA
 	var finalHandler http.Handler
-	webDir := "./web"
-	if _, err := os.Stat(webDir); err == nil {
+	webDir := "./web/dist"
+	if _, err := os.Stat(webDir + "/index.html"); err != nil {
+		webDir = "./web"
+	}
+	if _, err := os.Stat(webDir + "/index.html"); err == nil {
+		fileServer := http.FileServer(http.Dir(webDir))
 		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			// API and health routes go to the API handler
@@ -186,10 +191,15 @@ func main() {
 				apiHandler.ServeHTTP(w, r)
 				return
 			}
-			// Serve the dashboard SPA index.html for everything else
+			// Try to serve static files (JS, CSS, assets)
+			if len(path) > 8 && path[:8] == "/assets/" {
+				fileServer.ServeHTTP(w, r)
+				return
+			}
+			// SPA fallback: serve index.html for all other routes
 			http.ServeFile(w, r, webDir+"/index.html")
 		})
-		logger.Info("dashboard available at /")
+		logger.Info("dashboard available at /", "web_dir", webDir)
 	} else {
 		finalHandler = apiHandler
 		logger.Info("dashboard directory not found, serving API only")
