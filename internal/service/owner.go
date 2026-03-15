@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -65,7 +66,16 @@ func (s *OwnerService) Create(ctx context.Context, owner *domain.Owner, actor st
 		return fmt.Errorf("owner name is required")
 	}
 
-	owner.ID = generateID("owner")
+	if owner.ID == "" {
+		owner.ID = generateID("owner")
+	}
+	now := time.Now()
+	if owner.CreatedAt.IsZero() {
+		owner.CreatedAt = now
+	}
+	if owner.UpdatedAt.IsZero() {
+		owner.UpdatedAt = now
+	}
 	if err := s.ownerRepo.Create(ctx, owner); err != nil {
 		return fmt.Errorf("failed to create owner: %w", err)
 	}
@@ -140,7 +150,16 @@ func (s *OwnerService) GetOwner(id string) (*domain.Owner, error) {
 
 // CreateOwner creates a new owner (handler interface method).
 func (s *OwnerService) CreateOwner(owner domain.Owner) (*domain.Owner, error) {
-	owner.ID = generateID("owner")
+	if owner.ID == "" {
+		owner.ID = generateID("owner")
+	}
+	now := time.Now()
+	if owner.CreatedAt.IsZero() {
+		owner.CreatedAt = now
+	}
+	if owner.UpdatedAt.IsZero() {
+		owner.UpdatedAt = now
+	}
 	if err := s.ownerRepo.Create(context.Background(), &owner); err != nil {
 		return nil, fmt.Errorf("failed to create owner: %w", err)
 	}

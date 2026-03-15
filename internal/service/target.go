@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -65,7 +66,16 @@ func (s *TargetService) Create(ctx context.Context, target *domain.DeploymentTar
 		return fmt.Errorf("target name is required")
 	}
 
-	target.ID = generateID("target")
+	if target.ID == "" {
+		target.ID = generateID("target")
+	}
+	now := time.Now()
+	if target.CreatedAt.IsZero() {
+		target.CreatedAt = now
+	}
+	if target.UpdatedAt.IsZero() {
+		target.UpdatedAt = now
+	}
 	if err := s.targetRepo.Create(ctx, target); err != nil {
 		return fmt.Errorf("failed to create target: %w", err)
 	}
@@ -140,7 +150,16 @@ func (s *TargetService) GetTarget(id string) (*domain.DeploymentTarget, error) {
 
 // CreateTarget creates a new target (handler interface method).
 func (s *TargetService) CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
-	target.ID = generateID("target")
+	if target.ID == "" {
+		target.ID = generateID("target")
+	}
+	now := time.Now()
+	if target.CreatedAt.IsZero() {
+		target.CreatedAt = now
+	}
+	if target.UpdatedAt.IsZero() {
+		target.UpdatedAt = now
+	}
 	if err := s.targetRepo.Create(context.Background(), &target); err != nil {
 		return nil, fmt.Errorf("failed to create target: %w", err)
 	}

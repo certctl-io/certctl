@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -65,7 +66,16 @@ func (s *TeamService) Create(ctx context.Context, team *domain.Team, actor strin
 		return fmt.Errorf("team name is required")
 	}
 
-	team.ID = generateID("team")
+	if team.ID == "" {
+		team.ID = generateID("team")
+	}
+	now := time.Now()
+	if team.CreatedAt.IsZero() {
+		team.CreatedAt = now
+	}
+	if team.UpdatedAt.IsZero() {
+		team.UpdatedAt = now
+	}
 	if err := s.teamRepo.Create(ctx, team); err != nil {
 		return fmt.Errorf("failed to create team: %w", err)
 	}
@@ -140,7 +150,16 @@ func (s *TeamService) GetTeam(id string) (*domain.Team, error) {
 
 // CreateTeam creates a new team (handler interface method).
 func (s *TeamService) CreateTeam(team domain.Team) (*domain.Team, error) {
-	team.ID = generateID("team")
+	if team.ID == "" {
+		team.ID = generateID("team")
+	}
+	now := time.Now()
+	if team.CreatedAt.IsZero() {
+		team.CreatedAt = now
+	}
+	if team.UpdatedAt.IsZero() {
+		team.UpdatedAt = now
+	}
 	if err := s.teamRepo.Create(context.Background(), &team); err != nil {
 		return nil, fmt.Errorf("failed to create team: %w", err)
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -254,7 +255,16 @@ func (s *CertificateService) GetCertificate(id string) (*domain.ManagedCertifica
 
 // CreateCertificate creates a new certificate (handler interface method).
 func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
-	cert.ID = generateID("cert")
+	if cert.ID == "" {
+		cert.ID = generateID("cert")
+	}
+	now := time.Now()
+	if cert.CreatedAt.IsZero() {
+		cert.CreatedAt = now
+	}
+	if cert.UpdatedAt.IsZero() {
+		cert.UpdatedAt = now
+	}
 	if err := s.certRepo.Create(context.Background(), &cert); err != nil {
 		return nil, fmt.Errorf("failed to create certificate: %w", err)
 	}

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -65,7 +66,16 @@ func (s *IssuerService) Create(ctx context.Context, issuer *domain.Issuer, actor
 		return fmt.Errorf("issuer name is required")
 	}
 
-	issuer.ID = generateID("issuer")
+	if issuer.ID == "" {
+		issuer.ID = generateID("issuer")
+	}
+	now := time.Now()
+	if issuer.CreatedAt.IsZero() {
+		issuer.CreatedAt = now
+	}
+	if issuer.UpdatedAt.IsZero() {
+		issuer.UpdatedAt = now
+	}
 	if err := s.issuerRepo.Create(ctx, issuer); err != nil {
 		return fmt.Errorf("failed to create issuer: %w", err)
 	}
@@ -160,7 +170,16 @@ func (s *IssuerService) GetIssuer(id string) (*domain.Issuer, error) {
 
 // CreateIssuer creates a new issuer (handler interface method).
 func (s *IssuerService) CreateIssuer(issuer domain.Issuer) (*domain.Issuer, error) {
-	issuer.ID = generateID("issuer")
+	if issuer.ID == "" {
+		issuer.ID = generateID("issuer")
+	}
+	now := time.Now()
+	if issuer.CreatedAt.IsZero() {
+		issuer.CreatedAt = now
+	}
+	if issuer.UpdatedAt.IsZero() {
+		issuer.UpdatedAt = now
+	}
 	if err := s.issuerRepo.Create(context.Background(), &issuer); err != nil {
 		return nil, fmt.Errorf("failed to create issuer: %w", err)
 	}
