@@ -2,7 +2,7 @@
 
 A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certificates across your infrastructure with a web dashboard, REST API, and agent-based architecture where private keys never leave your servers.
 
-[![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
+[![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
 ![Status: Active Development](https://img.shields.io/badge/status-active%20development-green)
 
@@ -311,4 +311,8 @@ Summary:
 
 ## License
 
-Certctl is licensed under the [Apache License 2.0](LICENSE). See LICENSE file for details.
+Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties.
+
+On **March 14, 2033** (7 years from initial release), the license automatically converts to [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) and all restrictions are removed.
+
+For commercial licensing inquiries, contact skreddy040@gmail.com.
