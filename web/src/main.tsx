@@ -7,9 +7,12 @@ import DashboardPage from './pages/DashboardPage';
 import CertificatesPage from './pages/CertificatesPage';
 import CertificateDetailPage from './pages/CertificateDetailPage';
 import AgentsPage from './pages/AgentsPage';
+import AgentDetailPage from './pages/AgentDetailPage';
 import JobsPage from './pages/JobsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import PoliciesPage from './pages/PoliciesPage';
+import IssuersPage from './pages/IssuersPage';
+import TargetsPage from './pages/TargetsPage';
 import AuditPage from './pages/AuditPage';
 import './index.css';
 
@@ -33,9 +36,12 @@ createRoot(document.getElementById('root')!).render(
             <Route path="certificates" element={<CertificatesPage />} />
             <Route path="certificates/:id" element={<CertificateDetailPage />} />
             <Route path="agents" element={<AgentsPage />} />
+            <Route path="agents/:id" element={<AgentDetailPage />} />
             <Route path="jobs" element={<JobsPage />} />
             <Route path="notifications" element={<NotificationsPage />} />
             <Route path="policies" element={<PoliciesPage />} />
+            <Route path="issuers" element={<IssuersPage />} />
+            <Route path="targets" element={<TargetsPage />} />
             <Route path="audit" element={<AuditPage />} />
           </Route>
         </Routes>

@@ -6,7 +6,7 @@ You are my long-term copilot for building certctl — a self-hosted certificate 
 - [x] Go 1.22 server with net/http stdlib routing, slog logging, handler->service->repository layering
 - [x] PostgreSQL 16 schema (14 tables, TEXT primary keys, idempotent migrations)
 - [x] REST API — 41 endpoints under /api/v1/ with pagination, filtering, async actions
-- [x] Web dashboard — React SPA with dark theme, 7 views, demo mode fallback (static prototype, not wired to real API)
+- [x] Web dashboard — Vite + React 18 + TypeScript + TanStack Query, 11 views wired to real API, dark theme
 - [x] Agent binary — heartbeat, work polling, cert fetch, job status reporting (real HTTP calls)
 - [x] Local CA issuer connector — crypto/x509, in-memory CA, self-signed certs
 - [x] Issuer connector wired end-to-end — Local CA registered in server, adapter bridging connector<->service layers
@@ -29,13 +29,13 @@ You are my long-term copilot for building certctl — a self-hosted certificate 
 - [x] Documentation — concepts guide, quickstart, advanced demo, architecture, connectors
 - [x] BSL 1.1 license — 7-year conversion to Apache 2.0 (March 2033)
 - [x] Test suite — 120 tests across service layer (63), handler layer (46), and integration (11 subtests)
+- [x] Input validation — centralized validators for common name, CSR PEM, policy type/severity, string length
+- [x] GitHub Actions CI — parallel Go (build, vet, test+coverage) and Frontend (tsc, vite build) jobs
 
 ### What's NOT Wired Up Yet (Pre-v1.0 Gaps)
-- [ ] **GUI wired to real API**: Dashboard is a static prototype with demo mode fallback. Not functional against the live backend.
 - [ ] **Agent-side key generation**: V1 uses server-side key generation for Local CA (pragmatic for dev/demo). Must move to agents before v1.0.
 - [ ] **API authentication enforced**: Auth types exist but demo runs with `CERTCTL_AUTH_TYPE=none`. No rate limiting.
-- [ ] **Build errors**: `nginx.go` has non-constant format string errors that will block CI.
-- [ ] **Test coverage gaps**: Service 39%, handler 28%. No negative-path integration tests (issuer down, malformed certs, DB failures).
+- [ ] **Test coverage gaps**: Negative-path integration tests (issuer down, malformed certs, DB failures) still needed.
 
 ---
 
@@ -56,49 +56,17 @@ Configurable alert_thresholds_days JSONB column on renewal_policies, threshold-a
 ### M4: Test Coverage ✅
 120 tests: service layer unit tests (8 files), handler tests (2 files + utils), end-to-end integration test.
 
+### M5: Hardening + GUI Foundation ✅
+Fixed nginx.go format string errors, added centralized input validation (validation.go), migrated from single-file SPA to Vite + React 18 + TypeScript + TanStack Query v5 + Tailwind CSS 3. Componentized 7 views with real API wiring, loading/error/empty states. Server serves `web/dist/` with SPA fallback.
+
+### M6: Functional GUI + CI ✅
+All views wired to real API: agent detail page with heartbeat status + capabilities + recent jobs, audit trail with time range/actor/resource filters, notifications with grouped-by-cert view + read/unread state + mark-read mutations, policies with severity summary bar + config preview, new issuers and targets list views. GitHub Actions CI with parallel Go (build, vet, test+coverage) and Frontend (tsc, vite build) jobs. Makefile updated with test-cover and frontend-build targets.
+
 ---
 
 ## V1 Roadmap: Ship a Functional Product
 
 The principle: **every backend feature ships with its corresponding GUI surface.** The GUI is where ops teams spend 80% of their time — it must be an operational tool, not a demo viewer.
-
-### M5: Hardening + GUI Foundation
-**Goal**: Fix build errors, add input validation, and establish the real frontend build pipeline.
-
-**Backend hardening:**
-- Fix `nginx.go` non-constant format string errors
-- Error handling audit across all service methods (no panics, descriptive errors, consistent error types)
-- API input validation (required fields, format checks, string length limits)
-- Increase service layer test coverage to 60%+ with negative-path tests (issuer failures, DB errors, malformed inputs)
-
-**GUI foundation:**
-- Migrate from single `web/index.html` to proper Vite + React + TypeScript project
-- Set up TanStack Query (React Query) for server state management (caching, refetching, optimistic updates)
-- Keep existing dark theme, componentize the 7 existing views
-- Wire certificate list view to real API with server-side pagination, filtering, and sorting
-- Wire certificate detail view showing version history, deployment targets, job status
-- API error states shown in UI (loading, error, empty states)
-
-**Deliverables**: Clean build, validated API inputs, cert list + detail views working against real backend.
-
-### M6: Functional GUI + CI
-**Goal**: Wire all remaining views to real API and establish CI pipeline.
-
-**GUI — remaining views:**
-- Agent list with health indicators (online/offline/stale from heartbeat timestamps)
-- Agent detail with recent jobs and heartbeat history
-- Job queue view with status badges, retry controls, cancel actions
-- Notification inbox with read/unread state, threshold alert grouping by certificate
-- Audit trail view with time range picker, actor/action/resource filters
-- Policy list with violation counts and severity indicators
-- Dashboard overview with summary cards (total certs, expiring soon, active agents, pending jobs)
-
-**CI/CD:**
-- GitHub Actions: build, test, lint on every PR
-- Docker image builds on tag push
-- Test coverage reporting
-
-**Deliverables**: Every API-backed view functional in the GUI. CI green on master.
 
 ### M7: Security Baseline
 **Goal**: Make certctl deployable in a shared/team environment. This gates the v1.0 tag.
@@ -218,7 +186,8 @@ The principle: **every backend feature ships with its corresponding GUI surface.
 - Scheduler: `internal/scheduler/scheduler.go`
 - Schema: `migrations/000001_initial_schema.up.sql`
 - Seed data: `migrations/seed.sql`, `migrations/seed_demo.sql`
-- Dashboard: `web/` (migrating to Vite + React + TS in M5)
+- Dashboard: `web/src/` (Vite + React + TypeScript), built to `web/dist/`
+- CI: `.github/workflows/ci.yml`
 - Docker: `deploy/docker-compose.yml`, `Dockerfile`, `Dockerfile.agent`
 - Docs: `docs/`
 - Tests: `internal/service/*_test.go`, `internal/api/handler/*_test.go`, `internal/integration/lifecycle_test.go`

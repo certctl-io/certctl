@@ -1,4 +1,4 @@
-.PHONY: help build run test lint clean docker-up docker-down migrate-up migrate-down generate
+.PHONY: help build run test lint clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build
 
 # Default target - show help
 help:
@@ -77,6 +77,11 @@ test-coverage:
 	go tool cover -html=coverage.out -o coverage.html
 	@echo "Coverage report: coverage.html"
 
+test-cover:
+	@echo "Running tests with coverage..."
+	go test ./internal/service/... ./internal/api/handler/... ./internal/integration/... -count=1 -cover -coverprofile=coverage.out
+	@echo "Coverage report: coverage.out"
+
 # Linting targets
 lint:
 	@echo "Running golangci-lint..."
@@ -151,11 +156,18 @@ generate:
 	go generate ./...
 	@echo "Code generation complete"
 
+# Frontend build
+frontend-build:
+	@echo "Building frontend..."
+	cd web && npm ci && npx vite build
+	@echo "Frontend build complete"
+
 # Cleanup
 clean:
 	@echo "Cleaning build artifacts..."
 	rm -rf bin/ dist/ coverage.out coverage.html
 	go clean -testcache
+	cd web && rm -rf node_modules dist
 	@echo "Cleanup complete"
 
 install-tools:

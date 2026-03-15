@@ -14,11 +14,25 @@ const severityStyles: Record<string, string> = {
   critical: 'badge-danger',
 };
 
+const severityDots: Record<string, string> = {
+  low: 'bg-blue-400',
+  medium: 'bg-amber-400',
+  high: 'bg-orange-400',
+  critical: 'bg-red-400',
+};
+
 export default function PoliciesPage() {
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['policies'],
     queryFn: () => getPolicies(),
   });
+
+  const policies = data?.data || [];
+  const enabledCount = policies.filter(p => p.enabled).length;
+  const bySeverity = policies.reduce<Record<string, number>>((acc, p) => {
+    acc[p.severity] = (acc[p.severity] || 0) + 1;
+    return acc;
+  }, {});
 
   const columns: Column<PolicyRule>[] = [
     {
@@ -38,6 +52,18 @@ export default function PoliciesPage() {
       render: (p) => <span className={`badge ${severityStyles[p.severity] || 'badge-neutral'}`}>{p.severity}</span>,
     },
     {
+      key: 'config',
+      label: 'Config',
+      render: (p) => {
+        if (!p.config || Object.keys(p.config).length === 0) return <span className="text-slate-500">&mdash;</span>;
+        return (
+          <span className="text-xs text-slate-400 font-mono truncate max-w-xs block">
+            {JSON.stringify(p.config).slice(0, 50)}
+          </span>
+        );
+      },
+    },
+    {
       key: 'enabled',
       label: 'Enabled',
       render: (p) => (
@@ -52,11 +78,28 @@ export default function PoliciesPage() {
   return (
     <>
       <PageHeader title="Policies" subtitle={data ? `${data.total} rules` : undefined} />
+      {policies.length > 0 && (
+        <div className="px-4 py-3 flex flex-wrap gap-4 border-b border-slate-700/50">
+          <div className="flex items-center gap-2">
+            <span className="text-xs text-slate-400">Enabled:</span>
+            <span className="text-xs font-medium text-emerald-400">{enabledCount}</span>
+            <span className="text-xs text-slate-600">/</span>
+            <span className="text-xs text-slate-400">{policies.length}</span>
+          </div>
+          {Object.entries(bySeverity).map(([sev, count]) => (
+            <div key={sev} className="flex items-center gap-1.5">
+              <div className={`w-2 h-2 rounded-full ${severityDots[sev] || 'bg-slate-400'}`} />
+              <span className="text-xs text-slate-300 capitalize">{sev}</span>
+              <span className="text-xs text-slate-500">{count}</span>
+            </div>
+          ))}
+        </div>
+      )}
       <div className="flex-1 overflow-y-auto">
         {error ? (
           <ErrorState error={error as Error} onRetry={() => refetch()} />
         ) : (
-          <DataTable columns={columns} data={data?.data || []} isLoading={isLoading} emptyMessage="No policy rules" />
+          <DataTable columns={columns} data={policies} isLoading={isLoading} emptyMessage="No policy rules" />
         )}
       </div>
     </>

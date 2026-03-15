@@ -1,3 +1,4 @@
+import { useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { getAgents } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -17,6 +18,7 @@ function heartbeatStatus(lastHeartbeat: string): string {
 }
 
 export default function AgentsPage() {
+  const navigate = useNavigate();
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['agents'],
     queryFn: () => getAgents(),
@@ -56,7 +58,7 @@ export default function AgentsPage() {
         {error ? (
           <ErrorState error={error as Error} onRetry={() => refetch()} />
         ) : (
-          <DataTable columns={columns} data={data?.data || []} isLoading={isLoading} emptyMessage="No agents registered" />
+          <DataTable columns={columns} data={data?.data || []} isLoading={isLoading} emptyMessage="No agents registered" onRowClick={(a) => navigate(`/agents/${a.id}`)} />
         )}
       </div>
     </>
