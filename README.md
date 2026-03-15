@@ -1,383 +1,314 @@
-# Certctl — Open-Source Certificate Control Plane
+# certctl — Open-Source Certificate Control Plane
 
-A self-hosted, cloud-agnostic certificate management platform for teams. Manage issuance, deployment, and renewal of TLS certificates at scale with zero private key exposure in the control plane.
+A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certificates across your infrastructure with a web dashboard, REST API, and agent-based architecture where private keys never leave your servers.
 
 [![License](https://img.shields.io/badge/license-Apache%202.0-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
 ![Status: Active Development](https://img.shields.io/badge/status-active%20development-green)
 
-## Overview
+## What It Does
 
-Certctl decouples certificate management into a control plane and lightweight agents deployed across your infrastructure. The control plane orchestrates issuance and renewal via multiple ACME issuers, while agents securely request, deploy, and renew certificates on target systems—all without exposing private keys outside the edge.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (50+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure handle key generation and certificate deployment without exposing private keys to the control plane.
 
-### Why Certctl?
+```mermaid
+flowchart LR
+    subgraph "Control Plane"
+        API["REST API + Dashboard\n:8443"]
+        PG[("PostgreSQL")]
+    end
 
-- **Decoupled architecture**: Control plane + edge agents, no SSH or privileged access required
-- **Multi-issuer support**: ACME (Let's Encrypt, Sectigo, etc.), with extensible connector framework
-- **Zero private key exposure**: Keys generated and managed on agents, never sent to control plane
-- **Audit-first design**: Every action logged with full traceability
-- **Connector ecosystem**: Extensible issuer, target, and notifier connectors
-- **Self-hosted**: Run on Kubernetes, Docker Compose, or bare metal—no cloud lock-in
-- **Production-ready**: Graceful error handling, observability, database-backed state
+    subgraph "Your Infrastructure"
+        A1["Agent"] --> T1["NGINX"]
+        A2["Agent"] --> T2["F5 BIG-IP"]
+        A3["Agent"] --> T3["IIS"]
+    end
+
+    API --> PG
+    A1 & A2 & A3 -->|"CSR + status\n(no private keys)"| API
+    API -->|"Signed certs"| A1 & A2 & A3
+    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME"]
+```
 
 ## Quick Start
 
-### With Docker Compose (Recommended)
+### Docker Compose (Recommended)
 
 ```bash
-# Clone the repo
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
+docker compose -f deploy/docker-compose.yml up -d
+```
 
-# Copy example environment variables
-cp .env.example .env
+Wait ~30 seconds, then open **http://localhost:8443** in your browser.
 
-# Start the stack
-make docker-up
+The dashboard comes pre-loaded with 14 demo certificates, 5 agents, policy rules, audit events, and notifications — a realistic snapshot of a certificate inventory so you can explore immediately.
 
-# Check health
+Verify the API:
+```bash
 curl http://localhost:8443/health
+# {"status":"healthy"}
+
+curl -s http://localhost:8443/api/v1/certificates | jq '.total'
+# 14
 ```
 
-The stack includes PostgreSQL, certctl server, and a sample agent. Logs available via:
+### Manual Build
 
 ```bash
-make docker-logs-server
-make docker-logs-agent
-```
-
-### Manual Build & Run
-
-#### Prerequisites
-- Go 1.22+
-- PostgreSQL 14+
-- (Optional) Docker & Docker Compose
-
-#### Build from Source
-
-```bash
-# Install dependencies
+# Prerequisites: Go 1.22+, PostgreSQL 16+
 go mod download
-
-# Build binaries
 make build
 
-# Run migrations
-export DB_URL="postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable"
+# Set up database
+export CERTCTL_DATABASE_URL="postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable"
+export CERTCTL_AUTH_TYPE=none
 make migrate-up
 
-# Start server (in one terminal)
-make run
+# Start server
+./bin/server
 
-# Start agent (in another terminal, with API key from server logs)
-API_KEY="<key-from-server>" SERVER_URL=http://localhost:8443 ./bin/agent
+# Start agent (separate terminal)
+export CERTCTL_SERVER_URL=http://localhost:8443
+export CERTCTL_API_KEY=change-me-in-production
+export CERTCTL_AGENT_NAME=local-agent
+./bin/agent
 ```
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
+| [Quick Start](docs/quickstart.md) | Get running in 5 minutes with accurate API examples |
+| [Demo Walkthrough](docs/demo-guide.md) | 5-7 minute guided stakeholder presentation |
+| [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
+| [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
+| [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 
 ## Architecture
 
-### System Components
+```mermaid
+flowchart TB
+    subgraph "Control Plane (certctl-server)"
+        DASH["Web Dashboard\nReact SPA"]
+        API["REST API\nGo 1.22 net/http"]
+        SVC["Service Layer"]
+        REPO["Repository Layer\ndatabase/sql + lib/pq"]
+        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications"]
+    end
 
-```
-┌─────────────────────────────────────────────────────────┐
-│                   CONTROL PLANE                         │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ API Server (8443)                                │   │
-│  │  • Certificate management                        │   │
-│  │  • Issuance orchestration                        │   │
-│  │  • Audit logging                                 │   │
-│  └──────────────────────────────────────────────────┘   │
-│  ┌──────────────────────────────────────────────────┐   │
-│  │ PostgreSQL Database                              │   │
-│  │  • Certificates, agents, targets, policies       │   │
-│  │  • Complete audit trail                          │   │
-│  └──────────────────────────────────────────────────┘   │
-└─────────────────────────────────────────────────────────┘
-         │                           │
-         │ (mTLS + API Key)          │
-         │                           │
-    ┌────┴────┐             ┌────────┴────┐
-    │         │             │             │
-┌───┴──┐  ┌──┴───┐   ┌─────┴──┐  ┌──────┴────┐
-│Agent │  │Agent │   │ Agent  │  │   Agent   │
-│  #1  │  │  #2  │   │  #3    │  │   #N      │
-└──────┘  └──────┘   └────────┘  └───────────┘
-   │         │           │           │
-   ├────┬────┼────┬───┬──┴─────┬─────┴──┬───┐
-   │    │    │    │   │        │        │   │
-┌──┴─┐┌─┴──┐┌───┴──┐│┌───────┐│┌──────┐│   │
-│ACME││K8s ││F5 ││Vault│  │Webhook│
-│    ││LB ││LB  ││  │   │
-└────┘└────┘└────┘└────┘└──────┘
+    subgraph "Data Store"
+        PG[("PostgreSQL 16\n14 tables · TEXT primary keys")]
+    end
+
+    subgraph "Agents"
+        AG["certctl-agent\nKey generation · CSR · Deployment"]
+    end
+
+    DASH --> API
+    API --> SVC --> REPO --> PG
+    SCHED --> SVC
+    AG -->|"Heartbeat + CSR"| API
+    API -->|"Cert + Chain"| AG
 ```
 
-### Data Flow: Certificate Issuance
+### Key Design Decisions
 
-1. **Create Certificate** → Control plane stores managed certificate record
-2. **Generate CSR** → Agent creates private key (stays local) and CSR
-3. **Request Certificate** → Agent sends CSR to control plane
-4. **Issue via ACME** → Control plane submits to issuer (Let's Encrypt, etc.)
-5. **Return Certificate** → Agent receives signed cert, stores locally
-6. **Deploy** → Agent pushes certificate to targets (NGINX, F5, IIS, etc.)
-7. **Notify** → Webhook or email notification sent on completion
+- **Private keys never touch the control plane.** Agents generate keys locally and submit CSRs (public key only). The control plane forwards CSRs to the CA and returns signed certificates. Even if the control plane database is compromised, no private keys are exposed.
+- **TEXT primary keys, not UUIDs.** IDs are human-readable prefixed strings (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resource types at a glance in logs and queries.
+- **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
+- **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
 
-### Database Schema Overview
+### Database Schema
 
-| Entity | Purpose |
-|--------|---------|
-| `certificates` | Managed certificate records with metadata |
-| `agents` | Registered agents in the fleet |
-| `targets` | Deployment targets (NGINX, F5, IIS, etc.) |
-| `issuers` | ACME issuer configurations |
-| `jobs` | Issuance and deployment jobs |
-| `audit_logs` | Complete action trail |
+| Table | Purpose |
+|-------|---------|
+| `managed_certificates` | Certificate records with metadata, status, expiry, tags |
+| `certificate_versions` | Historical versions with PEM chains and CSRs |
+| `renewal_policies` | Renewal window, auto-renew settings, retry config |
+| `issuers` | CA configurations (Local CA, ACME, etc.) |
+| `deployment_targets` | Target systems (NGINX, F5, IIS) with agent assignments |
+| `agents` | Registered agents with heartbeat tracking |
+| `jobs` | Issuance, renewal, deployment, and validation jobs |
+| `teams` | Organizational groups for certificate ownership |
+| `owners` | Individual owners with email for notifications |
+| `policy_rules` | Enforcement rules (allowed issuers, environments, metadata) |
+| `policy_violations` | Flagged non-compliance with severity levels |
+| `audit_events` | Immutable action log (append-only, no update/delete) |
+| `notification_events` | Email and webhook notification records |
+| `certificate_target_mappings` | Many-to-many cert ↔ target relationships |
 
 ## Configuration
 
-### Environment Variables
+All server environment variables use the `CERTCTL_` prefix:
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `SERVER_HOST` | `0.0.0.0` | Server bind address |
-| `SERVER_PORT` | `8443` | Server listen port |
-| `DB_HOST` | `localhost` | PostgreSQL host |
-| `DB_PORT` | `5432` | PostgreSQL port |
-| `DB_USER` | `certctl` | Database user |
-| `DB_PASSWORD` | — | Database password |
-| `DB_NAME` | `certctl` | Database name |
-| `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
-| `ACME_DIRECTORY_URL` | staging | ACME directory URL |
-| `ACME_EMAIL` | — | ACME registration email |
-| `SMTP_HOST` | — | SMTP server for email notifications |
-| `SMTP_PORT` | `587` | SMTP port |
-| `SMTP_USERNAME` | — | SMTP username |
-| `SMTP_PASSWORD` | — | SMTP password |
-| `SMTP_FROM_ADDRESS` | — | Email from address |
+| `CERTCTL_SERVER_HOST` | `127.0.0.1` | Server bind address |
+| `CERTCTL_SERVER_PORT` | `8080` | Server listen port |
+| `CERTCTL_DATABASE_URL` | `postgres://localhost/certctl` | PostgreSQL connection string |
+| `CERTCTL_DATABASE_MAX_CONNS` | `25` | Connection pool size |
+| `CERTCTL_LOG_LEVEL` | `info` | Log level: `debug`, `info`, `warn`, `error` |
+| `CERTCTL_LOG_FORMAT` | `json` | Log format: `json` or `text` |
+| `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `jwt`, or `none` |
+| `CERTCTL_AUTH_SECRET` | — | Required for `api-key` and `jwt` auth types |
 
-See `.env.example` for complete reference.
+Agent environment variables:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_SERVER_URL` | `http://localhost:8080` | Control plane URL |
+| `CERTCTL_API_KEY` | — | Agent API key |
+| `CERTCTL_AGENT_NAME` | `certctl-agent` | Agent display name |
+
+Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
 ## API Overview
 
-### Key Endpoints
+All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`).
 
-#### Certificates
-- `POST /api/v1/certificates` — Create managed certificate
-- `GET /api/v1/certificates` — List certificates
-- `GET /api/v1/certificates/:id` — Get certificate details
-- `PUT /api/v1/certificates/:id` — Update certificate
-- `DELETE /api/v1/certificates/:id` — Archive certificate
+### Certificates
+```
+GET    /api/v1/certificates              List (filter: status, environment, owner_id, team_id)
+POST   /api/v1/certificates              Create
+GET    /api/v1/certificates/{id}          Get
+PUT    /api/v1/certificates/{id}          Update
+DELETE /api/v1/certificates/{id}          Archive (soft delete)
+GET    /api/v1/certificates/{id}/versions Version history
+POST   /api/v1/certificates/{id}/renew    Trigger renewal → 202 Accepted
+POST   /api/v1/certificates/{id}/deploy   Trigger deployment → 202 Accepted
+```
 
-#### Agents
-- `POST /api/v1/agents` — Register new agent
-- `GET /api/v1/agents` — List agents
-- `GET /api/v1/agents/:id` — Get agent details
-- `PUT /api/v1/agents/:id` — Update agent
+### Agents
+```
+GET    /api/v1/agents                     List
+POST   /api/v1/agents                     Register
+GET    /api/v1/agents/{id}                Get
+POST   /api/v1/agents/{id}/heartbeat      Record heartbeat
+POST   /api/v1/agents/{id}/csr            Submit CSR for issuance
+GET    /api/v1/agents/{id}/certificates/{certId}  Retrieve signed certificate
+```
 
-#### Targets
-- `POST /api/v1/targets` — Add deployment target
-- `GET /api/v1/targets` — List targets
-- `PUT /api/v1/targets/:id` — Update target
-- `DELETE /api/v1/targets/:id` — Remove target
+### Infrastructure
+```
+GET    /api/v1/issuers                    List issuers
+POST   /api/v1/issuers                    Create
+GET    /api/v1/issuers/{id}               Get
+POST   /api/v1/issuers/{id}/test          Test connectivity
 
-#### Issuers
-- `POST /api/v1/issuers` — Register ACME issuer
-- `GET /api/v1/issuers` — List issuers
-- `PUT /api/v1/issuers/:id` — Update issuer
+GET    /api/v1/targets                    List deployment targets
+POST   /api/v1/targets                    Create
+GET    /api/v1/targets/{id}               Get
+```
 
-#### Audit
-- `GET /api/v1/audit/logs` — Query audit trail
-- `GET /api/v1/audit/logs/:id` — Get specific log entry
+### Organization
+```
+GET    /api/v1/teams                      List teams
+POST   /api/v1/teams                      Create
+GET    /api/v1/owners                     List owners
+POST   /api/v1/owners                     Create
+```
 
-#### System
-- `GET /health` — Health check
+### Operations
+```
+GET    /api/v1/jobs                       List (filter: status, type)
+GET    /api/v1/jobs/{id}                  Get
+POST   /api/v1/jobs/{id}/cancel           Cancel
 
-Full API docs: [docs/api.md](docs/api.md) (coming soon)
+GET    /api/v1/policies                   List policy rules
+POST   /api/v1/policies                   Create
+GET    /api/v1/policies/{id}/violations   List violations for rule
 
-## Agent Setup Guide
+GET    /api/v1/audit                      Query audit trail
+GET    /api/v1/notifications              List notifications
+```
 
-### Installation
-
-Agents can be deployed as:
-- **Docker container**: `docker pull certctl:agent`
-- **Systemd service**: `systemctl start certctl-agent`
-- **Kubernetes DaemonSet**: See [docs/k8s-deployment.md](docs/k8s-deployment.md)
-
-### Configuration
-
-Agents require:
-1. **Server URL**: Control plane address (e.g., `https://certctl.example.com:8443`)
-2. **API Key**: Issued by control plane on agent registration
-3. **Agent Name**: Unique identifier in fleet
-
-Example systemd unit:
-
-```ini
-[Unit]
-Description=Certctl Agent
-After=network.target
-
-[Service]
-Type=simple
-ExecStart=/opt/certctl-agent/agent
-Environment="SERVER_URL=https://certctl.example.com:8443"
-Environment="API_KEY=ey..."
-Environment="AGENT_NAME=prod-web-01"
-Restart=on-failure
-RestartSec=10s
-
-[Install]
-WantedBy=multi-user.target
+### Health
+```
+GET    /health                            Server health check
+GET    /ready                             Readiness check
 ```
 
 ## Supported Integrations
 
 ### Certificate Issuers
-| Issuer | Status | Connector |
-|--------|--------|-----------|
-| Let's Encrypt (ACME v2) | ✓ Production | `acme` |
-| Sectigo ACME | ✓ Tested | `acme` |
-| Vault PKI | ◐ Planned | `vault` |
-| DigiCert | ◐ Planned | `digicert` |
+| Issuer | Status | Type |
+|--------|--------|------|
+| Local CA (self-signed) | Implemented | `GenericCA` |
+| ACME v2 (Let's Encrypt, Sectigo) | In progress | `ACME` |
+| Vault PKI | Planned | — |
+| DigiCert | Planned | — |
 
 ### Deployment Targets
-| Target | Status | Connector |
-|--------|--------|-----------|
-| NGINX | ✓ Production | `nginx` |
-| F5 BIG-IP | ✓ Tested | `f5` |
-| Microsoft IIS | ✓ Tested | `iis` |
-| Kubernetes Secrets | ◐ Planned | `k8s` |
-| AWS CloudFront | ◐ Planned | `aws` |
+| Target | Status | Type |
+|--------|--------|------|
+| NGINX | Implemented | `NGINX` |
+| F5 BIG-IP | Implemented | `F5` |
+| Microsoft IIS | Implemented | `IIS` |
+| Kubernetes Secrets | Planned | — |
 
 ### Notifiers
-| Notifier | Status | Connector |
-|----------|--------|-----------|
-| Email (SMTP) | ✓ Production | `email` |
-| Webhooks | ✓ Production | `webhook` |
-| Slack | ◐ Planned | `slack` |
-| PagerDuty | ◐ Planned | `pagerduty` |
+| Notifier | Status | Type |
+|----------|--------|------|
+| Email (SMTP) | Implemented | `Email` |
+| Webhooks | Implemented | `Webhook` |
+| Slack | Planned | — |
 
 ## Development
 
-### Local Setup
-
 ```bash
+# Install dev tools (golangci-lint, migrate CLI, air)
 make install-tools
-cp .env.example .env
-make docker-up-dev
 
-# Access PgAdmin at http://localhost:5050
-# Server logs: make docker-logs-server
-```
-
-### Testing
-
-```bash
-# Run all tests
+# Run tests
 make test
 
 # Run with coverage
 make test-coverage
 
-# Run specific package
-go test -v ./internal/service/...
+# Lint
+make lint
+
+# Format
+make fmt
 ```
 
-### Linting & Format
+### Docker Compose
 
 ```bash
-make lint
-make fmt
-make vet
+make docker-up          # Start stack (server + postgres + agent)
+make docker-down        # Stop stack
+make docker-logs-server # Server logs
+make docker-logs-agent  # Agent logs
+make docker-clean       # Stop + remove volumes
 ```
-
-### Building Connectors
-
-See [docs/connectors.md](docs/connectors.md) for a step-by-step guide to building issuers, targets, and notifier connectors.
-
-## Contributing
-
-1. Fork the repository
-2. Create a feature branch: `git checkout -b feature/my-feature`
-3. Commit changes: `git commit -am 'Add feature'`
-4. Push to branch: `git push origin feature/my-feature`
-5. Open a pull request
-
-### Code Standards
-- Go 1.22+ with `go fmt`, `go vet`, `golangci-lint`
-- Tests required for new features (>80% coverage)
-- Clear commit messages
-- Update relevant documentation
 
 ## Security
 
 ### Private Key Management
-- Private keys **never** sent to control plane
-- Keys generated and managed exclusively on agents
-- Encrypted at rest on agent systems
-- Cleared from memory after use
+- Private keys are generated exclusively on agents, never sent to the control plane
+- Keys stored with file permissions 0600
+- Old keys deleted after successful certificate renewal
 
 ### Authentication
-- Agent-to-server: mTLS + API key
-- API key rotation supported
-- Audit logging of all authenticated actions
+- Agent-to-server: API key (registered at agent creation)
+- API key and JWT auth types supported; `none` for demo/development
+- Auth type and secret configured via `CERTCTL_AUTH_TYPE` and `CERTCTL_AUTH_SECRET`
 
 ### Audit Trail
-- Complete action history in PostgreSQL
-- Immutable audit logs
-- Queryable by resource, user, timestamp, action
-
-For security issues, email security@example.com (do not open public issues).
-
-## Performance & Scaling
-
-- **Agents**: Stateless, horizontal scaling via fleet management
-- **Control Plane**: Single server handles 1000+ agents
-- **Database**: PostgreSQL; vertical scaling recommended
-- **Jobs**: Asynchronous processing; tunable concurrency
-
-See [docs/scaling.md](docs/scaling.md) for deployment guidance.
-
-## Troubleshooting
-
-### Server Won't Start
-```bash
-# Check database connection
-psql -h localhost -U certctl -d certctl
-
-# Check logs
-make docker-logs-server
-
-# Verify environment variables
-env | grep -E "DB_|SERVER_|ACME_"
-```
-
-### Agent Can't Connect
-```bash
-# Check server health
-curl -v https://certctl.example.com:8443/health
-
-# Verify API key
-echo $API_KEY
-
-# Check agent logs
-make docker-logs-agent
-```
-
-### Certificate Not Deploying
-1. Check agent is registered: `curl http://localhost:8443/api/v1/agents`
-2. Check target is reachable: `curl http://target-server:22` (SSH test)
-3. Review audit log: `curl http://localhost:8443/api/v1/audit/logs`
+- Immutable append-only log in PostgreSQL (`audit_events` table)
+- Every action attributed to an actor with timestamp and resource reference
+- No update or delete operations on audit records
 
 ## Roadmap
 
-- [ ] Kubernetes CRD for certificate management
-- [ ] Terraform provider
-- [ ] Multi-region deployment
-- [ ] HA control plane with etcd backend
-- [ ] Advanced scheduling policies
-- [ ] Certificate pinning validation
-- [ ] Hardware security module (HSM) support
+Summary:
+
+- **V1 (current)**: Dashboard, inventory, alerting, Local CA + ACME issuers, NGINX/F5/IIS targets, agents, REST API, policies, audit trail, Docker Compose
+- **V2**: Charts/trends, bulk import, OIDC/SSO, deployment rollback, CLI, Slack/Teams
+- **V3**: Certificate discovery, network scanning, unknown cert detection
+- **V4+**: Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
 
 ## License
 
 Certctl is licensed under the [Apache License 2.0](LICENSE). See LICENSE file for details.
-
