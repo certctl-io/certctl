@@ -54,12 +54,26 @@ const (
 
 // RenewalPolicy defines renewal parameters for a managed certificate.
 type RenewalPolicy struct {
-	ID                string    `json:"id"`
-	Name              string    `json:"name"`
-	RenewalWindowDays int       `json:"renewal_window_days"`
-	AutoRenew         bool      `json:"auto_renew"`
-	MaxRetries        int       `json:"max_retries"`
-	RetryInterval     int       `json:"retry_interval_seconds"`
-	CreatedAt         time.Time `json:"created_at"`
-	UpdatedAt         time.Time `json:"updated_at"`
+	ID                  string    `json:"id"`
+	Name                string    `json:"name"`
+	RenewalWindowDays   int       `json:"renewal_window_days"`
+	AutoRenew           bool      `json:"auto_renew"`
+	MaxRetries          int       `json:"max_retries"`
+	RetryInterval       int       `json:"retry_interval_seconds"`
+	AlertThresholdsDays []int     `json:"alert_thresholds_days"`
+	CreatedAt           time.Time `json:"created_at"`
+	UpdatedAt           time.Time `json:"updated_at"`
+}
+
+// DefaultAlertThresholds returns the standard alert thresholds when none are configured.
+func DefaultAlertThresholds() []int {
+	return []int{30, 14, 7, 0}
+}
+
+// EffectiveAlertThresholds returns the configured thresholds or defaults if empty.
+func (p *RenewalPolicy) EffectiveAlertThresholds() []int {
+	if len(p.AlertThresholdsDays) > 0 {
+		return p.AlertThresholdsDays
+	}
+	return DefaultAlertThresholds()
 }

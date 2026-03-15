@@ -67,9 +67,19 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 		args = append(args, filter.CertificateID)
 		argCount++
 	}
+	if filter.Type != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("type = $%d", argCount))
+		args = append(args, filter.Type)
+		argCount++
+	}
 	if filter.Status != "" {
 		whereConditions = append(whereConditions, fmt.Sprintf("status = $%d", argCount))
 		args = append(args, filter.Status)
+		argCount++
+	}
+	if filter.MessageLike != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("message LIKE $%d", argCount))
+		args = append(args, filter.MessageLike)
 		argCount++
 	}
 	if filter.Channel != "" {

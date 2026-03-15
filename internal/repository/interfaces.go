@@ -97,6 +97,14 @@ type JobRepository interface {
 	GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error)
 }
 
+// RenewalPolicyRepository defines operations for managing renewal policies.
+type RenewalPolicyRepository interface {
+	// Get retrieves a renewal policy by ID.
+	Get(ctx context.Context, id string) (*domain.RenewalPolicy, error)
+	// List returns all renewal policies.
+	List(ctx context.Context) ([]*domain.RenewalPolicy, error)
+}
+
 // PolicyRepository defines operations for managing compliance policies and violations.
 type PolicyRepository interface {
 	// ListRules returns all policy rules.

@@ -34,12 +34,26 @@ func NewNotificationService(
 	}
 }
 
-// SendExpirationWarning sends a certificate expiration warning.
+// SendExpirationWarning sends a certificate expiration warning for a specific threshold.
 func (s *NotificationService) SendExpirationWarning(ctx context.Context, cert *domain.ManagedCertificate, daysUntilExpiry int) error {
-	body := fmt.Sprintf(
-		"The certificate for %s will expire in %d days (%s).\n\nPlease schedule renewal.",
-		cert.CommonName, daysUntilExpiry, cert.ExpiresAt.Format("2006-01-02"),
-	)
+	return s.SendThresholdAlert(ctx, cert, daysUntilExpiry, daysUntilExpiry)
+}
+
+// SendThresholdAlert sends an expiration alert for a specific threshold (e.g., 30-day, 14-day, expired).
+// The threshold parameter indicates which configured threshold triggered the alert.
+func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *domain.ManagedCertificate, daysUntilExpiry int, threshold int) error {
+	var body string
+	if threshold <= 0 {
+		body = fmt.Sprintf(
+			"[EXPIRED] The certificate for %s has expired (%s).\n\nImmediate action required.\n\n[threshold:%d]",
+			cert.CommonName, cert.ExpiresAt.Format("2006-01-02"), threshold,
+		)
+	} else {
+		body = fmt.Sprintf(
+			"The certificate for %s will expire in %d days (%s).\n\nPlease schedule renewal.\n\n[threshold:%d]",
+			cert.CommonName, daysUntilExpiry, cert.ExpiresAt.Format("2006-01-02"), threshold,
+		)
+	}
 
 	// Create notification record
 	notif := &domain.NotificationEvent{
@@ -59,6 +73,24 @@ func (s *NotificationService) SendExpirationWarning(ctx context.Context, cert *d
 
 	// Attempt immediate send
 	return s.sendNotification(ctx, notif)
+}
+
+// HasThresholdNotification checks whether an expiration warning has already been sent
+// for a specific certificate and threshold combination. Used for deduplication.
+func (s *NotificationService) HasThresholdNotification(ctx context.Context, certID string, threshold int) (bool, error) {
+	filter := &repository.NotificationFilter{
+		CertificateID: certID,
+		Type:          string(domain.NotificationTypeExpirationWarning),
+		MessageLike:   fmt.Sprintf("%%[threshold:%d]%%", threshold),
+		PerPage:       1,
+	}
+
+	existing, err := s.notifRepo.List(ctx, filter)
+	if err != nil {
+		return false, fmt.Errorf("failed to check existing notifications: %w", err)
+	}
+
+	return len(existing) > 0, nil
 }
 
 // SendRenewalNotification sends a renewal success or failure notification.

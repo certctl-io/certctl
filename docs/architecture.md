@@ -315,7 +315,11 @@ flowchart LR
 | Agent health check | 2 minutes | Marks agents as offline if heartbeat is stale |
 | Notification processor | 1 minute | Sends pending notifications via configured channels |
 
-When the renewal checker finds a certificate within its renewal window (e.g., 30 days before expiry), it creates a renewal job. The job processor picks it up, coordinates with the issuer, and triggers deployment. All steps are logged in the audit trail and generate notifications.
+When the renewal checker finds a certificate within its renewal window, it performs two tasks: threshold-based alerting and renewal job creation.
+
+**Threshold-Based Expiration Alerting**: Each renewal policy defines configurable alert thresholds (default: 30, 14, 7, 0 days before expiry). For each certificate approaching expiry, the scheduler checks which thresholds have been crossed and sends deduplicated notifications. A certificate that crosses the 14-day threshold only gets one 14-day alert, even though the renewal checker runs every hour. Deduplication is tracked via threshold tags embedded in the notification message and queried with the `MessageLike` filter. Certificates are also transitioned to `Expiring` status when they enter the alert window and `Expired` when they hit 0 days.
+
+**Renewal Job Creation**: If the certificate's issuer has a registered connector, the scheduler creates a renewal job. The job processor picks it up, coordinates with the issuer, and triggers deployment. All steps are logged in the audit trail and generate notifications.
 
 ## Connector Architecture
 

@@ -18,11 +18,12 @@ import (
 
 // RenewalService manages certificate renewal workflows.
 type RenewalService struct {
-	certRepo        repository.CertificateRepository
-	jobRepo         repository.JobRepository
-	auditService    *AuditService
-	notificationSvc *NotificationService
-	issuerRegistry  map[string]IssuerConnector
+	certRepo          repository.CertificateRepository
+	jobRepo           repository.JobRepository
+	renewalPolicyRepo repository.RenewalPolicyRepository
+	auditService      *AuditService
+	notificationSvc   *NotificationService
+	issuerRegistry    map[string]IssuerConnector
 }
 
 // IssuerConnector defines the service-layer interface for interacting with certificate issuers.
@@ -48,28 +49,36 @@ type IssuanceResult struct {
 func NewRenewalService(
 	certRepo repository.CertificateRepository,
 	jobRepo repository.JobRepository,
+	renewalPolicyRepo repository.RenewalPolicyRepository,
 	auditService *AuditService,
 	notificationSvc *NotificationService,
 	issuerRegistry map[string]IssuerConnector,
 ) *RenewalService {
 	return &RenewalService{
-		certRepo:        certRepo,
-		jobRepo:         jobRepo,
-		auditService:    auditService,
-		notificationSvc: notificationSvc,
-		issuerRegistry:  issuerRegistry,
+		certRepo:          certRepo,
+		jobRepo:           jobRepo,
+		renewalPolicyRepo: renewalPolicyRepo,
+		auditService:      auditService,
+		notificationSvc:   notificationSvc,
+		issuerRegistry:    issuerRegistry,
 	}
 }
 
-// CheckExpiringCertificates identifies certificates needing renewal based on policy windows.
+// CheckExpiringCertificates identifies certificates needing renewal and sends threshold-based
+// expiration alerts. For each certificate, it looks up the renewal policy's configured alert
+// thresholds (default: 30, 14, 7, 0 days) and sends deduplicated notifications at each threshold.
+// Certificates are also transitioned to Expiring/Expired status as appropriate.
 func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
-	// Default renewal window: 30 days before expiry
-	renewalWindow := time.Now().AddDate(0, 0, 30)
+	// Use the maximum possible threshold window (30 days) plus buffer for query
+	renewalWindow := time.Now().AddDate(0, 0, 31)
 
 	expiring, err := s.certRepo.GetExpiringCertificates(ctx, renewalWindow)
 	if err != nil {
 		return fmt.Errorf("failed to fetch expiring certificates: %w", err)
 	}
+
+	// Cache renewal policies to avoid repeated lookups
+	policyCache := make(map[string]*domain.RenewalPolicy)
 
 	for _, cert := range expiring {
 		// Skip if already renewing or archived
@@ -80,10 +89,30 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		// Calculate days until expiry
 		daysUntil := time.Until(cert.ExpiresAt).Hours() / 24
 
-		// Send expiration warning notification (always, regardless of issuer availability)
-		if err := s.notificationSvc.SendExpirationWarning(ctx, cert, int(daysUntil)); err != nil {
-			fmt.Printf("failed to send expiration warning for cert %s: %v\n", cert.ID, err)
+		// Look up renewal policy for alert thresholds
+		thresholds := domain.DefaultAlertThresholds()
+		if cert.RenewalPolicyID != "" {
+			policy, ok := policyCache[cert.RenewalPolicyID]
+			if !ok {
+				policy, err = s.renewalPolicyRepo.Get(ctx, cert.RenewalPolicyID)
+				if err != nil {
+					// Log but continue with defaults
+					fmt.Printf("failed to fetch renewal policy %s for cert %s, using defaults: %v\n",
+						cert.RenewalPolicyID, cert.ID, err)
+				} else {
+					policyCache[cert.RenewalPolicyID] = policy
+				}
+			}
+			if policy != nil {
+				thresholds = policy.EffectiveAlertThresholds()
+			}
 		}
+
+		// Update certificate status based on expiry
+		s.updateCertExpiryStatus(ctx, cert, daysUntil)
+
+		// Send threshold-based alerts with deduplication
+		s.sendThresholdAlerts(ctx, cert, int(daysUntil), thresholds)
 
 		// Only create renewal job if an issuer connector is registered for this cert's issuer
 		if _, hasIssuer := s.issuerRegistry[cert.IssuerID]; !hasIssuer {
@@ -135,6 +164,72 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// sendThresholdAlerts sends deduplicated expiration notifications based on configured thresholds.
+// For each threshold that the certificate has crossed (e.g., ≤30 days, ≤14 days), it checks
+// whether a notification for that threshold was already sent. Only new threshold crossings
+// trigger notifications.
+func (s *RenewalService) sendThresholdAlerts(ctx context.Context, cert *domain.ManagedCertificate, daysUntil int, thresholds []int) {
+	for _, threshold := range thresholds {
+		// Only alert if the cert has crossed this threshold (days remaining ≤ threshold)
+		if daysUntil > threshold {
+			continue
+		}
+
+		// Check if we already sent a notification for this threshold (deduplication)
+		alreadySent, err := s.notificationSvc.HasThresholdNotification(ctx, cert.ID, threshold)
+		if err != nil {
+			fmt.Printf("failed to check notification dedup for cert %s threshold %d: %v\n",
+				cert.ID, threshold, err)
+			continue
+		}
+		if alreadySent {
+			continue
+		}
+
+		// Send the threshold alert
+		if err := s.notificationSvc.SendThresholdAlert(ctx, cert, daysUntil, threshold); err != nil {
+			fmt.Printf("failed to send threshold alert for cert %s at %d days: %v\n",
+				cert.ID, threshold, err)
+		}
+
+		// Record audit event for the alert
+		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+			"expiration_alert_sent", "certificate", cert.ID,
+			map[string]interface{}{
+				"threshold_days":  threshold,
+				"days_until_expiry": daysUntil,
+			})
+	}
+}
+
+// updateCertExpiryStatus transitions a certificate to Expiring or Expired status based on
+// how many days remain before expiry. Expired = 0 or fewer days, Expiring = within 30 days.
+func (s *RenewalService) updateCertExpiryStatus(ctx context.Context, cert *domain.ManagedCertificate, daysUntil float64) {
+	var newStatus domain.CertificateStatus
+
+	if daysUntil <= 0 {
+		newStatus = domain.CertificateStatusExpired
+	} else {
+		newStatus = domain.CertificateStatusExpiring
+	}
+
+	// Only update if status is changing and cert isn't already in a terminal/active renewal state
+	if cert.Status == newStatus {
+		return
+	}
+	if cert.Status == domain.CertificateStatusRenewalInProgress ||
+		cert.Status == domain.CertificateStatusArchived ||
+		cert.Status == domain.CertificateStatusRevoked {
+		return
+	}
+
+	cert.Status = newStatus
+	cert.UpdatedAt = time.Now()
+	if err := s.certRepo.Update(ctx, cert); err != nil {
+		fmt.Printf("failed to update cert %s status to %s: %v\n", cert.ID, newStatus, err)
+	}
 }
 
 // ProcessRenewalJob executes a renewal job: generate CSR, call issuer, store new version,

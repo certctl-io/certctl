@@ -37,8 +37,10 @@ type AuditFilter struct {
 // NotificationFilter defines filtering criteria for notification queries.
 type NotificationFilter struct {
 	CertificateID string // optional: filter by certificate
+	Type          string // optional: filter by notification type (e.g., "ExpirationWarning")
 	Status        string // e.g., "pending", "sent", "failed"
 	Channel       string // e.g., "email", "slack", "webhook"
+	MessageLike   string // optional: LIKE match on message content (for threshold dedup)
 	Page          int
 	PerPage       int
 }

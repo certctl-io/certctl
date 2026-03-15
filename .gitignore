@@ -44,13 +44,15 @@ temp/
 # Database
 *.db
 *.sqlite3
-*.sql
+
+# Allow migration SQL files (don't ignore *.sql globally)
+# SQL files in migrations/ are tracked
 
 # Build artifacts
 certctl-server
 certctl-agent
-server
-agent
+/server
+/agent
 
 # OS
 .DS_Store

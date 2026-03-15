@@ -383,7 +383,9 @@ Certctl sends notifications for certificate lifecycle events. Check what notific
 curl -s $API/api/v1/notifications | jq '.data[0:5]'
 ```
 
-**How it works:** The `NotificationService` generates notification records in the `notification_events` table whenever significant events occur — certificate creation, expiration warnings, renewal success/failure, deployment results, policy violations. Each notification has a `channel` (Email, Webhook) and a `recipient`.
+**How it works:** The `NotificationService` generates notification records in the `notification_events` table whenever significant events occur — expiration warnings at configurable thresholds (30, 14, 7, 0 days by default), renewal success/failure, deployment results, and policy violations. Each notification has a `channel` (Email, Webhook) and a `recipient`.
+
+**Threshold-Based Alerting:** Each renewal policy defines configurable alert thresholds via the `alert_thresholds_days` field (e.g., `[30, 14, 7, 0]` for the standard policy, `[14, 7, 3, 0]` for the urgent policy). The scheduler checks which thresholds each certificate has crossed and sends one notification per threshold, deduplicated so the same alert is never sent twice. Certificates are automatically transitioned to `Expiring` status when entering the alert window and `Expired` when they hit 0 days.
 
 The notification processor loop runs every 60 seconds and processes pending notifications:
 
@@ -431,7 +433,7 @@ curl -s -X POST $API/api/v1/certificates \
   }' | jq .
 ```
 
-**How it works:** This certificate is created with status `Active` and an explicit `expires_at` 18 days from now. The scheduler's renewal checker will flag this certificate when it runs because `expires_at - now() < 30 days` (the default renewal window in `rp-default`). It would transition the status to `Expiring` and create a renewal job.
+**How it works:** This certificate is created with status `Active` and an explicit `expires_at` 18 days from now. The scheduler's renewal checker will flag this certificate when it runs because `expires_at - now() < 30 days` (the default renewal window in `rp-default`). It would transition the status to `Expiring`, send deduplicated threshold alerts at 30 and 14 days (since both thresholds have been crossed), and create a renewal job.
 
 **Why `environment` matters:** The environment field isn't just metadata — it feeds the policy engine. A policy rule with type `AllowedEnvironments` can restrict which environments are valid. If someone tries to create a certificate with `environment: "yolo"`, the policy engine flags a violation. In a mature deployment, you'd enforce policies strictly: production certificates must use a trusted CA (not Local CA), staging certificates can use Let's Encrypt staging, and development certificates can use the Local CA.
 
