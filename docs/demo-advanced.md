@@ -106,7 +106,7 @@ You should see:
 
 **How it works:** The issuer record was inserted during database seeding (`migrations/seed_demo.sql`). The `type` field (`GenericCA`) maps to a connector implementation. When the server starts, it registers connector instances in an `issuerRegistry` map keyed by issuer ID. When a certificate needs issuance, the service layer looks up the issuer ID in this registry to find the right connector.
 
-**How the Local CA works internally:** The Local CA connector (`internal/connector/issuer/local/local.go`) generates a self-signed root CA certificate on first use using Go's `crypto/x509` and `crypto/rsa` packages. The CA key pair lives in memory only — it's regenerated each time the server restarts. When it receives an `IssuanceRequest` containing a CSR (Certificate Signing Request), it:
+**How the Local CA works internally:** The Local CA connector (`internal/connector/issuer/local/local.go`) generates a self-signed root CA certificate on first use using Go's `crypto/x509` package. The CA key pair lives in memory only — it's regenerated each time the server restarts, which means all certificates it issued become untrusted on restart (acceptable for dev/demo). When it receives an `IssuanceRequest` containing a CSR (Certificate Signing Request), it:
 
 1. Parses the CSR using `x509.ParseCertificateRequest()`
 2. Generates a random serial number via `crypto/rand`
@@ -233,7 +233,7 @@ sequenceDiagram
     S->>DB: SELECT pending jobs
     DB-->>S: [job-123: Renewal for mc-demo-api]
 
-    SVC->>SVC: Generate RSA-2048 key + CSR (server-side in V1)
+    SVC->>SVC: Generate ECDSA P-256 key + CSR (server-side in demo mode)
     SVC->>ISS: IssueCertificate(commonName, sans, csrPEM)
     ISS-->>SVC: {cert_pem, chain_pem, serial, not_after}
 
@@ -251,7 +251,7 @@ sequenceDiagram
     A->>SVC: POST /api/v1/agents/{id}/jobs/{jobId}/status {Completed}
 ```
 
-**V1 note:** In V1 with the Local CA, key generation happens server-side in `RenewalService.ProcessRenewalJob`. In V2+, agents will generate keys locally and submit CSRs, ensuring private keys never touch the control plane.
+**Keygen mode note:** By default, certctl uses agent-side key generation (`CERTCTL_KEYGEN_MODE=agent`) where agents generate ECDSA P-256 keys locally and submit CSRs to the control plane — private keys never leave agent infrastructure. The Docker Compose demo stack uses server-side keygen mode (`CERTCTL_KEYGEN_MODE=server`) for simplicity, where the control plane generates keys within `RenewalService.ProcessRenewalJob`. In production, always use agent keygen mode.
 
 Check the jobs list:
 
@@ -316,7 +316,7 @@ sequenceDiagram
     A->>A: Report deployment status to control plane
 ```
 
-Notice the `DeploymentRequest` struct intentionally omits the private key field. The agent loads the key from its own local storage and combines it with the certificate from the control plane. This is the architectural boundary that ensures zero private key exposure — the target connector interface physically cannot receive keys from the control plane because the data structure doesn't carry them.
+The `DeploymentRequest` struct includes a `KeyPEM` field, but this field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`), never from the control plane. The control plane only sends the signed certificate and CA chain (public material). The agent combines the locally-generated private key with the certificate from the control plane to create the full deployment payload. This is the architectural boundary that ensures zero private key exposure — the control plane API never transmits private keys, and the agent's key store is the sole source of key material for target deployment.
 
 Check for deployment jobs:
 

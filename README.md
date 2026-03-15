@@ -309,9 +309,10 @@ make docker-clean       # Stop + remove volumes
 
 ## Roadmap
 
-### V1 (in progress → v1.0.0)
-Backend complete: end-to-end lifecycle, Local CA + ACME v2 issuers, NGINX/F5/IIS targets, threshold alerting, agent-side keygen, auth + rate limiting. GUI fully wired to real API with 11 views. CI pipeline running. Remaining milestone before v1.0 tag:
-- **M9: End-to-End Test Hardening** — handler tests for all 7 files, negative-path integration tests (issuer down, malformed CSR, DB failure), scheduler and connector tests, CI coverage gates (service 70%+, handler 60%+)
+### V1 (feature-complete → v1.0.0 tag pending)
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, lint, test with coverage gates (service layer 30%+, handler layer 50%+), and frontend checks on every push. 170+ tests across service, handler, integration, and connector layers.
+
+Remaining before the v1.0.0 tag: dashboard screenshots in README, tagged Docker images published, final error-handling audit to confirm no panics or unhandled error paths.
 
 ### V2: Operational Maturity
 - **V2.0: Operational Workflows** — renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard

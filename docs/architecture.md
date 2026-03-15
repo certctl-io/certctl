@@ -399,11 +399,11 @@ type Connector interface {
 }
 ```
 
-Built-in issuers: **Local CA** (self-signed, for development/demos) and **ACME** (Let's Encrypt, Sectigo, etc., in progress).
+Built-in issuers: **Local CA** (self-signed, in-memory CA for development/demos using `crypto/x509`) and **ACME v2** (fully implemented with HTTP-01 challenge solving, compatible with Let's Encrypt, Sectigo, and any ACME-compliant CA). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance, order creation, HTTP-01 challenge solving via a built-in temporary HTTP server, order finalization, and DER-to-PEM chain conversion. Configure via `CERTCTL_ACME_DIRECTORY_URL` and `CERTCTL_ACME_EMAIL`.
 
 ### Target Connector
 
-Deploys certificates to infrastructure. Note: the interface does NOT include private keys — agents handle keys locally.
+Deploys certificates to infrastructure. The `DeploymentRequest` includes `KeyPEM` because agents generate and hold private keys locally — the key is passed from the agent's local key store into the target connector, never from the control plane.
 
 ```go
 type Connector interface {
@@ -413,7 +413,9 @@ type Connector interface {
 }
 ```
 
-Built-in targets: **NGINX**, **F5 BIG-IP**, **IIS**.
+The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
+
+Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **F5 BIG-IP** (REST API upload + virtual server binding), **IIS** (WinRM PFX import + site binding).
 
 ### Notifier Connector
 
@@ -438,7 +440,7 @@ See the [Connector Development Guide](connectors.md) for details on building cus
 ```mermaid
 flowchart LR
     subgraph "Agent (Your Infrastructure)"
-        GEN["1. GENERATE\ncrypto/rsa 2048-bit"]
+        GEN["1. GENERATE\ncrypto/ecdsa P-256"]
         STORE["2. STORE\nFile perms 0600"]
         USE["3. USE\nCSR gen + deployment"]
         ROT["4. ROTATE\nDelete old after renewal"]
@@ -558,14 +560,17 @@ For production, you would also add an ingress controller, TLS termination for th
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture:
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 170+ tests across four layers. The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
-- **Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. Tests all business logic: certificate CRUD, agent lifecycle, job state machine, policy evaluation, renewal/issuance flow, notification deduplication.
-- **Handler layer tests** (`internal/api/handler/*_test.go`) — 50 test functions using `httptest`. Currently covers certificates and agents; M9 expands to all 7 handler files.
-- **Integration tests** (`internal/integration/lifecycle_test.go`) — 11 subtests covering the full lifecycle from certificate creation through issuance, deployment, and status reporting. M9 adds negative-path scenarios (issuer failure, malformed CSR, DB timeout).
-- **CI pipeline** (`.github/workflows/ci.yml`) — Parallel Go (build, vet, test with coverage) and Frontend (TypeScript check, Vite build) jobs. M9 adds coverage threshold enforcement.
+**Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 4 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
-Remaining gaps before v1.0 (M9): handler tests for jobs/notifications/policies/issuers/targets, negative-path integration tests, scheduler loop tests, connector error handling tests, and CI coverage gates.
+**Handler layer tests** (`internal/api/handler/*_test.go`) — 119 test functions across 7 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (20 tests), agents (20 tests), jobs (14 tests), notifications (11 tests), policies (15 tests), issuers (15 tests), and targets (14 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
+
+**Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 12 subtests covering error paths: nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, and expired certificate lifecycle. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
+
+**CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with `-race` and coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~34%) and handler layer must be at least 50% (current: ~61%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/local/...` (the Local CA package, which has unit tests for certificate signing logic).
+
+**What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors (NGINX, F5, IIS) depend on real infrastructure or complex mocks. Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
 
 ## What's Next
 

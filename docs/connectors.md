@@ -209,11 +209,16 @@ type Connector interface {
 }
 
 type DeploymentRequest struct {
-    CertPEM      string            // Signed certificate (PEM)
-    ChainPEM     string            // CA chain (PEM)
-    TargetConfig json.RawMessage   // Target-specific config
-    Metadata     map[string]string
-    // NOTE: No private key — agents handle keys locally
+    CertPEM      string            // Signed certificate (PEM), from control plane
+    ChainPEM     string            // CA chain (PEM), from control plane
+    KeyPEM       string            // Private key (PEM), from agent's local key store
+    TargetConfig json.RawMessage   // Target-specific config (NGINX paths, F5 API, IIS site)
+    Metadata     map[string]string // Arbitrary context (cert ID, environment, etc.)
+    // NOTE: KeyPEM is populated by the agent from its local key store
+    // (CERTCTL_KEY_DIR). It is NEVER sent from the control plane.
+    // The control plane only provides CertPEM and ChainPEM (public material).
+    // The agent combines the locally-generated private key with the signed
+    // certificate to create the full deployment payload.
 }
 
 type DeploymentResult struct {
@@ -244,31 +249,62 @@ type ValidationResult struct {
 
 ### Built-in: NGINX
 
-The NGINX connector writes certificate and chain files to disk, validates the NGINX configuration, and reloads the server.
+The NGINX connector writes certificate, chain, and key files to disk, validates the NGINX configuration, and reloads the server. This is a common deployment pattern for teams running NGINX as a reverse proxy or TLS termination point.
 
 Configuration:
 ```json
 {
   "cert_path": "/etc/nginx/certs/cert.pem",
   "chain_path": "/etc/nginx/certs/chain.pem",
+  "key_path": "/etc/nginx/certs/key.pem",
   "reload_command": "systemctl reload nginx",
   "validate_command": "nginx -t"
 }
 ```
 
-The connector writes cert and chain files with mode 0644, runs the validation command first (so a bad config doesn't take down NGINX), and only reloads if validation passes.
+The deployment flow is designed to be safe and atomic where possible: the connector writes cert and chain files with mode 0644 and the key file with mode 0600 (read-only by owner), runs the validation command first (so a bad config doesn't take down NGINX), and only reloads if validation passes. If the validation command fails, the connector rolls back the file writes and returns an error with the validation output — this prevents a partial deployment from breaking a running NGINX instance.
+
+The `reload_command` defaults to `systemctl reload nginx` but can be overridden for custom setups (e.g., `nginx -s reload` for non-systemd environments, or `docker exec nginx nginx -s reload` for containerized NGINX).
 
 Location: `internal/connector/target/nginx/nginx.go`
 
 ### Built-in: F5 BIG-IP
 
-Deploys certificates via the F5 REST API. Uploads the certificate and key, then updates virtual server SSL profiles.
+Deploys certificates to F5 BIG-IP load balancers via the iControl REST API. This is the standard integration path for organizations using F5 for TLS offloading. The connector uploads the certificate and private key to the F5 SSL certificate store, then updates the SSL profile on the virtual server to reference the new certificate.
+
+Configuration:
+```json
+{
+  "host": "f5.internal.example.com",
+  "username": "admin",
+  "password": "...",
+  "partition": "Common",
+  "virtual_server": "/Common/vs_api",
+  "ssl_profile": "/Common/clientssl_api"
+}
+```
+
+The connector authenticates to the F5 REST API at `https://{host}/mgmt/tm/`, uploads the certificate via `POST /mgmt/tm/sys/crypto/cert`, uploads the key via `POST /mgmt/tm/sys/crypto/key`, and binds them to the specified SSL profile. The F5's native REST API handles certificate chain assembly. Agent credentials for the F5 API are stored locally on the agent, never on the control plane.
 
 Location: `internal/connector/target/f5/f5.go`
 
 ### Built-in: IIS
 
-Deploys certificates to Microsoft IIS via WinRM. Imports the certificate into the Windows certificate store and binds it to an IIS site.
+Deploys certificates to Microsoft IIS web servers via WinRM (Windows Remote Management). This connector is for organizations running Windows-based infrastructure where IIS terminates TLS. The connector executes PowerShell commands over WinRM to import a PFX certificate into the Windows certificate store and bind it to an IIS site.
+
+Configuration:
+```json
+{
+  "host": "iis-server.internal.example.com",
+  "username": "Administrator",
+  "password": "...",
+  "site_name": "Default Web Site",
+  "cert_store": "WebHosting",
+  "use_https": true
+}
+```
+
+The deployment flow: the connector combines the certificate and private key into a PFX (PKCS#12) bundle, transfers it to the Windows server via WinRM, runs `Import-PfxCertificate` to install it into the specified certificate store (typically `WebHosting` or `My`), then runs `Set-WebBinding` to bind the new certificate to the IIS site. Old certificate bindings are updated in-place so there is no downtime window.
 
 Location: `internal/connector/target/iis/iis.go`
 
@@ -371,6 +407,7 @@ func TestNginxDeploy(t *testing.T) {
     result, err := connector.DeployCertificate(ctx, target.DeploymentRequest{
         CertPEM:  testCertPEM,
         ChainPEM: testChainPEM,
+        KeyPEM:   testKeyPEM,
     })
     if err != nil {
         t.Fatalf("deploy failed: %v", err)
