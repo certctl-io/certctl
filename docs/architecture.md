@@ -1,574 +1,296 @@
-# Certctl Architecture
+# Architecture Guide
 
 ## Overview
 
-Certctl is a certificate management platform with a **decoupled control-plane and agent architecture**. The control plane orchestrates certificate issuance and renewal, while stateless agents deployed across your infrastructure handle certificate generation, deployment, and renewal without exposing private keys to the control plane.
+Certctl is a certificate management platform with a **decoupled control-plane and agent architecture**. The control plane orchestrates certificate issuance and renewal, while agents deployed across your infrastructure handle key generation, certificate deployment, and local validation — private keys never leave the infrastructure they were generated on.
+
+New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ### Design Principles
 
-1. **Zero Private Key Exposure** — Private keys generated and managed only on agents
-2. **Decoupled Operations** — Agents operate autonomously; control plane is optional for agent function
+1. **Zero Private Key Exposure** — Private keys are generated and managed only on agents, never sent to the control plane
+2. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
 3. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
 4. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
-5. **Self-Hosted** — No cloud lock-in; run on Kubernetes, Docker, or bare metal
-
----
+5. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
 
 ## System Components
 
-### Control Plane
+### Control Plane (Server)
 
-The control plane is a REST API server backed by PostgreSQL. It:
+The control plane is a Go HTTP server backed by PostgreSQL. It manages state (certificates, agents, targets, issuers, policies), orchestrates issuance by coordinating with CAs through issuer connectors, tracks jobs for certificate issuance/renewal/deployment workflows, maintains an immutable audit trail, and dispatches work via a background scheduler.
 
-- **Manages state**: Certificates, agents, targets, issuers, policies
-- **Orchestrates issuance**: Coordinates with ACME/PKI issuers
-- **Tracks jobs**: Certificate issuance, renewal, and deployment workflows
-- **Audits all actions**: Immutable audit trail for compliance
-- **Dispatches work**: Schedules renewal checks and deployment jobs
+The server exposes a REST API under `/api/v1/` and optionally serves the web dashboard as static files from the `web/` directory.
 
-**Deployment Options**: Single binary, Docker container, Kubernetes deployment
+**Key internals**: The server uses Go 1.22's `net/http` stdlib routing (no external router framework), structured logging via `slog`, and a handler → service → repository layered architecture. Handlers define their own service interfaces for clean dependency inversion.
 
 ### Agents
 
-Lightweight agents deployed on or near your infrastructure. They:
+Lightweight Go processes that run on or near your infrastructure. An agent generates private keys locally, creates CSRs, receives signed certificates from the control plane, deploys them to target systems, and reports status back. Agents communicate with the control plane via HTTP and authenticate with API keys.
 
-- **Generate certificates**: Create private keys and certificate requests
-- **Deploy certificates**: Push certs to NGINX, F5, IIS, etc.
-- **Manage credentials**: Store and rotate API keys with control plane
-- **Report status**: Health checks and job completion status
-- **Operate independently**: Continue functioning even if control plane is unreachable
+The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for pending jobs.
 
-**Deployment Options**: Container, systemd service, Kubernetes DaemonSet, Lambda
+### Web Dashboard
+
+A single-page React application served as a static HTML file (`web/index.html`). It communicates with the REST API and provides a visual interface for certificate inventory, agent status, job monitoring, audit trail, policy management, and notifications.
+
+The dashboard includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
 ### PostgreSQL Database
 
-Persistent state store:
+All state is stored in PostgreSQL 16. The schema uses TEXT primary keys (not UUIDs) with human-readable prefixed IDs like `mc-api-prod`, `t-platform`, `o-alice`.
+
+Database tables:
 
 ```
-├── Teams & Ownership
-│  ├── teams
-│  └── owners
-├── Certificate Management
-│  ├── certificates
-│  ├── certificate_versions
-│  └── renewal_policies
-├── Infrastructure
-│  ├── agents
-│  ├── targets
-│  └── target_connections
-├── Issuance
-│  ├── issuers
-│  ├── jobs
-│  └── job_steps
-├── Monitoring & Audit
-│  ├── audit_logs
-│  ├── notifications
-│  └── deployment_history
-└── Configuration
-   ├── agent_api_keys
-   └── connector_config
+Teams & Ownership
+  ├── teams
+  └── owners
+
+Certificate Management
+  ├── managed_certificates
+  ├── certificate_versions
+  └── renewal_policies
+
+Infrastructure
+  ├── agents
+  └── deployment_targets
+
+Issuance
+  ├── issuers
+  └── jobs
+
+Policy Engine
+  ├── policy_rules
+  └── policy_violations
+
+Certificate-Target Mapping
+  └── certificate_target_mappings
+
+Monitoring & Audit
+  ├── audit_events
+  └── notification_events
 ```
 
----
+Migrations are idempotent (`IF NOT EXISTS` on all CREATE statements, `ON CONFLICT (id) DO NOTHING` on all seed data) so they're safe to run multiple times — important for Docker Compose where both initdb and the server may run the same SQL.
 
 ## Data Flow: Certificate Lifecycle
 
-### 1. **Create Managed Certificate**
+### 1. Create Managed Certificate
 
 ```
-User/API
+User / API Client
    │
    ├─→ POST /api/v1/certificates
    │    {
-   │      "domain": "api.example.com",
-   │      "issuer_id": "issuer-001",
-   │      "target_ids": ["nginx-prod-01"],
-   │      "renewal_days_before": 30
+   │      "name": "API Production",
+   │      "common_name": "api.example.com",
+   │      "sans": ["api.example.com"],
+   │      "environment": "production",
+   │      "owner_id": "o-alice",
+   │      "team_id": "t-platform",
+   │      "issuer_id": "iss-local",
+   │      "renewal_policy_id": "rp-default",
+   │      "status": "Pending"
    │    }
    │
    └─→ Control Plane
-        ├─ Insert certificate record
-        ├─ Create initial job
-        ├─ Log audit event
-        └─ Return cert ID + API response
+        ├─ Validates input and policy rules
+        ├─ Inserts record into managed_certificates
+        ├─ Logs audit event (certificate_created)
+        └─ Returns certificate with ID
 ```
 
-### 2. **Agent Requests Certificate (CSR → Issuance)**
+### 2. Agent Requests Certificate (CSR → Issuance)
 
 ```
-Agent                          Control Plane                    ACME Issuer
+Agent                          Control Plane                    Issuer (Local CA / ACME)
   │                                  │                               │
-  ├─ POST /api/v1/csr               │                               │
-  │  {                              │                               │
-  │    "cert_id": "cert-123",       │                               │
-  │    "csr": "-----BEGIN CSR..."   │                               │
-  │  }                              │                               │
+  ├─ POST /api/v1/agents/{id}/csr  │                               │
+  │  { "csr_pem": "-----BEGIN..." } │                               │
   │                                 ├─ Validate CSR                 │
   │                                 │                               │
-  │                                 ├─ POST /directory/new-order    │
-  │                                 ├──────────────────────────────→
+  │                                 ├─ Submit CSR to issuer         │
+  │                                 ├──────────────────────────────→│
   │                                 │                               │
-  │                                 │← Poll challenges              │
-  │                                 ├──────────────────────────────→
+  │                                 │← Signed certificate + chain  │
+  │                                 │←──────────────────────────────│
   │                                 │                               │
-  │                                 ├─ POST /acme/finalize         │
-  │                                 ├──────────────────────────────→
+  │                                 ├─ Store certificate version    │
+  │                                 ├─ Update cert status → Active  │
+  │                                 ├─ Log audit event              │
   │                                 │                               │
-  │← Certificate + chain           │← Signed certificate           │
-  ├─────────────────────────────────│                               │
+  │← Certificate + chain (PEM)     │                               │
+  │  (NO private key)              │                               │
   │                                 │                               │
   ├─ Store locally:                │                               │
-  │  /etc/certctl/api.example.com/  │                               │
-  │   ├─ cert.pem                   │                               │
-  │   ├─ key.pem (never sent back)  │                               │
-  │   └─ chain.pem                  │                               │
+  │  cert.pem + chain.pem          │                               │
+  │  key.pem (generated locally,   │                               │
+  │           never sent anywhere)  │                               │
   │                                 │                               │
-  └─ POST /api/v1/deployments      │                               │
-     { "cert_id", "status": "ok" }  │                               │
-                                    ├─ Update cert record           │
-                                    ├─ Log "issued" event           │
-                                    └─ Trigger deployment jobs      │
+  └─ Deploy to target system       │                               │
 ```
 
-### 3. **Deploy Certificate to Target**
+### 3. Deploy Certificate to Target
 
-```
-Agent                          Target System
-  │
-  ├─ Fetch target credentials from config
-  │
-  ├─ Load certificate:
-  │  - /etc/certctl/api.example.com/cert.pem
-  │  - /etc/certctl/api.example.com/key.pem
-  │
-  ├─ NGINX (SSH):
-  │  ├─ scp cert.pem → /etc/nginx/ssl/
-  │  ├─ scp key.pem → /etc/nginx/ssl/ (restricted perms)
-  │  ├─ ssh nginx -s reload
-  │  └─ Verify: curl https://api.example.com/health
-  │
-  ├─ F5 (HTTPS API):
-  │  ├─ Authenticate with credentials
-  │  ├─ POST /mgmt/tm/ltm/cert {"name": "api.example.com", "cert": "..."}
-  │  ├─ PUT /mgmt/tm/ltm/virtual (update virtual server)
-  │  └─ Verify: F5 configuration updated
-  │
-  ├─ IIS (WinRM):
-  │  ├─ Import cert to store: Import-PfxCertificate
-  │  ├─ Bind to site: Set-WebBinding
-  │  └─ Verify: Get-WebBinding
-  │
-  └─ Report deployment status:
-     POST /api/v1/deployments/{id}/status
-     { "status": "success", "deployed_at": "..." }
-```
+The agent deploys certificates using target connectors. Each connector knows how to push certificates to a specific system:
 
-### 4. **Renewal Check & Rotation**
+- **NGINX**: Writes cert/chain files to disk, validates config with `nginx -t`, reloads with `nginx -s reload` or `systemctl reload nginx`
+- **F5 BIG-IP**: Calls the F5 REST API to upload certificate and update virtual server bindings
+- **IIS**: Uses WinRM to import the certificate into the Windows certificate store and bind it to an IIS site
 
-```
-Scheduler (Control Plane)
-  │
-  ├─ Every hour: SELECT certificates WHERE expiry_date < NOW() + 30 days
-  │
-  ├─ For each certificate:
-  │  │
-  │  ├─ Create renewal job
-  │  ├─ Notify agent(s)
-  │  │
-  │  └─ Agent flow:
-  │     ├─ Generate new CSR
-  │     ├─ Request new certificate
-  │     ├─ Deploy new cert to targets
-  │     ├─ Verify deployment
-  │     └─ Delete old private key from agent
-  │
-  ├─ Log completion
-  └─ Notify via email/webhook
-```
+The agent handles both the certificate (public) and the private key (local only). The control plane never sees the private key.
 
----
+### 4. Automatic Renewal
+
+The control plane runs a scheduler with four background loops:
+
+| Loop | Interval | Purpose |
+|------|----------|---------|
+| Renewal checker | 1 hour | Finds certificates approaching expiry, creates renewal jobs |
+| Job processor | 30 seconds | Processes pending jobs (issuance, renewal, deployment) |
+| Agent health check | 2 minutes | Marks agents as offline if heartbeat is stale |
+| Notification processor | 1 minute | Sends pending notifications via configured channels |
+
+When the renewal checker finds a certificate within its renewal window (e.g., 30 days before expiry), it creates a renewal job. The job processor picks it up, coordinates with the issuer, and triggers deployment. All steps are logged in the audit trail and generate notifications.
 
 ## Connector Architecture
 
-Certctl uses **connector interfaces** for extensibility. Connectors are pluggable implementations of specific capabilities.
+Certctl uses connector interfaces for extensibility. Each connector type has a standard interface that implementations must satisfy.
 
 ### Issuer Connector
 
-Handles certificate issuance from external PKI systems.
+Handles certificate issuance from CAs.
 
 ```go
-type IssuerConnector interface {
-    // GetDirectory returns the ACME directory
-    GetDirectory(ctx context.Context) (*ACMEDirectory, error)
-
-    // NewAccount registers a new account
-    NewAccount(ctx context.Context, email string) (*Account, error)
-
-    // NewOrder creates a new certificate order
-    NewOrder(ctx context.Context, identifiers []Identifier) (*Order, error)
-
-    // GetAuthorization retrieves challenge info
-    GetAuthorization(ctx context.Context, authURL string) (*Authorization, error)
-
-    // FinalizeOrder submits CSR and gets certificate
-    FinalizeOrder(ctx context.Context, orderURL, csr string) ([]byte, error)
+type Connector interface {
+    ValidateConfig(ctx context.Context, config json.RawMessage) error
+    IssueCertificate(ctx context.Context, request IssuanceRequest) (*IssuanceResult, error)
+    RenewCertificate(ctx context.Context, request RenewalRequest) (*IssuanceResult, error)
+    RevokeCertificate(ctx context.Context, request RevocationRequest) error
+    GetOrderStatus(ctx context.Context, orderID string) (*OrderStatus, error)
 }
 ```
 
-**Built-in Issuers**:
-- `acme` — ACME v2 protocol (Let's Encrypt, Sectigo, etc.)
-
-**Example Usage**:
-```yaml
-issuer:
-  type: acme
-  config:
-    directory_url: https://acme-v02.api.letsencrypt.org/directory
-    email: admin@example.com
-```
+Built-in issuers: **Local CA** (self-signed, for development/demos) and **ACME** (Let's Encrypt, Sectigo, etc., in progress).
 
 ### Target Connector
 
-Deploys certificates to infrastructure systems.
+Deploys certificates to infrastructure. Note: the interface does NOT include private keys — agents handle keys locally.
 
 ```go
-type TargetConnector interface {
-    // Validate tests connectivity and credentials
-    Validate(ctx context.Context) error
-
-    // Deploy pushes certificate to target
-    Deploy(ctx context.Context, cert *Certificate) error
-
-    // Remove removes/revokes certificate from target
-    Remove(ctx context.Context, domain string) error
-
-    // GetStatus checks deployment status
-    GetStatus(ctx context.Context, domain string) (string, error)
+type Connector interface {
+    ValidateConfig(ctx context.Context, config json.RawMessage) error
+    DeployCertificate(ctx context.Context, request DeploymentRequest) (*DeploymentResult, error)
+    ValidateDeployment(ctx context.Context, request ValidationRequest) (*ValidationResult, error)
 }
 ```
 
-**Built-in Targets**:
-- `nginx` — NGINX via SSH
-- `f5` — F5 BIG-IP via REST API
-- `iis` — Microsoft IIS via WinRM
-
-**Example Usage**:
-```yaml
-target:
-  type: nginx
-  config:
-    host: web01.prod.internal
-    ssh_user: deploy
-    ssh_key: /etc/certctl/keys/deploy.pem
-    cert_path: /etc/nginx/ssl
-```
+Built-in targets: **NGINX**, **F5 BIG-IP**, **IIS**.
 
 ### Notifier Connector
 
-Sends notifications about certificate events.
+Sends alerts about certificate lifecycle events.
 
 ```go
-type NotifierConnector interface {
-    // Send delivers a notification
-    Send(ctx context.Context, notif *Notification) error
-
-    // Validate checks configuration
-    Validate(ctx context.Context) error
+type Connector interface {
+    ValidateConfig(ctx context.Context, config json.RawMessage) error
+    SendAlert(ctx context.Context, alert Alert) error
+    SendEvent(ctx context.Context, event Event) error
 }
 ```
 
-**Built-in Notifiers**:
-- `email` — SMTP email
-- `webhook` — HTTP webhooks
+Built-in notifiers: **Email** (SMTP) and **Webhook** (HTTP POST).
 
-**Example Usage**:
-```yaml
-notifier:
-  type: email
-  config:
-    smtp_host: smtp.example.com
-    smtp_port: 587
-    username: alerts@example.com
-    password: "***"
-    from_address: certctl@example.com
-    recipients:
-      - ops@example.com
-      - security@example.com
-```
-
----
-
-## Job Lifecycle & States
-
-Jobs represent work to be done: certificate issuance, renewal, deployment, etc.
-
-```
-┌──────────┐
-│ PENDING  │  Job created, waiting to be processed
-└────┬─────┘
-     │
-     ↓
-┌──────────┐
-│ RUNNING  │  Job in progress (CSR generation, issuance, deployment)
-└────┬─────┘
-     │
-     ├─→ SUCCESS ──→ COMPLETED (job done, no errors)
-     │
-     ├─→ FAILURE ──→ FAILED (error occurred, may retry)
-     │
-     └─→ CANCEL ───→ CANCELLED (user or scheduler cancelled)
-
-Additional states:
-  • RETRY_WAIT  — Backoff before retry
-  • ABANDONED   — Max retries exceeded
-```
-
-### Job Steps
-
-Complex jobs are broken into steps:
-
-```
-Issuance Job
-  │
-  ├─ Step 1: Notify agent of CSR request
-  │   Status: COMPLETED
-  │
-  ├─ Step 2: Wait for CSR from agent
-  │   Status: RUNNING (timeout: 5 min)
-  │
-  ├─ Step 3: Submit to ACME issuer
-  │   Status: PENDING
-  │
-  ├─ Step 4: Poll for certificate
-  │   Status: PENDING
-  │
-  └─ Step 5: Trigger deployment jobs
-      Status: PENDING
-```
-
----
+See the [Connector Development Guide](connectors.md) for details on building custom connectors.
 
 ## Security Model
 
 ### Private Key Management
 
-```
-Private Key Lifecycle
-  │
-  ├─ GENERATED on Agent (never sent to control plane)
-  │  └─ Location: /etc/certctl/domains/{domain}/key.pem
-  │
-  ├─ STORED on Agent
-  │  ├─ File permissions: 0600 (agent user only)
-  │  └─ Encrypted at rest (optional, per deployment)
-  │
-  ├─ USED on Agent for:
-  │  ├─ Deployment to targets
-  │  └─ Certificate renewal
-  │
-  └─ DELETED on Agent
-     ├─ Old key deleted after successful renewal
-     └─ Manual revocation on agent removal
-```
+Private keys follow a strict lifecycle:
 
-### Authentication & Authorization
+1. **Generated on the agent** — never sent to the control plane
+2. **Stored on the agent** — file permissions 0600, owned by the agent process user
+3. **Used by the agent** — for deployment to targets and CSR generation
+4. **Rotated by the agent** — old keys deleted after successful renewal
 
-**Agent-to-Server**:
-- API Key (registered at agent creation)
-- mTLS optional for high-security deployments
-- All API calls include agent ID + API key
+The control plane only ever handles public material: certificates, chains, and CSRs. This is a deliberate architectural decision — even if the control plane database is compromised, no private keys are exposed.
 
-**Server-to-External Systems**:
-- ACME: ACME protocol with account key
-- NGINX: SSH key authentication
-- F5: Username/password or token
-- IIS: WinRM with encrypted credentials
+### Authentication
 
-### Audit Logging
+- **API clients → Server**: API key in `Authorization: Bearer` header, or `none` for demo mode
+- **Agent → Server**: API key registered at agent creation, included in all requests
+- **Server → Issuers**: ACME account key, or connector-specific credentials
+- **Agent → Targets**: SSH keys, API tokens, WinRM credentials (stored locally on agent)
 
-Every action is logged:
+### Audit Trail
+
+Every action is recorded as an immutable audit event:
 
 ```json
 {
-  "id": "audit-98765",
-  "timestamp": "2024-03-14T10:30:00Z",
-  "actor": {
-    "type": "agent",
-    "id": "agent-prod-01"
-  },
-  "action": "certificate_issued",
-  "resource": {
-    "type": "certificate",
-    "id": "cert-api-example-com"
-  },
-  "status": "success",
-  "details": {
-    "issuer": "acme/letsencrypt",
-    "expiry": "2024-06-12T10:30:00Z",
-    "deployed_to": ["nginx-prod-01"]
-  }
+  "id": "audit-001",
+  "actor": "o-alice",
+  "actor_type": "User",
+  "action": "certificate_created",
+  "resource_type": "certificate",
+  "resource_id": "mc-api-prod",
+  "details": {"environment": "production"},
+  "timestamp": "2026-03-14T10:30:00Z"
 }
 ```
 
-**Query examples**:
-- All actions by agent: `GET /audit/logs?actor_type=agent&actor_id=agent-001`
-- All deployments: `GET /audit/logs?action=certificate_deployed`
-- Last 30 days: `GET /audit/logs?from=2024-02-12`
+Audit events cannot be modified or deleted. They support filtering by actor, action, resource type, resource ID, and time range.
 
-### Data Encryption at Rest
+## API Design
 
-Optional encryption for sensitive fields:
+All endpoints are under `/api/v1/` and follow consistent patterns:
 
-- Passwords in connector configs
-- API keys
-- ACME account keys
+- **List**: `GET /api/v1/{resources}` — returns `{data: [...], total, page, per_page}`
+- **Get**: `GET /api/v1/{resources}/{id}` — returns the resource
+- **Create**: `POST /api/v1/{resources}` — returns the created resource with `201`
+- **Update**: `PUT /api/v1/{resources}/{id}` — returns the updated resource
+- **Delete**: `DELETE /api/v1/{resources}/{id}` — returns `204` (soft delete/archive)
+- **Actions**: `POST /api/v1/{resources}/{id}/{action}` — returns `202` for async operations
 
-Uses AES-256-GCM with per-row nonce.
+Resources: certificates, issuers, targets, agents, jobs, policies, teams, owners, audit, notifications.
 
----
-
-## Scaling Considerations
-
-### Control Plane Scaling
-
-**Single Server Limits**:
-- ~1000 agents (verified in testing)
-- ~10,000 managed certificates
-- ~100,000 audit log entries per day
-
-**Horizontal Scaling** (future):
-- Multiple server instances behind load balancer
-- Shared PostgreSQL backend
-- Distributed job queue (Redis/RabbitMQ)
-
-### Agent Scaling
-
-Agents are stateless and scale horizontally:
-
-- Each agent processes certificates independently
-- Scheduler distributes renewal checks across agents
-- No inter-agent communication required
-
-### Database Scaling
-
-For large deployments:
-- Vertical scaling: More CPU/RAM for PostgreSQL
-- Read replicas: For audit log queries
-- Partitioning: Audit logs by date
-- Connection pooling: PgBouncer
-
----
-
-## Integration Points
-
-### External Integrations
-
-```
-Certctl
-  │
-  ├─→ ACME Servers
-  │   ├─ Let's Encrypt
-  │   ├─ Sectigo
-  │   └─ Internal ACME (optional)
-  │
-  ├─→ Infrastructure Targets
-  │   ├─ NGINX (SSH)
-  │   ├─ F5 (REST API)
-  │   ├─ IIS (WinRM)
-  │   └─ Kubernetes (future)
-  │
-  ├─→ Notification Systems
-  │   ├─ SMTP (email)
-  │   ├─ HTTP webhooks
-  │   └─ Slack (future)
-  │
-  └─→ External Systems
-      ├─ Vault (credential storage)
-      ├─ HashiCorp Consul (service discovery)
-      └─ Prometheus (metrics)
-```
-
-### Internal Component Communication
-
-```
-Agent ← → Control Plane
-  ├─ Agent registration
-  ├─ CSR submission
-  ├─ Certificate retrieval
-  ├─ Deployment status
-  └─ Health checks (bidirectional)
-
-Scheduler → Services
-  ├─ Certificate renewal
-  ├─ Job processing
-  ├─ Notifications
-  └─ Cleanup tasks
-```
-
----
+Health checks live outside the API prefix: `GET /health` and `GET /ready`.
 
 ## Deployment Topologies
 
-### Single-Node (Development)
+### Docker Compose (Development / Small Deployments)
 
 ```
-┌────────────────────────────┐
-│ Server + Agent             │
-│ ├─ HTTP API (8443)         │
-│ ├─ PostgreSQL              │
-│ └─ Agent (test mode)       │
-└────────────────────────────┘
+┌─────────────────────────────────┐
+│ Docker Network                  │
+│ ├─ certctl-server (:8443)       │
+│ │  └─ Serves API + dashboard    │
+│ ├─ postgres (:5432)             │
+│ │  └─ Schema + seed data        │
+│ └─ certctl-agent                │
+│    └─ Heartbeat + work polling  │
+└─────────────────────────────────┘
 ```
 
-### Docker Compose (Local Dev)
+### Production (Kubernetes)
 
 ```
-┌─────────────────────────────────────┐
-│ Docker Network                      │
-│ ├─ certctl-server (8443)            │
-│ ├─ postgres (5432)                  │
-│ ├─ certctl-agent (managed)          │
-│ └─ pgadmin (5050, optional)         │
-└─────────────────────────────────────┘
+┌──────────────────────────────────────────────┐
+│ Kubernetes Cluster                           │
+│ ├─ Deployment: certctl-server (replicas=2+)  │
+│ ├─ DaemonSet: certctl-agent (infra nodes)    │
+│ ├─ StatefulSet: PostgreSQL (primary+replica) │
+│ ├─ ConfigMap: issuer/target configurations   │
+│ └─ Secret: API keys, ACME credentials        │
+└──────────────────────────────────────────────┘
 ```
 
-### Kubernetes (Production)
+For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
 
-```
-┌──────────────────────────────────────────────────┐
-│ Kubernetes Cluster                               │
-│ ├─ Deployment: certctl-server (replicas=3)       │
-│ ├─ DaemonSet: certctl-agent (all nodes)          │
-│ ├─ StatefulSet: postgres (primary + replica)     │
-│ ├─ ConfigMap: connector configurations           │
-│ └─ Secret: API keys, credentials                 │
-└──────────────────────────────────────────────────┘
-```
+## What's Next
 
----
-
-## Performance Characteristics
-
-| Operation | Typical Duration | Bottleneck |
-|-----------|------------------|-----------|
-| Certificate request (CSR) | 100-500ms | Agent network latency |
-| ACME challenge (DNS) | 30-60s | DNS propagation |
-| ACME finalize | 1-5s | ACME server |
-| NGINX deployment | 500ms-2s | SSH latency + nginx reload |
-| F5 deployment | 2-10s | F5 API response |
-| IIS deployment | 3-15s | WinRM latency |
-
----
-
-## Future Enhancements
-
-- **HSM Support**: Hardware security module integration for ACME account keys
-- **Multi-Region**: Control plane federation with local agents
-- **HA Control Plane**: Active-active with etcd-backed state
-- **Policy Engine**: Advanced renewal and deployment policies
-- **Certificate Pinning**: HPKP and pin validation
-- **Metrics**: Prometheus integration for observability
-
----
-
-See [README.md](../README.md) for quick start and [docs/](../) for additional guides.
+- [Quick Start](quickstart.md) — Get certctl running locally
+- [Advanced Demo](demo-advanced.md) — Issue a certificate end-to-end
+- [Connector Guide](connectors.md) — Build custom connectors

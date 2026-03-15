@@ -34,12 +34,20 @@ func (s *TargetService) List(ctx context.Context, page, perPage int) ([]*domain.
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	targets, total, err := s.targetRepo.List(ctx, offset, int64(perPage))
+	targets, err := s.targetRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list targets: %w", err)
 	}
-	return targets, total, nil
+	total := int64(len(targets))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+	return targets[start:end], total, nil
 }
 
 // Get retrieves a deployment target by ID.
@@ -109,13 +117,12 @@ func (s *TargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarge
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	targets, total, err := s.targetRepo.List(context.Background(), offset, int64(perPage))
+	targets, err := s.targetRepo.List(context.Background())
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list targets: %w", err)
 	}
+	total := int64(len(targets))
 
-	// Convert pointers to values for the handler interface
 	var result []domain.DeploymentTarget
 	for _, t := range targets {
 		if t != nil {

@@ -75,7 +75,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 	}
 
 	// Get total count
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM certificates %s", whereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM managed_certificates %s", whereClause)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("failed to count certificates: %w", err)
@@ -84,9 +84,9 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 	// Get paginated results
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
-		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id,
+		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		FROM certificates
+		FROM managed_certificates
 		%s
 		ORDER BY created_at DESC
 		LIMIT $%d OFFSET $%d
@@ -119,9 +119,9 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 // Get retrieves a certificate by ID
 func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id,
+		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		FROM certificates
+		FROM managed_certificates
 		WHERE id = $1
 	`, id)
 
@@ -148,13 +148,13 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 	}
 
 	err = r.db.QueryRowContext(ctx, `
-		INSERT INTO certificates (
-			id, name, common_name, sans, environment, owner_id, team_id, issuer_id,
+		INSERT INTO managed_certificates (
+			id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 			status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
 		RETURNING id
 	`, cert.ID, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
-		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.Status, cert.ExpiresAt,
+		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.RenewalPolicyID, cert.Status, cert.ExpiresAt,
 		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt, cert.CreatedAt, cert.UpdatedAt).Scan(&cert.ID)
 
 	if err != nil {
@@ -172,7 +172,7 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 	}
 
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE certificates SET
+		UPDATE managed_certificates SET
 			name = $1,
 			common_name = $2,
 			sans = $3,
@@ -210,7 +210,7 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 // Archive marks a certificate as archived
 func (r *CertificateRepository) Archive(ctx context.Context, id string) error {
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE certificates SET status = $1, updated_at = $2 WHERE id = $3
+		UPDATE managed_certificates SET status = $1, updated_at = $2 WHERE id = $3
 	`, domain.CertificateStatusArchived, time.Now(), id)
 
 	if err != nil {
@@ -286,9 +286,9 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 // GetExpiringCertificates returns certificates expiring before the given time
 func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id,
+		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		FROM certificates
+		FROM managed_certificates
 		WHERE expires_at < $1 AND status != $2
 		ORDER BY expires_at ASC
 	`, before, domain.CertificateStatusArchived)
@@ -324,7 +324,7 @@ func scanCertificate(scanner interface {
 
 	err := scanner.Scan(
 		&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
-		&cert.TeamID, &cert.IssuerID, &cert.Status, &cert.ExpiresAt, &tagsJSON,
+		&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &cert.Status, &cert.ExpiresAt, &tagsJSON,
 		&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.CreatedAt, &cert.UpdatedAt)
 
 	if err != nil {

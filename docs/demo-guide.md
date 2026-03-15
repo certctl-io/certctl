@@ -1,11 +1,12 @@
 # certctl Demo Guide
 
-Get the full certctl experience running locally in under 2 minutes.
+A 5-7 minute guided walkthrough of certctl's dashboard and API. Perfect for stakeholder presentations and team demos.
+
+New to certificates? Read the [Concepts Guide](concepts.md) first. Want a hands-on demo where you issue certificates yourself? See the [Advanced Demo](demo-advanced.md).
 
 ## Quick Start
 
 ```bash
-# Clone and start everything
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
 docker compose -f deploy/docker-compose.yml up -d
@@ -15,7 +16,7 @@ Wait ~30 seconds for PostgreSQL to initialize and the server to start, then open
 
 **http://localhost:8443**
 
-You'll see the dashboard pre-loaded with 15 demo certificates across multiple teams, environments, and statuses — including expiring, expired, active, failed, and in-progress renewals.
+You'll see the dashboard pre-loaded with 14 demo certificates across multiple teams, environments, and statuses — including expiring, expired, active, failed, and in-progress renewals.
 
 ## What You'll See
 
@@ -117,3 +118,9 @@ If you're demoing to a team or customer, here's a suggested flow:
 7. **Show the API** — "Everything you see here is API-first, so you can automate on top of it"
 
 The whole walkthrough takes 5-7 minutes.
+
+## Next Steps
+
+- **[Advanced Demo](demo-advanced.md)** — Go hands-on: create a team, issue a certificate via API, trigger renewal, and watch it appear in the dashboard
+- **[Concepts Guide](concepts.md)** — Understand TLS certificates, CAs, and private keys from scratch
+- **[Architecture](architecture.md)** — Deep dive into the control plane, agent model, and connector architecture

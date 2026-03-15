@@ -62,6 +62,16 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		// Calculate days until expiry
 		daysUntil := time.Until(cert.ExpiresAt).Hours() / 24
 
+		// Send expiration warning notification (always, regardless of issuer availability)
+		if err := s.notificationSvc.SendExpirationWarning(ctx, cert, int(daysUntil)); err != nil {
+			fmt.Printf("failed to send expiration warning for cert %s: %v\n", cert.ID, err)
+		}
+
+		// Only create renewal job if an issuer connector is registered for this cert's issuer
+		if _, hasIssuer := s.issuerRegistry[cert.IssuerID]; !hasIssuer {
+			continue
+		}
+
 		// Create renewal job
 		job := &domain.Job{
 			ID:            generateID("job"),
@@ -75,11 +85,6 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		if err := s.jobRepo.Create(ctx, job); err != nil {
 			fmt.Printf("failed to create renewal job for cert %s: %v\n", cert.ID, err)
 			continue
-		}
-
-		// Send expiration warning notification
-		if err := s.notificationSvc.SendExpirationWarning(ctx, cert, int(daysUntil)); err != nil {
-			fmt.Printf("failed to send expiration warning for cert %s: %v\n", cert.ID, err)
 		}
 
 		// Record audit event

@@ -30,6 +30,7 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/server .
 COPY --chown=certctl:certctl migrations/ ./migrations/
+COPY --chown=certctl:certctl web/ ./web/
 
 RUN chown -R certctl:certctl /app
 

@@ -179,8 +179,8 @@ func (s *JobService) GetJobStatus(ctx context.Context, jobID string) (*domain.Jo
 	return job, nil
 }
 
-// CancelJob cancels a pending or running job.
-func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
+// CancelJobWithContext cancels a pending or running job.
+func (s *JobService) CancelJobWithContext(ctx context.Context, jobID string) error {
 	job, err := s.jobRepo.Get(ctx, jobID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch job: %w", err)
@@ -197,3 +197,63 @@ func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	s.logger.Info("job cancelled", "job_id", jobID)
 	return nil
 }
+
+// CancelJob cancels a job (handler interface method).
+func (s *JobService) CancelJob(id string) error {
+	return s.CancelJobWithContext(context.Background(), id)
+}
+
+// ListJobs returns paginated jobs with optional filtering (handler interface method).
+func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	allJobs, err := s.jobRepo.List(context.Background())
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list jobs: %w", err)
+	}
+
+	// Filter jobs in memory based on status and jobType
+	var filtered []*domain.Job
+	for _, job := range allJobs {
+		if job == nil {
+			continue
+		}
+		if status != "" && string(job.Status) != status {
+			continue
+		}
+		if jobType != "" && string(job.Type) != jobType {
+			continue
+		}
+		filtered = append(filtered, job)
+	}
+
+	total := int64(len(filtered))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+
+	var result []domain.Job
+	for _, job := range filtered[start:end] {
+		if job != nil {
+			result = append(result, *job)
+		}
+	}
+
+	return result, total, nil
+}
+
+// GetJob returns a single job (handler interface method).
+func (s *JobService) GetJob(id string) (*domain.Job, error) {
+	return s.jobRepo.Get(context.Background(), id)
+}
+

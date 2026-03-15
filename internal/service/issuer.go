@@ -34,12 +34,20 @@ func (s *IssuerService) List(ctx context.Context, page, perPage int) ([]*domain.
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	issuers, total, err := s.issuerRepo.List(ctx, offset, int64(perPage))
+	issuers, err := s.issuerRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list issuers: %w", err)
 	}
-	return issuers, total, nil
+	total := int64(len(issuers))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+	return issuers[start:end], total, nil
 }
 
 // Get retrieves an issuer by ID.
@@ -100,8 +108,8 @@ func (s *IssuerService) Delete(ctx context.Context, id string, actor string) err
 	return nil
 }
 
-// TestConnection verifies the issuer connection.
-func (s *IssuerService) TestConnection(ctx context.Context, id string) error {
+// TestConnectionWithContext verifies the issuer connection with context.
+func (s *IssuerService) TestConnectionWithContext(ctx context.Context, id string) error {
 	issuer, err := s.issuerRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("issuer not found: %w", err)
@@ -115,6 +123,11 @@ func (s *IssuerService) TestConnection(ctx context.Context, id string) error {
 	return nil
 }
 
+// TestConnection verifies the issuer connection (handler interface method).
+func (s *IssuerService) TestConnection(id string) error {
+	return s.TestConnectionWithContext(context.Background(), id)
+}
+
 // ListIssuers returns paginated issuers (handler interface method).
 func (s *IssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, error) {
 	if page < 1 {
@@ -124,13 +137,12 @@ func (s *IssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, 
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	issuers, total, err := s.issuerRepo.List(context.Background(), offset, int64(perPage))
+	issuers, err := s.issuerRepo.List(context.Background())
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list issuers: %w", err)
 	}
+	total := int64(len(issuers))
 
-	// Convert pointers to values for the handler interface
 	var result []domain.Issuer
 	for _, i := range issuers {
 		if i != nil {

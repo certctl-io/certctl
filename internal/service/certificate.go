@@ -154,8 +154,8 @@ func (s *CertificateService) GetVersions(ctx context.Context, certID string) ([]
 	return versions, nil
 }
 
-// TriggerRenewal initiates a renewal job if the certificate is eligible.
-func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, actor string) error {
+// TriggerRenewalWithActor initiates a renewal job if the certificate is eligible.
+func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID string, actor string) error {
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch certificate: %w", err)
@@ -190,8 +190,8 @@ func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, 
 	return nil
 }
 
-// TriggerDeployment creates deployment jobs for all targets of a certificate.
-func (s *CertificateService) TriggerDeployment(ctx context.Context, certID string, actor string) error {
+// TriggerDeploymentWithActor creates deployment jobs for all targets of a certificate.
+func (s *CertificateService) TriggerDeploymentWithActor(ctx context.Context, certID string, actor string) error {
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch certificate: %w", err)
@@ -210,4 +210,111 @@ func (s *CertificateService) TriggerDeployment(ctx context.Context, certID strin
 	}
 
 	return nil
+}
+
+// ListCertificates returns paginated certificates with optional filtering (handler interface method).
+func (s *CertificateService) ListCertificates(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	// Build filter for repository
+	filter := &repository.CertificateFilter{
+		Status:      status,
+		Environment: environment,
+		OwnerID:     ownerID,
+		TeamID:      teamID,
+		IssuerID:    issuerID,
+		Page:        page,
+		PerPage:     perPage,
+	}
+
+	certs, total, err := s.certRepo.List(context.Background(), filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list certificates: %w", err)
+	}
+
+	var result []domain.ManagedCertificate
+	for _, c := range certs {
+		if c != nil {
+			result = append(result, *c)
+		}
+	}
+
+	return result, int64(total), nil
+}
+
+// GetCertificate returns a single certificate (handler interface method).
+func (s *CertificateService) GetCertificate(id string) (*domain.ManagedCertificate, error) {
+	return s.certRepo.Get(context.Background(), id)
+}
+
+// CreateCertificate creates a new certificate (handler interface method).
+func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+	cert.ID = generateID("cert")
+	if err := s.certRepo.Create(context.Background(), &cert); err != nil {
+		return nil, fmt.Errorf("failed to create certificate: %w", err)
+	}
+	return &cert, nil
+}
+
+// UpdateCertificate modifies a certificate (handler interface method).
+func (s *CertificateService) UpdateCertificate(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+	cert.ID = id
+	if err := s.certRepo.Update(context.Background(), &cert); err != nil {
+		return nil, fmt.Errorf("failed to update certificate: %w", err)
+	}
+	return &cert, nil
+}
+
+// ArchiveCertificate marks a certificate as archived (handler interface method).
+func (s *CertificateService) ArchiveCertificate(id string) error {
+	return s.certRepo.Archive(context.Background(), id)
+}
+
+// GetCertificateVersions returns certificate versions (handler interface method).
+func (s *CertificateService) GetCertificateVersions(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	versions, err := s.certRepo.ListVersions(context.Background(), certID)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list certificate versions: %w", err)
+	}
+
+	total := int64(len(versions))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+
+	var result []domain.CertificateVersion
+	for _, v := range versions[start:end] {
+		if v != nil {
+			result = append(result, *v)
+		}
+	}
+
+	return result, total, nil
+}
+
+// TriggerRenewal initiates renewal (handler interface method).
+func (s *CertificateService) TriggerRenewal(certID string) error {
+	return s.TriggerRenewalWithActor(context.Background(), certID, "api")
+}
+
+// TriggerDeployment triggers deployment (handler interface method).
+func (s *CertificateService) TriggerDeployment(certID string, targetID string) error {
+	return s.TriggerDeploymentWithActor(context.Background(), certID, "api")
 }

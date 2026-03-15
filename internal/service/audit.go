@@ -119,8 +119,8 @@ func (s *AuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, 
 	}
 
 	filter := &repository.AuditFilter{
-		Offset:  int64((page - 1) * perPage),
-		PerPage: int64(perPage),
+		Page:    page,
+		PerPage: perPage,
 	}
 
 	events, err := s.auditRepo.List(context.Background(), filter)
@@ -145,7 +145,8 @@ func (s *AuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, 
 // GetAuditEvent returns a single audit event (handler interface method).
 func (s *AuditService) GetAuditEvent(id string) (*domain.AuditEvent, error) {
 	filter := &repository.AuditFilter{
-		ID: id,
+		ResourceID: id,
+		PerPage:    1,
 	}
 
 	events, err := s.auditRepo.List(context.Background(), filter)

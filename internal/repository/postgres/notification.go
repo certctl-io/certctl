@@ -29,12 +29,12 @@ func (r *NotificationRepository) Create(ctx context.Context, notif *domain.Notif
 	}
 
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO notifications (
-			id, type, certificate_id, channel, recipient, message, sent_at, status, error, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		INSERT INTO notification_events (
+			id, type, certificate_id, channel, recipient, message, sent_at, status, error
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
 	`, notif.ID, notif.Type, notif.CertificateID, notif.Channel, notif.Recipient,
-		notif.Message, notif.SentAt, notif.Status, notif.Error, notif.CreatedAt).Scan(&notif.ID)
+		notif.Message, notif.SentAt, notif.Status, notif.Error).Scan(&notif.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create notification: %w", err)
@@ -84,7 +84,7 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 	}
 
 	// Get total count
-	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM notifications %s", whereClause)
+	countQuery := fmt.Sprintf("SELECT COUNT(*) FROM notification_events %s", whereClause)
 	var total int
 	if err := r.db.QueryRowContext(ctx, countQuery, args...).Scan(&total); err != nil {
 		return nil, fmt.Errorf("failed to count notifications: %w", err)
@@ -93,10 +93,10 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 	// Get paginated results
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
-		SELECT id, type, certificate_id, channel, recipient, message, sent_at, status, error, created_at
-		FROM notifications
+		SELECT id, type, certificate_id, channel, recipient, message, sent_at, status, error
+		FROM notification_events
 		%s
-		ORDER BY created_at DESC
+		ORDER BY sent_at DESC NULLS LAST
 		LIMIT $%d OFFSET $%d
 	`, whereClause, argCount, argCount+1)
 
@@ -127,7 +127,7 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 // UpdateStatus updates a notification's delivery status
 func (r *NotificationRepository) UpdateStatus(ctx context.Context, id string, status string, sentAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, `
-		UPDATE notifications SET status = $1, sent_at = $2 WHERE id = $3
+		UPDATE notification_events SET status = $1, sent_at = $2 WHERE id = $3
 	`, status, sentAt, id)
 
 	if err != nil {
@@ -152,7 +152,7 @@ func scanNotification(scanner interface {
 }) (*domain.NotificationEvent, error) {
 	var notif domain.NotificationEvent
 	err := scanner.Scan(&notif.ID, &notif.Type, &notif.CertificateID, &notif.Channel,
-		&notif.Recipient, &notif.Message, &notif.SentAt, &notif.Status, &notif.Error, &notif.CreatedAt)
+		&notif.Recipient, &notif.Message, &notif.SentAt, &notif.Status, &notif.Error)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan notification: %w", err)

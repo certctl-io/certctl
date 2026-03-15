@@ -74,8 +74,8 @@ func (s *AgentService) Register(ctx context.Context, name string, hostname strin
 	return agent, apiKey, nil
 }
 
-// Heartbeat updates an agent's last seen time and status.
-func (s *AgentService) Heartbeat(ctx context.Context, agentID string) error {
+// HeartbeatWithContext updates an agent's last seen time and status.
+func (s *AgentService) HeartbeatWithContext(ctx context.Context, agentID string) error {
 	agent, err := s.agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch agent: %w", err)
@@ -95,6 +95,11 @@ func (s *AgentService) Heartbeat(ctx context.Context, agentID string) error {
 	}
 
 	return nil
+}
+
+// Heartbeat updates agent heartbeat (handler interface method).
+func (s *AgentService) Heartbeat(agentID string) error {
+	return s.HeartbeatWithContext(context.Background(), agentID)
 }
 
 // SubmitCSR validates and processes a Certificate Signing Request from an agent.
@@ -242,6 +247,81 @@ func (s *AgentService) GetAgentByAPIKey(ctx context.Context, apiKey string) (*do
 		return nil, fmt.Errorf("invalid API key: %w", err)
 	}
 	return agent, nil
+}
+
+// ListAgents returns paginated agents (handler interface method).
+func (s *AgentService) ListAgents(page, perPage int) ([]domain.Agent, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	agents, err := s.agentRepo.List(context.Background())
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list agents: %w", err)
+	}
+
+	total := int64(len(agents))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+
+	var result []domain.Agent
+	for _, a := range agents[start:end] {
+		if a != nil {
+			result = append(result, *a)
+		}
+	}
+
+	return result, total, nil
+}
+
+// GetAgent returns a single agent (handler interface method).
+func (s *AgentService) GetAgent(id string) (*domain.Agent, error) {
+	return s.agentRepo.Get(context.Background(), id)
+}
+
+// RegisterAgent creates and registers a new agent (handler interface method).
+func (s *AgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) {
+	agent.ID = generateID("agent")
+	apiKey := generateAPIKey()
+	agent.APIKeyHash = hashAPIKey(apiKey)
+	agent.Status = domain.AgentStatusOnline
+	now := time.Now()
+	agent.RegisteredAt = now
+	agent.LastHeartbeatAt = &now
+
+	if err := s.agentRepo.Create(context.Background(), &agent); err != nil {
+		return nil, fmt.Errorf("failed to register agent: %w", err)
+	}
+	return &agent, nil
+}
+
+// CSRSubmit processes a CSR submission from an agent (handler interface method).
+func (s *AgentService) CSRSubmit(agentID string, csrPEM string) (string, error) {
+	// For the handler interface, we accept the CSR as a string
+	err := s.SubmitCSR(context.Background(), agentID, "", []byte(csrPEM))
+	if err != nil {
+		return "", err
+	}
+	// Return the CSR as acknowledgment
+	return csrPEM, nil
+}
+
+// CertificatePickup retrieves a certificate for an agent (handler interface method).
+func (s *AgentService) CertificatePickup(agentID, certID string) (string, error) {
+	certPEM, err := s.GetCertificateForAgent(context.Background(), agentID, certID)
+	if err != nil {
+		return "", err
+	}
+	return string(certPEM), nil
 }
 
 // generateAPIKey creates a random API key for an agent.

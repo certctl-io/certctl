@@ -34,12 +34,20 @@ func (s *OwnerService) List(ctx context.Context, page, perPage int) ([]*domain.O
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	owners, total, err := s.ownerRepo.List(ctx, offset, int64(perPage))
+	owners, err := s.ownerRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list owners: %w", err)
 	}
-	return owners, total, nil
+	total := int64(len(owners))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+	return owners[start:end], total, nil
 }
 
 // Get retrieves an owner by ID.
@@ -109,13 +117,12 @@ func (s *OwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, err
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	owners, total, err := s.ownerRepo.List(context.Background(), offset, int64(perPage))
+	owners, err := s.ownerRepo.List(context.Background())
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list owners: %w", err)
 	}
+	total := int64(len(owners))
 
-	// Convert pointers to values for the handler interface
 	var result []domain.Owner
 	for _, o := range owners {
 		if o != nil {

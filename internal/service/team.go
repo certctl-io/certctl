@@ -34,12 +34,20 @@ func (s *TeamService) List(ctx context.Context, page, perPage int) ([]*domain.Te
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	teams, total, err := s.teamRepo.List(ctx, offset, int64(perPage))
+	teams, err := s.teamRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list teams: %w", err)
 	}
-	return teams, total, nil
+	total := int64(len(teams))
+	start := (page - 1) * perPage
+	if start >= int(total) {
+		return nil, total, nil
+	}
+	end := start + perPage
+	if end > int(total) {
+		end = int(total)
+	}
+	return teams[start:end], total, nil
 }
 
 // Get retrieves a team by ID.
@@ -109,13 +117,12 @@ func (s *TeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error)
 		perPage = 50
 	}
 
-	offset := int64((page - 1) * perPage)
-	teams, total, err := s.teamRepo.List(context.Background(), offset, int64(perPage))
+	teams, err := s.teamRepo.List(context.Background())
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list teams: %w", err)
 	}
+	total := int64(len(teams))
 
-	// Convert pointers to values for the handler interface
 	var result []domain.Team
 	for _, t := range teams {
 		if t != nil {
