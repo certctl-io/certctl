@@ -8,7 +8,7 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ### Design Principles
 
-1. **Private Key Isolation** — Agents generate keys locally and submit CSRs only. Private keys never touch the control plane. (Local CA demo mode retains server-side keygen with explicit flag.)
+1. **Private Key Isolation** — Agents generate keys locally and submit CSRs only. Private keys never touch the control plane. (M8 milestone; currently server-side keygen for Local CA demo, flagged explicitly.)
 2. **GUI as Primary Interface** — The web dashboard is the operational control plane, not a secondary viewer. Every backend feature ships with its corresponding GUI surface.
 3. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
 4. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
@@ -74,7 +74,7 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents poll the control plane for pending deployment jobs, fetch signed certificates, deploy them to target systems, and report job status back. In V2+, agents will also generate private keys locally and create CSRs. Agents communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents poll the control plane for pending deployment jobs, fetch signed certificates, deploy them to target systems, and report job status back. In M8, agents will also generate private keys locally and create CSRs — private keys will never leave agent infrastructure. Agents communicate with the control plane via HTTP and authenticate with API keys.
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for pending deployment jobs via `GET /api/v1/agents/{id}/work`. When a job is found, the agent fetches the certificate, executes the deployment, and reports status via `POST /api/v1/agents/{id}/jobs/{job_id}/status`.
 
@@ -236,7 +236,7 @@ sequenceDiagram
 
 #### V1: Server-Side Key Generation (Local CA)
 
-In V1, the control plane generates keys and CSRs server-side for the Local CA. This simplifies the initial implementation — the full agent-side key generation flow is planned for V2+.
+In V1, the control plane generates keys and CSRs server-side for the Local CA. This simplifies the initial implementation — the full agent-side key generation flow is planned for M8.
 
 ```mermaid
 sequenceDiagram
@@ -263,7 +263,7 @@ sequenceDiagram
     Note over SVC: Deployment jobs picked up by agents<br/>via GET /api/v1/agents/{id}/work
 ```
 
-#### V2+ (Planned): Agent-Side Key Generation
+#### M8 (Planned): Agent-Side Key Generation
 
 ```mermaid
 sequenceDiagram
@@ -457,14 +457,14 @@ flowchart LR
 
 **V1 (Current):** The Local CA issuer generates RSA-2048 keys and CSRs server-side within `RenewalService.ProcessRenewalJob`. Private key material is stored alongside the CSR in the `certificate_versions` table. This is a pragmatic V1 trade-off to get the end-to-end lifecycle working.
 
-**V2+ (Target Architecture):** Private keys follow a strict lifecycle on agents:
+**M8 (Target Architecture):** Private keys follow a strict lifecycle on agents:
 
 1. **Generated on the agent** — never sent to the control plane
 2. **Stored on the agent** — file permissions 0600, owned by the agent process user
 3. **Used by the agent** — for deployment to targets and CSR generation
 4. **Rotated by the agent** — old keys deleted after successful renewal
 
-The V2+ architecture ensures the control plane only handles public material: certificates, chains, and CSRs.
+The M8+ architecture ensures the control plane only handles public material: certificates, chains, and CSRs.
 
 ### Authentication
 
@@ -551,6 +551,17 @@ flowchart TB
 ```
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
+
+## Testing Strategy
+
+certctl uses a layered testing approach aligned with the handler → service → repository architecture:
+
+- **Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. Tests all business logic: certificate CRUD, agent lifecycle, job state machine, policy evaluation, renewal/issuance flow, notification deduplication.
+- **Handler layer tests** (`internal/api/handler/*_test.go`) — 50 test functions using `httptest`. Currently covers certificates and agents; M9 expands to all 7 handler files.
+- **Integration tests** (`internal/integration/lifecycle_test.go`) — 11 subtests covering the full lifecycle from certificate creation through issuance, deployment, and status reporting. M9 adds negative-path scenarios (issuer failure, malformed CSR, DB timeout).
+- **CI pipeline** (`.github/workflows/ci.yml`) — Parallel Go (build, vet, test with coverage) and Frontend (TypeScript check, Vite build) jobs. M9 adds coverage threshold enforcement.
+
+Remaining gaps before v1.0 (M9): handler tests for jobs/notifications/policies/issuers/targets, negative-path integration tests, scheduler loop tests, connector error handling tests, and CI coverage gates.
 
 ## What's Next
 

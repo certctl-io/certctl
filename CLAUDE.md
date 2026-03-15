@@ -33,9 +33,9 @@ You are my long-term copilot for building certctl — a self-hosted certificate 
 - [x] GitHub Actions CI — parallel Go (build, vet, test+coverage) and Frontend (tsc, vite build) jobs
 
 ### What's NOT Wired Up Yet (Pre-v1.0 Gaps)
-- [ ] **Agent-side key generation**: V1 uses server-side key generation for Local CA (pragmatic for dev/demo). Must move to agents before v1.0.
 - [ ] **API authentication enforced**: Auth types exist but demo runs with `CERTCTL_AUTH_TYPE=none`. No rate limiting.
-- [ ] **Test coverage gaps**: Negative-path integration tests (issuer down, malformed certs, DB failures) still needed.
+- [ ] **Agent-side key generation**: V1 uses server-side key generation for Local CA (pragmatic for dev/demo). Must move to agents before v1.0.
+- [ ] **End-to-end test hardening**: Handler tests only cover 2 of 7 files. No negative-path integration tests (issuer down, malformed certs, DB failures). No scheduler or connector tests. No frontend tests.
 
 ---
 
@@ -68,29 +68,88 @@ All views wired to real API: agent detail page with heartbeat status + capabilit
 
 The principle: **every backend feature ships with its corresponding GUI surface.** The GUI is where ops teams spend 80% of their time — it must be an operational tool, not a demo viewer.
 
-### M7: Security Baseline
-**Goal**: Make certctl deployable in a shared/team environment. This gates the v1.0 tag.
+### M7: Auth + Rate Limiting
+**Goal**: Make the API production-safe for shared/team environments.
 
-**Authentication & authorization:**
-- API key auth enforced by default (not `none`)
-- Rate limiting on all API endpoints
-- CORS configuration for dashboard
+**Authentication:**
+- API key auth middleware enforced by default (`CERTCTL_AUTH_TYPE=api-key`)
+- Key generation and hashing (bcrypt/argon2) for stored keys
+- Auth bypass only with explicit `CERTCTL_AUTH_TYPE=none` flag
+- GUI: API key entry/login screen, key passed via `Authorization: Bearer` header
 
-**Agent-side key generation:**
-- Agents generate RSA/ECDSA keys locally
-- Agents submit CSR (public key only) to control plane
-- Private keys never leave agent infrastructure
-- Server-side keygen retained only for Local CA demo mode (flagged explicitly)
+**Rate limiting:**
+- Token bucket rate limiter on all API endpoints (`golang.org/x/time/rate`)
+- Configurable per-endpoint or global limits via `CERTCTL_RATE_LIMIT_RPS`
+- 429 Too Many Requests response with `Retry-After` header
 
-**Deliverables**: Auth enforced, rate limits active, private keys isolated from control plane.
+**CORS:**
+- Configurable allowed origins for dashboard (`CERTCTL_CORS_ORIGINS`)
+- Sensible defaults for same-origin deployment
+
+**Deliverables**: Auth enforced by default, rate limits active, CORS configured. certctl deployable in shared environments.
+
+### M8: Agent-Side Key Generation
+**Goal**: Private keys never leave agent infrastructure. This is the crypto architecture gate for v1.0.
+
+**Agent key generation:**
+- Agent generates RSA-2048 or ECDSA P-256 key pair locally
+- Agent creates CSR (public key only) and submits via `POST /agents/{id}/csr`
+- Control plane signs CSR via issuer connector, returns cert + chain (no private key)
+- Agent stores key locally with file permissions 0600
+
+**Server-side keygen flagging:**
+- Server-side keygen retained only for Local CA with explicit `--server-side-keygen` flag
+- Default behavior: reject issuance requests without agent-submitted CSR
+- Clear log warnings when server-side keygen is active
+
+**ACME integration:**
+- Agent handles ACME HTTP-01 challenge locally (challenge server on agent)
+- Or: agent submits CSR, server handles ACME flow, returns signed cert
+
+**Deliverables**: Private keys isolated from control plane for all production issuers. Server-side keygen flagged as demo-only.
+
+### M9: End-to-End Test Hardening
+**Goal**: Comprehensive test coverage across all layers as the final quality gate before v1.0.
+
+**Handler test expansion (target: all 7 handler files covered):**
+- Jobs handler tests — status transitions, cancel, filter by type/status
+- Notifications handler tests — list, mark-read, filter by type/channel
+- Policies handler tests — CRUD, violations endpoint
+- Issuers handler tests — list, create, test connectivity
+- Targets handler tests — list, create, config validation
+
+**Negative-path integration tests:**
+- Issuer unavailable / returns error mid-issuance
+- Malformed CSR submission (invalid PEM, wrong key type, missing fields)
+- Database connection failure / timeout during job processing
+- Agent heartbeat with invalid/expired API key
+- Rate limiter rejection under load
+- Deployment job with unreachable target
+
+**Scheduler tests:**
+- Renewal checker creates jobs for expiring certs only
+- Job processor respects max_attempts and backoff
+- Health checker marks stale agents offline
+- Notification processor sends pending, skips already-sent
+
+**Connector tests:**
+- IssuerConnectorAdapter bridges correctly for both Local CA and ACME
+- Target connector error handling (NGINX config validation failure, F5 API timeout, WinRM auth failure)
+
+**CI coverage enforcement:**
+- Coverage threshold check in CI (fail if service layer <60%, handler layer <50%)
+- Coverage trend reporting via artifact comparison
+
+**Deliverables**: All handler files tested, negative-path integration suite, scheduler and connector tests, CI coverage gates. Target: 70%+ service layer, 60%+ handler layer coverage.
 
 ### v1.0.0 Release
 **Gate criteria** — all must be true:
-- [ ] All M5-M7 deliverables complete
-- [ ] CI green with 60%+ service layer coverage
+- [ ] All M5–M9 deliverables complete
+- [ ] CI green with coverage gates passing (service 70%+, handler 60%+)
 - [ ] GUI functional against real API (no demo mode fallback needed)
 - [ ] Agent-side keygen working for ACME issuer
 - [ ] API auth enforced by default
+- [ ] Negative-path integration tests passing
 - [ ] README screenshots of actual dashboard
 - [ ] Tagged Docker images published
 - [ ] No known panics or unhandled error paths
