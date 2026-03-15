@@ -121,7 +121,7 @@ func main() {
 	ownerHandler := handler.NewOwnerHandler(ownerService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -166,13 +166,48 @@ func main() {
 	)
 	logger.Info("registered all API handlers")
 
-	// Apply middleware to API router
-	apiHandler := middleware.Chain(
-		apiRouter,
+	// Build middleware stack
+	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
+		Type:   cfg.Auth.Type,
+		Secret: cfg.Auth.Secret,
+	})
+	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
+		AllowedOrigins: cfg.CORS.AllowedOrigins,
+	})
+
+	middlewareStack := []func(http.Handler) http.Handler{
 		middleware.RequestID,
 		middleware.Logging,
 		middleware.Recovery,
-	)
+		corsMiddleware,
+		authMiddleware,
+	}
+
+	// Add rate limiter if enabled
+	if cfg.RateLimit.Enabled {
+		rateLimiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
+			RPS:       cfg.RateLimit.RPS,
+			BurstSize: cfg.RateLimit.BurstSize,
+		})
+		middlewareStack = []func(http.Handler) http.Handler{
+			middleware.RequestID,
+			middleware.Logging,
+			middleware.Recovery,
+			rateLimiter,
+			corsMiddleware,
+			authMiddleware,
+		}
+		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
+	}
+
+	if cfg.Auth.Type == "none" {
+		logger.Warn("authentication disabled (CERTCTL_AUTH_TYPE=none) — not suitable for production")
+	} else {
+		logger.Info("authentication enabled", "type", cfg.Auth.Type)
+	}
+
+	// Apply middleware to API router
+	apiHandler := middleware.Chain(apiRouter, middlewareStack...)
 
 	// Wrap with dashboard static file serving
 	// Vite builds to web/dist/; fall back to web/ for legacy single-file SPA

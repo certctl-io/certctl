@@ -31,9 +31,12 @@ You are my long-term copilot for building certctl — a self-hosted certificate 
 - [x] Test suite — 120 tests across service layer (63), handler layer (46), and integration (11 subtests)
 - [x] Input validation — centralized validators for common name, CSR PEM, policy type/severity, string length
 - [x] GitHub Actions CI — parallel Go (build, vet, test+coverage) and Frontend (tsc, vite build) jobs
+- [x] API key auth enforced by default — SHA-256 hashed keys, constant-time comparison, Bearer token middleware
+- [x] Token bucket rate limiting — configurable RPS/burst, 429 responses with Retry-After header
+- [x] Configurable CORS — per-origin allowlist or wildcard, preflight caching
+- [x] GUI auth flow — login screen, auth context, 401 auto-redirect, logout button
 
 ### What's NOT Wired Up Yet (Pre-v1.0 Gaps)
-- [ ] **API authentication enforced**: Auth types exist but demo runs with `CERTCTL_AUTH_TYPE=none`. No rate limiting.
 - [ ] **Agent-side key generation**: V1 uses server-side key generation for Local CA (pragmatic for dev/demo). Must move to agents before v1.0.
 - [ ] **End-to-end test hardening**: Handler tests only cover 2 of 7 files. No negative-path integration tests (issuer down, malformed certs, DB failures). No scheduler or connector tests. No frontend tests.
 
@@ -62,31 +65,14 @@ Fixed nginx.go format string errors, added centralized input validation (validat
 ### M6: Functional GUI + CI ✅
 All views wired to real API: agent detail page with heartbeat status + capabilities + recent jobs, audit trail with time range/actor/resource filters, notifications with grouped-by-cert view + read/unread state + mark-read mutations, policies with severity summary bar + config preview, new issuers and targets list views. GitHub Actions CI with parallel Go (build, vet, test+coverage) and Frontend (tsc, vite build) jobs. Makefile updated with test-cover and frontend-build targets.
 
+### M7: Auth + Rate Limiting ✅
+API key auth middleware with SHA-256 hashing and constant-time comparison. `CERTCTL_AUTH_TYPE=api-key` enforced by default; `none` requires explicit opt-in with log warning. Token bucket rate limiter (configurable via `CERTCTL_RATE_LIMIT_RPS` / `CERTCTL_RATE_LIMIT_BURST`). Configurable CORS via `CERTCTL_CORS_ORIGINS`. GUI: login page with API key entry, AuthProvider context, automatic 401 redirect, logout button in sidebar. Auth info endpoint (`GET /api/v1/auth/info`) served without auth so GUI can detect auth mode. Auth check endpoint (`GET /api/v1/auth/check`) validates credentials.
+
 ---
 
 ## V1 Roadmap: Ship a Functional Product
 
 The principle: **every backend feature ships with its corresponding GUI surface.** The GUI is where ops teams spend 80% of their time — it must be an operational tool, not a demo viewer.
-
-### M7: Auth + Rate Limiting
-**Goal**: Make the API production-safe for shared/team environments.
-
-**Authentication:**
-- API key auth middleware enforced by default (`CERTCTL_AUTH_TYPE=api-key`)
-- Key generation and hashing (bcrypt/argon2) for stored keys
-- Auth bypass only with explicit `CERTCTL_AUTH_TYPE=none` flag
-- GUI: API key entry/login screen, key passed via `Authorization: Bearer` header
-
-**Rate limiting:**
-- Token bucket rate limiter on all API endpoints (`golang.org/x/time/rate`)
-- Configurable per-endpoint or global limits via `CERTCTL_RATE_LIMIT_RPS`
-- 429 Too Many Requests response with `Retry-After` header
-
-**CORS:**
-- Configurable allowed origins for dashboard (`CERTCTL_CORS_ORIGINS`)
-- Sensible defaults for same-origin deployment
-
-**Deliverables**: Auth enforced by default, rate limits active, CORS configured. certctl deployable in shared environments.
 
 ### M8: Agent-Side Key Generation
 **Goal**: Private keys never leave agent infrastructure. This is the crypto architecture gate for v1.0.

@@ -57,7 +57,7 @@ func (r *Router) RegisterHandlers(
 	notifications handler.NotificationHandler,
 	health handler.HealthHandler,
 ) {
-	// Health endpoints (no middleware)
+	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
 		http.HandlerFunc(health.Health),
 		middleware.CORS,
@@ -68,6 +68,14 @@ func (r *Router) RegisterHandlers(
 		middleware.CORS,
 		middleware.ContentType,
 	))
+	// Auth info endpoint (no auth middleware — GUI needs this before login)
+	r.mux.Handle("GET /api/v1/auth/info", middleware.Chain(
+		http.HandlerFunc(health.AuthInfo),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+	// Auth check endpoint (uses full middleware chain via r.Register)
+	r.Register("GET /api/v1/auth/check", http.HandlerFunc(health.AuthCheck))
 
 	// Certificates routes: /api/v1/certificates
 	r.Register("GET /api/v1/certificates", http.HandlerFunc(certificates.ListCertificates))

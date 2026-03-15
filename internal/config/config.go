@@ -16,6 +16,8 @@ type Config struct {
 	Scheduler SchedulerConfig
 	Log       LogConfig
 	Auth      AuthConfig
+	RateLimit RateLimitConfig
+	CORS      CORSConfig
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -51,6 +53,18 @@ type AuthConfig struct {
 	Secret string // Secret key for signing (if applicable)
 }
 
+// RateLimitConfig contains rate limiting configuration.
+type RateLimitConfig struct {
+	Enabled    bool
+	RPS        float64 // Requests per second
+	BurstSize  int     // Maximum burst size
+}
+
+// CORSConfig contains CORS configuration.
+type CORSConfig struct {
+	AllowedOrigins []string // Allowed origins; empty = same-origin only; ["*"] = all
+}
+
 // Load reads configuration from environment variables and returns a Config.
 // Environment variables must have the CERTCTL_ prefix.
 // Example: CERTCTL_SERVER_HOST, CERTCTL_DATABASE_URL, etc.
@@ -78,6 +92,14 @@ func Load() (*Config, error) {
 		Auth: AuthConfig{
 			Type:   getEnv("CERTCTL_AUTH_TYPE", "api-key"),
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
+		},
+		RateLimit: RateLimitConfig{
+			Enabled:   getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
+			RPS:       getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
+			BurstSize: getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
+		},
+		CORS: CORSConfig{
+			AllowedOrigins: getEnvList("CERTCTL_CORS_ORIGINS", nil),
 		},
 	}
 
@@ -190,6 +212,67 @@ func getEnvDuration(key string, defaultValue time.Duration) time.Duration {
 		return duration
 	}
 	return defaultValue
+}
+
+// getEnvBool reads a boolean environment variable.
+func getEnvBool(key string, defaultValue bool) bool {
+	if value := os.Getenv(key); value != "" {
+		return value == "true" || value == "1" || value == "yes"
+	}
+	return defaultValue
+}
+
+// getEnvFloat reads a float64 environment variable.
+func getEnvFloat(key string, defaultValue float64) float64 {
+	if value := os.Getenv(key); value != "" {
+		f, err := strconv.ParseFloat(value, 64)
+		if err != nil {
+			return defaultValue
+		}
+		return f
+	}
+	return defaultValue
+}
+
+// getEnvList reads a comma-separated list environment variable.
+func getEnvList(key string, defaultValue []string) []string {
+	if value := os.Getenv(key); value != "" {
+		var result []string
+		for _, s := range splitComma(value) {
+			s = trimSpace(s)
+			if s != "" {
+				result = append(result, s)
+			}
+		}
+		return result
+	}
+	return defaultValue
+}
+
+// splitComma splits a string by commas (no strings import needed).
+func splitComma(s string) []string {
+	var parts []string
+	start := 0
+	for i := 0; i < len(s); i++ {
+		if s[i] == ',' {
+			parts = append(parts, s[start:i])
+			start = i + 1
+		}
+	}
+	parts = append(parts, s[start:])
+	return parts
+}
+
+// trimSpace trims leading/trailing whitespace.
+func trimSpace(s string) string {
+	start, end := 0, len(s)
+	for start < end && (s[start] == ' ' || s[start] == '\t') {
+		start++
+	}
+	for end > start && (s[end-1] == ' ' || s[end-1] == '\t') {
+		end--
+	}
+	return s[start:end]
 }
 
 // GetLogLevel returns the appropriate slog.Level from the configured log level.

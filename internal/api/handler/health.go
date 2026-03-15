@@ -5,11 +5,13 @@ import (
 )
 
 // HealthHandler handles health and readiness check endpoints.
-type HealthHandler struct{}
+type HealthHandler struct {
+	AuthType string // "api-key", "jwt", "none"
+}
 
 // NewHealthHandler creates a new HealthHandler.
-func NewHealthHandler() HealthHandler {
-	return HealthHandler{}
+func NewHealthHandler(authType string) HealthHandler {
+	return HealthHandler{AuthType: authType}
 }
 
 // Health responds with a simple health check indicating the service is alive.
@@ -40,4 +42,22 @@ func (h HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, response)
+}
+
+// AuthInfo responds with the server's authentication configuration.
+// This lets the GUI know whether to show a login screen.
+// GET /api/v1/auth/info (served without auth middleware)
+func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
+	response := map[string]interface{}{
+		"auth_type": h.AuthType,
+		"required":  h.AuthType != "none",
+	}
+	JSON(w, http.StatusOK, response)
+}
+
+// AuthCheck returns 200 if the request has valid auth credentials.
+// The auth middleware runs before this handler, so reaching here means auth passed.
+// GET /api/v1/auth/check
+func (h HealthHandler) AuthCheck(w http.ResponseWriter, r *http.Request) {
+	JSON(w, http.StatusOK, map[string]string{"status": "authenticated"})
 }

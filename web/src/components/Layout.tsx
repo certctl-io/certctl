@@ -1,4 +1,5 @@
 import { NavLink, Outlet } from 'react-router-dom';
+import { useAuth } from './AuthProvider';
 
 const nav = [
   { to: '/',              label: 'Dashboard',     icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
@@ -21,6 +22,8 @@ function Icon({ d }: { d: string }) {
 }
 
 export default function Layout() {
+  const { authRequired, logout } = useAuth();
+
   return (
     <div className="flex h-screen overflow-hidden">
       {/* Sidebar */}
@@ -48,8 +51,19 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700 text-xs text-slate-500">
-          certctl v1.0-dev
+        <div className="p-4 border-t border-slate-700 flex items-center justify-between">
+          <span className="text-xs text-slate-500">certctl v1.0-dev</span>
+          {authRequired && (
+            <button
+              onClick={logout}
+              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              title="Sign out"
+            >
+              <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                <path strokeLinecap="round" strokeLinejoin="round" d="M15.75 9V5.25A2.25 2.25 0 0013.5 3h-6a2.25 2.25 0 00-2.25 2.25v13.5A2.25 2.25 0 007.5 21h6a2.25 2.25 0 002.25-2.25V15m3 0l3-3m0 0l-3-3m3 3H9" />
+              </svg>
+            </button>
+          )}
         </div>
       </aside>
 

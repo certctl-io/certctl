@@ -2,17 +2,55 @@ import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEv
 
 const BASE = '/api/v1';
 
+// API key stored in memory (not localStorage for security)
+let apiKey: string | null = null;
+
+export function setApiKey(key: string | null) {
+  apiKey = key;
+}
+
+export function getApiKey(): string | null {
+  return apiKey;
+}
+
+function authHeaders(): Record<string, string> {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) {
+    headers['Authorization'] = `Bearer ${apiKey}`;
+  }
+  return headers;
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, {
-    headers: { 'Content-Type': 'application/json', ...init?.headers },
+    headers: { ...authHeaders(), ...init?.headers },
     ...init,
   });
+  if (res.status === 401) {
+    // Trigger re-auth
+    const event = new CustomEvent('certctl:auth-required');
+    window.dispatchEvent(event);
+    throw new Error('Authentication required');
+  }
   if (!res.ok) {
     const body = await res.json().catch(() => ({ message: res.statusText }));
     throw new Error(body.message || body.error || `HTTP ${res.status}`);
   }
   return res.json();
 }
+
+// Auth
+export const getAuthInfo = () =>
+  fetch(`${BASE}/auth/info`, { headers: { 'Content-Type': 'application/json' } })
+    .then(r => r.json() as Promise<{ auth_type: string; required: boolean }>);
+
+export const checkAuth = (key: string) =>
+  fetch(`${BASE}/auth/check`, {
+    headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
+  }).then(r => {
+    if (!r.ok) throw new Error('Invalid API key');
+    return r.json() as Promise<{ status: string }>;
+  });
 
 // Certificates
 export const getCertificates = (params: Record<string, string> = {}) => {
