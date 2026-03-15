@@ -1,8 +1,8 @@
 # Advanced Demo: Certificate Lifecycle End-to-End
 
-This demo goes beyond browsing pre-loaded data. You'll create a team, register an owner, set up an issuer, create a certificate, trigger renewal, and watch everything appear in the dashboard in real time. By the end, you'll understand the full certificate lifecycle as certctl manages it.
+This demo goes beyond browsing pre-loaded data. You'll create a team, register an owner, set up an issuer, create a certificate, trigger renewal, and watch everything appear in the dashboard in real time. Each step includes a technical explanation of what's happening inside certctl and why the system is designed that way.
 
-**Time**: 10-15 minutes
+**Time**: 15-20 minutes
 **Prerequisites**: certctl running via Docker Compose (see [Quick Start](quickstart.md))
 
 ## Setup
@@ -23,6 +23,23 @@ Set up a base variable for convenience:
 API="http://localhost:8443"
 ```
 
+## How the pieces fit together
+
+Before we start, here's the high-level flow of what we're about to do:
+
+```mermaid
+flowchart LR
+    A[Create Team\n& Owner] --> B[Verify Issuer]
+    B --> C[Create\nCertificate]
+    C --> D[Trigger\nRenewal]
+    D --> E[Trigger\nDeployment]
+    E --> F[Inspect Audit\n& Notifications]
+```
+
+Each step corresponds to a real operation that certctl would perform in production. The difference here is that we're driving each step manually via curl instead of letting the scheduler and agents handle it automatically.
+
+---
+
 ## Part 1: Build the Organization Structure
 
 ### Create a new team
@@ -37,6 +54,10 @@ curl -s -X POST $API/api/v1/teams \
   }' | jq .
 ```
 
+**How it works:** This `POST` hits the `/api/v1/teams` endpoint, which routes through Go 1.22's `net/http` pattern-based mux to the `TeamsHandler.CreateTeam` method. The handler deserializes the JSON body into a `domain.Team` struct, calls the `TeamService.Create()` method, which delegates to the `TeamRepository.Create()` postgres implementation — executing an `INSERT INTO teams (id, name, description, created_at, updated_at) VALUES (...)`. The server returns the full team object with server-generated timestamps.
+
+**Why teams exist:** Certificate ownership is a core design decision. In organizations with hundreds of certificates, outages happen when nobody knows who's responsible for a specific cert. Teams create accountability boundaries — when a cert expires, certctl knows exactly which team to alert. This maps to how enterprises actually operate: the platform team owns infrastructure certs, the payments team owns PCI-scoped certs, etc.
+
 ### Register an owner
 
 ```bash
@@ -50,6 +71,10 @@ curl -s -X POST $API/api/v1/owners \
   }' | jq .
 ```
 
+**How it works:** Same handler → service → repository flow. The owner is inserted into the `owners` table with a foreign key reference to the team via `team_id`. The `team_id` field isn't enforced at the database FK level in V1 (to keep migrations simple), but the service layer validates the reference.
+
+**Why owners matter:** Owners are the individual humans accountable for certificates. When certctl sends an expiration warning notification, it needs a recipient. The owner's email becomes the notification target. This also feeds the audit trail — every action is attributed to an actor, and owners provide the human identity layer.
+
 Verify both exist:
 
 ```bash
@@ -57,7 +82,11 @@ curl -s $API/api/v1/teams/t-demo | jq .
 curl -s $API/api/v1/owners/o-demo-user | jq .
 ```
 
-## Part 2: Configure the Issuer
+**How it works:** These `GET` requests use path parameters (`/api/v1/teams/{id}`) which Go 1.22's router extracts via `r.PathValue("id")`. The handler calls `service.Get(ctx, id)` which issues `SELECT * FROM teams WHERE id = $1`. If the row doesn't exist, the repository returns `nil` and the handler responds with HTTP 404.
+
+---
+
+## Part 2: Verify the Issuer
 
 The demo ships with a Local CA issuer (`iss-local`) that can sign certificates immediately — no external CA needed. Let's verify it's available:
 
@@ -75,7 +104,36 @@ You should see:
 }
 ```
 
-This Local CA generates real X.509 certificates using Go's `crypto/x509` library. The certificates are self-signed (not trusted by browsers in production), but structurally identical to production certificates — they have serial numbers, validity periods, SANs, key usage extensions, and a proper certificate chain.
+**How it works:** The issuer record was inserted during database seeding (`migrations/seed_demo.sql`). The `type` field (`GenericCA`) maps to a connector implementation. When the server starts, it registers connector instances in an `issuerRegistry` map keyed by issuer ID. When a certificate needs issuance, the service layer looks up the issuer ID in this registry to find the right connector.
+
+**How the Local CA works internally:** The Local CA connector (`internal/connector/issuer/local/local.go`) generates a self-signed root CA certificate on first use using Go's `crypto/x509` and `crypto/rsa` packages. The CA key pair lives in memory only — it's regenerated each time the server restarts. When it receives an `IssuanceRequest` containing a CSR (Certificate Signing Request), it:
+
+1. Parses the CSR using `x509.ParseCertificateRequest()`
+2. Generates a random serial number via `crypto/rand`
+3. Creates an `x509.Certificate` template with the CN, SANs, validity period, key usage extensions (Digital Signature, Key Encipherment), and extended key usage (TLS Server Auth)
+4. Signs it with the CA's private key using `x509.CreateCertificate()`
+5. Returns the PEM-encoded certificate and chain
+
+The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
+
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use internal PKI (Vault, ADCS), some use commercial CAs (DigiCert, Sectigo). The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend.
+
+```mermaid
+flowchart TD
+    subgraph "Issuer Connector Interface"
+        A["IssueCertificate(CSR)"]
+        B["RenewCertificate(CSR)"]
+        C["RevokeCertificate(serial)"]
+        D["GetOrderStatus(orderID)"]
+    end
+
+    A --> E["Local CA\n(crypto/x509)"]
+    A --> F["ACME\n(Let's Encrypt)"]
+    A --> G["Vault PKI\n(future)"]
+    A --> H["DigiCert API\n(future)"]
+```
+
+---
 
 ## Part 3: Create a Managed Certificate
 
@@ -103,7 +161,28 @@ curl -s -X POST $API/api/v1/certificates \
   }' | jq .
 ```
 
-**Check the dashboard now.** Click "Certificates" in the sidebar. You'll see your new "Demo API Certificate" with status "Pending" alongside the pre-loaded demo certificates. Click on it to see the full details: owner, team, environment, tags, and timeline.
+**How it works:** The `CertificatesHandler.CreateCertificate` handler deserializes the JSON into a `domain.ManagedCertificate` struct and calls `CertificateService.Create()`. The service layer:
+
+1. Validates required fields (`common_name`, `issuer_id`, `renewal_policy_id`)
+2. Stores `sans` as a PostgreSQL `TEXT[]` array and `tags` as a `JSONB` column
+3. Inserts into the `managed_certificates` table
+4. Logs an audit event via `AuditService.Create()` — recording the actor, action (`certificate_created`), resource type, and resource ID
+5. Returns the full certificate record with `created_at` and `updated_at` timestamps
+
+**Why each field matters:**
+
+| Field | Purpose |
+|-------|---------|
+| `id` | Human-readable TEXT primary key (not UUID). Prefixed with `mc-` by convention so you can identify resource types at a glance in logs and queries. |
+| `common_name` | The primary domain this certificate covers. Maps to the CN field in the X.509 certificate. |
+| `sans` | Subject Alternative Names — additional domains covered by the same certificate. Modern browsers actually check SANs, not CN, for domain validation. |
+| `environment` | Organizational tag (`production`, `staging`, `development`). Used for dashboard filtering and policy enforcement (e.g., "staging certs can only use the Local CA"). |
+| `issuer_id` | Links to the issuer connector that will sign this certificate. Determines which CA backend is used. |
+| `renewal_policy_id` | Links to a `renewal_policies` row that defines: how many days before expiry to renew (`renewal_window_days`), whether auto-renewal is enabled (`auto_renew`), max retries, and retry interval. The default policy (`rp-default`) renews 30 days before expiry. |
+| `status` | Set to `Pending` because the certificate hasn't been issued yet. The scheduler will pick it up, or you can trigger renewal manually. |
+| `tags` | Arbitrary key-value metadata stored as JSONB. Useful for filtering, reporting, and integration with external systems (e.g., `"pci": "true"` for compliance scoping). |
+
+**Check the dashboard now.** Click "Certificates" in the sidebar. You'll see your new "Demo API Certificate" with status "Pending" alongside the pre-loaded demo certificates. Click on it to see the full details.
 
 ### Verify via API
 
@@ -111,9 +190,11 @@ curl -s -X POST $API/api/v1/certificates \
 curl -s $API/api/v1/certificates/mc-demo-api | jq '{id, name, common_name, status, environment, owner_id, team_id}'
 ```
 
+---
+
 ## Part 4: Trigger Certificate Renewal
 
-In production, the scheduler automatically triggers renewal when certificates approach expiry. For this demo, we'll trigger it manually:
+In production, the scheduler automatically triggers renewal when certificates approach expiry. The scheduler's renewal loop runs every hour, queries `SELECT * FROM managed_certificates WHERE status IN ('Active', 'Expiring') AND expires_at < NOW() + interval '30 days'`, and creates renewal jobs for each match. For this demo, we'll trigger it manually:
 
 ```bash
 curl -s -X POST $API/api/v1/certificates/mc-demo-api/renew | jq .
@@ -126,13 +207,59 @@ Expected response:
 }
 ```
 
-This creates a renewal job. Check the jobs list:
+**How it works:** The `TriggerRenewal` handler extracts the certificate ID from the URL path, calls `CertificateService.TriggerRenewal(ctx, id)`, which:
+
+1. Fetches the certificate from the database to verify it exists
+2. Creates a new `Job` record in the `jobs` table with `type: "Renewal"`, `status: "Pending"`, `certificate_id: "mc-demo-api"`, and `scheduled_at: now()`
+3. The response returns `202 Accepted` immediately — the actual renewal happens asynchronously
+
+The `202 Accepted` status code is deliberate. Certificate issuance can take seconds (Local CA) to minutes (ACME DNS challenges). The API doesn't block the caller — it creates a job and returns. The job processor loop (runs every 30 seconds) picks up pending jobs and executes them.
+
+**What happens during a real renewal (production flow):**
+
+```mermaid
+sequenceDiagram
+    participant S as Scheduler
+    participant DB as PostgreSQL
+    participant SVC as CertificateService
+    participant ISS as IssuerConnector
+    participant A as Agent
+
+    S->>DB: Query expiring certificates
+    DB-->>S: [mc-demo-api: expires in 25 days]
+    S->>DB: INSERT job (type=Renewal, status=Pending)
+
+    Note over S: Job processor loop (every 30s)
+    S->>DB: SELECT pending jobs
+    DB-->>S: [job-123: Renewal for mc-demo-api]
+
+    S->>A: Notify: generate CSR for demo-api.internal.example.com
+    A->>A: Generate RSA-2048 key pair locally
+    A->>A: Create CSR with CN + SANs
+    A->>SVC: POST /api/v1/agents/{id}/csr {csr_pem: "..."}
+
+    SVC->>ISS: IssueCertificate(CSR)
+    ISS-->>SVC: {cert_pem, chain_pem, serial, not_after}
+
+    SVC->>DB: INSERT certificate_version
+    SVC->>DB: UPDATE managed_certificates SET status='Active'
+    SVC->>DB: INSERT audit_event (certificate_renewed)
+
+    SVC-->>A: {certificate_pem, chain_pem}
+    A->>A: Store cert + chain locally (key never leaves)
+```
+
+The critical security property: the private key is generated by the agent in step 3 and never transmitted. The CSR contains only the public key. The control plane forwards the CSR to the issuer and returns the signed certificate — it never has access to the private key material.
+
+Check the jobs list:
 
 ```bash
 curl -s "$API/api/v1/jobs" | jq '.data[] | select(.certificate_id == "mc-demo-api") | {id, type, status, certificate_id}'
 ```
 
 **Check the dashboard.** Go to the "Jobs" view — you'll see the renewal job for your certificate.
+
+---
 
 ## Part 5: Deploy the Certificate
 
@@ -149,11 +276,53 @@ Expected response:
 }
 ```
 
+**How it works:** The `TriggerDeployment` handler optionally accepts a `target_id` in the request body. If no target is specified, it creates deployment jobs for all targets mapped to this certificate (via the `certificate_target_mappings` table). Each deployment job is independent — if NGINX succeeds but F5 fails, the NGINX deployment isn't rolled back.
+
+The handler:
+1. Looks up the certificate
+2. Finds all deployment targets for this certificate (or uses the specific `target_id` if provided)
+3. Creates a `Job` record for each target with `type: "Deployment"`, `target_id`, and `certificate_id`
+4. Returns `202 Accepted`
+
+**What the agent does during deployment:**
+
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant TC as TargetConnector
+    participant T as Target System
+
+    A->>A: Load cert.pem + key.pem from local storage
+    A->>TC: DeployCertificate(cert_pem, chain_pem, config)
+
+    alt NGINX Target
+        TC->>T: Write cert.pem to /etc/nginx/certs/
+        TC->>T: Write chain.pem to /etc/nginx/certs/
+        TC->>T: Run: nginx -t (validate config)
+        TC->>T: Run: systemctl reload nginx
+        TC-->>A: {success: true, deployed_at: "..."}
+    else F5 Target
+        TC->>T: POST /mgmt/tm/sys/crypto/cert (upload cert)
+        TC->>T: PUT /mgmt/tm/ltm/virtual (bind to virtual server)
+        TC-->>A: {success: true, deployed_at: "..."}
+    else IIS Target
+        TC->>T: WinRM: Import-PfxCertificate
+        TC->>T: WinRM: Set-WebBinding -SslFlags
+        TC-->>A: {success: true, deployed_at: "..."}
+    end
+
+    A->>A: Report deployment status to control plane
+```
+
+Notice the `DeploymentRequest` struct intentionally omits the private key field. The agent loads the key from its own local storage and combines it with the certificate from the control plane. This is the architectural boundary that ensures zero private key exposure — the target connector interface physically cannot receive keys from the control plane because the data structure doesn't carry them.
+
 Check for deployment jobs:
 
 ```bash
 curl -s "$API/api/v1/jobs" | jq '.data[] | select(.certificate_id == "mc-demo-api")'
 ```
+
+---
 
 ## Part 6: View the Audit Trail
 
@@ -163,9 +332,23 @@ Every action you've taken has been recorded. Check the audit trail:
 curl -s $API/api/v1/audit | jq '.data[0:5]'
 ```
 
-You'll see events for certificate creation, renewal trigger, and deployment trigger — each with actor, action, resource type, and timestamp.
+**How it works:** The `audit_events` table is append-only — there is no `UPDATE` or `DELETE` in the `AuditRepository` interface. This is a deliberate design decision for compliance. Every service method that mutates state calls `AuditService.Create()` with:
+
+| Field | Source | Example |
+|-------|--------|---------|
+| `actor` | The authenticated user or system component | `"o-demo-user"`, `"system"`, `"agent-prod-01"` |
+| `actor_type` | Category of the actor | `"User"`, `"System"`, `"Agent"` |
+| `action` | What happened | `"certificate_created"`, `"renewal_triggered"`, `"deployment_completed"` |
+| `resource_type` | What was affected | `"certificate"`, `"team"`, `"agent"` |
+| `resource_id` | Specific resource | `"mc-demo-api"` |
+| `details` | Arbitrary JSON context | `{"environment": "staging", "issuer": "iss-local"}` |
+| `timestamp` | When it happened (server clock) | `"2026-03-14T10:30:00Z"` |
+
+**Why immutable audit:** Compliance frameworks (SOC 2 Type II, PCI-DSS, ISO 27001) require tamper-evident audit logs. By making the repository interface append-only, even a compromised API server can't retroactively delete or modify audit records. In a production deployment, you'd also stream these to an external SIEM (Splunk, Datadog) for additional protection.
 
 **Check the dashboard.** The "Audit" view shows the full timeline of all actions across the system.
+
+---
 
 ## Part 7: Check Notifications
 
@@ -175,7 +358,26 @@ Certctl sends notifications for certificate lifecycle events. Check what notific
 curl -s $API/api/v1/notifications | jq '.data[0:5]'
 ```
 
-In demo mode, notifications are marked as "sent" even without a real email/webhook backend. In production, these would go out via SMTP or HTTP webhooks.
+**How it works:** The `NotificationService` generates notification records in the `notification_events` table whenever significant events occur — certificate creation, expiration warnings, renewal success/failure, deployment results, policy violations. Each notification has a `channel` (Email, Webhook) and a `recipient`.
+
+The notification processor loop runs every 60 seconds and processes pending notifications:
+
+```mermaid
+flowchart TD
+    A[Notification Processor\nevery 60s] --> B{Pending\nnotifications?}
+    B -->|Yes| C[Look up channel\nin notifierRegistry]
+    C --> D{Notifier\nregistered?}
+    D -->|Yes| E[Call Notifier.Send\nrecipient, subject, body]
+    D -->|No| F[Mark as 'sent'\nDemo mode graceful skip]
+    E --> G{Delivery\nsucceeded?}
+    G -->|Yes| H[Update status → 'sent'\nRecord sent_at timestamp]
+    G -->|No| I[Update status → 'failed'\nRecord error message]
+    B -->|No| J[Sleep until next tick]
+```
+
+**Why graceful notifier fallback:** In demo mode, no SMTP server or webhook endpoint is configured. Rather than spamming error logs with "notifier not found" every 60 seconds (which was the original behavior — we fixed this), the service marks notifications as "sent" when no notifier is registered for the channel. This keeps the notification records visible in the dashboard without requiring external infrastructure.
+
+---
 
 ## Part 8: Create a Second Certificate and Compare
 
@@ -204,9 +406,15 @@ curl -s -X POST $API/api/v1/certificates \
   }' | jq .
 ```
 
-This certificate expires in about 18 days from the demo date, so it should show up as "Expiring" in the dashboard when the scheduler runs. **Refresh the dashboard** — you'll see it in the certificate list.
+**How it works:** This certificate is created with status `Active` and an explicit `expires_at` 18 days from now. The scheduler's renewal checker will flag this certificate when it runs because `expires_at - now() < 30 days` (the default renewal window in `rp-default`). It would transition the status to `Expiring` and create a renewal job.
 
-Now filter the dashboard by environment or status to see how the filtering works with your new certificates mixed in with the demo data.
+**Why `environment` matters:** The environment field isn't just metadata — it feeds the policy engine. A policy rule with type `AllowedEnvironments` can restrict which environments are valid. If someone tries to create a certificate with `environment: "yolo"`, the policy engine flags a violation. In a mature deployment, you'd enforce policies strictly: production certificates must use a trusted CA (not Local CA), staging certificates can use Let's Encrypt staging, and development certificates can use the Local CA.
+
+**Why `pci: true` in tags:** Tags are free-form, but they enable powerful filtering and compliance scoping. A security team could query `GET /api/v1/certificates?tags.pci=true` (not implemented yet, but the JSONB column supports it) to find all PCI-scoped certificates and verify they meet compliance requirements.
+
+**Refresh the dashboard** — you'll see the new payment gateway certificate. Try filtering by environment or status to see how both certificates appear alongside the demo data.
+
+---
 
 ## Part 9: Policy Violations
 
@@ -216,13 +424,74 @@ Let's see what happens when a certificate doesn't meet policy requirements. Chec
 curl -s $API/api/v1/policies | jq '.data[] | {id, name, type, enabled}'
 ```
 
-The demo includes rules for required owner metadata, allowed environments, maximum certificate lifetime, and minimum renewal windows. Check existing violations:
+**How it works:** Policy rules are stored in the `policy_rules` table with a `type` field that determines the enforcement logic and a `config` JSONB column with rule-specific parameters. The demo ships with four rules:
+
+| Rule | Type | What it enforces |
+|------|------|-----------------|
+| `pr-require-owner` | `RequiredMetadata` | Every certificate must have an `owner_id` |
+| `pr-allowed-environments` | `AllowedEnvironments` | Only `production`, `staging`, `development` are valid |
+| `pr-max-certificate-lifetime` | `RenewalLeadTime` | Certificates can't exceed a maximum lifetime |
+| `pr-min-renewal-window` | `RenewalLeadTime` | Certificates must be renewed at least N days before expiry |
+
+When a certificate is created or updated, the policy service evaluates it against all enabled rules. Violations are recorded in the `policy_violations` table with a severity (`Warning`, `Error`, `Critical`) and a human-readable message.
+
+Check existing violations:
 
 ```bash
 curl -s "$API/api/v1/policies/pr-max-certificate-lifetime/violations" | jq .
 ```
 
+**How it works:** This hits `GET /api/v1/policies/{id}/violations`, which queries `SELECT * FROM policy_violations WHERE rule_id = $1`. Each violation references the offending certificate and the rule it violated, creating a traceable link between the policy definition and the specific non-compliance.
+
 **In the dashboard**, click "Policies" in the sidebar to see all active rules and which certificates are violating them.
+
+---
+
+## End-to-End Architecture Summary
+
+Here's what we just walked through, mapped to the system architecture:
+
+```mermaid
+flowchart TB
+    subgraph "What You Did (API Calls)"
+        U1["POST /teams"] --> U2["POST /owners"]
+        U2 --> U3["POST /certificates"]
+        U3 --> U4["POST /certificates/{id}/renew"]
+        U4 --> U5["POST /certificates/{id}/deploy"]
+        U5 --> U6["GET /audit"]
+    end
+
+    subgraph "Control Plane (certctl-server)"
+        API["REST API\nGo net/http"]
+        SVC["Service Layer\nBusiness Logic"]
+        REPO["Repository Layer\ndatabase/sql + lib/pq"]
+        SCHED["Scheduler\n4 background loops"]
+        CONN["Connector Registry\nIssuer + Target + Notifier"]
+    end
+
+    subgraph "Data Store"
+        PG["PostgreSQL 16\n14 tables, TEXT PKs"]
+    end
+
+    subgraph "Agent (certctl-agent)"
+        AGENT["Agent Process\nHeartbeat + Work Poll"]
+        KEYS["Local Key Storage\nPrivate keys (0600)"]
+        TC["Target Connectors\nNGINX / F5 / IIS"]
+    end
+
+    U1 & U2 & U3 & U4 & U5 & U6 --> API
+    API --> SVC
+    SVC --> REPO
+    REPO --> PG
+    SVC --> CONN
+    SCHED --> SVC
+    AGENT -->|"CSR + Heartbeat"| API
+    API -->|"Cert + Chain (no key)"| AGENT
+    AGENT --> KEYS
+    AGENT --> TC
+```
+
+---
 
 ## Full Automated Script
 
@@ -335,6 +604,8 @@ Make it executable and run:
 chmod +x demo.sh
 ./demo.sh
 ```
+
+---
 
 ## What to Show Stakeholders
 

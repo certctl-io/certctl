@@ -80,10 +80,18 @@ Targets are the systems where certificates actually get installed — NGINX web 
 
 Every managed certificate in certctl goes through these states:
 
-```
-Pending → Active → Expiring → (auto-renewal) → Active → ...
-                              → Expired (if renewal fails)
-                              → Failed (if issuance fails)
+```mermaid
+stateDiagram-v2
+    [*] --> Pending: Certificate created
+    Pending --> Active: Issuance succeeds
+    Pending --> Failed: Issuance fails
+    Active --> Expiring: Within renewal window
+    Expiring --> RenewalInProgress: Auto-renewal triggered
+    RenewalInProgress --> Active: Renewal succeeds
+    RenewalInProgress --> Failed: Renewal fails
+    Expiring --> Expired: Renewal not attempted / all retries exhausted
+    Active --> Archived: Decommissioned
+    Failed --> Pending: Retry requested
 ```
 
 - **Pending**: Certificate record created, awaiting initial issuance

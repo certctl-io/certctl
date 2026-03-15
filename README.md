@@ -381,13 +381,3 @@ make docker-logs-agent
 
 Certctl is licensed under the [Apache License 2.0](LICENSE). See LICENSE file for details.
 
-## Support & Community
-
-- **Issues**: [GitHub Issues](https://github.com/shankar0123/certctl/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/shankar0123/certctl/discussions)
-- **Documentation**: [Full Docs](docs/)
-- **Security**: security@example.com
-
----
-
-**Built with ❤️ for infrastructure teams managing certificates at scale.**

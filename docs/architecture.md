@@ -16,6 +16,53 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ## System Components
 
+```mermaid
+flowchart TB
+    subgraph "Control Plane"
+        API["REST API\n(Go net/http, :8443)"]
+        SVC["Service Layer"]
+        REPO["Repository Layer\n(database/sql + lib/pq)"]
+        SCHED["Background Scheduler\n4 loops"]
+        DASH["Web Dashboard\n(React SPA)"]
+    end
+
+    subgraph "Data Store"
+        PG[("PostgreSQL 16\n14 tables\nTEXT primary keys")]
+    end
+
+    subgraph "Agent Fleet"
+        A1["Agent: nginx-prod\n(heartbeat + work poll)"]
+        A2["Agent: f5-prod"]
+        A3["Agent: iis-prod"]
+    end
+
+    subgraph "Issuer Backends"
+        CA1["Local CA\n(crypto/x509)"]
+        CA2["ACME\n(Let's Encrypt)"]
+        CA3["Vault PKI\n(future)"]
+    end
+
+    subgraph "Target Systems"
+        T1["NGINX\n(SSH + reload)"]
+        T2["F5 BIG-IP\n(REST API)"]
+        T3["IIS\n(WinRM)"]
+    end
+
+    DASH --> API
+    API --> SVC
+    SVC --> REPO
+    REPO --> PG
+    SCHED --> SVC
+    SVC -->|"Issue/Renew"| CA1 & CA2 & CA3
+
+    A1 & A2 & A3 -->|"CSR + Heartbeat"| API
+    API -->|"Cert + Chain\n(NO private key)"| A1 & A2 & A3
+
+    A1 -->|"Deploy"| T1
+    A2 -->|"Deploy"| T2
+    A3 -->|"Deploy"| T3
+```
+
 ### Control Plane (Server)
 
 The control plane is a Go HTTP server backed by PostgreSQL. It manages state (certificates, agents, targets, issuers, policies), orchestrates issuance by coordinating with CAs through issuer connectors, tracks jobs for certificate issuance/renewal/deployment workflows, maintains an immutable audit trail, and dispatches work via a background scheduler.
@@ -40,36 +87,116 @@ The dashboard includes a **demo mode** that activates when the API is unreachabl
 
 All state is stored in PostgreSQL 16. The schema uses TEXT primary keys (not UUIDs) with human-readable prefixed IDs like `mc-api-prod`, `t-platform`, `o-alice`.
 
-Database tables:
+```mermaid
+erDiagram
+    teams ||--o{ owners : "has members"
+    teams ||--o{ managed_certificates : "owns"
+    owners ||--o{ managed_certificates : "responsible for"
+    issuers ||--o{ managed_certificates : "signs"
+    renewal_policies ||--o{ managed_certificates : "governs"
+    managed_certificates ||--o{ certificate_versions : "has versions"
+    managed_certificates ||--o{ certificate_target_mappings : "deployed to"
+    deployment_targets ||--o{ certificate_target_mappings : "receives"
+    agents ||--o{ deployment_targets : "manages"
+    managed_certificates ||--o{ jobs : "triggers"
+    policy_rules ||--o{ policy_violations : "produces"
+    managed_certificates ||--o{ policy_violations : "violates"
+    managed_certificates ||--o{ audit_events : "logged in"
+    managed_certificates ||--o{ notification_events : "generates"
 
-```
-Teams & Ownership
-  ├── teams
-  └── owners
-
-Certificate Management
-  ├── managed_certificates
-  ├── certificate_versions
-  └── renewal_policies
-
-Infrastructure
-  ├── agents
-  └── deployment_targets
-
-Issuance
-  ├── issuers
-  └── jobs
-
-Policy Engine
-  ├── policy_rules
-  └── policy_violations
-
-Certificate-Target Mapping
-  └── certificate_target_mappings
-
-Monitoring & Audit
-  ├── audit_events
-  └── notification_events
+    teams {
+        text id PK
+        text name
+        text description
+    }
+    owners {
+        text id PK
+        text name
+        text email
+        text team_id FK
+    }
+    managed_certificates {
+        text id PK
+        text name
+        text common_name
+        text[] sans
+        text environment
+        text owner_id FK
+        text team_id FK
+        text issuer_id FK
+        text renewal_policy_id FK
+        text status
+        timestamp expires_at
+        jsonb tags
+    }
+    certificate_versions {
+        text id PK
+        text certificate_id FK
+        text serial_number
+        text fingerprint_sha256
+        text pem_chain
+        text csr_pem
+    }
+    agents {
+        text id PK
+        text name
+        text hostname
+        text status
+        text api_key_hash
+    }
+    deployment_targets {
+        text id PK
+        text name
+        text type
+        text agent_id FK
+        jsonb config
+    }
+    issuers {
+        text id PK
+        text name
+        text type
+        jsonb config
+        boolean enabled
+    }
+    jobs {
+        text id PK
+        text type
+        text certificate_id FK
+        text target_id FK
+        text status
+        int attempts
+    }
+    policy_rules {
+        text id PK
+        text name
+        text type
+        jsonb config
+        boolean enabled
+    }
+    policy_violations {
+        text id PK
+        text certificate_id FK
+        text rule_id FK
+        text message
+        text severity
+    }
+    audit_events {
+        text id PK
+        text actor
+        text actor_type
+        text action
+        text resource_type
+        text resource_id
+        jsonb details
+    }
+    notification_events {
+        text id PK
+        text type
+        text certificate_id FK
+        text channel
+        text recipient
+        text status
+    }
 ```
 
 Migrations are idempotent (`IF NOT EXISTS` on all CREATE statements, `ON CONFLICT (id) DO NOTHING` on all seed data) so they're safe to run multiple times — important for Docker Compose where both initdb and the server may run the same SQL.
@@ -78,57 +205,50 @@ Migrations are idempotent (`IF NOT EXISTS` on all CREATE statements, `ON CONFLIC
 
 ### 1. Create Managed Certificate
 
-```
-User / API Client
-   │
-   ├─→ POST /api/v1/certificates
-   │    {
-   │      "name": "API Production",
-   │      "common_name": "api.example.com",
-   │      "sans": ["api.example.com"],
-   │      "environment": "production",
-   │      "owner_id": "o-alice",
-   │      "team_id": "t-platform",
-   │      "issuer_id": "iss-local",
-   │      "renewal_policy_id": "rp-default",
-   │      "status": "Pending"
-   │    }
-   │
-   └─→ Control Plane
-        ├─ Validates input and policy rules
-        ├─ Inserts record into managed_certificates
-        ├─ Logs audit event (certificate_created)
-        └─ Returns certificate with ID
+```mermaid
+sequenceDiagram
+    participant U as User / API Client
+    participant API as REST API
+    participant SVC as CertificateService
+    participant DB as PostgreSQL
+    participant AUD as AuditService
+
+    U->>API: POST /api/v1/certificates<br/>{name, common_name, sans, ...}
+    API->>SVC: Create(ctx, certificate)
+    SVC->>SVC: Validate required fields
+    SVC->>DB: INSERT INTO managed_certificates
+    SVC->>AUD: Create(audit_event: certificate_created)
+    AUD->>DB: INSERT INTO audit_events
+    SVC-->>API: ManagedCertificate
+    API-->>U: 201 Created + JSON body
 ```
 
 ### 2. Agent Requests Certificate (CSR → Issuance)
 
-```
-Agent                          Control Plane                    Issuer (Local CA / ACME)
-  │                                  │                               │
-  ├─ POST /api/v1/agents/{id}/csr  │                               │
-  │  { "csr_pem": "-----BEGIN..." } │                               │
-  │                                 ├─ Validate CSR                 │
-  │                                 │                               │
-  │                                 ├─ Submit CSR to issuer         │
-  │                                 ├──────────────────────────────→│
-  │                                 │                               │
-  │                                 │← Signed certificate + chain  │
-  │                                 │←──────────────────────────────│
-  │                                 │                               │
-  │                                 ├─ Store certificate version    │
-  │                                 ├─ Update cert status → Active  │
-  │                                 ├─ Log audit event              │
-  │                                 │                               │
-  │← Certificate + chain (PEM)     │                               │
-  │  (NO private key)              │                               │
-  │                                 │                               │
-  ├─ Store locally:                │                               │
-  │  cert.pem + chain.pem          │                               │
-  │  key.pem (generated locally,   │                               │
-  │           never sent anywhere)  │                               │
-  │                                 │                               │
-  └─ Deploy to target system       │                               │
+```mermaid
+sequenceDiagram
+    participant A as Agent
+    participant API as Control Plane API
+    participant ISS as Issuer Connector
+    participant DB as PostgreSQL
+
+    A->>A: Generate RSA-2048 key pair
+    A->>A: Create CSR (CN + SANs, public key only)
+    A->>API: POST /api/v1/agents/{id}/csr<br/>{csr_pem: "-----BEGIN..."}
+
+    API->>API: Validate CSR format
+    API->>ISS: IssueCertificate(IssuanceRequest{CSR})
+    ISS-->>API: IssuanceResult{cert_pem, chain_pem, serial, not_after}
+
+    API->>DB: INSERT INTO certificate_versions
+    API->>DB: UPDATE managed_certificates SET status='Active'
+    API->>DB: INSERT INTO audit_events
+
+    API-->>A: {certificate_pem, chain_pem}<br/>(NO private key in response)
+
+    A->>A: Store cert.pem + chain.pem locally
+    Note over A: key.pem stays on agent<br/>Never transmitted anywhere
+    A->>A: Deploy to target system
 ```
 
 ### 3. Deploy Certificate to Target
@@ -145,6 +265,21 @@ The agent handles both the certificate (public) and the private key (local only)
 
 The control plane runs a scheduler with four background loops:
 
+```mermaid
+flowchart LR
+    subgraph "Scheduler (Background Goroutines)"
+        R["Renewal Checker\n⏱ every 1h"]
+        J["Job Processor\n⏱ every 30s"]
+        H["Agent Health\n⏱ every 2m"]
+        N["Notification Processor\n⏱ every 1m"]
+    end
+
+    R -->|"Find expiring certs\nCreate renewal jobs"| DB[("PostgreSQL")]
+    J -->|"Process pending jobs\nCoordinate issuance"| DB
+    H -->|"Check heartbeat staleness\nMark agents offline"| DB
+    N -->|"Send pending notifications\nEmail / Webhook"| DB
+```
+
 | Loop | Interval | Purpose |
 |------|----------|---------|
 | Renewal checker | 1 hour | Finds certificates approaching expiry, creates renewal jobs |
@@ -157,6 +292,33 @@ When the renewal checker finds a certificate within its renewal window (e.g., 30
 ## Connector Architecture
 
 Certctl uses connector interfaces for extensibility. Each connector type has a standard interface that implementations must satisfy.
+
+```mermaid
+flowchart TB
+    subgraph "Issuer Connectors"
+        direction TB
+        II["IssuerConnector Interface\nIssueCertificate() | RenewCertificate()\nRevokeCertificate() | GetOrderStatus()"]
+        II --> LC["Local CA"]
+        II --> ACME["ACME v2"]
+        II --> VP["Vault PKI (future)"]
+    end
+
+    subgraph "Target Connectors"
+        direction TB
+        TI["TargetConnector Interface\nDeployCertificate()\nValidateDeployment()"]
+        TI --> NG["NGINX"]
+        TI --> F5["F5 BIG-IP"]
+        TI --> IIS["IIS"]
+    end
+
+    subgraph "Notifier Connectors"
+        direction TB
+        NI["NotifierConnector Interface\nSendAlert() | SendEvent()"]
+        NI --> EM["Email (SMTP)"]
+        NI --> WH["Webhook (HTTP)"]
+        NI --> SL["Slack (future)"]
+    end
+```
 
 ### Issuer Connector
 
@@ -207,6 +369,30 @@ See the [Connector Development Guide](connectors.md) for details on building cus
 ## Security Model
 
 ### Private Key Management
+
+```mermaid
+flowchart LR
+    subgraph "Agent (Your Infrastructure)"
+        GEN["1. GENERATE\ncrypto/rsa 2048-bit"]
+        STORE["2. STORE\nFile perms 0600"]
+        USE["3. USE\nCSR gen + deployment"]
+        ROT["4. ROTATE\nDelete old after renewal"]
+    end
+
+    subgraph "Control Plane (certctl-server)"
+        CP["Only sees:\n• Certificates (public)\n• Chains (public)\n• CSRs (public key only)"]
+    end
+
+    GEN --> STORE --> USE --> ROT
+    USE -.->|"CSR (public key only)"| CP
+    CP -.->|"Signed cert + chain"| USE
+
+    style CP fill:#fee,stroke:#c33
+    style GEN fill:#efe,stroke:#3c3
+    style STORE fill:#efe,stroke:#3c3
+    style USE fill:#efe,stroke:#3c3
+    style ROT fill:#efe,stroke:#3c3
+```
 
 Private keys follow a strict lifecycle:
 
@@ -262,29 +448,43 @@ Health checks live outside the API prefix: `GET /health` and `GET /ready`.
 
 ### Docker Compose (Development / Small Deployments)
 
-```
-┌─────────────────────────────────┐
-│ Docker Network                  │
-│ ├─ certctl-server (:8443)       │
-│ │  └─ Serves API + dashboard    │
-│ ├─ postgres (:5432)             │
-│ │  └─ Schema + seed data        │
-│ └─ certctl-agent                │
-│    └─ Heartbeat + work polling  │
-└─────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph "Docker Network (certctl-network)"
+        SERVER["certctl-server\n:8443\nAPI + Dashboard"]
+        PG[("PostgreSQL\n:5432\nSchema + Seed Data")]
+        AGENT["certctl-agent\nHeartbeat + Work Poll"]
+    end
+
+    USER["Browser / curl"] -->|"HTTP :8443"| SERVER
+    SERVER -->|"SQL"| PG
+    AGENT -->|"HTTP (internal)"| SERVER
 ```
 
 ### Production (Kubernetes)
 
-```
-┌──────────────────────────────────────────────┐
-│ Kubernetes Cluster                           │
-│ ├─ Deployment: certctl-server (replicas=2+)  │
-│ ├─ DaemonSet: certctl-agent (infra nodes)    │
-│ ├─ StatefulSet: PostgreSQL (primary+replica) │
-│ ├─ ConfigMap: issuer/target configurations   │
-│ └─ Secret: API keys, ACME credentials        │
-└──────────────────────────────────────────────┘
+```mermaid
+flowchart TB
+    subgraph "Kubernetes Cluster"
+        subgraph "Control Plane"
+            DEP["Deployment\ncertctl-server\nreplicas: 2+"]
+            CM["ConfigMap\nIssuer/target configs"]
+            SEC["Secret\nAPI keys, ACME creds"]
+        end
+
+        subgraph "Data"
+            SS[("StatefulSet\nPostgreSQL\nprimary + replica")]
+        end
+
+        subgraph "Agent Fleet"
+            DS["DaemonSet\ncertctl-agent\n(infra nodes)"]
+        end
+    end
+
+    ING["Ingress\n+ TLS termination"] --> DEP
+    DEP --> SS
+    DEP --> CM & SEC
+    DS --> DEP
 ```
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
