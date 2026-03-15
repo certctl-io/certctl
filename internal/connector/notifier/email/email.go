@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net"
 	"net/smtp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -56,7 +57,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		"smtp_port", cfg.SMTPPort)
 
 	// Test SMTP connectivity with timeout
-	addr := fmt.Sprintf("%s:%d", cfg.SMTPHost, cfg.SMTPPort)
+	addr := net.JoinHostPort(cfg.SMTPHost, strconv.Itoa(cfg.SMTPPort))
 	conn, err := net.DialTimeout("tcp", addr, 10*time.Second)
 	if err != nil {
 		return fmt.Errorf("failed to reach SMTP server %s: %w", addr, err)
@@ -123,7 +124,7 @@ func (c *Connector) SendEvent(ctx context.Context, event notifier.Event) error {
 // sendEmail sends an email message using the configured SMTP server.
 // It handles both TLS and plain authentication modes.
 func (c *Connector) sendEmail(ctx context.Context, to, subject, body string) error {
-	addr := fmt.Sprintf("%s:%d", c.config.SMTPHost, c.config.SMTPPort)
+	addr := net.JoinHostPort(c.config.SMTPHost, strconv.Itoa(c.config.SMTPPort))
 
 	// Connect to SMTP server
 	var auth smtp.Auth
