@@ -307,12 +307,22 @@ make docker-clean       # Stop + remove volumes
 
 ## Roadmap
 
-Summary:
+### V1 (in progress → v1.0.0)
+Backend complete: end-to-end lifecycle, Local CA + ACME v2 issuers, NGINX/F5/IIS targets, threshold alerting, 120 tests. Remaining milestones before v1.0 tag:
+- **M5: Hardening + GUI Foundation** — fix build errors, input validation, migrate dashboard to Vite + React + TypeScript, wire cert list/detail views to real API
+- **M6: Functional GUI + CI** — wire all views (agents, jobs, notifications, audit, policies) to real API, GitHub Actions CI
+- **M7: Security Baseline** — agent-side key generation (private keys never leave agents), API auth enforced, rate limiting
 
-- **V1 (current)**: Dashboard, inventory, threshold-based expiration alerting (30/14/7/0 days with dedup), Local CA issuer (end-to-end lifecycle wired), ACME v2 (HTTP-01), NGINX/F5/IIS target connectors, agents with work polling, REST API (40+ endpoints), policies, audit trail, Docker Compose, 120 tests (service + handler + integration)
-- **V2**: Charts/trends, bulk import, OIDC/SSO, deployment rollback, CLI, Slack/Teams
-- **V3**: Certificate discovery, network scanning, unknown cert detection
-- **V4+**: Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
+### V2: Operational Maturity
+- **V2.0: Operational Workflows** — renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
+- **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams notifiers, bulk cert import
+- **V2.2: Observability** — expiration calendar, health scores, Prometheus metrics, deployment rollback
+
+### V3: Discovery & Visibility
+Certificate discovery (passive/active scanning), unknown cert detection, triage workflows in GUI
+
+### V4+: Platform & Scale
+Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
 
 ## License
 

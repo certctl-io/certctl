@@ -8,11 +8,12 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ### Design Principles
 
-1. **Private Key Isolation (V2+ goal)** — In V1, the Local CA generates server-side keys for simplicity. V2+ moves key generation to agents so private keys never touch the control plane
-2. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
-3. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
-4. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
-5. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
+1. **Private Key Isolation** — Agents generate keys locally and submit CSRs only. Private keys never touch the control plane. (Local CA demo mode retains server-side keygen with explicit flag.)
+2. **GUI as Primary Interface** — The web dashboard is the operational control plane, not a secondary viewer. Every backend feature ships with its corresponding GUI surface.
+3. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
+4. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
+5. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
+6. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
 
 ## System Components
 
@@ -79,9 +80,17 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 ### Web Dashboard
 
-A single-page React application served as a static HTML file (`web/index.html`). It communicates with the REST API and provides a visual interface for certificate inventory, agent status, job monitoring, audit trail, policy management, and notifications.
+The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
+
+**Current views**: certificate inventory (list + detail with version history), agent fleet (health indicators from heartbeat), job queue (status, retry, cancel), notification inbox (threshold alert grouping), audit trail (time range and actor/action filters), policy management (rules + violations), and a summary dashboard.
 
 The dashboard includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
+
+**Tech decisions**:
+- Vite for fast builds and HMR during development
+- TanStack Query over manual fetch/useEffect for automatic cache invalidation and refetching
+- Dark theme default (ops teams live in dark mode)
+- SSE/WebSocket planned for real-time job status updates (V2.0)
 
 ### PostgreSQL Database
 
