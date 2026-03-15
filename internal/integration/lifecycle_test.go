@@ -69,7 +69,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
-	healthHandler := handler.NewHealthHandler()
+	healthHandler := handler.NewHealthHandler("none")
 
 	// Create router and register handlers
 	r := router.New()
