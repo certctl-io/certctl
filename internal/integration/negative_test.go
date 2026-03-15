@@ -190,7 +190,7 @@ func TestNegativePaths(t *testing.T) {
 		}
 		agentBytes, _ := json.Marshal(agentBody)
 
-		regResp, err := http.Post(server.URL+"/api/v1/agents/register", "application/json", bytes.NewReader(agentBytes))
+		regResp, err := http.Post(server.URL+"/api/v1/agents", "application/json", bytes.NewReader(agentBytes))
 		if err != nil {
 			t.Fatalf("register agent failed: %v", err)
 		}
