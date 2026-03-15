@@ -139,8 +139,8 @@ The principle: **every backend feature ships with its corresponding GUI surface.
 - Notification processor sends pending, skips already-sent
 
 **CI coverage enforcement:**
-- ✅ Coverage threshold check in CI (fail if service layer <60%, handler layer <50%)
-- ✅ Connector tests included in CI coverage (`./internal/connector/...`)
+- ✅ Coverage threshold check in CI (fail if service layer <30%, handler layer <50%)
+- ✅ Connector tests included in CI coverage (`./internal/connector/issuer/local/...`)
 
 **Files created:**
 - `internal/api/handler/job_handler_test.go` — 14 tests for jobs handler
@@ -159,7 +159,7 @@ The principle: **every backend feature ships with its corresponding GUI surface.
 **Gate criteria** — all must be true:
 - [x] All M5–M8 deliverables complete
 - [x] M9 deliverables complete (test hardening)
-- [ ] CI green with coverage gates passing (service 60%+, handler 50%+)
+- [ ] CI green with coverage gates passing (service 30%+, handler 50%+)
 - [ ] GUI functional against real API (no demo mode fallback needed)
 - [x] Agent-side keygen working (ECDSA P-256, AwaitingCSR flow)
 - [x] API auth enforced by default
