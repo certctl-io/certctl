@@ -279,7 +279,7 @@ func (s *DeploymentService) MarkDeploymentFailed(ctx context.Context, jobID stri
 		}
 
 		// Send deployment failure notification
-		if err := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf(errMsg)); err != nil {
+		if err := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf("%s", errMsg)); err != nil {
 			fmt.Printf("failed to send deployment notification: %v\n", err)
 		}
 	}

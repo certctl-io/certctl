@@ -95,6 +95,29 @@ Configuration:
 
 Location: `internal/connector/issuer/local/local.go`
 
+### Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)
+
+The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports HTTP-01 challenge solving via a built-in temporary HTTP server that starts on demand during certificate issuance.
+
+Configuration:
+```json
+{
+  "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
+  "email": "admin@example.com",
+  "http_port": 80
+}
+```
+
+For HTTP-01 to work, the domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet. The connector automatically registers an ACME account, creates orders, solves challenges, finalizes with the CSR, and downloads the issued certificate chain.
+
+Environment variables for the default ACME connector:
+- `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
+- `CERTCTL_ACME_EMAIL` — Contact email for account registration
+
+The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
+
+Location: `internal/connector/issuer/acme/acme.go`
+
 ### Building a Custom Issuer
 
 Here's the structure for a HashiCorp Vault PKI issuer:
@@ -293,16 +316,36 @@ To add a new connector:
 
 2. Implement the interface (all methods required)
 
-3. Register it in the service layer during server initialization in `cmd/server/main.go`:
+3. Register it in the service layer during server initialization in `cmd/server/main.go`.
+
+### IssuerConnectorAdapter
+
+Issuer connectors use an adapter pattern to bridge the connector-layer `issuer.Connector` interface with the service-layer `service.IssuerConnector` interface. This maintains dependency inversion — the service package never imports the connector package directly.
+
+The adapter (`internal/service/issuer_adapter.go`) translates between the two interface types:
 
 ```go
-// For issuers
-issuerRegistry := map[string]service.IssuerConnector{
-    "local":    localCAConnector,
-    "acme":     acmeConnector,
-    "vault":    vaultConnector,  // your new issuer
-}
+// Wrap your connector implementation with the adapter
+import "github.com/shankar0123/certctl/internal/service"
 
+myIssuer := myissuer.New(config)
+adapted := service.NewIssuerConnectorAdapter(myIssuer)
+```
+
+Register adapted connectors keyed by the issuer ID from the database:
+
+```go
+// In cmd/server/main.go
+localCA := local.New(nil, logger)
+issuerRegistry := map[string]service.IssuerConnector{
+    "iss-local": service.NewIssuerConnectorAdapter(localCA),
+    "iss-vault": service.NewIssuerConnectorAdapter(vaultIssuer),  // your new issuer
+}
+```
+
+### Notifier Registration
+
+```go
 // For notifiers
 notifierRegistry := map[string]service.Notifier{
     "Email":   emailNotifier,

@@ -48,3 +48,15 @@ type DeploymentJob struct {
 	AgentID            string          `json:"agent_id"`
 	DeploymentResult   json.RawMessage `json:"deployment_result,omitempty"`
 }
+
+// WorkItem enriches a Job with target details so the agent knows which connector to use.
+// Returned by GET /api/v1/agents/{id}/work.
+type WorkItem struct {
+	ID            string          `json:"id"`
+	Type          JobType         `json:"type"`
+	CertificateID string          `json:"certificate_id"`
+	TargetID      *string         `json:"target_id,omitempty"`
+	TargetType    string          `json:"target_type,omitempty"`
+	TargetConfig  json.RawMessage `json:"target_config,omitempty"`
+	Status        JobStatus       `json:"status"`
+}

@@ -101,6 +101,8 @@ func (r *Router) RegisterHandlers(
 	r.Register("POST /api/v1/agents/{id}/heartbeat", http.HandlerFunc(agents.Heartbeat))
 	r.Register("POST /api/v1/agents/{id}/csr", http.HandlerFunc(agents.AgentCSRSubmit))
 	r.Register("GET /api/v1/agents/{id}/certificates/{cert_id}", http.HandlerFunc(agents.AgentCertificatePickup))
+	r.Register("GET /api/v1/agents/{id}/work", http.HandlerFunc(agents.AgentGetWork))
+	r.Register("POST /api/v1/agents/{id}/jobs/{job_id}/status", http.HandlerFunc(agents.AgentReportJobStatus))
 
 	// Jobs routes: /api/v1/jobs
 	r.Register("GET /api/v1/jobs", http.HandlerFunc(jobs.ListJobs))

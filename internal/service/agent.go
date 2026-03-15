@@ -17,6 +17,7 @@ type AgentService struct {
 	agentRepo       repository.AgentRepository
 	certRepo        repository.CertificateRepository
 	jobRepo         repository.JobRepository
+	targetRepo      repository.TargetRepository
 	auditService    *AuditService
 	issuerRegistry  map[string]IssuerConnector
 }
@@ -26,6 +27,7 @@ func NewAgentService(
 	agentRepo repository.AgentRepository,
 	certRepo repository.CertificateRepository,
 	jobRepo repository.JobRepository,
+	targetRepo repository.TargetRepository,
 	auditService *AuditService,
 	issuerRegistry map[string]IssuerConnector,
 ) *AgentService {
@@ -33,6 +35,7 @@ func NewAgentService(
 		agentRepo:      agentRepo,
 		certRepo:       certRepo,
 		jobRepo:        jobRepo,
+		targetRepo:     targetRepo,
 		auditService:   auditService,
 		issuerRegistry: issuerRegistry,
 	}
@@ -103,6 +106,8 @@ func (s *AgentService) Heartbeat(agentID string) error {
 }
 
 // SubmitCSR validates and processes a Certificate Signing Request from an agent.
+// It forwards the CSR to the appropriate issuer connector for signing, then stores
+// the resulting certificate version.
 func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID string, csrPEM []byte) error {
 	// Fetch agent
 	agent, err := s.agentRepo.Get(ctx, agentID)
@@ -110,16 +115,54 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 		return fmt.Errorf("failed to fetch agent: %w", err)
 	}
 
-	// Validate CSR format (basic check)
+	// Validate CSR format
 	if len(csrPEM) == 0 {
 		return fmt.Errorf("invalid CSR: empty")
 	}
 
-	// In production, parse and validate the CSR signature and CN here
-	// For now, accept and proceed
+	// If a certificate ID is provided, sign the CSR via the issuer connector
+	if certID != "" {
+		cert, err := s.certRepo.Get(ctx, certID)
+		if err != nil {
+			return fmt.Errorf("failed to fetch certificate: %w", err)
+		}
 
-	// In a production system, we'd store the CSR in a certificate version or metadata
-	// For now, we just validate and accept it
+		// Look up the issuer connector
+		connector, ok := s.issuerRegistry[cert.IssuerID]
+		if ok {
+			// Sign the CSR via the issuer connector
+			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM))
+			if err != nil {
+				return fmt.Errorf("issuer signing failed: %w", err)
+			}
+
+			// Store the signed certificate as a new version
+			version := &domain.CertificateVersion{
+				ID:                generateID("certver"),
+				CertificateID:    certID,
+				SerialNumber:     result.Serial,
+				NotBefore:        result.NotBefore,
+				NotAfter:         result.NotAfter,
+				PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
+				CSRPEM:           string(csrPEM),
+				CreatedAt:        time.Now(),
+			}
+
+			if err := s.certRepo.CreateVersion(ctx, version); err != nil {
+				return fmt.Errorf("failed to store certificate version: %w", err)
+			}
+
+			// Update certificate status and expiry
+			cert.Status = domain.CertificateStatusActive
+			cert.ExpiresAt = result.NotAfter
+			now := time.Now()
+			cert.LastRenewalAt = &now
+			cert.UpdatedAt = now
+			if err := s.certRepo.Update(ctx, cert); err != nil {
+				fmt.Printf("failed to update certificate: %v\n", err)
+			}
+		}
+	}
 
 	// Record audit event
 	if err := s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
@@ -305,14 +348,78 @@ func (s *AgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) 
 }
 
 // CSRSubmit processes a CSR submission from an agent (handler interface method).
+// The csrPEM parameter contains "certID:csrPEM" or just the CSR PEM.
 func (s *AgentService) CSRSubmit(agentID string, csrPEM string) (string, error) {
-	// For the handler interface, we accept the CSR as a string
 	err := s.SubmitCSR(context.Background(), agentID, "", []byte(csrPEM))
 	if err != nil {
 		return "", err
 	}
-	// Return the CSR as acknowledgment
-	return csrPEM, nil
+	return "csr_accepted", nil
+}
+
+// CSRSubmitForCert processes a CSR submission for a specific certificate (handler interface method).
+func (s *AgentService) CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error) {
+	err := s.SubmitCSR(context.Background(), agentID, certID, []byte(csrPEM))
+	if err != nil {
+		return "", err
+	}
+	return "csr_signed", nil
+}
+
+// GetWork returns pending deployment jobs for an agent (handler interface method).
+func (s *AgentService) GetWork(agentID string) ([]domain.Job, error) {
+	jobs, err := s.GetPendingWork(context.Background(), agentID)
+	if err != nil {
+		return nil, err
+	}
+	var result []domain.Job
+	for _, j := range jobs {
+		if j != nil {
+			result = append(result, *j)
+		}
+	}
+	return result, nil
+}
+
+// GetWorkWithTargets returns pending deployment jobs enriched with target type and config.
+// This allows agents to know which connector to invoke for each deployment job.
+func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, error) {
+	jobs, err := s.GetPendingWork(context.Background(), agentID)
+	if err != nil {
+		return nil, err
+	}
+
+	var items []domain.WorkItem
+	for _, j := range jobs {
+		if j == nil {
+			continue
+		}
+		item := domain.WorkItem{
+			ID:            j.ID,
+			Type:          j.Type,
+			CertificateID: j.CertificateID,
+			TargetID:      j.TargetID,
+			Status:        j.Status,
+		}
+
+		// Enrich with target details if target ID is present
+		if j.TargetID != nil && *j.TargetID != "" {
+			target, err := s.targetRepo.Get(context.Background(), *j.TargetID)
+			if err == nil {
+				item.TargetType = string(target.Type)
+				item.TargetConfig = target.Config
+			}
+		}
+
+		items = append(items, item)
+	}
+
+	return items, nil
+}
+
+// UpdateJobStatus reports a job's status from an agent (handler interface method).
+func (s *AgentService) UpdateJobStatus(agentID string, jobID string, status string, errMsg string) error {
+	return s.ReportJobStatus(context.Background(), agentID, jobID, domain.JobStatus(status), errMsg)
 }
 
 // CertificatePickup retrieves a certificate for an agent (handler interface method).

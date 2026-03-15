@@ -17,7 +17,11 @@ type AgentService interface {
 	RegisterAgent(agent domain.Agent) (*domain.Agent, error)
 	Heartbeat(agentID string) error
 	CSRSubmit(agentID string, csrPEM string) (string, error)
+	CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error)
 	CertificatePickup(agentID, certID string) (string, error)
+	GetWork(agentID string) ([]domain.Job, error)
+	GetWorkWithTargets(agentID string) ([]domain.WorkItem, error)
+	UpdateJobStatus(agentID string, jobID string, status string, errMsg string) error
 }
 
 // AgentHandler handles HTTP requests for agent operations.
@@ -155,6 +159,7 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 
 // AgentCSRSubmit receives a Certificate Signing Request from an agent.
 // POST /api/v1/agents/{id}/csr
+// Optionally accepts a certificate_id to sign the CSR for a specific certificate.
 func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -173,7 +178,8 @@ func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 	agentID := parts[0]
 
 	var req struct {
-		CSRPEM string `json:"csr_pem"`
+		CSRPEM        string `json:"csr_pem"`
+		CertificateID string `json:"certificate_id,omitempty"`
 	}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
@@ -185,15 +191,23 @@ func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	jobID, err := h.svc.CSRSubmit(agentID, req.CSRPEM)
+	var status string
+	var err error
+
+	// If certificate_id is provided, sign the CSR for that specific certificate
+	if req.CertificateID != "" {
+		status, err = h.svc.CSRSubmitForCert(agentID, req.CertificateID, req.CSRPEM)
+	} else {
+		status, err = h.svc.CSRSubmit(agentID, req.CSRPEM)
+	}
+
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to submit CSR", requestID)
 		return
 	}
 
 	response := map[string]string{
-		"job_id": jobID,
-		"status": "csr_received",
+		"status": status,
 	}
 
 	JSON(w, http.StatusAccepted, response)
@@ -230,4 +244,83 @@ func (h AgentHandler) AgentCertificatePickup(w http.ResponseWriter, r *http.Requ
 	}
 
 	JSON(w, http.StatusOK, response)
+}
+
+// AgentGetWork returns pending deployment jobs for an agent.
+// GET /api/v1/agents/{id}/work
+func (h AgentHandler) AgentGetWork(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	// Extract agent ID from path /api/v1/agents/{id}/work
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Agent ID is required", requestID)
+		return
+	}
+	agentID := parts[0]
+
+	workItems, err := h.svc.GetWorkWithTargets(agentID)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to get pending work", requestID)
+		return
+	}
+
+	if workItems == nil {
+		workItems = []domain.WorkItem{}
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"jobs":  workItems,
+		"count": len(workItems),
+	})
+}
+
+// AgentReportJobStatus receives a job status report from an agent.
+// POST /api/v1/agents/{id}/jobs/{job_id}/status
+func (h AgentHandler) AgentReportJobStatus(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	// Extract agent ID and job ID from path /api/v1/agents/{id}/jobs/{job_id}/status
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 4 || parts[0] == "" || parts[2] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Agent ID and Job ID are required", requestID)
+		return
+	}
+	agentID := parts[0]
+	jobID := parts[2]
+
+	var req struct {
+		Status string `json:"status"`
+		Error  string `json:"error,omitempty"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+		return
+	}
+
+	if req.Status == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Status is required", requestID)
+		return
+	}
+
+	if err := h.svc.UpdateJobStatus(agentID, jobID, req.Status, req.Error); err != nil {
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update job status", requestID)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]string{
+		"status": "updated",
+	})
 }

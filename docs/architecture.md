@@ -8,7 +8,7 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 
 ### Design Principles
 
-1. **Zero Private Key Exposure** — Private keys are generated and managed only on agents, never sent to the control plane
+1. **Private Key Isolation (V2+ goal)** — In V1, the Local CA generates server-side keys for simplicity. V2+ moves key generation to agents so private keys never touch the control plane
 2. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
 3. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
 4. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
@@ -73,9 +73,9 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. An agent generates private keys locally, creates CSRs, receives signed certificates from the control plane, deploys them to target systems, and reports status back. Agents communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents poll the control plane for pending deployment jobs, fetch signed certificates, deploy them to target systems, and report job status back. In V2+, agents will also generate private keys locally and create CSRs. Agents communicate with the control plane via HTTP and authenticate with API keys.
 
-The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for pending jobs.
+The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for pending deployment jobs via `GET /api/v1/agents/{id}/work`. When a job is found, the agent fetches the certificate, executes the deployment, and reports status via `POST /api/v1/agents/{id}/jobs/{job_id}/status`.
 
 ### Web Dashboard
 
@@ -223,7 +223,38 @@ sequenceDiagram
     API-->>U: 201 Created + JSON body
 ```
 
-### 2. Agent Requests Certificate (CSR → Issuance)
+### 2. Certificate Issuance
+
+#### V1: Server-Side Key Generation (Local CA)
+
+In V1, the control plane generates keys and CSRs server-side for the Local CA. This simplifies the initial implementation — the full agent-side key generation flow is planned for V2+.
+
+```mermaid
+sequenceDiagram
+    participant U as User / Scheduler
+    participant API as Control Plane API
+    participant SVC as RenewalService
+    participant ISS as IssuerConnector
+    participant DB as PostgreSQL
+
+    U->>API: POST /api/v1/certificates/{id}/renew
+    API->>SVC: ProcessRenewalJob(job)
+
+    SVC->>SVC: Generate RSA-2048 key pair (server-side)
+    SVC->>SVC: Create CSR with CN + SANs
+    SVC->>ISS: IssueCertificate(commonName, sans, csrPEM)
+    ISS-->>SVC: IssuanceResult{cert_pem, chain_pem, serial, not_after}
+
+    SVC->>SVC: Compute SHA-256 fingerprint
+    SVC->>DB: INSERT INTO certificate_versions (PEM chain + CSR)
+    SVC->>DB: UPDATE managed_certificates SET status='Active', expires_at
+    SVC->>DB: INSERT INTO audit_events
+    SVC->>DB: CREATE deployment jobs for all mapped targets
+
+    Note over SVC: Deployment jobs picked up by agents<br/>via GET /api/v1/agents/{id}/work
+```
+
+#### V2+ (Planned): Agent-Side Key Generation
 
 ```mermaid
 sequenceDiagram
@@ -232,22 +263,19 @@ sequenceDiagram
     participant ISS as Issuer Connector
     participant DB as PostgreSQL
 
-    A->>A: Generate RSA-2048 key pair
+    A->>A: Generate RSA-2048 key pair locally
     A->>A: Create CSR (CN + SANs, public key only)
-    A->>API: POST /api/v1/agents/{id}/csr<br/>{csr_pem: "-----BEGIN..."}
+    A->>API: POST /api/v1/agents/{id}/csr<br/>{csr_pem, certificate_id}
 
-    API->>API: Validate CSR format
     API->>ISS: IssueCertificate(IssuanceRequest{CSR})
     ISS-->>API: IssuanceResult{cert_pem, chain_pem, serial, not_after}
 
     API->>DB: INSERT INTO certificate_versions
     API->>DB: UPDATE managed_certificates SET status='Active'
-    API->>DB: INSERT INTO audit_events
 
     API-->>A: {certificate_pem, chain_pem}<br/>(NO private key in response)
 
-    A->>A: Store cert.pem + chain.pem locally
-    Note over A: key.pem stays on agent<br/>Never transmitted anywhere
+    A->>A: Store cert + chain locally (key never leaves agent)
     A->>A: Deploy to target system
 ```
 
@@ -318,6 +346,26 @@ flowchart TB
         NI --> WH["Webhook (HTTP)"]
         NI --> SL["Slack (future)"]
     end
+```
+
+### IssuerConnectorAdapter (Dependency Inversion)
+
+The service layer defines its own `IssuerConnector` interface (`internal/service/renewal.go`) while the connector layer has its own `issuer.Connector` interface (`internal/connector/issuer/interface.go`). The `IssuerConnectorAdapter` (`internal/service/issuer_adapter.go`) bridges the two, translating between their request/response types. This maintains clean dependency inversion — the service package never imports the connector package directly.
+
+```mermaid
+flowchart LR
+    SVC["Service Layer<br/>service.IssuerConnector"] --> ADAPT["IssuerConnectorAdapter<br/>(bridges interfaces)"]
+    ADAPT --> CONN["Connector Layer<br/>issuer.Connector"]
+    CONN --> LC["Local CA"]
+    CONN --> ACME["ACME v2"]
+```
+
+Registration happens in `cmd/server/main.go`:
+```go
+localCA := local.New(nil, logger)
+issuerRegistry := map[string]service.IssuerConnector{
+    "iss-local": service.NewIssuerConnectorAdapter(localCA),
+}
 ```
 
 ### Issuer Connector
@@ -394,14 +442,16 @@ flowchart LR
     style ROT fill:#efe,stroke:#3c3
 ```
 
-Private keys follow a strict lifecycle:
+**V1 (Current):** The Local CA issuer generates RSA-2048 keys and CSRs server-side within `RenewalService.ProcessRenewalJob`. Private key material is stored alongside the CSR in the `certificate_versions` table. This is a pragmatic V1 trade-off to get the end-to-end lifecycle working.
+
+**V2+ (Target Architecture):** Private keys follow a strict lifecycle on agents:
 
 1. **Generated on the agent** — never sent to the control plane
 2. **Stored on the agent** — file permissions 0600, owned by the agent process user
 3. **Used by the agent** — for deployment to targets and CSR generation
 4. **Rotated by the agent** — old keys deleted after successful renewal
 
-The control plane only ever handles public material: certificates, chains, and CSRs. This is a deliberate architectural decision — even if the control plane database is compromised, no private keys are exposed.
+The V2+ architecture ensures the control plane only handles public material: certificates, chains, and CSRs.
 
 ### Authentication
 

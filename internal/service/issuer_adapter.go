@@ -1,0 +1,59 @@
+package service
+
+import (
+	"context"
+
+	"github.com/shankar0123/certctl/internal/connector/issuer"
+)
+
+// IssuerConnectorAdapter bridges the connector-layer issuer.Connector interface with the
+// service-layer IssuerConnector interface. This maintains dependency inversion: the service
+// layer defines the interface it needs, and this adapter wraps the concrete connector.
+type IssuerConnectorAdapter struct {
+	connector issuer.Connector
+}
+
+// NewIssuerConnectorAdapter wraps an issuer.Connector to implement service.IssuerConnector.
+func NewIssuerConnectorAdapter(c issuer.Connector) IssuerConnector {
+	return &IssuerConnectorAdapter{connector: c}
+}
+
+// IssueCertificate delegates to the underlying connector's IssueCertificate method,
+// translating between service-layer and connector-layer types.
+func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error) {
+	result, err := a.connector.IssueCertificate(ctx, issuer.IssuanceRequest{
+		CommonName: commonName,
+		SANs:       sans,
+		CSRPEM:     csrPEM,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &IssuanceResult{
+		CertPEM:   result.CertPEM,
+		ChainPEM:  result.ChainPEM,
+		Serial:    result.Serial,
+		NotBefore: result.NotBefore,
+		NotAfter:  result.NotAfter,
+	}, nil
+}
+
+// RenewCertificate delegates to the underlying connector's RenewCertificate method,
+// translating between service-layer and connector-layer types.
+func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error) {
+	result, err := a.connector.RenewCertificate(ctx, issuer.RenewalRequest{
+		CommonName: commonName,
+		SANs:       sans,
+		CSRPEM:     csrPEM,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &IssuanceResult{
+		CertPEM:   result.CertPEM,
+		ChainPEM:  result.ChainPEM,
+		Serial:    result.Serial,
+		NotBefore: result.NotBefore,
+		NotAfter:  result.NotAfter,
+	}, nil
+}

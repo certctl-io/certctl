@@ -95,22 +95,15 @@ func (s *JobService) processJob(ctx context.Context, job *domain.Job) error {
 }
 
 // processIssuanceJob handles a certificate issuance job.
-// This is a placeholder that documents the flow.
-// TODO: Implement actual issuance job processing if needed.
+// It reuses the renewal service's ProcessRenewalJob since the flow is identical:
+// generate key → create CSR → call issuer → store version → create deployment jobs.
+// The only difference is semantics (new cert vs renewed cert), not mechanics.
 func (s *JobService) processIssuanceJob(ctx context.Context, job *domain.Job) error {
 	s.logger.Debug("processing issuance job", "job_id", job.ID)
 
-	// TODO: Implement issuance job processing
-	// In production:
-	//   1. Fetch the certificate
-	//   2. Fetch the issuer
-	//   3. Generate or retrieve CSR
-	//   4. Call issuer to issue new certificate
-	//   5. Create certificate version
-	//   6. Update certificate status
-	//   7. Mark job as completed
-
-	return fmt.Errorf("issuance job processing not yet implemented")
+	// Issuance follows the same code path as renewal for the Local CA:
+	// generate server-side key + CSR → sign via issuer → store cert version → deploy
+	return s.renewalService.ProcessRenewalJob(ctx, job)
 }
 
 // processValidationJob handles a certificate validation job.

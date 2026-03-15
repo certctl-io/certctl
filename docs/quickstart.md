@@ -111,6 +111,13 @@ curl -s http://localhost:8443/api/v1/certificates/mc-api-prod | jq .
 curl -s http://localhost:8443/api/v1/agents | jq .
 ```
 
+### Check agent pending work
+
+```bash
+# Replace with an actual agent ID from the list above
+curl -s http://localhost:8443/api/v1/agents/agent-nginx-prod/work | jq .
+```
+
 ### View audit trail
 
 ```bash

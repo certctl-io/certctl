@@ -8,7 +8,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (50+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure handle key generation and certificate deployment without exposing private keys to the control plane.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (40+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure handle certificate deployment, and in V2+ will handle key generation locally so private keys never leave your servers.
 
 ```mermaid
 flowchart LR
@@ -71,7 +71,8 @@ make migrate-up
 export CERTCTL_SERVER_URL=http://localhost:8443
 export CERTCTL_API_KEY=change-me-in-production
 export CERTCTL_AGENT_NAME=local-agent
-./bin/agent
+export CERTCTL_AGENT_ID=agent-local-01
+./bin/agent --agent-id=agent-local-01
 ```
 
 ## Documentation
@@ -114,7 +115,7 @@ flowchart TB
 
 ### Key Design Decisions
 
-- **Private keys never touch the control plane.** Agents generate keys locally and submit CSRs (public key only). The control plane forwards CSRs to the CA and returns signed certificates. Even if the control plane database is compromised, no private keys are exposed.
+- **Private keys isolated from the control plane (V2+ goal).** In V1, the Local CA issuer generates server-side keys for simplicity. V2+ moves key generation to agents — agents generate keys locally and submit CSRs (public key only). The architecture is designed for this separation; V1 takes a pragmatic shortcut for the built-in CA.
 - **TEXT primary keys, not UUIDs.** IDs are human-readable prefixed strings (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resource types at a glance in logs and queries.
 - **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
 - **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
@@ -152,6 +153,8 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_LOG_FORMAT` | `json` | Log format: `json` or `text` |
 | `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `jwt`, or `none` |
 | `CERTCTL_AUTH_SECRET` | — | Required for `api-key` and `jwt` auth types |
+| `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
+| `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
 
 Agent environment variables:
 
@@ -160,6 +163,7 @@ Agent environment variables:
 | `CERTCTL_SERVER_URL` | `http://localhost:8080` | Control plane URL |
 | `CERTCTL_API_KEY` | — | Agent API key |
 | `CERTCTL_AGENT_NAME` | `certctl-agent` | Agent display name |
+| `CERTCTL_AGENT_ID` | — | Registered agent ID (required) |
 
 Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
@@ -187,6 +191,8 @@ GET    /api/v1/agents/{id}                Get
 POST   /api/v1/agents/{id}/heartbeat      Record heartbeat
 POST   /api/v1/agents/{id}/csr            Submit CSR for issuance
 GET    /api/v1/agents/{id}/certificates/{certId}  Retrieve signed certificate
+GET    /api/v1/agents/{id}/work            Poll for pending deployment jobs
+POST   /api/v1/agents/{id}/jobs/{jobId}/status  Report job completion/failure
 ```
 
 ### Infrastructure
@@ -235,7 +241,7 @@ GET    /ready                             Readiness check
 | Issuer | Status | Type |
 |--------|--------|------|
 | Local CA (self-signed) | Implemented | `GenericCA` |
-| ACME v2 (Let's Encrypt, Sectigo) | In progress | `ACME` |
+| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01) | `ACME` |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
 
@@ -286,9 +292,8 @@ make docker-clean       # Stop + remove volumes
 ## Security
 
 ### Private Key Management
-- Private keys are generated exclusively on agents, never sent to the control plane
-- Keys stored with file permissions 0600
-- Old keys deleted after successful certificate renewal
+- **V1 (Local CA)**: The control plane generates ephemeral RSA-2048 keys server-side for certificate issuance. This simplifies the initial implementation but means private keys exist on the control plane temporarily. Keys are stored in certificate version records.
+- **V2+**: Private keys will be generated exclusively on agents, never sent to the control plane. Keys stored with file permissions 0600 and rotated after successful renewal.
 
 ### Authentication
 - Agent-to-server: API key (registered at agent creation)
@@ -304,7 +309,7 @@ make docker-clean       # Stop + remove volumes
 
 Summary:
 
-- **V1 (current)**: Dashboard, inventory, alerting, Local CA + ACME issuers, NGINX/F5/IIS targets, agents, REST API, policies, audit trail, Docker Compose
+- **V1 (current)**: Dashboard, inventory, alerting, Local CA issuer (end-to-end lifecycle wired), NGINX/F5/IIS target connectors, agents with work polling, REST API (40+ endpoints), policies, audit trail, Docker Compose
 - **V2**: Charts/trends, bulk import, OIDC/SSO, deployment rollback, CLI, Slack/Teams
 - **V3**: Certificate discovery, network scanning, unknown cert detection
 - **V4+**: Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
