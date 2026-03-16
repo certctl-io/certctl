@@ -36,7 +36,7 @@ flowchart LR
 ```bash
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 Wait ~30 seconds, then open **http://localhost:8443** in your browser.

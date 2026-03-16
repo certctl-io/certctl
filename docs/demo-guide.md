@@ -9,7 +9,7 @@ New to certificates? Read the [Concepts Guide](concepts.md) first. Want a hands-
 ```bash
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
 Wait ~30 seconds for PostgreSQL to initialize and the server to start, then open:

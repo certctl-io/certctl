@@ -10,7 +10,7 @@ This demo goes beyond browsing pre-loaded data. You'll create a team, register a
 Make sure certctl is running:
 
 ```bash
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 # Wait for healthy status
 docker compose -f deploy/docker-compose.yml ps
 ```
@@ -541,7 +541,7 @@ echo ""
 echo -e "${YELLOW}Step 1: Checking server health...${NC}"
 HEALTH=$(curl -s $API/health | jq -r '.status')
 if [ "$HEALTH" != "healthy" ]; then
-  echo "Server is not healthy. Run: docker compose -f deploy/docker-compose.yml up -d"
+  echo "Server is not healthy. Run: docker compose -f deploy/docker-compose.yml up -d --build"
   exit 1
 fi
 echo -e "${GREEN}Server is healthy${NC}"

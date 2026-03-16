@@ -20,8 +20,10 @@ On Linux, follow the official Docker install guide for your distribution.
 ```bash
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
-docker compose -f deploy/docker-compose.yml up -d
+docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+The `--build` flag is important — it builds the server image including the React frontend. Without it, Docker may use a stale cached image that doesn't include the dashboard.
 
 Wait about 30 seconds for PostgreSQL to initialize and the server to boot. Check that everything is healthy:
 
