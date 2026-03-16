@@ -348,6 +348,3 @@ Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
 
 Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties.
 
-On **March 14, 2033** (7 years from initial release), the license automatically converts to [Apache License 2.0](https://www.apache.org/licenses/LICENSE-2.0) and all restrictions are removed.
-
-For commercial licensing inquiries, contact skreddy040@gmail.com.
