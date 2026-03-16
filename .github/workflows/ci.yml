@@ -83,6 +83,10 @@ jobs:
         working-directory: web
         run: npx tsc --noEmit
 
+      - name: Run Frontend Tests
+        working-directory: web
+        run: npx vitest run
+
       - name: Build Frontend
         working-directory: web
         run: npx vite build

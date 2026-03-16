@@ -1,18 +1,11 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getNotifications } from '../api/client';
+import { getNotifications, markNotificationRead } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime, timeAgo } from '../api/utils';
 import type { Notification } from '../api/types';
-
-const BASE = '/api/v1';
-
-async function markNotificationRead(id: string) {
-  const res = await fetch(`${BASE}/notifications/${id}/read`, { method: 'POST' });
-  if (!res.ok) throw new Error('Failed to mark as read');
-}
 
 type ViewMode = 'list' | 'grouped';
 

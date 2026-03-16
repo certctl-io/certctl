@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { getTargets } from '../api/client';
+import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { getTargets, deleteTarget } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -17,9 +17,16 @@ const typeLabels: Record<string, string> = {
 };
 
 export default function TargetsPage() {
+  const queryClient = useQueryClient();
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['targets'],
     queryFn: () => getTargets(),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deleteTarget,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['targets'] }),
   });
 
   const columns: Column<Target>[] = [
@@ -59,6 +66,18 @@ export default function TargetsPage() {
       key: 'created',
       label: 'Created',
       render: (t) => <span className="text-xs text-slate-400">{formatDateTime(t.created_at)}</span>,
+    },
+    {
+      key: 'actions',
+      label: '',
+      render: (t) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete target ${t.name}?`)) deleteMutation.mutate(t.id); }}
+          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+        >
+          Delete
+        </button>
+      ),
     },
   ];
 

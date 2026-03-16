@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, getTargets } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
@@ -19,6 +20,8 @@ export default function CertificateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  const [showDeploy, setShowDeploy] = useState(false);
+  const [deployTargetId, setDeployTargetId] = useState('');
 
   const { data: cert, isLoading, error, refetch } = useQuery({
     queryKey: ['certificate', id],
@@ -32,11 +35,34 @@ export default function CertificateDetailPage() {
     enabled: !!id,
   });
 
+  const { data: targets } = useQuery({
+    queryKey: ['targets'],
+    queryFn: () => getTargets(),
+    enabled: showDeploy,
+  });
+
   const renewMutation = useMutation({
     mutationFn: () => triggerRenewal(id!),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['certificate', id] });
       queryClient.invalidateQueries({ queryKey: ['certificates'] });
+    },
+  });
+
+  const deployMutation = useMutation({
+    mutationFn: () => triggerDeployment(id!, deployTargetId),
+    onSuccess: () => {
+      setShowDeploy(false);
+      setDeployTargetId('');
+      queryClient.invalidateQueries({ queryKey: ['certificate', id] });
+    },
+  });
+
+  const archiveMutation = useMutation({
+    mutationFn: () => archiveCertificate(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['certificates'] });
+      navigate('/certificates');
     },
   });
 
@@ -71,12 +97,28 @@ export default function CertificateDetailPage() {
               Back
             </button>
             <button
+              onClick={() => setShowDeploy(true)}
+              disabled={cert.status === 'Archived'}
+              className="btn btn-ghost text-xs border border-slate-600 disabled:opacity-50"
+            >
+              Deploy
+            </button>
+            <button
               onClick={() => renewMutation.mutate()}
               disabled={renewMutation.isPending || cert.status === 'Archived' || cert.status === 'RenewalInProgress'}
               className="btn btn-primary text-xs disabled:opacity-50"
             >
               {renewMutation.isPending ? 'Renewing...' : 'Trigger Renewal'}
             </button>
+            {cert.status !== 'Archived' && (
+              <button
+                onClick={() => { if (confirm('Archive this certificate? This cannot be undone.')) archiveMutation.mutate(); }}
+                disabled={archiveMutation.isPending}
+                className="btn btn-ghost text-xs text-red-400 hover:text-red-300 disabled:opacity-50"
+              >
+                {archiveMutation.isPending ? 'Archiving...' : 'Archive'}
+              </button>
+            )}
           </div>
         }
       />
@@ -89,6 +131,21 @@ export default function CertificateDetailPage() {
         {renewMutation.isError && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
             Failed to trigger renewal: {(renewMutation.error as Error).message}
+          </div>
+        )}
+        {deployMutation.isSuccess && (
+          <div className="bg-emerald-500/10 border border-emerald-500/20 text-emerald-400 rounded-lg px-4 py-3 text-sm">
+            Deployment triggered. A deployment job has been created.
+          </div>
+        )}
+        {deployMutation.isError && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
+            Failed to deploy: {(deployMutation.error as Error).message}
+          </div>
+        )}
+        {archiveMutation.isError && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
+            Failed to archive: {(archiveMutation.error as Error).message}
           </div>
         )}
 
@@ -163,6 +220,39 @@ export default function CertificateDetailPage() {
           )}
         </div>
       </div>
+      {showDeploy && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowDeploy(false)}>
+          <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-slate-200 mb-4">Deploy Certificate</h2>
+            {deployMutation.isError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">
+                {(deployMutation.error as Error).message}
+              </div>
+            )}
+            <label className="text-xs text-slate-400 block mb-2">Select Target</label>
+            <select
+              value={deployTargetId}
+              onChange={e => setDeployTargetId(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+            >
+              <option value="">Choose a target...</option>
+              {targets?.data?.map(t => (
+                <option key={t.id} value={t.id}>{t.name} ({t.type} — {t.hostname})</option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowDeploy(false)} className="btn btn-ghost text-sm">Cancel</button>
+              <button
+                onClick={() => deployMutation.mutate()}
+                disabled={!deployTargetId || deployMutation.isPending}
+                className="btn btn-primary text-sm disabled:opacity-50"
+              >
+                {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </>
   );
 }

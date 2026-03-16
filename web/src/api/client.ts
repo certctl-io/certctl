@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, Issuer, Target, PaginatedResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, PaginatedResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -70,6 +70,12 @@ export const createCertificate = (data: Partial<Certificate>) =>
 export const triggerRenewal = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/certificates/${id}/renew`, { method: 'POST' });
 
+export const updateCertificate = (id: string, data: Partial<Certificate>) =>
+  fetchJSON<Certificate>(`${BASE}/certificates/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const archiveCertificate = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/certificates/${id}`, { method: 'DELETE' });
+
 export const triggerDeployment = (id: string, targetId: string) =>
   fetchJSON<{ message: string }>(`${BASE}/certificates/${id}/deploy`, {
     method: 'POST',
@@ -84,6 +90,9 @@ export const getAgents = (params: Record<string, string> = {}) => {
 
 export const getAgent = (id: string) =>
   fetchJSON<Agent>(`${BASE}/agents/${id}`);
+
+export const registerAgent = (data: Partial<Agent>) =>
+  fetchJSON<Agent>(`${BASE}/agents`, { method: 'POST', body: JSON.stringify(data) });
 
 // Jobs
 export const getJobs = (params: Record<string, string> = {}) => {
@@ -100,6 +109,9 @@ export const getNotifications = (params: Record<string, string> = {}) => {
   return fetchJSON<PaginatedResponse<Notification>>(`${BASE}/notifications?${qs}`);
 };
 
+export const markNotificationRead = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/notifications/${id}/read`, { method: 'POST' });
+
 // Audit
 export const getAuditEvents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
@@ -112,17 +124,44 @@ export const getPolicies = (params: Record<string, string> = {}) => {
   return fetchJSON<PaginatedResponse<PolicyRule>>(`${BASE}/policies?${qs}`);
 };
 
+export const createPolicy = (data: Partial<PolicyRule>) =>
+  fetchJSON<PolicyRule>(`${BASE}/policies`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updatePolicy = (id: string, data: Partial<PolicyRule>) =>
+  fetchJSON<PolicyRule>(`${BASE}/policies/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deletePolicy = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/policies/${id}`, { method: 'DELETE' });
+
+export const getPolicyViolations = (id: string) =>
+  fetchJSON<PaginatedResponse<PolicyViolation>>(`${BASE}/policies/${id}/violations`);
+
 // Issuers
 export const getIssuers = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
   return fetchJSON<PaginatedResponse<Issuer>>(`${BASE}/issuers?${qs}`);
 };
 
+export const createIssuer = (data: Partial<Issuer>) =>
+  fetchJSON<Issuer>(`${BASE}/issuers`, { method: 'POST', body: JSON.stringify(data) });
+
+export const testIssuerConnection = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/issuers/${id}/test`, { method: 'POST' });
+
+export const deleteIssuer = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/issuers/${id}`, { method: 'DELETE' });
+
 // Targets
 export const getTargets = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
   return fetchJSON<PaginatedResponse<Target>>(`${BASE}/targets?${qs}`);
 };
+
+export const createTarget = (data: Partial<Target>) =>
+  fetchJSON<Target>(`${BASE}/targets`, { method: 'POST', body: JSON.stringify(data) });
+
+export const deleteTarget = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/targets/${id}`, { method: 'DELETE' });
 
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');

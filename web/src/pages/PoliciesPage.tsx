@@ -1,5 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
-import { getPolicies } from '../api/client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getPolicies, updatePolicy, deletePolicy } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -22,9 +22,21 @@ const severityDots: Record<string, string> = {
 };
 
 export default function PoliciesPage() {
+  const queryClient = useQueryClient();
+
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['policies'],
     queryFn: () => getPolicies(),
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => updatePolicy(id, { enabled }),
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
+  });
+
+  const deleteMutation = useMutation({
+    mutationFn: deletePolicy,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
   });
 
   const policies = data?.data || [];
@@ -67,12 +79,27 @@ export default function PoliciesPage() {
       key: 'enabled',
       label: 'Enabled',
       render: (p) => (
-        <span className={p.enabled ? 'text-emerald-400' : 'text-slate-500'}>
-          {p.enabled ? 'Yes' : 'No'}
-        </span>
+        <button
+          onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: p.id, enabled: !p.enabled }); }}
+          className={`text-xs font-medium transition-colors ${p.enabled ? 'text-emerald-400 hover:text-emerald-300' : 'text-slate-500 hover:text-slate-300'}`}
+        >
+          {p.enabled ? 'Enabled' : 'Disabled'}
+        </button>
       ),
     },
     { key: 'created', label: 'Created', render: (p) => <span className="text-xs text-slate-400">{formatDateTime(p.created_at)}</span> },
+    {
+      key: 'actions',
+      label: '',
+      render: (p) => (
+        <button
+          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete policy ${p.name}?`)) deleteMutation.mutate(p.id); }}
+          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+        >
+          Delete
+        </button>
+      ),
+    },
   ];
 
   return (
