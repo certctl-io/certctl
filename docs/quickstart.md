@@ -159,10 +159,10 @@ curl -s -X POST http://localhost:8443/api/v1/certificates \
   }' | jq .
 ```
 
-The server returns the created certificate with an auto-generated ID:
+The server returns the created certificate. Since we didn't include an `id` field, the server auto-generates one using the name and a timestamp:
 ```json
 {
-  "id": "a1b2c3d4-...",
+  "id": "My First Certificate-1710403200000000000",
   "name": "My First Certificate",
   "common_name": "myapp.example.com",
   "status": "Pending",
@@ -170,7 +170,7 @@ The server returns the created certificate with an auto-generated ID:
 }
 ```
 
-Save the certificate ID:
+Save the certificate ID (or provide your own `id` in the request body, e.g. `"id": "mc-my-first"`):
 ```bash
 CERT_ID="<paste the id from the response>"
 ```

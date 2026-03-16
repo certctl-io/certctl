@@ -8,7 +8,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (40+ endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (55 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers.
 
 ```mermaid
 flowchart LR
@@ -202,19 +202,29 @@ POST   /api/v1/agents/{id}/jobs/{jobId}/status  Report job completion/failure
 GET    /api/v1/issuers                    List issuers
 POST   /api/v1/issuers                    Create
 GET    /api/v1/issuers/{id}               Get
+PUT    /api/v1/issuers/{id}               Update
+DELETE /api/v1/issuers/{id}               Delete
 POST   /api/v1/issuers/{id}/test          Test connectivity
 
 GET    /api/v1/targets                    List deployment targets
 POST   /api/v1/targets                    Create
 GET    /api/v1/targets/{id}               Get
+PUT    /api/v1/targets/{id}               Update
+DELETE /api/v1/targets/{id}               Delete
 ```
 
 ### Organization
 ```
 GET    /api/v1/teams                      List teams
 POST   /api/v1/teams                      Create
+GET    /api/v1/teams/{id}                 Get
+PUT    /api/v1/teams/{id}                 Update
+DELETE /api/v1/teams/{id}                 Delete
 GET    /api/v1/owners                     List owners
 POST   /api/v1/owners                     Create
+GET    /api/v1/owners/{id}                Get
+PUT    /api/v1/owners/{id}                Update
+DELETE /api/v1/owners/{id}                Delete
 ```
 
 ### Operations
@@ -225,10 +235,19 @@ POST   /api/v1/jobs/{id}/cancel           Cancel
 
 GET    /api/v1/policies                   List policy rules
 POST   /api/v1/policies                   Create
+PUT    /api/v1/policies/{id}              Update (enable/disable)
+DELETE /api/v1/policies/{id}              Delete
 GET    /api/v1/policies/{id}/violations   List violations for rule
 
 GET    /api/v1/audit                      Query audit trail
 GET    /api/v1/notifications              List notifications
+POST   /api/v1/notifications/{id}/read    Mark as read
+```
+
+### Auth
+```
+GET    /api/v1/auth/info                  Auth mode info (no auth required)
+GET    /api/v1/auth/check                 Validate credentials
 ```
 
 ### Health
@@ -310,7 +329,7 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (feature-complete → v1.0.0 tag pending)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, lint, test with coverage gates (service layer 30%+, handler layer 50%+), and frontend checks on every push. 170+ tests across service, handler, integration, and connector layers.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers.
 
 Remaining before the v1.0.0 tag: dashboard screenshots in README, tagged Docker images published, final error-handling audit to confirm no panics or unhandled error paths.
 

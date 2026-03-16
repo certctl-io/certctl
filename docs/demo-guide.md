@@ -77,8 +77,8 @@ curl -s http://localhost:8443/api/v1/agents | jq .
 # View audit trail
 curl -s http://localhost:8443/api/v1/audit | jq .
 
-# View policy violations
-curl -s http://localhost:8443/api/v1/policies/violations | jq .
+# View policy violations (replace POLICY_ID with a real policy ID, e.g. pr-require-owner)
+curl -s http://localhost:8443/api/v1/policies/pr-require-owner/violations | jq .
 
 # Check system health
 curl -s http://localhost:8443/health | jq .
@@ -86,13 +86,13 @@ curl -s http://localhost:8443/health | jq .
 
 ## Demo Without Docker
 
-The dashboard includes a **Demo Mode** that works without any backend. Just open the HTML file directly:
+The dashboard includes a **Demo Mode** that works without any backend. Build and serve the frontend with Vite:
 
 ```bash
-open web/index.html
-# or
-python3 -m http.server 3000 -d web/
-# then visit http://localhost:3000
+cd web
+npm install
+npm run dev
+# Dashboard available at http://localhost:5173
 ```
 
 When the API is unreachable, the dashboard automatically loads realistic mock data and shows a subtle "Demo Mode" badge. This is perfect for screenshots, presentations, or quick demos without any infrastructure.
