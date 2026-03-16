@@ -1,5 +1,17 @@
 # Multi-stage build for certctl server
-# Stage 1: Build
+
+# Stage 1: Build frontend
+FROM node:20-alpine AS frontend
+
+WORKDIR /app/web
+
+COPY web/package.json web/package-lock.json ./
+RUN npm ci
+
+COPY web/ .
+RUN npm run build
+
+# Stage 2: Build Go binary
 FROM golang:1.22-alpine AS builder
 
 RUN apk add --no-cache git ca-certificates tzdata
@@ -18,7 +30,7 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
     -o bin/server \
     ./cmd/server
 
-# Stage 2: Runtime
+# Stage 3: Runtime
 FROM alpine:3.19
 
 RUN apk add --no-cache ca-certificates tzdata curl
@@ -30,7 +42,7 @@ WORKDIR /app
 
 COPY --from=builder /app/bin/server .
 COPY --chown=certctl:certctl migrations/ ./migrations/
-COPY --chown=certctl:certctl web/ ./web/
+COPY --from=frontend --chown=certctl:certctl /app/web/dist/ ./web/dist/
 
 RUN chown -R certctl:certctl /app
 
