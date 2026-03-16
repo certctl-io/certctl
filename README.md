@@ -29,6 +29,21 @@ flowchart LR
     API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME"]
 ```
 
+### Screenshots
+
+| | |
+|---|---|
+| ![Dashboard](docs/screenshots/dashboard.png) | ![Certificates](docs/screenshots/certificates.png) |
+| **Dashboard** — certificate stats, expiry timeline, recent jobs | **Certificates** — full inventory with status, environment, owner filters |
+| ![Agents](docs/screenshots/agents.png) | ![Jobs](docs/screenshots/jobs.png) |
+| **Agents** — fleet health, hostname, heartbeat tracking | **Jobs** — issuance, renewal, deployment job queue |
+| ![Notifications](docs/screenshots/notifications.png) | ![Policies](docs/screenshots/policies.png) |
+| **Notifications** — threshold alerts grouped by certificate | **Policies** — enforcement rules with enable/disable and delete |
+| ![Issuers](docs/screenshots/issuers.png) | ![Targets](docs/screenshots/targets.png) |
+| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, F5, IIS) |
+| ![Audit Trail](docs/screenshots/audit-trail.png) | |
+| **Audit Trail** — immutable log of every action | |
+
 ## Quick Start
 
 ### Docker Compose (Recommended)

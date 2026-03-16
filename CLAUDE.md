@@ -41,7 +41,7 @@ You are my long-term copilot for building certctl — a self-hosted certificate 
 - [x] Agent local key storage — keys written to `CERTCTL_KEY_DIR` (default /var/lib/certctl/keys) with 0600 permissions
 
 ### What's NOT Wired Up Yet (Pre-v1.0 Gaps)
-- [ ] **README screenshots**: Screenshots of actual dashboard in README
+- [x] **README screenshots**: 9 dashboard screenshots in docs/screenshots/, referenced in README
 - [ ] **Tagged Docker images**: Publish v1.0.0 images
 - [x] **Frontend tests**: 53 Vitest tests (API client coverage, utility functions) with CI integration
 
