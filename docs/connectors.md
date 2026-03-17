@@ -110,6 +110,8 @@ Configuration:
 
 For HTTP-01 to work, the domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet. The connector automatically registers an ACME account, creates orders, solves challenges, finalizes with the CSR, and downloads the issued certificate chain.
 
+**Limitation:** v1 supports HTTP-01 challenges only. DNS-01 challenge support (required for wildcard certificates and hosts that can't serve HTTP on port 80) is planned for V2, including provider-specific DNS adapters (Cloudflare, Route53, etc.) and custom validation script hooks.
+
 Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
 - `CERTCTL_ACME_EMAIL` — Contact email for account registration
