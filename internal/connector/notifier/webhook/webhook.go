@@ -89,14 +89,14 @@ func (c *Connector) SendAlert(ctx context.Context, alert notifier.Alert) error {
 
 	// Format payload
 	payload := map[string]interface{}{
-		"type":      "alert",
-		"alert_id":  alert.ID,
-		"severity":  alert.Severity,
-		"subject":   alert.Subject,
-		"message":   alert.Message,
-		"recipient": alert.Recipient,
+		"type":       "alert",
+		"alert_id":   alert.ID,
+		"severity":   alert.Severity,
+		"subject":    alert.Subject,
+		"message":    alert.Message,
+		"recipient":  alert.Recipient,
 		"created_at": alert.CreatedAt,
-		"metadata":  alert.Metadata,
+		"metadata":   alert.Metadata,
 	}
 
 	if err := c.postWebhook(ctx, payload); err != nil {

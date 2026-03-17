@@ -379,10 +379,10 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 			x509.ExtKeyUsageServerAuth,
 			x509.ExtKeyUsageClientAuth,
 		},
-		DNSNames:            dnsNames,
-		EmailAddresses:      emails,
-		SubjectKeyId:        hashPublicKey(csr.PublicKey),
-		AuthorityKeyId:      c.caCert.SubjectKeyId,
+		DNSNames:       dnsNames,
+		EmailAddresses: emails,
+		SubjectKeyId:   hashPublicKey(csr.PublicKey),
+		AuthorityKeyId: c.caCert.SubjectKeyId,
 	}
 
 	// Add IP addresses if present

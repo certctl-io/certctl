@@ -20,14 +20,14 @@ type Connector interface {
 
 // Alert represents a notification alert with urgency.
 type Alert struct {
-	ID          string            `json:"id"`
-	Type        string            `json:"type"`
-	Severity    string            `json:"severity"`
-	Subject     string            `json:"subject"`
-	Message     string            `json:"message"`
-	Recipient   string            `json:"recipient"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
-	CreatedAt   time.Time         `json:"created_at"`
+	ID        string            `json:"id"`
+	Type      string            `json:"type"`
+	Severity  string            `json:"severity"`
+	Subject   string            `json:"subject"`
+	Message   string            `json:"message"`
+	Recipient string            `json:"recipient"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+	CreatedAt time.Time         `json:"created_at"`
 }
 
 // Event represents a notification event with contextual information.

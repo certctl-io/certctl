@@ -11,7 +11,7 @@ import (
 
 // NotificationService provides business logic for managing notifications.
 type NotificationService struct {
-	notifRepo       repository.NotificationRepository
+	notifRepo        repository.NotificationRepository
 	notifierRegistry map[string]Notifier
 }
 

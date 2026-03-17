@@ -14,13 +14,13 @@ import (
 
 // AgentService provides business logic for managing and coordinating with agents.
 type AgentService struct {
-	agentRepo       repository.AgentRepository
-	certRepo        repository.CertificateRepository
-	jobRepo         repository.JobRepository
-	targetRepo      repository.TargetRepository
-	auditService    *AuditService
-	issuerRegistry  map[string]IssuerConnector
-	renewalService  *RenewalService
+	agentRepo      repository.AgentRepository
+	certRepo       repository.CertificateRepository
+	jobRepo        repository.JobRepository
+	targetRepo     repository.TargetRepository
+	auditService   *AuditService
+	issuerRegistry map[string]IssuerConnector
+	renewalService *RenewalService
 }
 
 // NewAgentService creates a new agent service.
@@ -161,7 +161,7 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 			}
 
 			version := &domain.CertificateVersion{
-				ID:             generateID("certver"),
+				ID:            generateID("certver"),
 				CertificateID: certID,
 				SerialNumber:  result.Serial,
 				NotBefore:     result.NotBefore,

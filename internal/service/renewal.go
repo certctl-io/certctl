@@ -204,7 +204,7 @@ func (s *RenewalService) sendThresholdAlerts(ctx context.Context, cert *domain.M
 		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"expiration_alert_sent", "certificate", cert.ID,
 			map[string]interface{}{
-				"threshold_days":  threshold,
+				"threshold_days":    threshold,
 				"days_until_expiry": daysUntil,
 			})
 	}
@@ -356,14 +356,14 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 	// Create new certificate version
 	version := &domain.CertificateVersion{
 		ID:                generateID("certver"),
-		CertificateID:    job.CertificateID,
-		SerialNumber:     result.Serial,
-		NotBefore:        result.NotBefore,
-		NotAfter:         result.NotAfter,
+		CertificateID:     job.CertificateID,
+		SerialNumber:      result.Serial,
+		NotBefore:         result.NotBefore,
+		NotAfter:          result.NotAfter,
 		FingerprintSHA256: fingerprint,
-		PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
-		CSRPEM:           privKeyPEM, // Server mode: stores private key for agent deployment
-		CreatedAt:        time.Now(),
+		PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
+		CSRPEM:            privKeyPEM, // Server mode: stores private key for agent deployment
+		CreatedAt:         time.Now(),
 	}
 
 	if err := s.certRepo.CreateVersion(ctx, version); err != nil {
@@ -439,14 +439,14 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 	// Store cert version — CSRPEM holds the actual CSR (not the private key!)
 	version := &domain.CertificateVersion{
 		ID:                generateID("certver"),
-		CertificateID:    cert.ID,
-		SerialNumber:     result.Serial,
-		NotBefore:        result.NotBefore,
-		NotAfter:         result.NotAfter,
+		CertificateID:     cert.ID,
+		SerialNumber:      result.Serial,
+		NotBefore:         result.NotBefore,
+		NotAfter:          result.NotAfter,
 		FingerprintSHA256: fingerprint,
-		PEMChain:         result.CertPEM + "\n" + result.ChainPEM,
-		CSRPEM:           csrPEM, // Agent mode: stores actual CSR, not private key
-		CreatedAt:        time.Now(),
+		PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
+		CSRPEM:            csrPEM, // Agent mode: stores actual CSR, not private key
+		CreatedAt:         time.Now(),
 	}
 
 	if err := s.certRepo.CreateVersion(ctx, version); err != nil {

@@ -24,9 +24,9 @@ type JobFilter struct {
 
 // AuditFilter defines filtering criteria for audit event queries.
 type AuditFilter struct {
-	Actor        string    // username or service ID
-	ActorType    string    // "user", "agent", "system"
-	ResourceType string    // e.g., "certificate", "policy", "agent"
+	Actor        string // username or service ID
+	ActorType    string // "user", "agent", "system"
+	ResourceType string // e.g., "certificate", "policy", "agent"
 	ResourceID   string
 	From         time.Time
 	To           time.Time

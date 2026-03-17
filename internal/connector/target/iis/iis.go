@@ -14,10 +14,10 @@ import (
 // Config represents the IIS deployment target configuration.
 // This configuration is for Windows agents that manage IIS servers.
 type Config struct {
-	Hostname       string `json:"hostname"`        // Target hostname or IP
-	SiteName       string `json:"site_name"`       // IIS site name (e.g., "Default Web Site")
-	CertStore      string `json:"cert_store"`      // Windows cert store (e.g., "My", "WebHosting")
-	BindingInfo    string `json:"binding_info"`    // Binding info (e.g., "*.example.com")
+	Hostname    string `json:"hostname"`     // Target hostname or IP
+	SiteName    string `json:"site_name"`    // IIS site name (e.g., "Default Web Site")
+	CertStore   string `json:"cert_store"`   // Windows cert store (e.g., "My", "WebHosting")
+	BindingInfo string `json:"binding_info"` // Binding info (e.g., "*.example.com")
 }
 
 // Connector implements the target.Connector interface for IIS (Internet Information Services).
@@ -86,12 +86,12 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 // the IIS binding to use the new certificate.
 //
 // The IIS deployment process (via PowerShell):
-// 1. Create a temporary PFX file from the certificate and existing private key
-//    (Note: The private key is managed by the agent, not provided by the control plane)
-// 2. Import the PFX to the Windows certificate store (My store by default)
-// 3. Get the certificate thumbprint
-// 4. Update the IIS binding to use the new certificate by thumbprint
-// 5. Verify the binding is active
+//  1. Create a temporary PFX file from the certificate and existing private key
+//     (Note: The private key is managed by the agent, not provided by the control plane)
+//  2. Import the PFX to the Windows certificate store (My store by default)
+//  3. Get the certificate thumbprint
+//  4. Update the IIS binding to use the new certificate by thumbprint
+//  5. Verify the binding is active
 //
 // TODO: Implement actual PowerShell commands:
 // - Import-PfxCertificate -FilePath {pfxPath} -CertStoreLocation "Cert:\LocalMachine\My"
@@ -128,10 +128,10 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		Message:       "Certificate deployment to IIS initiated (stub)",
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"hostname":     c.config.Hostname,
-			"site_name":    c.config.SiteName,
-			"cert_store":   c.config.CertStore,
-			"duration_ms":  fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
+			"hostname":    c.config.Hostname,
+			"site_name":   c.config.SiteName,
+			"cert_store":  c.config.CertStore,
+			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
 		},
 	}, nil
 }

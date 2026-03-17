@@ -12,10 +12,10 @@ import (
 // JobService manages job processing and status tracking.
 // It coordinates between the scheduler and various job-specific services.
 type JobService struct {
-	jobRepo              repository.JobRepository
-	renewalService       *RenewalService
-	deploymentService    *DeploymentService
-	logger               *slog.Logger
+	jobRepo           repository.JobRepository
+	renewalService    *RenewalService
+	deploymentService *DeploymentService
+	logger            *slog.Logger
 }
 
 // NewJobService creates a new job service.
@@ -249,4 +249,3 @@ func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]doma
 func (s *JobService) GetJob(id string) (*domain.Job, error) {
 	return s.jobRepo.Get(context.Background(), id)
 }
-

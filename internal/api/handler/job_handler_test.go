@@ -12,8 +12,8 @@ import (
 
 // MockJobService is a mock implementation of JobService interface.
 type MockJobService struct {
-	ListJobsFn func(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
-	GetJobFn   func(id string) (*domain.Job, error)
+	ListJobsFn  func(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
+	GetJobFn    func(id string) (*domain.Job, error)
 	CancelJobFn func(id string) error
 }
 

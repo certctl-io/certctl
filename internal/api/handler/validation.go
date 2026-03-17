@@ -126,7 +126,7 @@ func isValidHostnameChar(r rune) bool {
 		r == '.' ||
 		r == '-' ||
 		r == '_' || // Underscores are sometimes allowed
-		r == '*'    // Wildcard support
+		r == '*' // Wildcard support
 }
 
 // Error method makes ValidationError satisfy the error interface.

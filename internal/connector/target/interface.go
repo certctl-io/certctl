@@ -23,37 +23,37 @@ type Connector interface {
 // In agent keygen mode, KeyPEM is populated from the agent's local key store.
 // In server keygen mode (demo only), KeyPEM may be empty if the key was embedded in the cert version.
 type DeploymentRequest struct {
-	CertPEM       string          `json:"cert_pem"`
-	KeyPEM        string          `json:"key_pem,omitempty"`
-	ChainPEM      string          `json:"chain_pem"`
-	TargetConfig  json.RawMessage `json:"target_config"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	CertPEM      string            `json:"cert_pem"`
+	KeyPEM       string            `json:"key_pem,omitempty"`
+	ChainPEM     string            `json:"chain_pem"`
+	TargetConfig json.RawMessage   `json:"target_config"`
+	Metadata     map[string]string `json:"metadata,omitempty"`
 }
 
 // DeploymentResult contains the result of a successful certificate deployment.
 type DeploymentResult struct {
-	Success       bool      `json:"success"`
-	TargetAddress string    `json:"target_address"`
-	DeploymentID  string    `json:"deployment_id"`
-	Message       string    `json:"message"`
-	DeployedAt    time.Time `json:"deployed_at"`
+	Success       bool              `json:"success"`
+	TargetAddress string            `json:"target_address"`
+	DeploymentID  string            `json:"deployment_id"`
+	Message       string            `json:"message"`
+	DeployedAt    time.Time         `json:"deployed_at"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 // ValidationRequest contains the parameters for validating a deployed certificate.
 type ValidationRequest struct {
-	CertificateID string          `json:"certificate_id"`
-	Serial        string          `json:"serial"`
-	TargetConfig  json.RawMessage `json:"target_config"`
+	CertificateID string            `json:"certificate_id"`
+	Serial        string            `json:"serial"`
+	TargetConfig  json.RawMessage   `json:"target_config"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }
 
 // ValidationResult contains the result of a certificate validation check.
 type ValidationResult struct {
-	Valid         bool      `json:"valid"`
-	Serial        string    `json:"serial"`
-	TargetAddress string    `json:"target_address"`
-	Message       string    `json:"message"`
-	ValidatedAt   time.Time `json:"validated_at"`
+	Valid         bool              `json:"valid"`
+	Serial        string            `json:"serial"`
+	TargetAddress string            `json:"target_address"`
+	Message       string            `json:"message"`
+	ValidatedAt   time.Time         `json:"validated_at"`
 	Metadata      map[string]string `json:"metadata,omitempty"`
 }

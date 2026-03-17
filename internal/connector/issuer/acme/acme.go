@@ -22,10 +22,10 @@ import (
 
 // Config represents the ACME issuer connector configuration.
 type Config struct {
-	DirectoryURL string `json:"directory_url"` // ACME directory URL (e.g., https://acme-staging-v02.api.letsencrypt.org/directory)
-	Email        string `json:"email"`         // Contact email for the ACME account
-	EABKid       string `json:"eab_kid,omitempty"`  // External Account Binding Key ID (for some CAs)
-	EABHmac      string `json:"eab_hmac,omitempty"` // External Account Binding HMAC Key
+	DirectoryURL string `json:"directory_url"`       // ACME directory URL (e.g., https://acme-staging-v02.api.letsencrypt.org/directory)
+	Email        string `json:"email"`               // Contact email for the ACME account
+	EABKid       string `json:"eab_kid,omitempty"`   // External Account Binding Key ID (for some CAs)
+	EABHmac      string `json:"eab_hmac,omitempty"`  // External Account Binding HMAC Key
 	HTTPPort     int    `json:"http_port,omitempty"` // Port for HTTP-01 challenge server (default: 80)
 }
 

@@ -13,12 +13,12 @@ import (
 
 // Config represents the F5 BIG-IP deployment target configuration.
 type Config struct {
-	Host        string `json:"host"`         // F5 BIG-IP hostname or IP
-	Port        int    `json:"port"`         // F5 iControl REST API port (default 443)
-	Username    string `json:"username"`     // Administrative username
-	Password    string `json:"password"`     // Administrative password
-	Partition   string `json:"partition"`    // F5 partition name (e.g., "Common")
-	SSLProfile  string `json:"ssl_profile"`  // SSL profile name to update
+	Host       string `json:"host"`        // F5 BIG-IP hostname or IP
+	Port       int    `json:"port"`        // F5 iControl REST API port (default 443)
+	Username   string `json:"username"`    // Administrative username
+	Password   string `json:"password"`    // Administrative password
+	Partition  string `json:"partition"`   // F5 partition name (e.g., "Common")
+	SSLProfile string `json:"ssl_profile"` // SSL profile name to update
 }
 
 // Connector implements the target.Connector interface for F5 BIG-IP load balancers.
@@ -138,10 +138,10 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		Message:       "Certificate deployment to F5 initiated (stub)",
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"host":         c.config.Host,
-			"partition":    c.config.Partition,
-			"ssl_profile":  c.config.SSLProfile,
-			"duration_ms":  fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
+			"host":        c.config.Host,
+			"partition":   c.config.Partition,
+			"ssl_profile": c.config.SSLProfile,
+			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
 		},
 	}, nil
 }

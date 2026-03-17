@@ -12,8 +12,8 @@ import (
 func TestCreateRule(t *testing.T) {
 	ctx := context.Background()
 	policyRepo := &mockPolicyRepo{
-		Rules:       make(map[string]*domain.PolicyRule),
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      make(map[string]*domain.PolicyRule),
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{Events: []*domain.AuditEvent{}}
 	auditService := NewAuditService(auditRepo)
@@ -58,8 +58,8 @@ func TestGetRule(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -79,8 +79,8 @@ func TestGetRule(t *testing.T) {
 func TestGetRule_NotFound(t *testing.T) {
 	ctx := context.Background()
 	policyRepo := &mockPolicyRepo{
-		Rules:       make(map[string]*domain.PolicyRule),
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      make(map[string]*domain.PolicyRule),
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -115,8 +115,8 @@ func TestListRules(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -147,8 +147,8 @@ func TestUpdateRule(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": originalRule},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": originalRule},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{Events: []*domain.AuditEvent{}}
 	auditService := NewAuditService(auditRepo)
@@ -187,8 +187,8 @@ func TestDeleteRule(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{Events: []*domain.AuditEvent{}}
 	auditService := NewAuditService(auditRepo)
@@ -223,8 +223,8 @@ func TestValidateCertificate(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -265,8 +265,8 @@ func TestValidateCertificate_WithViolation(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -319,8 +319,8 @@ func TestValidateCertificate_MultipleViolations(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -330,7 +330,7 @@ func TestValidateCertificate_MultipleViolations(t *testing.T) {
 	cert := &domain.ManagedCertificate{
 		ID:         "cert-001",
 		CommonName: "example.com",
-		IssuerID:   "", // Missing issuer
+		IssuerID:   "",  // Missing issuer
 		Tags:       nil, // Missing metadata
 		Status:     domain.CertificateStatusActive,
 		ExpiresAt:  now.AddDate(1, 0, 0),
@@ -368,8 +368,8 @@ func TestListPolicies(t *testing.T) {
 	}
 
 	policyRepo := &mockPolicyRepo{
-		Rules:       map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      map[string]*domain.PolicyRule{"rule-001": rule1, "rule-002": rule2},
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
@@ -392,8 +392,8 @@ func TestListPolicies(t *testing.T) {
 func TestCreatePolicy(t *testing.T) {
 	now := time.Now()
 	policyRepo := &mockPolicyRepo{
-		Rules:       make(map[string]*domain.PolicyRule),
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      make(map[string]*domain.PolicyRule),
+		Violations: []*domain.PolicyViolation{},
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)

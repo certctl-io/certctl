@@ -18,8 +18,8 @@ func TestCreateCertificate(t *testing.T) {
 		Events: []*domain.AuditEvent{},
 	}
 	policyRepo := &mockPolicyRepo{
-		Rules:       make(map[string]*domain.PolicyRule),
-		Violations:  []*domain.PolicyViolation{},
+		Rules:      make(map[string]*domain.PolicyRule),
+		Violations: []*domain.PolicyViolation{},
 	}
 
 	policyService := NewPolicyService(policyRepo, NewAuditService(auditRepo))

@@ -18,25 +18,25 @@ type Issuer struct {
 
 // DeploymentTarget represents a target system where certificates are deployed.
 type DeploymentTarget struct {
-	ID        string           `json:"id"`
-	Name      string           `json:"name"`
-	Type      TargetType       `json:"type"`
-	AgentID   string           `json:"agent_id"`
-	Config    json.RawMessage  `json:"config"`
-	Enabled   bool             `json:"enabled"`
-	CreatedAt time.Time        `json:"created_at"`
-	UpdatedAt time.Time        `json:"updated_at"`
+	ID        string          `json:"id"`
+	Name      string          `json:"name"`
+	Type      TargetType      `json:"type"`
+	AgentID   string          `json:"agent_id"`
+	Config    json.RawMessage `json:"config"`
+	Enabled   bool            `json:"enabled"`
+	CreatedAt time.Time       `json:"created_at"`
+	UpdatedAt time.Time       `json:"updated_at"`
 }
 
 // Agent represents an agent running on a target system.
 type Agent struct {
-	ID            string      `json:"id"`
-	Name          string      `json:"name"`
-	Hostname      string      `json:"hostname"`
-	Status        AgentStatus `json:"status"`
-	LastHeartbeatAt *time.Time `json:"last_heartbeat_at,omitempty"`
-	RegisteredAt  time.Time   `json:"registered_at"`
-	APIKeyHash    string      `json:"api_key_hash"`
+	ID              string      `json:"id"`
+	Name            string      `json:"name"`
+	Hostname        string      `json:"hostname"`
+	Status          AgentStatus `json:"status"`
+	LastHeartbeatAt *time.Time  `json:"last_heartbeat_at,omitempty"`
+	RegisteredAt    time.Time   `json:"registered_at"`
+	APIKeyHash      string      `json:"api_key_hash"`
 }
 
 // AgentStatus represents the operational status of an agent.
@@ -52,7 +52,7 @@ const (
 type IssuerType string
 
 const (
-	IssuerTypeACME     IssuerType = "ACME"
+	IssuerTypeACME      IssuerType = "ACME"
 	IssuerTypeGenericCA IssuerType = "GenericCA"
 )
 

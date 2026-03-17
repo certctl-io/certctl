@@ -37,9 +37,9 @@ type ServerConfig struct {
 
 // DatabaseConfig contains database connection configuration.
 type DatabaseConfig struct {
-	URL             string
-	MaxConnections  int
-	MigrationsPath  string
+	URL            string
+	MaxConnections int
+	MigrationsPath string
 }
 
 // SchedulerConfig contains scheduler timing configuration.
@@ -64,9 +64,9 @@ type AuthConfig struct {
 
 // RateLimitConfig contains rate limiting configuration.
 type RateLimitConfig struct {
-	Enabled    bool
-	RPS        float64 // Requests per second
-	BurstSize  int     // Maximum burst size
+	Enabled   bool
+	RPS       float64 // Requests per second
+	BurstSize int     // Maximum burst size
 }
 
 // CORSConfig contains CORS configuration.

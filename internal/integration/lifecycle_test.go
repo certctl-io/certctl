@@ -910,8 +910,8 @@ func (m *mockIssuerRepository) Delete(ctx context.Context, id string) error {
 // Mock service implementations for handlers that need them but aren't tested
 
 type mockTargetService struct {
-	targetRepo    *mockTargetRepository
-	auditService  *service.AuditService
+	targetRepo   *mockTargetRepository
+	auditService *service.AuditService
 }
 
 func (m *mockTargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error) {

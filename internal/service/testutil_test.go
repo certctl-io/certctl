@@ -13,16 +13,16 @@ var errNotFound = errors.New("not found")
 
 // mockCertRepo is a test implementation of CertificateRepository
 type mockCertRepo struct {
-	Certs             map[string]*domain.ManagedCertificate
-	Versions          map[string][]*domain.CertificateVersion
-	CreateErr         error
-	UpdateErr         error
-	GetErr            error
-	ListErr           error
-	ListVersionsErr   error
+	Certs              map[string]*domain.ManagedCertificate
+	Versions           map[string][]*domain.CertificateVersion
+	CreateErr          error
+	UpdateErr          error
+	GetErr             error
+	ListErr            error
+	ListVersionsErr    error
 	ListVersionsResult []*domain.CertificateVersion
-	CreateVersionErr  error
-	ArchiveErr        error
+	CreateVersionErr   error
+	ArchiveErr         error
 }
 
 func (m *mockCertRepo) List(ctx context.Context, filter *repository.CertificateFilter) ([]*domain.ManagedCertificate, int, error) {
@@ -109,15 +109,15 @@ func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 
 // mockJobRepo is a test implementation of JobRepository
 type mockJobRepo struct {
-	Jobs             map[string]*domain.Job
-	StatusUpdates    map[string]domain.JobStatus
-	CreateErr        error
-	UpdateErr        error
-	UpdateStatusErr  error
-	GetErr           error
-	ListErr          error
-	ListByStatusErr  error
-	DeleteErr        error
+	Jobs            map[string]*domain.Job
+	StatusUpdates   map[string]domain.JobStatus
+	CreateErr       error
+	UpdateErr       error
+	UpdateStatusErr error
+	GetErr          error
+	ListErr         error
+	ListByStatusErr error
+	DeleteErr       error
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -261,7 +261,7 @@ func (m *mockNotifRepo) AddNotification(notif *domain.NotificationEvent) {
 
 // mockAuditRepo is a test implementation of AuditRepository
 type mockAuditRepo struct {
-	Events []*domain.AuditEvent
+	Events    []*domain.AuditEvent
 	CreateErr error
 	ListErr   error
 }
@@ -309,15 +309,15 @@ func (m *mockAuditRepo) AddEvent(event *domain.AuditEvent) {
 
 // mockPolicyRepo is a test implementation of PolicyRepository
 type mockPolicyRepo struct {
-	Rules               map[string]*domain.PolicyRule
-	Violations          []*domain.PolicyViolation
-	CreateRuleErr       error
-	UpdateRuleErr       error
-	DeleteRuleErr       error
-	GetRuleErr          error
-	ListRulesErr        error
-	CreateViolationErr  error
-	ListViolationsErr   error
+	Rules              map[string]*domain.PolicyRule
+	Violations         []*domain.PolicyViolation
+	CreateRuleErr      error
+	UpdateRuleErr      error
+	DeleteRuleErr      error
+	GetRuleErr         error
+	ListRulesErr       error
+	CreateViolationErr error
+	ListViolationsErr  error
 }
 
 func (m *mockPolicyRepo) ListRules(ctx context.Context) ([]*domain.PolicyRule, error) {
@@ -420,13 +420,13 @@ func (m *mockRenewalPolicyRepo) AddPolicy(policy *domain.RenewalPolicy) {
 
 // mockAgentRepo is a test implementation of AgentRepository
 type mockAgentRepo struct {
-	Agents            map[string]*domain.Agent
-	HeartbeatUpdates  map[string]time.Time
-	CreateErr         error
-	UpdateErr         error
-	DeleteErr         error
-	GetErr            error
-	ListErr           error
+	Agents             map[string]*domain.Agent
+	HeartbeatUpdates   map[string]time.Time
+	CreateErr          error
+	UpdateErr          error
+	DeleteErr          error
+	GetErr             error
+	ListErr            error
 	UpdateHeartbeatErr error
 	GetByAPIKeyErr     error
 }
@@ -509,13 +509,13 @@ func (m *mockAgentRepo) AddAgent(agent *domain.Agent) {
 
 // mockTargetRepo is a test implementation of TargetRepository
 type mockTargetRepo struct {
-	Targets          map[string]*domain.DeploymentTarget
-	CreateErr        error
-	UpdateErr        error
-	DeleteErr        error
-	GetErr           error
-	ListErr          error
-	ListByCertErr    error
+	Targets       map[string]*domain.DeploymentTarget
+	CreateErr     error
+	UpdateErr     error
+	DeleteErr     error
+	GetErr        error
+	ListErr       error
+	ListByCertErr error
 }
 
 func (m *mockTargetRepo) List(ctx context.Context) ([]*domain.DeploymentTarget, error) {
@@ -667,9 +667,9 @@ func newMockIssuerRepository() *mockIssuerRepository {
 
 // mockIssuerRepository is a test implementation of IssuerRepository
 type mockIssuerRepository struct {
-	issuers map[string]*domain.Issuer
-	GetErr  error
-	ListErr error
+	issuers   map[string]*domain.Issuer
+	GetErr    error
+	ListErr   error
 	CreateErr error
 	UpdateErr error
 	DeleteErr error

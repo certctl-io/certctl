@@ -33,12 +33,12 @@ type IssuanceRequest struct {
 
 // IssuanceResult contains the result of a successful certificate issuance.
 type IssuanceResult struct {
-	CertPEM    string    `json:"cert_pem"`
-	ChainPEM   string    `json:"chain_pem"`
-	Serial     string    `json:"serial"`
-	NotBefore  time.Time `json:"not_before"`
-	NotAfter   time.Time `json:"not_after"`
-	OrderID    string    `json:"order_id"`
+	CertPEM   string    `json:"cert_pem"`
+	ChainPEM  string    `json:"chain_pem"`
+	Serial    string    `json:"serial"`
+	NotBefore time.Time `json:"not_before"`
+	NotAfter  time.Time `json:"not_after"`
+	OrderID   string    `json:"order_id"`
 }
 
 // RenewalRequest contains the parameters for renewing a certificate.
@@ -57,13 +57,13 @@ type RevocationRequest struct {
 
 // OrderStatus contains the status of a pending issuance or renewal order.
 type OrderStatus struct {
-	OrderID    string    `json:"order_id"`
-	Status     string    `json:"status"`
-	Message    *string   `json:"message,omitempty"`
-	CertPEM    *string   `json:"cert_pem,omitempty"`
-	ChainPEM   *string   `json:"chain_pem,omitempty"`
-	Serial     *string   `json:"serial,omitempty"`
-	NotBefore  *time.Time `json:"not_before,omitempty"`
-	NotAfter   *time.Time `json:"not_after,omitempty"`
-	UpdatedAt  time.Time  `json:"updated_at"`
+	OrderID   string     `json:"order_id"`
+	Status    string     `json:"status"`
+	Message   *string    `json:"message,omitempty"`
+	CertPEM   *string    `json:"cert_pem,omitempty"`
+	ChainPEM  *string    `json:"chain_pem,omitempty"`
+	Serial    *string    `json:"serial,omitempty"`
+	NotBefore *time.Time `json:"not_before,omitempty"`
+	NotAfter  *time.Time `json:"not_after,omitempty"`
+	UpdatedAt time.Time  `json:"updated_at"`
 }

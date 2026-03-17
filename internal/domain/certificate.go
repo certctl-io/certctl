@@ -6,36 +6,36 @@ import (
 
 // ManagedCertificate represents a certificate managed by the control plane.
 type ManagedCertificate struct {
-	ID              string            `json:"id"`
-	Name            string            `json:"name"`
-	CommonName      string            `json:"common_name"`
-	SANs            []string          `json:"sans"`
-	Environment     string            `json:"environment"`
-	OwnerID         string            `json:"owner_id"`
-	TeamID          string            `json:"team_id"`
-	IssuerID        string            `json:"issuer_id"`
-	TargetIDs       []string          `json:"target_ids"`
-	RenewalPolicyID string            `json:"renewal_policy_id"`
-	Status          CertificateStatus `json:"status"`
-	ExpiresAt       time.Time         `json:"expires_at"`
-	Tags            map[string]string `json:"tags"`
-	LastRenewalAt   *time.Time        `json:"last_renewal_at,omitempty"`
-	LastDeploymentAt *time.Time       `json:"last_deployment_at,omitempty"`
-	CreatedAt       time.Time         `json:"created_at"`
-	UpdatedAt       time.Time         `json:"updated_at"`
+	ID               string            `json:"id"`
+	Name             string            `json:"name"`
+	CommonName       string            `json:"common_name"`
+	SANs             []string          `json:"sans"`
+	Environment      string            `json:"environment"`
+	OwnerID          string            `json:"owner_id"`
+	TeamID           string            `json:"team_id"`
+	IssuerID         string            `json:"issuer_id"`
+	TargetIDs        []string          `json:"target_ids"`
+	RenewalPolicyID  string            `json:"renewal_policy_id"`
+	Status           CertificateStatus `json:"status"`
+	ExpiresAt        time.Time         `json:"expires_at"`
+	Tags             map[string]string `json:"tags"`
+	LastRenewalAt    *time.Time        `json:"last_renewal_at,omitempty"`
+	LastDeploymentAt *time.Time        `json:"last_deployment_at,omitempty"`
+	CreatedAt        time.Time         `json:"created_at"`
+	UpdatedAt        time.Time         `json:"updated_at"`
 }
 
 // CertificateVersion represents a specific version of a certificate.
 type CertificateVersion struct {
-	ID               string    `json:"id"`
-	CertificateID    string    `json:"certificate_id"`
-	SerialNumber     string    `json:"serial_number"`
-	NotBefore        time.Time `json:"not_before"`
-	NotAfter         time.Time `json:"not_after"`
-	FingerprintSHA256 string   `json:"fingerprint_sha256"`
-	PEMChain         string    `json:"pem_chain"`
-	CSRPEM           string    `json:"csr_pem"`
-	CreatedAt        time.Time `json:"created_at"`
+	ID                string    `json:"id"`
+	CertificateID     string    `json:"certificate_id"`
+	SerialNumber      string    `json:"serial_number"`
+	NotBefore         time.Time `json:"not_before"`
+	NotAfter          time.Time `json:"not_after"`
+	FingerprintSHA256 string    `json:"fingerprint_sha256"`
+	PEMChain          string    `json:"pem_chain"`
+	CSRPEM            string    `json:"csr_pem"`
+	CreatedAt         time.Time `json:"created_at"`
 }
 
 // CertificateStatus represents the lifecycle status of a managed certificate.

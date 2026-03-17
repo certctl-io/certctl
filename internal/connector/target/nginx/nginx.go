@@ -15,10 +15,10 @@ import (
 // Config represents the NGINX deployment target configuration.
 // This configuration is used on the agent side to deploy certificates to NGINX.
 type Config struct {
-	CertPath       string `json:"cert_path"`        // Path where cert will be written (typically /etc/nginx/certs/cert.pem)
-	KeyPath        string `json:"key_path"`         // Path where private key will be written (NOT provided by control plane)
-	ChainPath      string `json:"chain_path"`       // Path where chain will be written (typically /etc/nginx/certs/chain.pem)
-	ReloadCommand  string `json:"reload_command"`   // Command to reload NGINX (e.g., "nginx -s reload" or "systemctl reload nginx")
+	CertPath        string `json:"cert_path"`        // Path where cert will be written (typically /etc/nginx/certs/cert.pem)
+	KeyPath         string `json:"key_path"`         // Path where private key will be written (NOT provided by control plane)
+	ChainPath       string `json:"chain_path"`       // Path where chain will be written (typically /etc/nginx/certs/chain.pem)
+	ReloadCommand   string `json:"reload_command"`   // Command to reload NGINX (e.g., "nginx -s reload" or "systemctl reload nginx")
 	ValidateCommand string `json:"validate_command"` // Command to validate NGINX config (e.g., "nginx -t")
 }
 
@@ -157,9 +157,9 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		Message:       "Certificate deployed and NGINX reloaded successfully",
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"cert_path":     c.config.CertPath,
-			"chain_path":    c.config.ChainPath,
-			"duration_ms":   fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
+			"cert_path":   c.config.CertPath,
+			"chain_path":  c.config.ChainPath,
+			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
 		},
 	}, nil
 }

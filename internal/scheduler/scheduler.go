@@ -19,9 +19,9 @@ type Scheduler struct {
 	logger              *slog.Logger
 
 	// Configurable tick intervals
-	renewalCheckInterval       time.Duration
-	jobProcessorInterval       time.Duration
-	agentHealthCheckInterval   time.Duration
+	renewalCheckInterval        time.Duration
+	jobProcessorInterval        time.Duration
+	agentHealthCheckInterval    time.Duration
 	notificationProcessInterval time.Duration
 }
 

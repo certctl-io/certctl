@@ -11,7 +11,7 @@ import (
 
 // CertificateService provides business logic for certificate management.
 type CertificateService struct {
-	certRepo   repository.CertificateRepository
+	certRepo      repository.CertificateRepository
 	policyService *PolicyService
 	auditService  *AuditService
 }
@@ -23,7 +23,7 @@ func NewCertificateService(
 	auditService *AuditService,
 ) *CertificateService {
 	return &CertificateService{
-		certRepo:   certRepo,
+		certRepo:      certRepo,
 		policyService: policyService,
 		auditService:  auditService,
 	}
