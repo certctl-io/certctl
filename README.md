@@ -278,6 +278,8 @@ GET    /ready                             Readiness check
 |--------|--------|------|
 | Local CA (self-signed) | Implemented | `GenericCA` |
 | ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01) | `ACME` |
+| step-ca | Planned (V2) | — |
+| OpenSSL / Custom CA | Planned (V2) | — |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
 
@@ -285,8 +287,8 @@ GET    /ready                             Readiness check
 | Target | Status | Type |
 |--------|--------|------|
 | NGINX | Implemented | `NGINX` |
-| F5 BIG-IP | Implemented | `F5` |
-| Microsoft IIS | Implemented | `IIS` |
+| F5 BIG-IP | Interface only (V2) | `F5` |
+| Microsoft IIS | Interface only (V2) | `IIS` |
 | Kubernetes Secrets | Planned | — |
 
 ### Notifiers
@@ -349,7 +351,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 Remaining before the v1.0.0 tag: dashboard screenshots in README, tagged Docker images published, final error-handling audit to confirm no panics or unhandled error paths.
 
 ### V2: Operational Maturity
-- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
+- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca and OpenSSL/custom CA issuer connectors, F5 BIG-IP and IIS target connector implementations, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
 - **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams notifiers, bulk cert import
 - **V2.2: Observability** — expiration calendar, health scores, Prometheus metrics, deployment rollback
 

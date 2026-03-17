@@ -40,13 +40,15 @@ flowchart TB
     subgraph "Issuer Backends"
         CA1["Local CA\n(crypto/x509)"]
         CA2["ACME\n(Let's Encrypt)"]
-        CA3["Vault PKI\n(future)"]
+        CA3["step-ca\n(planned)"]
+        CA4["OpenSSL / Custom CA\n(planned)"]
+        CA5["Vault PKI\n(planned)"]
     end
 
     subgraph "Target Systems"
-        T1["NGINX\n(SSH + reload)"]
-        T2["F5 BIG-IP\n(REST API)"]
-        T3["IIS\n(WinRM)"]
+        T1["NGINX\n(file write + reload)"]
+        T2["F5 BIG-IP\n(iControl REST, planned)"]
+        T3["IIS\n(WinRM, planned)"]
     end
 
     DASH --> API
@@ -345,15 +347,17 @@ flowchart TB
         II["IssuerConnector Interface\nIssueCertificate() | RenewCertificate()\nRevokeCertificate() | GetOrderStatus()"]
         II --> LC["Local CA"]
         II --> ACME["ACME v2"]
-        II --> VP["Vault PKI (future)"]
+        II --> SC["step-ca (planned)"]
+        II --> OC["OpenSSL / Custom CA (planned)"]
+        II --> VP["Vault PKI (planned)"]
     end
 
     subgraph "Target Connectors"
         direction TB
         TI["TargetConnector Interface\nDeployCertificate()\nValidateDeployment()"]
         TI --> NG["NGINX"]
-        TI --> F5["F5 BIG-IP"]
-        TI --> IIS["IIS"]
+        TI --> F5["F5 BIG-IP (interface only)"]
+        TI --> IIS["IIS (interface only)"]
     end
 
     subgraph "Notifier Connectors"

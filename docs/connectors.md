@@ -6,8 +6,8 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (ACME, Local CA, Vault, DigiCert)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, F5, IIS)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME; step-ca, OpenSSL, Vault, DigiCert planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX implemented; F5, IIS interface only)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents.
@@ -119,6 +119,15 @@ Environment variables for the default ACME connector:
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 
 Location: `internal/connector/issuer/acme/acme.go`
+
+### Planned Issuers (V2)
+
+The following issuer connectors are planned for V2:
+
+- **step-ca** — Smallstep's private CA and ACME server. Would allow certctl to issue certificates from a self-hosted step-ca instance via its ACME or provisioner APIs.
+- **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
+- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
+- **DigiCert** — Commercial CA integration via DigiCert's REST API.
 
 ### Building a Custom Issuer
 
@@ -270,31 +279,28 @@ The `reload_command` defaults to `systemctl reload nginx` but can be overridden 
 
 Location: `internal/connector/target/nginx/nginx.go`
 
-### Built-in: F5 BIG-IP
+### Planned: F5 BIG-IP (Interface Only)
 
-Deploys certificates to F5 BIG-IP load balancers via the iControl REST API. This is the standard integration path for organizations using F5 for TLS offloading. The connector uploads the certificate and private key to the F5 SSL certificate store, then updates the SSL profile on the virtual server to reference the new certificate.
+The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
 
-Configuration:
+Configuration (defined, not yet functional):
 ```json
 {
   "host": "f5.internal.example.com",
   "username": "admin",
   "password": "...",
   "partition": "Common",
-  "virtual_server": "/Common/vs_api",
   "ssl_profile": "/Common/clientssl_api"
 }
 ```
 
-The connector authenticates to the F5 REST API at `https://{host}/mgmt/tm/`, uploads the certificate via `POST /mgmt/tm/sys/crypto/cert`, uploads the key via `POST /mgmt/tm/sys/crypto/key`, and binds them to the specified SSL profile. The F5's native REST API handles certificate chain assembly. Agent credentials for the F5 API are stored locally on the agent, never on the control plane.
-
 Location: `internal/connector/target/f5/f5.go`
 
-### Built-in: IIS
+### Planned: IIS (Interface Only)
 
-Deploys certificates to Microsoft IIS web servers via WinRM (Windows Remote Management). This connector is for organizations running Windows-based infrastructure where IIS terminates TLS. The connector executes PowerShell commands over WinRM to import a PFX certificate into the Windows certificate store and bind it to an IIS site.
+The IIS target connector interface is built with the WinRM/PowerShell flow mapped out, but the actual remote execution is not yet implemented. The planned flow is: transfer a PFX bundle to the Windows server via WinRM, run `Import-PfxCertificate` to install it into the certificate store, and run `Set-WebBinding` to bind the certificate to the IIS site. Implementation is planned for V2.
 
-Configuration:
+Configuration (defined, not yet functional):
 ```json
 {
   "host": "iis-server.internal.example.com",
@@ -305,8 +311,6 @@ Configuration:
   "use_https": true
 }
 ```
-
-The deployment flow: the connector combines the certificate and private key into a PFX (PKCS#12) bundle, transfers it to the Windows server via WinRM, runs `Import-PfxCertificate` to install it into the specified certificate store (typically `WebHosting` or `My`), then runs `Set-WebBinding` to bind the new certificate to the IIS site. Old certificate bindings are updated in-place so there is no downtime window.
 
 Location: `internal/connector/target/iis/iis.go`
 
