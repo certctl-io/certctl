@@ -1,4 +1,4 @@
-# certctl — Open-Source Certificate Control Plane
+# certctl — Self-Hosted Certificate Lifecycle Platform
 
 A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certificates across your infrastructure with a web dashboard, REST API, and agent-based architecture where private keys never leave your servers.
 
