@@ -30,7 +30,7 @@ Common CAs include Let's Encrypt (free, automated), DigiCert, Sectigo, and your 
 
 ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01) or creating a DNS record (DNS-01).
 
-certctl speaks ACME natively, so it can request certificates from Let's Encrypt or any ACME-compatible CA without manual intervention.
+certctl speaks ACME natively via HTTP-01 challenges, so it can request certificates from Let's Encrypt or any ACME-compatible CA without manual intervention. DNS-01 challenge support (required for wildcard certificates) is planned for V2.
 
 ### Private Key
 
