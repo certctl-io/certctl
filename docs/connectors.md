@@ -126,6 +126,7 @@ The following issuer connectors are planned for V2:
 
 - **step-ca** — Smallstep's private CA and ACME server. Would allow certctl to issue certificates from a self-hosted step-ca instance via its ACME or provisioner APIs.
 - **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
+- **ADCS (Active Directory Certificate Services)** — Microsoft's enterprise CA. Would allow certctl to request certificates from an existing ADCS infrastructure, useful for organizations that need lifecycle management around their Windows PKI.
 - **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
 - **DigiCert** — Commercial CA integration via DigiCert's REST API.
 

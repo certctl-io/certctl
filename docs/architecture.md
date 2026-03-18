@@ -42,7 +42,8 @@ flowchart TB
         CA2["ACME\n(Let's Encrypt)"]
         CA3["step-ca\n(planned)"]
         CA4["OpenSSL / Custom CA\n(planned)"]
-        CA5["Vault PKI\n(planned)"]
+        CA5["ADCS\n(planned)"]
+        CA6["Vault PKI\n(planned)"]
     end
 
     subgraph "Target Systems"
@@ -349,6 +350,7 @@ flowchart TB
         II --> ACME["ACME v2"]
         II --> SC["step-ca (planned)"]
         II --> OC["OpenSSL / Custom CA (planned)"]
+        II --> AD["ADCS (planned)"]
         II --> VP["Vault PKI (planned)"]
     end
 
