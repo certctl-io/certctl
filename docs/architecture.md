@@ -81,6 +81,8 @@ Lightweight Go processes that run on or near your infrastructure. Agents generat
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
+**Planned (V2):** Agent metadata collection — agents will report OS, platform, architecture, IP address, and hostname via heartbeat using `runtime.GOOS`, `runtime.GOARCH`, and `net` stdlib. This metadata enables dynamic device grouping, allowing policies to be scoped by agent criteria (e.g., all Ubuntu agents, all agents in a specific subnet) rather than requiring manual per-certificate assignment.
+
 ### Web Dashboard
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
