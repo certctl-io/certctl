@@ -6,9 +6,9 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME; step-ca, OpenSSL, Vault, DigiCert planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX implemented; F5, IIS interface only)
-3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME implemented; step-ca, ADCS, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX implemented; F5, IIS interface only; Apache httpd, HAProxy planned V2; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
+3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2.1)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents.
 

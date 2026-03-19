@@ -77,7 +77,7 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, F5, IIS) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX fully implemented; Apache httpd, HAProxy planned for V2; F5 BIG-IP, IIS interface only with V2 implementations planned) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
@@ -423,7 +423,9 @@ type Connector interface {
 
 The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
 
-Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **F5 BIG-IP** (REST API upload + virtual server binding), **IIS** (WinRM PFX import + site binding).
+Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **F5 BIG-IP** (interface only — iControl REST flow mapped, implementation planned), **IIS** (interface only — WinRM/PowerShell flow mapped, implementation planned).
+
+**Planned targets (V2):** Apache httpd (file write, `apachectl configtest`, graceful reload), HAProxy (combined PEM file write, reload via socket/signal). **Planned targets (V3):** AWS ALB/CloudFront, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets.
 
 ### Notifier Connector
 

@@ -352,15 +352,16 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 Remaining before the v1.0.0 tag: dashboard screenshots in README, tagged Docker images published, final error-handling audit to confirm no panics or unhandled error paths.
 
 ### V2: Operational Maturity
-- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca, ADCS, and OpenSSL/custom CA issuer connectors, F5 BIG-IP and IIS target connector implementations, agent metadata collection (OS, platform, IP, hostname via heartbeat), dynamic device grouping for policy-based targeting, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
-- **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams notifiers, bulk cert import
-- **V2.2: Observability** — expiration calendar, health scores, Prometheus metrics, deployment rollback
+- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca, ADCS, and OpenSSL/custom CA issuer connectors, F5 BIG-IP, IIS, Apache httpd, and HAProxy target connector implementations, agent metadata collection (OS, platform, IP, hostname via heartbeat), dynamic device grouping for policy-based targeting, crypto policy enforcement, certificate ownership tracking, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
+- **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
+- **V2.2: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics, deployment rollback
+- **V2.3: Integrations & Distribution** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer connector, filesystem cert discovery
 
-### V3: Discovery & Visibility
-Certificate discovery (passive/active scanning), unknown cert detection, triage workflows in GUI
+### V3: Discovery, Visibility & Cloud
+Discovery engine (passive/active scanning, cert chain validation, Nmap/Qualys import, unknown cert detection, triage workflows), cloud targets (AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module, compliance mapping docs
 
 ### V4+: Platform & Scale
-Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support
+Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support, LDAP auth, API key scoping, multi-tenancy
 
 ## License
 

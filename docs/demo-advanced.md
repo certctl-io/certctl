@@ -116,7 +116,7 @@ You should see:
 
 The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
 
-**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault, ADCS), some use commercial CAs (DigiCert, Sectigo), and some have custom OpenSSL-based workflows. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA and ACME (HTTP-01); step-ca, ADCS, OpenSSL/custom CA, Vault PKI, and DigiCert are planned for V2.
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault, ADCS), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA and ACME (HTTP-01); step-ca, ADCS, OpenSSL/custom CA are planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
 
 ```mermaid
 flowchart TD
@@ -129,11 +129,13 @@ flowchart TD
 
     A --> E["Local CA\n(crypto/x509)"]
     A --> F["ACME\n(Let's Encrypt)"]
-    A --> G["step-ca\n(planned)"]
-    A --> H["OpenSSL / Custom CA\n(planned)"]
-    A --> I["ADCS\n(planned)"]
-    A --> J["Vault PKI\n(planned)"]
-    A --> K["DigiCert API\n(planned)"]
+    A --> G["step-ca\n(planned V2)"]
+    A --> H["OpenSSL / Custom CA\n(planned V2)"]
+    A --> I["ADCS\n(planned V2)"]
+    A --> J["DigiCert API\n(planned V2.3)"]
+    A --> K["Vault PKI\n(planned V3)"]
+    A --> L["Entrust / GlobalSign\n(planned V3)"]
+    A --> M["Google CAS / EJBCA\n(planned V3)"]
 ```
 
 ---
