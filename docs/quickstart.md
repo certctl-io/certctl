@@ -25,6 +25,13 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 The `--build` flag is important — it builds the server image including the React frontend. Without it, Docker may use a stale cached image that doesn't include the dashboard.
 
+**For production deployments**, copy `deploy/.env.example` to `deploy/.env` and customize the credentials:
+```bash
+cp deploy/.env.example deploy/.env
+# Edit deploy/.env to set secure POSTGRES_PASSWORD and CERTCTL_API_KEY values
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
 Wait about 30 seconds for PostgreSQL to initialize and the server to boot. Check that everything is healthy:
 
 ```bash

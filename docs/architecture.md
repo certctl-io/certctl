@@ -89,7 +89,7 @@ The web dashboard is the primary operational interface for certctl. It is built 
 
 **Current views**: certificate inventory (list with "New Certificate" creation modal + detail with version history, deploy, archive, and trigger renewal actions), agent fleet (health indicators from heartbeat), job queue (status, retry, cancel), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range and actor/action filters), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with delete), and a summary dashboard.
 
-The dashboard includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
+The dashboard includes an **ErrorBoundary component** for graceful error recovery — if a view crashes, the boundary catches the error and displays a user-friendly message instead of breaking the entire dashboard. It also includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
 **Tech decisions**:
 - Vite for fast builds and HMR during development
@@ -326,12 +326,14 @@ flowchart LR
     N -->|"Send pending notifications\nEmail / Webhook"| DB
 ```
 
-| Loop | Interval | Purpose |
-|------|----------|---------|
-| Renewal checker | 1 hour | Finds certificates approaching expiry, creates renewal jobs |
-| Job processor | 30 seconds | Processes pending jobs (issuance, renewal, deployment) |
-| Agent health check | 2 minutes | Marks agents as offline if heartbeat is stale |
-| Notification processor | 1 minute | Sends pending notifications via configured channels |
+| Loop | Interval | Timeout | Purpose |
+|------|----------|---------|---------|
+| Renewal checker | 1 hour | 5 minutes | Finds certificates approaching expiry, creates renewal jobs |
+| Job processor | 30 seconds | 2 minutes | Processes pending jobs (issuance, renewal, deployment) |
+| Agent health check | 2 minutes | 1 minute | Marks agents as offline if heartbeat is stale |
+| Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
+
+Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
 When the renewal checker finds a certificate within its renewal window, it performs two tasks: threshold-based alerting and renewal job creation.
 
@@ -506,7 +508,11 @@ Every action is recorded as an immutable audit event:
 }
 ```
 
-Audit events cannot be modified or deleted. They support filtering by actor, action, resource type, resource ID, and time range.
+Audit events cannot be modified or deleted. They support filtering by actor, action, resource type, resource ID, and time range. All audit operations are logged via structured `slog` logging; if an audit event fails to persist, the error is logged immediately to ensure no gaps in the audit trail go unnoticed.
+
+### Logging
+
+All logging throughout the service layer uses Go's `log/slog` package for structured, queryable logs. This replaces ad-hoc `fmt.Printf` statements with consistent key-value logging that includes request context, operation names, and error details. Agents also implement exponential backoff on network failures to gracefully handle temporary connectivity issues with the control plane.
 
 ## API Design
 
@@ -532,13 +538,16 @@ flowchart TB
     subgraph "Docker Network (certctl-network)"
         SERVER["certctl-server\n:8443\nAPI + Dashboard"]
         PG[("PostgreSQL\n:5432\nSchema + Seed Data")]
-        AGENT["certctl-agent\nHeartbeat + Work Poll"]
+        AGENT["certctl-agent\nHeartbeat + Work Poll\nagent_keys volume"]
     end
 
     USER["Browser / curl"] -->|"HTTP :8443"| SERVER
     SERVER -->|"SQL"| PG
     AGENT -->|"HTTP (internal)"| SERVER
 ```
+
+**Credentials & Configuration:**
+Database and API credentials are managed via environment variables defined in a `.env` file. Copy `deploy/.env.example` to `deploy/.env` for local development and customize credentials for production. The agent key directory (`CERTCTL_KEY_DIR`) is persisted as a named Docker volume (`agent_keys`) at `/var/lib/certctl/keys` for reliable key storage across container restarts.
 
 ### Production (Kubernetes)
 
@@ -572,9 +581,9 @@ For production, you would also add an ingress controller, TLS termination for th
 
 certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 220+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
-**Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 4 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
+**Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
-**Handler layer tests** (`internal/api/handler/*_test.go`) — 119 test functions across 7 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (20 tests), agents (20 tests), jobs (14 tests), notifications (11 tests), policies (15 tests), issuers (15 tests), and targets (14 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
+**Handler layer tests** (`internal/api/handler/*_test.go`) — 127 test functions across 7 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (22 tests), agents (28 tests), jobs (13 tests), notifications (11 tests), policies (19 tests), issuers (17 tests), and targets (17 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
 
 **Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 12 subtests covering error paths: nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, and expired certificate lifecycle. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
 
