@@ -39,11 +39,15 @@ export interface Agent {
   name: string;
   hostname: string;
   ip_address: string;
+  os: string;
+  architecture: string;
   status: string;
   version: string;
   last_heartbeat: string;
+  last_heartbeat_at: string;
   capabilities: string[];
   tags: Record<string, string>;
+  registered_at: string;
   created_at: string;
   updated_at: string;
 }

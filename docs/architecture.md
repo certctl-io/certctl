@@ -77,11 +77,11 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX fully implemented; Apache httpd, HAProxy planned for V2; F5 BIG-IP, IIS interface only with V2 implementations planned) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, Apache httpd, HAProxy fully implemented; F5 BIG-IP, IIS interface only with V2 implementations planned) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
-**Planned (V2):** Agent metadata collection — agents will report OS, platform, architecture, IP address, and hostname via heartbeat using `runtime.GOOS`, `runtime.GOARCH`, and `net` stdlib. This metadata enables dynamic device grouping, allowing policies to be scoped by agent criteria (e.g., all Ubuntu agents, all agents in a specific subnet) rather than requiring manual per-certificate assignment.
+**Agent metadata (M10):** Agents report OS, architecture, IP address, hostname, and version via heartbeat using `runtime.GOOS`, `runtime.GOARCH`, and `net` stdlib. This metadata is stored on the `agents` table and displayed in the GUI (agent list shows OS/Arch column, detail page shows full system info). This metadata enables future dynamic device grouping, allowing policies to be scoped by agent criteria (e.g., all Ubuntu agents, all agents in a specific subnet).
 
 ### Web Dashboard
 
@@ -425,9 +425,9 @@ type Connector interface {
 
 The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
 
-Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **F5 BIG-IP** (interface only — iControl REST flow mapped, implementation planned), **IIS** (interface only — WinRM/PowerShell flow mapped, implementation planned).
+Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — iControl REST flow mapped, implementation planned V2), **IIS** (interface only — WinRM/PowerShell flow mapped, implementation planned V2).
 
-**Planned targets (V2):** Apache httpd (file write, `apachectl configtest`, graceful reload), HAProxy (combined PEM file write, reload via socket/signal). **Planned targets (V3):** AWS ALB/CloudFront, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets.
+**Planned targets (V3):** AWS ALB/CloudFront, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets.
 
 ### Notifier Connector
 

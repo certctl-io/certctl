@@ -14,16 +14,20 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
+	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/nginx"
 )
@@ -139,15 +143,29 @@ func (a *Agent) Run(ctx context.Context) error {
 	}
 }
 
-// sendHeartbeat sends a heartbeat to the control plane.
+// getOutboundIP returns the preferred outbound IP address of this machine.
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
+// sendHeartbeat sends a heartbeat to the control plane with agent metadata.
 // POST /api/v1/agents/{agentID}/heartbeat
 func (a *Agent) sendHeartbeat(ctx context.Context) {
 	a.logger.Debug("sending heartbeat", "agent_id", a.config.AgentID)
 
 	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", a.config.AgentID)
 	resp, err := a.makeRequest(ctx, http.MethodPost, path, map[string]string{
-		"version":  "1.0.0",
-		"hostname": a.config.Hostname,
+		"version":      "1.0.0",
+		"hostname":     a.config.Hostname,
+		"os":           runtime.GOOS,
+		"architecture": runtime.GOARCH,
+		"ip_address":   getOutboundIP(),
 	})
 	if err != nil {
 		a.logger.Error("heartbeat failed", "error", err)
@@ -488,6 +506,24 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return nginx.New(&cfg, a.logger), nil
+
+	case "Apache":
+		var cfg apache.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Apache config: %w", err)
+			}
+		}
+		return apache.New(&cfg, a.logger), nil
+
+	case "HAProxy":
+		var cfg haproxy.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid HAProxy config: %w", err)
+			}
+		}
+		return haproxy.New(&cfg, a.logger), nil
 
 	case "F5":
 		var cfg f5.Config

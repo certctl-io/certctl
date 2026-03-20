@@ -684,7 +684,7 @@ func (m *mockAgentRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockAgentRepository) UpdateHeartbeat(ctx context.Context, id string) error {
+func (m *mockAgentRepository) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
 	agent, ok := m.agents[id]
 	if !ok {
 		return fmt.Errorf("agent not found")

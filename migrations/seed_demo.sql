@@ -36,12 +36,12 @@ INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VA
 ON CONFLICT (id) DO NOTHING;
 
 -- Agents
-INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash) VALUES
-  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '90 days', 'demo_hash_1'),
-  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '60 days', 'demo_hash_2'),
-  ('ag-lb-prod',     'lb-prod-agent',     'f5-prod-01.internal',    'online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_3'),
-  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '30 days', 'demo_hash_4'),
-  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '45 days', 'demo_hash_5')
+INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
+  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '90 days', 'demo_hash_1', 'linux', 'amd64', '10.0.1.10', '1.0.0'),
+  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '60 days', 'demo_hash_2', 'linux', 'amd64', '10.0.2.20', '1.0.0'),
+  ('ag-lb-prod',     'lb-prod-agent',     'f5-prod-01.internal',    'online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_3', 'linux', 'amd64', '10.0.1.50', '1.0.0'),
+  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '30 days', 'demo_hash_4', 'windows', 'amd64', '10.0.3.15', '1.0.0'),
+  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '45 days', 'demo_hash_5', 'linux', 'arm64', '10.0.4.30', '1.0.0')
 ON CONFLICT (id) DO NOTHING;
 
 -- Deployment Targets

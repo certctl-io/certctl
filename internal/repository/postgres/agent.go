@@ -23,7 +23,8 @@ func NewAgentRepository(db *sql.DB) *AgentRepository {
 // List returns all agents
 func (r *AgentRepository) List(ctx context.Context) ([]*domain.Agent, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash
+		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash,
+		       os, architecture, ip_address, version
 		FROM agents
 		ORDER BY registered_at DESC
 	`)
@@ -52,7 +53,8 @@ func (r *AgentRepository) List(ctx context.Context) ([]*domain.Agent, error) {
 // Get retrieves an agent by ID
 func (r *AgentRepository) Get(ctx context.Context, id string) (*domain.Agent, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash
+		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash,
+		       os, architecture, ip_address, version
 		FROM agents
 		WHERE id = $1
 	`, id)
@@ -75,11 +77,13 @@ func (r *AgentRepository) Create(ctx context.Context, agent *domain.Agent) error
 	}
 
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash,
+		                    os, architecture, ip_address, version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id
 	`, agent.ID, agent.Name, agent.Hostname, agent.Status, agent.LastHeartbeatAt,
-		agent.RegisteredAt, agent.APIKeyHash).Scan(&agent.ID)
+		agent.RegisteredAt, agent.APIKeyHash,
+		agent.OS, agent.Architecture, agent.IPAddress, agent.Version).Scan(&agent.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create agent: %w", err)
@@ -96,9 +100,14 @@ func (r *AgentRepository) Update(ctx context.Context, agent *domain.Agent) error
 			hostname = $2,
 			status = $3,
 			last_heartbeat_at = $4,
-			api_key_hash = $5
-		WHERE id = $6
-	`, agent.Name, agent.Hostname, agent.Status, agent.LastHeartbeatAt, agent.APIKeyHash, agent.ID)
+			api_key_hash = $5,
+			os = $6,
+			architecture = $7,
+			ip_address = $8,
+			version = $9
+		WHERE id = $10
+	`, agent.Name, agent.Hostname, agent.Status, agent.LastHeartbeatAt, agent.APIKeyHash,
+		agent.OS, agent.Architecture, agent.IPAddress, agent.Version, agent.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update agent: %w", err)
@@ -136,11 +145,27 @@ func (r *AgentRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-// UpdateHeartbeat updates the agent's last heartbeat timestamp
-func (r *AgentRepository) UpdateHeartbeat(ctx context.Context, id string) error {
-	result, err := r.db.ExecContext(ctx, `
-		UPDATE agents SET last_heartbeat_at = $1 WHERE id = $2
-	`, time.Now(), id)
+// UpdateHeartbeat updates the agent's last heartbeat timestamp and metadata
+func (r *AgentRepository) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
+	var result sql.Result
+	var err error
+
+	if metadata != nil {
+		result, err = r.db.ExecContext(ctx, `
+			UPDATE agents SET
+				last_heartbeat_at = $1,
+				hostname = CASE WHEN $3 = '' THEN hostname ELSE $3 END,
+				os = CASE WHEN $4 = '' THEN os ELSE $4 END,
+				architecture = CASE WHEN $5 = '' THEN architecture ELSE $5 END,
+				ip_address = CASE WHEN $6 = '' THEN ip_address ELSE $6 END,
+				version = CASE WHEN $7 = '' THEN version ELSE $7 END
+			WHERE id = $2
+		`, time.Now(), id, metadata.Hostname, metadata.OS, metadata.Architecture, metadata.IPAddress, metadata.Version)
+	} else {
+		result, err = r.db.ExecContext(ctx, `
+			UPDATE agents SET last_heartbeat_at = $1 WHERE id = $2
+		`, time.Now(), id)
+	}
 
 	if err != nil {
 		return fmt.Errorf("failed to update heartbeat: %w", err)
@@ -161,7 +186,8 @@ func (r *AgentRepository) UpdateHeartbeat(ctx context.Context, id string) error 
 // GetByAPIKey retrieves an agent by hashed API key
 func (r *AgentRepository) GetByAPIKey(ctx context.Context, keyHash string) (*domain.Agent, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash
+		SELECT id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash,
+		       os, architecture, ip_address, version
 		FROM agents
 		WHERE api_key_hash = $1
 	`, keyHash)
@@ -183,7 +209,8 @@ func scanAgent(scanner interface {
 }) (*domain.Agent, error) {
 	var agent domain.Agent
 	err := scanner.Scan(&agent.ID, &agent.Name, &agent.Hostname, &agent.Status,
-		&agent.LastHeartbeatAt, &agent.RegisteredAt, &agent.APIKeyHash)
+		&agent.LastHeartbeatAt, &agent.RegisteredAt, &agent.APIKeyHash,
+		&agent.OS, &agent.Architecture, &agent.IPAddress, &agent.Version)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan agent: %w", err)

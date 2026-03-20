@@ -14,7 +14,7 @@ Think of it like a notarized ID badge for a website. The badge says "I am api.ex
 
 Every certificate has an expiration date, typically 90 days for Let's Encrypt or up to 1 year for commercial CAs. This isn't a bug — it's a security feature. Short lifetimes limit the damage if a private key is compromised, and they force organizations to prove they still control their domains.
 
-The problem? When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, F5 load balancers, and IIS boxes in three environments, it becomes a ticking time bomb. One missed renewal means a production outage — your site goes down, your API returns errors, and your customers see scary browser warnings.
+The problem? When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, Apache instances, HAProxy load balancers, F5 appliances, and IIS boxes in three environments, it becomes a ticking time bomb. One missed renewal means a production outage — your site goes down, your API returns errors, and your customers see scary browser warnings.
 
 **This is the core problem certctl solves**: automated tracking, renewal, and deployment of certificates across your entire infrastructure.
 
@@ -72,9 +72,11 @@ The flow looks like this:
 
 At no point does the private key leave the agent. This is a fundamental security property.
 
+Agents also report **metadata** about themselves — their operating system, CPU architecture, IP address, hostname, and version — with every heartbeat. This gives ops teams fleet-wide visibility (e.g., "how many agents are running on ARM?", "which agents are still on v1.0.0?") and is the foundation for future features like dynamic device grouping, where policies can be scoped to specific agent criteria like OS type or network subnet.
+
 ### Deployment Targets
 
-Targets are the systems where certificates actually get installed — NGINX web servers, F5 BIG-IP load balancers, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX config, calling the F5 REST API, running PowerShell commands on IIS via WinRM).
+Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, F5 BIG-IP appliances, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy, calling the F5 REST API, running PowerShell commands on IIS via WinRM).
 
 ## The Certificate Lifecycle
 

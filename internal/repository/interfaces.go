@@ -69,8 +69,8 @@ type AgentRepository interface {
 	Update(ctx context.Context, agent *domain.Agent) error
 	// Delete removes an agent.
 	Delete(ctx context.Context, id string) error
-	// UpdateHeartbeat updates the agent's last heartbeat timestamp.
-	UpdateHeartbeat(ctx context.Context, id string) error
+	// UpdateHeartbeat updates the agent's last heartbeat timestamp and metadata.
+	UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error
 	// GetByAPIKey retrieves an agent by hashed API key.
 	GetByAPIKey(ctx context.Context, keyHash string) (*domain.Agent, error)
 }

@@ -93,11 +93,15 @@ export default function AgentDetailPage() {
             <InfoRow label="Updated" value={formatDateTime(agent.updated_at)} />
           </div>
 
-          {/* Capabilities */}
+          {/* System Info */}
           <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">Capabilities & Tags</h3>
+            <h3 className="text-sm font-semibold text-slate-300 mb-4">System Information</h3>
+            <InfoRow label="Operating System" value={agent.os || '—'} />
+            <InfoRow label="Architecture" value={agent.architecture || '—'} />
+            <InfoRow label="IP Address" value={<span className="font-mono text-xs">{agent.ip_address || '—'}</span>} />
+            <InfoRow label="Agent Version" value={agent.version || '—'} />
             {agent.capabilities?.length ? (
-              <div className="mb-4">
+              <div className="mt-4">
                 <p className="text-xs text-slate-400 mb-2">Capabilities</p>
                 <div className="flex flex-wrap gap-2">
                   {agent.capabilities.map((c) => (
@@ -105,11 +109,9 @@ export default function AgentDetailPage() {
                   ))}
                 </div>
               </div>
-            ) : (
-              <p className="text-sm text-slate-500 mb-4">No capabilities reported</p>
-            )}
+            ) : null}
             {agent.tags && Object.keys(agent.tags).length > 0 ? (
-              <div>
+              <div className="mt-4">
                 <p className="text-xs text-slate-400 mb-2">Tags</p>
                 <div className="flex flex-wrap gap-2">
                   {Object.entries(agent.tags).map(([k, v]) => (
@@ -117,9 +119,7 @@ export default function AgentDetailPage() {
                   ))}
                 </div>
               </div>
-            ) : (
-              <p className="text-sm text-slate-500">No tags</p>
-            )}
+            ) : null}
           </div>
         </div>
 

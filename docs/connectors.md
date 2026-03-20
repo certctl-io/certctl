@@ -7,7 +7,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME implemented; step-ca, ADCS, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX implemented; F5, IIS interface only; Apache httpd, HAProxy planned V2; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5, IIS interface only; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2.1)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents.
@@ -280,7 +280,43 @@ The `reload_command` defaults to `systemctl reload nginx` but can be overridden 
 
 Location: `internal/connector/target/nginx/nginx.go`
 
-### Planned: F5 BIG-IP (Interface Only)
+### Built-in: Apache httpd
+
+The Apache httpd connector follows the same pattern as NGINX: it writes separate certificate, chain, and key files to disk, validates the Apache configuration with `apachectl configtest`, and performs a graceful reload. The key difference is that private keys are written with 0600 permissions (owner-only read) for security, while cert and chain files use 0644.
+
+Configuration:
+```json
+{
+  "cert_path": "/etc/apache2/ssl/cert.pem",
+  "chain_path": "/etc/apache2/ssl/chain.pem",
+  "key_path": "/etc/apache2/ssl/key.pem",
+  "reload_command": "apachectl graceful",
+  "validate_command": "apachectl configtest"
+}
+```
+
+The `reload_command` can be customized for different environments (e.g., `systemctl reload apache2` for systemd, `httpd -k graceful` for RHEL/CentOS). Validation output is captured and included in error messages for debugging.
+
+Location: `internal/connector/target/apache/apache.go`
+
+### Built-in: HAProxy
+
+The HAProxy connector differs from NGINX and Apache because HAProxy expects all TLS material in a single combined PEM file (certificate + chain + private key concatenated). The connector builds this combined file, writes it with 0600 permissions (since it contains the private key), optionally validates the HAProxy configuration, and reloads.
+
+Configuration:
+```json
+{
+  "pem_path": "/etc/haproxy/certs/site.pem",
+  "reload_command": "systemctl reload haproxy",
+  "validate_command": "haproxy -c -f /etc/haproxy/haproxy.cfg"
+}
+```
+
+The combined PEM is built in this order: server certificate, intermediate/chain certificates, private key. The `validate_command` is optional — if omitted, the connector skips config validation and goes straight to reload.
+
+Location: `internal/connector/target/haproxy/haproxy.go`
+
+### Planned: F5 BIG-IP (V2, Interface Only)
 
 The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
 
@@ -297,7 +333,7 @@ Configuration (defined, not yet functional):
 
 Location: `internal/connector/target/f5/f5.go`
 
-### Planned: IIS (Interface Only)
+### Planned: IIS (V2, Interface Only)
 
 The IIS target connector interface is built with the WinRM/PowerShell flow mapped out, but the actual remote execution is not yet implemented. The planned flow is: transfer a PFX bundle to the Windows server via WinRM, run `Import-PfxCertificate` to install it into the certificate store, and run `Set-WebBinding` to bind the certificate to the IIS site. Implementation is planned for V2.
 

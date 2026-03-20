@@ -144,7 +144,7 @@ flowchart TB
 | `renewal_policies` | Renewal window, auto-renew settings, retry config, alert thresholds |
 | `issuers` | CA configurations (Local CA, ACME, etc.) |
 | `deployment_targets` | Target systems (NGINX, F5, IIS) with agent assignments |
-| `agents` | Registered agents with heartbeat tracking |
+| `agents` | Registered agents with heartbeat tracking, OS/arch/IP metadata |
 | `jobs` | Issuance, renewal, deployment, and validation jobs |
 | `teams` | Organizational groups for certificate ownership |
 | `owners` | Individual owners with email for notifications |
@@ -288,6 +288,8 @@ GET    /ready                             Readiness check
 | Target | Status | Type |
 |--------|--------|------|
 | NGINX | Implemented | `NGINX` |
+| Apache httpd | Implemented | `Apache` |
+| HAProxy | Implemented | `HAProxy` |
 | F5 BIG-IP | Interface only (V2) | `F5` |
 | Microsoft IIS | Interface only (V2) | `IIS` |
 | Kubernetes Secrets | Planned | — |
@@ -350,10 +352,14 @@ make docker-clean       # Stop + remove volumes
 All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
-- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca, ADCS, and OpenSSL/custom CA issuer connectors, F5 BIG-IP, IIS, Apache httpd, and HAProxy target connector implementations, agent metadata collection (OS, platform, IP, hostname via heartbeat), dynamic device grouping for policy-based targeting, crypto policy enforcement, certificate ownership tracking, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
-- **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
-- **V2.2: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics, deployment rollback
-- **V2.3: Integrations & Distribution** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer connector, filesystem cert discovery
+- **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
+- **M11: Policy + Ownership** — crypto policy enforcement (key algo/size validation), certificate ownership tracking, dynamic device grouping, renewal approval UI
+- **M12: DNS-01 + step-ca** — ACME DNS-01 challenges (wildcard certs, Cloudflare/Route53 adapters), step-ca issuer connector
+- **M13: GUI Operations** — bulk cert operations, deployment timeline, inline policy editor, target config wizard, audit export
+- **M14: Enterprise Connectors** — SSE/WebSocket real-time updates, F5 BIG-IP, IIS, ADCS, OpenSSL/Custom CA implementations
+- **M15: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
+- **M16: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics, deployment rollback
+- **M17: Integrations** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer, filesystem cert discovery
 
 ### V3: Discovery, Visibility & Cloud
 Discovery engine (passive/active scanning, cert chain validation, Nmap/Qualys import, unknown cert detection, triage workflows), cloud targets (AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module, compliance mapping docs

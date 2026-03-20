@@ -477,7 +477,7 @@ func (m *mockAgentRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string) error {
+func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
 	if m.UpdateHeartbeatErr != nil {
 		return m.UpdateHeartbeatErr
 	}
