@@ -130,7 +130,7 @@ export default function CertificateDetailPage() {
         )}
         {renewMutation.isError && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
-            Failed to trigger renewal: {(renewMutation.error as Error).message}
+            Failed to trigger renewal: {renewMutation.error instanceof Error ? renewMutation.error.message : 'Unknown error'}
           </div>
         )}
         {deployMutation.isSuccess && (
@@ -140,12 +140,12 @@ export default function CertificateDetailPage() {
         )}
         {deployMutation.isError && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
-            Failed to deploy: {(deployMutation.error as Error).message}
+            Failed to deploy: {deployMutation.error instanceof Error ? deployMutation.error.message : 'Unknown error'}
           </div>
         )}
         {archiveMutation.isError && (
           <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
-            Failed to archive: {(archiveMutation.error as Error).message}
+            Failed to archive: {archiveMutation.error instanceof Error ? archiveMutation.error.message : 'Unknown error'}
           </div>
         )}
 
@@ -226,7 +226,7 @@ export default function CertificateDetailPage() {
             <h2 className="text-lg font-semibold text-slate-200 mb-4">Deploy Certificate</h2>
             {deployMutation.isError && (
               <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">
-                {(deployMutation.error as Error).message}
+                {deployMutation.error instanceof Error ? deployMutation.error.message : 'Unknown error'}
               </div>
             )}
             <label className="text-xs text-slate-400 block mb-2">Select Target</label>

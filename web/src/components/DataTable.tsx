@@ -11,9 +11,10 @@ interface DataTableProps<T> {
   onRowClick?: (item: T) => void;
   emptyMessage?: string;
   isLoading?: boolean;
+  keyField?: string;
 }
 
-export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading }: DataTableProps<T>) {
+export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading, keyField = 'id' }: DataTableProps<T>) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-slate-400">
@@ -49,7 +50,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
         <tbody>
           {data.map((item, i) => (
             <tr
-              key={i}
+              key={(item as Record<string, unknown>)[keyField] as string ?? `row-${i}`}
               onClick={() => onRowClick?.(item)}
               className={`border-b border-slate-700/50 transition-colors hover:bg-blue-500/5 ${onRowClick ? 'cursor-pointer' : ''}`}
             >

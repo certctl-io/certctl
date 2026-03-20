@@ -33,8 +33,14 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
     throw new Error('Authentication required');
   }
   if (!res.ok) {
-    const body = await res.json().catch(() => ({ message: res.statusText }));
-    throw new Error(body.message || body.error || `HTTP ${res.status}`);
+    let errorMsg = res.statusText;
+    try {
+      const body = await res.json();
+      errorMsg = body.message || body.error || errorMsg;
+    } catch {
+      // Response body is not JSON, use status text
+    }
+    throw new Error(errorMsg || `HTTP ${res.status}`);
   }
   return res.json();
 }
