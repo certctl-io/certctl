@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -81,7 +82,9 @@ func (s *TargetService) Create(ctx context.Context, target *domain.DeploymentTar
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_target", "target", target.ID, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_target", "target", target.ID, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil
@@ -99,7 +102,9 @@ func (s *TargetService) Update(ctx context.Context, id string, target *domain.De
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_target", "target", id, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_target", "target", id, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil
@@ -112,7 +117,9 @@ func (s *TargetService) Delete(ctx context.Context, id string, actor string) err
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_target", "target", id, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_target", "target", id, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil

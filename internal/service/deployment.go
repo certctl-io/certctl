@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -68,7 +69,7 @@ func (s *DeploymentService) CreateDeploymentJobs(ctx context.Context, certID str
 		}
 
 		if err := s.jobRepo.Create(ctx, job); err != nil {
-			fmt.Printf("failed to create deployment job for target %s: %v\n", target.ID, err)
+			slog.Error("failed to create deployment job for target", "target_id", target.ID, "error", err)
 			continue
 		}
 
@@ -80,9 +81,11 @@ func (s *DeploymentService) CreateDeploymentJobs(ctx context.Context, certID str
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"deployment_jobs_created", "certificate", certID,
-		map[string]interface{}{"target_count": len(targets), "job_count": len(jobIDs)})
+		map[string]interface{}{"target_count": len(targets), "job_count": len(jobIDs)}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return jobIDs, nil
 }
@@ -99,7 +102,7 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	if err != nil {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, fmt.Sprintf("certificate fetch failed: %v", err))
 		if updateErr != nil {
-			fmt.Printf("failed to update job status: %v\n", updateErr)
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 		}
 		return fmt.Errorf("failed to fetch certificate: %w", err)
 	}
@@ -112,7 +115,7 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	if targetID == "" {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, "target_id not found in job")
 		if updateErr != nil {
-			fmt.Printf("failed to update job status: %v\n", updateErr)
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 		}
 		return fmt.Errorf("target_id not found in job")
 	}
@@ -121,7 +124,7 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	if err != nil {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, fmt.Sprintf("target fetch failed: %v", err))
 		if updateErr != nil {
-			fmt.Printf("failed to update job status: %v\n", updateErr)
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 		}
 		return fmt.Errorf("failed to fetch target: %w", err)
 	}
@@ -132,7 +135,7 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	if err != nil {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, fmt.Sprintf("agent fetch failed: %v", err))
 		if updateErr != nil {
-			fmt.Printf("failed to update job status: %v\n", updateErr)
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 		}
 		return fmt.Errorf("failed to fetch agent: %w", err)
 	}
@@ -141,13 +144,17 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	if agent.LastHeartbeatAt != nil && time.Since(*agent.LastHeartbeatAt) > 5*time.Minute {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, "agent is offline")
 		if updateErr != nil {
-			fmt.Printf("failed to update job status: %v\n", updateErr)
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 		}
 
-		_ = s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf("agent offline"))
-		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		if notifErr := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf("agent offline")); notifErr != nil {
+			slog.Error("failed to send deployment notification", "error", notifErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"deployment_job_failed", "certificate", job.CertificateID,
-			map[string]interface{}{"job_id": job.ID, "reason": "agent offline", "target_id": targetID})
+			map[string]interface{}{"job_id": job.ID, "reason": "agent offline", "target_id": targetID}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 
 		return fmt.Errorf("agent %s is offline", agentID)
 	}
@@ -157,9 +164,11 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 	// For now, we mark it as pending and rely on agent polling.
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"deployment_job_dispatched", "certificate", job.CertificateID,
-		map[string]interface{}{"job_id": job.ID, "target_id": targetID, "agent_id": agentID})
+		map[string]interface{}{"job_id": job.ID, "target_id": targetID, "agent_id": agentID}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -217,7 +226,7 @@ func (s *DeploymentService) MarkDeploymentComplete(ctx context.Context, jobID st
 	// Fetch certificate and target for notification
 	cert, err := s.certRepo.Get(ctx, job.CertificateID)
 	if err != nil {
-		fmt.Printf("failed to fetch certificate for notification: %v\n", err)
+		slog.Error("failed to fetch certificate for notification", "error", err)
 		return nil
 	}
 
@@ -229,20 +238,22 @@ func (s *DeploymentService) MarkDeploymentComplete(ctx context.Context, jobID st
 	if targetID != "" {
 		target, err := s.targetRepo.Get(ctx, targetID)
 		if err != nil {
-			fmt.Printf("failed to fetch target for notification: %v\n", err)
+			slog.Error("failed to fetch target for notification", "error", err)
 			return nil
 		}
 
 		// Send deployment success notification
 		if err := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, true, nil); err != nil {
-			fmt.Printf("failed to send deployment notification: %v\n", err)
+			slog.Error("failed to send deployment notification", "error", err)
 		}
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"deployment_job_completed", "certificate", job.CertificateID,
-		map[string]interface{}{"job_id": jobID, "target_id": targetID})
+		map[string]interface{}{"job_id": jobID, "target_id": targetID}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -262,7 +273,7 @@ func (s *DeploymentService) MarkDeploymentFailed(ctx context.Context, jobID stri
 	// Fetch certificate and target for notification
 	cert, err := s.certRepo.Get(ctx, job.CertificateID)
 	if err != nil {
-		fmt.Printf("failed to fetch certificate for notification: %v\n", err)
+		slog.Error("failed to fetch certificate for notification", "error", err)
 		return nil
 	}
 
@@ -274,20 +285,22 @@ func (s *DeploymentService) MarkDeploymentFailed(ctx context.Context, jobID stri
 	if targetID != "" {
 		target, err := s.targetRepo.Get(ctx, targetID)
 		if err != nil {
-			fmt.Printf("failed to fetch target for notification: %v\n", err)
+			slog.Error("failed to fetch target for notification", "error", err)
 			return nil
 		}
 
 		// Send deployment failure notification
 		if err := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf("%s", errMsg)); err != nil {
-			fmt.Printf("failed to send deployment notification: %v\n", err)
+			slog.Error("failed to send deployment notification", "error", err)
 		}
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"deployment_job_failed", "certificate", job.CertificateID,
-		map[string]interface{}{"job_id": jobID, "target_id": targetID, "error": errMsg})
+		map[string]interface{}{"job_id": jobID, "target_id": targetID, "error": errMsg}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }

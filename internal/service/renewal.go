@@ -10,6 +10,7 @@ import (
 	"encoding/hex"
 	"encoding/pem"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -103,8 +104,7 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 				policy, err = s.renewalPolicyRepo.Get(ctx, cert.RenewalPolicyID)
 				if err != nil {
 					// Log but continue with defaults
-					fmt.Printf("failed to fetch renewal policy %s for cert %s, using defaults: %v\n",
-						cert.RenewalPolicyID, cert.ID, err)
+					slog.Error("failed to fetch renewal policy, using defaults", "policy_id", cert.RenewalPolicyID, "cert_id", cert.ID, "error", err)
 				} else {
 					policyCache[cert.RenewalPolicyID] = policy
 				}
@@ -153,20 +153,22 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		}
 
 		if err := s.jobRepo.Create(ctx, job); err != nil {
-			fmt.Printf("failed to create renewal job for cert %s: %v\n", cert.ID, err)
+			slog.Error("failed to create renewal job for cert", "cert_id", cert.ID, "error", err)
 			continue
 		}
 
 		// Update certificate status to RenewalInProgress
 		cert.Status = domain.CertificateStatusRenewalInProgress
 		if err := s.certRepo.Update(ctx, cert); err != nil {
-			fmt.Printf("failed to update cert status for %s: %v\n", cert.ID, err)
+			slog.Error("failed to update cert status", "cert_id", cert.ID, "error", err)
 		}
 
 		// Record audit event
-		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"renewal_job_created", "certificate", cert.ID,
-			map[string]interface{}{"days_until_expiry": daysUntil, "job_id": job.ID})
+			map[string]interface{}{"days_until_expiry": daysUntil, "job_id": job.ID}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil
@@ -186,8 +188,7 @@ func (s *RenewalService) sendThresholdAlerts(ctx context.Context, cert *domain.M
 		// Check if we already sent a notification for this threshold (deduplication)
 		alreadySent, err := s.notificationSvc.HasThresholdNotification(ctx, cert.ID, threshold)
 		if err != nil {
-			fmt.Printf("failed to check notification dedup for cert %s threshold %d: %v\n",
-				cert.ID, threshold, err)
+			slog.Error("failed to check notification dedup", "cert_id", cert.ID, "threshold", threshold, "error", err)
 			continue
 		}
 		if alreadySent {
@@ -196,17 +197,18 @@ func (s *RenewalService) sendThresholdAlerts(ctx context.Context, cert *domain.M
 
 		// Send the threshold alert
 		if err := s.notificationSvc.SendThresholdAlert(ctx, cert, daysUntil, threshold); err != nil {
-			fmt.Printf("failed to send threshold alert for cert %s at %d days: %v\n",
-				cert.ID, threshold, err)
+			slog.Error("failed to send threshold alert for cert", "cert_id", cert.ID, "threshold", threshold, "error", err)
 		}
 
 		// Record audit event for the alert
-		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"expiration_alert_sent", "certificate", cert.ID,
 			map[string]interface{}{
 				"threshold_days":    threshold,
 				"days_until_expiry": daysUntil,
-			})
+			}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 }
 
@@ -234,7 +236,7 @@ func (s *RenewalService) updateCertExpiryStatus(ctx context.Context, cert *domai
 	cert.Status = newStatus
 	cert.UpdatedAt = time.Now()
 	if err := s.certRepo.Update(ctx, cert); err != nil {
-		fmt.Printf("failed to update cert %s status to %s: %v\n", cert.ID, newStatus, err)
+		slog.Error("failed to update cert status", "cert_id", cert.ID, "new_status", newStatus, "error", err)
 	}
 }
 
@@ -290,13 +292,15 @@ func (s *RenewalService) processRenewalAgentKeygen(ctx context.Context, job *dom
 	cert.Status = domain.CertificateStatusRenewalInProgress
 	cert.UpdatedAt = time.Now()
 	if err := s.certRepo.Update(ctx, cert); err != nil {
-		fmt.Printf("failed to update cert status for %s: %v\n", cert.ID, err)
+		slog.Error("failed to update cert status", "cert_id", cert.ID, "error", err)
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"renewal_awaiting_csr", "certificate", job.CertificateID,
-		map[string]interface{}{"job_id": job.ID, "keygen_mode": "agent"})
+		map[string]interface{}{"job_id": job.ID, "keygen_mode": "agent"}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -343,10 +347,14 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer renewal failed: %v", err))
-		_ = s.notificationSvc.SendRenewalNotification(ctx, cert, false, err)
-		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
+			slog.Error("failed to send renewal failure notification", "error", notifErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"renewal_job_failed", "certificate", job.CertificateID,
-			map[string]interface{}{"job_id": job.ID, "error": err.Error()})
+			map[string]interface{}{"job_id": job.ID, "error": err.Error()}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 		return fmt.Errorf("issuer renewal failed: %w", err)
 	}
 
@@ -392,18 +400,20 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 
 	// Send success notification
 	if err := s.notificationSvc.SendRenewalNotification(ctx, cert, true, nil); err != nil {
-		fmt.Printf("failed to send renewal notification: %v\n", err)
+		slog.Error("failed to send renewal notification", "error", err)
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"renewal_job_completed", "certificate", job.CertificateID,
 		map[string]interface{}{
 			"job_id":      job.ID,
 			"serial":      result.Serial,
 			"not_after":   result.NotAfter,
 			"keygen_mode": "server",
-		})
+		}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -427,10 +437,14 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer signing failed: %v", err))
-		_ = s.notificationSvc.SendRenewalNotification(ctx, cert, false, err)
-		_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
+			slog.Error("failed to send renewal failure notification", "error", notifErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 			"renewal_job_failed", "certificate", job.CertificateID,
-			map[string]interface{}{"job_id": job.ID, "error": err.Error()})
+			map[string]interface{}{"job_id": job.ID, "error": err.Error()}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 		return fmt.Errorf("issuer signing failed: %w", err)
 	}
 
@@ -475,18 +489,20 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 
 	// Send success notification
 	if err := s.notificationSvc.SendRenewalNotification(ctx, cert, true, nil); err != nil {
-		fmt.Printf("failed to send renewal notification: %v\n", err)
+		slog.Error("failed to send renewal notification", "error", err)
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"renewal_job_completed", "certificate", cert.ID,
 		map[string]interface{}{
 			"job_id":      job.ID,
 			"serial":      result.Serial,
 			"not_after":   result.NotAfter,
 			"keygen_mode": "agent",
-		})
+		}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -509,7 +525,7 @@ func (s *RenewalService) createDeploymentJobs(ctx context.Context, cert *domain.
 			CreatedAt:     time.Now(),
 		}
 		if err := s.jobRepo.Create(ctx, deployJob); err != nil {
-			fmt.Printf("failed to create deployment job for target %s: %v\n", targetID, err)
+			slog.Error("failed to create deployment job for target", "target_id", targetID, "error", err)
 		}
 	}
 }
@@ -532,7 +548,7 @@ func (s *RenewalService) GetAwaitingCSRJobs(ctx context.Context, certID string) 
 // failJob is a helper to mark a job as failed with an error message.
 func (s *RenewalService) failJob(ctx context.Context, job *domain.Job, errMsg string) {
 	if updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, errMsg); updateErr != nil {
-		fmt.Printf("failed to update job status: %v\n", updateErr)
+		slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
 	}
 }
 
@@ -565,7 +581,7 @@ func (s *RenewalService) RetryFailedJobs(ctx context.Context, maxRetries int) er
 
 		// Reset status to pending for retry
 		if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusPending, ""); err != nil {
-			fmt.Printf("failed to reset job status for retry: %v\n", err)
+			slog.Error("failed to reset job status for retry", "job_id", job.ID, "error", err)
 			continue
 		}
 	}

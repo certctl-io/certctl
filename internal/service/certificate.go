@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -62,9 +63,11 @@ func (s *CertificateService) Create(ctx context.Context, cert *domain.ManagedCer
 	if len(violations) > 0 {
 		// Record violations but do not block creation
 		for _, v := range violations {
-			_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
+			if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 				"policy_violation_detected", "certificate", cert.ID,
-				map[string]interface{}{"rule_id": v.RuleID, "message": v.Message})
+				map[string]interface{}{"rule_id": v.RuleID, "message": v.Message}); auditErr != nil {
+				slog.Error("failed to record audit event", "error", auditErr)
+			}
 		}
 	}
 
@@ -78,7 +81,7 @@ func (s *CertificateService) Create(ctx context.Context, cert *domain.ManagedCer
 		"certificate_created", "certificate", cert.ID,
 		map[string]interface{}{"common_name": cert.CommonName}); err != nil {
 		// Log but don't fail the operation
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -98,9 +101,11 @@ func (s *CertificateService) Update(ctx context.Context, cert *domain.ManagedCer
 	}
 	if len(violations) > 0 {
 		for _, v := range violations {
-			_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
+			if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 				"policy_violation_detected", "certificate", cert.ID,
-				map[string]interface{}{"rule_id": v.RuleID, "message": v.Message})
+				map[string]interface{}{"rule_id": v.RuleID, "message": v.Message}); auditErr != nil {
+				slog.Error("failed to record audit event", "error", auditErr)
+			}
 		}
 	}
 
@@ -120,7 +125,7 @@ func (s *CertificateService) Update(ctx context.Context, cert *domain.ManagedCer
 
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"certificate_updated", "certificate", cert.ID, changes); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -140,7 +145,7 @@ func (s *CertificateService) Archive(ctx context.Context, id string, actor strin
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"certificate_archived", "certificate", id,
 		map[string]interface{}{"common_name": cert.CommonName}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -185,7 +190,7 @@ func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"renewal_triggered", "certificate", certID,
 		map[string]interface{}{"common_name": cert.CommonName}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -207,7 +212,7 @@ func (s *CertificateService) TriggerDeploymentWithActor(ctx context.Context, cer
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"deployment_triggered", "certificate", certID,
 		map[string]interface{}{"common_name": cert.CommonName}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil

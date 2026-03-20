@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -44,7 +45,7 @@ func (s *PolicyService) ValidateCertificate(ctx context.Context, cert *domain.Ma
 		// Evaluate rule against certificate
 		v, err := s.evaluateRule(rule, cert)
 		if err != nil {
-			fmt.Printf("failed to evaluate rule %s: %v\n", rule.ID, err)
+			slog.Error("failed to evaluate rule", "rule_id", rule.ID, "error", err)
 			continue
 		}
 
@@ -149,7 +150,7 @@ func (s *PolicyService) CreateRule(ctx context.Context, rule *domain.PolicyRule,
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"policy_rule_created", "policy", rule.ID,
 		map[string]interface{}{"rule_type": rule.Type}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -175,7 +176,7 @@ func (s *PolicyService) UpdateRule(ctx context.Context, rule *domain.PolicyRule,
 
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"policy_rule_updated", "policy", rule.ID, changes); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -213,7 +214,7 @@ func (s *PolicyService) DeleteRule(ctx context.Context, id string, actor string)
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"policy_rule_deleted", "policy", id,
 		map[string]interface{}{"rule_type": rule.Type}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil

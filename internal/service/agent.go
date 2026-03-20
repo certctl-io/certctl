@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"math/rand"
 	"time"
 
@@ -73,7 +74,7 @@ func (s *AgentService) Register(ctx context.Context, name string, hostname strin
 	if err := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
 		"agent_registered", "agent", agent.ID,
 		map[string]interface{}{"name": name, "hostname": hostname}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	// Return the API key only once; the agent must save it securely
@@ -96,7 +97,7 @@ func (s *AgentService) HeartbeatWithContext(ctx context.Context, agentID string)
 	if agent.Status != domain.AgentStatusOnline {
 		agent.Status = domain.AgentStatusOnline
 		if err := s.agentRepo.Update(ctx, agent); err != nil {
-			fmt.Printf("failed to update agent status: %v\n", err)
+			slog.Error("failed to update agent status", "error", err)
 		}
 	}
 
@@ -140,13 +141,15 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 				}
 
 				// Record audit event
-				_ = s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
+				if auditErr := s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
 					"csr_submitted", "certificate", certID,
 					map[string]interface{}{
 						"agent_hostname": agent.Hostname,
 						"keygen_mode":    "agent",
 						"job_id":         awaitingJobs[0].ID,
-					})
+					}); auditErr != nil {
+					slog.Error("failed to record audit event", "error", auditErr)
+				}
 
 				return nil
 			}
@@ -181,15 +184,17 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 			cert.LastRenewalAt = &now
 			cert.UpdatedAt = now
 			if err := s.certRepo.Update(ctx, cert); err != nil {
-				fmt.Printf("failed to update certificate: %v\n", err)
+				slog.Error("failed to update certificate", "error", err)
 			}
 		}
 	}
 
 	// Record audit event
-	_ = s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
+	if auditErr := s.auditService.RecordEvent(ctx, agent.ID, domain.ActorTypeAgent,
 		"csr_submitted", "certificate", certID,
-		map[string]interface{}{"agent_hostname": agent.Hostname})
+		map[string]interface{}{"agent_hostname": agent.Hostname}); auditErr != nil {
+		slog.Error("failed to record audit event", "error", auditErr)
+	}
 
 	return nil
 }
@@ -224,7 +229,7 @@ func (s *AgentService) GetCertificateForAgent(ctx context.Context, agentID strin
 	if err := s.auditService.RecordEvent(ctx, agentID, domain.ActorTypeAgent,
 		"certificate_retrieved", "certificate", certID,
 		map[string]interface{}{"version": latestVersion.SerialNumber}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return []byte(latestVersion.PEMChain), nil
@@ -283,7 +288,7 @@ func (s *AgentService) ReportJobStatus(ctx context.Context, agentID string, jobI
 	if err := s.auditService.RecordEvent(ctx, agentID, domain.ActorTypeAgent,
 		"job_status_reported", "job", jobID,
 		map[string]interface{}{"status": status, "error": errMsg}); err != nil {
-		fmt.Printf("failed to record audit event: %v\n", err)
+		slog.Error("failed to record audit event", "error", err)
 	}
 
 	return nil
@@ -302,7 +307,7 @@ func (s *AgentService) MarkStaleAgentsOffline(ctx context.Context, threshold tim
 		if agent.Status == domain.AgentStatusOnline && agent.LastHeartbeatAt != nil && agent.LastHeartbeatAt.Before(cutoff) {
 			agent.Status = domain.AgentStatusOffline
 			if err := s.agentRepo.Update(ctx, agent); err != nil {
-				fmt.Printf("failed to mark agent %s offline: %v\n", agent.ID, err)
+				slog.Error("failed to mark agent offline", "agent_id", agent.ID, "error", err)
 				continue
 			}
 		}

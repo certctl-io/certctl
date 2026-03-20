@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -81,7 +82,9 @@ func (s *IssuerService) Create(ctx context.Context, issuer *domain.Issuer, actor
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_issuer", "issuer", issuer.ID, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_issuer", "issuer", issuer.ID, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil
@@ -99,7 +102,9 @@ func (s *IssuerService) Update(ctx context.Context, id string, issuer *domain.Is
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_issuer", "issuer", id, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_issuer", "issuer", id, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil
@@ -112,7 +117,9 @@ func (s *IssuerService) Delete(ctx context.Context, id string, actor string) err
 	}
 
 	if s.auditService != nil {
-		_ = s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_issuer", "issuer", id, nil)
+		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_issuer", "issuer", id, nil); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
 	}
 
 	return nil

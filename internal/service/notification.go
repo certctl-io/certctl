@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -188,7 +189,7 @@ func (s *NotificationService) ProcessPendingNotifications(ctx context.Context) e
 
 	for _, notif := range pending {
 		if err := s.sendNotification(ctx, notif); err != nil {
-			fmt.Printf("failed to send notification %s: %v\n", notif.ID, err)
+			slog.Error("failed to send notification", "notification_id", notif.ID, "error", err)
 			failedCount++
 		}
 	}
@@ -206,20 +207,24 @@ func (s *NotificationService) sendNotification(ctx context.Context, notif *domai
 	notifier, ok := s.notifierRegistry[string(notif.Channel)]
 	if !ok {
 		// No notifier configured for this channel — mark as sent (demo mode)
-		_ = s.notifRepo.UpdateStatus(ctx, notif.ID, "sent", time.Now())
+		if updateErr := s.notifRepo.UpdateStatus(ctx, notif.ID, "sent", time.Now()); updateErr != nil {
+			slog.Error("failed to update notification status", "notification_id", notif.ID, "error", updateErr)
+		}
 		return nil
 	}
 
 	// Send the notification
 	if err := notifier.Send(ctx, notif.Recipient, string(notif.Type), notif.Message); err != nil {
 		// Update status to failed
-		_ = s.notifRepo.UpdateStatus(ctx, notif.ID, "failed", time.Time{})
+		if updateErr := s.notifRepo.UpdateStatus(ctx, notif.ID, "failed", time.Time{}); updateErr != nil {
+			slog.Error("failed to update notification status", "notification_id", notif.ID, "error", updateErr)
+		}
 		return fmt.Errorf("failed to send via %s: %w", notif.Channel, err)
 	}
 
 	// Update status to sent
 	if err := s.notifRepo.UpdateStatus(ctx, notif.ID, "sent", time.Now()); err != nil {
-		fmt.Printf("failed to update notification status: %v\n", err)
+		slog.Error("failed to update notification status", "notification_id", notif.ID, "error", err)
 	}
 
 	return nil
