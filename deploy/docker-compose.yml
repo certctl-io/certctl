@@ -6,7 +6,7 @@ services:
     environment:
       POSTGRES_DB: certctl
       POSTGRES_USER: certctl
-      POSTGRES_PASSWORD: certctl
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-certctl}
     ports:
       - "5432:5432"
     volumes:
@@ -33,7 +33,7 @@ services:
       postgres:
         condition: service_healthy
     environment:
-      CERTCTL_DATABASE_URL: postgres://certctl:certctl@postgres:5432/certctl?sslmode=disable
+      CERTCTL_DATABASE_URL: postgres://certctl:${POSTGRES_PASSWORD:-certctl}@postgres:5432/certctl?sslmode=disable
       CERTCTL_SERVER_HOST: 0.0.0.0
       CERTCTL_SERVER_PORT: 8443
       CERTCTL_LOG_LEVEL: info
@@ -54,6 +54,11 @@ services:
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 512M
 
   # Certctl Agent
   certctl-agent:
@@ -66,17 +71,29 @@ services:
         condition: service_healthy
     environment:
       CERTCTL_SERVER_URL: http://certctl-server:8443
-      CERTCTL_API_KEY: change-me-in-production
+      CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
       CERTCTL_AGENT_NAME: docker-agent
       CERTCTL_LOG_LEVEL: info
+    volumes:
+      - agent_keys:/var/lib/certctl/keys
     networks:
       - certctl-network
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f certctl-agent || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
     restart: unless-stopped
     logging:
       driver: "json-file"
       options:
         max-size: "10m"
         max-file: "3"
+    deploy:
+      resources:
+        limits:
+          cpus: '0.5'
+          memory: 256M
 
 networks:
   certctl-network:
@@ -84,4 +101,6 @@ networks:
 
 volumes:
   postgres_data:
+    driver: local
+  agent_keys:
     driver: local
