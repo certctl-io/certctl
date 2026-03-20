@@ -221,3 +221,10 @@ CREATE TABLE IF NOT EXISTS notification_events (
 CREATE INDEX IF NOT EXISTS idx_notification_events_certificate_id ON notification_events(certificate_id);
 CREATE INDEX IF NOT EXISTS idx_notification_events_status ON notification_events(status);
 CREATE INDEX IF NOT EXISTS idx_notification_events_type ON notification_events(type);
+
+-- Performance indexes for scheduler queries (added for v1.0 hardening)
+CREATE INDEX IF NOT EXISTS idx_jobs_status_scheduled_at ON jobs(status, scheduled_at);
+CREATE INDEX IF NOT EXISTS idx_certificate_versions_cert_created ON certificate_versions(certificate_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_audit_events_timestamp_desc ON audit_events(timestamp DESC);
+CREATE INDEX IF NOT EXISTS idx_agents_online_heartbeat ON agents(status, last_heartbeat_at) WHERE status = 'online';
+CREATE UNIQUE INDEX IF NOT EXISTS idx_deployment_targets_agent_name ON deployment_targets(agent_id, name);
