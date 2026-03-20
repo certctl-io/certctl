@@ -1,0 +1,79 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+env:
+  REGISTRY: ghcr.io
+
+jobs:
+  build-and-push:
+    name: Build & Push Docker Images
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      packages: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Log in to GitHub Container Registry
+        uses: docker/login-action@v3
+        with:
+          registry: ${{ env.REGISTRY }}
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push server image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/shankar0123/certctl-server:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Build and push agent image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          file: ./Dockerfile.agent
+          push: true
+          tags: |
+            ${{ env.REGISTRY }}/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/shankar0123/certctl-agent:latest
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v2
+        with:
+          generate_release_notes: true
+          body: |
+            ## Docker Images
+
+            ```bash
+            docker pull ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
+            ```
+
+            ## Quick Start
+
+            ```bash
+            git clone https://github.com/shankar0123/certctl.git
+            cd certctl
+            cp deploy/.env.example deploy/.env
+            docker compose -f deploy/docker-compose.yml up -d
+            ```
