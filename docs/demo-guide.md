@@ -16,7 +16,7 @@ Wait ~30 seconds for PostgreSQL to initialize and the server to start, then open
 
 **http://localhost:8443**
 
-You'll see the dashboard pre-loaded with 14 demo certificates across multiple teams, environments, and statuses — including expiring, expired, active, failed, and in-progress renewals.
+You'll see the dashboard pre-loaded with 15 demo certificates across multiple teams, environments, and statuses — including expiring, expired, active, failed, wildcard, and in-progress renewals.
 
 ## What You'll See
 

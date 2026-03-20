@@ -4,7 +4,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
-![Status: Active Development](https://img.shields.io/badge/status-active%20development-green)
+![Status: v1.0.0](https://img.shields.io/badge/status-v1.0.0-brightgreen)
 
 ## What It Does
 
@@ -56,7 +56,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 Wait ~30 seconds, then open **http://localhost:8443** in your browser.
 
-The dashboard comes pre-loaded with 14 demo certificates, 5 agents, policy rules, audit events, and notifications — a realistic snapshot of a certificate inventory so you can explore immediately.
+The dashboard comes pre-loaded with 15 demo certificates, 5 agents, policy rules, audit events, and notifications — a realistic snapshot of a certificate inventory so you can explore immediately.
 
 Verify the API:
 ```bash
@@ -64,7 +64,7 @@ curl http://localhost:8443/health
 # {"status":"healthy"}
 
 curl -s http://localhost:8443/api/v1/certificates | jq '.total'
-# 14
+# 15
 ```
 
 ### Manual Build
@@ -114,7 +114,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n14 tables · TEXT primary keys")]
+        PG[("PostgreSQL 16\n14 tables\nTEXT primary keys")]
     end
 
     subgraph "Agents"
@@ -346,10 +346,8 @@ make docker-clean       # Stop + remove volumes
 
 ## Roadmap
 
-### V1 (feature-complete → v1.0.0 tag pending)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers.
-
-Remaining before the v1.0.0 tag: dashboard screenshots in README, tagged Docker images published, final error-handling audit to confirm no panics or unhandled error paths.
+### V1 (v1.0.0 released)
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca, ADCS, and OpenSSL/custom CA issuer connectors, F5 BIG-IP, IIS, Apache httpd, and HAProxy target connector implementations, agent metadata collection (OS, platform, IP, hostname via heartbeat), dynamic device grouping for policy-based targeting, crypto policy enforcement, certificate ownership tracking, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard

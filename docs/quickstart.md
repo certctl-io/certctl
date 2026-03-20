@@ -58,7 +58,7 @@ curl http://localhost:8443/health
 
 Open **http://localhost:8443** in your browser.
 
-The dashboard comes pre-loaded with 14 demo certificates across multiple teams, environments, and statuses. You'll see expiring certs, expired certs, active certs, failed renewals — a realistic snapshot of what a certificate inventory looks like in a real organization.
+The dashboard comes pre-loaded with 15 demo certificates across multiple teams, environments, and statuses. You'll see expiring certs, expired certs, active certs, failed renewals — a realistic snapshot of what a certificate inventory looks like in a real organization.
 
 Explore the sidebar: Certificates, Agents, Policies, Jobs, Audit Trail, Notifications. Everything you see in the dashboard is backed by the REST API.
 
@@ -92,7 +92,7 @@ The response has this shape:
       "updated_at": "2026-03-14T00:00:00Z"
     }
   ],
-  "total": 14,
+  "total": 15,
   "page": 1,
   "per_page": 50
 }
@@ -217,7 +217,7 @@ The demo comes pre-loaded with realistic data so you can explore certctl's featu
 | Issuers | 3 | Local Dev CA, Let's Encrypt Staging, DigiCert |
 | Agents | 5 | nginx-prod, nginx-staging, f5-prod, iis-prod, data-agent |
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
-| Certificates | 14 | Various statuses: Active, Expiring, Expired, Failed |
+| Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |
 
 Certificates have varied statuses so you can see what each state looks like in the dashboard: healthy certs with 45+ days remaining, certs about to expire (5-12 days), certs that already expired, and a failed renewal.
