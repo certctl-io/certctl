@@ -117,7 +117,9 @@ func (s *Scheduler) renewalCheckLoop(ctx context.Context) {
 
 // runRenewalCheck executes a single renewal check with error recovery.
 func (s *Scheduler) runRenewalCheck(ctx context.Context) {
-	if err := s.renewalService.CheckExpiringCertificates(ctx); err != nil {
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := s.renewalService.CheckExpiringCertificates(opCtx); err != nil {
 		s.logger.Error("renewal check failed",
 			"error", err,
 			"interval", s.renewalCheckInterval.String())
@@ -148,7 +150,9 @@ func (s *Scheduler) jobProcessorLoop(ctx context.Context) {
 
 // runJobProcessor executes a single job processing cycle with error recovery.
 func (s *Scheduler) runJobProcessor(ctx context.Context) {
-	if err := s.jobService.ProcessPendingJobs(ctx); err != nil {
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := s.jobService.ProcessPendingJobs(opCtx); err != nil {
 		s.logger.Error("job processor failed",
 			"error", err,
 			"interval", s.jobProcessorInterval.String())
@@ -179,7 +183,9 @@ func (s *Scheduler) agentHealthCheckLoop(ctx context.Context) {
 
 // runAgentHealthCheck executes a single agent health check with error recovery.
 func (s *Scheduler) runAgentHealthCheck(ctx context.Context) {
-	if err := s.agentService.MarkStaleAgentsOffline(ctx, s.agentHealthCheckInterval); err != nil {
+	opCtx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+	if err := s.agentService.MarkStaleAgentsOffline(opCtx, s.agentHealthCheckInterval); err != nil {
 		s.logger.Error("agent health check failed",
 			"error", err,
 			"interval", s.agentHealthCheckInterval.String())
@@ -209,7 +215,9 @@ func (s *Scheduler) notificationProcessLoop(ctx context.Context) {
 
 // runNotificationProcess executes a single notification processing cycle with error recovery.
 func (s *Scheduler) runNotificationProcess(ctx context.Context) {
-	if err := s.notificationService.ProcessPendingNotifications(ctx); err != nil {
+	opCtx, cancel := context.WithTimeout(ctx, 1*time.Minute)
+	defer cancel()
+	if err := s.notificationService.ProcessPendingNotifications(opCtx); err != nil {
 		s.logger.Error("notification processor failed",
 			"error", err,
 			"interval", s.notificationProcessInterval.String())
