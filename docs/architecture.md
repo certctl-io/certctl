@@ -48,6 +48,8 @@ flowchart TB
 
     subgraph "Target Systems"
         T1["NGINX\n(file write + reload)"]
+        T4["Apache httpd\n(file write + reload)"]
+        T5["HAProxy\n(combined PEM + reload)"]
         T2["F5 BIG-IP\n(iControl REST, planned)"]
         T3["IIS\n(WinRM, planned)"]
     end
@@ -157,6 +159,10 @@ erDiagram
         text hostname
         text status
         text api_key_hash
+        varchar os
+        varchar architecture
+        varchar ip_address
+        varchar version
     }
     deployment_targets {
         text id PK
@@ -301,9 +307,11 @@ sequenceDiagram
 
 The agent deploys certificates using target connectors. Each connector knows how to push certificates to a specific system:
 
-- **NGINX**: Writes cert/chain files to disk, validates config with `nginx -t`, reloads with `nginx -s reload` or `systemctl reload nginx`
-- **F5 BIG-IP**: Calls the F5 REST API to upload certificate and update virtual server bindings
-- **IIS**: Uses WinRM to import the certificate into the Windows certificate store and bind it to an IIS site
+- **NGINX**: Writes cert/chain/key files to disk, validates config with `nginx -t`, reloads with `nginx -s reload` or `systemctl reload nginx`
+- **Apache httpd**: Writes separate cert/chain/key files, validates with `apachectl configtest`, graceful reload
+- **HAProxy**: Builds a combined PEM file (cert + chain + key), optionally validates config, reloads via systemctl or signal
+- **F5 BIG-IP** (planned): Calls the F5 iControl REST API to upload certificate and update SSL profile bindings
+- **IIS** (planned): Uses WinRM to import PFX into the Windows certificate store and bind it to an IIS site
 
 The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key.
 
@@ -362,6 +370,8 @@ flowchart TB
         direction TB
         TI["TargetConnector Interface\nDeployCertificate()\nValidateDeployment()"]
         TI --> NG["NGINX"]
+        TI --> AP["Apache httpd"]
+        TI --> HP["HAProxy"]
         TI --> F5["F5 BIG-IP (interface only)"]
         TI --> IIS["IIS (interface only)"]
     end
@@ -427,7 +437,7 @@ The `DeploymentRequest` struct carries the full material needed by the target sy
 
 Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — iControl REST flow mapped, implementation planned V2), **IIS** (interface only — WinRM/PowerShell flow mapped, implementation planned V2).
 
-**Planned targets (V3):** AWS ALB/CloudFront, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets.
+**Planned (V3):** Kubernetes cert-manager external issuer, Kubernetes Secrets, AWS ALB/CloudFront, AWS IAM Roles Anywhere, Azure Key Vault, Azure Managed Identity, Palo Alto, FortiGate, Citrix ADC.
 
 ### Notifier Connector
 
@@ -579,7 +589,7 @@ For production, you would also add an ingress controller, TLS termination for th
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 220+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 230+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
 **Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
@@ -591,7 +601,7 @@ certctl uses a layered testing approach aligned with the handler → service →
 
 **CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vitest test suite, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~34%) and handler layer must be at least 50% (current: ~61%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/local/...` (the Local CA package, which has unit tests for certificate signing logic). The Frontend job runs `npx vitest run` between the TypeScript check and production build steps.
 
-**What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors (NGINX, F5, IIS) depend on real infrastructure or complex mocks. Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
+**What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors for F5 BIG-IP and IIS depend on real infrastructure or complex mocks. Apache httpd and HAProxy connectors have unit tests (7 tests each) covering config validation, deployment, and validation flows. Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
 
 ## What's Next
 

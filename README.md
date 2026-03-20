@@ -1,6 +1,8 @@
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certificates across your infrastructure with a web dashboard, REST API, and agent-based architecture where private keys never leave your servers.
+TLS certificate lifespans are shrinking. The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) unanimously in April 2025, setting a phased reduction: **200 days** by March 2026, **100 days** by March 2027, and **47 days** by March 2029. Manual certificate management is no longer viable at any scale.
+
+certctl is a self-hosted platform for **end-to-end certificate lifecycle automation** — from issuance through renewal to deployment — with zero human intervention. Track every certificate in your organization, automatically renew them before they expire, and deploy them to your servers without touching a terminal. Private keys never leave your infrastructure.
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
@@ -8,7 +10,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (55 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (55 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -19,8 +21,8 @@ flowchart LR
 
     subgraph "Your Infrastructure"
         A1["Agent"] --> T1["NGINX"]
-        A2["Agent"] --> T2["F5 BIG-IP"]
-        A3["Agent"] --> T3["IIS"]
+        A2["Agent"] --> T2["Apache / HAProxy"]
+        A3["Agent"] --> T3["F5 · IIS"]
     end
 
     API --> PG
@@ -40,7 +42,7 @@ flowchart LR
 | ![Notifications](docs/screenshots/notifications.png) | ![Policies](docs/screenshots/policies.png) |
 | **Notifications** — threshold alerts grouped by certificate | **Policies** — enforcement rules with enable/disable and delete |
 | ![Issuers](docs/screenshots/issuers.png) | ![Targets](docs/screenshots/targets.png) |
-| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, F5, IIS) |
+| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, Apache, HAProxy, F5, IIS) |
 | ![Audit Trail](docs/screenshots/audit-trail.png) | |
 | **Audit Trail** — immutable log of every action | |
 
@@ -349,23 +351,24 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 230+ tests total: 180+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
-- **M11: Policy + Ownership** — crypto policy enforcement (key algo/size validation), certificate ownership tracking, dynamic device grouping, renewal approval UI
+- **M11: Crypto Policy + Profiles + Ownership** — certificate profiles (configurable TTL down to 5 min for short-lived certs), crypto policy enforcement (key algo/size validation), SPIFFE URI SAN support, certificate ownership, dynamic device grouping, renewal approval UI
 - **M12: DNS-01 + step-ca** — ACME DNS-01 challenges (wildcard certs, Cloudflare/Route53 adapters), step-ca issuer connector
-- **M13: GUI Operations** — bulk cert operations, deployment timeline, inline policy editor, target config wizard, audit export
+- **M13: GUI Operations** — bulk cert operations (renew, revoke, reassign), deployment timeline, inline policy editor, target config wizard, audit export, short-lived credentials dashboard
 - **M14: Enterprise Connectors** — SSE/WebSocket real-time updates, F5 BIG-IP, IIS, ADCS, OpenSSL/Custom CA implementations
-- **M15: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
-- **M16: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics, deployment rollback
-- **M17: Integrations** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer, filesystem cert discovery
+- **M15: Revocation Infrastructure** — revocation API with reason codes, embedded OCSP responder, CRL endpoint, bulk revocation by profile/owner/agent, revocation webhooks
+- **M16: Team Adoption** — OIDC/SSO, RBAC (profile-gated), CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
+- **M17: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics (issuance/revocation rates, OCSP latency), deployment rollback
+- **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer, filesystem cert discovery
 
 ### V3: Discovery, Visibility & Cloud
-Discovery engine (passive/active scanning, cert chain validation, Nmap/Qualys import, unknown cert detection, triage workflows), cloud targets (AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module, compliance mapping docs
+Discovery engine (passive/active scanning, cert chain validation, unknown cert detection, triage workflows), Kubernetes cert-manager external issuer, cloud targets (AWS ALB/IAM Roles Anywhere, Azure Key Vault/Managed Identity, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module
 
 ### V4+: Platform & Scale
-Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support, LDAP auth, API key scoping, multi-tenancy
+Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support, LDAP auth, API key scoping, multi-tenancy, SPIFFE/SPIRE federation, OPA policy backend, compliance reporting (NIST, SOC 2, PCI-DSS)
 
 ## License
 

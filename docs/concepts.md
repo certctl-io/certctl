@@ -1,6 +1,6 @@
 # Understanding Certificates: A Beginner's Guide
 
-If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why managing them at scale is hard enough to need a tool like certctl.
+If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why the industry's move toward shorter certificate lifespans — down to 47 days by 2029 — makes automated lifecycle management essential.
 
 ## What Is a TLS Certificate?
 
@@ -12,11 +12,15 @@ Think of it like a notarized ID badge for a website. The badge says "I am api.ex
 
 ## Why Do Certificates Expire?
 
-Every certificate has an expiration date, typically 90 days for Let's Encrypt or up to 1 year for commercial CAs. This isn't a bug — it's a security feature. Short lifetimes limit the damage if a private key is compromised, and they force organizations to prove they still control their domains.
+Every certificate has an expiration date. This isn't a bug — it's a security feature. Short lifetimes limit the damage if a private key is compromised, and they force organizations to prove they still control their domains.
 
-The problem? When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, Apache instances, HAProxy load balancers, F5 appliances, and IIS boxes in three environments, it becomes a ticking time bomb. One missed renewal means a production outage — your site goes down, your API returns errors, and your customers see scary browser warnings.
+Certificate lifespans have been shrinking steadily. A decade ago, certificates lasted up to 5 years. Then the CA/Browser Forum — the industry body that sets certificate rules — reduced the maximum to 3 years, then 2 years, then 398 days. In April 2025, they passed Ballot SC-081v3 unanimously, setting a phased reduction to **200 days** (March 2026), **100 days** (March 2027), and **47 days** (March 2029). Let's Encrypt already issues 90-day certificates by default.
 
-**This is the core problem certctl solves**: automated tracking, renewal, and deployment of certificates across your entire infrastructure.
+The trend is clear: shorter lifespans, more frequent renewals, and zero tolerance for manual processes.
+
+When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, Apache instances, HAProxy load balancers, F5 appliances, and IIS boxes in three environments — and each certificate needs renewal every 47 days — manual management becomes impossible. One missed renewal means a production outage: your site goes down, your API returns errors, and your customers see browser warnings.
+
+**This is the core problem certctl solves**: end-to-end automation of the certificate lifecycle — issuance, renewal, and deployment — across your entire infrastructure, with no human intervention required.
 
 ## The Cast of Characters
 

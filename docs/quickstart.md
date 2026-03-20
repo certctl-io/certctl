@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get certctl running locally and managing certificates in under 5 minutes.
+Get certctl running locally and managing certificates in under 5 minutes. With TLS certificate lifespans dropping to 47 days by 2029, automated lifecycle management isn't optional — it's infrastructure. This guide gets you hands-on with certctl's automation loop: tracking, renewing, and deploying certificates without manual intervention.
 
 New to certificates? Read the [Concepts Guide](concepts.md) first — it explains TLS, CAs, and private keys in plain language.
 
