@@ -17,6 +17,9 @@ import PoliciesPage from './pages/PoliciesPage';
 import IssuersPage from './pages/IssuersPage';
 import TargetsPage from './pages/TargetsPage';
 import ProfilesPage from './pages/ProfilesPage';
+import OwnersPage from './pages/OwnersPage';
+import TeamsPage from './pages/TeamsPage';
+import AgentGroupsPage from './pages/AgentGroupsPage';
 import AuditPage from './pages/AuditPage';
 import './index.css';
 
@@ -50,6 +53,9 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="issuers" element={<IssuersPage />} />
                   <Route path="targets" element={<TargetsPage />} />
+                  <Route path="owners" element={<OwnersPage />} />
+                  <Route path="teams" element={<TeamsPage />} />
+                  <Route path="agent-groups" element={<AgentGroupsPage />} />
                   <Route path="audit" element={<AuditPage />} />
                 </Route>
               </Routes>

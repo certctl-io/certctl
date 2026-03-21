@@ -54,6 +54,7 @@ func (r *Router) RegisterHandlers(
 	profiles handler.ProfileHandler,
 	teams handler.TeamHandler,
 	owners handler.OwnerHandler,
+	agentGroups handler.AgentGroupHandler,
 	audit handler.AuditHandler,
 	notifications handler.NotificationHandler,
 	health handler.HealthHandler,
@@ -117,6 +118,8 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/jobs", http.HandlerFunc(jobs.ListJobs))
 	r.Register("GET /api/v1/jobs/{id}", http.HandlerFunc(jobs.GetJob))
 	r.Register("POST /api/v1/jobs/{id}/cancel", http.HandlerFunc(jobs.CancelJob))
+	r.Register("POST /api/v1/jobs/{id}/approve", http.HandlerFunc(jobs.ApproveJob))
+	r.Register("POST /api/v1/jobs/{id}/reject", http.HandlerFunc(jobs.RejectJob))
 
 	// Policies routes: /api/v1/policies
 	r.Register("GET /api/v1/policies", http.HandlerFunc(policies.ListPolicies))
@@ -146,6 +149,14 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/owners/{id}", http.HandlerFunc(owners.GetOwner))
 	r.Register("PUT /api/v1/owners/{id}", http.HandlerFunc(owners.UpdateOwner))
 	r.Register("DELETE /api/v1/owners/{id}", http.HandlerFunc(owners.DeleteOwner))
+
+	// Agent Groups routes: /api/v1/agent-groups
+	r.Register("GET /api/v1/agent-groups", http.HandlerFunc(agentGroups.ListAgentGroups))
+	r.Register("POST /api/v1/agent-groups", http.HandlerFunc(agentGroups.CreateAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.GetAgentGroup))
+	r.Register("PUT /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.UpdateAgentGroup))
+	r.Register("DELETE /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.DeleteAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}/members", http.HandlerFunc(agentGroups.ListAgentGroupMembers))
 
 	// Audit routes: /api/v1/audit
 	r.Register("GET /api/v1/audit", http.HandlerFunc(audit.ListAuditEvents))

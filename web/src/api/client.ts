@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, PaginatedResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -186,6 +186,70 @@ export const updateProfile = (id: string, data: Partial<CertificateProfile>) =>
 
 export const deleteProfile = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/profiles/${id}`, { method: 'DELETE' });
+
+// Owners
+export const getOwners = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<Owner>>(`${BASE}/owners?${qs}`);
+};
+
+export const getOwner = (id: string) =>
+  fetchJSON<Owner>(`${BASE}/owners/${id}`);
+
+export const createOwner = (data: Partial<Owner>) =>
+  fetchJSON<Owner>(`${BASE}/owners`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateOwner = (id: string, data: Partial<Owner>) =>
+  fetchJSON<Owner>(`${BASE}/owners/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteOwner = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/owners/${id}`, { method: 'DELETE' });
+
+// Teams
+export const getTeams = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<Team>>(`${BASE}/teams?${qs}`);
+};
+
+export const getTeam = (id: string) =>
+  fetchJSON<Team>(`${BASE}/teams/${id}`);
+
+export const createTeam = (data: Partial<Team>) =>
+  fetchJSON<Team>(`${BASE}/teams`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateTeam = (id: string, data: Partial<Team>) =>
+  fetchJSON<Team>(`${BASE}/teams/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteTeam = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/teams/${id}`, { method: 'DELETE' });
+
+// Agent Groups
+export const getAgentGroups = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<AgentGroup>>(`${BASE}/agent-groups?${qs}`);
+};
+
+export const getAgentGroup = (id: string) =>
+  fetchJSON<AgentGroup>(`${BASE}/agent-groups/${id}`);
+
+export const createAgentGroup = (data: Partial<AgentGroup>) =>
+  fetchJSON<AgentGroup>(`${BASE}/agent-groups`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateAgentGroup = (id: string, data: Partial<AgentGroup>) =>
+  fetchJSON<AgentGroup>(`${BASE}/agent-groups/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteAgentGroup = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/agent-groups/${id}`, { method: 'DELETE' });
+
+export const getAgentGroupMembers = (id: string) =>
+  fetchJSON<PaginatedResponse<Agent>>(`${BASE}/agent-groups/${id}/members`);
+
+// Renewal Approvals
+export const approveRenewal = (jobId: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/jobs/${jobId}/approve`, { method: 'POST' });
+
+export const rejectRenewal = (jobId: string, reason: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/jobs/${jobId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
 
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');

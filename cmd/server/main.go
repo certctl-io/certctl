@@ -103,6 +103,7 @@ func main() {
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
+	notificationService.SetOwnerRepo(ownerRepo)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
@@ -112,6 +113,8 @@ func main() {
 	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
+	agentGroupRepo := postgres.NewAgentGroupRepository(db)
+	agentGroupService := service.NewAgentGroupService(agentGroupRepo, auditService)
 	logger.Info("initialized all services")
 
 	// Initialize API handlers
@@ -124,6 +127,7 @@ func main() {
 	profileHandler := handler.NewProfileHandler(profileService)
 	teamHandler := handler.NewTeamHandler(teamService)
 	ownerHandler := handler.NewOwnerHandler(ownerService)
+	agentGroupHandler := handler.NewAgentGroupHandler(agentGroupService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
@@ -166,6 +170,7 @@ func main() {
 		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
 		healthHandler,

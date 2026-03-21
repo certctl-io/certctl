@@ -190,3 +190,19 @@ INSERT INTO notification_events (id, type, certificate_id, channel, recipient, m
   ('ne-demo-05', 'renewal_success',     'mc-api-prod',      'email',   'alice@example.com',   'Certificate api-production renewed successfully',        NOW() - INTERVAL '15 days',    'sent',   NULL),
   ('ne-demo-06', 'deployment_success',  'mc-api-prod',      'webhook', 'https://hooks.example.com/certctl', 'Certificate api-production deployed to NGINX Production', NOW() - INTERVAL '15 days', 'sent', NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- Agent Groups
+INSERT INTO agent_groups (id, name, description, match_os, match_architecture, match_ip_cidr, match_version, enabled, created_at, updated_at) VALUES
+  ('ag-linux-prod',   'Linux Production',    'All Linux agents in production',          'linux',   '',       '',              '',      true,  NOW(), NOW()),
+  ('ag-linux-amd64',  'Linux AMD64',         'Linux agents on x86_64 architecture',     'linux',   'amd64', '',              '',      true,  NOW(), NOW()),
+  ('ag-windows',      'Windows Agents',      'All Windows-based agents',                'windows', '',       '',              '',      true,  NOW(), NOW()),
+  ('ag-datacenter-a', 'Datacenter A',        'Agents in 10.0.1.0/24 subnet',           '',        '',       '10.0.1.0/24',  '',      true,  NOW(), NOW()),
+  ('ag-manual',       'Manual Group',        'Manually managed agent group (no dynamic criteria)', '', '',   '',              '',      false, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Agent Group Members (manual membership for the manual group)
+INSERT INTO agent_group_members (agent_group_id, agent_id, membership_type, created_at) VALUES
+  ('ag-manual', 'agent-web-1',   'include', NOW()),
+  ('ag-manual', 'agent-api-1',   'include', NOW()),
+  ('ag-manual', 'agent-db-1',    'exclude', NOW())
+ON CONFLICT (agent_group_id, agent_id) DO NOTHING;

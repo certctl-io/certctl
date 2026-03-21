@@ -68,6 +68,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
+	agentGroupHandler := handler.NewAgentGroupHandler(&mockAgentGroupService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	healthHandler := handler.NewHealthHandler("none")
@@ -84,6 +85,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
 		healthHandler,
@@ -1018,4 +1020,31 @@ func (m *mockProfileService) UpdateProfile(id string, profile domain.Certificate
 
 func (m *mockProfileService) DeleteProfile(id string) error {
 	return nil
+}
+
+type mockAgentGroupService struct{}
+
+func (m *mockAgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error) {
+	return []domain.AgentGroup{}, 0, nil
+}
+
+func (m *mockAgentGroupService) GetAgentGroup(id string) (*domain.AgentGroup, error) {
+	return nil, fmt.Errorf("agent group not found")
+}
+
+func (m *mockAgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error) {
+	return &group, nil
+}
+
+func (m *mockAgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
+	group.ID = id
+	return &group, nil
+}
+
+func (m *mockAgentGroupService) DeleteAgentGroup(id string) error {
+	return nil
+}
+
+func (m *mockAgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
+	return []domain.Agent{}, 0, nil
 }

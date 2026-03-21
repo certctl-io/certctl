@@ -13,6 +13,7 @@ import (
 // NotificationService provides business logic for managing notifications.
 type NotificationService struct {
 	notifRepo        repository.NotificationRepository
+	ownerRepo        repository.OwnerRepository
 	notifierRegistry map[string]Notifier
 }
 
@@ -33,6 +34,25 @@ func NewNotificationService(
 		notifRepo:        notifRepo,
 		notifierRegistry: notifierRegistry,
 	}
+}
+
+// SetOwnerRepo sets the owner repository for email resolution.
+// Called after construction to avoid circular dependency during initialization.
+func (s *NotificationService) SetOwnerRepo(ownerRepo repository.OwnerRepository) {
+	s.ownerRepo = ownerRepo
+}
+
+// resolveRecipient resolves an owner ID to an email address.
+// Falls back to the raw owner ID if the owner repo is not set or lookup fails.
+func (s *NotificationService) resolveRecipient(ctx context.Context, ownerID string) string {
+	if s.ownerRepo == nil || ownerID == "" {
+		return ownerID
+	}
+	owner, err := s.ownerRepo.Get(ctx, ownerID)
+	if err != nil || owner == nil || owner.Email == "" {
+		return ownerID
+	}
+	return owner.Email
 }
 
 // SendExpirationWarning sends a certificate expiration warning for a specific threshold.
@@ -56,13 +76,13 @@ func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *doma
 		)
 	}
 
-	// Create notification record
+	// Create notification record — resolve owner email if possible
 	notif := &domain.NotificationEvent{
 		ID:            generateID("notif"),
 		CertificateID: &cert.ID,
 		Type:          domain.NotificationTypeExpirationWarning,
 		Channel:       domain.NotificationChannelEmail,
-		Recipient:     cert.OwnerID,
+		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
 		Message:       body,
 		Status:        "pending",
 		CreatedAt:     time.Now(),
@@ -121,7 +141,7 @@ func (s *NotificationService) SendRenewalNotification(ctx context.Context, cert 
 		CertificateID: &cert.ID,
 		Type:          notifType,
 		Channel:       domain.NotificationChannelEmail,
-		Recipient:     cert.OwnerID,
+		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
 		Message:       body,
 		Status:        "pending",
 		CreatedAt:     time.Now(),
@@ -160,7 +180,7 @@ func (s *NotificationService) SendDeploymentNotification(ctx context.Context, ce
 		CertificateID: &cert.ID,
 		Type:          notifType,
 		Channel:       domain.NotificationChannelEmail,
-		Recipient:     cert.OwnerID,
+		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
 		Message:       body,
 		Status:        "pending",
 		CreatedAt:     time.Now(),

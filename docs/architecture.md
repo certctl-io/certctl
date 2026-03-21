@@ -83,13 +83,15 @@ Lightweight Go processes that run on or near your infrastructure. Agents generat
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
-**Agent metadata (M10):** Agents report OS, architecture, IP address, hostname, and version via heartbeat using `runtime.GOOS`, `runtime.GOARCH`, and `net` stdlib. This metadata is stored on the `agents` table and displayed in the GUI (agent list shows OS/Arch column, detail page shows full system info). This metadata enables future dynamic device grouping, allowing policies to be scoped by agent criteria (e.g., all Ubuntu agents, all agents in a specific subnet).
+**Agent metadata (M10):** Agents report OS, architecture, IP address, hostname, and version via heartbeat using `runtime.GOOS`, `runtime.GOARCH`, and `net` stdlib. This metadata is stored on the `agents` table and displayed in the GUI (agent list shows OS/Arch column, detail page shows full system info).
+
+**Agent groups (M11b):** Dynamic device grouping allows organizing agents by metadata criteria. Agent groups can match by OS, architecture, IP CIDR, and version. Groups support both dynamic matching (agents automatically join when criteria match) and manual membership (explicit include/exclude). Renewal policies can be scoped to agent groups via the `agent_group_id` foreign key. The GUI provides full CRUD management for agent groups with visual match criteria badges.
 
 ### Web Dashboard
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
 
-**Current views**: certificate inventory (list with "New Certificate" creation modal + detail with version history, deploy, archive, and trigger renewal actions), agent fleet (health indicators from heartbeat), job queue (status, retry, cancel), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range and actor/action filters), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with delete), and a summary dashboard.
+**Current views (14)**: certificate inventory (list with "New Certificate" creation modal + detail with version history, deploy, archive, and trigger renewal actions), agent fleet (health indicators from heartbeat), job queue (status, retry, cancel), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range and actor/action filters), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), and a summary dashboard.
 
 The dashboard includes an **ErrorBoundary component** for graceful error recovery — if a view crashes, the boundary catches the error and displays a user-friendly message instead of breaking the entire dashboard. It also includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
@@ -535,7 +537,9 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 - **Delete**: `DELETE /api/v1/{resources}/{id}` — returns `204` (soft delete/archive)
 - **Actions**: `POST /api/v1/{resources}/{id}/{action}` — returns `202` for async operations
 
-Resources: certificates, issuers, targets, agents, jobs, policies, teams, owners, audit, notifications.
+Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
+
+Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
 Health checks live outside the API prefix: `GET /health` and `GET /ready`.
 
@@ -589,11 +593,11 @@ For production, you would also add an ingress controller, TLS termination for th
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 230+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 250+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
 **Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
-**Handler layer tests** (`internal/api/handler/*_test.go`) — 127 test functions across 7 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (22 tests), agents (28 tests), jobs (13 tests), notifications (11 tests), policies (19 tests), issuers (17 tests), and targets (17 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
+**Handler layer tests** (`internal/api/handler/*_test.go`) — 147 test functions across 8 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (22 tests), agents (28 tests), jobs (21 tests including approve/reject), notifications (11 tests), policies (19 tests), issuers (17 tests), targets (17 tests), and agent groups (12 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
 
 **Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 14 subtests covering error paths: nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, and expired certificate lifecycle. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
 

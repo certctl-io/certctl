@@ -58,6 +58,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
+	agentGroupHandler := handler.NewAgentGroupHandler(&mockAgentGroupService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	healthHandler := handler.NewHealthHandler("none")
@@ -73,6 +74,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
 		healthHandler,

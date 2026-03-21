@@ -149,6 +149,43 @@ export interface CertificateProfile {
   updated_at: string;
 }
 
+export interface Owner {
+  id: string;
+  name: string;
+  email: string;
+  team_id: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface Team {
+  id: string;
+  name: string;
+  description: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentGroup {
+  id: string;
+  name: string;
+  description: string;
+  match_os: string;
+  match_architecture: string;
+  match_ip_cidr: string;
+  match_version: string;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface AgentGroupMembership {
+  agent_group_id: string;
+  agent_id: string;
+  membership_type: string;
+  created_at: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;

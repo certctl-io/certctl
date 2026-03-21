@@ -169,6 +169,26 @@ type CertificateProfileRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// AgentGroupRepository defines operations for managing agent groups.
+type AgentGroupRepository interface {
+	// List returns all agent groups.
+	List(ctx context.Context) ([]*domain.AgentGroup, error)
+	// Get retrieves an agent group by ID.
+	Get(ctx context.Context, id string) (*domain.AgentGroup, error)
+	// Create stores a new agent group.
+	Create(ctx context.Context, group *domain.AgentGroup) error
+	// Update modifies an existing agent group.
+	Update(ctx context.Context, group *domain.AgentGroup) error
+	// Delete removes an agent group.
+	Delete(ctx context.Context, id string) error
+	// ListMembers returns agents in a group (both dynamic matches and manual includes).
+	ListMembers(ctx context.Context, groupID string) ([]*domain.Agent, error)
+	// AddMember adds a manual membership.
+	AddMember(ctx context.Context, groupID, agentID, membershipType string) error
+	// RemoveMember removes a manual membership.
+	RemoveMember(ctx context.Context, groupID, agentID string) error
+}
+
 // OwnerRepository defines operations for managing certificate owners.
 type OwnerRepository interface {
 	// List returns all owners.
