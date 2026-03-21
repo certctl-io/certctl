@@ -68,6 +68,7 @@ func main() {
 	policyRepo := postgres.NewPolicyRepository(db)
 	notificationRepo := postgres.NewNotificationRepository(db)
 	renewalPolicyRepo := postgres.NewRenewalPolicyRepository(db)
+	profileRepo := postgres.NewProfileRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	ownerRepo := postgres.NewOwnerRepository(db)
 	logger.Info("initialized all repositories")
@@ -102,12 +103,13 @@ func main() {
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
+	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	issuerService := service.NewIssuerService(issuerRepo, auditService)
 	targetService := service.NewTargetService(targetRepo, auditService)
+	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
 	logger.Info("initialized all services")
@@ -119,6 +121,7 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(profileService)
 	teamHandler := handler.NewTeamHandler(teamService)
 	ownerHandler := handler.NewOwnerHandler(ownerService)
 	auditHandler := handler.NewAuditHandler(auditService)
@@ -160,6 +163,7 @@ func main() {
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
 		auditHandler,

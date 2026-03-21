@@ -43,7 +43,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, "server")
+	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
@@ -55,6 +55,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
 	auditHandler := handler.NewAuditHandler(auditService)
@@ -69,6 +70,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
 		auditHandler,

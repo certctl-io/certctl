@@ -85,7 +85,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
 		FROM managed_certificates
 		%s
 		ORDER BY created_at DESC
@@ -120,7 +120,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
 		FROM managed_certificates
 		WHERE id = $1
 	`, id)
@@ -147,14 +147,20 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 		return fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
+	var profileID *string
+	if cert.CertificateProfileID != "" {
+		profileID = &cert.CertificateProfileID
+	}
+
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO managed_certificates (
 			id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-			status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
 		RETURNING id
 	`, cert.ID, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
-		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.RenewalPolicyID, cert.Status, cert.ExpiresAt,
+		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.RenewalPolicyID, profileID,
+		cert.Status, cert.ExpiresAt,
 		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt, cert.CreatedAt, cert.UpdatedAt).Scan(&cert.ID)
 
 	if err != nil {
@@ -171,6 +177,11 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 		return fmt.Errorf("failed to marshal tags: %w", err)
 	}
 
+	var profileID *string
+	if cert.CertificateProfileID != "" {
+		profileID = &cert.CertificateProfileID
+	}
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE managed_certificates SET
 			name = $1,
@@ -180,15 +191,16 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 			owner_id = $5,
 			team_id = $6,
 			issuer_id = $7,
-			status = $8,
-			expires_at = $9,
-			tags = $10,
-			last_renewal_at = $11,
-			last_deployment_at = $12,
-			updated_at = $13
-		WHERE id = $14
+			certificate_profile_id = $8,
+			status = $9,
+			expires_at = $10,
+			tags = $11,
+			last_renewal_at = $12,
+			last_deployment_at = $13,
+			updated_at = $14
+		WHERE id = $15
 	`, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
-		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.Status, cert.ExpiresAt,
+		cert.OwnerID, cert.TeamID, cert.IssuerID, profileID, cert.Status, cert.ExpiresAt,
 		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt, cert.UpdatedAt, cert.ID)
 
 	if err != nil {
@@ -233,7 +245,7 @@ func (r *CertificateRepository) Archive(ctx context.Context, id string) error {
 func (r *CertificateRepository) ListVersions(ctx context.Context, certID string) ([]*domain.CertificateVersion, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, certificate_id, serial_number, not_before, not_after,
-		       fingerprint_sha256, pem_chain, csr_pem, created_at
+		       fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
 		FROM certificate_versions
 		WHERE certificate_id = $1
 		ORDER BY created_at DESC
@@ -248,7 +260,7 @@ func (r *CertificateRepository) ListVersions(ctx context.Context, certID string)
 	for rows.Next() {
 		var v domain.CertificateVersion
 		if err := rows.Scan(&v.ID, &v.CertificateID, &v.SerialNumber, &v.NotBefore, &v.NotAfter,
-			&v.FingerprintSHA256, &v.PEMChain, &v.CSRPEM, &v.CreatedAt); err != nil {
+			&v.FingerprintSHA256, &v.PEMChain, &v.CSRPEM, &v.KeyAlgorithm, &v.KeySize, &v.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan certificate version: %w", err)
 		}
 		versions = append(versions, &v)
@@ -270,11 +282,11 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO certificate_versions (
 			id, certificate_id, serial_number, not_before, not_after,
-			fingerprint_sha256, pem_chain, csr_pem, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id
 	`, version.ID, version.CertificateID, version.SerialNumber, version.NotBefore, version.NotAfter,
-		version.FingerprintSHA256, version.PEMChain, version.CSRPEM, version.CreatedAt).Scan(&version.ID)
+		version.FingerprintSHA256, version.PEMChain, version.CSRPEM, version.KeyAlgorithm, version.KeySize, version.CreatedAt).Scan(&version.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create certificate version: %w", err)
@@ -287,7 +299,7 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
 		FROM managed_certificates
 		WHERE expires_at < $1 AND status != $2
 		ORDER BY expires_at ASC
@@ -321,10 +333,12 @@ func scanCertificate(scanner interface {
 	var cert domain.ManagedCertificate
 	var tagsJSON []byte
 	var sans pq.StringArray
+	var profileID sql.NullString
 
 	err := scanner.Scan(
 		&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
-		&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &cert.Status, &cert.ExpiresAt, &tagsJSON,
+		&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &profileID,
+		&cert.Status, &cert.ExpiresAt, &tagsJSON,
 		&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.CreatedAt, &cert.UpdatedAt)
 
 	if err != nil {
@@ -332,6 +346,9 @@ func scanCertificate(scanner interface {
 	}
 
 	cert.SANs = []string(sans)
+	if profileID.Valid {
+		cert.CertificateProfileID = profileID.String
+	}
 
 	// Unmarshal tags
 	if len(tagsJSON) > 0 {

@@ -51,6 +51,7 @@ func (r *Router) RegisterHandlers(
 	agents handler.AgentHandler,
 	jobs handler.JobHandler,
 	policies handler.PolicyHandler,
+	profiles handler.ProfileHandler,
 	teams handler.TeamHandler,
 	owners handler.OwnerHandler,
 	audit handler.AuditHandler,
@@ -124,6 +125,13 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/policies/{id}", http.HandlerFunc(policies.UpdatePolicy))
 	r.Register("DELETE /api/v1/policies/{id}", http.HandlerFunc(policies.DeletePolicy))
 	r.Register("GET /api/v1/policies/{id}/violations", http.HandlerFunc(policies.ListViolations))
+
+	// Profiles routes: /api/v1/profiles
+	r.Register("GET /api/v1/profiles", http.HandlerFunc(profiles.ListProfiles))
+	r.Register("POST /api/v1/profiles", http.HandlerFunc(profiles.CreateProfile))
+	r.Register("GET /api/v1/profiles/{id}", http.HandlerFunc(profiles.GetProfile))
+	r.Register("PUT /api/v1/profiles/{id}", http.HandlerFunc(profiles.UpdateProfile))
+	r.Register("DELETE /api/v1/profiles/{id}", http.HandlerFunc(profiles.DeleteProfile))
 
 	// Teams routes: /api/v1/teams
 	r.Register("GET /api/v1/teams", http.HandlerFunc(teams.ListTeams))

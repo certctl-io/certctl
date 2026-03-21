@@ -6,23 +6,24 @@ import (
 
 // ManagedCertificate represents a certificate managed by the control plane.
 type ManagedCertificate struct {
-	ID               string            `json:"id"`
-	Name             string            `json:"name"`
-	CommonName       string            `json:"common_name"`
-	SANs             []string          `json:"sans"`
-	Environment      string            `json:"environment"`
-	OwnerID          string            `json:"owner_id"`
-	TeamID           string            `json:"team_id"`
-	IssuerID         string            `json:"issuer_id"`
-	TargetIDs        []string          `json:"target_ids"`
-	RenewalPolicyID  string            `json:"renewal_policy_id"`
-	Status           CertificateStatus `json:"status"`
-	ExpiresAt        time.Time         `json:"expires_at"`
-	Tags             map[string]string `json:"tags"`
-	LastRenewalAt    *time.Time        `json:"last_renewal_at,omitempty"`
-	LastDeploymentAt *time.Time        `json:"last_deployment_at,omitempty"`
-	CreatedAt        time.Time         `json:"created_at"`
-	UpdatedAt        time.Time         `json:"updated_at"`
+	ID                   string            `json:"id"`
+	Name                 string            `json:"name"`
+	CommonName           string            `json:"common_name"`
+	SANs                 []string          `json:"sans"`
+	Environment          string            `json:"environment"`
+	OwnerID              string            `json:"owner_id"`
+	TeamID               string            `json:"team_id"`
+	IssuerID             string            `json:"issuer_id"`
+	TargetIDs            []string          `json:"target_ids"`
+	RenewalPolicyID      string            `json:"renewal_policy_id"`
+	CertificateProfileID string            `json:"certificate_profile_id,omitempty"`
+	Status               CertificateStatus `json:"status"`
+	ExpiresAt            time.Time         `json:"expires_at"`
+	Tags                 map[string]string `json:"tags"`
+	LastRenewalAt        *time.Time        `json:"last_renewal_at,omitempty"`
+	LastDeploymentAt     *time.Time        `json:"last_deployment_at,omitempty"`
+	CreatedAt            time.Time         `json:"created_at"`
+	UpdatedAt            time.Time         `json:"updated_at"`
 }
 
 // CertificateVersion represents a specific version of a certificate.
@@ -35,6 +36,8 @@ type CertificateVersion struct {
 	FingerprintSHA256 string    `json:"fingerprint_sha256"`
 	PEMChain          string    `json:"pem_chain"`
 	CSRPEM            string    `json:"csr_pem"`
+	KeyAlgorithm      string    `json:"key_algorithm,omitempty"`
+	KeySize           int       `json:"key_size,omitempty"`
 	CreatedAt         time.Time `json:"created_at"`
 }
 
@@ -54,15 +57,16 @@ const (
 
 // RenewalPolicy defines renewal parameters for a managed certificate.
 type RenewalPolicy struct {
-	ID                  string    `json:"id"`
-	Name                string    `json:"name"`
-	RenewalWindowDays   int       `json:"renewal_window_days"`
-	AutoRenew           bool      `json:"auto_renew"`
-	MaxRetries          int       `json:"max_retries"`
-	RetryInterval       int       `json:"retry_interval_seconds"`
-	AlertThresholdsDays []int     `json:"alert_thresholds_days"`
-	CreatedAt           time.Time `json:"created_at"`
-	UpdatedAt           time.Time `json:"updated_at"`
+	ID                   string    `json:"id"`
+	Name                 string    `json:"name"`
+	RenewalWindowDays    int       `json:"renewal_window_days"`
+	AutoRenew            bool      `json:"auto_renew"`
+	MaxRetries           int       `json:"max_retries"`
+	RetryInterval        int       `json:"retry_interval_seconds"`
+	AlertThresholdsDays  []int     `json:"alert_thresholds_days"`
+	CertificateProfileID string    `json:"certificate_profile_id,omitempty"`
+	CreatedAt            time.Time `json:"created_at"`
+	UpdatedAt            time.Time `json:"updated_at"`
 }
 
 // DefaultAlertThresholds returns the standard alert thresholds when none are configured.

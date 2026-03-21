@@ -155,6 +155,20 @@ type TeamRepository interface {
 	Delete(ctx context.Context, id string) error
 }
 
+// CertificateProfileRepository defines operations for managing certificate profiles.
+type CertificateProfileRepository interface {
+	// List returns all certificate profiles.
+	List(ctx context.Context) ([]*domain.CertificateProfile, error)
+	// Get retrieves a certificate profile by ID.
+	Get(ctx context.Context, id string) (*domain.CertificateProfile, error)
+	// Create stores a new certificate profile.
+	Create(ctx context.Context, profile *domain.CertificateProfile) error
+	// Update modifies an existing certificate profile.
+	Update(ctx context.Context, profile *domain.CertificateProfile) error
+	// Delete removes a certificate profile.
+	Delete(ctx context.Context, id string) error
+}
+
 // OwnerRepository defines operations for managing certificate owners.
 type OwnerRepository interface {
 	// List returns all owners.

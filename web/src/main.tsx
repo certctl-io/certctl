@@ -16,6 +16,7 @@ import NotificationsPage from './pages/NotificationsPage';
 import PoliciesPage from './pages/PoliciesPage';
 import IssuersPage from './pages/IssuersPage';
 import TargetsPage from './pages/TargetsPage';
+import ProfilesPage from './pages/ProfilesPage';
 import AuditPage from './pages/AuditPage';
 import './index.css';
 
@@ -46,6 +47,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="jobs" element={<JobsPage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="policies" element={<PoliciesPage />} />
+                  <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="issuers" element={<IssuersPage />} />
                   <Route path="targets" element={<TargetsPage />} />
                   <Route path="audit" element={<AuditPage />} />

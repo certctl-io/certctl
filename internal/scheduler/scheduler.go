@@ -19,10 +19,11 @@ type Scheduler struct {
 	logger              *slog.Logger
 
 	// Configurable tick intervals
-	renewalCheckInterval        time.Duration
-	jobProcessorInterval        time.Duration
-	agentHealthCheckInterval    time.Duration
-	notificationProcessInterval time.Duration
+	renewalCheckInterval            time.Duration
+	jobProcessorInterval            time.Duration
+	agentHealthCheckInterval        time.Duration
+	notificationProcessInterval     time.Duration
+	shortLivedExpiryCheckInterval   time.Duration
 }
 
 // NewScheduler creates a new scheduler with configurable intervals.
@@ -41,10 +42,11 @@ func NewScheduler(
 		logger:              logger,
 
 		// Default intervals
-		renewalCheckInterval:        1 * time.Hour,
-		jobProcessorInterval:        30 * time.Second,
-		agentHealthCheckInterval:    2 * time.Minute,
-		notificationProcessInterval: 1 * time.Minute,
+		renewalCheckInterval:          1 * time.Hour,
+		jobProcessorInterval:          30 * time.Second,
+		agentHealthCheckInterval:      2 * time.Minute,
+		notificationProcessInterval:   1 * time.Minute,
+		shortLivedExpiryCheckInterval: 30 * time.Second,
 	}
 }
 
@@ -87,6 +89,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go s.jobProcessorLoop(ctx)
 		go s.agentHealthCheckLoop(ctx)
 		go s.notificationProcessLoop(ctx)
+		go s.shortLivedExpiryCheckLoop(ctx)
 
 		// Wait for context cancellation
 		<-ctx.Done()
@@ -223,5 +226,35 @@ func (s *Scheduler) runNotificationProcess(ctx context.Context) {
 			"interval", s.notificationProcessInterval.String())
 	} else {
 		s.logger.Debug("notification processor completed")
+	}
+}
+
+// shortLivedExpiryCheckLoop runs every shortLivedExpiryCheckInterval and marks expired
+// short-lived certificates. For certs with TTL < 1 hour, expiry IS revocation —
+// no CRL/OCSP needed.
+func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.shortLivedExpiryCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runShortLivedExpiryCheck(ctx)
+		}
+	}
+}
+
+// runShortLivedExpiryCheck executes a single short-lived expiry check with error recovery.
+func (s *Scheduler) runShortLivedExpiryCheck(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.renewalService.ExpireShortLivedCertificates(opCtx); err != nil {
+		s.logger.Error("short-lived expiry check failed",
+			"error", err,
+			"interval", s.shortLivedExpiryCheckInterval.String())
+	} else {
+		s.logger.Debug("short-lived expiry check completed")
 	}
 }

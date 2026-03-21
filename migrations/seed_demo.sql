@@ -53,6 +53,42 @@ INSERT INTO deployment_targets (id, name, type, agent_id, config, enabled, creat
   ('tgt-nginx-data',    'NGINX Data Services', 'nginx', 'ag-data-prod',  '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
+-- Certificate Profiles
+INSERT INTO certificate_profiles (id, name, description, allowed_key_algorithms, max_ttl_seconds, allowed_ekus, required_san_patterns, spiffe_uri_pattern, allow_short_lived, enabled, created_at, updated_at) VALUES
+  ('prof-standard-tls', 'Standard TLS',
+   'Default profile for web-facing TLS certificates. Requires ECDSA P-256+ or RSA 2048+.',
+   '[{"algorithm": "ECDSA", "min_size": 256}, {"algorithm": "RSA", "min_size": 2048}]'::jsonb,
+   7776000, -- 90 days
+   '["serverAuth"]'::jsonb,
+   '[]'::jsonb,
+   '', false, true, NOW(), NOW()),
+
+  ('prof-internal-mtls', 'Internal mTLS',
+   'Mutual TLS profile for internal service-to-service communication.',
+   '[{"algorithm": "ECDSA", "min_size": 256}]'::jsonb,
+   2592000, -- 30 days
+   '["serverAuth", "clientAuth"]'::jsonb,
+   '[".*\\.internal\\.example\\.com$"]'::jsonb,
+   '', false, true, NOW(), NOW()),
+
+  ('prof-short-lived', 'Short-Lived Credential',
+   'Ephemeral certificates for CI/CD pipelines and container workloads. TTL under 1 hour, expiry = revocation.',
+   '[{"algorithm": "ECDSA", "min_size": 256}]'::jsonb,
+   300, -- 5 minutes
+   '["serverAuth", "clientAuth"]'::jsonb,
+   '[]'::jsonb,
+   'spiffe://example.com/workload/*',
+   true, true, NOW(), NOW()),
+
+  ('prof-high-security', 'High Security',
+   'For PCI-DSS and compliance-sensitive workloads. RSA 4096+ or ECDSA P-384+ only.',
+   '[{"algorithm": "ECDSA", "min_size": 384}, {"algorithm": "RSA", "min_size": 4096}]'::jsonb,
+   4060800, -- 47 days (Ballot SC-081v3 target)
+   '["serverAuth"]'::jsonb,
+   '[".*\\.example\\.com$"]'::jsonb,
+   '', false, true, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
 -- Managed Certificates — varied statuses and expiry dates for realistic dashboard
 INSERT INTO managed_certificates (id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at) VALUES
   -- Active, healthy certs

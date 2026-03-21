@@ -22,6 +22,7 @@ type RenewalService struct {
 	certRepo          repository.CertificateRepository
 	jobRepo           repository.JobRepository
 	renewalPolicyRepo repository.RenewalPolicyRepository
+	profileRepo       repository.CertificateProfileRepository
 	auditService      *AuditService
 	notificationSvc   *NotificationService
 	issuerRegistry    map[string]IssuerConnector
@@ -52,6 +53,7 @@ func NewRenewalService(
 	certRepo repository.CertificateRepository,
 	jobRepo repository.JobRepository,
 	renewalPolicyRepo repository.RenewalPolicyRepository,
+	profileRepo repository.CertificateProfileRepository,
 	auditService *AuditService,
 	notificationSvc *NotificationService,
 	issuerRegistry map[string]IssuerConnector,
@@ -64,6 +66,7 @@ func NewRenewalService(
 		certRepo:          certRepo,
 		jobRepo:           jobRepo,
 		renewalPolicyRepo: renewalPolicyRepo,
+		profileRepo:       profileRepo,
 		auditService:      auditService,
 		notificationSvc:   notificationSvc,
 		issuerRegistry:    issuerRegistry,
@@ -371,6 +374,8 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		FingerprintSHA256: fingerprint,
 		PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
 		CSRPEM:            privKeyPEM, // Server mode: stores private key for agent deployment
+		KeyAlgorithm:      domain.KeyAlgorithmRSA,
+		KeySize:           2048,
 		CreatedAt:         time.Now(),
 	}
 
@@ -428,6 +433,22 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 		return fmt.Errorf("issuer connector not found for %s", cert.IssuerID)
 	}
 
+	// Validate CSR against certificate profile (crypto policy enforcement)
+	var profile *domain.CertificateProfile
+	if cert.CertificateProfileID != "" && s.profileRepo != nil {
+		var profileErr error
+		profile, profileErr = s.profileRepo.Get(ctx, cert.CertificateProfileID)
+		if profileErr != nil {
+			slog.Warn("failed to fetch certificate profile, skipping crypto validation",
+				"profile_id", cert.CertificateProfileID, "cert_id", cert.ID, "error", profileErr)
+		}
+	}
+	csrInfo, csrErr := ValidateCSRAgainstProfile(csrPEM, profile)
+	if csrErr != nil {
+		s.failJob(ctx, job, fmt.Sprintf("CSR validation failed: %v", csrErr))
+		return fmt.Errorf("CSR validation failed: %w", csrErr)
+	}
+
 	// Update job to running
 	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusRunning, ""); err != nil {
 		return fmt.Errorf("failed to update job status: %w", err)
@@ -461,6 +482,10 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 		PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
 		CSRPEM:            csrPEM, // Agent mode: stores actual CSR, not private key
 		CreatedAt:         time.Now(),
+	}
+	if csrInfo != nil {
+		version.KeyAlgorithm = csrInfo.KeyAlgorithm
+		version.KeySize = csrInfo.KeySize
 	}
 
 	if err := s.certRepo.CreateVersion(ctx, version); err != nil {
@@ -583,6 +608,73 @@ func (s *RenewalService) RetryFailedJobs(ctx context.Context, maxRetries int) er
 		if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusPending, ""); err != nil {
 			slog.Error("failed to reset job status for retry", "job_id", job.ID, "error", err)
 			continue
+		}
+	}
+
+	return nil
+}
+
+// ExpireShortLivedCertificates finds active certificates with short-lived profiles
+// whose TTL has elapsed and marks them as Expired. For certs with TTL < 1 hour,
+// expiry is the revocation mechanism — no CRL/OCSP needed.
+func (s *RenewalService) ExpireShortLivedCertificates(ctx context.Context) error {
+	if s.profileRepo == nil {
+		return nil
+	}
+
+	// Get all Active certificates and check if any have expired based on their actual expiry time
+	// This catches short-lived certs that expire between normal renewal check cycles
+	now := time.Now()
+	expiring, err := s.certRepo.GetExpiringCertificates(ctx, now)
+	if err != nil {
+		return fmt.Errorf("failed to fetch expired certificates: %w", err)
+	}
+
+	for _, cert := range expiring {
+		if cert.Status != domain.CertificateStatusActive && cert.Status != domain.CertificateStatusExpiring {
+			continue
+		}
+
+		// Only auto-expire certs that have actually passed their expiry time
+		if cert.ExpiresAt.After(now) {
+			continue
+		}
+
+		// Check if this cert has a short-lived profile
+		if cert.CertificateProfileID == "" {
+			continue
+		}
+
+		profile, err := s.profileRepo.Get(ctx, cert.CertificateProfileID)
+		if err != nil {
+			slog.Warn("failed to fetch profile for short-lived expiry check",
+				"profile_id", cert.CertificateProfileID, "cert_id", cert.ID, "error", err)
+			continue
+		}
+
+		if !profile.IsShortLived() {
+			continue
+		}
+
+		// Mark as expired
+		cert.Status = domain.CertificateStatusExpired
+		cert.UpdatedAt = now
+		if err := s.certRepo.Update(ctx, cert); err != nil {
+			slog.Error("failed to expire short-lived cert", "cert_id", cert.ID, "error", err)
+			continue
+		}
+
+		slog.Info("short-lived certificate expired (expiry = revocation)",
+			"cert_id", cert.ID, "profile_id", cert.CertificateProfileID,
+			"expired_at", cert.ExpiresAt)
+
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+			"short_lived_cert_expired", "certificate", cert.ID,
+			map[string]interface{}{
+				"profile_id": cert.CertificateProfileID,
+				"expired_at": cert.ExpiresAt,
+			}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
 		}
 	}
 

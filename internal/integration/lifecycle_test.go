@@ -52,7 +52,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, "server")
+	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
@@ -65,6 +65,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
 	auditHandler := handler.NewAuditHandler(auditService)
@@ -80,6 +81,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
 		auditHandler,
@@ -992,5 +994,28 @@ func (m *mockOwnerService) UpdateOwner(id string, owner domain.Owner) (*domain.O
 }
 
 func (m *mockOwnerService) DeleteOwner(id string) error {
+	return nil
+}
+
+type mockProfileService struct{}
+
+func (m *mockProfileService) ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error) {
+	return []domain.CertificateProfile{}, 0, nil
+}
+
+func (m *mockProfileService) GetProfile(id string) (*domain.CertificateProfile, error) {
+	return nil, fmt.Errorf("profile not found")
+}
+
+func (m *mockProfileService) CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+	return &profile, nil
+}
+
+func (m *mockProfileService) UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+	profile.ID = id
+	return &profile, nil
+}
+
+func (m *mockProfileService) DeleteProfile(id string) error {
 	return nil
 }

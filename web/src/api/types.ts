@@ -129,6 +129,26 @@ export interface Target {
   created_at: string;
 }
 
+export interface KeyAlgorithmRule {
+  algorithm: string;
+  min_size: number;
+}
+
+export interface CertificateProfile {
+  id: string;
+  name: string;
+  description: string;
+  allowed_key_algorithms: KeyAlgorithmRule[];
+  max_ttl_seconds: number;
+  allowed_ekus: string[];
+  required_san_patterns: string[];
+  spiffe_uri_pattern: string;
+  allow_short_lived: boolean;
+  enabled: boolean;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface PaginatedResponse<T> {
   data: T[];
   total: number;

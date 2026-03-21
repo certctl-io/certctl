@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, PaginatedResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, PaginatedResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -168,6 +168,24 @@ export const createTarget = (data: Partial<Target>) =>
 
 export const deleteTarget = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/targets/${id}`, { method: 'DELETE' });
+
+// Profiles
+export const getProfiles = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<CertificateProfile>>(`${BASE}/profiles?${qs}`);
+};
+
+export const getProfile = (id: string) =>
+  fetchJSON<CertificateProfile>(`${BASE}/profiles/${id}`);
+
+export const createProfile = (data: Partial<CertificateProfile>) =>
+  fetchJSON<CertificateProfile>(`${BASE}/profiles`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateProfile = (id: string, data: Partial<CertificateProfile>) =>
+  fetchJSON<CertificateProfile>(`${BASE}/profiles/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteProfile = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/profiles/${id}`, { method: 'DELETE' });
 
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');

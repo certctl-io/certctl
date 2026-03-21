@@ -30,7 +30,7 @@ func TestCheckExpiringCertificates_SendsThresholdAlerts(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create a cert expiring in 10 days
 	cert := &domain.ManagedCertificate{
@@ -112,7 +112,7 @@ func TestCheckExpiringCertificates_DeduplicatesAlerts(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create cert
 	cert := &domain.ManagedCertificate{
@@ -192,7 +192,7 @@ func TestCheckExpiringCertificates_SkipsRenewalInProgress(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create cert with RenewalInProgress status
 	cert := &domain.ManagedCertificate{
@@ -257,7 +257,7 @@ func TestCheckExpiringCertificates_UpdatesStatusToExpiring(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create active cert that will become expiring
 	// Use an issuer NOT in the registry so no renewal job is created (which would override status)
@@ -319,7 +319,7 @@ func TestCheckExpiringCertificates_UpdatesStatusToExpired(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create cert that is already expired
 	// Use an issuer NOT in the registry so no renewal job is created (which would override status)
@@ -381,7 +381,7 @@ func TestCheckExpiringCertificates_CreatesRenewalJob(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create expiring cert with registered issuer
 	cert := &domain.ManagedCertificate{
@@ -447,7 +447,7 @@ func TestCheckExpiringCertificates_SkipsWithoutIssuer(t *testing.T) {
 	// Empty issuer registry
 	issuerRegistry := map[string]IssuerConnector{}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create cert with unregistered issuer
 	cert := &domain.ManagedCertificate{
@@ -509,7 +509,7 @@ func TestCheckExpiringCertificates_SkipsDuplicateJobs(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create cert
 	cert := &domain.ManagedCertificate{
@@ -593,7 +593,7 @@ func TestProcessRenewalJob(t *testing.T) {
 		"iss-test": issuerConnector,
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create certificate
 	cert := &domain.ManagedCertificate{
@@ -689,7 +689,7 @@ func TestProcessRenewalJob_IssuerFailure(t *testing.T) {
 		"iss-test": issuerConnector,
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create certificate
 	cert := &domain.ManagedCertificate{
@@ -771,7 +771,7 @@ func TestRetryFailedJobs(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create failed job with attempts < max_attempts
 	failedJob := &domain.Job{
@@ -836,7 +836,7 @@ func TestProcessRenewalJob_NoCertificate(t *testing.T) {
 		"iss-test": &mockIssuerConnector{},
 	}
 
-	svc := NewRenewalService(certRepo, jobRepo, policyRepo, auditSvc, notifSvc, issuerRegistry, "server")
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
 	// Create job with non-existent certificate
 	job := &domain.Job{
