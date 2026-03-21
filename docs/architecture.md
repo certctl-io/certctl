@@ -9,11 +9,13 @@ New to certificates? Read the [Concepts Guide](concepts.md) first.
 ### Design Principles
 
 1. **Private Key Isolation** — Agents generate ECDSA P-256 keys locally and submit CSRs only. Private keys never touch the control plane. Server-side keygen available via `CERTCTL_KEYGEN_MODE=server` for demo only.
-2. **GUI as Primary Interface** — The web dashboard is the operational control plane, not a secondary viewer. Every backend feature ships with its corresponding GUI surface.
-3. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
-4. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
-5. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
-6. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
+2. **Pull-Only Deployment** — The server never initiates outbound connections to agents or targets. Agents poll for work. For network appliances and agentless targets, a proxy agent in the same network zone executes deployments via the target's API. This keeps the control plane firewalled off and limits credential scope to the proxy agent's zone.
+3. **Sub-CA Capable** — The Local CA can operate as a subordinate CA under an enterprise root (e.g., ADCS). Load a pre-signed CA cert+key from disk and all issued certs chain to the enterprise trust hierarchy. Self-signed mode remains the default for development/demos.
+4. **GUI as Primary Interface** — The web dashboard is the operational control plane, not a secondary viewer. Every backend feature ships with its corresponding GUI surface.
+5. **Decoupled Operations** — Agents operate autonomously; the control plane coordinates but doesn't block agent function
+6. **Audit-First** — Complete traceability of all issuance, deployment, and rotation events
+7. **Connector Architecture** — Pluggable issuers, targets, and notifiers for extensibility
+8. **Self-Hosted** — No cloud lock-in; run with Docker Compose, Kubernetes, or bare metal
 
 ## System Components
 
@@ -50,8 +52,8 @@ flowchart TB
         T1["NGINX\n(file write + reload)"]
         T4["Apache httpd\n(file write + reload)"]
         T5["HAProxy\n(combined PEM + reload)"]
-        T2["F5 BIG-IP\n(iControl REST, planned)"]
-        T3["IIS\n(WinRM, planned)"]
+        T2["F5 BIG-IP\n(proxy agent + iControl REST, planned)"]
+        T3["IIS\n(agent-local PowerShell, planned)"]
     end
 
     DASH --> API
@@ -312,10 +314,10 @@ The agent deploys certificates using target connectors. Each connector knows how
 - **NGINX**: Writes cert/chain/key files to disk, validates config with `nginx -t`, reloads with `nginx -s reload` or `systemctl reload nginx`
 - **Apache httpd**: Writes separate cert/chain/key files, validates with `apachectl configtest`, graceful reload
 - **HAProxy**: Builds a combined PEM file (cert + chain + key), optionally validates config, reloads via systemctl or signal
-- **F5 BIG-IP** (planned): Calls the F5 iControl REST API to upload certificate and update SSL profile bindings
-- **IIS** (planned): Uses WinRM to import PFX into the Windows certificate store and bind it to an IIS site
+- **F5 BIG-IP** (planned): A proxy agent in the same network zone calls the iControl REST API to upload certificate and update SSL profile bindings. The server assigns the work; the proxy agent executes it.
+- **IIS** (planned, dual-mode): (1) Agent-local (recommended) — a Windows agent on the IIS box runs PowerShell `Import-PfxCertificate` + `Set-WebBinding` directly. (2) Proxy agent WinRM — for agentless IIS targets, a nearby Windows agent reaches the IIS box via WinRM.
 
-The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key.
+The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key and never initiates outbound connections to agents or targets (pull-only model).
 
 ### 4. Automatic Renewal
 
@@ -437,7 +439,7 @@ type Connector interface {
 
 The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
 
-Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — iControl REST flow mapped, implementation planned V2), **IIS** (interface only — WinRM/PowerShell flow mapped, implementation planned V2).
+Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — proxy agent + iControl REST, planned V2), **IIS** (interface only — dual-mode: agent-local PowerShell primary + proxy agent WinRM for agentless targets, planned V2).
 
 **Planned (V3):** Kubernetes cert-manager external issuer, Kubernetes Secrets, AWS ALB/CloudFront, AWS IAM Roles Anywhere, Azure Key Vault, Azure Managed Identity, Palo Alto, FortiGate, Citrix ADC.
 
@@ -501,7 +503,7 @@ The control plane only handles public material: certificates, chains, and CSRs.
 - **API clients → Server**: API key in `Authorization: Bearer` header, or `none` for demo mode
 - **Agent → Server**: API key registered at agent creation, included in all requests
 - **Server → Issuers**: ACME account key, or connector-specific credentials
-- **Agent → Targets**: SSH keys, API tokens, WinRM credentials (stored locally on agent)
+- **Agent → Targets**: API tokens, WinRM credentials (stored locally on agent or proxy agent — never on server). Credential scope is limited to the agent's network zone.
 
 ### Audit Trail
 

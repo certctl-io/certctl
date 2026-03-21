@@ -116,7 +116,7 @@ You should see:
 
 The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
 
-**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault, ADCS), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA and ACME (HTTP-01); step-ca, ADCS, OpenSSL/custom CA are planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA) and ACME (HTTP-01); step-ca, OpenSSL/custom CA are planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
 
 ```mermaid
 flowchart TD
@@ -127,11 +127,10 @@ flowchart TD
         D["GetOrderStatus(orderID)"]
     end
 
-    A --> E["Local CA\n(crypto/x509)"]
+    A --> E["Local CA\n(self-signed or sub-CA)"]
     A --> F["ACME\n(Let's Encrypt)"]
     A --> G["step-ca\n(planned V2)"]
     A --> H["OpenSSL / Custom CA\n(planned V2)"]
-    A --> I["ADCS\n(planned V2)"]
     A --> J["DigiCert API\n(planned V2.3)"]
     A --> K["Vault PKI\n(planned V3)"]
     A --> L["Entrust / GlobalSign\n(planned V3)"]
@@ -308,13 +307,13 @@ sequenceDiagram
         TC->>T: Run: nginx -t (validate config)
         TC->>T: Run: systemctl reload nginx
         TC-->>A: {success: true, deployed_at: "..."}
-    else F5 Target
-        TC->>T: POST /mgmt/tm/sys/crypto/cert (upload cert)
-        TC->>T: PUT /mgmt/tm/ltm/virtual (bind to virtual server)
+    else F5 Target (via proxy agent)
+        TC->>T: iControl REST: POST /mgmt/tm/sys/crypto/cert
+        TC->>T: iControl REST: PUT /mgmt/tm/ltm/virtual
         TC-->>A: {success: true, deployed_at: "..."}
-    else IIS Target
-        TC->>T: WinRM: Import-PfxCertificate
-        TC->>T: WinRM: Set-WebBinding -SslFlags
+    else IIS Target (agent-local)
+        TC->>T: PowerShell: Import-PfxCertificate
+        TC->>T: PowerShell: Set-WebBinding -SslFlags
         TC-->>A: {success: true, deployed_at: "..."}
     end
 

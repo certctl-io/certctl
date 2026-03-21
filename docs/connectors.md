@@ -6,11 +6,11 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME implemented; step-ca, ADCS, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5, IIS interface only; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME implemented; step-ca, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2)
 
-All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents.
+All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
 
 ## Issuer Connector
 
@@ -81,15 +81,19 @@ type OrderStatus struct {
 
 ### Built-in: Local CA
 
-The Local CA issuer generates self-signed certificates using Go's `crypto/x509` library. It creates a CA on first use (in memory), issues certificates with proper serial numbers, validity periods, SANs, and key usage extensions.
+The Local CA issuer signs certificates using Go's `crypto/x509` library. It supports two modes:
 
-This issuer is designed for development and demos only — certificates are self-signed and not trusted by browsers.
+**Self-signed mode (default):** Creates a CA on first use (in memory), issues certificates with proper serial numbers, validity periods, SANs, and key usage extensions. Designed for development and demos — certificates are self-signed and not trusted by browsers.
+
+**Sub-CA mode (planned M12):** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. If the paths are not set, falls back to self-signed mode.
 
 Configuration:
 ```json
 {
   "ca_common_name": "CertCtl Local CA",
-  "validity_days": 90
+  "validity_days": 90,
+  "ca_cert_path": "/etc/certctl/ca/ca.pem",
+  "ca_key_path": "/etc/certctl/ca/ca-key.pem"
 }
 ```
 
@@ -126,9 +130,10 @@ The following issuer connectors are planned for V2:
 
 - **step-ca** — Smallstep's private CA and ACME server. Would allow certctl to issue certificates from a self-hosted step-ca instance via its ACME or provisioner APIs.
 - **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
-- **ADCS (Active Directory Certificate Services)** — Microsoft's enterprise CA. Would allow certctl to request certificates from an existing ADCS infrastructure, useful for organizations that need lifecycle management around their Windows PKI.
 - **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
 - **DigiCert** — Commercial CA integration via DigiCert's REST API.
+
+Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 
 ### Building a Custom Issuer
 
@@ -318,7 +323,9 @@ Location: `internal/connector/target/haproxy/haproxy.go`
 
 ### Planned: F5 BIG-IP (V2, Interface Only)
 
-The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
+The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it.
+
+The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
 
 Configuration (defined, not yet functional):
 ```json
@@ -331,23 +338,32 @@ Configuration (defined, not yet functional):
 }
 ```
 
+Note: F5 credentials are stored on the proxy agent, not on the control plane server. This limits the credential blast radius to the proxy agent's network zone.
+
 Location: `internal/connector/target/f5/f5.go`
 
-### Planned: IIS (V2, Interface Only)
+### Planned: IIS (V2, Interface Only, Dual-Mode)
 
-The IIS target connector interface is built with the WinRM/PowerShell flow mapped out, but the actual remote execution is not yet implemented. The planned flow is: transfer a PFX bundle to the Windows server via WinRM, run `Import-PfxCertificate` to install it into the certificate store, and run `Set-WebBinding` to bind the certificate to the IIS site. Implementation is planned for V2.
+The IIS target connector supports two deployment modes:
+
+**Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
+
+**Proxy agent WinRM (for agentless targets):** For Windows servers where you don't want to install an agent, a nearby Windows agent acts as a proxy and reaches the IIS box via WinRM. The proxy agent picks up the deployment job, transfers the PFX bundle over WinRM, and runs the PowerShell commands remotely. WinRM credentials are stored on the proxy agent, not on the control plane.
 
 Configuration (defined, not yet functional):
 ```json
 {
-  "host": "iis-server.internal.example.com",
-  "username": "Administrator",
-  "password": "...",
+  "mode": "local",
   "site_name": "Default Web Site",
   "cert_store": "WebHosting",
-  "use_https": true
+  "winrm_host": "",
+  "winrm_username": "",
+  "winrm_password": "",
+  "winrm_use_https": true
 }
 ```
+
+When `mode` is `"local"`, the `winrm_*` fields are ignored. When `mode` is `"proxy"`, the agent connects to the remote IIS server via WinRM using the provided credentials.
 
 Location: `internal/connector/target/iis/iis.go`
 

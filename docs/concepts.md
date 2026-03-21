@@ -30,6 +30,8 @@ A CA is the trusted third party that signs your certificates. When a CA signs a 
 
 Common CAs include Let's Encrypt (free, automated), DigiCert, Sectigo, and your organization's internal/private CA. Each issues certificates through different protocols and APIs.
 
+certctl includes a built-in **Local CA** that can operate in two modes: self-signed (default, for development and demos) or as a **subordinate CA** under an enterprise root like Active Directory Certificate Services (ADCS). In sub-CA mode, you load a CA certificate and key signed by your enterprise root, and all certificates certctl issues automatically chain to the enterprise trust hierarchy — no manual trust configuration needed on clients that already trust your enterprise root.
+
 ### ACME Protocol
 
 ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01) or creating a DNS record (DNS-01).
@@ -62,7 +64,7 @@ The control plane never touches private keys. It coordinates the certificate lif
 
 ### Agents
 
-Agents are lightweight processes that run on or near your infrastructure. They do the actual work: generating private keys, creating Certificate Signing Requests (CSRs), receiving signed certificates, and deploying them to servers. An agent might run on the same machine as your NGINX server, or on a management host that has SSH access to your web servers.
+Agents are lightweight processes that run on or near your infrastructure. They do the actual work: generating private keys, creating Certificate Signing Requests (CSRs), receiving signed certificates, and deploying them to target systems. An agent typically runs on the same machine as the target (e.g., your NGINX or IIS server), deploying certificates locally. For network appliances where you can't install an agent, a proxy agent in the same network zone handles deployment via the appliance's API.
 
 The flow looks like this:
 
@@ -76,11 +78,13 @@ The flow looks like this:
 
 At no point does the private key leave the agent. This is a fundamental security property.
 
-Agents also report **metadata** about themselves — their operating system, CPU architecture, IP address, hostname, and version — with every heartbeat. This gives ops teams fleet-wide visibility (e.g., "how many agents are running on ARM?", "which agents are still on v1.0.0?") and is the foundation for future features like dynamic device grouping, where policies can be scoped to specific agent criteria like OS type or network subnet.
+Agents also report **metadata** about themselves — their operating system, CPU architecture, IP address, hostname, and version — with every heartbeat. This gives ops teams fleet-wide visibility (e.g., "how many agents are running on ARM?", "which agents are still on v1.0.0?") and powers **agent groups** — dynamic device grouping where policies can be scoped to specific agent criteria like OS type, architecture, or network subnet.
 
 ### Deployment Targets
 
-Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, F5 BIG-IP appliances, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy, calling the F5 REST API, running PowerShell commands on IIS via WinRM).
+Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, F5 BIG-IP appliances, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy).
+
+For targets where an agent runs directly on the machine (NGINX, Apache, HAProxy, IIS), the agent deploys certificates locally — no remote access needed. For network appliances where you can't install an agent (F5 BIG-IP, Palo Alto, etc.), a **proxy agent** in the same network zone picks up the deployment job and calls the appliance's API. The server never initiates outbound connections to any target.
 
 ## The Certificate Lifecycle
 
