@@ -193,6 +193,51 @@ func (s *NotificationService) SendDeploymentNotification(ctx context.Context, ce
 	return s.sendNotification(ctx, notif)
 }
 
+// SendRevocationNotification sends a certificate revocation notification.
+func (s *NotificationService) SendRevocationNotification(ctx context.Context, cert *domain.ManagedCertificate, reason string) error {
+	body := fmt.Sprintf(
+		"[REVOKED] The certificate for %s has been revoked.\n\nReason: %s\n\nThis certificate is no longer valid.",
+		cert.CommonName, reason,
+	)
+
+	notif := &domain.NotificationEvent{
+		ID:            generateID("notif"),
+		CertificateID: &cert.ID,
+		Type:          domain.NotificationTypeRevocation,
+		Channel:       domain.NotificationChannelWebhook,
+		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
+		Message:       body,
+		Status:        "pending",
+		CreatedAt:     time.Now(),
+	}
+
+	if err := s.notifRepo.Create(ctx, notif); err != nil {
+		return fmt.Errorf("failed to create revocation notification: %w", err)
+	}
+
+	// Also send via email channel
+	emailNotif := &domain.NotificationEvent{
+		ID:            generateID("notif"),
+		CertificateID: &cert.ID,
+		Type:          domain.NotificationTypeRevocation,
+		Channel:       domain.NotificationChannelEmail,
+		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
+		Message:       body,
+		Status:        "pending",
+		CreatedAt:     time.Now(),
+	}
+
+	if err := s.notifRepo.Create(ctx, emailNotif); err != nil {
+		slog.Error("failed to create email revocation notification", "error", err)
+	}
+
+	// Attempt immediate send for both
+	if err := s.sendNotification(ctx, notif); err != nil {
+		slog.Error("failed to send webhook revocation notification", "error", err)
+	}
+	return s.sendNotification(ctx, emailNotif)
+}
+
 // ProcessPendingNotifications sends all pending notifications in batch.
 func (s *NotificationService) ProcessPendingNotifications(ctx context.Context) error {
 	filter := &repository.NotificationFilter{

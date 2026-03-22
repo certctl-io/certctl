@@ -5,6 +5,7 @@ import (
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
@@ -20,6 +21,8 @@ type CertificateService interface {
 	GetCertificateVersions(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
 	TriggerRenewal(certID string) error
 	TriggerDeployment(certID string, targetID string) error
+	RevokeCertificate(certID string, reason string) error
+	GetRevokedCertificates() ([]*domain.CertificateRevocation, error)
 }
 
 // CertificateHandler handles HTTP requests for certificate operations.
@@ -349,4 +352,95 @@ func (h CertificateHandler) TriggerDeployment(w http.ResponseWriter, r *http.Req
 	}
 
 	JSON(w, http.StatusAccepted, response)
+}
+
+// RevokeCertificate revokes a certificate with an optional reason code.
+// POST /api/v1/certificates/{id}/revoke
+func (h CertificateHandler) RevokeCertificate(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	// Extract certificate ID from path /api/v1/certificates/{id}/revoke
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/certificates/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Certificate ID is required", requestID)
+		return
+	}
+	certID := parts[0]
+
+	// Parse optional reason from request body
+	var req struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil && r.Header.Get("Content-Type") == "application/json" {
+		if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+			return
+		}
+	}
+
+	if err := h.svc.RevokeCertificate(certID, req.Reason); err != nil {
+		// Distinguish between client errors and server errors
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "already revoked") ||
+			strings.Contains(errMsg, "cannot revoke") ||
+			strings.Contains(errMsg, "invalid revocation reason") {
+			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
+			return
+		}
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to fetch") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+			return
+		}
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to revoke certificate", requestID)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
+}
+
+// GetCRL returns the Certificate Revocation List as structured JSON.
+// GET /api/v1/crl
+// Note: DER-encoded X.509 CRL generation (requiring CA key access) is planned for M15b
+// alongside the embedded OCSP responder. This endpoint provides the same data in JSON format.
+func (h CertificateHandler) GetCRL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	revocations, err := h.svc.GetRevokedCertificates()
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate CRL", requestID)
+		return
+	}
+
+	type CRLEntry struct {
+		SerialNumber     string `json:"serial_number"`
+		RevocationDate   string `json:"revocation_date"`
+		RevocationReason string `json:"revocation_reason"`
+	}
+
+	entries := make([]CRLEntry, 0, len(revocations))
+	for _, rev := range revocations {
+		entries = append(entries, CRLEntry{
+			SerialNumber:     rev.SerialNumber,
+			RevocationDate:   rev.RevokedAt.Format("2006-01-02T15:04:05Z"),
+			RevocationReason: rev.Reason,
+		})
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"version":      1,
+		"entries":      entries,
+		"total":        len(entries),
+		"generated_at": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
+	})
 }

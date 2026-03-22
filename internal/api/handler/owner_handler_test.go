@@ -2,14 +2,12 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
 )
 
@@ -550,9 +548,4 @@ func TestDeleteOwner_MethodNotAllowed(t *testing.T) {
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status 405, got %d", w.Code)
 	}
-}
-
-// contextWithRequestID returns a context with a test request ID for use in tests.
-func contextWithRequestID() context.Context {
-	return context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id-123")
 }

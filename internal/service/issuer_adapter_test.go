@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -23,7 +24,7 @@ type mockConnectorLayerIssuer struct {
 	orderStatus   *issuer.OrderStatus
 }
 
-func (m *mockConnectorLayerIssuer) ValidateConfig(ctx context.Context, config []byte) error {
+func (m *mockConnectorLayerIssuer) ValidateConfig(ctx context.Context, config json.RawMessage) error {
 	return m.validateErr
 }
 
@@ -325,5 +326,45 @@ func TestIssuerConnectorAdapter_RenewCertificate_RequestTranslation(t *testing.T
 
 	if mock.lastRenewReq.CSRPEM != csrPEM {
 		t.Errorf("expected CSRPEM %s, got %s", csrPEM, mock.lastRenewReq.CSRPEM)
+	}
+}
+
+// Tests for RevokeCertificate
+
+func TestIssuerConnectorAdapter_RevokeCertificate_Success(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	err := adapter.RevokeCertificate(ctx, "serial-123", "keyCompromise")
+	if err != nil {
+		t.Fatalf("RevokeCertificate failed: %v", err)
+	}
+}
+
+func TestIssuerConnectorAdapter_RevokeCertificate_Error(t *testing.T) {
+	ctx := context.Background()
+	testErr := errors.New("revocation failed at issuer")
+	mock := &mockConnectorLayerIssuer{revokeErr: testErr}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	err := adapter.RevokeCertificate(ctx, "serial-123", "keyCompromise")
+	if err == nil {
+		t.Fatal("expected error, got nil")
+	}
+	if !errors.Is(err, testErr) {
+		t.Errorf("expected error %v, got %v", testErr, err)
+	}
+}
+
+func TestIssuerConnectorAdapter_RevokeCertificate_EmptyReason(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	// Empty reason should pass nil to the connector
+	err := adapter.RevokeCertificate(ctx, "serial-456", "")
+	if err != nil {
+		t.Fatalf("RevokeCertificate with empty reason failed: %v", err)
 	}
 }

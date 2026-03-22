@@ -88,6 +88,10 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/certificates/{id}/versions", http.HandlerFunc(certificates.GetCertificateVersions))
 	r.Register("POST /api/v1/certificates/{id}/renew", http.HandlerFunc(certificates.TriggerRenewal))
 	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(certificates.TriggerDeployment))
+	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(certificates.RevokeCertificate))
+
+	// CRL endpoint: /api/v1/crl
+	r.Register("GET /api/v1/crl", http.HandlerFunc(certificates.GetCRL))
 
 	// Issuers routes: /api/v1/issuers
 	r.Register("GET /api/v1/issuers", http.HandlerFunc(issuers.ListIssuers))

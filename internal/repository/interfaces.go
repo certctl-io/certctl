@@ -25,6 +25,22 @@ type CertificateRepository interface {
 	CreateVersion(ctx context.Context, version *domain.CertificateVersion) error
 	// GetExpiringCertificates returns certificates expiring before the given time.
 	GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error)
+	// GetLatestVersion returns the most recent certificate version for a certificate.
+	GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error)
+}
+
+// RevocationRepository defines operations for managing certificate revocations.
+type RevocationRepository interface {
+	// Create records a new certificate revocation.
+	Create(ctx context.Context, revocation *domain.CertificateRevocation) error
+	// GetBySerial retrieves a revocation by serial number.
+	GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error)
+	// ListAll returns all revocations, ordered by revocation time (for CRL generation).
+	ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error)
+	// ListByCertificate returns all revocations for a certificate.
+	ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error)
+	// MarkIssuerNotified updates the issuer_notified flag for a revocation.
+	MarkIssuerNotified(ctx context.Context, id string) error
 }
 
 // IssuerRepository defines operations for managing certificate issuers.

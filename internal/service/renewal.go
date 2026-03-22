@@ -37,6 +37,8 @@ type IssuerConnector interface {
 	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error)
 	// RenewCertificate renews a certificate using the provided CSR PEM.
 	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error)
+	// RevokeCertificate revokes a certificate by serial number with an optional reason.
+	RevokeCertificate(ctx context.Context, serial string, reason string) error
 }
 
 // IssuanceResult holds the result of a certificate issuance or renewal operation.

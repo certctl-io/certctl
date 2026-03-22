@@ -248,8 +248,8 @@ func TestDeleteAgentGroup_Success(t *testing.T) {
 
 	h.DeleteAgentGroup(w, req)
 
-	if w.Code != http.StatusOK {
-		t.Fatalf("expected status 200, got %d", w.Code)
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("expected status 204, got %d", w.Code)
 	}
 	if deletedID != "ag-linux" {
 		t.Errorf("expected deleted ID 'ag-linux', got '%s'", deletedID)

@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -23,6 +24,8 @@ type MockCertificateService struct {
 	GetCertificateVersionsFn func(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
 	TriggerRenewalFn         func(certID string) error
 	TriggerDeploymentFn      func(certID string, targetID string) error
+	RevokeCertificateFn      func(certID string, reason string) error
+	GetRevokedCertificatesFn func() ([]*domain.CertificateRevocation, error)
 }
 
 func (m *MockCertificateService) ListCertificates(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
@@ -79,6 +82,20 @@ func (m *MockCertificateService) TriggerDeployment(certID string, targetID strin
 		return m.TriggerDeploymentFn(certID, targetID)
 	}
 	return nil
+}
+
+func (m *MockCertificateService) RevokeCertificate(certID string, reason string) error {
+	if m.RevokeCertificateFn != nil {
+		return m.RevokeCertificateFn(certID, reason)
+	}
+	return nil
+}
+
+func (m *MockCertificateService) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
+	if m.GetRevokedCertificatesFn != nil {
+		return m.GetRevokedCertificatesFn()
+	}
+	return nil, nil
 }
 
 // Helper function to create context with request ID.
@@ -706,5 +723,322 @@ func TestListCertificates_PerPageExceedsMax(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+// === Revocation Handler Tests ===
+
+func TestRevokeCertificate_Handler_Success(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			if certID != "mc-prod-001" {
+				t.Errorf("expected certID mc-prod-001, got %s", certID)
+			}
+			if reason != "keyCompromise" {
+				t.Errorf("expected reason keyCompromise, got %s", reason)
+			}
+			return nil
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	body := `{"reason":"keyCompromise"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp map[string]string
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["status"] != "revoked" {
+		t.Errorf("expected status 'revoked', got %s", resp["status"])
+	}
+}
+
+func TestRevokeCertificate_Handler_NoBody(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			// Empty reason is OK — service defaults to "unspecified"
+			return nil
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_AlreadyRevoked(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			return fmt.Errorf("certificate is already revoked")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	body := `{"reason":"keyCompromise"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_NotFound(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			return fmt.Errorf("failed to fetch certificate: not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/nonexistent/revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_InvalidReason(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			return fmt.Errorf("invalid revocation reason: badReason")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	body := `{"reason":"badReason"}`
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", bytes.NewBufferString(body))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_InvalidBody(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", bytes.NewBufferString("{invalid json"))
+	req.Header.Set("Content-Type", "application/json")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_MethodNotAllowed(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates/mc-prod-001/revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_EmptyID(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates//revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_CannotRevokeArchived(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			return fmt.Errorf("cannot revoke archived certificate")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-archived/revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestRevokeCertificate_Handler_ServerError(t *testing.T) {
+	mock := &MockCertificateService{
+		RevokeCertificateFn: func(certID string, reason string) error {
+			return fmt.Errorf("database connection lost")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-prod-001/revoke", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.RevokeCertificate(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// === CRL Handler Tests ===
+
+func TestGetCRL_Success(t *testing.T) {
+	mock := &MockCertificateService{
+		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+			return []*domain.CertificateRevocation{
+				{
+					ID:            "rev-1",
+					CertificateID: "cert-1",
+					SerialNumber:  "ABC123",
+					Reason:        "keyCompromise",
+					RevokedAt:     time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC),
+				},
+				{
+					ID:            "rev-2",
+					CertificateID: "cert-2",
+					SerialNumber:  "DEF456",
+					Reason:        "superseded",
+					RevokedAt:     time.Date(2026, 3, 21, 14, 30, 0, 0, time.UTC),
+				},
+			}, nil
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetCRL(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+
+	if resp["version"] != float64(1) {
+		t.Errorf("expected version 1, got %v", resp["version"])
+	}
+	if resp["total"] != float64(2) {
+		t.Errorf("expected total 2, got %v", resp["total"])
+	}
+
+	entries, ok := resp["entries"].([]interface{})
+	if !ok {
+		t.Fatal("expected entries to be an array")
+	}
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+
+	entry1 := entries[0].(map[string]interface{})
+	if entry1["serial_number"] != "ABC123" {
+		t.Errorf("expected serial ABC123, got %v", entry1["serial_number"])
+	}
+	if entry1["revocation_reason"] != "keyCompromise" {
+		t.Errorf("expected reason keyCompromise, got %v", entry1["revocation_reason"])
+	}
+}
+
+func TestGetCRL_Empty(t *testing.T) {
+	mock := &MockCertificateService{
+		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+			return nil, nil
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetCRL(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	var resp map[string]interface{}
+	json.NewDecoder(w.Body).Decode(&resp)
+	if resp["total"] != float64(0) {
+		t.Errorf("expected total 0, got %v", resp["total"])
+	}
+}
+
+func TestGetCRL_ServiceError(t *testing.T) {
+	mock := &MockCertificateService{
+		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+			return nil, fmt.Errorf("revocation repository not configured")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetCRL(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+func TestGetCRL_MethodNotAllowed(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetCRL(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }

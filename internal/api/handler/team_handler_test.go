@@ -2,14 +2,12 @@ package handler
 
 import (
 	"bytes"
-	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
 )
 
@@ -133,7 +131,8 @@ func TestListTeams_WithQueryParams(t *testing.T) {
 	}
 }
 
-// TestListTeams_PerPageMaxLimit tests that per_page is capped at 500.
+// TestListTeams_PerPageMaxLimit tests that per_page values exceeding 500 are rejected
+// and fall back to the default of 50 (the handler ignores invalid per_page values).
 func TestListTeams_PerPageMaxLimit(t *testing.T) {
 	var capturedPerPage int
 	mock := &MockTeamService{
@@ -150,8 +149,9 @@ func TestListTeams_PerPageMaxLimit(t *testing.T) {
 
 	handler.ListTeams(w, req)
 
-	if capturedPerPage != 500 {
-		t.Errorf("expected per_page capped at 500, got %d", capturedPerPage)
+	// Handler rejects per_page > 500 and falls back to default (50)
+	if capturedPerPage != 50 {
+		t.Errorf("expected per_page to fall back to default 50 for values > 500, got %d", capturedPerPage)
 	}
 }
 

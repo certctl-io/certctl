@@ -57,3 +57,15 @@ func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonNam
 		NotAfter:  result.NotAfter,
 	}, nil
 }
+
+// RevokeCertificate delegates to the underlying connector's RevokeCertificate method.
+func (a *IssuerConnectorAdapter) RevokeCertificate(ctx context.Context, serial string, reason string) error {
+	var reasonPtr *string
+	if reason != "" {
+		reasonPtr = &reason
+	}
+	return a.connector.RevokeCertificate(ctx, issuer.RevocationRequest{
+		Serial: serial,
+		Reason: reasonPtr,
+	})
+}

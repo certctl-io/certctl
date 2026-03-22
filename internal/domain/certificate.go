@@ -22,6 +22,8 @@ type ManagedCertificate struct {
 	Tags                 map[string]string `json:"tags"`
 	LastRenewalAt        *time.Time        `json:"last_renewal_at,omitempty"`
 	LastDeploymentAt     *time.Time        `json:"last_deployment_at,omitempty"`
+	RevokedAt            *time.Time        `json:"revoked_at,omitempty"`
+	RevocationReason     string            `json:"revocation_reason,omitempty"`
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
 }

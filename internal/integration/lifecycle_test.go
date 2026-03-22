@@ -545,6 +545,14 @@ func (m *mockCertificateRepository) GetExpiringCertificates(ctx context.Context,
 	return expiring, nil
 }
 
+func (m *mockCertificateRepository) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
+	versions := m.versions[certID]
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("no versions found")
+	}
+	return versions[len(versions)-1], nil
+}
+
 type mockJobRepository struct {
 	jobs map[string]*domain.Job
 }
@@ -1047,4 +1055,53 @@ func (m *mockAgentGroupService) DeleteAgentGroup(id string) error {
 
 func (m *mockAgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
 	return []domain.Agent{}, 0, nil
+}
+
+// mockRevocationRepository is a test implementation of RevocationRepository for integration tests.
+type mockRevocationRepository struct {
+	revocations []*domain.CertificateRevocation
+}
+
+func newMockRevocationRepository() *mockRevocationRepository {
+	return &mockRevocationRepository{
+		revocations: make([]*domain.CertificateRevocation, 0),
+	}
+}
+
+func (m *mockRevocationRepository) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
+	m.revocations = append(m.revocations, revocation)
+	return nil
+}
+
+func (m *mockRevocationRepository) GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error) {
+	for _, r := range m.revocations {
+		if r.SerialNumber == serial {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("revocation not found")
+}
+
+func (m *mockRevocationRepository) ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error) {
+	return m.revocations, nil
+}
+
+func (m *mockRevocationRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
+	var result []*domain.CertificateRevocation
+	for _, r := range m.revocations {
+		if r.CertificateID == certID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockRevocationRepository) MarkIssuerNotified(ctx context.Context, id string) error {
+	for _, r := range m.revocations {
+		if r.ID == id {
+			r.IssuerNotified = true
+			return nil
+		}
+	}
+	return fmt.Errorf("revocation not found")
 }

@@ -28,6 +28,7 @@ const (
 	NotificationTypeDeploymentSuccess NotificationType = "DeploymentSuccess"
 	NotificationTypeDeploymentFailure NotificationType = "DeploymentFailure"
 	NotificationTypePolicyViolation   NotificationType = "PolicyViolation"
+	NotificationTypeRevocation        NotificationType = "Revocation"
 )
 
 // NotificationChannel represents the communication medium for a notification.

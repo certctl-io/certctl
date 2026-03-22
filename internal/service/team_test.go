@@ -3,11 +3,10 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
-	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // mockTeamRepo is a test implementation of TeamRepository
@@ -162,8 +161,8 @@ func TestTeamService_List_RepositoryError(t *testing.T) {
 		t.Fatalf("expected error, got nil")
 	}
 
-	if !errors.Is(err, errors.New("database error")) {
-		t.Errorf("expected database error, got %v", err)
+	if !strings.Contains(err.Error(), "database error") {
+		t.Errorf("expected error containing 'database error', got %v", err)
 	}
 }
 
@@ -281,7 +280,7 @@ func TestTeamService_Create(t *testing.T) {
 		t.Errorf("expected ID to be generated, got empty")
 	}
 
-	if !team.ID[:5] == "team-" {
+	if !(team.ID[:5] == "team-") {
 		t.Logf("note: generated ID is %s", team.ID)
 	}
 

@@ -124,12 +124,20 @@ func main() {
 	}
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
 
+	// Initialize revocation repository
+	revocationRepo := postgres.NewRevocationRepository(db)
+
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
 	notificationService.SetOwnerRepo(ownerRepo)
+
+	// Wire revocation dependencies into CertificateService
+	certificateService.SetRevocationRepo(revocationRepo)
+	certificateService.SetNotificationService(notificationService)
+	certificateService.SetIssuerRegistry(issuerRegistry)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)

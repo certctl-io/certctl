@@ -85,7 +85,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
 		FROM managed_certificates
 		%s
 		ORDER BY created_at DESC
@@ -120,7 +120,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
 		FROM managed_certificates
 		WHERE id = $1
 	`, id)
@@ -152,16 +152,23 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 		profileID = &cert.CertificateProfileID
 	}
 
+	var revocationReason *string
+	if cert.RevocationReason != "" {
+		revocationReason = &cert.RevocationReason
+	}
+
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO managed_certificates (
 			id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17)
+			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
 		RETURNING id
 	`, cert.ID, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
 		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.RenewalPolicyID, profileID,
 		cert.Status, cert.ExpiresAt,
-		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt, cert.CreatedAt, cert.UpdatedAt).Scan(&cert.ID)
+		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt,
+		cert.RevokedAt, revocationReason,
+		cert.CreatedAt, cert.UpdatedAt).Scan(&cert.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create certificate: %w", err)
@@ -182,6 +189,11 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 		profileID = &cert.CertificateProfileID
 	}
 
+	var revocationReason *string
+	if cert.RevocationReason != "" {
+		revocationReason = &cert.RevocationReason
+	}
+
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE managed_certificates SET
 			name = $1,
@@ -197,11 +209,14 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 			tags = $11,
 			last_renewal_at = $12,
 			last_deployment_at = $13,
-			updated_at = $14
-		WHERE id = $15
+			revoked_at = $14,
+			revocation_reason = $15,
+			updated_at = $16
+		WHERE id = $17
 	`, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
 		cert.OwnerID, cert.TeamID, cert.IssuerID, profileID, cert.Status, cert.ExpiresAt,
-		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt, cert.UpdatedAt, cert.ID)
+		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt,
+		cert.RevokedAt, revocationReason, cert.UpdatedAt, cert.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update certificate: %w", err)
@@ -299,7 +314,7 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
 		FROM managed_certificates
 		WHERE expires_at < $1 AND status != $2
 		ORDER BY expires_at ASC
@@ -326,6 +341,26 @@ func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, bef
 	return certs, nil
 }
 
+// GetLatestVersion returns the most recent certificate version for a certificate.
+func (r *CertificateRepository) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
+	var v domain.CertificateVersion
+	err := r.db.QueryRowContext(ctx, `
+		SELECT id, certificate_id, serial_number, not_before, not_after,
+		       fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
+		FROM certificate_versions
+		WHERE certificate_id = $1
+		ORDER BY created_at DESC
+		LIMIT 1
+	`, certID).Scan(&v.ID, &v.CertificateID, &v.SerialNumber, &v.NotBefore, &v.NotAfter,
+		&v.FingerprintSHA256, &v.PEMChain, &v.CSRPEM, &v.KeyAlgorithm, &v.KeySize, &v.CreatedAt)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to get latest certificate version: %w", err)
+	}
+
+	return &v, nil
+}
+
 // scanCertificate scans a certificate from a row or rows
 func scanCertificate(scanner interface {
 	Scan(...interface{}) error
@@ -334,12 +369,14 @@ func scanCertificate(scanner interface {
 	var tagsJSON []byte
 	var sans pq.StringArray
 	var profileID sql.NullString
+	var revocationReason sql.NullString
 
 	err := scanner.Scan(
 		&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
 		&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &profileID,
 		&cert.Status, &cert.ExpiresAt, &tagsJSON,
-		&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.CreatedAt, &cert.UpdatedAt)
+		&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.RevokedAt, &revocationReason,
+		&cert.CreatedAt, &cert.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan certificate: %w", err)
@@ -348,6 +385,9 @@ func scanCertificate(scanner interface {
 	cert.SANs = []string(sans)
 	if profileID.Valid {
 		cert.CertificateProfileID = profileID.String
+	}
+	if revocationReason.Valid {
+		cert.RevocationReason = revocationReason.String
 	}
 
 	// Unmarshal tags
