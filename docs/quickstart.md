@@ -214,7 +214,7 @@ The demo comes pre-loaded with realistic data so you can explore certctl's featu
 |----------|-------|---------|
 | Teams | 5 | Platform, Security, Payments, Frontend, Data |
 | Owners | 5 | Alice, Bob, Carol, Dave, Eve |
-| Issuers | 3 | Local Dev CA, Let's Encrypt Staging, DigiCert |
+| Issuers | 4 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, DigiCert (disabled) |
 | Agents | 5 | nginx-prod, nginx-staging, f5-prod, iis-prod, data-agent |
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
 | Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |

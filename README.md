@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (55 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (68 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -116,7 +116,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n14 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n17 tables\nTEXT primary keys")]
     end
 
     subgraph "Agents"
@@ -155,6 +155,9 @@ flowchart TB
 | `audit_events` | Immutable action log (append-only, no update/delete) |
 | `notification_events` | Email and webhook notification records |
 | `certificate_target_mappings` | Many-to-many cert ↔ target relationships |
+| `certificate_profiles` | Named enrollment profiles with allowed key types, max TTL, crypto constraints |
+| `agent_groups` | Dynamic device grouping by OS, architecture, IP CIDR, version |
+| `agent_group_members` | Manual include/exclude membership for agent groups |
 
 ## Configuration
 
@@ -173,6 +176,11 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_KEYGEN_MODE` | `agent` | Key generation mode: `agent` (production) or `server` (demo only) |
 | `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
 | `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
+| `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default) or `dns-01` |
+| `CERTCTL_CA_CERT_PATH` | — | Path to CA certificate for sub-CA mode |
+| `CERTCTL_CA_KEY_PATH` | — | Path to CA private key for sub-CA mode |
+| `CERTCTL_STEPCA_URL` | — | step-ca server URL |
+| `CERTCTL_STEPCA_PROVISIONER` | — | step-ca JWK provisioner name |
 
 Agent environment variables:
 
@@ -278,13 +286,14 @@ GET    /ready                             Readiness check
 ### Certificate Issuers
 | Issuer | Status | Type |
 |--------|--------|------|
-| Local CA (self-signed) | Implemented | `GenericCA` |
-| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01) | `ACME` |
-| step-ca | Planned (V2) | — |
+| Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
+| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
+| step-ca | Implemented | `StepCA` |
 | OpenSSL / Custom CA | Planned (V2) | — |
-| ADCS (Active Directory CS) | Planned (V2) | — |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
+
+**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS.
 
 ### Deployment Targets
 | Target | Status | Type |
@@ -351,12 +360,12 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 230+ tests total: 180+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 16 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 330+ tests total: 277+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
-- **M11: Crypto Policy + Profiles + Ownership** — certificate profiles (configurable TTL down to 5 min for short-lived certs), crypto policy enforcement (key algo/size validation), SPIFFE URI SAN support, certificate ownership, dynamic device grouping, renewal approval UI
-- **M12: DNS-01 + step-ca** — ACME DNS-01 challenges (wildcard certs, Cloudflare/Route53 adapters), step-ca issuer connector
+- **M11: Crypto Policy + Profiles + Ownership** ✅ — certificate profiles (named enrollment profiles with allowed key types, max TTL, crypto constraints), certificate ownership tracking (owners + teams + notification routing), dynamic agent groups (OS/arch/IP CIDR/version matching), interactive renewal approval (AwaitingApproval state)
+- **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), step-ca issuer connector (native /sign API with JWK provisioner auth)
 - **M13: GUI Operations** — bulk cert operations (renew, revoke, reassign), deployment timeline, inline policy editor, target config wizard, audit export, short-lived credentials dashboard
 - **M14: Enterprise Connectors** — SSE/WebSocket real-time updates, F5 BIG-IP, IIS, ADCS, OpenSSL/Custom CA implementations
 - **M15: Revocation Infrastructure** — revocation API with reason codes, embedded OCSP responder, CRL endpoint, bulk revocation by profile/owner/agent, revocation webhooks

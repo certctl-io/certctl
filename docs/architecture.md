@@ -30,7 +30,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n14 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n17 tables\nTEXT primary keys")]
     end
 
     subgraph "Agent Fleet"
@@ -40,11 +40,10 @@ flowchart TB
     end
 
     subgraph "Issuer Backends"
-        CA1["Local CA\n(crypto/x509)"]
-        CA2["ACME\n(Let's Encrypt)"]
+        CA1["Local CA\n(crypto/x509, sub-CA)"]
+        CA2["ACME\n(HTTP-01 + DNS-01)"]
         CA3["step-ca\n(/sign API)"]
         CA4["OpenSSL / Custom CA\n(planned)"]
-        CA5["ADCS\n(planned)"]
         CA6["Vault PKI\n(planned)"]
     end
 
@@ -93,7 +92,7 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
 
-**Current views (14)**: certificate inventory (list with "New Certificate" creation modal + detail with version history, deploy, archive, and trigger renewal actions), agent fleet (health indicators from heartbeat), job queue (status, retry, cancel), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range and actor/action filters), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), and a summary dashboard.
+**Current views (16 pages)**: certificate inventory (list with "New Certificate" creation modal + detail with version history, deploy, archive, and trigger renewal actions), agent fleet (list + detail with system info), job queue (status, retry, cancel, approve/reject), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range and actor/action filters), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), summary dashboard, and login page.
 
 The dashboard includes an **ErrorBoundary component** for graceful error recovery — if a view crashes, the boundary catches the error and displays a user-friendly message instead of breaking the entire dashboard. It also includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
@@ -123,6 +122,8 @@ erDiagram
     managed_certificates ||--o{ policy_violations : "violates"
     managed_certificates ||--o{ audit_events : "logged in"
     managed_certificates ||--o{ notification_events : "generates"
+    agent_groups ||--o{ agent_group_members : "has members"
+    agents ||--o{ agent_group_members : "belongs to"
 
     teams {
         text id PK
@@ -220,6 +221,26 @@ erDiagram
         text channel
         text recipient
         text status
+    }
+    certificate_profiles {
+        text id PK
+        text name
+        text description
+        jsonb allowed_key_types
+        int max_validity_days
+    }
+    agent_groups {
+        text id PK
+        text name
+        text description
+        jsonb match_criteria
+        boolean enabled
+    }
+    agent_group_members {
+        text id PK
+        text agent_group_id FK
+        text agent_id FK
+        text membership_type
     }
 ```
 
@@ -366,7 +387,6 @@ flowchart TB
         II --> ACME["ACME v2"]
         II --> SC["step-ca"]
         II --> OC["OpenSSL / Custom CA (planned)"]
-        II --> AD["ADCS (planned)"]
         II --> VP["Vault PKI (planned)"]
     end
 
@@ -423,7 +443,7 @@ type Connector interface {
 }
 ```
 
-Built-in issuers: **Local CA** (self-signed, in-memory CA for development/demos using `crypto/x509`) and **ACME v2** (fully implemented with HTTP-01 challenge solving, compatible with Let's Encrypt, Sectigo, and any ACME-compliant CA). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance, order creation, HTTP-01 challenge solving via a built-in temporary HTTP server, order finalization, and DER-to-PEM chain conversion. Configure via `CERTCTL_ACME_DIRECTORY_URL` and `CERTCTL_ACME_EMAIL`.
+Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01 and DNS-01 challenges, compatible with Let's Encrypt, Sectigo, and any ACME-compliant CA), and **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance, order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks), order finalization, and DER-to-PEM chain conversion.
 
 ### Target Connector
 
@@ -595,17 +615,17 @@ For production, you would also add an ingress controller, TLS termination for th
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 250+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 330+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
-**Service layer unit tests** (`internal/service/*_test.go`) — 74 test functions across 7 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
+**Service layer unit tests** (`internal/service/*_test.go`) — 99 test functions across 10 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), and notification deduplication (threshold tag matching, channel routing). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
-**Handler layer tests** (`internal/api/handler/*_test.go`) — 147 test functions across 8 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (22 tests), agents (28 tests), jobs (21 tests including approve/reject), notifications (11 tests), policies (19 tests), issuers (17 tests), targets (17 tests), and agent groups (12 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
+**Handler layer tests** (`internal/api/handler/*_test.go`) — 165 test functions across 9 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (22 tests), agents (28 tests), jobs (21 tests including approve/reject), notifications (11 tests), policies (19 tests), profiles (18 tests), issuers (17 tests), targets (17 tests), and agent groups (12 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
 
 **Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 14 subtests covering error paths: nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, and expired certificate lifecycle. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
 
 **Frontend tests** (`web/src/api/client.test.ts`, `web/src/api/utils.test.ts`) — 53 Vitest tests covering the API client and utility functions. The API client tests mock `globalThis.fetch` and verify all endpoint functions (certificates, agents, jobs, policies, issuers, targets, notifications, audit, health) send correct HTTP methods, URLs, headers, and request bodies. They also test API key management (store/retrieve/clear), auth header propagation, 401 event dispatching, and error handling (server messages, error fields, status text fallback). The utility tests use `vi.useFakeTimers()` for deterministic date testing and cover `formatDate`, `formatDateTime`, `timeAgo`, `daysUntil`, and `expiryColor`. The test environment uses jsdom with `@testing-library/jest-dom` matchers.
 
-**CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vitest test suite, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~34%) and handler layer must be at least 50% (current: ~61%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/local/...` (the Local CA package, which has unit tests for certificate signing logic). The Frontend job runs `npx vitest run` between the TypeScript check and production build steps.
+**CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vitest test suite, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~35%) and handler layer must be at least 50% (current: ~63%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/...` (includes Local CA, ACME, and step-ca packages with unit tests for certificate signing logic, DNS solver, and issuer validation). The Frontend job runs `npx vitest run` between the TypeScript check and production build steps.
 
 **What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors for F5 BIG-IP and IIS depend on real infrastructure or complex mocks. Apache httpd and HAProxy connectors have unit tests (7 tests each) covering config validation, deployment, and validation flows. Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
 

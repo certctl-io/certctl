@@ -30,13 +30,13 @@ A CA is the trusted third party that signs your certificates. When a CA signs a 
 
 Common CAs include Let's Encrypt (free, automated), DigiCert, Sectigo, and your organization's internal/private CA. Each issues certificates through different protocols and APIs.
 
-certctl includes a built-in **Local CA** that can operate in two modes: self-signed (default, for development and demos) or as a **subordinate CA** under an enterprise root like Active Directory Certificate Services (ADCS). In sub-CA mode, you load a CA certificate and key signed by your enterprise root, and all certificates certctl issues automatically chain to the enterprise trust hierarchy — no manual trust configuration needed on clients that already trust your enterprise root.
+certctl includes a built-in **Local CA** that can operate in two modes: self-signed (default, for development and demos) or as a **subordinate CA** under an enterprise root like Active Directory Certificate Services (ADCS). In sub-CA mode, you load a CA certificate and key signed by your enterprise root, and all certificates certctl issues automatically chain to the enterprise trust hierarchy — no manual trust configuration needed on clients that already trust your enterprise root. certctl also integrates with **step-ca** (Smallstep's private CA) via its native /sign API, providing a lightweight alternative to ACME for internal PKI.
 
 ### ACME Protocol
 
 ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01) or creating a DNS record (DNS-01).
 
-certctl speaks ACME natively via HTTP-01 challenges, so it can request certificates from Let's Encrypt or any ACME-compatible CA without manual intervention. DNS-01 challenge support (required for wildcard certificates) is planned for V2.
+certctl speaks ACME natively with both HTTP-01 and DNS-01 challenges, so it can request certificates — including wildcard certificates — from Let's Encrypt or any ACME-compatible CA without manual intervention. HTTP-01 uses a built-in temporary HTTP server for domain validation; DNS-01 uses pluggable script-based hooks to create TXT records with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
 
 ### Private Key
 

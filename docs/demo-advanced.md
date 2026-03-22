@@ -116,7 +116,7 @@ You should see:
 
 The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
 
-**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA) and ACME (HTTP-01); step-ca, OpenSSL/custom CA are planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA), ACME (HTTP-01 + DNS-01 for wildcards), and step-ca (Smallstep private CA via native /sign API). OpenSSL/Custom CA is planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
 
 ```mermaid
 flowchart TD
@@ -129,7 +129,7 @@ flowchart TD
 
     A --> E["Local CA\n(self-signed or sub-CA)"]
     A --> F["ACME\n(Let's Encrypt)"]
-    A --> G["step-ca\n(planned V2)"]
+    A --> G["step-ca\n(implemented)"]
     A --> H["OpenSSL / Custom CA\n(planned V2)"]
     A --> J["DigiCert API\n(planned V2.3)"]
     A --> K["Vault PKI\n(planned V3)"]
@@ -501,7 +501,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG["PostgreSQL 16\n14 tables, TEXT PKs"]
+        PG["PostgreSQL 16\n17 tables, TEXT PKs"]
     end
 
     subgraph "Agent (certctl-agent)"

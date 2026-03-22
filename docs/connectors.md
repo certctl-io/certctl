@@ -58,23 +58,23 @@ type RenewalRequest struct {
     CommonName string
     SANs       []string
     CSRPEM     string
-    OrderID    string // optional, for tracking
+    OrderID    *string // optional, for tracking (pointer — nil when not provided)
 }
 
 type RevocationRequest struct {
     Serial string
-    Reason string // optional
+    Reason *string // optional (pointer — nil when not provided)
 }
 
 type OrderStatus struct {
     OrderID   string
-    Status    string // "pending", "valid", "invalid", "expired"
-    Message   string
-    CertPEM   string
-    ChainPEM  string
-    Serial    string
-    NotBefore time.Time
-    NotAfter  time.Time
+    Status    string     // "pending", "valid", "invalid", "expired"
+    Message   *string    // optional (pointer fields are omitted from JSON when nil)
+    CertPEM   *string    // populated when order is complete
+    ChainPEM  *string    // populated when order is complete
+    Serial    *string    // populated when order is complete
+    NotBefore *time.Time // populated when order is complete
+    NotAfter  *time.Time // populated when order is complete
     UpdatedAt time.Time
 }
 ```
