@@ -367,7 +367,7 @@ Location: `internal/connector/target/haproxy/haproxy.go`
 
 The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it.
 
-The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
+The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for a future release.
 
 Configuration (defined, not yet functional):
 ```json
@@ -384,7 +384,7 @@ Note: F5 credentials are stored on the proxy agent, not on the control plane ser
 
 Location: `internal/connector/target/f5/f5.go`
 
-### Planned: IIS (V2, Interface Only, Dual-Mode)
+### Planned: IIS (Interface Only, Dual-Mode)
 
 The IIS target connector supports two deployment modes:
 

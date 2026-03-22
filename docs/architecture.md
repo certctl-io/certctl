@@ -100,7 +100,7 @@ The dashboard includes an **ErrorBoundary component** for graceful error recover
 - Vite for fast builds and HMR during development
 - TanStack Query over manual fetch/useEffect for automatic cache invalidation and refetching
 - Dark theme default (ops teams live in dark mode)
-- SSE/WebSocket planned for real-time job status updates (V2.0)
+- SSE/WebSocket planned for real-time job status updates
 
 ### PostgreSQL Database
 
@@ -631,7 +631,7 @@ certctl uses a layered testing approach aligned with the handler → service →
 
 **Connector tests** (`internal/connector/`) — 23 test functions covering issuer and target connectors. The Local CA connector has tests for self-signed and sub-CA modes (RSA, ECDSA, config validation, non-CA cert rejection). The ACME DNS solver has 6 tests for script-based DNS-01 challenges. The step-ca connector has tests with a mock HTTP server for issuance, renewal, revocation, and error paths. The NGINX target connector has 13 tests covering config validation, certificate deployment (file writing, permissions, validate/reload commands), and deployment validation. Apache httpd and HAProxy connectors each have 3 tests covering config validation, deployment, and validation flows.
 
-**What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors for F5 BIG-IP and IIS are interface stubs (implementation planned for V2). Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
+**What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors for F5 BIG-IP and IIS are interface stubs (implementation planned for a future release). Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
 
 ## What's Next
 

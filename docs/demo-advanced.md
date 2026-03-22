@@ -131,7 +131,7 @@ flowchart TD
     A --> F["ACME\n(Let's Encrypt)"]
     A --> G["step-ca\n(implemented)"]
     A --> H["OpenSSL / Custom CA\n(planned V2)"]
-    A --> J["DigiCert API\n(planned V2.3)"]
+    A --> J["DigiCert API\n(planned V3)"]
     A --> K["Vault PKI\n(planned V3)"]
     A --> L["Entrust / GlobalSign\n(planned V3)"]
     A --> M["Google CAS / EJBCA\n(planned V3)"]

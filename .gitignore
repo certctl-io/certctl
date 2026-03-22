@@ -57,6 +57,9 @@ certctl-agent
 /server
 /agent
 
+# Private strategy docs
+roadmap.md
+
 # OS
 .DS_Store
 Thumbs.db

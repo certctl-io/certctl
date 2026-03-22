@@ -370,18 +370,18 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M11: Crypto Policy + Profiles + Ownership** ✅ — certificate profiles (named enrollment profiles with allowed key types, max TTL, crypto constraints), certificate ownership tracking (owners + teams + notification routing), dynamic agent groups (OS/arch/IP CIDR/version matching), interactive renewal approval (AwaitingApproval state)
 - **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), step-ca issuer connector (native /sign API with JWK provisioner auth)
 - **M13: GUI Operations** — bulk cert operations (renew, revoke, reassign), deployment timeline, inline policy editor, target config wizard, audit export, short-lived credentials dashboard
-- **M14: Enterprise Connectors** — SSE/WebSocket real-time updates, F5 BIG-IP, IIS, ADCS, OpenSSL/Custom CA implementations
+- **M14: Additional Connectors** — OpenSSL/Custom CA issuer connector
 - **M15a: Core Revocation** ✅ — revocation API with all RFC 5280 reason codes, JSON CRL endpoint, webhook + email revocation notifications, best-effort issuer notification, `certificate_revocations` table with idempotent recording, 48 new tests
-- **M15b: OCSP + Bulk Revocation + GUI** — embedded OCSP responder, DER-encoded X.509 CRL, short-lived cert exemption, bulk revocation by profile/owner/agent, revocation GUI
-- **M16: Team Adoption** — OIDC/SSO, RBAC (profile-gated), CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
-- **M17: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics (issuance/revocation rates, OCSP latency), deployment rollback
-- **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer, filesystem cert discovery
+- **M15b: OCSP + Revocation GUI** — embedded OCSP responder, DER-encoded X.509 CRL, short-lived cert exemption, revocation GUI
+- **M16: Operator Tooling** — CLI tool (`certctl`), Slack/Teams/PagerDuty/OpsGenie notifiers, bulk certificate import
+- **M17: Observability** — expiration calendar/heatmap, Prometheus metrics endpoint, structured logging improvements, deployment rollback
+- **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), filesystem cert discovery
 
-### V3: Discovery, Visibility & Cloud
-Discovery engine (passive/active scanning, cert chain validation, unknown cert detection, triage workflows), Kubernetes cert-manager external issuer, cloud targets (AWS ALB/IAM Roles Anywhere, Azure Key Vault/Managed Identity, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module
+### V3: Team & Enterprise
+Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, real-time operational views, and premium CA integrations.
 
-### V4+: Platform & Scale
-Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support, LDAP auth, API key scoping, multi-tenancy, SPIFFE/SPIRE federation, OPA policy backend, compliance reporting (NIST, SOC 2, PCI-DSS)
+### V4+: Discovery, Cloud & Scale
+Discovery engine, Kubernetes integration, cloud infrastructure targets, extended CA support, and platform-scale features.
 
 ## License
 
