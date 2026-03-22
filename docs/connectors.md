@@ -6,7 +6,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME implemented; step-ca, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca implemented; OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
 2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2)
 
@@ -85,7 +85,7 @@ The Local CA issuer signs certificates using Go's `crypto/x509` library. It supp
 
 **Self-signed mode (default):** Creates a CA on first use (in memory), issues certificates with proper serial numbers, validity periods, SANs, and key usage extensions. Designed for development and demos — certificates are self-signed and not trusted by browsers.
 
-**Sub-CA mode (planned M12):** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. If the paths are not set, falls back to self-signed mode.
+**Sub-CA mode:** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. Supports RSA, ECDSA, and PKCS#8 key formats. If the paths are not set, falls back to self-signed mode. The loaded certificate must have `IsCA=true` and `KeyUsageCertSign`.
 
 Configuration:
 ```json
@@ -101,9 +101,13 @@ Location: `internal/connector/issuer/local/local.go`
 
 ### Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)
 
-The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports HTTP-01 challenge solving via a built-in temporary HTTP server that starts on demand during certificate issuance.
+The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports two challenge methods:
 
-Configuration:
+**HTTP-01 (default):** A built-in temporary HTTP server starts on demand during certificate issuance. The domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet.
+
+**DNS-01 (for wildcards):** Creates DNS TXT records via user-provided scripts. Required for wildcard certificates (`*.example.com`) and hosts that can't serve HTTP on port 80. The connector invokes external scripts to create and clean up `_acme-challenge` TXT records, making it compatible with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
+
+HTTP-01 configuration:
 ```json
 {
   "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
@@ -112,23 +116,61 @@ Configuration:
 }
 ```
 
-For HTTP-01 to work, the domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet. The connector automatically registers an ACME account, creates orders, solves challenges, finalizes with the CSR, and downloads the issued certificate chain.
+DNS-01 configuration:
+```json
+{
+  "directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+  "email": "admin@example.com",
+  "challenge_type": "dns-01",
+  "dns_present_script": "/etc/certctl/dns/create-record.sh",
+  "dns_cleanup_script": "/etc/certctl/dns/delete-record.sh",
+  "dns_propagation_wait": 30
+}
+```
 
-**Limitation:** v1 supports HTTP-01 challenges only. DNS-01 challenge support (required for wildcard certificates and hosts that can't serve HTTP on port 80) is planned for V2, including provider-specific DNS adapters (Cloudflare, Route53, etc.) and custom validation script hooks.
+DNS hook scripts receive these environment variables: `CERTCTL_DNS_DOMAIN` (domain being validated), `CERTCTL_DNS_FQDN` (full record name, e.g., `_acme-challenge.example.com`), `CERTCTL_DNS_VALUE` (TXT record value), `CERTCTL_DNS_TOKEN` (ACME challenge token). The present script must create the TXT record and exit 0; the cleanup script removes it.
 
 Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
 - `CERTCTL_ACME_EMAIL` — Contact email for account registration
+- `CERTCTL_ACME_CHALLENGE_TYPE` — `http-01` (default) or `dns-01`
+- `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 only)
+- `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only)
 
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 
-Location: `internal/connector/issuer/acme/acme.go`
+Location: `internal/connector/issuer/acme/acme.go`, `internal/connector/issuer/acme/dns.go`
 
-### Planned Issuers (V2)
+### Built-in: step-ca (Smallstep Private CA)
 
-The following issuer connectors are planned for V2:
+The step-ca connector integrates with Smallstep's step-ca private certificate authority using its native `/sign` API with JWK provisioner authentication. This is simpler than ACME for internal PKI — no challenge solving, no domain validation, just CSR + auth token → signed certificate.
 
-- **step-ca** — Smallstep's private CA and ACME server. Would allow certctl to issue certificates from a self-hosted step-ca instance via its ACME or provisioner APIs.
+Configuration:
+```json
+{
+  "ca_url": "https://ca.internal:9000",
+  "provisioner_name": "certctl",
+  "provisioner_key_path": "/etc/certctl/stepca/provisioner.json",
+  "provisioner_password": "...",
+  "root_cert_path": "/etc/certctl/stepca/root_ca.crt",
+  "validity_days": 90
+}
+```
+
+Environment variables:
+- `CERTCTL_STEPCA_URL` — step-ca server URL
+- `CERTCTL_STEPCA_PROVISIONER` — JWK provisioner name
+- `CERTCTL_STEPCA_KEY_PATH` — Path to provisioner private key (JWK JSON)
+- `CERTCTL_STEPCA_PASSWORD` — Provisioner key password
+
+The connector is registered in the issuer registry under `iss-stepca`. step-ca also works with the existing ACME connector (point `iss-acme-*` at step-ca's ACME directory URL for ACME-based issuance).
+
+Location: `internal/connector/issuer/stepca/stepca.go`
+
+### Planned Issuers
+
+The following issuer connectors are planned for future milestones:
+
 - **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
 - **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
 - **DigiCert** — Commercial CA integration via DigiCert's REST API.

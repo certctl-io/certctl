@@ -18,6 +18,7 @@ import (
 	"github.com/shankar0123/certctl/internal/config"
 	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
+	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
@@ -73,28 +74,53 @@ func main() {
 	ownerRepo := postgres.NewOwnerRepository(db)
 	logger.Info("initialized all repositories")
 
-	// Initialize Local CA issuer connector
-	// This provides in-memory certificate signing for development, testing, and demo.
-	// The CA is ephemeral (regenerated on restart) and NOT suitable for production.
-	localCA := local.New(nil, logger)
+	// Initialize Local CA issuer connector.
+	// In sub-CA mode (CERTCTL_CA_CERT_PATH + CERTCTL_CA_KEY_PATH set), loads a pre-signed
+	// CA cert+key from disk. All issued certs chain to the upstream root (e.g., ADCS).
+	// Otherwise, generates an ephemeral self-signed CA for development/demo.
+	localCAConfig := &local.Config{}
+	if cfg.CA.CertPath != "" && cfg.CA.KeyPath != "" {
+		localCAConfig.CACertPath = cfg.CA.CertPath
+		localCAConfig.CAKeyPath = cfg.CA.KeyPath
+		logger.Info("Local CA configured in sub-CA mode",
+			"cert_path", cfg.CA.CertPath,
+			"key_path", cfg.CA.KeyPath)
+	} else {
+		logger.Info("Local CA configured in self-signed mode (ephemeral)")
+	}
+	localCA := local.New(localCAConfig, logger)
 	logger.Info("initialized Local CA issuer connector")
 
 	// Initialize ACME issuer connector (for Let's Encrypt, Sectigo, etc.)
-	// The ACME connector is registered but only activated when an issuer record
-	// in the database references it. Configuration comes from the issuer's config JSON.
+	// Supports HTTP-01 (default) and DNS-01 (for wildcards) challenge types.
 	acmeConnector := acmeissuer.New(&acmeissuer.Config{
-		DirectoryURL: os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
-		Email:        os.Getenv("CERTCTL_ACME_EMAIL"),
+		DirectoryURL:       os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
+		Email:              os.Getenv("CERTCTL_ACME_EMAIL"),
+		ChallengeType:      os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
+		DNSPresentScript:   os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
+		DNSCleanUpScript:   os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
 	}, logger)
 	logger.Info("initialized ACME issuer connector")
+
+	// Initialize step-ca issuer connector (for Smallstep private CA).
+	// Uses the native /sign API with JWK provisioner authentication.
+	stepcaConnector := stepcaissuer.New(&stepcaissuer.Config{
+		CAURL:               os.Getenv("CERTCTL_STEPCA_URL"),
+		ProvisionerName:     os.Getenv("CERTCTL_STEPCA_PROVISIONER"),
+		ProvisionerKeyPath:  os.Getenv("CERTCTL_STEPCA_KEY_PATH"),
+		ProvisionerPassword: os.Getenv("CERTCTL_STEPCA_PASSWORD"),
+	}, logger)
+	logger.Info("initialized step-ca issuer connector")
 
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
+	// "iss-stepca" is the step-ca private CA connector.
 	issuerRegistry := map[string]service.IssuerConnector{
 		"iss-local":        service.NewIssuerConnectorAdapter(localCA),
 		"iss-acme-staging": service.NewIssuerConnectorAdapter(acmeConnector),
 		"iss-acme-prod":    service.NewIssuerConnectorAdapter(acmeConnector),
+		"iss-stepca":       service.NewIssuerConnectorAdapter(stepcaConnector),
 	}
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
 

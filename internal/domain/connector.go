@@ -67,6 +67,7 @@ type IssuerType string
 const (
 	IssuerTypeACME      IssuerType = "ACME"
 	IssuerTypeGenericCA IssuerType = "GenericCA"
+	IssuerTypeStepCA    IssuerType = "StepCA"
 )
 
 // TargetType represents the type of deployment target.

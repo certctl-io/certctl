@@ -42,7 +42,7 @@ flowchart TB
     subgraph "Issuer Backends"
         CA1["Local CA\n(crypto/x509)"]
         CA2["ACME\n(Let's Encrypt)"]
-        CA3["step-ca\n(planned)"]
+        CA3["step-ca\n(/sign API)"]
         CA4["OpenSSL / Custom CA\n(planned)"]
         CA5["ADCS\n(planned)"]
         CA6["Vault PKI\n(planned)"]
@@ -364,7 +364,7 @@ flowchart TB
         II["IssuerConnector Interface\nIssueCertificate() | RenewCertificate()\nRevokeCertificate() | GetOrderStatus()"]
         II --> LC["Local CA"]
         II --> ACME["ACME v2"]
-        II --> SC["step-ca (planned)"]
+        II --> SC["step-ca"]
         II --> OC["OpenSSL / Custom CA (planned)"]
         II --> AD["ADCS (planned)"]
         II --> VP["Vault PKI (planned)"]

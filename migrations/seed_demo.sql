@@ -32,6 +32,7 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VALUES
   ('iss-local',    'Local Dev CA',          'local',      '{"ca_common_name": "CertCtl Demo CA", "validity_days": 90}', true,  NOW(), NOW()),
   ('iss-acme-le',  'Let''s Encrypt Staging', 'acme',      '{"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "admin@example.com"}', true,  NOW(), NOW()),
+  ('iss-stepca',   'step-ca Internal',      'stepca',     '{"ca_url": "https://ca.internal:9000", "provisioner_name": "certctl", "validity_days": 90}', false, NOW(), NOW()),
   ('iss-digicert', 'DigiCert (disabled)',    'generic_ca', '{"api_url": "https://api.digicert.com", "api_key": "REDACTED"}', false, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 

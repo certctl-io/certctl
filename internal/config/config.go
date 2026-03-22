@@ -19,6 +19,7 @@ type Config struct {
 	RateLimit RateLimitConfig
 	CORS      CORSConfig
 	Keygen    KeygenConfig
+	CA        CAConfig
 }
 
 // KeygenConfig controls where private keys are generated.
@@ -27,6 +28,34 @@ type KeygenConfig struct {
 	// In "agent" mode, renewal/issuance jobs enter AwaitingCSR state and agents generate keys locally.
 	// In "server" mode, the control plane generates keys (private keys touch the server — demo only).
 	Mode string
+}
+
+// CAConfig controls the Local CA's operating mode.
+type CAConfig struct {
+	// CertPath is the path to a PEM-encoded CA certificate for sub-CA mode.
+	// When set with KeyPath, the Local CA loads this cert instead of generating a self-signed root.
+	CertPath string
+
+	// KeyPath is the path to a PEM-encoded CA private key for sub-CA mode.
+	// Supports RSA, ECDSA, and PKCS#8 encoded keys.
+	KeyPath string
+}
+
+// StepCAConfig contains step-ca issuer connector configuration.
+type StepCAConfig struct {
+	URL                 string
+	ProvisionerName     string
+	ProvisionerKeyPath  string
+	ProvisionerPassword string
+}
+
+// ACMEConfig contains ACME issuer connector configuration.
+type ACMEConfig struct {
+	DirectoryURL     string
+	Email            string
+	ChallengeType    string // "http-01" (default) or "dns-01"
+	DNSPresentScript string
+	DNSCleanUpScript string
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -112,6 +141,10 @@ func Load() (*Config, error) {
 		},
 		Keygen: KeygenConfig{
 			Mode: getEnv("CERTCTL_KEYGEN_MODE", "agent"),
+		},
+		CA: CAConfig{
+			CertPath: getEnv("CERTCTL_CA_CERT_PATH", ""),
+			KeyPath:  getEnv("CERTCTL_CA_KEY_PATH", ""),
 		},
 	}
 
