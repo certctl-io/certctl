@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -256,6 +256,25 @@ export const approveRenewal = (jobId: string) =>
 
 export const rejectRenewal = (jobId: string, reason: string) =>
   fetchJSON<{ message: string }>(`${BASE}/jobs/${jobId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+
+// Stats
+export const getDashboardSummary = () =>
+  fetchJSON<DashboardSummary>(`${BASE}/stats/summary`);
+
+export const getCertificatesByStatus = () =>
+  fetchJSON<CertificateStatusCount[]>(`${BASE}/stats/certificates-by-status`);
+
+export const getExpirationTimeline = (days = 30) =>
+  fetchJSON<ExpirationBucket[]>(`${BASE}/stats/expiration-timeline?days=${days}`);
+
+export const getJobTrends = (days = 30) =>
+  fetchJSON<JobTrendDataPoint[]>(`${BASE}/stats/job-trends?days=${days}`);
+
+export const getIssuanceRate = (days = 30) =>
+  fetchJSON<IssuanceRateDataPoint[]>(`${BASE}/stats/issuance-rate?days=${days}`);
+
+export const getMetrics = () =>
+  fetchJSON<MetricsResponse>(`${BASE}/metrics`);
 
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');

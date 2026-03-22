@@ -206,3 +206,62 @@ export interface PaginatedResponse<T> {
   page: number;
   per_page: number;
 }
+
+// Stats types
+export interface DashboardSummary {
+  total_certificates: number;
+  expiring_certificates: number;
+  expired_certificates: number;
+  revoked_certificates: number;
+  active_agents: number;
+  offline_agents: number;
+  total_agents: number;
+  pending_jobs: number;
+  failed_jobs: number;
+  complete_jobs: number;
+  completed_at: string;
+}
+
+export interface CertificateStatusCount {
+  status: string;
+  count: number;
+}
+
+export interface ExpirationBucket {
+  date: string;
+  count: number;
+}
+
+export interface JobTrendDataPoint {
+  date: string;
+  completed_count: number;
+  failed_count: number;
+  success_rate: number;
+}
+
+export interface IssuanceRateDataPoint {
+  date: string;
+  issued_count: number;
+}
+
+export interface MetricsResponse {
+  gauge: {
+    certificate_total: number;
+    certificate_active: number;
+    certificate_expiring_soon: number;
+    certificate_expired: number;
+    certificate_revoked: number;
+    agent_total: number;
+    agent_online: number;
+    job_pending: number;
+  };
+  counter: {
+    job_completed_total: number;
+    job_failed_total: number;
+  };
+  uptime: {
+    uptime_seconds: number;
+    server_started: string;
+    measured_at: string;
+  };
+}

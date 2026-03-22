@@ -75,6 +75,8 @@ func TestCertificateLifecycle(t *testing.T) {
 	agentGroupHandler := handler.NewAgentGroupHandler(&mockAgentGroupService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
+	statsHandler := handler.NewStatsHandler(&mockStatsService{})
+	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
 
 	// Create router and register handlers
@@ -92,6 +94,8 @@ func TestCertificateLifecycle(t *testing.T) {
 		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
+		statsHandler,
+		metricsHandler,
 		healthHandler,
 	)
 
@@ -1108,4 +1112,27 @@ func (m *mockRevocationRepository) MarkIssuerNotified(ctx context.Context, id st
 		}
 	}
 	return fmt.Errorf("revocation not found")
+}
+
+// mockStatsService implements both handler.StatsService and handler.MetricsService for integration tests.
+type mockStatsService struct{}
+
+func (m *mockStatsService) GetDashboardSummary(ctx context.Context) (interface{}, error) {
+	return &handler.DashboardSummary{}, nil
+}
+
+func (m *mockStatsService) GetCertificatesByStatus(ctx context.Context) (interface{}, error) {
+	return map[string]int64{}, nil
+}
+
+func (m *mockStatsService) GetExpirationTimeline(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
+}
+
+func (m *mockStatsService) GetJobStats(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
+}
+
+func (m *mockStatsService) GetIssuanceRate(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
 }

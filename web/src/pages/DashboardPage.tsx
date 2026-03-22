@@ -1,9 +1,28 @@
 import { useQuery } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, getAgents, getJobs, getNotifications, getHealth } from '../api/client';
+import {
+  BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
+  XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
+} from 'recharts';
+import {
+  getCertificates, getAgents, getJobs, getNotifications, getHealth,
+  getDashboardSummary, getCertificatesByStatus, getExpirationTimeline,
+  getJobTrends, getIssuanceRate,
+} from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import { daysUntil, expiryColor, formatDate } from '../api/utils';
+
+const STATUS_COLORS: Record<string, string> = {
+  Active: '#10b981',
+  Expiring: '#f59e0b',
+  Expired: '#ef4444',
+  Revoked: '#8b5cf6',
+  Pending: '#6366f1',
+  RenewalInProgress: '#3b82f6',
+  Failed: '#f43f5e',
+  Archived: '#64748b',
+};
 
 function StatCard({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) {
   const colorMap: Record<string, string> = {
@@ -27,23 +46,71 @@ function StatCard({ label, value, icon, color }: { label: string; value: string 
   );
 }
 
+function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
+  return (
+    <div className="card p-5">
+      <h3 className="text-sm font-semibold text-slate-300 mb-4">{title}</h3>
+      <div className="h-64">
+        {children}
+      </div>
+    </div>
+  );
+}
+
+const CustomTooltip = ({ active, payload, label }: any) => {
+  if (!active || !payload?.length) return null;
+  return (
+    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-lg">
+      <p className="text-slate-300 mb-1">{label}</p>
+      {payload.map((entry: any, i: number) => (
+        <p key={i} style={{ color: entry.color }}>
+          {entry.name}: {typeof entry.value === 'number' && entry.name?.includes('rate') ? `${entry.value.toFixed(1)}%` : entry.value}
+        </p>
+      ))}
+    </div>
+  );
+};
+
 export default function DashboardPage() {
   const navigate = useNavigate();
 
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30000 });
+  const { data: summary } = useQuery({ queryKey: ['dashboard-summary'], queryFn: getDashboardSummary, refetchInterval: 30000 });
+  const { data: statusCounts } = useQuery({ queryKey: ['certs-by-status'], queryFn: getCertificatesByStatus, refetchInterval: 30000 });
+  const { data: expirationTimeline } = useQuery({ queryKey: ['expiration-timeline'], queryFn: () => getExpirationTimeline(90), refetchInterval: 60000 });
+  const { data: jobTrends } = useQuery({ queryKey: ['job-trends'], queryFn: () => getJobTrends(30), refetchInterval: 30000 });
+  const { data: issuanceRate } = useQuery({ queryKey: ['issuance-rate'], queryFn: () => getIssuanceRate(30), refetchInterval: 60000 });
   const { data: certs } = useQuery({ queryKey: ['certificates', {}], queryFn: () => getCertificates(), refetchInterval: 30000 });
-  const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => getAgents(), refetchInterval: 15000 });
   const { data: jobs } = useQuery({ queryKey: ['jobs', {}], queryFn: () => getJobs(), refetchInterval: 10000 });
-  const { data: notifs } = useQuery({ queryKey: ['notifications'], queryFn: () => getNotifications() });
 
-  const totalCerts = certs?.total || 0;
-  const expiringSoon = certs?.data?.filter(c => {
-    const d = daysUntil(c.expires_at);
-    return d > 0 && d <= 30;
-  }).length || 0;
-  const expired = certs?.data?.filter(c => c.status === 'Expired' || daysUntil(c.expires_at) <= 0).length || 0;
-  const activeAgents = agents?.data?.filter(a => a.status === 'Online').length || agents?.total || 0;
-  const pendingJobs = jobs?.data?.filter(j => j.status === 'Pending' || j.status === 'Running').length || 0;
+  const totalCerts = summary?.total_certificates || 0;
+  const expiringSoon = summary?.expiring_certificates || 0;
+  const expired = summary?.expired_certificates || 0;
+  const activeAgents = summary?.active_agents || 0;
+  const pendingJobs = summary?.pending_jobs || 0;
+
+  // Prepare pie chart data
+  const pieData = (statusCounts || []).filter(s => s.count > 0).map(s => ({
+    name: s.status,
+    value: s.count,
+    fill: STATUS_COLORS[s.status] || '#64748b',
+  }));
+
+  // Format expiration heatmap for display — aggregate weekly for 90 days
+  const weeklyExpiration = (expirationTimeline || []).reduce<{ week: string; count: number }[]>((acc, bucket, i) => {
+    const weekIdx = Math.floor(i / 7);
+    if (!acc[weekIdx]) {
+      acc[weekIdx] = { week: bucket.date, count: 0 };
+    }
+    acc[weekIdx].count += bucket.count;
+    return acc;
+  }, []);
+
+  // Format dates for x-axis labels
+  const formatShortDate = (dateStr: string) => {
+    const d = new Date(dateStr + 'T00:00:00');
+    return `${d.getMonth() + 1}/${d.getDate()}`;
+  };
 
   return (
     <>
@@ -53,7 +120,7 @@ export default function DashboardPage() {
       />
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Stats */}
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-4">
           <StatCard label="Total Certificates" value={totalCerts} color="info"
             icon="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z" />
           <StatCard label="Expiring Soon" value={expiringSoon} color={expiringSoon > 0 ? 'warning' : 'success'}
@@ -62,6 +129,100 @@ export default function DashboardPage() {
             icon="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" />
           <StatCard label="Active Agents" value={activeAgents} color="success"
             icon="M5 12h14M5 12a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v4a2 2 0 01-2 2M5 12a2 2 0 00-2 2v4a2 2 0 002 2h14a2 2 0 002-2v-4a2 2 0 00-2-2" />
+          <StatCard label="Pending Jobs" value={pendingJobs} color={pendingJobs > 0 ? 'warning' : 'info'}
+            icon="M4 4v5h.582m15.356 2A8.001 8.001 0 004.582 9m0 0H9m11 11v-5h-.581m0 0a8.003 8.003 0 01-15.357-2m15.357 2H15" />
+        </div>
+
+        {/* Charts Row 1 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Certificates by Status (Pie) */}
+          <ChartCard title="Certificates by Status">
+            {pieData.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <PieChart>
+                  <Pie
+                    data={pieData}
+                    cx="50%"
+                    cy="50%"
+                    innerRadius={60}
+                    outerRadius={90}
+                    paddingAngle={2}
+                    dataKey="value"
+                    label={({ name, value }) => `${name}: ${value}`}
+                    labelLine={false}
+                  >
+                    {pieData.map((entry, index) => (
+                      <Cell key={index} fill={entry.fill} />
+                    ))}
+                  </Pie>
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend
+                    verticalAlign="bottom"
+                    height={36}
+                    formatter={(value: string) => <span className="text-xs text-slate-400">{value}</span>}
+                  />
+                </PieChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-slate-500">No certificate data</div>
+            )}
+          </ChartCard>
+
+          {/* Expiration Heatmap (Bar chart by week) */}
+          <ChartCard title="Expiration Timeline (Next 90 Days)">
+            {weeklyExpiration.length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={weeklyExpiration}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="week" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="count" name="Expiring certs" fill="#f59e0b" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-slate-500">No expiration data</div>
+            )}
+          </ChartCard>
+        </div>
+
+        {/* Charts Row 2 */}
+        <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
+          {/* Job Trends (Line chart) */}
+          <ChartCard title="Job Success/Failure Trends (30 Days)">
+            {(jobTrends || []).length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={jobTrends}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Legend formatter={(value: string) => <span className="text-xs text-slate-400">{value}</span>} />
+                  <Line type="monotone" dataKey="completed_count" name="Completed" stroke="#10b981" strokeWidth={2} dot={false} />
+                  <Line type="monotone" dataKey="failed_count" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
+                </LineChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-slate-500">No job trend data</div>
+            )}
+          </ChartCard>
+
+          {/* Issuance Rate (Bar chart) */}
+          <ChartCard title="Certificate Issuance Rate (30 Days)">
+            {(issuanceRate || []).length > 0 ? (
+              <ResponsiveContainer width="100%" height="100%">
+                <BarChart data={issuanceRate}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
+                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <Tooltip content={<CustomTooltip />} />
+                  <Bar dataKey="issued_count" name="Issued" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                </BarChart>
+              </ResponsiveContainer>
+            ) : (
+              <div className="h-full flex items-center justify-center text-sm text-slate-500">No issuance data</div>
+            )}
+          </ChartCard>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">

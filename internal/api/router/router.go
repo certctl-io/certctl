@@ -57,6 +57,8 @@ func (r *Router) RegisterHandlers(
 	agentGroups handler.AgentGroupHandler,
 	audit handler.AuditHandler,
 	notifications handler.NotificationHandler,
+	stats handler.StatsHandler,
+	metrics handler.MetricsHandler,
 	health handler.HealthHandler,
 ) {
 	// Health endpoints (no auth middleware — must always be accessible)
@@ -174,6 +176,16 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(notifications.ListNotifications))
 	r.Register("GET /api/v1/notifications/{id}", http.HandlerFunc(notifications.GetNotification))
 	r.Register("POST /api/v1/notifications/{id}/read", http.HandlerFunc(notifications.MarkAsRead))
+
+	// Stats routes: /api/v1/stats
+	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(stats.GetDashboardSummary))
+	r.Register("GET /api/v1/stats/certificates-by-status", http.HandlerFunc(stats.GetCertificatesByStatus))
+	r.Register("GET /api/v1/stats/expiration-timeline", http.HandlerFunc(stats.GetExpirationTimeline))
+	r.Register("GET /api/v1/stats/job-trends", http.HandlerFunc(stats.GetJobTrends))
+	r.Register("GET /api/v1/stats/issuance-rate", http.HandlerFunc(stats.GetIssuanceRate))
+
+	// Metrics routes: /api/v1/metrics
+	r.Register("GET /api/v1/metrics", http.HandlerFunc(metrics.GetMetrics))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

@@ -22,6 +22,7 @@ import TeamsPage from './pages/TeamsPage';
 import AgentGroupsPage from './pages/AgentGroupsPage';
 import AuditPage from './pages/AuditPage';
 import ShortLivedPage from './pages/ShortLivedPage';
+import AgentFleetPage from './pages/AgentFleetPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -48,6 +49,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="certificates/:id" element={<CertificateDetailPage />} />
                   <Route path="agents" element={<AgentsPage />} />
                   <Route path="agents/:id" element={<AgentDetailPage />} />
+                  <Route path="fleet" element={<AgentFleetPage />} />
                   <Route path="jobs" element={<JobsPage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="policies" element={<PoliciesPage />} />

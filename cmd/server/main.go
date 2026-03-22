@@ -152,6 +152,10 @@ func main() {
 	agentGroupService := service.NewAgentGroupService(agentGroupRepo, auditService)
 	logger.Info("initialized all services")
 
+	// Initialize stats and metrics services
+	statsService := service.NewStatsService(certificateRepo, jobRepo, agentRepo)
+	logger.Info("initialized stats service")
+
 	// Initialize API handlers
 	certificateHandler := handler.NewCertificateHandler(certificateService)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
@@ -165,6 +169,8 @@ func main() {
 	agentGroupHandler := handler.NewAgentGroupHandler(agentGroupService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
+	statsHandler := handler.NewStatsHandler(statsService)
+	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
 	logger.Info("initialized all handlers")
 
@@ -208,6 +214,8 @@ func main() {
 		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
+		statsHandler,
+		metricsHandler,
 		healthHandler,
 	)
 	logger.Info("registered all API handlers")
@@ -221,9 +229,11 @@ func main() {
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
 
+	structuredLogger := middleware.NewLogging(logger)
+
 	middlewareStack := []func(http.Handler) http.Handler{
 		middleware.RequestID,
-		middleware.Logging,
+		structuredLogger,
 		middleware.Recovery,
 		corsMiddleware,
 		authMiddleware,
@@ -237,7 +247,7 @@ func main() {
 		})
 		middlewareStack = []func(http.Handler) http.Handler{
 			middleware.RequestID,
-			middleware.Logging,
+			structuredLogger,
 			middleware.Recovery,
 			rateLimiter,
 			corsMiddleware,

@@ -480,15 +480,29 @@ export default function CertificateDetailPage() {
             <p className="text-sm text-slate-500">No versions yet</p>
           ) : (
             <div className="space-y-3">
-              {versions.data.map((v) => (
+              {versions.data.map((v, idx) => (
                 <div key={v.id} className="flex items-center justify-between py-2 border-b border-slate-700/50 last:border-0">
                   <div>
-                    <div className="text-sm text-slate-200">Version {v.version}</div>
+                    <div className="flex items-center gap-2">
+                      <span className="text-sm text-slate-200">Version {v.version}</span>
+                      {idx === 0 && <span className="text-xs bg-blue-500/20 text-blue-400 px-1.5 py-0.5 rounded">Current</span>}
+                    </div>
                     <div className="text-xs text-slate-500 font-mono">{v.serial_number}</div>
                   </div>
-                  <div className="text-right">
-                    <div className="text-sm text-slate-300">{formatDate(v.not_before)} — {formatDate(v.not_after)}</div>
-                    <div className="text-xs text-slate-500">{formatDateTime(v.created_at)}</div>
+                  <div className="flex items-center gap-4">
+                    <div className="text-right">
+                      <div className="text-sm text-slate-300">{formatDate(v.not_before)} — {formatDate(v.not_after)}</div>
+                      <div className="text-xs text-slate-500">{formatDateTime(v.created_at)}</div>
+                    </div>
+                    {idx > 0 && cert?.status !== 'Archived' && cert?.status !== 'Revoked' && (
+                      <button
+                        onClick={() => setShowDeploy(true)}
+                        className="text-xs text-amber-400 hover:text-amber-300 border border-amber-500/30 px-2 py-1 rounded hover:bg-amber-500/10 transition-colors"
+                        title="Redeploy this version to targets"
+                      >
+                        Rollback
+                      </button>
+                    )}
                   </div>
                 </div>
               ))}

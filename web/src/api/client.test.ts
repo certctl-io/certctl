@@ -55,6 +55,12 @@ import {
   deleteAgentGroup,
   getAgentGroupMembers,
   getHealth,
+  getDashboardSummary,
+  getCertificatesByStatus,
+  getExpirationTimeline,
+  getJobTrends,
+  getIssuanceRate,
+  getMetrics,
 } from './client';
 
 // Mock global fetch
@@ -614,6 +620,59 @@ describe('API Client', () => {
       await getAuditEvents({ resource_type: 'certificate' });
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toContain('resource_type=certificate');
+    });
+  });
+
+  // ─── Stats ─────────────────────────────────────────
+
+  describe('Stats', () => {
+    it('getDashboardSummary calls /api/v1/stats/summary', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ total_certificates: 10 }));
+      const result = await getDashboardSummary();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/summary');
+      expect(result.total_certificates).toBe(10);
+    });
+
+    it('getCertificatesByStatus calls /api/v1/stats/certificates-by-status', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([{ status: 'Active', count: 5 }]));
+      const result = await getCertificatesByStatus();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/certificates-by-status');
+      expect(result).toHaveLength(1);
+    });
+
+    it('getExpirationTimeline calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getExpirationTimeline(60);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/expiration-timeline?days=60');
+    });
+
+    it('getExpirationTimeline uses default 30 days', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getExpirationTimeline();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/expiration-timeline?days=30');
+    });
+
+    it('getJobTrends calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getJobTrends(14);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/job-trends?days=14');
+    });
+
+    it('getIssuanceRate calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getIssuanceRate(7);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/issuance-rate?days=7');
+    });
+
+    it('getMetrics calls /api/v1/metrics', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({
+        gauge: { certificate_total: 10 },
+        counter: { job_completed_total: 5 },
+        uptime: { uptime_seconds: 3600 },
+      }));
+      const result = await getMetrics();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/metrics');
+      expect(result.gauge.certificate_total).toBe(10);
     });
   });
 

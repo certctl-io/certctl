@@ -6,6 +6,7 @@ import (
 	"crypto/subtle"
 	"encoding/hex"
 	"log"
+	"log/slog"
 	"net/http"
 	"sync"
 	"time"
@@ -30,6 +31,7 @@ func RequestID(next http.Handler) http.Handler {
 }
 
 // Logging middleware logs request details including method, path, status, and duration.
+// Deprecated: Use NewLogging for structured logging with slog.
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -43,6 +45,33 @@ func Logging(next http.Handler) http.Handler {
 		requestID := getRequestID(r.Context())
 		log.Printf("[%s] %s %s %d %v", requestID, r.Method, r.URL.Path, wrapped.statusCode, duration)
 	})
+}
+
+// NewLogging creates a structured logging middleware using slog.
+// Logs request_id, method, path, status, duration_ms, and remote_addr.
+func NewLogging(logger *slog.Logger) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			start := time.Now()
+
+			// Wrap response writer to capture status code
+			wrapped := &responseWriter{ResponseWriter: w, statusCode: http.StatusOK}
+
+			next.ServeHTTP(wrapped, r)
+
+			duration := time.Since(start)
+			requestID := getRequestID(r.Context())
+
+			logger.InfoContext(r.Context(), "request completed",
+				"request_id", requestID,
+				"method", r.Method,
+				"path", r.URL.Path,
+				"status", wrapped.statusCode,
+				"duration_ms", duration.Milliseconds(),
+				"remote_addr", r.RemoteAddr,
+			)
+		})
+	}
 }
 
 // Recovery middleware recovers from panics and returns a 500 error.
