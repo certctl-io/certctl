@@ -1,18 +1,219 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, getTargets } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
-import { formatDate, formatDateTime, daysUntil, expiryColor } from '../api/utils';
+import { formatDate, formatDateTime, daysUntil, expiryColor, timeAgo } from '../api/utils';
+import type { Job } from '../api/types';
 
-function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
+function InfoRow({ label, value, editable, onEdit }: { label: string; value: React.ReactNode; editable?: boolean; onEdit?: () => void }) {
   return (
-    <div className="flex justify-between py-2 border-b border-slate-700/50">
+    <div className="flex justify-between py-2 border-b border-slate-700/50 group">
       <span className="text-sm text-slate-400">{label}</span>
-      <span className="text-sm text-slate-200">{value}</span>
+      <div className="flex items-center gap-2">
+        <span className="text-sm text-slate-200">{value}</span>
+        {editable && onEdit && (
+          <button onClick={onEdit} className="opacity-0 group-hover:opacity-100 transition-opacity text-xs text-blue-400 hover:text-blue-300">
+            Edit
+          </button>
+        )}
+      </div>
+    </div>
+  );
+}
+
+// Timeline step component for deployment status
+function TimelineStep({ label, status, time, isLast }: { label: string; status: 'completed' | 'active' | 'pending' | 'failed'; time?: string; isLast?: boolean }) {
+  const dotStyles = {
+    completed: 'bg-emerald-500 ring-emerald-500/30',
+    active: 'bg-blue-500 ring-blue-500/30 animate-pulse',
+    pending: 'bg-slate-600 ring-slate-600/30',
+    failed: 'bg-red-500 ring-red-500/30',
+  };
+  const lineStyles = {
+    completed: 'bg-emerald-500/50',
+    active: 'bg-blue-500/30',
+    pending: 'bg-slate-700',
+    failed: 'bg-red-500/30',
+  };
+  const textStyles = {
+    completed: 'text-emerald-400',
+    active: 'text-blue-400',
+    pending: 'text-slate-500',
+    failed: 'text-red-400',
+  };
+
+  return (
+    <div className="flex items-start gap-3 relative">
+      <div className="flex flex-col items-center">
+        <div className={`w-3 h-3 rounded-full ring-4 ${dotStyles[status]} flex-shrink-0 mt-0.5`} />
+        {!isLast && <div className={`w-0.5 h-8 ${lineStyles[status]}`} />}
+      </div>
+      <div className="pb-6">
+        <div className={`text-sm font-medium ${textStyles[status]}`}>{label}</div>
+        {time && <div className="text-xs text-slate-500 mt-0.5">{time}</div>}
+      </div>
+    </div>
+  );
+}
+
+function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certId: string; certStatus: string; createdAt: string; issuedAt: string }) {
+  const { data: jobsData } = useQuery({
+    queryKey: ['jobs', { certificate_id: certId }],
+    queryFn: () => getJobs({ certificate_id: certId }),
+  });
+
+  const jobs = jobsData?.data || [];
+  const issuanceJobs = jobs.filter((j: Job) => j.type === 'Issuance' || j.type === 'Renewal');
+  const deployJobs = jobs.filter((j: Job) => j.type === 'Deployment');
+  const latestIssuance = issuanceJobs[0];
+  const latestDeploy = deployJobs[0];
+
+  // Determine step statuses
+  const getRequestedStatus = () => 'completed' as const;
+  const getRequestedTime = () => formatDateTime(createdAt);
+
+  const getIssuedStatus = () => {
+    if (issuedAt) return 'completed' as const;
+    if (latestIssuance?.status === 'Running' || latestIssuance?.status === 'AwaitingCSR' || latestIssuance?.status === 'AwaitingApproval') return 'active' as const;
+    if (latestIssuance?.status === 'Failed') return 'failed' as const;
+    return 'pending' as const;
+  };
+  const getIssuedTime = () => {
+    if (issuedAt) return formatDateTime(issuedAt);
+    if (latestIssuance) return `${latestIssuance.status} — ${timeAgo(latestIssuance.created_at)}`;
+    return undefined;
+  };
+
+  const getDeployStatus = () => {
+    if (!issuedAt) return 'pending' as const;
+    if (latestDeploy?.status === 'Completed') return 'completed' as const;
+    if (latestDeploy?.status === 'Running') return 'active' as const;
+    if (latestDeploy?.status === 'Failed') return 'failed' as const;
+    if (latestDeploy?.status === 'Pending') return 'active' as const;
+    return 'pending' as const;
+  };
+  const getDeployTime = () => {
+    if (latestDeploy?.status === 'Completed') return formatDateTime(latestDeploy.completed_at);
+    if (latestDeploy) return `${latestDeploy.status} — ${timeAgo(latestDeploy.created_at)}`;
+    return undefined;
+  };
+
+  const getActiveStatus = () => {
+    if (certStatus === 'Active') return 'completed' as const;
+    if (certStatus === 'Revoked') return 'failed' as const;
+    if (certStatus === 'Expired') return 'failed' as const;
+    if (latestDeploy?.status === 'Completed') return 'completed' as const;
+    return 'pending' as const;
+  };
+  const getActiveTime = () => {
+    if (certStatus === 'Revoked') return 'Revoked';
+    if (certStatus === 'Expired') return 'Expired';
+    if (certStatus === 'Active') return 'Currently active';
+    return undefined;
+  };
+
+  return (
+    <div className="card p-5">
+      <h3 className="text-sm font-semibold text-slate-300 mb-4">Lifecycle Timeline</h3>
+      <div className="pl-1">
+        <TimelineStep label="Requested" status={getRequestedStatus()} time={getRequestedTime()} />
+        <TimelineStep label="Issued" status={getIssuedStatus()} time={getIssuedTime()} />
+        <TimelineStep label="Deploying" status={getDeployStatus()} time={getDeployTime()} />
+        <TimelineStep label={certStatus === 'Revoked' ? 'Revoked' : certStatus === 'Expired' ? 'Expired' : 'Active'}
+          status={getActiveStatus()} time={getActiveTime()} isLast />
+      </div>
+    </div>
+  );
+}
+
+function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { certId: string; currentPolicyId: string; currentProfileId: string }) {
+  const queryClient = useQueryClient();
+  const [editing, setEditing] = useState(false);
+  const [policyId, setPolicyId] = useState(currentPolicyId);
+  const [profileId, setProfileId] = useState(currentProfileId);
+
+  const { data: policies } = useQuery({
+    queryKey: ['policies'],
+    queryFn: () => getPolicies(),
+    enabled: editing,
+  });
+
+  const { data: profiles } = useQuery({
+    queryKey: ['profiles'],
+    queryFn: () => getProfiles(),
+    enabled: editing,
+  });
+
+  const saveMutation = useMutation({
+    mutationFn: () => updateCertificate(certId, {
+      renewal_policy_id: policyId,
+      certificate_profile_id: profileId,
+    }),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['certificate', certId] });
+      setEditing(false);
+    },
+  });
+
+  if (!editing) {
+    return (
+      <div className="card p-5">
+        <div className="flex items-center justify-between mb-4">
+          <h3 className="text-sm font-semibold text-slate-300">Policy & Profile</h3>
+          <button onClick={() => setEditing(true)} className="text-xs text-blue-400 hover:text-blue-300 transition-colors">
+            Edit
+          </button>
+        </div>
+        <InfoRow label="Renewal Policy" value={currentPolicyId || '—'} />
+        <InfoRow label="Certificate Profile" value={currentProfileId || '—'} />
+      </div>
+    );
+  }
+
+  return (
+    <div className="card p-5 border-blue-500/30">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-blue-400">Edit Policy & Profile</h3>
+        <div className="flex gap-2">
+          <button onClick={() => { setEditing(false); setPolicyId(currentPolicyId); setProfileId(currentProfileId); }}
+            className="text-xs text-slate-400 hover:text-slate-300">Cancel</button>
+          <button onClick={() => saveMutation.mutate()} disabled={saveMutation.isPending}
+            className="text-xs text-blue-400 hover:text-blue-300 font-medium disabled:opacity-50">
+            {saveMutation.isPending ? 'Saving...' : 'Save'}
+          </button>
+        </div>
+      </div>
+      {saveMutation.isError && (
+        <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">
+          {saveMutation.error instanceof Error ? saveMutation.error.message : 'Failed to save'}
+        </div>
+      )}
+      <div className="space-y-3">
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Renewal Policy</label>
+          <select value={policyId} onChange={e => setPolicyId(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">
+            <option value="">None</option>
+            {policies?.data?.map(p => (
+              <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+            ))}
+          </select>
+        </div>
+        <div>
+          <label className="text-xs text-slate-400 block mb-1">Certificate Profile</label>
+          <select value={profileId} onChange={e => setProfileId(e.target.value)}
+            className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">
+            <option value="">None</option>
+            {profiles?.data?.map(p => (
+              <option key={p.id} value={p.id}>{p.name} — max TTL {p.max_ttl_seconds ? `${Math.round(p.max_ttl_seconds / 86400)}d` : '∞'}</option>
+            ))}
+          </select>
+        </div>
+      </div>
     </div>
   );
 }
@@ -203,6 +404,9 @@ export default function CertificateDetailPage() {
           </div>
         )}
 
+        {/* Deployment Status Timeline */}
+        <DeploymentTimeline certId={id!} certStatus={cert.status} createdAt={cert.created_at} issuedAt={cert.issued_at} />
+
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Certificate Info */}
           <div className="card p-5">
@@ -229,8 +433,6 @@ export default function CertificateDetailPage() {
             } />
             <InfoRow label="Environment" value={cert.environment || '—'} />
             <InfoRow label="Issuer" value={cert.issuer_id} />
-            <InfoRow label="Profile" value={cert.certificate_profile_id || '—'} />
-            <InfoRow label="Renewal Policy" value={cert.renewal_policy_id || '—'} />
             <InfoRow label="Owner" value={cert.owner_id} />
             <InfoRow label="Team" value={cert.team_id} />
             {isRevoked && (
@@ -249,6 +451,13 @@ export default function CertificateDetailPage() {
             <InfoRow label="Updated" value={formatDateTime(cert.updated_at)} />
           </div>
         </div>
+
+        {/* Inline Policy Editor */}
+        <InlinePolicyEditor
+          certId={id!}
+          currentPolicyId={cert.renewal_policy_id || ''}
+          currentProfileId={cert.certificate_profile_id || ''}
+        />
 
         {/* Tags */}
         {cert.tags && Object.keys(cert.tags).length > 0 && (

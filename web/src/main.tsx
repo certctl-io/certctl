@@ -21,6 +21,7 @@ import OwnersPage from './pages/OwnersPage';
 import TeamsPage from './pages/TeamsPage';
 import AgentGroupsPage from './pages/AgentGroupsPage';
 import AuditPage from './pages/AuditPage';
+import ShortLivedPage from './pages/ShortLivedPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -57,6 +58,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="teams" element={<TeamsPage />} />
                   <Route path="agent-groups" element={<AgentGroupsPage />} />
                   <Route path="audit" element={<AuditPage />} />
+                  <Route path="short-lived" element={<ShortLivedPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

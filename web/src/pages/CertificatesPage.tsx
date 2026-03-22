@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate } from '../api/client';
+import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners } from '../api/client';
+import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -99,12 +100,149 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
   );
 }
 
+function BulkRevokeModal({ ids, onClose, onSuccess }: { ids: string[]; onClose: () => void; onSuccess: () => void }) {
+  const [reason, setReason] = useState('unspecified');
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+
+  const handleRevoke = async () => {
+    setRunning(true);
+    setError('');
+    let succeeded = 0;
+    for (const id of ids) {
+      try {
+        await revokeCertificate(id, reason);
+        succeeded++;
+        setProgress(succeeded);
+      } catch (err) {
+        setError(`Failed on ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        break;
+      }
+    }
+    if (!error) onSuccess();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-red-400 mb-2">Bulk Revoke</h2>
+        <p className="text-sm text-slate-400 mb-4">
+          Revoke {ids.length} certificate{ids.length > 1 ? 's' : ''}. This cannot be undone.
+        </p>
+        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">{error}</div>}
+        {running && (
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Progress</span>
+              <span>{progress}/{ids.length}</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-2">
+              <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
+            </div>
+          </div>
+        )}
+        <label className="text-xs text-slate-400 block mb-2">Revocation Reason (RFC 5280)</label>
+        <select value={reason} onChange={e => setReason(e.target.value)}
+          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+          disabled={running}
+        >
+          {REVOCATION_REASONS.map(r => (
+            <option key={r.value} value={r.value}>{r.label}</option>
+          ))}
+        </select>
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="btn btn-ghost text-sm" disabled={running}>Cancel</button>
+          <button onClick={handleRevoke} disabled={running}
+            className="btn text-sm bg-red-600 hover:bg-red-500 text-white disabled:opacity-50">
+            {running ? `Revoking (${progress}/${ids.length})...` : `Revoke ${ids.length} Certificates`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function BulkReassignModal({ ids, onClose, onSuccess }: { ids: string[]; onClose: () => void; onSuccess: () => void }) {
+  const [ownerId, setOwnerId] = useState('');
+  const [progress, setProgress] = useState(0);
+  const [error, setError] = useState('');
+  const [running, setRunning] = useState(false);
+
+  const { data: owners } = useQuery({
+    queryKey: ['owners'],
+    queryFn: () => getOwners(),
+  });
+
+  const handleReassign = async () => {
+    if (!ownerId) return;
+    setRunning(true);
+    setError('');
+    let succeeded = 0;
+    for (const id of ids) {
+      try {
+        await updateCertificate(id, { owner_id: ownerId } as Partial<Certificate>);
+        succeeded++;
+        setProgress(succeeded);
+      } catch (err) {
+        setError(`Failed on ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
+        break;
+      }
+    }
+    if (!error) onSuccess();
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-slate-200 mb-2">Reassign Owner</h2>
+        <p className="text-sm text-slate-400 mb-4">
+          Reassign {ids.length} certificate{ids.length > 1 ? 's' : ''} to a new owner.
+        </p>
+        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">{error}</div>}
+        {running && (
+          <div className="mb-3">
+            <div className="flex justify-between text-xs text-slate-400 mb-1">
+              <span>Progress</span>
+              <span>{progress}/{ids.length}</span>
+            </div>
+            <div className="w-full bg-slate-700 rounded-full h-2">
+              <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
+            </div>
+          </div>
+        )}
+        <label className="text-xs text-slate-400 block mb-2">New Owner</label>
+        <select value={ownerId} onChange={e => setOwnerId(e.target.value)}
+          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+          disabled={running}
+        >
+          <option value="">Select owner...</option>
+          {owners?.data?.map(o => (
+            <option key={o.id} value={o.id}>{o.name} ({o.email})</option>
+          ))}
+        </select>
+        <div className="flex justify-end gap-3">
+          <button onClick={onClose} className="btn btn-ghost text-sm" disabled={running}>Cancel</button>
+          <button onClick={handleReassign} disabled={running || !ownerId}
+            className="btn btn-primary text-sm disabled:opacity-50">
+            {running ? `Reassigning (${progress}/${ids.length})...` : `Reassign ${ids.length} Certificates`}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function CertificatesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
   const [envFilter, setEnvFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [showBulkRevoke, setShowBulkRevoke] = useState(false);
+  const [showBulkReassign, setShowBulkReassign] = useState(false);
+  const [bulkRenewProgress, setBulkRenewProgress] = useState<{ done: number; total: number; running: boolean } | null>(null);
 
   const params: Record<string, string> = {};
   if (statusFilter) params.status = statusFilter;
@@ -115,6 +253,22 @@ export default function CertificatesPage() {
     queryFn: () => getCertificates(params),
     refetchInterval: 30000,
   });
+
+  const handleBulkRenewal = async () => {
+    const ids = Array.from(selectedIds);
+    setBulkRenewProgress({ done: 0, total: ids.length, running: true });
+    for (let i = 0; i < ids.length; i++) {
+      try {
+        await triggerRenewal(ids[i]);
+      } catch {
+        // continue on individual failures
+      }
+      setBulkRenewProgress({ done: i + 1, total: ids.length, running: i + 1 < ids.length });
+    }
+    queryClient.invalidateQueries({ queryKey: ['certificates'] });
+    setSelectedIds(new Set());
+    setTimeout(() => setBulkRenewProgress(null), 3000);
+  };
 
   const columns: Column<Certificate>[] = [
     {
@@ -146,6 +300,9 @@ export default function CertificatesPage() {
     { key: 'owner', label: 'Owner', render: (c) => <span className="text-slate-400 text-xs">{c.owner_id}</span> },
   ];
 
+  const selectedArray = Array.from(selectedIds);
+  const hasSelection = selectedArray.length > 0;
+
   return (
     <>
       <PageHeader
@@ -157,6 +314,43 @@ export default function CertificatesPage() {
           </button>
         }
       />
+
+      {/* Bulk Action Bar */}
+      {hasSelection && (
+        <div className="px-6 py-3 bg-blue-500/10 border-b border-blue-500/20 flex items-center justify-between">
+          <span className="text-sm text-blue-400 font-medium">{selectedArray.length} selected</span>
+          <div className="flex gap-2">
+            <button onClick={handleBulkRenewal} disabled={bulkRenewProgress?.running}
+              className="btn btn-primary text-xs disabled:opacity-50">
+              {bulkRenewProgress?.running
+                ? `Renewing (${bulkRenewProgress.done}/${bulkRenewProgress.total})...`
+                : 'Trigger Renewal'}
+            </button>
+            <button onClick={() => setShowBulkRevoke(true)}
+              className="btn btn-ghost text-xs text-amber-400 hover:text-amber-300 border border-amber-600/50">
+              Revoke
+            </button>
+            <button onClick={() => setShowBulkReassign(true)}
+              className="btn btn-ghost text-xs text-blue-400 hover:text-blue-300 border border-blue-600/50">
+              Reassign Owner
+            </button>
+            <button onClick={() => setSelectedIds(new Set())}
+              className="btn btn-ghost text-xs text-slate-400">
+              Clear
+            </button>
+          </div>
+        </div>
+      )}
+
+      {/* Bulk Renewal Success */}
+      {bulkRenewProgress && !bulkRenewProgress.running && (
+        <div className="px-6 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
+          <span className="text-sm text-emerald-400">
+            Triggered renewal for {bulkRenewProgress.done} certificate{bulkRenewProgress.done > 1 ? 's' : ''}.
+          </span>
+        </div>
+      )}
+
       <div className="px-6 py-3 flex gap-3 border-b border-slate-700/50">
         <select
           value={statusFilter}
@@ -192,6 +386,9 @@ export default function CertificatesPage() {
             isLoading={isLoading}
             onRowClick={(c) => navigate(`/certificates/${c.id}`)}
             emptyMessage="No certificates found"
+            selectable
+            selectedKeys={selectedIds}
+            onSelectionChange={setSelectedIds}
           />
         )}
       </div>
@@ -200,6 +397,28 @@ export default function CertificatesPage() {
           onClose={() => setShowCreate(false)}
           onSuccess={() => {
             setShowCreate(false);
+            queryClient.invalidateQueries({ queryKey: ['certificates'] });
+          }}
+        />
+      )}
+      {showBulkRevoke && (
+        <BulkRevokeModal
+          ids={selectedArray}
+          onClose={() => setShowBulkRevoke(false)}
+          onSuccess={() => {
+            setShowBulkRevoke(false);
+            setSelectedIds(new Set());
+            queryClient.invalidateQueries({ queryKey: ['certificates'] });
+          }}
+        />
+      )}
+      {showBulkReassign && (
+        <BulkReassignModal
+          ids={selectedArray}
+          onClose={() => setShowBulkReassign(false)}
+          onSuccess={() => {
+            setShowBulkReassign(false);
+            setSelectedIds(new Set());
             queryClient.invalidateQueries({ queryKey: ['certificates'] });
           }}
         />
