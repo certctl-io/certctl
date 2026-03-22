@@ -292,7 +292,7 @@ GET    /ready                             Readiness check
 | Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
 | ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
 | step-ca | Implemented | `StepCA` |
-| OpenSSL / Custom CA | Planned (V2) | — |
+| OpenSSL / Custom CA | Planned | — |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
 
@@ -304,8 +304,8 @@ GET    /ready                             Readiness check
 | NGINX | Implemented | `NGINX` |
 | Apache httpd | Implemented | `Apache` |
 | HAProxy | Implemented | `HAProxy` |
-| F5 BIG-IP | Interface only (V2) | `F5` |
-| Microsoft IIS | Interface only (V2) | `IIS` |
+| F5 BIG-IP | Interface only | `F5` |
+| Microsoft IIS | Interface only | `IIS` |
 | Kubernetes Secrets | Planned | — |
 
 ### Notifiers

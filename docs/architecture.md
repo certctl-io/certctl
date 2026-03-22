@@ -459,9 +459,9 @@ type Connector interface {
 
 The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
 
-Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — proxy agent + iControl REST, planned V2), **IIS** (interface only — dual-mode: agent-local PowerShell primary + proxy agent WinRM for agentless targets, planned V2).
+Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **F5 BIG-IP** (interface only — proxy agent + iControl REST, implementation planned), **IIS** (interface only — dual-mode: agent-local PowerShell primary + proxy agent WinRM for agentless targets, implementation planned).
 
-**Planned (V3):** Kubernetes cert-manager external issuer, Kubernetes Secrets, AWS ALB/CloudFront, AWS IAM Roles Anywhere, Azure Key Vault, Azure Managed Identity, Palo Alto, FortiGate, Citrix ADC.
+Additional cloud, network, and Kubernetes target connectors are planned for future releases.
 
 ### Notifier Connector
 

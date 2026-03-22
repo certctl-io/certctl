@@ -6,9 +6,9 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca implemented; OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
-3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca implemented; OpenSSL/Custom CA and additional CA integrations planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
+3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks implemented; Slack, Teams, PagerDuty, OpsGenie planned)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
 
@@ -363,7 +363,7 @@ The combined PEM is built in this order: server certificate, intermediate/chain 
 
 Location: `internal/connector/target/haproxy/haproxy.go`
 
-### Planned: F5 BIG-IP (V2, Interface Only)
+### Planned: F5 BIG-IP (Interface Only)
 
 The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it.
 
