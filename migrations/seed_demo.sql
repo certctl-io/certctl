@@ -203,7 +203,7 @@ ON CONFLICT (id) DO NOTHING;
 
 -- Agent Group Members (manual membership for the manual group)
 INSERT INTO agent_group_members (agent_group_id, agent_id, membership_type, created_at) VALUES
-  ('ag-manual', 'agent-web-1',   'include', NOW()),
-  ('ag-manual', 'agent-api-1',   'include', NOW()),
-  ('ag-manual', 'agent-db-1',    'exclude', NOW())
+  ('ag-manual', 'ag-web-prod',    'include', NOW()),
+  ('ag-manual', 'ag-web-staging', 'include', NOW()),
+  ('ag-manual', 'ag-iis-prod',    'exclude', NOW())
 ON CONFLICT (agent_group_id, agent_id) DO NOTHING;
