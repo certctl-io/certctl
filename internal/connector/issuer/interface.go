@@ -3,6 +3,7 @@ package issuer
 import (
 	"context"
 	"encoding/json"
+	"math/big"
 	"time"
 )
 
@@ -22,6 +23,14 @@ type Connector interface {
 
 	// GetOrderStatus retrieves the status of an issuance or renewal order.
 	GetOrderStatus(ctx context.Context, orderID string) (*OrderStatus, error)
+
+	// GenerateCRL generates a DER-encoded X.509 CRL signed by this issuer.
+	// Returns nil if the issuer does not support CRL generation (e.g., ACME).
+	GenerateCRL(ctx context.Context, revokedCerts []RevokedCertEntry) ([]byte, error)
+
+	// SignOCSPResponse signs an OCSP response for the given certificate serial.
+	// Returns nil if the issuer does not support OCSP (e.g., ACME).
+	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
 }
 
 // IssuanceRequest contains the parameters for issuing a new certificate.
@@ -66,4 +75,21 @@ type OrderStatus struct {
 	NotBefore *time.Time `json:"not_before,omitempty"`
 	NotAfter  *time.Time `json:"not_after,omitempty"`
 	UpdatedAt time.Time  `json:"updated_at"`
+}
+
+// RevokedCertEntry represents a revoked certificate for CRL generation.
+type RevokedCertEntry struct {
+	SerialNumber *big.Int
+	RevokedAt    time.Time
+	ReasonCode   int
+}
+
+// OCSPSignRequest contains the parameters for signing an OCSP response.
+type OCSPSignRequest struct {
+	CertSerial       *big.Int
+	CertStatus       int // 0=good, 1=revoked, 2=unknown
+	RevokedAt        time.Time
+	RevocationReason int
+	ThisUpdate       time.Time
+	NextUpdate       time.Time
 }

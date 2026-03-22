@@ -1,7 +1,8 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, getTargets } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, getTargets } from '../api/client';
+import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
@@ -22,6 +23,8 @@ export default function CertificateDetailPage() {
   const queryClient = useQueryClient();
   const [showDeploy, setShowDeploy] = useState(false);
   const [deployTargetId, setDeployTargetId] = useState('');
+  const [showRevoke, setShowRevoke] = useState(false);
+  const [revokeReason, setRevokeReason] = useState('unspecified');
 
   const { data: cert, isLoading, error, refetch } = useQuery({
     queryKey: ['certificate', id],
@@ -66,6 +69,16 @@ export default function CertificateDetailPage() {
     },
   });
 
+  const revokeMutation = useMutation({
+    mutationFn: () => revokeCertificate(id!, revokeReason),
+    onSuccess: () => {
+      setShowRevoke(false);
+      setRevokeReason('unspecified');
+      queryClient.invalidateQueries({ queryKey: ['certificate', id] });
+      queryClient.invalidateQueries({ queryKey: ['certificates'] });
+    },
+  });
+
   if (isLoading) {
     return (
       <>
@@ -85,6 +98,9 @@ export default function CertificateDetailPage() {
   }
 
   const days = daysUntil(cert.expires_at);
+  const isRevoked = cert.status === 'Revoked';
+  const isArchived = cert.status === 'Archived';
+  const canRevoke = !isRevoked && !isArchived;
 
   return (
     <>
@@ -98,19 +114,27 @@ export default function CertificateDetailPage() {
             </button>
             <button
               onClick={() => setShowDeploy(true)}
-              disabled={cert.status === 'Archived'}
+              disabled={isArchived || isRevoked}
               className="btn btn-ghost text-xs border border-slate-600 disabled:opacity-50"
             >
               Deploy
             </button>
             <button
               onClick={() => renewMutation.mutate()}
-              disabled={renewMutation.isPending || cert.status === 'Archived' || cert.status === 'RenewalInProgress'}
+              disabled={renewMutation.isPending || isArchived || isRevoked || cert.status === 'RenewalInProgress'}
               className="btn btn-primary text-xs disabled:opacity-50"
             >
               {renewMutation.isPending ? 'Renewing...' : 'Trigger Renewal'}
             </button>
-            {cert.status !== 'Archived' && (
+            {canRevoke && (
+              <button
+                onClick={() => setShowRevoke(true)}
+                className="btn btn-ghost text-xs text-amber-400 hover:text-amber-300 border border-amber-600/50"
+              >
+                Revoke
+              </button>
+            )}
+            {!isArchived && (
               <button
                 onClick={() => { if (confirm('Archive this certificate? This cannot be undone.')) archiveMutation.mutate(); }}
                 disabled={archiveMutation.isPending}
@@ -148,6 +172,36 @@ export default function CertificateDetailPage() {
             Failed to archive: {archiveMutation.error instanceof Error ? archiveMutation.error.message : 'Unknown error'}
           </div>
         )}
+        {revokeMutation.isSuccess && (
+          <div className="bg-amber-500/10 border border-amber-500/20 text-amber-400 rounded-lg px-4 py-3 text-sm">
+            Certificate revoked successfully. It has been added to the CRL.
+          </div>
+        )}
+        {revokeMutation.isError && (
+          <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-4 py-3 text-sm">
+            Failed to revoke: {revokeMutation.error instanceof Error ? revokeMutation.error.message : 'Unknown error'}
+          </div>
+        )}
+
+        {/* Revocation Banner */}
+        {isRevoked && (
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-4 py-3">
+            <div className="flex items-center gap-3">
+              <div className="w-8 h-8 rounded-full bg-red-500/20 flex items-center justify-center flex-shrink-0">
+                <svg className="w-4 h-4 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M18.364 18.364A9 9 0 005.636 5.636m12.728 12.728A9 9 0 015.636 5.636m12.728 12.728L5.636 5.636" />
+                </svg>
+              </div>
+              <div>
+                <div className="text-sm font-medium text-red-400">Certificate Revoked</div>
+                <div className="text-xs text-slate-400 mt-0.5">
+                  Reason: {REVOCATION_REASONS.find(r => r.value === cert.revocation_reason)?.label || cert.revocation_reason || 'Unspecified'}
+                  {cert.revoked_at && <> &middot; Revoked {formatDateTime(cert.revoked_at)}</>}
+                </div>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Certificate Info */}
@@ -169,15 +223,28 @@ export default function CertificateDetailPage() {
             <h3 className="text-sm font-semibold text-slate-300 mb-4">Lifecycle</h3>
             <InfoRow label="Issued" value={formatDate(cert.issued_at)} />
             <InfoRow label="Expires" value={
-              <span className={expiryColor(days)}>
+              <span className={isRevoked ? 'text-red-400 line-through' : expiryColor(days)}>
                 {formatDate(cert.expires_at)} ({days <= 0 ? 'expired' : `${days} days`})
               </span>
             } />
             <InfoRow label="Environment" value={cert.environment || '—'} />
             <InfoRow label="Issuer" value={cert.issuer_id} />
+            <InfoRow label="Profile" value={cert.certificate_profile_id || '—'} />
             <InfoRow label="Renewal Policy" value={cert.renewal_policy_id || '—'} />
             <InfoRow label="Owner" value={cert.owner_id} />
             <InfoRow label="Team" value={cert.team_id} />
+            {isRevoked && (
+              <>
+                <InfoRow label="Revoked At" value={
+                  <span className="text-red-400">{cert.revoked_at ? formatDateTime(cert.revoked_at) : '—'}</span>
+                } />
+                <InfoRow label="Revocation Reason" value={
+                  <span className="text-red-400">
+                    {REVOCATION_REASONS.find(r => r.value === cert.revocation_reason)?.label || cert.revocation_reason || '—'}
+                  </span>
+                } />
+              </>
+            )}
             <InfoRow label="Created" value={formatDateTime(cert.created_at)} />
             <InfoRow label="Updated" value={formatDateTime(cert.updated_at)} />
           </div>
@@ -220,6 +287,8 @@ export default function CertificateDetailPage() {
           )}
         </div>
       </div>
+
+      {/* Deploy Modal */}
       {showDeploy && (
         <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowDeploy(false)}>
           <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
@@ -248,6 +317,45 @@ export default function CertificateDetailPage() {
                 className="btn btn-primary text-sm disabled:opacity-50"
               >
                 {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Revoke Modal */}
+      {showRevoke && (
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={() => setShowRevoke(false)}>
+          <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-red-400 mb-2">Revoke Certificate</h2>
+            <p className="text-sm text-slate-400 mb-4">
+              This action cannot be undone. The certificate will be added to the CRL and marked as revoked.
+            </p>
+            {revokeMutation.isError && (
+              <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">
+                {revokeMutation.error instanceof Error ? revokeMutation.error.message : 'Unknown error'}
+              </div>
+            )}
+            <label className="text-xs text-slate-400 block mb-2">Revocation Reason (RFC 5280)</label>
+            <select
+              value={revokeReason}
+              onChange={e => setRevokeReason(e.target.value)}
+              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+            >
+              {REVOCATION_REASONS.map(r => (
+                <option key={r.value} value={r.value}>{r.label}</option>
+              ))}
+            </select>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => { setShowRevoke(false); setRevokeReason('unspecified'); }} className="btn btn-ghost text-sm">
+                Cancel
+              </button>
+              <button
+                onClick={() => revokeMutation.mutate()}
+                disabled={revokeMutation.isPending}
+                className="btn text-sm bg-red-600 hover:bg-red-500 text-white disabled:opacity-50"
+              >
+                {revokeMutation.isPending ? 'Revoking...' : 'Revoke Certificate'}
               </button>
             </div>
           </div>

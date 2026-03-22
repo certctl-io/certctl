@@ -26,6 +26,8 @@ type MockCertificateService struct {
 	TriggerDeploymentFn      func(certID string, targetID string) error
 	RevokeCertificateFn      func(certID string, reason string) error
 	GetRevokedCertificatesFn func() ([]*domain.CertificateRevocation, error)
+	GenerateDERCRLFn         func(issuerID string) ([]byte, error)
+	GetOCSPResponseFn        func(issuerID string, serialHex string) ([]byte, error)
 }
 
 func (m *MockCertificateService) ListCertificates(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
@@ -94,6 +96,20 @@ func (m *MockCertificateService) RevokeCertificate(certID string, reason string)
 func (m *MockCertificateService) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
 	if m.GetRevokedCertificatesFn != nil {
 		return m.GetRevokedCertificatesFn()
+	}
+	return nil, nil
+}
+
+func (m *MockCertificateService) GenerateDERCRL(issuerID string) ([]byte, error) {
+	if m.GenerateDERCRLFn != nil {
+		return m.GenerateDERCRLFn(issuerID)
+	}
+	return nil, nil
+}
+
+func (m *MockCertificateService) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
+	if m.GetOCSPResponseFn != nil {
+		return m.GetOCSPResponseFn(issuerID, serialHex)
 	}
 	return nil, nil
 }
@@ -1037,6 +1053,184 @@ func TestGetCRL_MethodNotAllowed(t *testing.T) {
 	w := httptest.NewRecorder()
 
 	handler.GetCRL(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+// M15b: DER CRL and OCSP Handler Tests
+
+func TestGetDERCRL_Success(t *testing.T) {
+	derCRLData := []byte{0x30, 0x82, 0x01, 0x00} // Mock DER CRL bytes
+	mock := &MockCertificateService{
+		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+			if issuerID == "iss-local" {
+				return derCRLData, nil
+			}
+			return nil, fmt.Errorf("issuer not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetDERCRL(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	// Verify response is DER data
+	responseBody := w.Body.Bytes()
+	if len(responseBody) == 0 {
+		t.Error("expected non-empty response body")
+	}
+}
+
+func TestGetDERCRL_IssuerNotFound(t *testing.T) {
+	mock := &MockCertificateService{
+		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+			return nil, fmt.Errorf("issuer not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/nonexistent/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetDERCRL(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestGetDERCRL_NotSupported(t *testing.T) {
+	mock := &MockCertificateService{
+		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+			return nil, fmt.Errorf("issuer does not support CRL generation")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-acme/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetDERCRL(w, req)
+
+	// Service should return an error; handler routes to appropriate status
+	if w.Code == http.StatusOK {
+		t.Errorf("expected error status, got %d", w.Code)
+	}
+}
+
+func TestGetDERCRL_MethodNotAllowed(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers/iss-local/crl", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetDERCRL(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+func TestHandleOCSP_Success(t *testing.T) {
+	ocspResponseBytes := []byte{0x30, 0x82, 0x02, 0x00} // Mock OCSP response
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+			if issuerID == "iss-local" && serialHex == "12345" {
+				return ocspResponseBytes, nil
+			}
+			return nil, fmt.Errorf("certificate not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp?serial=12345", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSP(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
+	}
+
+	responseBody := w.Body.Bytes()
+	if len(responseBody) == 0 {
+		t.Error("expected non-empty OCSP response body")
+	}
+}
+
+func TestHandleOCSP_MissingSerial(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSP(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+func TestHandleOCSP_IssuerNotFound(t *testing.T) {
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+			return nil, fmt.Errorf("issuer not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/nonexistent/ocsp?serial=ABC123", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestHandleOCSP_CertNotFound(t *testing.T) {
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+			return nil, fmt.Errorf("certificate not found")
+		},
+	}
+
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp?serial=UNKNOWN", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSP(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
+	}
+}
+
+func TestHandleOCSP_MethodNotAllowed(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers/iss-local/ocsp?serial=12345", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSP(w, req)
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)

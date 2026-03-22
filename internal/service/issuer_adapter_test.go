@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"math/big"
 	"testing"
 	"time"
 
@@ -85,6 +86,14 @@ func (m *mockConnectorLayerIssuer) GetOrderStatus(ctx context.Context, orderID s
 		Status:    status,
 		UpdatedAt: time.Now(),
 	}, nil
+}
+
+func (m *mockConnectorLayerIssuer) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	return []byte("mock-crl-data"), nil
+}
+
+func (m *mockConnectorLayerIssuer) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	return []byte("mock-ocsp-response"), nil
 }
 
 // Tests for IssueCertificate
@@ -367,4 +376,151 @@ func TestIssuerConnectorAdapter_RevokeCertificate_EmptyReason(t *testing.T) {
 	if err != nil {
 		t.Fatalf("RevokeCertificate with empty reason failed: %v", err)
 	}
+}
+
+// M15b: CRL and OCSP Adapter Tests
+
+func TestIssuerConnectorAdapter_GenerateCRL_Success(t *testing.T) {
+	ctx := context.Background()
+	expectedCRL := []byte("DER-encoded-CRL-data")
+
+	mock := &mockConnectorLayerIssuer{
+		// Mock returns a valid DER CRL when GenerateCRL is called
+	}
+
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	// Call GenerateCRL on adapter
+	crl, err := adapter.GenerateCRL(ctx, nil)
+
+	if err != nil {
+		t.Fatalf("GenerateCRL failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("expected non-nil CRL, got nil")
+	}
+
+	// Verify we got the mock CRL bytes
+	if string(crl) != "mock-crl-data" {
+		t.Errorf("expected mock-crl-data, got %s", string(crl))
+	}
+
+	t.Log("CRL generation delegated to connector successfully")
+}
+
+func TestIssuerConnectorAdapter_GenerateCRL_WithEntries(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	// Create test entries
+	entries := []issuer.RevokedCertEntry{
+		{SerialNumber: big.NewInt(111), RevokedAt: time.Now(), ReasonCode: 1},
+		{SerialNumber: big.NewInt(222), RevokedAt: time.Now(), ReasonCode: 4},
+	}
+
+	crl, err := adapter.GenerateCRL(ctx, entries)
+
+	if err != nil {
+		t.Fatalf("GenerateCRL with entries failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("expected non-nil CRL")
+	}
+
+	if len(crl) == 0 {
+		t.Fatal("expected non-empty CRL")
+	}
+
+	t.Logf("CRL with %d entries generated via adapter", len(entries))
+}
+
+func TestIssuerConnectorAdapter_SignOCSPResponse_Good(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	now := time.Now()
+	req := issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(12345),
+		CertStatus: 0, // good
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	}
+
+	resp, err := adapter.SignOCSPResponse(ctx, req)
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("expected non-nil OCSP response")
+	}
+
+	if len(resp) == 0 {
+		t.Fatal("expected non-empty OCSP response")
+	}
+
+	if string(resp) != "mock-ocsp-response" {
+		t.Errorf("expected mock-ocsp-response, got %s", string(resp))
+	}
+
+	t.Log("OCSP response for good cert signed via adapter")
+}
+
+func TestIssuerConnectorAdapter_SignOCSPResponse_Revoked(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	now := time.Now()
+	req := issuer.OCSPSignRequest{
+		CertSerial:       big.NewInt(67890),
+		CertStatus:       1, // revoked
+		RevokedAt:        now.Add(-24 * time.Hour),
+		RevocationReason: 1, // keyCompromise
+		ThisUpdate:       now,
+		NextUpdate:       now.Add(1 * time.Hour),
+	}
+
+	resp, err := adapter.SignOCSPResponse(ctx, req)
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse for revoked cert failed: %v", err)
+	}
+
+	if resp == nil || len(resp) == 0 {
+		t.Fatal("expected non-empty OCSP response for revoked cert")
+	}
+
+	t.Log("OCSP response for revoked cert signed via adapter")
+}
+
+func TestIssuerConnectorAdapter_SignOCSPResponse_Unknown(t *testing.T) {
+	ctx := context.Background()
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	now := time.Now()
+	req := issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(99999),
+		CertStatus: 2, // unknown
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	}
+
+	resp, err := adapter.SignOCSPResponse(ctx, req)
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse for unknown cert failed: %v", err)
+	}
+
+	if resp == nil || len(resp) == 0 {
+		t.Fatal("expected non-empty OCSP response for unknown cert")
+	}
+
+	t.Log("OCSP response for unknown cert signed via adapter")
 }

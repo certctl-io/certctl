@@ -167,6 +167,7 @@ export default function CertificatesPage() {
           <option value="Active">Active</option>
           <option value="Expiring">Expiring</option>
           <option value="Expired">Expired</option>
+          <option value="Revoked">Revoked</option>
           <option value="RenewalInProgress">Renewal In Progress</option>
           <option value="Archived">Archived</option>
         </select>

@@ -457,5 +457,15 @@ func parseSignResponse(respBody []byte) (certPEM string, chainPEM string, serial
 	return certPEM, chainPEM, serial, notBefore, notAfter, nil
 }
 
+// GenerateCRL is not supported by step-ca as step-ca provides its own CRL endpoint.
+func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	return nil, fmt.Errorf("step-ca provides its own CRL endpoint; use step-ca's /crl directly")
+}
+
+// SignOCSPResponse is not supported by step-ca as step-ca provides its own OCSP responder.
+func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	return nil, fmt.Errorf("step-ca provides its own OCSP responder; use step-ca's /ocsp directly")
+}
+
 // Ensure Connector implements the issuer.Connector interface.
 var _ issuer.Connector = (*Connector)(nil)

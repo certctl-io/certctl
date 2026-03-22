@@ -542,3 +542,364 @@ func generateTestCSR(commonName string) (*x509.CertificateRequest, string, error
 
 	return csr, string(csrPEM), nil
 }
+
+// M15b: CRL and OCSP Tests
+
+func TestGenerateCRL_Empty(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	// Generate CRL with no revoked certs — should succeed with 0 entries
+	crl, err := connector.GenerateCRL(ctx, nil)
+	if err != nil {
+		t.Fatalf("GenerateCRL failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("CRL is nil")
+	}
+
+	// Verify it's valid DER by parsing
+	parsedCRL, err := x509.ParseRevocationList(crl)
+	if err != nil {
+		t.Fatalf("failed to parse CRL: %v", err)
+	}
+
+	if len(parsedCRL.RevokedCertificateEntries) != 0 {
+		t.Errorf("expected 0 revoked entries, got %d", len(parsedCRL.RevokedCertificateEntries))
+	}
+
+	t.Logf("Empty CRL generated successfully with %d entries", len(parsedCRL.RevokedCertificateEntries))
+}
+
+func TestGenerateCRL_WithEntries(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	// Generate CRL with 2 revoked certs
+	entries := []issuer.RevokedCertEntry{
+		{SerialNumber: big.NewInt(12345), RevokedAt: time.Now().Add(-24 * time.Hour), ReasonCode: 1},
+		{SerialNumber: big.NewInt(67890), RevokedAt: time.Now().Add(-1 * time.Hour), ReasonCode: 4},
+	}
+
+	crl, err := connector.GenerateCRL(ctx, entries)
+	if err != nil {
+		t.Fatalf("GenerateCRL failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("CRL is nil")
+	}
+
+	parsedCRL, err := x509.ParseRevocationList(crl)
+	if err != nil {
+		t.Fatalf("failed to parse CRL: %v", err)
+	}
+
+	if len(parsedCRL.RevokedCertificateEntries) != 2 {
+		t.Errorf("expected 2 revoked entries, got %d", len(parsedCRL.RevokedCertificateEntries))
+	}
+
+	// Verify entries contain expected serials
+	serials := make(map[string]bool)
+	for _, entry := range parsedCRL.RevokedCertificateEntries {
+		serials[entry.SerialNumber.String()] = true
+	}
+
+	if !serials["12345"] {
+		t.Error("expected serial 12345 in CRL")
+	}
+	if !serials["67890"] {
+		t.Error("expected serial 67890 in CRL")
+	}
+
+	t.Logf("CRL with entries generated successfully: %d entries", len(parsedCRL.RevokedCertificateEntries))
+}
+
+func TestGenerateCRL_BeforeCAInit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	// CRL generation should init the CA automatically
+	cfg := &local.Config{ValidityDays: 90}
+	connector := local.New(cfg, logger)
+
+	crl, err := connector.GenerateCRL(ctx, nil)
+	if err != nil {
+		t.Fatalf("GenerateCRL failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("CRL is nil")
+	}
+
+	// Verify it's valid
+	_, err = x509.ParseRevocationList(crl)
+	if err != nil {
+		t.Fatalf("failed to parse CRL: %v", err)
+	}
+
+	t.Log("CRL generated with auto-initialized CA")
+}
+
+func TestGenerateCRL_WithReasonCodes(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	// Test all RFC 5280 reason codes
+	entries := []issuer.RevokedCertEntry{
+		{SerialNumber: big.NewInt(100), RevokedAt: time.Now(), ReasonCode: 0}, // unspecified
+		{SerialNumber: big.NewInt(101), RevokedAt: time.Now(), ReasonCode: 1}, // keyCompromise
+		{SerialNumber: big.NewInt(102), RevokedAt: time.Now(), ReasonCode: 2}, // caCompromise
+		{SerialNumber: big.NewInt(103), RevokedAt: time.Now(), ReasonCode: 3}, // affiliationChanged
+		{SerialNumber: big.NewInt(104), RevokedAt: time.Now(), ReasonCode: 4}, // superseded
+	}
+
+	crl, err := connector.GenerateCRL(ctx, entries)
+	if err != nil {
+		t.Fatalf("GenerateCRL failed: %v", err)
+	}
+
+	parsedCRL, err := x509.ParseRevocationList(crl)
+	if err != nil {
+		t.Fatalf("failed to parse CRL: %v", err)
+	}
+
+	if len(parsedCRL.RevokedCertificateEntries) != 5 {
+		t.Errorf("expected 5 revoked entries, got %d", len(parsedCRL.RevokedCertificateEntries))
+	}
+
+	// Verify reason codes are preserved
+	reasonCount := 0
+	for _, entry := range parsedCRL.RevokedCertificateEntries {
+		if entry.ReasonCode >= 0 {
+			reasonCount++
+		}
+	}
+	if reasonCount != 5 {
+		t.Errorf("expected all 5 entries to have reason codes, got %d", reasonCount)
+	}
+
+	t.Logf("CRL with %d reason codes generated successfully", reasonCount)
+}
+
+func TestSignOCSPResponse_Good(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	now := time.Now()
+	resp, err := connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(12345),
+		CertStatus: 0, // good
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	})
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("OCSP response is nil")
+	}
+
+	if len(resp) == 0 {
+		t.Fatal("OCSP response is empty")
+	}
+
+	t.Logf("OCSP response for good cert generated: %d bytes", len(resp))
+}
+
+func TestSignOCSPResponse_Revoked(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	now := time.Now()
+	revokedAt := now.Add(-24 * time.Hour)
+
+	resp, err := connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial:       big.NewInt(12345),
+		CertStatus:       1, // revoked
+		RevokedAt:        revokedAt,
+		RevocationReason: 1, // keyCompromise
+		ThisUpdate:       now,
+		NextUpdate:       now.Add(1 * time.Hour),
+	})
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("OCSP response is nil")
+	}
+
+	if len(resp) == 0 {
+		t.Fatal("OCSP response is empty")
+	}
+
+	t.Logf("OCSP response for revoked cert generated: %d bytes", len(resp))
+}
+
+func TestSignOCSPResponse_Unknown(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	now := time.Now()
+	resp, err := connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(12345),
+		CertStatus: 2, // unknown
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	})
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil {
+		t.Fatal("OCSP response is nil")
+	}
+
+	if len(resp) == 0 {
+		t.Fatal("OCSP response is empty")
+	}
+
+	t.Logf("OCSP response for unknown cert generated: %d bytes", len(resp))
+}
+
+func TestSignOCSPResponse_BeforeCAInit(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	cfg := &local.Config{ValidityDays: 90}
+	connector := local.New(cfg, logger)
+
+	now := time.Now()
+	resp, err := connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(999),
+		CertStatus: 0,
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	})
+
+	if err != nil {
+		t.Fatalf("SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil || len(resp) == 0 {
+		t.Fatal("OCSP response is nil or empty")
+	}
+
+	t.Log("OCSP response generated with auto-initialized CA")
+}
+
+func TestGenerateCRL_SubCA(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	certPath, keyPath := generateTestSubCA(t, "rsa")
+	defer os.Remove(certPath)
+	defer os.Remove(keyPath)
+
+	config := &local.Config{
+		ValidityDays: 30,
+		CACertPath:   certPath,
+		CAKeyPath:    keyPath,
+	}
+	connector := local.New(config, logger)
+
+	entries := []issuer.RevokedCertEntry{
+		{SerialNumber: big.NewInt(555), RevokedAt: time.Now().Add(-12 * time.Hour), ReasonCode: 2},
+	}
+
+	crl, err := connector.GenerateCRL(ctx, entries)
+	if err != nil {
+		t.Fatalf("SubCA GenerateCRL failed: %v", err)
+	}
+
+	if crl == nil {
+		t.Fatal("CRL is nil")
+	}
+
+	parsedCRL, err := x509.ParseRevocationList(crl)
+	if err != nil {
+		t.Fatalf("failed to parse SubCA CRL: %v", err)
+	}
+
+	if len(parsedCRL.RevokedCertificateEntries) != 1 {
+		t.Errorf("expected 1 entry in SubCA CRL, got %d", len(parsedCRL.RevokedCertificateEntries))
+	}
+
+	t.Log("SubCA CRL generated successfully")
+}
+
+func TestSignOCSPResponse_SubCA(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	certPath, keyPath := generateTestSubCA(t, "ecdsa")
+	defer os.Remove(certPath)
+	defer os.Remove(keyPath)
+
+	config := &local.Config{
+		ValidityDays: 30,
+		CACertPath:   certPath,
+		CAKeyPath:    keyPath,
+	}
+	connector := local.New(config, logger)
+
+	now := time.Now()
+	resp, err := connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial: big.NewInt(777),
+		CertStatus: 0,
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
+	})
+
+	if err != nil {
+		t.Fatalf("SubCA SignOCSPResponse failed: %v", err)
+	}
+
+	if resp == nil || len(resp) == 0 {
+		t.Fatal("SubCA OCSP response is nil or empty")
+	}
+
+	t.Log("SubCA OCSP response generated successfully")
+}

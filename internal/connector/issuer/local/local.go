@@ -19,6 +19,8 @@ import (
 	"sync"
 	"time"
 
+	"golang.org/x/crypto/ocsp"
+
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 )
 
@@ -581,4 +583,77 @@ func hashPublicKey(pub interface{}) []byte {
 		h.Write(elliptic.Marshal(k.Curve, k.X, k.Y))
 	}
 	return h.Sum(nil)[:4] // Use first 4 bytes for brevity
+}
+
+// GenerateCRL generates a DER-encoded X.509 CRL signed by this local CA.
+func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	if err := c.ensureCA(ctx); err != nil {
+		return nil, fmt.Errorf("CA initialization failed: %w", err)
+	}
+
+	now := time.Now()
+	revokedEntries := make([]x509.RevocationListEntry, 0, len(revokedCerts))
+	for _, cert := range revokedCerts {
+		revokedEntries = append(revokedEntries, x509.RevocationListEntry{
+			SerialNumber:   cert.SerialNumber,
+			RevocationTime: cert.RevokedAt,
+			ReasonCode:     cert.ReasonCode,
+		})
+	}
+
+	template := &x509.RevocationList{
+		RevokedCertificateEntries: revokedEntries,
+		Number:                    big.NewInt(time.Now().Unix()),
+		ThisUpdate:                now,
+		NextUpdate:                now.Add(24 * time.Hour),
+	}
+
+	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, c.caCert, c.caKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CRL: %w", err)
+	}
+
+	c.logger.Info("CRL generated",
+		"entries", len(revokedCerts),
+		"next_update", template.NextUpdate)
+
+	return crlBytes, nil
+}
+
+// SignOCSPResponse signs an OCSP response for the given certificate.
+func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	if err := c.ensureCA(ctx); err != nil {
+		return nil, fmt.Errorf("CA initialization failed: %w", err)
+	}
+
+	// Import OCSP after we confirm golang.org/x/crypto is available
+	// This will be added to imports below
+	template := ocsp.Response{
+		SerialNumber: req.CertSerial,
+		ThisUpdate:   req.ThisUpdate,
+		NextUpdate:   req.NextUpdate,
+		Certificate:  c.caCert,
+	}
+
+	switch req.CertStatus {
+	case 0: // good
+		template.Status = ocsp.Good
+	case 1: // revoked
+		template.Status = ocsp.Revoked
+		template.RevokedAt = req.RevokedAt
+		template.RevocationReason = req.RevocationReason
+	default: // unknown
+		template.Status = ocsp.Unknown
+	}
+
+	respBytes, err := ocsp.CreateResponse(c.caCert, c.caCert, template, c.caKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OCSP response: %w", err)
+	}
+
+	c.logger.Info("OCSP response signed",
+		"serial", req.CertSerial,
+		"status", req.CertStatus)
+
+	return respBytes, nil
 }

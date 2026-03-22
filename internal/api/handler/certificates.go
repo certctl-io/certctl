@@ -23,6 +23,8 @@ type CertificateService interface {
 	TriggerDeployment(certID string, targetID string) error
 	RevokeCertificate(certID string, reason string) error
 	GetRevokedCertificates() ([]*domain.CertificateRevocation, error)
+	GenerateDERCRL(issuerID string) ([]byte, error)
+	GetOCSPResponse(issuerID string, serialHex string) ([]byte, error)
 }
 
 // CertificateHandler handles HTTP requests for certificate operations.
@@ -443,4 +445,79 @@ func (h CertificateHandler) GetCRL(w http.ResponseWriter, r *http.Request) {
 		"total":        len(entries),
 		"generated_at": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
 	})
+}
+
+// GetDERCRL returns a DER-encoded X.509 CRL signed by the specified issuer.
+// GET /api/v1/crl/{issuer_id}
+func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	issuerID := strings.TrimPrefix(r.URL.Path, "/api/v1/crl/")
+	if issuerID == "" {
+		Error(w, http.StatusBadRequest, "Issuer ID is required")
+		return
+	}
+
+	derBytes, err := h.svc.GenerateDERCRL(issuerID)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "issuer not found") {
+			Error(w, http.StatusNotFound, errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
+			Error(w, http.StatusNotImplemented, errMsg)
+			return
+		}
+		Error(w, http.StatusInternalServerError, "Failed to generate CRL")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/pkix-crl")
+	w.Header().Set("Cache-Control", "public, max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	w.Write(derBytes)
+}
+
+// HandleOCSP processes OCSP requests.
+// GET /api/v1/ocsp/{issuer_id}/{serial_hex}
+// For simplicity, use GET with path params instead of binary POST.
+func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Extract issuer_id and serial from path: /api/v1/ocsp/{issuer_id}/{serial_hex}
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/ocsp/")
+	parts := strings.SplitN(path, "/", 2)
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		Error(w, http.StatusBadRequest, "Issuer ID and serial number are required")
+		return
+	}
+	issuerID := parts[0]
+	serialHex := parts[1]
+
+	derBytes, err := h.svc.GetOCSPResponse(issuerID, serialHex)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "issuer not found") {
+			Error(w, http.StatusNotFound, errMsg)
+			return
+		}
+		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
+			Error(w, http.StatusNotImplemented, errMsg)
+			return
+		}
+		Error(w, http.StatusInternalServerError, "Failed to generate OCSP response")
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/ocsp-response")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	w.Write(derBytes)
 }

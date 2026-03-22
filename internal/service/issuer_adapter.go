@@ -69,3 +69,29 @@ func (a *IssuerConnectorAdapter) RevokeCertificate(ctx context.Context, serial s
 		Reason: reasonPtr,
 	})
 }
+
+// GenerateCRL delegates to the underlying connector.
+func (a *IssuerConnectorAdapter) GenerateCRL(ctx context.Context, entries []CRLEntry) ([]byte, error) {
+	// Convert service-layer CRLEntry to connector-layer RevokedCertEntry
+	connEntries := make([]issuer.RevokedCertEntry, len(entries))
+	for i, e := range entries {
+		connEntries[i] = issuer.RevokedCertEntry{
+			SerialNumber: e.SerialNumber,
+			RevokedAt:    e.RevokedAt,
+			ReasonCode:   e.ReasonCode,
+		}
+	}
+	return a.connector.GenerateCRL(ctx, connEntries)
+}
+
+// SignOCSPResponse delegates to the underlying connector.
+func (a *IssuerConnectorAdapter) SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error) {
+	return a.connector.SignOCSPResponse(ctx, issuer.OCSPSignRequest{
+		CertSerial:       req.CertSerial,
+		CertStatus:       req.CertStatus,
+		RevokedAt:        req.RevokedAt,
+		RevocationReason: req.RevocationReason,
+		ThisUpdate:       req.ThisUpdate,
+		NextUpdate:       req.NextUpdate,
+	})
+}

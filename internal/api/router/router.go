@@ -90,8 +90,12 @@ func (r *Router) RegisterHandlers(
 	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(certificates.TriggerDeployment))
 	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(certificates.RevokeCertificate))
 
-	// CRL endpoint: /api/v1/crl
+	// CRL endpoints: /api/v1/crl (JSON) and /api/v1/crl/{issuer_id} (DER)
 	r.Register("GET /api/v1/crl", http.HandlerFunc(certificates.GetCRL))
+	r.Register("GET /api/v1/crl/{issuer_id}", http.HandlerFunc(certificates.GetDERCRL))
+
+	// OCSP responder: /api/v1/ocsp/{issuer_id}/{serial}
+	r.Register("GET /api/v1/ocsp/{issuer_id}/{serial}", http.HandlerFunc(certificates.HandleOCSP))
 
 	// Issuers routes: /api/v1/issuers
 	r.Register("GET /api/v1/issuers", http.HandlerFunc(issuers.ListIssuers))

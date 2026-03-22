@@ -9,16 +9,30 @@ export interface Certificate {
   owner_id: string;
   team_id: string;
   renewal_policy_id: string;
+  certificate_profile_id: string;
   serial_number: string;
   fingerprint: string;
   key_algorithm: string;
   key_size: number;
   issued_at: string;
   expires_at: string;
+  revoked_at?: string;
+  revocation_reason?: string;
   tags: Record<string, string>;
   created_at: string;
   updated_at: string;
 }
+
+export const REVOCATION_REASONS = [
+  { value: 'unspecified', label: 'Unspecified' },
+  { value: 'keyCompromise', label: 'Key Compromise' },
+  { value: 'caCompromise', label: 'CA Compromise' },
+  { value: 'affiliationChanged', label: 'Affiliation Changed' },
+  { value: 'superseded', label: 'Superseded' },
+  { value: 'cessationOfOperation', label: 'Cessation of Operation' },
+  { value: 'certificateHold', label: 'Certificate Hold' },
+  { value: 'privilegeWithdrawn', label: 'Privilege Withdrawn' },
+] as const;
 
 export interface CertificateVersion {
   id: string;

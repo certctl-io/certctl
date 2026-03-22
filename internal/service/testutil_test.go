@@ -620,6 +620,20 @@ func (m *mockIssuerConnector) RevokeCertificate(ctx context.Context, serial stri
 	return nil
 }
 
+func (m *mockIssuerConnector) GenerateCRL(ctx context.Context, entries []CRLEntry) ([]byte, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return []byte("-----BEGIN X509 CRL-----\nmock-crl-data\n-----END X509 CRL-----"), nil
+}
+
+func (m *mockIssuerConnector) SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return []byte("mock-ocsp-response"), nil
+}
+
 // Constructor functions for mocks
 
 func newMockCertificateRepository() *mockCertRepo {

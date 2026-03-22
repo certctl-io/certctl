@@ -88,6 +88,12 @@ export const triggerDeployment = (id: string, targetId: string) =>
     body: JSON.stringify({ target_id: targetId }),
   });
 
+export const revokeCertificate = (id: string, reason: string) =>
+  fetchJSON<{ status: string }>(`${BASE}/certificates/${id}/revoke`, {
+    method: 'POST',
+    body: JSON.stringify({ reason }),
+  });
+
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();

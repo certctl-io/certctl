@@ -609,3 +609,13 @@ func parseDERChain(derChain [][]byte) (certPEM string, chainPEM string, serial s
 
 	return
 }
+
+// GenerateCRL is not supported by ACME issuers.
+func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	return nil, fmt.Errorf("ACME issuers do not support CRL generation")
+}
+
+// SignOCSPResponse is not supported by ACME issuers.
+func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	return nil, fmt.Errorf("ACME issuers do not support OCSP response signing")
+}

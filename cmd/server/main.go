@@ -138,6 +138,7 @@ func main() {
 	certificateService.SetRevocationRepo(revocationRepo)
 	certificateService.SetNotificationService(notificationService)
 	certificateService.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetProfileRepo(profileRepo)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)

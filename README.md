@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (70 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (72 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -211,6 +211,8 @@ POST   /api/v1/certificates/{id}/renew    Trigger renewal → 202 Accepted
 POST   /api/v1/certificates/{id}/deploy   Trigger deployment → 202 Accepted
 POST   /api/v1/certificates/{id}/revoke   Revoke with RFC 5280 reason code
 GET    /api/v1/crl                        Certificate Revocation List (JSON)
+GET    /api/v1/crl/{issuer_id}            DER-encoded X.509 CRL
+GET    /api/v1/ocsp/{issuer_id}/{serial}  OCSP responder (good/revoked/unknown)
 ```
 
 ### Agents
@@ -369,12 +371,12 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
 - **M11: Crypto Policy + Profiles + Ownership** ✅ — certificate profiles (named enrollment profiles with allowed key types, max TTL, crypto constraints), certificate ownership tracking (owners + teams + notification routing), dynamic agent groups (OS/arch/IP CIDR/version matching), interactive renewal approval (AwaitingApproval state)
 - **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), step-ca issuer connector (native /sign API with JWK provisioner auth)
-- **M13: GUI Operations** — bulk cert operations (renew, revoke, reassign), deployment timeline, inline policy editor, target config wizard, audit export, short-lived credentials dashboard
-- **M14: Additional Connectors** — OpenSSL/Custom CA issuer connector
 - **M15a: Core Revocation** ✅ — revocation API with all RFC 5280 reason codes, JSON CRL endpoint, webhook + email revocation notifications, best-effort issuer notification, `certificate_revocations` table with idempotent recording, 48 new tests
-- **M15b: OCSP + Revocation GUI** — embedded OCSP responder, DER-encoded X.509 CRL, short-lived cert exemption, revocation GUI
+- **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
+- **M13: GUI Operations** — bulk cert operations (renew, revoke, reassign), deployment timeline, inline policy editor, target config wizard, audit export, short-lived credentials dashboard
+- **M14: Observability** — expiration calendar/heatmap, Prometheus metrics endpoint, structured logging improvements, deployment rollback
 - **M16: Operator Tooling** — CLI tool (`certctl`), Slack/Teams/PagerDuty/OpsGenie notifiers, bulk certificate import
-- **M17: Observability** — expiration calendar/heatmap, Prometheus metrics endpoint, structured logging improvements, deployment rollback
+- **M17: Additional Connectors** — OpenSSL/Custom CA issuer connector
 - **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), filesystem cert discovery
 
 ### V3: Team & Enterprise

@@ -11,6 +11,7 @@ import (
 	"encoding/pem"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -39,6 +40,10 @@ type IssuerConnector interface {
 	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error)
 	// RevokeCertificate revokes a certificate by serial number with an optional reason.
 	RevokeCertificate(ctx context.Context, serial string, reason string) error
+	// GenerateCRL generates a DER-encoded X.509 CRL from the given revocation entries.
+	GenerateCRL(ctx context.Context, revokedCerts []CRLEntry) ([]byte, error)
+	// SignOCSPResponse signs an OCSP response for the given certificate serial.
+	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
 }
 
 // IssuanceResult holds the result of a certificate issuance or renewal operation.
@@ -48,6 +53,23 @@ type IssuanceResult struct {
 	Serial    string
 	NotBefore time.Time
 	NotAfter  time.Time
+}
+
+// CRLEntry represents a revoked certificate for CRL generation.
+type CRLEntry struct {
+	SerialNumber *big.Int
+	RevokedAt    time.Time
+	ReasonCode   int
+}
+
+// OCSPSignRequest contains the parameters for OCSP response signing.
+type OCSPSignRequest struct {
+	CertSerial       *big.Int
+	CertStatus       int // 0=good, 1=revoked, 2=unknown
+	RevokedAt        time.Time
+	RevocationReason int
+	ThisUpdate       time.Time
+	NextUpdate       time.Time
 }
 
 // NewRenewalService creates a new renewal service.

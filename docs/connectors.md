@@ -87,6 +87,8 @@ The Local CA issuer signs certificates using Go's `crypto/x509` library. It supp
 
 **Sub-CA mode:** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. Supports RSA, ECDSA, and PKCS#8 key formats. If the paths are not set, falls back to self-signed mode. The loaded certificate must have `IsCA=true` and `KeyUsageCertSign`.
 
+**CRL and OCSP support (M15b):** The Local CA supports DER-encoded X.509 CRL generation via `GET /api/v1/crl/{issuer_id}` with 24-hour validity. An embedded OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}` returns signed OCSP responses for issued certificates (good/revoked/unknown status). Certificates with profile TTL < 1 hour automatically skip CRL/OCSP — expiry is treated as sufficient revocation for short-lived credentials.
+
 Configuration:
 ```json
 {
@@ -139,6 +141,8 @@ Environment variables for the default ACME connector:
 
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 
+**Note:** ACME-issued certificates rely on the Local CA for CRL/OCSP endpoints if they are stored in certctl's inventory. For issuers with their own public CRL/OCSP infrastructure (e.g., Let's Encrypt), clients should validate against the issuer's endpoints instead.
+
 Location: `internal/connector/issuer/acme/acme.go`, `internal/connector/issuer/acme/dns.go`
 
 ### Built-in: step-ca (Smallstep Private CA)
@@ -164,6 +168,8 @@ Environment variables:
 - `CERTCTL_STEPCA_PASSWORD` — Provisioner key password
 
 The connector is registered in the issuer registry under `iss-stepca`. step-ca also works with the existing ACME connector (point `iss-acme-*` at step-ca's ACME directory URL for ACME-based issuance).
+
+**Note:** step-ca-issued certificates rely on step-ca's own CRL/OCSP infrastructure. certctl's local CRL/OCSP endpoints (`GET /api/v1/crl/{issuer_id}` and `GET /api/v1/ocsp/{issuer_id}/{serial}`) are populated from step-ca's revocation data if available, but clients should validate against step-ca's endpoints for the authoritative status.
 
 Location: `internal/connector/issuer/stepca/stepca.go`
 

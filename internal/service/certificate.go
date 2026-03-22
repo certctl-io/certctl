@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"math/big"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -14,6 +15,7 @@ import (
 type CertificateService struct {
 	certRepo        repository.CertificateRepository
 	revocationRepo  repository.RevocationRepository
+	profileRepo     repository.CertificateProfileRepository
 	policyService   *PolicyService
 	auditService    *AuditService
 	notificationSvc *NotificationService
@@ -46,6 +48,11 @@ func (s *CertificateService) SetNotificationService(svc *NotificationService) {
 // SetIssuerRegistry sets the issuer registry for issuer-level revocation.
 func (s *CertificateService) SetIssuerRegistry(registry map[string]IssuerConnector) {
 	s.issuerRegistry = registry
+}
+
+// SetProfileRepo sets the profile repository for short-lived cert exemption in CRL/OCSP.
+func (s *CertificateService) SetProfileRepo(repo repository.CertificateProfileRepository) {
+	s.profileRepo = repo
 }
 
 // List returns a paginated list of certificates matching the filter.
@@ -470,4 +477,123 @@ func (s *CertificateService) GetRevokedCertificates() ([]*domain.CertificateRevo
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
 	return s.revocationRepo.ListAll(context.Background())
+}
+
+// GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
+// Short-lived certificates (profile TTL < 1 hour) are excluded from the CRL.
+func (s *CertificateService) GenerateDERCRL(issuerID string) ([]byte, error) {
+	if s.revocationRepo == nil {
+		return nil, fmt.Errorf("revocation repository not configured")
+	}
+	if s.issuerRegistry == nil {
+		return nil, fmt.Errorf("issuer registry not configured")
+	}
+
+	issuerConn, ok := s.issuerRegistry[issuerID]
+	if !ok {
+		return nil, fmt.Errorf("issuer not found: %s", issuerID)
+	}
+
+	revocations, err := s.revocationRepo.ListAll(context.Background())
+	if err != nil {
+		return nil, fmt.Errorf("failed to list revocations: %w", err)
+	}
+
+	// Filter to this issuer and convert to CRL entries.
+	// Short-lived certificates (profile TTL < 1 hour) are excluded — expiry is sufficient revocation.
+	var entries []CRLEntry
+	for _, rev := range revocations {
+		if rev.IssuerID != issuerID {
+			continue
+		}
+
+		// Check short-lived exemption: look up the cert's profile
+		if s.profileRepo != nil && s.certRepo != nil {
+			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
+			if err == nil && cert.CertificateProfileID != "" {
+				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
+				if err == nil && profile.IsShortLived() {
+					slog.Debug("skipping short-lived cert from CRL",
+						"certificate_id", rev.CertificateID,
+						"profile_id", cert.CertificateProfileID)
+					continue
+				}
+			}
+		}
+
+		// Parse serial number from hex string
+		serial := new(big.Int)
+		serial.SetString(rev.SerialNumber, 16)
+
+		entries = append(entries, CRLEntry{
+			SerialNumber: serial,
+			RevokedAt:    rev.RevokedAt,
+			ReasonCode:   domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
+		})
+	}
+
+	return issuerConn.GenerateCRL(context.Background(), entries)
+}
+
+// GetOCSPResponse generates a signed OCSP response for the given certificate serial.
+func (s *CertificateService) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
+	if s.revocationRepo == nil {
+		return nil, fmt.Errorf("revocation repository not configured")
+	}
+	if s.issuerRegistry == nil {
+		return nil, fmt.Errorf("issuer registry not configured")
+	}
+
+	issuerConn, ok := s.issuerRegistry[issuerID]
+	if !ok {
+		return nil, fmt.Errorf("issuer not found: %s", issuerID)
+	}
+
+	serial := new(big.Int)
+	serial.SetString(serialHex, 16)
+
+	now := time.Now()
+
+	// Short-lived cert exemption: if the cert's profile has TTL < 1 hour,
+	// always return "good" — expiry is sufficient revocation for short-lived certs.
+	if s.profileRepo != nil && s.certRepo != nil {
+		// Look up cert by serial through revocation table
+		rev, _ := s.revocationRepo.GetBySerial(context.Background(), serialHex)
+		if rev != nil {
+			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
+			if err == nil && cert.CertificateProfileID != "" {
+				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
+				if err == nil && profile.IsShortLived() {
+					return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+						CertSerial: serial,
+						CertStatus: 0, // good — short-lived exemption
+						ThisUpdate: now,
+						NextUpdate: now.Add(1 * time.Hour),
+					})
+				}
+			}
+		}
+	}
+
+	// Check if this serial is revoked
+	rev, err := s.revocationRepo.GetBySerial(context.Background(), serialHex)
+	if err != nil {
+		// Not revoked — return "good" status
+		return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+			CertSerial: serial,
+			CertStatus: 0, // good
+			ThisUpdate: now,
+			NextUpdate: now.Add(1 * time.Hour),
+		})
+	}
+
+	// Revoked
+	return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+		CertSerial:       serial,
+		CertStatus:       1, // revoked
+		RevokedAt:        rev.RevokedAt,
+		RevocationReason: domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
+		ThisUpdate:       now,
+		NextUpdate:       now.Add(1 * time.Hour),
+	})
 }
