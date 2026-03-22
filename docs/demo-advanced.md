@@ -501,7 +501,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG["PostgreSQL 16\n17 tables, TEXT PKs"]
+        PG["PostgreSQL 16\n18 tables, TEXT PKs"]
     end
 
     subgraph "Agent (certctl-agent)"

@@ -30,7 +30,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n17 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n18 tables\nTEXT primary keys")]
     end
 
     subgraph "Agent Fleet"
