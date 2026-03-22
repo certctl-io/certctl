@@ -414,7 +414,7 @@ func TestIssuerConnectorAdapter_GenerateCRL_WithEntries(t *testing.T) {
 	adapter := NewIssuerConnectorAdapter(mock)
 
 	// Create test entries
-	entries := []issuer.RevokedCertEntry{
+	entries := []CRLEntry{
 		{SerialNumber: big.NewInt(111), RevokedAt: time.Now(), ReasonCode: 1},
 		{SerialNumber: big.NewInt(222), RevokedAt: time.Now(), ReasonCode: 4},
 	}
@@ -442,7 +442,7 @@ func TestIssuerConnectorAdapter_SignOCSPResponse_Good(t *testing.T) {
 	adapter := NewIssuerConnectorAdapter(mock)
 
 	now := time.Now()
-	req := issuer.OCSPSignRequest{
+	req := OCSPSignRequest{
 		CertSerial: big.NewInt(12345),
 		CertStatus: 0, // good
 		ThisUpdate: now,
@@ -476,7 +476,7 @@ func TestIssuerConnectorAdapter_SignOCSPResponse_Revoked(t *testing.T) {
 	adapter := NewIssuerConnectorAdapter(mock)
 
 	now := time.Now()
-	req := issuer.OCSPSignRequest{
+	req := OCSPSignRequest{
 		CertSerial:       big.NewInt(67890),
 		CertStatus:       1, // revoked
 		RevokedAt:        now.Add(-24 * time.Hour),
@@ -504,7 +504,7 @@ func TestIssuerConnectorAdapter_SignOCSPResponse_Unknown(t *testing.T) {
 	adapter := NewIssuerConnectorAdapter(mock)
 
 	now := time.Now()
-	req := issuer.OCSPSignRequest{
+	req := OCSPSignRequest{
 		CertSerial: big.NewInt(99999),
 		CertStatus: 2, // unknown
 		ThisUpdate: now,
