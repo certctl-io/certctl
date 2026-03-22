@@ -464,7 +464,7 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 	derBytes, err := h.svc.GenerateDERCRL(issuerID)
 	if err != nil {
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "issuer not found") {
+		if strings.Contains(errMsg, "not found") {
 			Error(w, http.StatusNotFound, errMsg)
 			return
 		}
@@ -504,7 +504,7 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 	derBytes, err := h.svc.GetOCSPResponse(issuerID, serialHex)
 	if err != nil {
 		errMsg := err.Error()
-		if strings.Contains(errMsg, "issuer not found") {
+		if strings.Contains(errMsg, "not found") {
 			Error(w, http.StatusNotFound, errMsg)
 			return
 		}
