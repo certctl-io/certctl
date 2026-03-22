@@ -412,7 +412,7 @@ func TestRevokeCertificate_HandlerInterfaceMethod(t *testing.T) {
 // M15b: CRL and OCSP Service Tests
 
 func TestGenerateDERCRL_Success(t *testing.T) {
-	svc, certRepo, revocationRepo, _ := newRevocationTestService()
+	svc, _, revocationRepo, _ := newRevocationTestService()
 
 	// Add some revoked certificates to the repo
 	now := time.Now()
