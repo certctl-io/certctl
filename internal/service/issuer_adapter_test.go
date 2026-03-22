@@ -382,7 +382,6 @@ func TestIssuerConnectorAdapter_RevokeCertificate_EmptyReason(t *testing.T) {
 
 func TestIssuerConnectorAdapter_GenerateCRL_Success(t *testing.T) {
 	ctx := context.Background()
-	expectedCRL := []byte("DER-encoded-CRL-data")
 
 	mock := &mockConnectorLayerIssuer{
 		// Mock returns a valid DER CRL when GenerateCRL is called
