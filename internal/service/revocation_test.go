@@ -435,7 +435,7 @@ func TestGenerateDERCRL_Success(t *testing.T) {
 		},
 	}
 
-	crl, err := svc.GenerateDERCRL(context.Background(), "iss-local")
+	crl, err := svc.GenerateDERCRL("iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -458,7 +458,7 @@ func TestGenerateDERCRL_EmptyCRL(t *testing.T) {
 	// No revoked certs for this issuer
 	revocationRepo.Revocations = []*domain.CertificateRevocation{}
 
-	crl, err := svc.GenerateDERCRL(context.Background(), "iss-local")
+	crl, err := svc.GenerateDERCRL("iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -479,7 +479,7 @@ func TestGenerateDERCRL_IssuerNotFound(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Try to generate CRL for unknown issuer
-	crl, err := svc.GenerateDERCRL(context.Background(), "iss-unknown")
+	crl, err := svc.GenerateDERCRL("iss-unknown")
 
 	// Should return error or nil CRL depending on implementation
 	if crl != nil && err == nil {
@@ -513,7 +513,7 @@ func TestGetOCSPResponse_Good(t *testing.T) {
 	certRepo.Versions["cert-ocsp-good"] = []*domain.CertificateVersion{version}
 
 	// Request OCSP response for good cert
-	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-GOOD-001")
+	resp, err := svc.GetOCSPResponse("iss-local", "OCSP-GOOD-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -566,7 +566,7 @@ func TestGetOCSPResponse_Revoked(t *testing.T) {
 	}
 
 	// Request OCSP response for revoked cert
-	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-REVOKED-001")
+	resp, err := svc.GetOCSPResponse("iss-local", "OCSP-REVOKED-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -583,7 +583,7 @@ func TestGetOCSPResponse_Unknown(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response for unknown cert
-	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "UNKNOWN-SERIAL")
+	resp, err := svc.GetOCSPResponse("iss-local", "UNKNOWN-SERIAL")
 
 	if err != nil {
 		t.Fatalf("expected no error (should return unknown status), got: %v", err)
@@ -601,7 +601,7 @@ func TestGetOCSPResponse_IssuerNotFound(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response for unknown issuer
-	resp, err := svc.GetOCSPResponse(context.Background(), "iss-unknown", "SOME-SERIAL")
+	resp, err := svc.GetOCSPResponse("iss-unknown", "SOME-SERIAL")
 
 	// Should return error since issuer doesn't exist
 	if err == nil && resp != nil {
@@ -615,7 +615,7 @@ func TestGetOCSPResponse_InvalidSerial(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response with invalid serial format
-	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "")
+	resp, err := svc.GetOCSPResponse("iss-local", "")
 
 	if err == nil && resp != nil {
 		// Empty serial might return unknown status; that's ok
