@@ -1073,7 +1073,7 @@ func TestGetDERCRL_Success(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/crl", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/iss-local", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1098,7 +1098,7 @@ func TestGetDERCRL_IssuerNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/nonexistent/crl", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/nonexistent", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1117,7 +1117,7 @@ func TestGetDERCRL_NotSupported(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-acme/crl", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/iss-acme", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1132,7 +1132,7 @@ func TestGetDERCRL_NotSupported(t *testing.T) {
 func TestGetDERCRL_MethodNotAllowed(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers/iss-local/crl", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/crl/iss-local", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1155,7 +1155,7 @@ func TestHandleOCSP_Success(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp?serial=12345", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/12345", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1174,7 +1174,7 @@ func TestHandleOCSP_Success(t *testing.T) {
 func TestHandleOCSP_MissingSerial(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1193,7 +1193,7 @@ func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/nonexistent/ocsp?serial=ABC123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/nonexistent/ABC123", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1212,7 +1212,7 @@ func TestHandleOCSP_CertNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/issuers/iss-local/ocsp?serial=UNKNOWN", nil)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/UNKNOWN", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1226,7 +1226,7 @@ func TestHandleOCSP_CertNotFound(t *testing.T) {
 func TestHandleOCSP_MethodNotAllowed(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers/iss-local/ocsp?serial=12345", nil)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/ocsp/iss-local/12345", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 

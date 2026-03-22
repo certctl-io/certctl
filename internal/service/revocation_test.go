@@ -19,6 +19,9 @@ func newRevocationTestService() (*CertificateService, *mockCertRepo, *mockRevoca
 	policyService := NewPolicyService(policyRepo, auditService)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 	certService.SetRevocationRepo(revocationRepo)
+	certService.SetIssuerRegistry(map[string]IssuerConnector{
+		"iss-local": &mockIssuerConnector{},
+	})
 
 	return certService, certRepo, revocationRepo, auditRepo
 }
