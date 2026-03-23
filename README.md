@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (76 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (77 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -282,12 +282,13 @@ All endpoints are under `/api/v1/` and return JSON. List endpoints support pagin
 
 ### Certificates
 ```
-GET    /api/v1/certificates              List (filter: status, environment, owner_id, team_id)
+GET    /api/v1/certificates              List (filter, sort, cursor, sparse fields)
 POST   /api/v1/certificates              Create
 GET    /api/v1/certificates/{id}          Get
 PUT    /api/v1/certificates/{id}          Update
 DELETE /api/v1/certificates/{id}          Archive (soft delete)
 GET    /api/v1/certificates/{id}/versions Version history
+GET    /api/v1/certificates/{id}/deployments  List deployment targets
 POST   /api/v1/certificates/{id}/renew    Trigger renewal → 202 Accepted
 POST   /api/v1/certificates/{id}/deploy   Trigger deployment → 202 Accepted
 POST   /api/v1/certificates/{id}/revoke   Revoke with RFC 5280 reason code
@@ -493,7 +494,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M16a: Notifier Connectors** ✅ — Slack (incoming webhook), Microsoft Teams (MessageCard), PagerDuty (Events API v2), OpsGenie (Alert API v2) — config-driven enablement via env vars
 - **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)
 - **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
-- **M20: Enhanced Query API** — sparse field selection (`?fields=`), sort params, time-range filters, cursor pagination, `updatedAfter` for incremental agent sync, per-cert deployment history endpoint
+- **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
 - **M18b: Filesystem Cert Discovery** — agents walk directories, parse PEM/DER/PFX/JKS, report unmanaged certs to control plane
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
