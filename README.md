@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (78 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (76 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -262,16 +262,44 @@ DELETE /api/v1/owners/{id}                Delete
 GET    /api/v1/jobs                       List (filter: status, type)
 GET    /api/v1/jobs/{id}                  Get
 POST   /api/v1/jobs/{id}/cancel           Cancel
+POST   /api/v1/jobs/{id}/approve          Approve (interactive renewal)
+POST   /api/v1/jobs/{id}/reject           Reject (interactive renewal)
 
 GET    /api/v1/policies                   List policy rules
 POST   /api/v1/policies                   Create
+GET    /api/v1/policies/{id}              Get
 PUT    /api/v1/policies/{id}              Update (enable/disable)
 DELETE /api/v1/policies/{id}              Delete
 GET    /api/v1/policies/{id}/violations   List violations for rule
 
+GET    /api/v1/profiles                   List certificate profiles
+POST   /api/v1/profiles                   Create
+GET    /api/v1/profiles/{id}              Get
+PUT    /api/v1/profiles/{id}              Update
+DELETE /api/v1/profiles/{id}              Delete
+
+GET    /api/v1/agent-groups               List agent groups
+POST   /api/v1/agent-groups               Create
+GET    /api/v1/agent-groups/{id}          Get
+PUT    /api/v1/agent-groups/{id}          Update
+DELETE /api/v1/agent-groups/{id}          Delete
+GET    /api/v1/agent-groups/{id}/members  List members
+
 GET    /api/v1/audit                      Query audit trail
+GET    /api/v1/audit/{id}                 Get audit event
 GET    /api/v1/notifications              List notifications
+GET    /api/v1/notifications/{id}         Get notification
 POST   /api/v1/notifications/{id}/read    Mark as read
+```
+
+### Observability
+```
+GET    /api/v1/stats/summary              Dashboard summary (totals, expiring, agents, jobs)
+GET    /api/v1/stats/certificates-by-status  Certificate counts grouped by status
+GET    /api/v1/stats/expiration-timeline   Expiration buckets (?days=30)
+GET    /api/v1/stats/job-trends            Job success/failure over time (?days=7)
+GET    /api/v1/stats/issuance-rate         Certificate issuance rate (?days=7)
+GET    /api/v1/metrics                     JSON metrics (gauges, counters, uptime)
 ```
 
 ### Auth
@@ -359,13 +387,14 @@ make docker-clean       # Stop + remove volumes
 
 ### Audit Trail
 - Immutable append-only log in PostgreSQL (`audit_events` table)
-- Every action attributed to an actor with timestamp and resource reference
+- Every lifecycle action attributed to an actor with timestamp and resource reference
 - No update or delete operations on audit records
+- V2 extends to log every API call (method, path, actor, response status, latency)
 
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 17 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 744+ tests total: ~520 Go test functions + ~138 subtests across service, handler, integration, connector, and domain layers, plus 86 frontend Vitest tests covering all API client endpoints, stats/metrics endpoints, utilities, and M13 operations. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 19 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 744+ tests total: ~520 Go test functions + ~138 subtests across service, handler, integration, connector, and domain layers, plus 86 frontend Vitest tests covering all API client endpoints, stats/metrics endpoints, utilities, and M13 operations. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
@@ -374,7 +403,8 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M15a: Core Revocation** ✅ — revocation API with all RFC 5280 reason codes, JSON CRL endpoint, webhook + email revocation notifications, best-effort issuer notification, `certificate_revocations` table with idempotent recording, 48 new tests
 - **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
-- **M14: Observability** — expiration calendar/heatmap, Prometheus metrics endpoint, structured logging improvements, deployment rollback
+- **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
+- **M19: Immutable API Audit Log** — extend audit trail to log every API call (method, path, actor, status, latency), queryable via existing audit endpoint
 - **M16: Operator Tooling** — CLI tool (`certctl`), Slack/Teams/PagerDuty/OpsGenie notifiers, bulk certificate import
 - **M17: Additional Connectors** — OpenSSL/Custom CA issuer connector
 - **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), filesystem cert discovery
