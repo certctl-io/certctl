@@ -15,6 +15,7 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
 	"os"
 	"sync"
 	"time"
@@ -558,9 +559,15 @@ func parseIP(s string) []byte {
 	if s == "localhost" {
 		return []byte{127, 0, 0, 1}
 	}
-	// In production, use net.ParseIP for proper parsing.
-	// For now, return nil for non-localhost IPs.
-	return nil
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return nil
+	}
+	// Prefer 4-byte representation for IPv4
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip
 }
 
 // isEmail checks if a string looks like an email address.

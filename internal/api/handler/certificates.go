@@ -450,14 +450,16 @@ func (h CertificateHandler) GetCRL(w http.ResponseWriter, r *http.Request) {
 // GetDERCRL returns a DER-encoded X.509 CRL signed by the specified issuer.
 // GET /api/v1/crl/{issuer_id}
 func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
+	requestID, _ := r.Context().Value("request_id").(string)
+
 	if r.Method != http.MethodGet {
-		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		ErrorWithRequestID(w, http.StatusMethodNotAllowed, "Method not allowed", requestID)
 		return
 	}
 
 	issuerID := strings.TrimPrefix(r.URL.Path, "/api/v1/crl/")
 	if issuerID == "" {
-		Error(w, http.StatusBadRequest, "Issuer ID is required")
+		ErrorWithRequestID(w, http.StatusBadRequest, "Issuer ID is required", requestID)
 		return
 	}
 
@@ -465,14 +467,14 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not found") {
-			Error(w, http.StatusNotFound, errMsg)
+			ErrorWithRequestID(w, http.StatusNotFound, errMsg, requestID)
 			return
 		}
 		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
-			Error(w, http.StatusNotImplemented, errMsg)
+			ErrorWithRequestID(w, http.StatusNotImplemented, errMsg, requestID)
 			return
 		}
-		Error(w, http.StatusInternalServerError, "Failed to generate CRL")
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate CRL", requestID)
 		return
 	}
 
@@ -486,8 +488,10 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 // GET /api/v1/ocsp/{issuer_id}/{serial_hex}
 // For simplicity, use GET with path params instead of binary POST.
 func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
+	requestID, _ := r.Context().Value("request_id").(string)
+
 	if r.Method != http.MethodGet {
-		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		ErrorWithRequestID(w, http.StatusMethodNotAllowed, "Method not allowed", requestID)
 		return
 	}
 
@@ -495,7 +499,7 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/ocsp/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		Error(w, http.StatusBadRequest, "Issuer ID and serial number are required")
+		ErrorWithRequestID(w, http.StatusBadRequest, "Issuer ID and serial number are required", requestID)
 		return
 	}
 	issuerID := parts[0]
@@ -505,14 +509,14 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not found") {
-			Error(w, http.StatusNotFound, errMsg)
+			ErrorWithRequestID(w, http.StatusNotFound, errMsg, requestID)
 			return
 		}
 		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
-			Error(w, http.StatusNotImplemented, errMsg)
+			ErrorWithRequestID(w, http.StatusNotImplemented, errMsg, requestID)
 			return
 		}
-		Error(w, http.StatusInternalServerError, "Failed to generate OCSP response")
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate OCSP response", requestID)
 		return
 	}
 

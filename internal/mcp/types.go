@@ -31,8 +31,8 @@ type CreateCertificateInput struct {
 	CommonName      string            `json:"common_name" jsonschema:"Certificate common name (e.g. api.example.com)"`
 	SANs            []string          `json:"sans,omitempty" jsonschema:"Subject Alternative Names"`
 	Environment     string            `json:"environment,omitempty" jsonschema:"Environment (e.g. production, staging)"`
-	OwnerID         string            `json:"owner_id,omitempty" jsonschema:"Owner ID"`
-	TeamID          string            `json:"team_id,omitempty" jsonschema:"Team ID"`
+	OwnerID         string            `json:"owner_id" jsonschema:"Owner ID (required)"`
+	TeamID          string            `json:"team_id" jsonschema:"Team ID (required)"`
 	IssuerID        string            `json:"issuer_id" jsonschema:"Issuer connector ID"`
 	TargetIDs       []string          `json:"target_ids,omitempty" jsonschema:"Deployment target IDs"`
 	RenewalPolicyID string            `json:"renewal_policy_id,omitempty" jsonschema:"Renewal policy ID"`

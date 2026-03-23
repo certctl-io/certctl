@@ -186,7 +186,10 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 		Reason string `json:"reason"`
 	}
 	if r.Body != nil {
-		json.NewDecoder(r.Body).Decode(&body)
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+			return
+		}
 	}
 
 	if err := h.svc.RejectJob(jobID, body.Reason); err != nil {

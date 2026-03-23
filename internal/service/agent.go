@@ -439,7 +439,7 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 		// Enrich with target details for deployment jobs
 		if j.TargetID != nil && *j.TargetID != "" {
 			target, err := s.targetRepo.Get(context.Background(), *j.TargetID)
-			if err == nil {
+			if err == nil && target != nil {
 				item.TargetType = string(target.Type)
 				item.TargetConfig = target.Config
 			}
@@ -448,7 +448,7 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 		// Enrich with certificate details for AwaitingCSR jobs (agent needs CN + SANs for CSR)
 		if j.Status == domain.JobStatusAwaitingCSR {
 			cert, err := s.certRepo.Get(context.Background(), j.CertificateID)
-			if err == nil {
+			if err == nil && cert != nil {
 				item.CommonName = cert.CommonName
 				item.SANs = cert.SANs
 			}
