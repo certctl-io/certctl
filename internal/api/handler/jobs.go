@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -185,8 +186,8 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 	var body struct {
 		Reason string `json:"reason"`
 	}
-	if r.Body != nil {
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+	if r.Body != nil && r.Body != http.NoBody {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
 			ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
 			return
 		}
