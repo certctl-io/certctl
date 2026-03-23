@@ -208,6 +208,39 @@ Agent environment variables:
 
 Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
+## MCP Server (AI Integration)
+
+certctl ships a standalone MCP (Model Context Protocol) server that exposes all 76 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
+
+```bash
+# Install
+go install github.com/shankar0123/certctl/cmd/mcp-server@latest
+
+# Configure
+export CERTCTL_SERVER_URL=http://localhost:8443   # certctl API endpoint
+export CERTCTL_API_KEY=your-api-key               # optional if auth disabled
+
+# Run (stdio transport — add to your AI client config)
+mcp-server
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "certctl": {
+      "command": "mcp-server",
+      "env": {
+        "CERTCTL_SERVER_URL": "http://localhost:8443",
+        "CERTCTL_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+76 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
+
 ## API Overview
 
 All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`). Full request/response schemas are available in the [OpenAPI 3.1 spec](api/openapi.yaml).
@@ -417,7 +450,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
 - **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
-- **M18a: MCP Server** (V2.1) — AI-native integration, expose REST API as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
+- **M18a: MCP Server** ✅ (V2.1) — AI-native integration, all 76 REST API endpoints exposed as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
 - **M19: Immutable API Audit Log** — extend audit trail to log every API call (method, path, actor, status, latency), queryable via existing audit endpoint
 - **M16a: Notifier Connectors** — Slack, Microsoft Teams, PagerDuty, OpsGenie notification integrations (parallel with M19)
 - **M20: Enhanced Query API** — sparse field selection (`?fields=`), sort params, time-range filters, cursor pagination, `updatedAfter` for incremental agent sync, per-cert deployment history endpoint
