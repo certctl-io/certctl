@@ -88,6 +88,7 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/certificates/{id}", http.HandlerFunc(certificates.UpdateCertificate))
 	r.Register("DELETE /api/v1/certificates/{id}", http.HandlerFunc(certificates.ArchiveCertificate))
 	r.Register("GET /api/v1/certificates/{id}/versions", http.HandlerFunc(certificates.GetCertificateVersions))
+	r.Register("GET /api/v1/certificates/{id}/deployments", http.HandlerFunc(certificates.GetCertificateDeployments))
 	r.Register("POST /api/v1/certificates/{id}/renew", http.HandlerFunc(certificates.TriggerRenewal))
 	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(certificates.TriggerDeployment))
 	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(certificates.RevokeCertificate))

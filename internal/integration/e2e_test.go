@@ -679,3 +679,216 @@ func TestIssuerAndTargetCRUD(t *testing.T) {
 		}
 	})
 }
+
+// TestM20EnhancedQueryAPI exercises M20 query API enhancements: sorting, time-range filters,
+// cursor pagination, sparse fields, profile/agent filters, and the deployments endpoint.
+func TestM20EnhancedQueryAPI(t *testing.T) {
+	server, certRepo, _, _ := setupTestServer(t)
+
+	// Setup: Create a certificate for testing
+	now := time.Now()
+	cert := &domain.ManagedCertificate{
+		ID:          "mc-m20-test-1",
+		Name:        "M20 Test Cert",
+		CommonName:  "m20.example.com",
+		Environment: "production",
+		Status:      domain.CertificateStatusActive,
+		IssuerID:    "iss-local",
+		OwnerID:     "owner-ops",
+		TeamID:      "team-platform",
+		CertificateProfileID: "prof-standard",
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	certRepo.certs["mc-m20-test-1"] = cert
+
+	t.Run("ListWithSortDescending", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?sort=-notAfter&page=1&per_page=10")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		var respBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		if _, ok := respBody["data"]; !ok {
+			t.Error("expected data field in response")
+		}
+	})
+
+	t.Run("ListWithSortAscending", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?sort=createdAt&page=1&per_page=10")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+		var respBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		if _, ok := respBody["page"]; !ok {
+			t.Error("expected page-based pagination response")
+		}
+	})
+
+	t.Run("TimeRangeFilter_ExpiresBefore", func(t *testing.T) {
+		future := now.AddDate(0, 0, 365).Format(time.RFC3339)
+		resp, err := http.Get(server.URL + "/api/v1/certificates?expires_before=" + future)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Errorf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+	})
+
+	t.Run("TimeRangeFilter_ExpiresAfter", func(t *testing.T) {
+		past := now.AddDate(0, 0, -90).Format(time.RFC3339)
+		resp, err := http.Get(server.URL + "/api/v1/certificates?expires_after=" + past)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("TimeRangeFilter_CreatedAfter", func(t *testing.T) {
+		past := now.AddDate(-1, 0, 0).Format(time.RFC3339)
+		resp, err := http.Get(server.URL + "/api/v1/certificates?created_after=" + past)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("SparseFields", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?fields=id,common_name,status")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Errorf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		var respBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		if data, ok := respBody["data"].([]interface{}); ok && len(data) > 0 {
+			firstCert, ok := data[0].(map[string]interface{})
+			if !ok {
+				t.Fatal("expected cert object in data array")
+			}
+			// Should have requested fields
+			if _, ok := firstCert["id"]; !ok {
+				t.Error("expected 'id' field in sparse response")
+			}
+			// Should NOT have unrequested fields like 'environment'
+			if _, ok := firstCert["environment"]; ok {
+				t.Error("did not expect 'environment' field in sparse response")
+			}
+		}
+	})
+
+	t.Run("ProfileFilter", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?profile_id=prof-standard")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("AgentIDFilter", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?agent_id=agent-prod-001")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("CursorPagination", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?cursor=abc123&page_size=10")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+		var respBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		if _, ok := respBody["next_cursor"]; !ok {
+			t.Error("expected next_cursor field with cursor pagination")
+		}
+	})
+
+	t.Run("CombinedFilters", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates?status=Active&environment=production&profile_id=prof-standard&sort=-createdAt&per_page=10")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetCertificateDeployments_Success", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates/mc-m20-test-1/deployments")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Errorf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		var respBody map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&respBody)
+		if _, ok := respBody["data"]; !ok {
+			t.Error("expected data field in response")
+		}
+		if _, ok := respBody["total"]; !ok {
+			t.Error("expected total field in response")
+		}
+	})
+
+	t.Run("GetCertificateDeployments_NotFound", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/certificates/mc-nonexistent-m20/deployments")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("InvalidTimeRange", func(t *testing.T) {
+		// Invalid RFC3339 should be silently ignored (no filter applied)
+		resp, err := http.Get(server.URL + "/api/v1/certificates?expires_before=not-a-date&page=1&per_page=10")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			t.Errorf("expected 200 (invalid time ignored), got %d", resp.StatusCode)
+		}
+	})
+}

@@ -3,6 +3,7 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -68,10 +69,57 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 		args = append(args, filter.IssuerID)
 		argCount++
 	}
+	if filter.ProfileID != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("certificate_profile_id = $%d", argCount))
+		args = append(args, filter.ProfileID)
+		argCount++
+	}
+	if filter.ExpiresBefore != nil {
+		whereConditions = append(whereConditions, fmt.Sprintf("expires_at < $%d", argCount))
+		args = append(args, filter.ExpiresBefore)
+		argCount++
+	}
+	if filter.ExpiresAfter != nil {
+		whereConditions = append(whereConditions, fmt.Sprintf("expires_at > $%d", argCount))
+		args = append(args, filter.ExpiresAfter)
+		argCount++
+	}
+	if filter.CreatedAfter != nil {
+		whereConditions = append(whereConditions, fmt.Sprintf("created_at > $%d", argCount))
+		args = append(args, filter.CreatedAfter)
+		argCount++
+	}
+	if filter.UpdatedAfter != nil {
+		whereConditions = append(whereConditions, fmt.Sprintf("updated_at > $%d", argCount))
+		args = append(args, filter.UpdatedAfter)
+		argCount++
+	}
+	if filter.AgentID != "" {
+		// Filter by agent_id via deployment_targets and certificate_target_mappings
+		whereConditions = append(whereConditions, fmt.Sprintf(`id IN (
+			SELECT DISTINCT certificate_id FROM certificate_target_mappings ctm
+			JOIN deployment_targets dt ON ctm.target_id = dt.id
+			WHERE dt.agent_id = $%d
+		)`, argCount))
+		args = append(args, filter.AgentID)
+		argCount++
+	}
 
 	whereClause := ""
 	if len(whereConditions) > 0 {
 		whereClause = "WHERE " + strings.Join(whereConditions, " AND ")
+	}
+
+	// Handle cursor-based pagination
+	if filter.Cursor != "" {
+		createdAt, id, err := decodeCursor(filter.Cursor)
+		if err == nil {
+			// Add cursor condition: (created_at, id) < (cursor_time, cursor_id)
+			whereConditions = append(whereConditions, fmt.Sprintf("(created_at, id) < ($%d, $%d)", argCount, argCount+1))
+			args = append(args, createdAt, id)
+			argCount += 2
+			whereClause = "WHERE " + strings.Join(whereConditions, " AND ")
+		}
 	}
 
 	// Get total count
@@ -81,18 +129,59 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 		return nil, 0, fmt.Errorf("failed to count certificates: %w", err)
 	}
 
+	// Determine sort field and direction
+	sortField := "created_at"
+	sortDir := "DESC"
+	sortFieldMap := map[string]string{
+		"notAfter":    "expires_at",
+		"expiresAt":   "expires_at",
+		"createdAt":   "created_at",
+		"updatedAt":   "updated_at",
+		"commonName":  "common_name",
+		"name":        "name",
+		"status":      "status",
+		"environment": "environment",
+	}
+	if filter.Sort != "" {
+		if mappedField, ok := sortFieldMap[filter.Sort]; ok {
+			sortField = mappedField
+		}
+	}
+	if filter.SortDesc {
+		sortDir = "DESC"
+	} else {
+		sortDir = "ASC"
+	}
+
 	// Get paginated results
-	offset := (filter.Page - 1) * filter.PerPage
+	pageSize := filter.PerPage
+	if filter.PageSize > 0 && filter.PageSize <= 500 {
+		pageSize = filter.PageSize
+	}
+
+	var limitClause string
+	var offset int
+	if filter.Cursor != "" {
+		// Cursor-based pagination
+		limitClause = fmt.Sprintf("LIMIT $%d", argCount)
+		args = append(args, pageSize)
+		argCount++
+	} else {
+		// Page-based pagination
+		offset = (filter.Page - 1) * pageSize
+		limitClause = fmt.Sprintf("LIMIT $%d OFFSET $%d", argCount, argCount+1)
+		args = append(args, pageSize, offset)
+		argCount += 2
+	}
+
 	query := fmt.Sprintf(`
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
 		FROM managed_certificates
 		%s
-		ORDER BY created_at DESC
-		LIMIT $%d OFFSET $%d
-	`, whereClause, argCount, argCount+1)
-
-	args = append(args, filter.PerPage, offset)
+		ORDER BY %s %s
+		%s
+	`, whereClause, sortField, sortDir, limitClause)
 
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -400,4 +489,27 @@ func scanCertificate(scanner interface {
 	}
 
 	return &cert, nil
+}
+
+// decodeCursor extracts a timestamp and ID from a cursor token.
+func decodeCursor(cursor string) (time.Time, string, error) {
+	raw, err := base64.URLEncoding.DecodeString(cursor)
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor: %w", err)
+	}
+	parts := strings.SplitN(string(raw), ":", 2)
+	if len(parts) != 2 {
+		return time.Time{}, "", fmt.Errorf("invalid cursor format")
+	}
+	t, err := time.Parse(time.RFC3339Nano, parts[0])
+	if err != nil {
+		return time.Time{}, "", fmt.Errorf("invalid cursor timestamp: %w", err)
+	}
+	return t, parts[1], nil
+}
+
+// encodeCursor creates an opaque cursor token from a timestamp and ID.
+func encodeCursor(createdAt time.Time, id string) string {
+	raw := createdAt.Format(time.RFC3339Nano) + ":" + id
+	return base64.URLEncoding.EncodeToString([]byte(raw))
 }

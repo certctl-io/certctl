@@ -56,6 +56,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	certificateService.SetRevocationRepo(revocationRepo)
 	certificateService.SetNotificationService(notificationService)
 	certificateService.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetTargetRepo(targetRepo)
 	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)

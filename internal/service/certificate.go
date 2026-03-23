@@ -14,6 +14,7 @@ import (
 // CertificateService provides business logic for certificate management.
 type CertificateService struct {
 	certRepo        repository.CertificateRepository
+	targetRepo      repository.TargetRepository
 	revocationRepo  repository.RevocationRepository
 	profileRepo     repository.CertificateProfileRepository
 	policyService   *PolicyService
@@ -55,6 +56,11 @@ func (s *CertificateService) SetProfileRepo(repo repository.CertificateProfileRe
 	s.profileRepo = repo
 }
 
+// SetTargetRepo sets the target repository for deployment queries.
+func (s *CertificateService) SetTargetRepo(repo repository.TargetRepository) {
+	s.targetRepo = repo
+}
+
 // List returns a paginated list of certificates matching the filter.
 func (s *CertificateService) List(ctx context.Context, filter *repository.CertificateFilter) ([]*domain.ManagedCertificate, int, error) {
 	certs, total, err := s.certRepo.List(ctx, filter)
@@ -62,6 +68,22 @@ func (s *CertificateService) List(ctx context.Context, filter *repository.Certif
 		return nil, 0, fmt.Errorf("failed to list certificates: %w", err)
 	}
 	return certs, total, nil
+}
+
+// ListCertificatesWithFilter returns a list of certificates with advanced filtering (M20).
+// This method supports the new M20 filters and returns domain.ManagedCertificate (not pointers).
+func (s *CertificateService) ListCertificatesWithFilter(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+	certs, total, err := s.certRepo.List(context.Background(), filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list certificates with filter: %w", err)
+	}
+
+	// Convert pointers to values for handler compatibility
+	result := make([]domain.ManagedCertificate, len(certs))
+	for i, cert := range certs {
+		result[i] = *cert
+	}
+	return result, total, nil
 }
 
 // Get retrieves a certificate by ID.
@@ -596,4 +618,30 @@ func (s *CertificateService) GetOCSPResponse(issuerID string, serialHex string) 
 		ThisUpdate:       now,
 		NextUpdate:       now.Add(1 * time.Hour),
 	})
+}
+
+// GetCertificateDeployments returns all deployment targets for a certificate (M20).
+func (s *CertificateService) GetCertificateDeployments(certID string) ([]domain.DeploymentTarget, error) {
+	// Verify certificate exists
+	_, err := s.certRepo.Get(context.Background(), certID)
+	if err != nil {
+		return nil, fmt.Errorf("certificate not found: %w", err)
+	}
+
+	if s.targetRepo == nil {
+		return []domain.DeploymentTarget{}, nil
+	}
+
+	// Get targets from repository
+	targets, err := s.targetRepo.ListByCertificate(context.Background(), certID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list deployment targets: %w", err)
+	}
+
+	// Convert pointers to values
+	result := make([]domain.DeploymentTarget, len(targets))
+	for i, target := range targets {
+		result[i] = *target
+	}
+	return result, nil
 }
