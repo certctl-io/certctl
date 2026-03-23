@@ -20,6 +20,20 @@ type Config struct {
 	CORS      CORSConfig
 	Keygen    KeygenConfig
 	CA        CAConfig
+	Notifiers NotifierConfig
+}
+
+// NotifierConfig contains configuration for notification connectors.
+// Each notifier is enabled by setting its required env var (webhook URL or API key).
+type NotifierConfig struct {
+	SlackWebhookURL      string
+	SlackChannel         string
+	SlackUsername         string
+	TeamsWebhookURL      string
+	PagerDutyRoutingKey  string
+	PagerDutySeverity    string
+	OpsGenieAPIKey       string
+	OpsGeniePriority     string
 }
 
 // KeygenConfig controls where private keys are generated.
@@ -145,6 +159,16 @@ func Load() (*Config, error) {
 		CA: CAConfig{
 			CertPath: getEnv("CERTCTL_CA_CERT_PATH", ""),
 			KeyPath:  getEnv("CERTCTL_CA_KEY_PATH", ""),
+		},
+		Notifiers: NotifierConfig{
+			SlackWebhookURL:     getEnv("CERTCTL_SLACK_WEBHOOK_URL", ""),
+			SlackChannel:        getEnv("CERTCTL_SLACK_CHANNEL", ""),
+			SlackUsername:        getEnv("CERTCTL_SLACK_USERNAME", "certctl"),
+			TeamsWebhookURL:     getEnv("CERTCTL_TEAMS_WEBHOOK_URL", ""),
+			PagerDutyRoutingKey: getEnv("CERTCTL_PAGERDUTY_ROUTING_KEY", ""),
+			PagerDutySeverity:   getEnv("CERTCTL_PAGERDUTY_SEVERITY", "warning"),
+			OpsGenieAPIKey:      getEnv("CERTCTL_OPSGENIE_API_KEY", ""),
+			OpsGeniePriority:    getEnv("CERTCTL_OPSGENIE_PRIORITY", "P3"),
 		},
 	}
 

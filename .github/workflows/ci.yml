@@ -32,7 +32,7 @@ jobs:
 
       - name: Go Test with Coverage
         run: |
-          go test ./internal/service/... ./internal/api/handler/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/mcp/... -count=1 -cover -coverprofile=coverage.out
+          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/mcp/... -count=1 -cover -coverprofile=coverage.out
 
       - name: Check Coverage Thresholds
         run: |

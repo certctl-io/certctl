@@ -16,9 +16,14 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
 	"github.com/shankar0123/certctl/internal/config"
+	"github.com/shankar0123/certctl/internal/domain"
 	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
+	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
+	notifyslack "github.com/shankar0123/certctl/internal/connector/notifier/slack"
+	notifyteams "github.com/shankar0123/certctl/internal/connector/notifier/teams"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
@@ -131,7 +136,43 @@ func main() {
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
-	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
+	notifierRegistry := make(map[string]service.Notifier)
+
+	// Wire notifier connectors from config
+	if cfg.Notifiers.SlackWebhookURL != "" {
+		slackNotifier := notifyslack.New(notifyslack.Config{
+			WebhookURL:      cfg.Notifiers.SlackWebhookURL,
+			ChannelOverride: cfg.Notifiers.SlackChannel,
+			Username:        cfg.Notifiers.SlackUsername,
+		})
+		notifierRegistry["Slack"] = slackNotifier
+		logger.Info("Slack notifier enabled")
+	}
+	if cfg.Notifiers.TeamsWebhookURL != "" {
+		teamsNotifier := notifyteams.New(notifyteams.Config{
+			WebhookURL: cfg.Notifiers.TeamsWebhookURL,
+		})
+		notifierRegistry["Teams"] = teamsNotifier
+		logger.Info("Teams notifier enabled")
+	}
+	if cfg.Notifiers.PagerDutyRoutingKey != "" {
+		pdNotifier := notifypagerduty.New(notifypagerduty.Config{
+			RoutingKey: cfg.Notifiers.PagerDutyRoutingKey,
+			Severity:   cfg.Notifiers.PagerDutySeverity,
+		})
+		notifierRegistry["PagerDuty"] = pdNotifier
+		logger.Info("PagerDuty notifier enabled")
+	}
+	if cfg.Notifiers.OpsGenieAPIKey != "" {
+		ogNotifier := notifyopsgenie.New(notifyopsgenie.Config{
+			APIKey:   cfg.Notifiers.OpsGenieAPIKey,
+			Priority: cfg.Notifiers.OpsGeniePriority,
+		})
+		notifierRegistry["OpsGenie"] = ogNotifier
+		logger.Info("OpsGenie notifier enabled")
+	}
+
+	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
 	notificationService.SetOwnerRepo(ownerRepo)
 
 	// Wire revocation dependencies into CertificateService
@@ -231,12 +272,25 @@ func main() {
 
 	structuredLogger := middleware.NewLogging(logger)
 
+	// API audit log middleware — records every API call to the audit trail
+	auditAdapter := middleware.NewAuditServiceAdapter(
+		func(ctx context.Context, actor string, actorType string, action string, resourceType string, resourceID string, details map[string]interface{}) error {
+			return auditService.RecordEvent(ctx, actor, domain.ActorType(actorType), action, resourceType, resourceID, details)
+		},
+	)
+	auditMiddleware := middleware.NewAuditLog(auditAdapter, middleware.AuditConfig{
+		ExcludePaths: []string{"/health", "/ready"},
+		Logger:       logger,
+	})
+	logger.Info("API audit logging enabled (excluding /health, /ready)")
+
 	middlewareStack := []func(http.Handler) http.Handler{
 		middleware.RequestID,
 		structuredLogger,
 		middleware.Recovery,
 		corsMiddleware,
 		authMiddleware,
+		auditMiddleware,
 	}
 
 	// Add rate limiter if enabled
@@ -252,6 +306,7 @@ func main() {
 			rateLimiter,
 			corsMiddleware,
 			authMiddleware,
+			auditMiddleware,
 		}
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
 	}
