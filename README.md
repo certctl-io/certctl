@@ -112,7 +112,7 @@ flowchart TB
         API["REST API\nGo 1.22 net/http"]
         SVC["Service Layer"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications"]
+        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry"]
     end
 
     subgraph "Data Store"
@@ -180,8 +180,21 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default) or `dns-01` |
 | `CERTCTL_CA_CERT_PATH` | — | Path to CA certificate for sub-CA mode |
 | `CERTCTL_CA_KEY_PATH` | — | Path to CA private key for sub-CA mode |
+| `CERTCTL_CORS_ORIGINS` | — | Comma-separated allowed CORS origins (empty = same-origin, `*` = all) |
+| `CERTCTL_RATE_LIMIT_ENABLED` | `true` | Enable/disable token bucket rate limiting |
+| `CERTCTL_RATE_LIMIT_RPS` | `50` | Requests per second limit |
+| `CERTCTL_RATE_LIMIT_BURST` | `100` | Maximum burst size for rate limiter |
+| `CERTCTL_DATABASE_MIGRATIONS_PATH` | `./migrations` | Path to SQL migration files |
+| `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | `1h` | How often the scheduler checks for expiring certs |
+| `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | `30s` | How often the scheduler processes pending jobs |
+| `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | `2m` | How often the scheduler checks agent health |
+| `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | `1m` | How often the scheduler processes pending notifications |
+| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | — | Script to create DNS-01 `_acme-challenge` TXT record |
+| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | — | Script to remove DNS-01 `_acme-challenge` TXT record |
 | `CERTCTL_STEPCA_URL` | — | step-ca server URL |
 | `CERTCTL_STEPCA_PROVISIONER` | — | step-ca JWK provisioner name |
+| `CERTCTL_STEPCA_KEY_PATH` | — | Path to step-ca provisioner private key (JWK JSON) |
+| `CERTCTL_STEPCA_PASSWORD` | — | step-ca provisioner key password |
 
 Agent environment variables:
 
@@ -404,13 +417,17 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
 - **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
+- **M18a: MCP Server** (V2.1) — AI-native integration, expose REST API as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
 - **M19: Immutable API Audit Log** — extend audit trail to log every API call (method, path, actor, status, latency), queryable via existing audit endpoint
-- **M16: Operator Tooling** — CLI tool (`certctl`), Slack/Teams/PagerDuty/OpsGenie notifiers, bulk certificate import
+- **M16a: Notifier Connectors** — Slack, Microsoft Teams, PagerDuty, OpsGenie notification integrations (parallel with M19)
+- **M20: Enhanced Query API** — sparse field selection (`?fields=`), sort params, time-range filters, cursor pagination, `updatedAfter` for incremental agent sync, per-cert deployment history endpoint
+- **M18b: Filesystem Cert Discovery** — agents walk directories, parse PEM/DER/PFX/JKS, report unmanaged certs to control plane
+- **M16b: CLI + Bulk Import** — `certctl` CLI for terminal workflows, bulk certificate import from PEM files or network scans
 - **M17: Additional Connectors** — OpenSSL/Custom CA issuer connector
-- **M18: Integrations** — MCP server (OpenClaw/Claude/Cursor), filesystem cert discovery
+- **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
 ### V3: Team & Enterprise
-Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, real-time operational views, and premium CA integrations.
+Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
 
 ### V4+: Discovery, Cloud & Scale
 Discovery engine, Kubernetes integration, cloud infrastructure targets, extended CA support, and platform-scale features.
