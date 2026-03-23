@@ -210,7 +210,7 @@ Docker Compose overrides these for the demo stack (see `deploy/docker-compose.ym
 
 ## API Overview
 
-All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`).
+All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`). Full request/response schemas are available in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Certificates
 ```

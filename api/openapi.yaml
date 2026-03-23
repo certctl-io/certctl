@@ -1,0 +1,2580 @@
+openapi: 3.1.0
+info:
+  title: certctl API
+  description: |
+    Certificate lifecycle management platform API. Manages certificates, issuers,
+    deployment targets, agents, jobs, policies, profiles, teams, owners, agent groups,
+    audit events, notifications, and observability metrics.
+
+    All endpoints under `/api/v1/` require authentication by default (configurable via
+    `CERTCTL_AUTH_TYPE`). Use `Bearer {api_key}` in the Authorization header.
+
+    Paginated list endpoints accept `page` (default 1) and `per_page` (default 50, max 500)
+    query parameters and return a standard envelope with `data`, `total`, `page`, and `per_page`.
+  version: 2.0.0
+  license:
+    name: BSL 1.1
+    url: https://github.com/shankar0123/certctl/blob/master/LICENSE
+
+servers:
+  - url: http://localhost:8080
+    description: Local development
+  - url: http://localhost:8443
+    description: Docker Compose demo
+
+security:
+  - bearerAuth: []
+
+tags:
+  - name: Certificates
+    description: Certificate lifecycle — CRUD, versions, renewal, deployment, revocation
+  - name: CRL & OCSP
+    description: Certificate revocation list and OCSP responder
+  - name: Issuers
+    description: CA issuer connector management (Local CA, ACME, step-ca)
+  - name: Targets
+    description: Deployment target management (NGINX, Apache, HAProxy, F5, IIS)
+  - name: Agents
+    description: Agent registration, heartbeat, CSR submission, work polling
+  - name: Jobs
+    description: Job queue — issuance, renewal, deployment, validation
+  - name: Policies
+    description: Policy rules and violation tracking
+  - name: Profiles
+    description: Certificate enrollment profiles with crypto constraints
+  - name: Teams
+    description: Team management for ownership grouping
+  - name: Owners
+    description: Certificate owner management with email routing
+  - name: Agent Groups
+    description: Dynamic agent grouping by OS, architecture, IP CIDR, version
+  - name: Audit
+    description: Immutable audit trail
+  - name: Notifications
+    description: Notification events (expiration, renewal, deployment, revocation)
+  - name: Stats
+    description: Dashboard statistics and aggregations
+  - name: Metrics
+    description: System metrics (gauges, counters, uptime)
+  - name: Health
+    description: Health and readiness probes, auth info
+
+paths:
+  # ─── Health & Auth ───────────────────────────────────────────────────
+  /health:
+    get:
+      tags: [Health]
+      summary: Health check
+      security: []
+      operationId: getHealth
+      responses:
+        "200":
+          description: Server is healthy
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: healthy
+
+  /ready:
+    get:
+      tags: [Health]
+      summary: Readiness check
+      security: []
+      operationId: getReady
+      responses:
+        "200":
+          description: Server is ready
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: ready
+
+  /api/v1/auth/info:
+    get:
+      tags: [Health]
+      summary: Auth configuration info
+      description: Returns auth mode. Served without auth so GUI can detect auth requirements before login.
+      security: []
+      operationId: getAuthInfo
+      responses:
+        "200":
+          description: Auth configuration
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  auth_type:
+                    type: string
+                    enum: [api-key, jwt, none]
+                  required:
+                    type: boolean
+
+  /api/v1/auth/check:
+    get:
+      tags: [Health]
+      summary: Validate credentials
+      description: Returns 200 if auth credentials are valid, 401 otherwise.
+      operationId: checkAuth
+      responses:
+        "200":
+          description: Authenticated
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    example: authenticated
+        "401":
+          description: Unauthorized
+
+  # ─── Certificates ────────────────────────────────────────────────────
+  /api/v1/certificates:
+    get:
+      tags: [Certificates]
+      summary: List certificates
+      operationId: listCertificates
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/CertificateStatus"
+        - name: environment
+          in: query
+          schema:
+            type: string
+        - name: owner_id
+          in: query
+          schema:
+            type: string
+        - name: team_id
+          in: query
+          schema:
+            type: string
+        - name: issuer_id
+          in: query
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of certificates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/ManagedCertificate"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Certificates]
+      summary: Create certificate
+      operationId: createCertificate
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagedCertificate"
+      responses:
+        "201":
+          description: Certificate created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedCertificate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}:
+    get:
+      tags: [Certificates]
+      summary: Get certificate
+      operationId: getCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Certificate details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedCertificate"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Certificates]
+      summary: Update certificate
+      operationId: updateCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ManagedCertificate"
+      responses:
+        "200":
+          description: Certificate updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ManagedCertificate"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Certificates]
+      summary: Archive certificate
+      operationId: archiveCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Certificate archived
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}/versions:
+    get:
+      tags: [Certificates]
+      summary: List certificate versions
+      operationId: listCertificateVersions
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of certificate versions
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/CertificateVersion"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}/renew:
+    post:
+      tags: [Certificates]
+      summary: Trigger certificate renewal
+      operationId: triggerRenewal
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "202":
+          description: Renewal triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}/deploy:
+    post:
+      tags: [Certificates]
+      summary: Trigger certificate deployment
+      operationId: triggerDeployment
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                target_id:
+                  type: string
+                  description: Optional specific target ID
+      responses:
+        "202":
+          description: Deployment triggered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}/revoke:
+    post:
+      tags: [Certificates]
+      summary: Revoke certificate
+      description: |
+        Revokes a certificate with an optional RFC 5280 reason code. Records revocation in
+        cert inventory, audit log, and certificate_revocations table. Best-effort issuer notification.
+      operationId: revokeCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  $ref: "#/components/schemas/RevocationReason"
+      responses:
+        "200":
+          description: Certificate revoked
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── CRL & OCSP ─────────────────────────────────────────────────────
+  /api/v1/crl:
+    get:
+      tags: [CRL & OCSP]
+      summary: Get JSON CRL
+      description: Returns all revoked certificates in JSON format.
+      operationId: getCRL
+      responses:
+        "200":
+          description: JSON CRL
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  version:
+                    type: integer
+                    example: 1
+                  entries:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        serial_number:
+                          type: string
+                        revocation_date:
+                          type: string
+                          format: date-time
+                        revocation_reason:
+                          type: string
+                  total:
+                    type: integer
+                  generated_at:
+                    type: string
+                    format: date-time
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/crl/{issuer_id}:
+    get:
+      tags: [CRL & OCSP]
+      summary: Get DER-encoded X.509 CRL
+      description: Returns a proper DER-encoded CRL signed by the issuing CA. 24-hour validity.
+      operationId: getDERCRL
+      parameters:
+        - name: issuer_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: DER-encoded CRL
+          content:
+            application/pkix-crl:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Issuer does not support CRL generation
+
+  /api/v1/ocsp/{issuer_id}/{serial}:
+    get:
+      tags: [CRL & OCSP]
+      summary: OCSP responder
+      description: Returns signed OCSP response (good/revoked/unknown) for the given serial number.
+      operationId: handleOCSP
+      parameters:
+        - name: issuer_id
+          in: path
+          required: true
+          schema:
+            type: string
+        - name: serial
+          in: path
+          required: true
+          description: Hex-encoded certificate serial number
+          schema:
+            type: string
+      responses:
+        "200":
+          description: OCSP response
+          content:
+            application/ocsp-response:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Issuer does not support OCSP
+
+  # ─── Issuers ─────────────────────────────────────────────────────────
+  /api/v1/issuers:
+    get:
+      tags: [Issuers]
+      summary: List issuers
+      operationId: listIssuers
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of issuers
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Issuer"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Issuers]
+      summary: Create issuer
+      operationId: createIssuer
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Issuer"
+      responses:
+        "201":
+          description: Issuer created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issuer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/issuers/{id}:
+    get:
+      tags: [Issuers]
+      summary: Get issuer
+      operationId: getIssuer
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Issuer details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issuer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Issuers]
+      summary: Update issuer
+      operationId: updateIssuer
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Issuer"
+      responses:
+        "200":
+          description: Issuer updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Issuer"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Issuers]
+      summary: Delete issuer
+      operationId: deleteIssuer
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Issuer deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/issuers/{id}/test:
+    post:
+      tags: [Issuers]
+      summary: Test issuer connection
+      operationId: testIssuerConnection
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Connection successful
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Targets ─────────────────────────────────────────────────────────
+  /api/v1/targets:
+    get:
+      tags: [Targets]
+      summary: List targets
+      operationId: listTargets
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of targets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DeploymentTarget"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Targets]
+      summary: Create target
+      operationId: createTarget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeploymentTarget"
+      responses:
+        "201":
+          description: Target created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/targets/{id}:
+    get:
+      tags: [Targets]
+      summary: Get target
+      operationId: getTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Target details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Targets]
+      summary: Update target
+      operationId: updateTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DeploymentTarget"
+      responses:
+        "200":
+          description: Target updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DeploymentTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Targets]
+      summary: Delete target
+      operationId: deleteTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Target deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Agents ──────────────────────────────────────────────────────────
+  /api/v1/agents:
+    get:
+      tags: [Agents]
+      summary: List agents
+      operationId: listAgents
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of agents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Agent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Agents]
+      summary: Register agent
+      operationId: registerAgent
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Agent"
+      responses:
+        "201":
+          description: Agent registered
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}:
+    get:
+      tags: [Agents]
+      summary: Get agent
+      operationId: getAgent
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Agent details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}/heartbeat:
+    post:
+      tags: [Agents]
+      summary: Agent heartbeat
+      description: Reports agent liveness and metadata (OS, architecture, IP, version).
+      operationId: agentHeartbeat
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                version:
+                  type: string
+                hostname:
+                  type: string
+                os:
+                  type: string
+                architecture:
+                  type: string
+                ip_address:
+                  type: string
+      responses:
+        "200":
+          description: Heartbeat recorded
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}/csr:
+    post:
+      tags: [Agents]
+      summary: Submit CSR
+      description: Agent submits a PEM-encoded CSR for signing. Used in agent keygen mode.
+      operationId: agentSubmitCSR
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [csr_pem]
+              properties:
+                csr_pem:
+                  type: string
+                  description: PEM-encoded certificate signing request
+                certificate_id:
+                  type: string
+      responses:
+        "202":
+          description: CSR accepted
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}/certificates/{cert_id}:
+    get:
+      tags: [Agents]
+      summary: Pick up signed certificate
+      description: Agent retrieves the signed certificate PEM after CSR signing completes.
+      operationId: agentPickupCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - name: cert_id
+          in: path
+          required: true
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Certificate PEM
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  certificate_pem:
+                    type: string
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}/work:
+    get:
+      tags: [Agents]
+      summary: Get pending work
+      description: Returns pending deployment and AwaitingCSR jobs for the agent.
+      operationId: agentGetWork
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Work items
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  jobs:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/WorkItem"
+                  count:
+                    type: integer
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agents/{id}/jobs/{job_id}/status:
+    post:
+      tags: [Agents]
+      summary: Report job status
+      description: Agent reports completion or failure of an assigned job.
+      operationId: agentReportJobStatus
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - name: job_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status:
+                  type: string
+                error:
+                  type: string
+      responses:
+        "200":
+          description: Status updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Jobs ────────────────────────────────────────────────────────────
+  /api/v1/jobs:
+    get:
+      tags: [Jobs]
+      summary: List jobs
+      operationId: listJobs
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+        - name: status
+          in: query
+          schema:
+            $ref: "#/components/schemas/JobStatus"
+        - name: type
+          in: query
+          schema:
+            $ref: "#/components/schemas/JobType"
+      responses:
+        "200":
+          description: Paginated list of jobs
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Job"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}:
+    get:
+      tags: [Jobs]
+      summary: Get job
+      operationId: getJob
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Job details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Job"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}/cancel:
+    post:
+      tags: [Jobs]
+      summary: Cancel job
+      operationId: cancelJob
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Job cancelled
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}/approve:
+    post:
+      tags: [Jobs]
+      summary: Approve job
+      description: Approves a job in AwaitingApproval state.
+      operationId: approveJob
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Job approved
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}/reject:
+    post:
+      tags: [Jobs]
+      summary: Reject job
+      description: Rejects a job in AwaitingApproval state with an optional reason.
+      operationId: rejectJob
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                reason:
+                  type: string
+      responses:
+        "200":
+          description: Job rejected
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Policies ────────────────────────────────────────────────────────
+  /api/v1/policies:
+    get:
+      tags: [Policies]
+      summary: List policies
+      operationId: listPolicies
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of policies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PolicyRule"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Policies]
+      summary: Create policy
+      operationId: createPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyRule"
+      responses:
+        "201":
+          description: Policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/policies/{id}:
+    get:
+      tags: [Policies]
+      summary: Get policy
+      operationId: getPolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Policy details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Policies]
+      summary: Update policy
+      operationId: updatePolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/PolicyRule"
+      responses:
+        "200":
+          description: Policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/PolicyRule"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Policies]
+      summary: Delete policy
+      operationId: deletePolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Policy deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/policies/{id}/violations:
+    get:
+      tags: [Policies]
+      summary: List policy violations
+      operationId: listPolicyViolations
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of violations
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/PolicyViolation"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Profiles ────────────────────────────────────────────────────────
+  /api/v1/profiles:
+    get:
+      tags: [Profiles]
+      summary: List profiles
+      operationId: listProfiles
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of profiles
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/CertificateProfile"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Profiles]
+      summary: Create profile
+      operationId: createProfile
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CertificateProfile"
+      responses:
+        "201":
+          description: Profile created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/profiles/{id}:
+    get:
+      tags: [Profiles]
+      summary: Get profile
+      operationId: getProfile
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Profile details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Profiles]
+      summary: Update profile
+      operationId: updateProfile
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CertificateProfile"
+      responses:
+        "200":
+          description: Profile updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CertificateProfile"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Profiles]
+      summary: Delete profile
+      operationId: deleteProfile
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Profile deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Teams ───────────────────────────────────────────────────────────
+  /api/v1/teams:
+    get:
+      tags: [Teams]
+      summary: List teams
+      operationId: listTeams
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of teams
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Team"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Teams]
+      summary: Create team
+      operationId: createTeam
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Team"
+      responses:
+        "201":
+          description: Team created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/teams/{id}:
+    get:
+      tags: [Teams]
+      summary: Get team
+      operationId: getTeam
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Team details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Teams]
+      summary: Update team
+      operationId: updateTeam
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Team"
+      responses:
+        "200":
+          description: Team updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Team"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Teams]
+      summary: Delete team
+      operationId: deleteTeam
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Team deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Owners ──────────────────────────────────────────────────────────
+  /api/v1/owners:
+    get:
+      tags: [Owners]
+      summary: List owners
+      operationId: listOwners
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of owners
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Owner"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Owners]
+      summary: Create owner
+      operationId: createOwner
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Owner"
+      responses:
+        "201":
+          description: Owner created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/owners/{id}:
+    get:
+      tags: [Owners]
+      summary: Get owner
+      operationId: getOwner
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Owner details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Owners]
+      summary: Update owner
+      operationId: updateOwner
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/Owner"
+      responses:
+        "200":
+          description: Owner updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Owner"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Owners]
+      summary: Delete owner
+      operationId: deleteOwner
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Owner deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Agent Groups ───────────────────────────────────────────────────
+  /api/v1/agent-groups:
+    get:
+      tags: [Agent Groups]
+      summary: List agent groups
+      operationId: listAgentGroups
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of agent groups
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AgentGroup"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Agent Groups]
+      summary: Create agent group
+      operationId: createAgentGroup
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentGroup"
+      responses:
+        "201":
+          description: Agent group created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agent-groups/{id}:
+    get:
+      tags: [Agent Groups]
+      summary: Get agent group
+      operationId: getAgentGroup
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Agent group details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Agent Groups]
+      summary: Update agent group
+      operationId: updateAgentGroup
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/AgentGroup"
+      responses:
+        "200":
+          description: Agent group updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentGroup"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Agent Groups]
+      summary: Delete agent group
+      operationId: deleteAgentGroup
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Agent group deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/agent-groups/{id}/members:
+    get:
+      tags: [Agent Groups]
+      summary: List agent group members
+      description: Returns agents matching the group's dynamic criteria plus manually included members.
+      operationId: listAgentGroupMembers
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: List of member agents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Agent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Audit ───────────────────────────────────────────────────────────
+  /api/v1/audit:
+    get:
+      tags: [Audit]
+      summary: List audit events
+      operationId: listAuditEvents
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of audit events
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/AuditEvent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/audit/{id}:
+    get:
+      tags: [Audit]
+      summary: Get audit event
+      operationId: getAuditEvent
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Audit event details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuditEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Notifications ──────────────────────────────────────────────────
+  /api/v1/notifications:
+    get:
+      tags: [Notifications]
+      summary: List notifications
+      operationId: listNotifications
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of notifications
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NotificationEvent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/notifications/{id}:
+    get:
+      tags: [Notifications]
+      summary: Get notification
+      operationId: getNotification
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Notification details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NotificationEvent"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/notifications/{id}/read:
+    post:
+      tags: [Notifications]
+      summary: Mark notification as read
+      operationId: markNotificationAsRead
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Marked as read
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Stats ───────────────────────────────────────────────────────────
+  /api/v1/stats/summary:
+    get:
+      tags: [Stats]
+      summary: Dashboard summary
+      operationId: getDashboardSummary
+      responses:
+        "200":
+          description: High-level system metrics
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DashboardSummary"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/certificates-by-status:
+    get:
+      tags: [Stats]
+      summary: Certificate status breakdown
+      operationId: getCertificatesByStatus
+      responses:
+        "200":
+          description: Certificate counts by status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status_counts:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        status:
+                          type: string
+                        count:
+                          type: integer
+                          format: int64
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/expiration-timeline:
+    get:
+      tags: [Stats]
+      summary: Expiration timeline
+      operationId: getExpirationTimeline
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 365
+      responses:
+        "200":
+          description: Certificates expiring per day
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  buckets:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        count:
+                          type: integer
+                          format: int64
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/job-trends:
+    get:
+      tags: [Stats]
+      summary: Job success/failure trends
+      operationId: getJobTrends
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 365
+      responses:
+        "200":
+          description: Job trends per day
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  trends:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        completed:
+                          type: integer
+                          format: int64
+                        failed:
+                          type: integer
+                          format: int64
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/stats/issuance-rate:
+    get:
+      tags: [Stats]
+      summary: Certificate issuance rate
+      operationId: getIssuanceRate
+      parameters:
+        - name: days
+          in: query
+          schema:
+            type: integer
+            default: 30
+            minimum: 1
+            maximum: 365
+      responses:
+        "200":
+          description: Issuance count per day
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  rate:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        date:
+                          type: string
+                          format: date
+                        count:
+                          type: integer
+                          format: int64
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Metrics ─────────────────────────────────────────────────────────
+  /api/v1/metrics:
+    get:
+      tags: [Metrics]
+      summary: System metrics
+      description: JSON metrics snapshot with gauges, counters, and uptime. Prometheus format deferred to V3.
+      operationId: getMetrics
+      responses:
+        "200":
+          description: Metrics snapshot
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/MetricsResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+# ═══════════════════════════════════════════════════════════════════════
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: API key passed as Bearer token. Configure via CERTCTL_AUTH_SECRET.
+
+  parameters:
+    resourceId:
+      name: id
+      in: path
+      required: true
+      schema:
+        type: string
+      description: Human-readable resource ID (e.g., mc-api-prod, t-platform)
+    page:
+      name: page
+      in: query
+      schema:
+        type: integer
+        default: 1
+        minimum: 1
+    per_page:
+      name: per_page
+      in: query
+      schema:
+        type: integer
+        default: 50
+        minimum: 1
+        maximum: 500
+
+  responses:
+    BadRequest:
+      description: Validation error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
+
+  schemas:
+    # ─── Common ──────────────────────────────────────────────────────
+    ErrorResponse:
+      type: object
+      properties:
+        error:
+          type: string
+        request_id:
+          type: string
+
+    StatusResponse:
+      type: object
+      properties:
+        status:
+          type: string
+
+    PaginationEnvelope:
+      type: object
+      properties:
+        total:
+          type: integer
+          format: int64
+        page:
+          type: integer
+        per_page:
+          type: integer
+
+    # ─── Certificates ────────────────────────────────────────────────
+    CertificateStatus:
+      type: string
+      enum:
+        - Pending
+        - Active
+        - Expiring
+        - Expired
+        - RenewalInProgress
+        - Failed
+        - Revoked
+        - Archived
+
+    ManagedCertificate:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        common_name:
+          type: string
+        sans:
+          type: array
+          items:
+            type: string
+        environment:
+          type: string
+        owner_id:
+          type: string
+        team_id:
+          type: string
+        issuer_id:
+          type: string
+        target_ids:
+          type: array
+          items:
+            type: string
+        renewal_policy_id:
+          type: string
+        certificate_profile_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/CertificateStatus"
+        expires_at:
+          type: string
+          format: date-time
+        tags:
+          type: object
+          additionalProperties:
+            type: string
+        last_renewal_at:
+          type: string
+          format: date-time
+        last_deployment_at:
+          type: string
+          format: date-time
+        revoked_at:
+          type: string
+          format: date-time
+        revocation_reason:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    CertificateVersion:
+      type: object
+      properties:
+        id:
+          type: string
+        certificate_id:
+          type: string
+        serial_number:
+          type: string
+        not_before:
+          type: string
+          format: date-time
+        not_after:
+          type: string
+          format: date-time
+        fingerprint_sha256:
+          type: string
+        pem_chain:
+          type: string
+        csr_pem:
+          type: string
+        key_algorithm:
+          type: string
+        key_size:
+          type: integer
+        created_at:
+          type: string
+          format: date-time
+
+    RevocationReason:
+      type: string
+      enum:
+        - unspecified
+        - keyCompromise
+        - caCompromise
+        - affiliationChanged
+        - superseded
+        - cessationOfOperation
+        - certificateHold
+        - privilegeWithdrawn
+
+    # ─── Issuers ─────────────────────────────────────────────────────
+    IssuerType:
+      type: string
+      enum: [ACME, GenericCA, StepCA]
+
+    Issuer:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/IssuerType"
+        config:
+          type: object
+          description: Issuer-specific configuration (varies by type)
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ─── Targets ─────────────────────────────────────────────────────
+    TargetType:
+      type: string
+      enum: [NGINX, Apache, HAProxy, F5, IIS]
+
+    DeploymentTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/TargetType"
+        agent_id:
+          type: string
+        config:
+          type: object
+          description: Target-specific configuration (varies by type)
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ─── Agents ──────────────────────────────────────────────────────
+    AgentStatus:
+      type: string
+      enum: [Online, Offline, Degraded]
+
+    Agent:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        hostname:
+          type: string
+        status:
+          $ref: "#/components/schemas/AgentStatus"
+        last_heartbeat_at:
+          type: string
+          format: date-time
+        registered_at:
+          type: string
+          format: date-time
+        api_key_hash:
+          type: string
+        os:
+          type: string
+        architecture:
+          type: string
+        ip_address:
+          type: string
+        version:
+          type: string
+
+    WorkItem:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/JobType"
+        certificate_id:
+          type: string
+        common_name:
+          type: string
+        sans:
+          type: array
+          items:
+            type: string
+        target_id:
+          type: string
+        target_type:
+          type: string
+        target_config:
+          type: object
+        status:
+          $ref: "#/components/schemas/JobStatus"
+
+    # ─── Jobs ────────────────────────────────────────────────────────
+    JobType:
+      type: string
+      enum: [Issuance, Renewal, Deployment, Validation]
+
+    JobStatus:
+      type: string
+      enum:
+        - Pending
+        - AwaitingCSR
+        - AwaitingApproval
+        - Running
+        - Completed
+        - Failed
+        - Cancelled
+
+    Job:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/JobType"
+        certificate_id:
+          type: string
+        target_id:
+          type: string
+        status:
+          $ref: "#/components/schemas/JobStatus"
+        attempts:
+          type: integer
+        max_attempts:
+          type: integer
+        last_error:
+          type: string
+        scheduled_at:
+          type: string
+          format: date-time
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+
+    # ─── Policies ────────────────────────────────────────────────────
+    PolicyType:
+      type: string
+      enum:
+        - AllowedIssuers
+        - AllowedDomains
+        - RequiredMetadata
+        - AllowedEnvironments
+        - RenewalLeadTime
+
+    PolicySeverity:
+      type: string
+      enum: [Warning, Error, Critical]
+
+    PolicyRule:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        type:
+          $ref: "#/components/schemas/PolicyType"
+        config:
+          type: object
+          description: Policy-specific configuration (varies by type)
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    PolicyViolation:
+      type: object
+      properties:
+        id:
+          type: string
+        certificate_id:
+          type: string
+        rule_id:
+          type: string
+        message:
+          type: string
+        severity:
+          $ref: "#/components/schemas/PolicySeverity"
+        created_at:
+          type: string
+          format: date-time
+
+    # ─── Profiles ────────────────────────────────────────────────────
+    CertificateProfile:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        allowed_key_algorithms:
+          type: array
+          items:
+            $ref: "#/components/schemas/KeyAlgorithmRule"
+        max_ttl_seconds:
+          type: integer
+        allowed_ekus:
+          type: array
+          items:
+            type: string
+        required_san_patterns:
+          type: array
+          items:
+            type: string
+        spiffe_uri_pattern:
+          type: string
+        allow_short_lived:
+          type: boolean
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    KeyAlgorithmRule:
+      type: object
+      properties:
+        algorithm:
+          type: string
+          enum: [RSA, ECDSA, Ed25519]
+        min_size:
+          type: integer
+
+    # ─── Teams ───────────────────────────────────────────────────────
+    Team:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ─── Owners ──────────────────────────────────────────────────────
+    Owner:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        email:
+          type: string
+        team_id:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ─── Agent Groups ────────────────────────────────────────────────
+    AgentGroup:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        description:
+          type: string
+        match_os:
+          type: string
+        match_architecture:
+          type: string
+        match_ip_cidr:
+          type: string
+        match_version:
+          type: string
+        enabled:
+          type: boolean
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    # ─── Audit ───────────────────────────────────────────────────────
+    ActorType:
+      type: string
+      enum: [User, System, Agent]
+
+    AuditEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        actor:
+          type: string
+        actor_type:
+          $ref: "#/components/schemas/ActorType"
+        action:
+          type: string
+        resource_type:
+          type: string
+        resource_id:
+          type: string
+        details:
+          type: object
+        timestamp:
+          type: string
+          format: date-time
+
+    # ─── Notifications ───────────────────────────────────────────────
+    NotificationType:
+      type: string
+      enum:
+        - ExpirationWarning
+        - RenewalSuccess
+        - RenewalFailure
+        - DeploymentSuccess
+        - DeploymentFailure
+        - PolicyViolation
+        - Revocation
+
+    NotificationChannel:
+      type: string
+      enum: [Email, Webhook, Slack]
+
+    NotificationEvent:
+      type: object
+      properties:
+        id:
+          type: string
+        type:
+          $ref: "#/components/schemas/NotificationType"
+        certificate_id:
+          type: string
+        channel:
+          $ref: "#/components/schemas/NotificationChannel"
+        recipient:
+          type: string
+        message:
+          type: string
+        sent_at:
+          type: string
+          format: date-time
+        status:
+          type: string
+        error:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+
+    # ─── Stats & Metrics ─────────────────────────────────────────────
+    DashboardSummary:
+      type: object
+      properties:
+        total_certificates:
+          type: integer
+          format: int64
+        expiring_certificates:
+          type: integer
+          format: int64
+        expired_certificates:
+          type: integer
+          format: int64
+        revoked_certificates:
+          type: integer
+          format: int64
+        active_agents:
+          type: integer
+          format: int64
+        offline_agents:
+          type: integer
+          format: int64
+        total_agents:
+          type: integer
+          format: int64
+        pending_jobs:
+          type: integer
+          format: int64
+        failed_jobs:
+          type: integer
+          format: int64
+        complete_jobs:
+          type: integer
+          format: int64
+        completed_at:
+          type: string
+          format: date-time
+
+    MetricsResponse:
+      type: object
+      properties:
+        gauge:
+          type: object
+          properties:
+            certificate_total:
+              type: integer
+              format: int64
+            certificate_active:
+              type: integer
+              format: int64
+            certificate_expiring_soon:
+              type: integer
+              format: int64
+            certificate_expired:
+              type: integer
+              format: int64
+            certificate_revoked:
+              type: integer
+              format: int64
+            agent_total:
+              type: integer
+              format: int64
+            agent_online:
+              type: integer
+              format: int64
+            job_pending:
+              type: integer
+              format: int64
+        counter:
+          type: object
+          properties:
+            job_completed_total:
+              type: integer
+              format: int64
+            job_failed_total:
+              type: integer
+              format: int64
+        uptime:
+          type: object
+          properties:
+            uptime_seconds:
+              type: integer
+              format: int64
+            server_started:
+              type: string
+              format: date-time
+            measured_at:
+              type: string
+              format: date-time
