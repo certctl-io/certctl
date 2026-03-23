@@ -200,4 +200,4 @@ The agent fleet overview page groups agents by OS, architecture, and version, sh
 
 Now that you understand the concepts, head to the [Quick Start Guide](quickstart.md) to get certctl running locally in under 5 minutes. You'll see a pre-loaded dashboard with demo certificates, explore the API, and understand how everything fits together.
 
-For a deeper look at the system design, see the [Architecture Guide](architecture.md). For terminal-based workflows, check out the CLI Guide (docs coming soon). For AI-native integration, see the MCP Server Guide (docs coming soon).
+For a deeper look at the system design, see the [Architecture Guide](architecture.md). For terminal-based workflows, check out the CLI Guide (docs coming soon). For AI-native integration, see the [MCP Server Guide](mcp.md). For the full API reference, see the [OpenAPI Spec Guide](openapi.md).

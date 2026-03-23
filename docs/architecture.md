@@ -677,3 +677,5 @@ certctl uses a layered testing approach aligned with the handler → service →
 - [Quick Start](quickstart.md) — Get certctl running locally
 - [Advanced Demo](demo-advanced.md) — Issue a certificate end-to-end
 - [Connector Guide](connectors.md) — Build custom connectors
+- [MCP Server Guide](mcp.md) — AI-native access to the API
+- [OpenAPI Spec](openapi.md) — Full API reference and SDK generation
