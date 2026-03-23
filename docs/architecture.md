@@ -43,7 +43,7 @@ flowchart TB
         CA1["Local CA\n(crypto/x509, sub-CA)"]
         CA2["ACME\n(HTTP-01 + DNS-01)"]
         CA3["step-ca\n(/sign API)"]
-        CA4["OpenSSL / Custom CA\n(planned)"]
+        CA4["OpenSSL / Custom CA\n(script-based)"]
         CA6["Vault PKI\n(planned)"]
     end
 
@@ -386,7 +386,7 @@ flowchart TB
         II --> LC["Local CA"]
         II --> ACME["ACME v2"]
         II --> SC["step-ca"]
-        II --> OC["OpenSSL / Custom CA (planned)"]
+        II --> OC["OpenSSL / Custom CA"]
         II --> VP["Vault PKI (planned)"]
     end
 
@@ -405,7 +405,10 @@ flowchart TB
         NI["NotifierConnector Interface\nSendAlert() | SendEvent()"]
         NI --> EM["Email (SMTP)"]
         NI --> WH["Webhook (HTTP)"]
-        NI --> SL["Slack (future)"]
+        NI --> SL["Slack"]
+        NI --> TM["Microsoft Teams"]
+        NI --> PD["PagerDuty"]
+        NI --> OG["OpsGenie"]
     end
 ```
 

@@ -6,9 +6,9 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca implemented; OpenSSL/Custom CA and additional CA integrations planned)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
 2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
-3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks implemented; Slack, Teams, PagerDuty, OpsGenie planned)
+3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
 
@@ -173,11 +173,24 @@ The connector is registered in the issuer registry under `iss-stepca`. step-ca a
 
 Location: `internal/connector/issuer/stepca/stepca.go`
 
+### OpenSSL / Custom CA
+
+Script-based issuer connector for organizations with existing CA tooling. Delegates certificate signing, revocation, and CRL generation to user-provided shell scripts.
+
+**Configuration:**
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `CERTCTL_OPENSSL_SIGN_SCRIPT` | Yes | Script that receives CSR on stdin and outputs signed PEM cert on stdout |
+| `CERTCTL_OPENSSL_REVOKE_SCRIPT` | No | Script to revoke a certificate (receives serial number as argument) |
+| `CERTCTL_OPENSSL_CRL_SCRIPT` | No | Script that outputs DER-encoded CRL on stdout |
+| `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | No | Script execution timeout (default: 30s) |
+
+The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information.
+
 ### Planned Issuers
 
 The following issuer connectors are planned for future milestones:
 
-- **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
 - **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
 - **DigiCert** — Commercial CA integration via DigiCert's REST API.
 
@@ -444,7 +457,16 @@ type Connector interface {
 }
 ```
 
-Built-in notifiers: **Email** (SMTP) and **Webhook** (HTTP POST).
+Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard webhook), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2).
+
+Each notifier is enabled by its configuration env var:
+
+| Notifier | Env Var | Description |
+|----------|---------|-------------|
+| Slack | `CERTCTL_SLACK_WEBHOOK_URL` | Incoming webhook URL. Optional: `CERTCTL_SLACK_CHANNEL`, `CERTCTL_SLACK_USERNAME` |
+| Teams | `CERTCTL_TEAMS_WEBHOOK_URL` | Incoming webhook URL (MessageCard format) |
+| PagerDuty | `CERTCTL_PAGERDUTY_ROUTING_KEY` | Events API v2 routing key. Optional: `CERTCTL_PAGERDUTY_SEVERITY` (default: "warning") |
+| OpsGenie | `CERTCTL_OPSGENIE_API_KEY` | Alert API GenieKey. Optional: `CERTCTL_OPSGENIE_PRIORITY` (default: "P3") |
 
 In demo mode, notifications are marked as "sent" even without a configured notifier — this prevents error spam in the logs while still generating notification records for the dashboard to display.
 

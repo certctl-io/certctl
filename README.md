@@ -28,7 +28,7 @@ flowchart LR
     API --> PG
     A1 & A2 & A3 -->|"CSR + status\n(no private keys)"| API
     API -->|"Signed certs"| A1 & A2 & A3
-    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME"]
+    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME · step-ca · OpenSSL"]
 ```
 
 ### Screenshots
@@ -195,6 +195,14 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_STEPCA_PROVISIONER` | — | step-ca JWK provisioner name |
 | `CERTCTL_STEPCA_KEY_PATH` | — | Path to step-ca provisioner private key (JWK JSON) |
 | `CERTCTL_STEPCA_PASSWORD` | — | step-ca provisioner key password |
+| `CERTCTL_OPENSSL_SIGN_SCRIPT` | — | Script for OpenSSL/Custom CA certificate signing |
+| `CERTCTL_OPENSSL_REVOKE_SCRIPT` | — | Script for OpenSSL/Custom CA certificate revocation |
+| `CERTCTL_OPENSSL_CRL_SCRIPT` | — | Script for OpenSSL/Custom CA CRL generation |
+| `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | `30` | Timeout for OpenSSL script execution |
+| `CERTCTL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for notifications |
+| `CERTCTL_TEAMS_WEBHOOK_URL` | — | Microsoft Teams incoming webhook URL |
+| `CERTCTL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 routing key |
+| `CERTCTL_OPSGENIE_API_KEY` | — | OpsGenie Alert API key |
 
 Agent environment variables:
 
@@ -240,6 +248,33 @@ mcp-server
 ```
 
 76 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
+
+## CLI
+
+certctl ships a command-line tool for terminal-based certificate management workflows.
+
+```bash
+# Install
+go install github.com/shankar0123/certctl/cmd/cli@latest
+
+# Configure
+export CERTCTL_SERVER_URL=http://localhost:8443
+export CERTCTL_API_KEY=your-api-key
+
+# Commands
+certctl-cli list-certs                    # List all certificates
+certctl-cli get-cert --id mc-api-prod     # Get certificate details
+certctl-cli renew-cert --id mc-api-prod   # Trigger renewal
+certctl-cli revoke-cert --id mc-api-prod --reason keyCompromise
+certctl-cli list-agents                   # List registered agents
+certctl-cli list-jobs                     # List jobs
+certctl-cli health                        # Server health check
+certctl-cli metrics                       # Server metrics
+certctl-cli import --file certs.pem       # Bulk import from PEM file
+
+# Output formats
+certctl-cli list-certs --format json      # JSON output (default: table)
+```
 
 ## API Overview
 
@@ -368,7 +403,7 @@ GET    /ready                             Readiness check
 | Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
 | ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
 | step-ca | Implemented | `StepCA` |
-| OpenSSL / Custom CA | Planned | — |
+| OpenSSL / Custom CA | Implemented | `OpenSSL` |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
 
@@ -389,7 +424,10 @@ GET    /ready                             Readiness check
 |----------|--------|------|
 | Email (SMTP) | Implemented | `Email` |
 | Webhooks | Implemented | `Webhook` |
-| Slack | Planned | — |
+| Slack | Implemented | `Slack` |
+| Microsoft Teams | Implemented | `Teams` |
+| PagerDuty | Implemented | `PagerDuty` |
+| OpsGenie | Implemented | `OpsGenie` |
 
 ## Development
 
@@ -435,12 +473,12 @@ make docker-clean       # Stop + remove volumes
 - Immutable append-only log in PostgreSQL (`audit_events` table)
 - Every lifecycle action attributed to an actor with timestamp and resource reference
 - No update or delete operations on audit records
-- V2 extends to log every API call (method, path, actor, response status, latency)
+- Every API call recorded to audit trail with method, path, actor, SHA-256 body hash, response status, and latency (M19)
 
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 19 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 744+ tests total: ~520 Go test functions + ~138 subtests across service, handler, integration, connector, and domain layers, plus 86 frontend Vitest tests covering all API client endpoints, stats/metrics endpoints, utilities, and M13 operations. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 19 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
@@ -451,12 +489,12 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
 - **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
 - **M18a: MCP Server** ✅ (V2.1) — AI-native integration, all 76 REST API endpoints exposed as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
-- **M19: Immutable API Audit Log** — extend audit trail to log every API call (method, path, actor, status, latency), queryable via existing audit endpoint
-- **M16a: Notifier Connectors** — Slack, Microsoft Teams, PagerDuty, OpsGenie notification integrations (parallel with M19)
+- **M19: Immutable API Audit Log** ✅ — every API call recorded to immutable audit trail (method, path, actor, SHA-256 body hash, status, latency), async recording via goroutine, configurable path exclusions
+- **M16a: Notifier Connectors** ✅ — Slack (incoming webhook), Microsoft Teams (MessageCard), PagerDuty (Events API v2), OpsGenie (Alert API v2) — config-driven enablement via env vars
+- **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)
+- **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
 - **M20: Enhanced Query API** — sparse field selection (`?fields=`), sort params, time-range filters, cursor pagination, `updatedAfter` for incremental agent sync, per-cert deployment history endpoint
 - **M18b: Filesystem Cert Discovery** — agents walk directories, parse PEM/DER/PFX/JKS, report unmanaged certs to control plane
-- **M16b: CLI + Bulk Import** — `certctl` CLI for terminal workflows, bulk certificate import from PEM files or network scans
-- **M17: Additional Connectors** — OpenSSL/Custom CA issuer connector
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
 ### V3: Team & Enterprise
