@@ -68,6 +68,7 @@ const (
 	IssuerTypeACME      IssuerType = "ACME"
 	IssuerTypeGenericCA IssuerType = "GenericCA"
 	IssuerTypeStepCA    IssuerType = "StepCA"
+	IssuerTypeOpenSSL   IssuerType = "OpenSSL"
 )
 
 // TargetType represents the type of deployment target.

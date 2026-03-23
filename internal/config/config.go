@@ -72,6 +72,14 @@ type ACMEConfig struct {
 	DNSCleanUpScript string
 }
 
+// OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
+type OpenSSLConfig struct {
+	SignScript     string
+	RevokeScript   string
+	CRLScript      string
+	TimeoutSeconds int
+}
+
 // ServerConfig contains HTTP server configuration.
 type ServerConfig struct {
 	Host string

@@ -54,6 +54,7 @@ temp/
 # Build artifacts
 certctl-server
 certctl-agent
+certctl-cli
 /server
 /agent
 

@@ -19,6 +19,7 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
+	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
@@ -117,15 +118,27 @@ func main() {
 	}, logger)
 	logger.Info("initialized step-ca issuer connector")
 
+	// Initialize OpenSSL/Custom CA issuer connector (for script-based CA integrations).
+	// Delegates certificate signing to user-provided scripts.
+	opensslConnector := opensslissuer.New(&opensslissuer.Config{
+		SignScript:     os.Getenv("CERTCTL_OPENSSL_SIGN_SCRIPT"),
+		RevokeScript:   os.Getenv("CERTCTL_OPENSSL_REVOKE_SCRIPT"),
+		CRLScript:      os.Getenv("CERTCTL_OPENSSL_CRL_SCRIPT"),
+		TimeoutSeconds: getEnvIntDefault(os.Getenv("CERTCTL_OPENSSL_TIMEOUT_SECONDS"), 30),
+	}, logger)
+	logger.Info("initialized OpenSSL/Custom CA issuer connector")
+
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
 	// "iss-stepca" is the step-ca private CA connector.
+	// "iss-openssl" is the custom CA/OpenSSL connector.
 	issuerRegistry := map[string]service.IssuerConnector{
 		"iss-local":        service.NewIssuerConnectorAdapter(localCA),
 		"iss-acme-staging": service.NewIssuerConnectorAdapter(acmeConnector),
 		"iss-acme-prod":    service.NewIssuerConnectorAdapter(acmeConnector),
 		"iss-stepca":       service.NewIssuerConnectorAdapter(stepcaConnector),
+		"iss-openssl":      service.NewIssuerConnectorAdapter(opensslConnector),
 	}
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
 
@@ -399,4 +412,16 @@ func main() {
 	}
 
 	logger.Info("certctl server stopped")
+}
+
+// getEnvIntDefault parses an integer from a string with a default fallback.
+func getEnvIntDefault(s string, defaultVal int) int {
+	if s == "" {
+		return defaultVal
+	}
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return val
 }
