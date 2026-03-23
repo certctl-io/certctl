@@ -187,6 +187,17 @@ Script-based issuer connector for organizations with existing CA tooling. Delega
 
 The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information.
 
+### Revocation Across Issuers
+
+All issuer connectors implement `RevokeCertificate(ctx, serial, reason)`. When a certificate is revoked via `POST /api/v1/certificates/{id}/revoke`, certctl notifies the issuing CA on a best-effort basis — the revocation succeeds in certctl's inventory even if the CA notification fails (e.g., CA is temporarily unreachable). This ensures revocation is never blocked by external dependencies.
+
+Each issuer handles revocation differently:
+
+- **Local CA**: Updates the in-memory revocation list. DER-encoded CRLs and OCSP responses are generated from this list.
+- **ACME**: ACME v2 has limited revocation support — certctl records the revocation locally and serves it via CRL/OCSP.
+- **step-ca**: Calls step-ca's `/revoke` API endpoint. Clients should check step-ca's own CRL/OCSP for authoritative status.
+- **OpenSSL/Custom CA**: Invokes the configured revoke script (`CERTCTL_OPENSSL_REVOKE_SCRIPT`) with the serial number as an argument.
+
 ### Planned Issuers
 
 The following issuer connectors are planned for future milestones:

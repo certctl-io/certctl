@@ -206,6 +206,24 @@ curl -s http://localhost:8443/api/v1/audit | jq '.data[0:3]'
 
 Refresh the dashboard at http://localhost:8443 — your new certificate appears in the inventory.
 
+### Step 5: Revoke a certificate
+
+If a certificate's private key is compromised or the service is decommissioned, revoke it:
+
+```bash
+curl -s -X POST http://localhost:8443/api/v1/certificates/$CERT_ID/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "superseded"}' | jq .
+```
+
+Supported RFC 5280 reason codes: `unspecified`, `keyCompromise`, `caCompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `privilegeWithdrawn`. If you omit the reason, it defaults to `unspecified`.
+
+Check the CRL to confirm:
+
+```bash
+curl -s http://localhost:8443/api/v1/crl | jq .
+```
+
 ## Understanding the Demo Data
 
 The demo comes pre-loaded with realistic data so you can explore certctl's features immediately:
@@ -219,8 +237,98 @@ The demo comes pre-loaded with realistic data so you can explore certctl's featu
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
 | Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |
+| Profiles | 3 | Default TLS, Short-Lived, High-Security |
+| Agent Groups | 5 | Linux agents, ARM agents, Production subnet, etc. |
 
 Certificates have varied statuses so you can see what each state looks like in the dashboard: healthy certs with 45+ days remaining, certs about to expire (5-12 days), certs that already expired, and a failed renewal.
+
+## Advanced API Features
+
+### Sorting and filtering
+
+```bash
+# Sort certificates by expiration date (ascending)
+curl -s "http://localhost:8443/api/v1/certificates?sort=notAfter" | jq .
+
+# Sort descending (prefix with -)
+curl -s "http://localhost:8443/api/v1/certificates?sort=-createdAt" | jq .
+
+# Time-range filters (RFC3339 format)
+curl -s "http://localhost:8443/api/v1/certificates?expires_before=2026-05-01T00:00:00Z" | jq .
+curl -s "http://localhost:8443/api/v1/certificates?created_after=2026-03-01T00:00:00Z" | jq .
+```
+
+Supported sort fields: `notAfter`, `expiresAt`, `createdAt`, `updatedAt`, `commonName`, `name`, `status`, `environment`.
+
+### Sparse field selection
+
+Request only the fields you need to reduce response size:
+
+```bash
+curl -s "http://localhost:8443/api/v1/certificates?fields=id,common_name,status,expires_at" | jq .
+```
+
+### Cursor-based pagination
+
+For large datasets, cursor pagination is more efficient than page-based:
+
+```bash
+# First page
+curl -s "http://localhost:8443/api/v1/certificates?page_size=5" | jq '{next_cursor: .next_cursor, count: (.data | length)}'
+
+# Next page (use the next_cursor from the previous response)
+curl -s "http://localhost:8443/api/v1/certificates?cursor=<next_cursor_value>&page_size=5" | jq .
+```
+
+### Stats and metrics
+
+```bash
+# Dashboard summary
+curl -s http://localhost:8443/api/v1/stats/summary | jq .
+
+# Certificates by status
+curl -s http://localhost:8443/api/v1/stats/certificates-by-status | jq .
+
+# Expiration timeline (next 90 days)
+curl -s "http://localhost:8443/api/v1/stats/expiration-timeline?days=90" | jq .
+
+# Job trends (last 30 days)
+curl -s "http://localhost:8443/api/v1/stats/job-trends?days=30" | jq .
+
+# System metrics
+curl -s http://localhost:8443/api/v1/metrics | jq .
+```
+
+### Certificate profiles
+
+```bash
+# List all profiles
+curl -s http://localhost:8443/api/v1/profiles | jq .
+
+# Get a specific profile
+curl -s http://localhost:8443/api/v1/profiles/prof-default | jq .
+```
+
+### Certificate deployments
+
+```bash
+# View deployment targets for a certificate
+curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
+```
+
+### Interactive approval workflow
+
+```bash
+# Approve a pending job
+curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/approve \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Approved for production deployment"}' | jq .
+
+# Reject a pending job
+curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/reject \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Key type does not meet compliance requirements"}' | jq .
+```
 
 ## Tear Down
 
@@ -236,3 +344,4 @@ The `-v` flag removes the PostgreSQL data volume so you get a clean slate next t
 - **[Demo Walkthrough](demo-guide.md)** — Guided 5-minute stakeholder presentation
 - **[Architecture](architecture.md)** — How the control plane, agents, and connectors work together
 - **[Connector Guide](connectors.md)** — Build custom connectors for your infrastructure
+- **[CLI Reference](cli.md)** — Manage certificates from your terminal

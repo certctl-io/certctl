@@ -128,9 +128,39 @@ Every certificate belongs to a **team** and has an **owner**. This answers the q
 
 Agent groups let you organize agents by criteria — OS, architecture, IP subnet, or version — for dynamic policy scoping. For example, you can create a group matching all Linux agents and scope a renewal policy to that group. Groups can use dynamic matching criteria (agents automatically join when they match) or manual membership (explicitly include/exclude specific agents). Agent groups are managed via the GUI and API.
 
+### Certificate Profiles
+
+Certificate profiles define the cryptographic and lifecycle constraints for a class of certificates. A profile specifies which key types are allowed (e.g., RSA-2048, ECDSA P-256), the maximum validity period, and other enrollment rules. When a certificate is assigned to a profile, certctl enforces these constraints during issuance — if an agent submits a CSR with a disallowed key type, issuance is rejected.
+
+Profiles answer the question "what kind of certificate is this?" while policies answer "is this certificate compliant?" A production TLS profile might allow only ECDSA P-256 with a 90-day max TTL, while a development profile might allow RSA-2048 with a 365-day TTL. Short-lived profiles (TTL under 1 hour) enable machine-to-machine authentication patterns where certificates are issued frequently and expire quickly — these are exempt from CRL/OCSP since expiry itself is sufficient revocation.
+
+Profiles are managed via the API (`/api/v1/profiles`) and the GUI, and can be assigned to certificates during creation or updated later.
+
 ### Interactive Renewal Approval
 
 For policies with `auto_renew` disabled, renewal jobs enter an **AwaitingApproval** state instead of processing immediately. An operator must explicitly approve or reject the renewal via the API or GUI. Approved jobs transition to Pending and are picked up by the scheduler. Rejected jobs are cancelled with an optional reason. This is useful for high-value certificates where you want human oversight before renewal.
+
+### Certificate Revocation
+
+When a private key is compromised, a certificate is superseded, or a service is decommissioned, you need to revoke the certificate immediately — not wait for it to expire. Revocation tells clients "stop trusting this certificate right now."
+
+certctl implements revocation using three complementary mechanisms:
+
+**Revocation API**: `POST /api/v1/certificates/{id}/revoke` marks a certificate as revoked in the inventory, records the revocation in a dedicated `certificate_revocations` table, notifies the issuing CA (best-effort — the revocation succeeds even if the CA is unreachable), creates an audit trail entry, and sends notifications. You can specify an RFC 5280 reason code (keyCompromise, superseded, cessationOfOperation, etc.) or let it default to "unspecified."
+
+**Certificate Revocation List (CRL)**: certctl serves both a JSON-formatted CRL at `GET /api/v1/crl` and DER-encoded X.509 CRLs per issuer at `GET /api/v1/crl/{issuer_id}`. The DER CRL is signed by the issuing CA's key and has 24-hour validity — clients can download it periodically to check revocation status offline.
+
+**OCSP Responder**: For real-time revocation checking, certctl includes an embedded OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}`. It returns signed OCSP responses (good, revoked, or unknown) so clients can verify certificate status without downloading the full CRL.
+
+Short-lived certificates (those assigned to profiles with TTL under 1 hour) are exempt from CRL and OCSP — their rapid expiry is considered sufficient revocation. This is a deliberate design choice to reduce infrastructure overhead for ephemeral machine-to-machine credentials.
+
+### Short-Lived Certificates
+
+Short-lived certificates are certificates with a TTL under 1 hour, typically used for service-to-service authentication in microservice architectures. Instead of revoking these certificates when something goes wrong, you simply stop issuing new ones — the existing certificates expire within minutes.
+
+certctl provides a dedicated dashboard view for short-lived credentials that shows active certificates with live TTL countdowns, auto-refreshes every 10 seconds, and filters by profile. This gives ops teams real-time visibility into ephemeral credential activity without cluttering the main certificate inventory.
+
+Short-lived certificates are defined by their profile — assign a certificate to a profile with `max_validity_days` that translates to under 1 hour, and certctl automatically treats it as short-lived: no CRL/OCSP entries, no revocation overhead, just rapid issuance and natural expiry.
 
 ### Policies
 
@@ -146,10 +176,28 @@ Every action is logged: who did it, what changed, when, and why. This is essenti
 
 ### Notifications
 
-certctl can alert you when certificates are expiring, when renewals fail, when deployments succeed, or when policy violations are detected. Notifications go out via email or webhooks, with Slack support planned.
+certctl can alert you when certificates are expiring, when renewals fail, when deployments succeed, or when policy violations are detected. Notifications are delivered via six channels: Email, Webhook, Slack, Microsoft Teams, PagerDuty, and OpsGenie. Each notifier is configured independently via environment variables and can be enabled or disabled as needed.
+
+### CLI
+
+certctl ships with a command-line tool (`certctl-cli`) for operators who prefer terminal workflows or need to integrate certctl into shell scripts and CI/CD pipelines. The CLI wraps the REST API with 10 subcommands: `list-certs`, `get-cert`, `renew-cert`, `revoke-cert`, `list-agents`, `list-jobs`, `health`, `metrics`, and `import` (for bulk PEM import).
+
+The CLI supports both table and JSON output formats (`--format table` or `--format json`), connects to the server via `CERTCTL_SERVER_URL` and authenticates with `CERTCTL_API_KEY`. It's built with Go's standard library only — no external dependencies.
+
+### MCP Server (AI Integration)
+
+certctl includes an MCP (Model Context Protocol) server that exposes all 76 API endpoints as MCP tools. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
+
+The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport and acts as a stateless HTTP proxy to the certctl REST API. It requires no additional infrastructure — just point it at your certctl server URL and API key.
+
+### Observability
+
+certctl exposes a JSON metrics endpoint at `GET /api/v1/metrics` with gauges (certificate totals by status, agent counts, pending jobs), counters (completed/failed jobs), and uptime. Five stats endpoints power the dashboard charts: summary statistics, certificates by status, expiration timeline, job trends, and issuance rate.
+
+The agent fleet overview page groups agents by OS, architecture, and version, showing distribution charts that help ops teams track fleet health and identify outdated agents. All API requests are logged via structured `slog` middleware with request IDs for correlation.
 
 ## What's Next
 
 Now that you understand the concepts, head to the [Quick Start Guide](quickstart.md) to get certctl running locally in under 5 minutes. You'll see a pre-loaded dashboard with demo certificates, explore the API, and understand how everything fits together.
 
-For a deeper look at the system design, see the [Architecture Guide](architecture.md).
+For a deeper look at the system design, see the [Architecture Guide](architecture.md). For terminal-based workflows, check out the CLI Guide (docs coming soon). For AI-native integration, see the MCP Server Guide (docs coming soon).

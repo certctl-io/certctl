@@ -33,7 +33,9 @@ flowchart LR
     B --> C[Create\nCertificate]
     C --> D[Trigger\nRenewal]
     D --> E[Trigger\nDeployment]
-    E --> F[Inspect Audit\n& Notifications]
+    E --> F[Revoke a\nCertificate]
+    F --> G[Check Stats\n& Metrics]
+    G --> H[Inspect Audit\n& Notifications]
 ```
 
 Each step corresponds to a real operation that certctl would perform in production. The difference here is that we're driving each step manually via curl instead of letting the scheduler and agents handle it automatically.
@@ -130,7 +132,7 @@ flowchart TD
     A --> E["Local CA\n(self-signed or sub-CA)"]
     A --> F["ACME\n(Let's Encrypt)"]
     A --> G["step-ca\n(implemented)"]
-    A --> H["OpenSSL / Custom CA\n(planned)"]
+    A --> H["OpenSSL / Custom CA\n(script-based)"]
     A --> J["DigiCert API\n(planned)"]
     A --> K["Vault PKI\n(planned)"]
     A --> L["Entrust / GlobalSign\n(planned)"]
@@ -447,6 +449,50 @@ curl -s -X POST $API/api/v1/certificates \
 
 ---
 
+## Part 8.5: Revoke a Certificate
+
+Let's revoke the payments gateway certificate — simulating a key compromise scenario:
+
+```bash
+curl -s -X POST $API/api/v1/certificates/mc-demo-payments/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "keyCompromise"}' | jq .
+```
+
+**How it works:** The `RevokeCertificateWithActor` service method executes a 7-step process:
+
+1. Validates the certificate is eligible (not already revoked, not archived)
+2. Retrieves the latest certificate version to get the serial number
+3. Updates the certificate status to "Revoked" with a timestamp and reason
+4. Records the revocation in the `certificate_revocations` table (idempotent via ON CONFLICT)
+5. Notifies the issuing CA (best-effort — revocation succeeds even if the CA is unreachable)
+6. Creates an audit trail entry
+7. Sends revocation notifications via configured channels
+
+Check the CRL (Certificate Revocation List):
+
+```bash
+# JSON-formatted CRL
+curl -s $API/api/v1/crl | jq .
+
+# DER-encoded X.509 CRL for the local CA (binary — pipe to openssl for inspection)
+curl -s $API/api/v1/crl/iss-local -o /tmp/crl.der
+openssl crl -inform DER -in /tmp/crl.der -text -noout
+```
+
+Check OCSP status:
+
+```bash
+# Replace SERIAL with the actual serial number from the certificate version
+curl -s $API/api/v1/ocsp/iss-local/SERIAL | jq .
+```
+
+**Why RFC 5280 reason codes:** The reason code isn't just metadata — it tells clients *why* the certificate was revoked. A `keyCompromise` revocation means the private key was exposed and the certificate should be distrusted immediately. A `superseded` revocation means a newer certificate replaced it — less urgent. CRLs and OCSP responses include the reason code so client software can make informed trust decisions.
+
+**Check the dashboard.** Click the payments certificate — you'll see a revocation banner with the reason code and timestamp.
+
+---
+
 ## Part 9: Policy Violations
 
 Let's see what happens when a certificate doesn't meet policy requirements. Check existing policy rules:
@@ -475,6 +521,36 @@ curl -s "$API/api/v1/policies/pr-max-certificate-lifetime/violations" | jq .
 **How it works:** This hits `GET /api/v1/policies/{id}/violations`, which queries `SELECT * FROM policy_violations WHERE rule_id = $1`. Each violation references the offending certificate and the rule it violated, creating a traceable link between the policy definition and the specific non-compliance.
 
 **In the dashboard**, click "Policies" in the sidebar to see all active rules and which certificates are violating them.
+
+---
+
+## Part 9.5: Dashboard Stats and Metrics
+
+certctl exposes operational metrics so you can monitor the health of your certificate infrastructure:
+
+```bash
+# Dashboard summary — total certs, expiring, expired, active
+curl -s $API/api/v1/stats/summary | jq .
+
+# Certificates grouped by status
+curl -s $API/api/v1/stats/certificates-by-status | jq .
+
+# Expiration timeline — how many certs expire in the next 90 days
+curl -s "$API/api/v1/stats/expiration-timeline?days=90" | jq .
+
+# Job trends — completed vs failed jobs over 30 days
+curl -s "$API/api/v1/stats/job-trends?days=30" | jq .
+
+# Issuance rate — new certificates per day over 30 days
+curl -s "$API/api/v1/stats/issuance-rate?days=30" | jq .
+
+# System metrics — gauges, counters, uptime
+curl -s $API/api/v1/metrics | jq .
+```
+
+**How it works:** The `StatsService` computes aggregations in Go from existing repository List methods — no additional SQL queries or materialized views. This keeps the database schema simple while providing real-time dashboard data. The metrics endpoint returns gauges (cert totals by status, agent counts, pending jobs), counters (completed/failed jobs), and server uptime.
+
+**In the dashboard**, these stats power four interactive charts: an expiration heatmap, renewal success rate trends, certificate status distribution, and issuance rate. The agent fleet overview page uses agent metadata to group by OS, architecture, and version.
 
 ---
 
@@ -615,7 +691,20 @@ echo -e "${YELLOW}Step 9: Recent audit events...${NC}"
 curl -s $API/api/v1/audit | jq '.data[0:3] | .[] | {action, resource_type, resource_id, timestamp}'
 echo ""
 
-# Step 10: Summary
+# Step 10: Revoke the certificate
+echo -e "${YELLOW}Step 10: Revoking certificate...${NC}"
+curl -s -X POST $API/api/v1/certificates/$CERT_ID/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "superseded"}' | jq .
+echo -e "${GREEN}Certificate revoked${NC}"
+echo ""
+
+# Step 11: Check stats
+echo -e "${YELLOW}Step 11: Dashboard summary...${NC}"
+curl -s $API/api/v1/stats/summary | jq .
+echo ""
+
+# Step 12: Summary
 echo -e "${BLUE}=== Demo Complete ===${NC}"
 echo ""
 echo "What happened:"
@@ -623,7 +712,9 @@ echo "  1. Created a team and owner for accountability"
 echo "  2. Created a managed certificate tracked by certctl"
 echo "  3. Triggered renewal (would contact the Local CA in production flow)"
 echo "  4. Triggered deployment (would push to NGINX/F5/IIS targets)"
-echo "  5. All actions recorded in the audit trail"
+echo "  5. Revoked the certificate with RFC 5280 reason codes"
+echo "  6. Checked dashboard stats and metrics"
+echo "  7. All actions recorded in the audit trail"
 echo ""
 echo -e "Open ${GREEN}http://localhost:8443${NC} to see everything in the dashboard."
 echo "Look for certificate: $CERT_ID"
@@ -645,10 +736,12 @@ If you're using this demo to present certctl to decision-makers, here's the narr
 1. **Start with the dashboard** — "This is your certificate inventory. Every TLS certificate across your infrastructure, in one place."
 2. **Point to expiring certs** — "These certificates would have caused outages. Certctl catches them automatically."
 3. **Show the cert you just created** — "I just created this via the API. It's already tracked, assigned to a team, and will be renewed automatically."
-4. **Show the audit trail** — "Complete traceability. Every action, every change, every deployment — timestamped and attributed."
-5. **Show policies** — "Guardrails. We enforce that every certificate has an owner, uses approved CAs, and stays within allowed environments."
-6. **Show agents** — "Private keys never touch the control plane. Agents handle cryptographic operations locally on your infrastructure."
-7. **Show the API** — "Everything is API-first. The dashboard is just one consumer. You can integrate with CI/CD, Terraform, or custom tooling."
+4. **Show revocation** — "If a key is compromised, one-click revocation with RFC 5280 reason codes. CRL and OCSP endpoints are served automatically."
+5. **Show the audit trail** — "Complete traceability. Every action, every change, every deployment — timestamped and attributed."
+6. **Show policies** — "Guardrails. We enforce that every certificate has an owner, uses approved CAs, and stays within allowed environments."
+7. **Show agents** — "Private keys never touch the control plane. Agents handle cryptographic operations locally on your infrastructure."
+8. **Show dashboard stats** — "Real-time metrics: expiration trends, job success rates, certificate distribution. Everything you need to operate with confidence."
+9. **Show the CLI and MCP server** — "Terminal users get a CLI tool. AI assistants get MCP integration. Everything is API-first."
 
 ## Teardown
 

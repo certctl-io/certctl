@@ -25,7 +25,7 @@ flowchart TB
         API["REST API\n(Go net/http, :8443)"]
         SVC["Service Layer"]
         REPO["Repository Layer\n(database/sql + lib/pq)"]
-        SCHED["Background Scheduler\n4 loops"]
+        SCHED["Background Scheduler\n5 loops"]
         DASH["Web Dashboard\n(React SPA)"]
     end
 
@@ -92,7 +92,7 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
 
-**Current views (17 pages)**: certificate inventory (list with multi-select bulk operations + "New Certificate" creation modal + detail with deployment status timeline, inline policy/profile editor, version history, deploy, revoke, archive, and trigger renewal actions), agent fleet (list + detail with system info), job queue (status, retry, cancel, approve/reject), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range, actor, action filters + CSV/JSON export), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with 3-step configuration wizard + delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), short-lived credentials dashboard (TTL countdown, profile filtering, auto-refresh), summary dashboard, and login page.
+**Current views (19 pages)**: certificate inventory (list with multi-select bulk operations + "New Certificate" creation modal + detail with deployment status timeline, inline policy/profile editor, version history, deploy, revoke, archive, and trigger renewal actions), agent fleet (list + detail with system info + OS/architecture grouping with charts), job queue (status, retry, cancel, approve/reject), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range, actor, action filters + CSV/JSON export), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with 3-step configuration wizard + delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), short-lived credentials dashboard (TTL countdown, profile filtering, auto-refresh), summary dashboard with charts (expiration heatmap, renewal success rate, status distribution, issuance rate), and login page.
 
 The dashboard includes an **ErrorBoundary component** for graceful error recovery — if a view crashes, the boundary catches the error and displays a user-friendly message instead of breaking the entire dashboard. It also includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
@@ -342,7 +342,7 @@ The agent handles both the certificate (public) and the private key (read from l
 
 ### 4. Automatic Renewal
 
-The control plane runs a scheduler with four background loops:
+The control plane runs a scheduler with five background loops:
 
 ```mermaid
 flowchart LR
@@ -351,12 +351,14 @@ flowchart LR
         J["Job Processor\n⏱ every 30s"]
         H["Agent Health\n⏱ every 2m"]
         N["Notification Processor\n⏱ every 1m"]
+        SL["Short-Lived Expiry\n⏱ every 30s"]
     end
 
     R -->|"Find expiring certs\nCreate renewal jobs"| DB[("PostgreSQL")]
     J -->|"Process pending jobs\nCoordinate issuance"| DB
     H -->|"Check heartbeat staleness\nMark agents offline"| DB
-    N -->|"Send pending notifications\nEmail / Webhook"| DB
+    N -->|"Send pending notifications\nEmail / Webhook / Slack"| DB
+    SL -->|"Expire short-lived certs\nMark as Expired"| DB
 ```
 
 | Loop | Interval | Timeout | Purpose |
@@ -365,6 +367,7 @@ flowchart LR
 | Job processor | 30 seconds | 2 minutes | Processes pending jobs (issuance, renewal, deployment) |
 | Agent health check | 2 minutes | 1 minute | Marks agents as offline if heartbeat is stale |
 | Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
+| Short-lived expiry | 30 seconds | 30 seconds | Marks expired short-lived certificates (profile TTL < 1 hour) |
 
 Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
@@ -478,7 +481,7 @@ type Connector interface {
 }
 ```
 
-Built-in notifiers: **Email** (SMTP) and **Webhook** (HTTP POST).
+Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2). Each is enabled by setting its configuration environment variable.
 
 See the [Connector Development Guide](connectors.md) for details on building custom connectors.
 
@@ -547,6 +550,12 @@ Every action is recorded as an immutable audit event:
 
 Audit events cannot be modified or deleted. They support filtering by actor, action, resource type, resource ID, and time range. All audit operations are logged via structured `slog` logging; if an audit event fails to persist, the error is logged immediately to ensure no gaps in the audit trail go unnoticed.
 
+### API Audit Log
+
+In addition to application-level audit events, certctl records every HTTP API call via middleware. The audit middleware captures method, path, actor (extracted from auth context), SHA-256 request body hash (truncated to 16 characters), response status code, and request latency. Health and readiness probes are excluded to avoid noise.
+
+Audit recording is async (via goroutine) so it never blocks the HTTP response. If audit persistence fails, the error is logged immediately — the API call still succeeds. The middleware sits after the auth middleware in the stack so the actor identity is available from context.
+
 ### Logging
 
 All logging throughout the service layer uses Go's `log/slog` package for structured, queryable logs. This replaces ad-hoc `fmt.Printf` statements with consistent key-value logging that includes request context, operation names, and error details. Agents also implement exponential backoff on network failures to gracefully handle temporary connectivity issues with the control plane.
@@ -569,6 +578,31 @@ Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST
 Certificate revocation: `POST /api/v1/certificates/{id}/revoke` with optional `{"reason": "keyCompromise"}`. Supports RFC 5280 reason codes (unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn). Returns the updated certificate status. Best-effort issuer notification — the revocation succeeds even if the issuer connector is unavailable. A JSON-formatted CRL is available at `GET /api/v1/crl`, and a DER-encoded X.509 CRL signed by the issuing CA at `GET /api/v1/crl/{issuer_id}`. An embedded OCSP responder serves signed responses at `GET /api/v1/ocsp/{issuer_id}/{serial}`. Short-lived certificates (profile TTL < 1 hour) are exempt from CRL/OCSP — expiry is sufficient revocation.
 
 Health checks live outside the API prefix: `GET /health` and `GET /ready`.
+
+## MCP Server
+
+certctl includes an MCP (Model Context Protocol) server as a separate binary (`cmd/mcp-server/`) that enables AI assistants to interact with the certificate platform. The MCP server uses the official MCP Go SDK (`modelcontextprotocol/go-sdk`) with stdio transport for integration with Claude, Cursor, and other MCP-compatible tools.
+
+```mermaid
+flowchart LR
+    AI["AI Assistant\n(Claude, Cursor)"] -->|"stdio"| MCP["MCP Server\ncmd/mcp-server/"]
+    MCP -->|"HTTP + Bearer token"| API["certctl REST API\n:8443"]
+
+    subgraph "76 MCP Tools"
+        T1["Certificate CRUD"]
+        T2["Agent Management"]
+        T3["Job Operations"]
+        T4["Policy/Profile Queries"]
+        T5["Audit Trail Access"]
+        T6["Stats & Metrics"]
+    end
+
+    MCP --> T1 & T2 & T3 & T4 & T5 & T6
+```
+
+The MCP server is a stateless HTTP proxy — every MCP tool call translates to an HTTP request to the certctl REST API. It adds no new state, no new dependencies, and no new attack surface beyond what the API already exposes. Configuration is minimal: `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables.
+
+The 76 tools are organized across 16 resource domains with typed input structs and `jsonschema` struct tags for automatic LLM-friendly schema generation. Binary response support handles DER CRL and OCSP endpoints.
 
 ## Deployment Topologies
 
@@ -620,7 +654,7 @@ For production, you would also add an ingress controller, TLS termination for th
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 630+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 860+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
 **Service layer unit tests** (`internal/service/*_test.go`) — ~238 test functions across 15 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, certificate revocation (success, already-revoked, archived, invalid reason, all RFC 5280 reason codes, issuer notification, notification service integration, OCSP/CRL generation), agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), notification deduplication (threshold tag matching, channel routing), team/owner/agent group CRUD with pagination and audit recording, issuer service CRUD with connection testing, and the issuer connector adapter (type translation between connector and service layers including revocation). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 
@@ -628,7 +662,9 @@ certctl uses a layered testing approach aligned with the handler → service →
 
 **Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 14 subtests covering error paths, 19 M11b endpoint tests, and 8 revocation endpoint tests (M15a+M15b): nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, expired certificate lifecycle, team/owner/agent group CRUD validation, revocation success, already-revoked rejection, not-found revocation, JSON CRL retrieval, DER CRL retrieval, OCSP response retrieval, and short-lived cert exemption. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
 
-**Frontend tests** (`web/src/api/client.test.ts`, `web/src/api/utils.test.ts`) — 53 Vitest tests covering the API client and utility functions. The API client tests mock `globalThis.fetch` and verify all endpoint functions (certificates, agents, jobs, policies, issuers, targets, notifications, audit, health) send correct HTTP methods, URLs, headers, and request bodies. They also test API key management (store/retrieve/clear), auth header propagation, 401 event dispatching, and error handling (server messages, error fields, status text fallback). The utility tests use `vi.useFakeTimers()` for deterministic date testing and cover `formatDate`, `formatDateTime`, `timeAgo`, `daysUntil`, and `expiryColor`. The test environment uses jsdom with `@testing-library/jest-dom` matchers.
+**Frontend tests** (`web/src/api/client.test.ts`, `web/src/api/utils.test.ts`) — 86 Vitest tests covering the API client, stats/metrics endpoints, and utility functions. The API client tests mock `globalThis.fetch` and verify all endpoint functions (certificates, agents, jobs, policies, issuers, targets, notifications, audit, stats, metrics, health) send correct HTTP methods, URLs, headers, and request bodies. They also test API key management (store/retrieve/clear), auth header propagation, 401 event dispatching, and error handling (server messages, error fields, status text fallback). The stats/metrics endpoint tests verify correct query parameter handling and response shape validation. The utility tests use `vi.useFakeTimers()` for deterministic date testing and cover `formatDate`, `formatDateTime`, `timeAgo`, `daysUntil`, and `expiryColor`. The test environment uses jsdom with `@testing-library/jest-dom` matchers.
+
+**CLI tests** (`internal/cli/client_test.go`) — 14 tests covering all 10 CLI subcommands with httptest mock servers, PEM parsing for bulk import, auth header verification, and JSON/table output formatting.
 
 **CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vitest test suite, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~35%) and handler layer must be at least 50% (current: ~63%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/...` and `./internal/connector/target/...` (covers Local CA, ACME, step-ca, NGINX, Apache, and HAProxy packages with unit tests for certificate signing logic, DNS solver, issuer validation, and deployment flows). The Frontend job runs `npx vitest run` between the TypeScript check and production build steps.
 
