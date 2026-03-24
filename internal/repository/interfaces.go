@@ -205,6 +205,39 @@ type AgentGroupRepository interface {
 	RemoveMember(ctx context.Context, groupID, agentID string) error
 }
 
+// DiscoveryRepository defines operations for managing certificate discovery.
+type DiscoveryRepository interface {
+	// CreateScan stores a new discovery scan record.
+	CreateScan(ctx context.Context, scan *domain.DiscoveryScan) error
+	// GetScan retrieves a discovery scan by ID.
+	GetScan(ctx context.Context, id string) (*domain.DiscoveryScan, error)
+	// ListScans returns discovery scans, optionally filtered by agent ID.
+	ListScans(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error)
+	// CreateDiscovered stores a new discovered certificate (upserts by fingerprint+agent+path).
+	// Returns true if the certificate was newly inserted (not just updated).
+	CreateDiscovered(ctx context.Context, cert *domain.DiscoveredCertificate) (bool, error)
+	// GetDiscovered retrieves a discovered certificate by ID.
+	GetDiscovered(ctx context.Context, id string) (*domain.DiscoveredCertificate, error)
+	// ListDiscovered returns discovered certificates matching the filter.
+	ListDiscovered(ctx context.Context, filter *DiscoveryFilter) ([]*domain.DiscoveredCertificate, int, error)
+	// UpdateDiscoveredStatus updates the status and optional managed certificate link.
+	UpdateDiscoveredStatus(ctx context.Context, id string, status domain.DiscoveryStatus, managedCertID string) error
+	// GetByFingerprint retrieves discovered certificates by SHA-256 fingerprint.
+	GetByFingerprint(ctx context.Context, fingerprint string) ([]*domain.DiscoveredCertificate, error)
+	// CountByStatus returns counts of discovered certificates grouped by status.
+	CountByStatus(ctx context.Context) (map[string]int, error)
+}
+
+// DiscoveryFilter defines filters for listing discovered certificates.
+type DiscoveryFilter struct {
+	AgentID   string
+	Status    string
+	IsExpired bool
+	IsCA      bool
+	Page      int
+	PerPage   int
+}
+
 // OwnerRepository defines operations for managing certificate owners.
 type OwnerRepository interface {
 	// List returns all owners.

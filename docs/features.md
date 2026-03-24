@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **77 endpoints** across 16 resource domains under `/api/v1/`
+- **84 endpoints** across 17 resource domains under `/api/v1/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -54,6 +54,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 | **Teams** | 5 | List, create, get, update, delete |
 | **Owners** | 5 | List, create, get, update, delete |
 | **Agent Groups** | 6 | List, create, get, update, delete, list agents in group |
+| **Discovery** | 7 | Submit scan results, list discovered certs, get detail, claim, dismiss, list scans, summary stats |
 | **Audit** | 3 | List events, list by resource, export (CSV/JSON) |
 | **Notifications** | 3 | List, get, mark as read |
 | **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
@@ -343,6 +344,70 @@ Agents report to `/api/v1/agents/{id}/work` with supported target types and issu
 - **Charts** — Status distribution (pie), version breakdown (bar)
 - **Per-Platform Listing** — Expandable agent list under each OS/Arch combo
 - **Health Indicators** — Online/offline status, last heartbeat, uptime
+
+---
+
+## Certificate Discovery (M18b)
+
+### Overview
+Agents automatically discover existing certificates in the infrastructure — on filesystem, in key stores, or elsewhere — report findings to the control plane, and operators triage them for enrollment.
+
+### Agent-Side Discovery
+- **Configuration** — `CERTCTL_DISCOVERY_DIRS` env var (comma-separated list) or `--discovery-dirs` CLI flag
+- **Scan Execution** — Runs on agent startup and every 6 hours in background
+- **Supported Formats** — PEM (.pem, .crt, .cer, .cert) and DER (.der) files
+- **Recursive Walk** — Scans directory trees to find all certificates
+- **File Filtering** — Skips files > 1MB and obvious key files
+
+### Certificate Extraction
+Each discovered certificate is parsed and its metadata extracted:
+
+| Field | Source | Example |
+|-------|--------|---------|
+| **Common Name** | X.509 Subject CN | api.example.com |
+| **SANs** | X.509 SubjectAltNames | api.example.com, *.api.example.com |
+| **Serial** | Certificate serial number | 0x123abc... |
+| **Issuer DN** | X.509 Issuer | CN=Internal CA, O=Acme Inc |
+| **Subject DN** | X.509 Subject | CN=api.example.com, O=Acme Inc |
+| **Not Before** | Validity start | 2024-01-15T00:00:00Z |
+| **Not After** | Validity end | 2026-01-15T00:00:00Z |
+| **Key Algorithm** | Key type | RSA, ECDSA, Ed25519 |
+| **Key Size** | Bits | 2048, 256, 4096 |
+| **Is CA** | CA flag in extensions | true/false |
+| **Fingerprint** | SHA-256 hash (dedup key) | a1b2c3d4e5f6... |
+
+### Server-Side Processing
+- **Deduplication** — Uses fingerprint + agent ID + path as unique key; prevents duplicates
+- **Status Tracking** — Three statuses: **Unmanaged** (discovered, not yet claimed), **Managed** (linked to control plane cert), **Dismissed** (operator decided not to manage)
+- **Audit Trail** — `discovery_scan_completed`, `discovery_cert_claimed`, `discovery_cert_dismissed` events logged with actor and reason
+- **Storage** — `discovered_certificates` and `discovery_scans` tables in PostgreSQL
+
+### Triage Workflow
+1. Agent submits scan results via `POST /api/v1/agents/{id}/discoveries`
+2. Server deduplicates and stores discovery records
+3. Operator views `GET /api/v1/discovered-certificates?status=Unmanaged`
+4. For each unmanaged cert:
+   - **Claim it** — `POST /api/v1/discovered-certificates/{id}/claim` links to managed cert or creates new enrollment
+   - **Dismiss it** — `POST /api/v1/discovered-certificates/{id}/dismiss` removes from triage queue
+5. Tracking enables visibility into what's deployed vs. what's managed
+
+### Discovery API Endpoints (M18b)
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/agents/{id}/discoveries` | POST | Agent submits scan results |
+| `/api/v1/discovered-certificates` | GET | List discovered certs (with ?agent_id, ?status filters) |
+| `/api/v1/discovered-certificates/{id}` | GET | Get single discovered cert detail |
+| `/api/v1/discovered-certificates/{id}/claim` | POST | Link to managed cert or create enrollment |
+| `/api/v1/discovered-certificates/{id}/dismiss` | POST | Dismiss from triage |
+| `/api/v1/discovery-scans` | GET | List scan history with timestamps |
+| `/api/v1/discovery-summary` | GET | Aggregate status counts (Unmanaged, Managed, Dismissed) |
+
+### Use Cases
+- **Inventory Baseline** — Scan production servers at deployment time to establish baseline of existing certificates
+- **Compliance Discovery** — Find all TLS certs before renewing certificate policies
+- **Migration Planning** — Discover unmanaged certs to plan migration from other CA/platforms
+- **Audit Preparation** — Triage discovered certs into managed and dismissed for compliance reports
+- **Multi-CA Migration** — Find all certs currently issued by old CA, claim them for renewal under new issuer
 
 ---
 
@@ -840,7 +905,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 | Category | Count |
 |----------|-------|
-| **API Endpoints** | 77 (under /api/v1/) |
+| **API Endpoints** | 84 (under /api/v1/) |
 | **Dashboard Pages** | 19 |
 | **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
 | **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |
@@ -850,9 +915,10 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | **Policy Rule Types** | 5 (AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime) |
 | **Certificate States** | 8 (Pending, Active, Expiring, Expired, RenewalInProgress, Failed, Revoked, Archived) |
 | **Revocation Reason Codes** | 8 (RFC 5280 compliant) |
-| **MCP Tools** | 76 (16 resource domains) |
+| **Discovery Statuses** | 3 (Unmanaged, Managed, Dismissed) |
+| **MCP Tools** | 83 (17 resource domains) |
 | **CLI Subcommands** | 10 |
-| **Database Tables** | 18+ |
-| **Test Suite** | 860+ tests |
-| **Environment Variables** | 40+ configuration options |
+| **Database Tables** | 20+ |
+| **Test Suite** | 881+ tests |
+| **Environment Variables** | 41+ configuration options |
 

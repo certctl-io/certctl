@@ -60,6 +60,7 @@ func (r *Router) RegisterHandlers(
 	stats handler.StatsHandler,
 	metrics handler.MetricsHandler,
 	health handler.HealthHandler,
+	discovery handler.DiscoveryHandler,
 ) {
 	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
@@ -187,6 +188,15 @@ func (r *Router) RegisterHandlers(
 
 	// Metrics routes: /api/v1/metrics
 	r.Register("GET /api/v1/metrics", http.HandlerFunc(metrics.GetMetrics))
+
+	// Discovery routes: /api/v1/discovered-certificates, /api/v1/discovery-scans
+	r.Register("POST /api/v1/agents/{id}/discoveries", http.HandlerFunc(discovery.SubmitDiscoveryReport))
+	r.Register("GET /api/v1/discovered-certificates", http.HandlerFunc(discovery.ListDiscovered))
+	r.Register("GET /api/v1/discovered-certificates/{id}", http.HandlerFunc(discovery.GetDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/claim", http.HandlerFunc(discovery.ClaimDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", http.HandlerFunc(discovery.DismissDiscovered))
+	r.Register("GET /api/v1/discovery-scans", http.HandlerFunc(discovery.ListScans))
+	r.Register("GET /api/v1/discovery-summary", http.HandlerFunc(discovery.GetDiscoverySummary))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

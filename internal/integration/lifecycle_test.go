@@ -79,6 +79,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	statsHandler := handler.NewStatsHandler(&mockStatsService{})
 	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
+	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 
 	// Create router and register handlers
 	r := router.New()
@@ -98,6 +99,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		statsHandler,
 		metricsHandler,
 		healthHandler,
+		discoveryHandler,
 	)
 
 	// Create test server
@@ -1136,4 +1138,39 @@ func (m *mockStatsService) GetJobStats(ctx context.Context, days int) (interface
 
 func (m *mockStatsService) GetIssuanceRate(ctx context.Context, days int) (interface{}, error) {
 	return []interface{}{}, nil
+}
+
+// mockDiscoveryService implements handler.DiscoveryService for integration tests.
+type mockDiscoveryService struct{}
+
+func (m *mockDiscoveryService) ProcessDiscoveryReport(ctx context.Context, report *domain.DiscoveryReport) (*domain.DiscoveryScan, error) {
+	return &domain.DiscoveryScan{ID: "dscan-test"}, nil
+}
+
+func (m *mockDiscoveryService) ListDiscovered(ctx context.Context, agentID, status string, page, perPage int) ([]*domain.DiscoveredCertificate, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockDiscoveryService) GetDiscovered(ctx context.Context, id string) (*domain.DiscoveredCertificate, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string) error {
+	return nil
+}
+
+func (m *mockDiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockDiscoveryService) ListScans(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockDiscoveryService) GetScan(ctx context.Context, id string) (*domain.DiscoveryScan, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockDiscoveryService) GetDiscoverySummary(ctx context.Context) (map[string]int, error) {
+	return map[string]int{}, nil
 }

@@ -69,6 +69,9 @@ On the Certificates page, select multiple certificates using the checkboxes. A b
 **10. "How do I see the deployment history?"**
 Click any certificate, then scroll to the deployment timeline. A visual 4-step timeline shows the lifecycle: Requested → Issued → Deploying → Active. Previous versions show a rollback button.
 
+**11. "What about certificates already running in production?"**
+Enable discovery on agents by setting `CERTCTL_DISCOVERY_DIRS` to directories containing certificates (e.g., `/etc/nginx/certs`). Agents scan on startup and every 6 hours, report findings to the control plane. Click "Discovered Certificates" to see what agents found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
+
 ## API Walkthrough
 
 The dashboard is backed by a real REST API. Try these while the demo is running:
@@ -111,6 +114,12 @@ curl -s http://localhost:8443/api/v1/agent-groups | jq .
 curl -s -X POST http://localhost:8443/api/v1/certificates/mc-api-prod/revoke \
   -H "Content-Type: application/json" \
   -d '{"reason": "superseded"}' | jq .
+
+# List discovered certificates
+curl -s http://localhost:8443/api/v1/discovered-certificates | jq .
+
+# Discovery summary (counts by status)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
 ```
 
 ## Demo Without Docker
@@ -147,7 +156,8 @@ If you're demoing to a team or customer, here's a suggested flow:
 7. **Show profiles** — "Certificate profiles enforce crypto constraints — key types, max TTL, compliance requirements"
 8. **Show policies** — "Guardrails prevent teams from going outside approved scope"
 9. **Show bulk operations** — "Select multiple certs, trigger renewal or revoke in bulk with progress tracking"
-10. **Show the API** — "Everything you see here is API-first. We also have a CLI tool and an MCP server for AI assistant integration"
+10. **Show certificate discovery** — "Agents scan your infrastructure for existing certificates you're not managing yet. We automatically deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
+11. **Show the API** — "Everything you see here is API-first. We also have a CLI tool and an MCP server for AI assistant integration"
 
 The whole walkthrough takes 5-10 minutes.
 

@@ -581,6 +581,64 @@ docker rm -f nginx
 6. **Idempotent operations** — Deploying the same certificate twice should succeed, not fail
 7. **Report metadata** — Return deployment duration, target address, and other useful data in results
 
+## Agent Discovery Scanner
+
+Agents include a built-in certificate discovery scanner that walks configured directories and reports unmanaged certificates to the control plane. This is useful for discovering existing certificates already deployed in your infrastructure, so you can bring them under certctl's management.
+
+### Configuration
+
+Enable discovery on an agent by setting `CERTCTL_DISCOVERY_DIRS` to a comma-separated list of directories:
+
+```bash
+export CERTCTL_DISCOVERY_DIRS="/etc/nginx/certs,/etc/ssl/certs,/etc/apache2/ssl"
+```
+
+Or via command-line flag:
+
+```bash
+./agent --agent-id agent-nginx-01 --discovery-dirs "/etc/nginx/certs,/etc/ssl/certs"
+```
+
+The agent scans these directories on startup and every 6 hours, looking for certificate files in PEM or DER format (extensions: `.pem`, `.crt`, `.cer`, `.cert`, `.der`).
+
+### How It Works
+
+1. **Scan**: Agent recursively walks directories, extracts certificates
+2. **Deduplicate**: Control plane deduplicates by SHA-256 fingerprint (same cert in multiple locations is one discovery)
+3. **Store**: Discovered certificates stored with metadata (agent ID, file path, found date, fingerprint)
+4. **Triage**: Operators query discovered certs via API, claim to link to managed certificates, or dismiss false positives
+
+### API Endpoints
+
+```bash
+# List discovered certificates (filter by agent, status)
+curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-01&status=new" | jq .
+
+# Get discovery detail
+curl -s http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID | jq .
+
+# Claim a discovered cert (link to managed certificate)
+curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim \
+  -H "Content-Type: application/json" \
+  -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
+
+# Dismiss a discovery
+curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/dismiss | jq .
+
+# View discovery scan history
+curl -s http://localhost:8443/api/v1/discovery-scans | jq .
+
+# Summary counts (new, claimed, dismissed)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+```
+
+### Use Cases
+
+- **Inventory audit** — Find all TLS certificates running in your infrastructure
+- **Migration** — Onboard existing certificates that were issued outside certctl
+- **Compliance** — Detect rogue/unauthorized certificates in monitored directories
+- **Integration** — Pull certificate data from systems that pre-generate certs (e.g., Kubernetes CertManager)
+
 ## What's Next
 
 - [Architecture Guide](architecture.md) — Understanding the full system design

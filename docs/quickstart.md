@@ -338,6 +338,32 @@ docker compose -f deploy/docker-compose.yml down -v
 
 The `-v` flag removes the PostgreSQL data volume so you get a clean slate next time.
 
+### Certificate Discovery
+
+Agents can scan your infrastructure for existing certificates you're not yet managing:
+
+```bash
+# Configure agent to scan directories
+export CERTCTL_DISCOVERY_DIRS="/etc/nginx/certs,/etc/ssl/certs,/var/lib/certs"
+
+# Agent scans on startup + every 6 hours, reports findings to control plane
+```
+
+Query discovered certificates:
+
+```bash
+# List all discovered certs from a specific agent
+curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-prod" | jq .
+
+# Get discovery summary (counts by status)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+
+# Claim a discovered cert (link to managed cert)
+curl -s -X POST "http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim" \
+  -H "Content-Type: application/json" \
+  -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
+```
+
 ## What's Next
 
 - **[Advanced Demo](demo-advanced.md)** — Issue a real certificate via the Local CA and watch it appear in the dashboard

@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (77 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (84 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates in your infrastructure, and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -213,6 +213,7 @@ Agent environment variables:
 | `CERTCTL_AGENT_NAME` | `certctl-agent` | Agent display name |
 | `CERTCTL_AGENT_ID` | — | Registered agent ID (required) |
 | `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Directory for storing private keys (agent keygen mode) |
+| `CERTCTL_DISCOVERY_DIRS` | — | Comma-separated directories to scan for existing certificates (e.g., `/etc/nginx/certs,/etc/ssl/certs`) |
 
 Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
@@ -247,7 +248,7 @@ mcp-server
 }
 ```
 
-76 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
+83 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), discoveries (7), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
 
 ## CLI
 
@@ -307,6 +308,17 @@ POST   /api/v1/agents/{id}/csr            Submit CSR for issuance
 GET    /api/v1/agents/{id}/certificates/{certId}  Retrieve signed certificate
 GET    /api/v1/agents/{id}/work            Poll for pending deployment jobs
 POST   /api/v1/agents/{id}/jobs/{jobId}/status  Report job completion/failure
+POST   /api/v1/agents/{id}/discoveries    Submit certificate discovery scan results
+```
+
+### Certificate Discovery
+```
+GET    /api/v1/discovered-certificates    List discovered certificates (?agent_id, ?status)
+GET    /api/v1/discovered-certificates/{id}  Get discovery detail
+POST   /api/v1/discovered-certificates/{id}/claim  Link discovered cert to managed cert
+POST   /api/v1/discovered-certificates/{id}/dismiss  Dismiss discovery
+GET    /api/v1/discovery-scans            List discovery scan history
+GET    /api/v1/discovery-summary          Aggregated discovery status (new, claimed, dismissed counts)
 ```
 
 ### Infrastructure
@@ -495,7 +507,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)
 - **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
 - **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
-- **M18b: Filesystem Cert Discovery** — agents walk directories, parse PEM/DER/PFX/JKS, report unmanaged certs to control plane
+- **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
 ### V3: Team & Enterprise

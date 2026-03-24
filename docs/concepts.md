@@ -190,6 +190,19 @@ certctl includes an MCP (Model Context Protocol) server that exposes all 76 API 
 
 The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport and acts as a stateless HTTP proxy to the certctl REST API. It requires no additional infrastructure — just point it at your certctl server URL and API key.
 
+### Certificate Discovery
+
+Certificate discovery is the process of automatically finding existing certificates in your infrastructure — certificates you didn't issue through certctl, possibly issued by other CAs or tools. This is essential for building a complete inventory before you can manage everything.
+
+**How it works:** Agents can scan configured directories (configured via `CERTCTL_DISCOVERY_DIRS`) for certificate files. On startup and every 6 hours, the agent walks these directories recursively, parses PEM and DER files, extracts metadata (common name, SANs, expiration, issuer, key algorithm), and reports all findings to the control plane. The server deduplicates by fingerprint (prevents duplicate reports of the same cert) and stores them with a status: **Unmanaged** (discovered but not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage it).
+
+This gives you a three-step triage workflow:
+1. **Discover** — Agents find all existing certs on your infrastructure
+2. **Triage** — Operators review discoveries and decide: claim it (enroll for management), or dismiss it (not worth managing)
+3. **Baseline** — Once triaged, you have a complete baseline of what's deployed, what you're managing, and what's unmanaged
+
+This is a prerequisite for multi-CA migration, compliance audits, and building confidence that you've found all the certificates that matter.
+
 ### Observability
 
 certctl exposes a JSON metrics endpoint at `GET /api/v1/metrics` with gauges (certificate totals by status, agent counts, pending jobs), counters (completed/failed jobs), and uptime. Five stats endpoints power the dashboard charts: summary statistics, certificates by status, expiration timeline, job trends, and issuance rate.

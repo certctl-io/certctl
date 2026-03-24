@@ -675,6 +675,57 @@ curl -s "$API/api/v1/certificates/mc-demo-api/deployments" | jq .
 
 ---
 
+## Part 14: Certificate Discovery (M18b)
+
+Agents can automatically discover existing certificates already deployed in your infrastructure. This is useful for building a baseline inventory before you start managing everything with certctl.
+
+First, configure the demo agent to scan for certificates. In the Docker Compose setup, agents have a `/tmp/certs` directory (created by the seed script). Restart the agent with discovery enabled:
+
+```bash
+# Stop the existing agent
+docker compose -f deploy/docker-compose.yml stop agent
+
+# Restart with discovery enabled (scans /tmp/certs every 6 hours, or on startup)
+docker compose -f deploy/docker-compose.yml run -e CERTCTL_DISCOVERY_DIRS=/tmp/certs agent certctl-agent
+```
+
+Or with the CLI flag:
+
+```bash
+certctl-agent --agent-id a-demo-1 --key-dir /tmp/keys --discovery-dirs /tmp/certs --server http://localhost:8443 --api-key test-key-123
+```
+
+Now check what the agent discovered:
+
+```bash
+# List discovered certificates (should show unmanaged certs found on the agent)
+curl -s "$API/api/v1/discovered-certificates?status=Unmanaged" | jq '.data[] | {id, common_name, expires_at, issuer_dn, status}'
+
+# Get a summary of all discoveries
+curl -s $API/api/v1/discovery-summary | jq .
+```
+
+If the agent found certificates, you'll see entries with `status: "Unmanaged"`. Now triage them — claim the ones you want to manage or dismiss the ones you don't:
+
+```bash
+# Claim a certificate (link it to a managed cert, or create new enrollment)
+DISCOVERED_ID=$(curl -s "$API/api/v1/discovered-certificates?status=Unmanaged" | jq -r '.data[0].id')
+curl -s -X POST "$API/api/v1/discovered-certificates/$DISCOVERED_ID/claim" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Migrating from external CA to certctl"}' | jq .
+
+# Or dismiss a certificate
+curl -s -X POST "$API/api/v1/discovered-certificates/$DISCOVERED_ID/dismiss" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Self-signed test cert, not production"}' | jq .
+```
+
+**How it works:** The agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, extracts metadata (common name, SANs, issuer, expiration, key type, fingerprint) from all PEM and DER files, and POSTs the findings to `POST /api/v1/agents/{id}/discoveries`. The server deduplicates by fingerprint (prevents duplicate records) and stores results with a status: **Unmanaged** (discovered, not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage). This gives you a triage workflow: discover → review → claim or dismiss.
+
+**In the dashboard**, the Discovery page (coming in future V2.x) will provide a visual triage interface for claiming and dismissing discovered certificates.
+
+---
+
 ## End-to-End Architecture Summary
 
 Here's what we just walked through, mapped to the system architecture:

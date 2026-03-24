@@ -205,6 +205,8 @@ func main() {
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
 	agentGroupRepo := postgres.NewAgentGroupRepository(db)
 	agentGroupService := service.NewAgentGroupService(agentGroupRepo, auditService)
+	discoveryRepo := postgres.NewDiscoveryRepository(db)
+	discoveryService := service.NewDiscoveryService(discoveryRepo, certificateRepo, auditService)
 	logger.Info("initialized all services")
 
 	// Initialize stats and metrics services
@@ -227,6 +229,7 @@ func main() {
 	statsHandler := handler.NewStatsHandler(statsService)
 	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
+	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -272,6 +275,7 @@ func main() {
 		statsHandler,
 		metricsHandler,
 		healthHandler,
+		discoveryHandler,
 	)
 	logger.Info("registered all API handlers")
 

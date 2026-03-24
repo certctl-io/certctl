@@ -703,6 +703,61 @@ flowchart TB
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
 
+## Discovery Data Flow (M18b)
+
+Certificate discovery enables operators to build a complete inventory of existing certificates before managing them with certctl. Here's how data flows through the system:
+
+```mermaid
+flowchart TB
+    AGENT["certctl-agent\n(on infrastructure)"]
+    SCAN["Filesystem Scanner\n(CERTCTL_DISCOVERY_DIRS)"]
+    EXTRACT["Extract Metadata\n(CN, SANs, serial, issuer, expiry, fingerprint)"]
+    REPORT["POST /api/v1/agents/{id}/discoveries\n(submit scan results)"]
+    HANDLER["Discovery Handler\n(parse request)"]
+    SERVICE["Discovery Service\n(ProcessDiscoveryReport)"]
+    REPO["Discovery Repository\n(upsert with fingerprint dedup)"]
+    DB["PostgreSQL\ndiscovered_certificates\ndiscovery_scans tables"]
+    AUDIT["Audit Service\n(RecordDiscoveryScanCompleted)"]
+    API_LIST["GET /api/v1/discovered-certificates\n(list for triage)"]
+    API_CLAIM["POST /discovered-certificates/{id}/claim\n(operator claims cert)"]
+    API_DISMISS["POST /discovered-certificates/{id}/dismiss\n(operator dismisses)"]
+    UPDATE_STATUS["Update Status\n(Unmanaged → Managed/Dismissed)"]
+
+    AGENT -->|"Scan loop\n(startup + 6h)"| SCAN
+    SCAN --> EXTRACT
+    EXTRACT --> REPORT
+    REPORT --> HANDLER
+    HANDLER --> SERVICE
+    SERVICE --> REPO
+    REPO -->|"Dedup by fingerprint\n+ agent + path"| DB
+    SERVICE --> AUDIT
+    AUDIT -->|"discovery_scan_completed"| DB
+    DB -->|"query unmanaged"| API_LIST
+    API_LIST -->|"operator reviews"| API_CLAIM
+    API_LIST -->|"operator reviews"| API_DISMISS
+    API_CLAIM --> UPDATE_STATUS
+    API_DISMISS --> UPDATE_STATUS
+    UPDATE_STATUS -->|"RecordDiscoveryCertClaimed\nRecordDiscoveryCertDismissed"| AUDIT
+    AUDIT --> DB
+```
+
+**Key steps:**
+
+1. **Agent-side discovery** — Agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, walking directories recursively and parsing PEM/DER files
+2. **Metadata extraction** — For each certificate found, extract: common name, SANs, serial number, issuer DN, subject DN, expiration date, key algorithm, key size, is_ca flag, SHA-256 fingerprint (used as dedup key)
+3. **Server submission** — Agent POSTs scan results as `DiscoveryReport` to `POST /api/v1/agents/{id}/discoveries`
+4. **Deduplication** — Server uses fingerprint + agent ID + filesystem path as unique key; prevents duplicate records of the same cert on the same agent
+5. **Storage** — Records stored in `discovered_certificates` table with status = "Unmanaged"
+6. **Audit** — `discovery_scan_completed` event logged with agent ID, cert count, scan timestamp
+7. **Operator triage** — Operator queries `GET /api/v1/discovered-certificates?status=Unmanaged` to see new findings
+8. **Claim or dismiss** — For each unmanaged cert, operator either:
+   - **Claims it** via `POST /discovered-certificates/{id}/claim` — links to existing managed cert or creates new enrollment
+   - **Dismisses it** via `POST /discovered-certificates/{id}/dismiss` — removes from triage, marked as "Dismissed"
+9. **Status tracking** — `discovery_cert_claimed` and `discovery_cert_dismissed` events audit the operator's decision
+10. **Summary** — `GET /api/v1/discovery-summary` returns count of Unmanaged, Managed, and Dismissed certs (useful for compliance reporting)
+
+This data flow is pull-based and non-blocking. Agents discover at their own pace; the server stores results for later review. There's no pressure to claim or dismiss; operators can leave certificates in "Unmanaged" status indefinitely.
+
 ## Testing Strategy
 
 certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 860+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
