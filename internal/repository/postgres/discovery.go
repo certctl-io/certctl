@@ -9,6 +9,7 @@ import (
 
 	"github.com/lib/pq"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // DiscoveryRepository implements the repository.DiscoveryRepository interface.
@@ -205,7 +206,7 @@ func (r *DiscoveryRepository) GetDiscovered(ctx context.Context, id string) (*do
 }
 
 // ListDiscovered returns discovered certificates matching the filter.
-func (r *DiscoveryRepository) ListDiscovered(ctx context.Context, filter *DiscoveryFilter) ([]*domain.DiscoveredCertificate, int, error) {
+func (r *DiscoveryRepository) ListDiscovered(ctx context.Context, filter *repository.DiscoveryFilter) ([]*domain.DiscoveredCertificate, int, error) {
 	if filter.Page < 1 {
 		filter.Page = 1
 	}
@@ -384,16 +385,6 @@ func (r *DiscoveryRepository) CountByStatus(ctx context.Context) (map[string]int
 		counts[status] = count
 	}
 	return counts, nil
-}
-
-// DiscoveryFilter defines filters for listing discovered certificates.
-type DiscoveryFilter struct {
-	AgentID   string
-	Status    string
-	IsExpired bool
-	IsCA      bool
-	Page      int
-	PerPage   int
 }
 
 // nullableString returns a sql.NullString, null if the string is empty.
