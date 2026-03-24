@@ -202,8 +202,8 @@ Each issuer handles revocation differently:
 
 The following issuer connectors are planned for future milestones:
 
-- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
-- **DigiCert** — Commercial CA integration via DigiCert's REST API.
+- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA (planned for V4.0+).
+- **DigiCert** — Commercial CA integration via DigiCert's REST API (planned for V3 paid release).
 
 Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 
@@ -393,9 +393,9 @@ The combined PEM is built in this order: server certificate, intermediate/chain 
 
 Location: `internal/connector/target/haproxy/haproxy.go`
 
-### Planned: F5 BIG-IP (Interface Only)
+### V3 (Paid): F5 BIG-IP (Interface Only)
 
-The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it.
+The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it. Implementation is planned for the paid V3 release.
 
 The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for a future release.
 
@@ -414,9 +414,9 @@ Note: F5 credentials are stored on the proxy agent, not on the control plane ser
 
 Location: `internal/connector/target/f5/f5.go`
 
-### Planned: IIS (Interface Only, Dual-Mode)
+### V3 (Paid): IIS (Interface Only, Dual-Mode)
 
-The IIS target connector supports two deployment modes:
+The IIS target connector supports two deployment modes planned for the paid V3 release:
 
 **Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
 

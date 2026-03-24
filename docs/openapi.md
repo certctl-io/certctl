@@ -1,6 +1,6 @@
 # OpenAPI Specification Guide
 
-certctl ships with a complete OpenAPI 3.1 specification at `api/openapi.yaml`. This spec documents all 78 API operations (76 resource endpoints + health + readiness), every request/response schema, pagination conventions, authentication requirements, and error formats. It's the single source of truth for the REST API.
+certctl ships with a complete OpenAPI 3.1 specification at `api/openapi.yaml`. This spec documents all 78 API operations currently specified, every request/response schema, pagination conventions, authentication requirements, and error formats. It's the single source of truth for the documented REST API. (Note: The spec will be updated to include 7 additional certificate discovery endpoints from M18b.)
 
 This guide covers how to use the spec for API exploration, client SDK generation, and integration testing.
 
@@ -14,7 +14,7 @@ cat api/openapi.yaml
 
 # Count operations
 grep "operationId:" api/openapi.yaml | wc -l
-# 78
+# 78 (includes health + ready, 7 discovery endpoints pending spec update)
 ```
 
 ## Viewing with Swagger UI
@@ -149,7 +149,7 @@ npx @apidevtools/swagger-cli validate api/openapi.yaml
 Import the spec directly into Postman:
 
 1. Open Postman → Import → File → select `api/openapi.yaml`
-2. Postman creates a collection with all 78 operations organized by tag
+2. Postman creates a collection with all 78 documented operations organized by tag
 3. Set the `baseUrl` variable to `http://localhost:8443`
 4. Add an `Authorization: Bearer your-api-key` header to the collection
 

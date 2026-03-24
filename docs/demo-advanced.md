@@ -42,6 +42,109 @@ Each step corresponds to a real operation that certctl would perform in producti
 
 ---
 
+## Alternative Issuers Reference
+
+certctl ships with multiple issuer connectors. The demo uses the Local CA, but here's how to set up others:
+
+### Sub-CA Mode (Local CA chained to enterprise root)
+
+For enterprises with ADCS, root CAs, or intermediate CAs:
+
+```bash
+# Place your CA certificate and key on the server
+export CERTCTL_CA_CERT_PATH="/etc/certctl/ca-cert.pem"
+export CERTCTL_CA_KEY_PATH="/etc/certctl/ca-key.pem"
+
+# Restart the server. The Local CA connector loads the cert+key from disk
+# All issued certificates now chain to your enterprise root
+docker compose -f deploy/docker-compose.yml restart server
+```
+
+The CA key can be RSA, ECDSA, or PKCS#8 format. The connector validates that the certificate has `IsCA=true` and `KeyUsageCertSign`.
+
+### ACME with DNS-01 Challenges (Wildcard Certificates)
+
+For Let's Encrypt or other ACME providers with wildcard support:
+
+```bash
+# Configure ACME DNS-01 with a DNS provider script
+export CERTCTL_ACME_CHALLENGE_TYPE="dns-01"
+export CERTCTL_ACME_DNS_PRESENT_SCRIPT="/usr/local/bin/dns-present.sh"
+export CERTCTL_ACME_DNS_CLEANUP_SCRIPT="/usr/local/bin/dns-cleanup.sh"
+export CERTCTL_ACME_DNS_PROPAGATION_WAIT="10"  # seconds to wait for DNS propagation
+
+# Example dns-present.sh for Cloudflare:
+# #!/bin/bash
+# RECORD_NAME=$1
+# RECORD_VALUE=$2
+# curl -X POST "https://api.cloudflare.com/client/v4/zones/ZONE_ID/dns_records" \
+#   -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" \
+#   -d "{\"type\":\"TXT\",\"name\":\"$RECORD_NAME\",\"content\":\"$RECORD_VALUE\"}"
+```
+
+Then issue wildcard certificates:
+```bash
+curl -s -X POST $API/api/v1/certificates \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "mc-wildcard-api",
+    "name": "Wildcard API Certificate",
+    "common_name": "*.api.example.com",
+    "sans": ["*.api.example.com", "api.example.com"],
+    "issuer_id": "iss-acme",
+    "renewal_policy_id": "rp-default",
+    "status": "Pending"
+  }' | jq .
+```
+
+### step-ca (Smallstep Private CA)
+
+For organizations running step-ca as their private CA:
+
+```bash
+# Configure step-ca connector
+export CERTCTL_STEPCA_URL="https://ca.internal.example.com"
+export CERTCTL_STEPCA_FINGERPRINT="your-ca-fingerprint"  # From `step ca bootstrap`
+export CERTCTL_STEPCA_PROVISIONER="certctl-admin"  # Name of the JWK provisioner
+export CERTCTL_STEPCA_PROVISIONER_JWK="/etc/certctl/provisioner.json"  # Path to JWK private key
+```
+
+Then use step-ca as the issuer:
+```bash
+curl -s -X POST $API/api/v1/certificates \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "mc-stepca-cert",
+    "name": "Certificate from step-ca",
+    "common_name": "service.internal.example.com",
+    "issuer_id": "iss-stepca",
+    "renewal_policy_id": "rp-default",
+    "status": "Pending"
+  }' | jq .
+```
+
+### OpenSSL / Custom CA (Script-based)
+
+For custom signing workflows via shell scripts:
+
+```bash
+# Configure OpenSSL connector with user-provided scripts
+export CERTCTL_OPENSSL_SIGN_SCRIPT="/usr/local/bin/custom-sign.sh"
+export CERTCTL_OPENSSL_REVOKE_SCRIPT="/usr/local/bin/custom-revoke.sh"
+export CERTCTL_OPENSSL_CRL_SCRIPT="/usr/local/bin/custom-crl.sh"
+export CERTCTL_OPENSSL_TIMEOUT_SECONDS="30"
+
+# Example custom-sign.sh:
+# #!/bin/bash
+# CSR_PEM=$1
+# VALIDITY_DAYS=$2
+# # Do something custom with the CSR and return signed certificate
+# openssl ca -in <(echo "$CSR_PEM") -days $VALIDITY_DAYS -out /tmp/signed.pem
+# cat /tmp/signed.pem
+```
+
+---
+
 ## Part 1: Build the Organization Structure
 
 ### Create a new team
@@ -101,12 +204,12 @@ You should see:
 {
   "id": "iss-local",
   "name": "Local Dev CA",
-  "type": "GenericCA",
+  "type": "local",
   "enabled": true
 }
 ```
 
-**How it works:** The issuer record was inserted during database seeding (`migrations/seed_demo.sql`). The `type` field (`GenericCA`) maps to a connector implementation. When the server starts, it registers connector instances in an `issuerRegistry` map keyed by issuer ID. When a certificate needs issuance, the service layer looks up the issuer ID in this registry to find the right connector.
+**How it works:** The issuer record was inserted during database seeding (`migrations/seed_demo.sql`). The `type` field (`local`) maps to a connector implementation. When the server starts, it registers connector instances in an `issuerRegistry` map keyed by issuer ID. When a certificate needs issuance, the service layer looks up the issuer ID in this registry to find the right connector.
 
 **How the Local CA works internally:** The Local CA connector (`internal/connector/issuer/local/local.go`) generates a self-signed root CA certificate on first use using Go's `crypto/x509` package. The CA key pair lives in memory only — it's regenerated each time the server restarts, which means all certificates it issued become untrusted on restart (acceptable for dev/demo). When it receives an `IssuanceRequest` containing a CSR (Certificate Signing Request), it:
 
@@ -355,29 +458,47 @@ curl -s -X POST "$API/api/v1/agents/agent-nginx-prod/jobs/JOB_ID/status" \
 
 ---
 
-## Part 6: View the Audit Trail
+## Part 6: View the Audit Trail (Immutable API Audit Log)
 
-Every action you've taken has been recorded. Check the audit trail:
+Every API call and state change is recorded in an immutable, append-only audit trail. Check the recent audit events:
 
 ```bash
-curl -s $API/api/v1/audit | jq '.data[0:5]'
+# List recent audit events
+curl -s $API/api/v1/audit | jq '.data[0:10]'
+
+# Filter by action (e.g., all certificate creations)
+curl -s "$API/api/v1/audit?action=certificate_created" | jq '.data[] | {actor, action, resource_id, timestamp}'
+
+# Filter by resource (e.g., all actions on mc-demo-api)
+curl -s "$API/api/v1/audit?resource_id=mc-demo-api" | jq '.data[] | {actor, action, timestamp}'
+
+# Filter by actor (e.g., all actions by a specific owner)
+curl -s "$API/api/v1/audit?actor=o-demo-user" | jq '.data[] | {action, resource_type, timestamp}'
+
+# Time-range filter (e.g., last hour)
+curl -s "$API/api/v1/audit?created_after=2026-03-24T09:00:00Z" | jq '.data | length'
+
+# Export audit trail (CSV format via GUI)
+# Available on the Audit page with applied filters
 ```
 
-**How it works:** The `audit_events` table is append-only — there is no `UPDATE` or `DELETE` in the `AuditRepository` interface. This is a deliberate design decision for compliance. Every service method that mutates state calls `AuditService.Create()` with:
+**How it works:** The `audit_events` table is append-only — there is no `UPDATE` or `DELETE` in the `AuditRepository` interface. Every API call (including this audit query) is recorded by the API audit middleware with:
 
 | Field | Source | Example |
 |-------|--------|---------|
-| `actor` | The authenticated user or system component | `"o-demo-user"`, `"system"`, `"agent-prod-01"` |
+| `actor` | The authenticated user extracted from auth context | `"o-demo-user"`, `"system"`, `"agent-prod-01"`, `"anonymous"` |
 | `actor_type` | Category of the actor | `"User"`, `"System"`, `"Agent"` |
-| `action` | What happened | `"certificate_created"`, `"renewal_triggered"`, `"deployment_completed"` |
-| `resource_type` | What was affected | `"certificate"`, `"team"`, `"agent"` |
+| `action` | What happened | `"certificate_created"`, `"renewal_triggered"`, `"deployment_completed"`, `"api_call"` |
+| `resource_type` | What was affected | `"certificate"`, `"team"`, `"agent"`, `"audit"` |
 | `resource_id` | Specific resource | `"mc-demo-api"` |
-| `details` | Arbitrary JSON context | `{"environment": "staging", "issuer": "iss-local"}` |
+| `details` | Arbitrary JSON context | `{"environment": "staging", "issuer": "iss-local", "body_hash": "abc123..." }` |
 | `timestamp` | When it happened (server clock) | `"2026-03-14T10:30:00Z"` |
 
-**Why immutable audit:** Compliance frameworks (SOC 2 Type II, PCI-DSS, ISO 27001) require tamper-evident audit logs. By making the repository interface append-only, even a compromised API server can't retroactively delete or modify audit records. In a production deployment, you'd also stream these to an external SIEM (Splunk, Datadog) for additional protection.
+The audit middleware (M19) records every HTTP request: method, path, status code, actor, request body SHA-256 hash, and latency. This creates a complete API audit trail without blocking responses (logging happens asynchronously).
 
-**Check the dashboard.** The "Audit" view shows the full timeline of all actions across the system.
+**Why immutable audit:** Compliance frameworks (SOC 2 Type II, PCI-DSS, ISO 27001) require tamper-evident audit logs. By making the repository interface append-only and recording API calls, even a compromised API server can't retroactively delete or modify audit records. In a production deployment, you'd also stream these to an external SIEM (Splunk, Datadog) for additional protection.
+
+**Check the dashboard.** The "Audit" view shows the full timeline of all actions across the system with filtering and CSV/JSON export.
 
 ---
 
@@ -409,6 +530,36 @@ flowchart TD
 ```
 
 **Why graceful notifier fallback:** In demo mode, no SMTP server or webhook endpoint is configured. Rather than spamming error logs with "notifier not found" every 60 seconds (which was the original behavior — we fixed this), the service marks notifications as "sent" when no notifier is registered for the channel. This keeps the notification records visible in the dashboard without requiring external infrastructure.
+
+### Configuring Notifier Connectors
+
+In production, enable notifiers by setting environment variables:
+
+**Slack:**
+```bash
+export CERTCTL_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/YOUR/WEBHOOK/URL"
+export CERTCTL_SLACK_CHANNEL="cert-alerts"  # Optional, overrides channel in webhook
+export CERTCTL_SLACK_USERNAME="CertCTL"     # Optional, defaults to "CertCTL"
+```
+
+**Microsoft Teams:**
+```bash
+export CERTCTL_TEAMS_WEBHOOK_URL="https://outlook.webhook.office.com/webhookb2/..."
+```
+
+**PagerDuty:**
+```bash
+export CERTCTL_PAGERDUTY_ROUTING_KEY="your-routing-key"
+export CERTCTL_PAGERDUTY_SEVERITY="warning"  # Or: critical, error, info
+```
+
+**OpsGenie:**
+```bash
+export CERTCTL_OPSGENIE_API_KEY="your-api-key"
+export CERTCTL_OPSGENIE_PRIORITY="P3"  # Or: P1, P2, P4, P5
+```
+
+When certificates expire, renewal fails, or policies are violated, certctl sends notifications via the configured channels. Each notifier connector implements the `Notifier` interface: `Send(ctx context.Context, recipient, subject, body string) error`. The notification processor handles retries and failure recording.
 
 ---
 
@@ -675,7 +826,97 @@ curl -s "$API/api/v1/certificates/mc-demo-api/deployments" | jq .
 
 ---
 
-## Part 14: Certificate Discovery (M18b)
+## Part 14: CLI Tool (M16b)
+
+certctl includes a standalone CLI tool for command-line users:
+
+```bash
+# Build the CLI
+cd cmd/cli && go build -o certctl-cli .
+
+# Export credentials
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+# List certificates (JSON or table format)
+./certctl-cli list-certs --format table
+
+# Get certificate details
+./certctl-cli get-cert mc-demo-api
+
+# Trigger renewal
+./certctl-cli renew-cert mc-demo-api
+
+# Revoke a certificate with RFC 5280 reason
+./certctl-cli revoke-cert mc-demo-payments --reason keyCompromise
+
+# List agents
+./certctl-cli list-agents
+
+# List pending jobs
+./certctl-cli list-jobs
+
+# Check system health
+./certctl-cli health
+
+# Export metrics
+./certctl-cli metrics --format json
+
+# Bulk import certificates from a PEM file
+./certctl-cli import /path/to/certificates.pem
+```
+
+**How it works:** The CLI tool is a self-contained Go binary with zero external dependencies (just the stdlib: flag, net/http, encoding/json, text/tabwriter). It reads credentials from environment variables or command-line flags, calls the REST API endpoints, and formats output as JSON or ASCII tables. This makes it perfect for scripts, CI/CD pipelines, and automation workflows.
+
+---
+
+## Part 15: MCP Server for AI Integration (M18a)
+
+certctl exposes all 76 API endpoints as tools via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
+
+```bash
+# Build the MCP server
+cd cmd/mcp-server && go build -o mcp-server .
+
+# Export credentials
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+# Start the MCP server (listens on stdin/stdout)
+./mcp-server
+```
+
+**How it works:** The MCP server uses the official Model Context Protocol Go SDK to expose stateless HTTP proxies to all 76 API endpoints. Each MCP tool corresponds to one or more REST endpoints and includes:
+
+- **Input schema** — typed arguments with JSON schema hints for LLM-friendly introspection
+- **Binary support** — handles DER-encoded CRL and OCSP responses without mangling
+- **Error translation** — converts HTTP errors to user-readable messages
+
+**Example usage from Claude:**
+
+```
+User: What certificates are expiring in the next 30 days?
+
+Claude uses the MCP tools to:
+  1. Call tools.listCertificates with filters: {status: "Expiring"}
+  2. Parse the response
+  3. Display: "mc-api-prod expires in 12 days. mc-cdn-prod expires in 8 days..."
+
+User: Revoke mc-payments due to key compromise
+
+Claude uses the MCP tools to:
+  1. Call tools.revokeCertificate with id="mc-payments" reason="keyCompromise"
+  2. Return the audit trail entry showing revocation recorded
+```
+
+The MCP server is perfect for:
+- Compliance audits — "Show me all certificates with PCI tags and their revocation status"
+- Incident response — "Revoke all certificates issued by the OpenSSL CA issued before 2026-01-01"
+- Operational queries — "What's the renewal success rate over the last 30 days?"
+
+---
+
+## Part 16: Certificate Discovery (M18b)
 
 Agents can automatically discover existing certificates already deployed in your infrastructure. This is useful for building a baseline inventory before you start managing everything with certctl.
 

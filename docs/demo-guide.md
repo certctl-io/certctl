@@ -72,9 +72,9 @@ Click any certificate, then scroll to the deployment timeline. A visual 4-step t
 **11. "What about certificates already running in production?"**
 Enable discovery on agents by setting `CERTCTL_DISCOVERY_DIRS` to directories containing certificates (e.g., `/etc/nginx/certs`). Agents scan on startup and every 6 hours, report findings to the control plane. Click "Discovered Certificates" to see what agents found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
 
-## API Walkthrough
+## REST API Walkthrough
 
-The dashboard is backed by a real REST API. Try these while the demo is running:
+The dashboard is backed by a real REST API (84 endpoints). Try these while the demo is running:
 
 ```bash
 # List all certificates
@@ -83,13 +83,22 @@ curl -s http://localhost:8443/api/v1/certificates | jq .
 # Get expiring certs
 curl -s "http://localhost:8443/api/v1/certificates?status=expiring" | jq .
 
+# Advanced query: sort by expiration, sparse fields, cursor pagination
+curl -s "http://localhost:8443/api/v1/certificates?sort=-expires_at&fields=id,common_name,expires_at" | jq .
+
+# Time-range filter: certs expiring before June 2026
+curl -s "http://localhost:8443/api/v1/certificates?expires_before=2026-06-01T00:00:00Z" | jq .
+
 # Get a specific certificate
 curl -s http://localhost:8443/api/v1/certificates/mc-api-prod | jq .
+
+# Get deployment targets for a certificate
+curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
 
 # List agents
 curl -s http://localhost:8443/api/v1/agents | jq .
 
-# View audit trail
+# View audit trail (immutable API audit log of all actions)
 curl -s http://localhost:8443/api/v1/audit | jq .
 
 # View policy violations (replace POLICY_ID with a real policy ID, e.g. pr-require-owner)
@@ -98,10 +107,12 @@ curl -s http://localhost:8443/api/v1/policies/pr-require-owner/violations | jq .
 # Check system health
 curl -s http://localhost:8443/health | jq .
 
-# Dashboard stats
+# Dashboard stats and metrics
 curl -s http://localhost:8443/api/v1/stats/summary | jq .
-
-# System metrics (cert totals, agent counts, job stats)
+curl -s http://localhost:8443/api/v1/stats/certificates-by-status | jq .
+curl -s http://localhost:8443/api/v1/stats/expiration-timeline | jq .
+curl -s http://localhost:8443/api/v1/stats/job-trends | jq .
+curl -s http://localhost:8443/api/v1/stats/issuance-rate | jq .
 curl -s http://localhost:8443/api/v1/metrics | jq .
 
 # Certificate profiles
@@ -115,6 +126,10 @@ curl -s -X POST http://localhost:8443/api/v1/certificates/mc-api-prod/revoke \
   -H "Content-Type: application/json" \
   -d '{"reason": "superseded"}' | jq .
 
+# CRL and OCSP endpoints
+curl -s http://localhost:8443/api/v1/crl | jq .
+curl -s http://localhost:8443/api/v1/crl/iss-local -o /tmp/crl.der
+
 # List discovered certificates
 curl -s http://localhost:8443/api/v1/discovered-certificates | jq .
 
@@ -122,7 +137,72 @@ curl -s http://localhost:8443/api/v1/discovered-certificates | jq .
 curl -s http://localhost:8443/api/v1/discovery-summary | jq .
 ```
 
-## Demo Without Docker
+## CLI Tool
+
+certctl ships with a command-line tool (`certctl-cli`) for terminal users:
+
+```bash
+# Build the CLI
+cd cmd/cli && go build -o certctl-cli .
+
+# Set credentials
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+# List certificates (JSON or table format)
+./certctl-cli list-certs --format json
+./certctl-cli list-certs --format table
+
+# Get certificate details
+./certctl-cli get-cert mc-api-prod
+
+# Trigger renewal
+./certctl-cli renew-cert mc-api-prod
+
+# Revoke a certificate (with RFC 5280 reason)
+./certctl-cli revoke-cert mc-api-prod --reason keyCompromise
+
+# List agents
+./certctl-cli list-agents
+
+# List pending jobs
+./certctl-cli list-jobs
+
+# Bulk import certificates from PEM files
+./certctl-cli import /path/to/certs.pem
+
+# Check health and metrics
+./certctl-cli health
+./certctl-cli metrics
+```
+
+## MCP Server for AI Integration
+
+certctl exposes its 76 API endpoints as tools via the Model Context Protocol (MCP), enabling integration with Claude, Cursor, and other AI assistants:
+
+```bash
+# Build and run the MCP server
+cd cmd/mcp-server && go build -o mcp-server .
+
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+./mcp-server
+```
+
+The MCP server:
+- Exposes all 76 API endpoints as MCP tools with typed schemas
+- Handles binary responses (DER CRL, OCSP responses)
+- Uses stdio transport for Claude/Cursor/OpenClaw integration
+- Zero external dependencies — pure Go with official MCP SDK
+
+You can then ask Claude questions like:
+- "What certificates are expiring in the next 30 days?"
+- "Revoke the payments certificate due to key compromise"
+- "Show me the audit trail for the last 10 actions"
+- "List all certificates with PCI compliance tags"
+
+## Dashboard Demo Mode
 
 The dashboard includes a **Demo Mode** that works without any backend. Build and serve the frontend with Vite:
 
@@ -152,12 +232,14 @@ If you're demoing to a team or customer, here's a suggested flow:
 3. **Click into auth-production** — "Here's the full lifecycle: who owns it, where it's deployed, deployment timeline, when it was last renewed"
 4. **Show revocation** — "If a key is compromised, one click revokes the cert with an RFC 5280 reason code. CRL and OCSP are served automatically"
 5. **Show the failed VPN cert** — "The system tried 3 times, then alerted the team via Slack, Teams, PagerDuty, or OpsGenie"
-6. **Show agents and fleet overview** — "Agents run on your infrastructure, handle key generation locally. Fleet view shows OS, architecture, and version distribution"
+6. **Show agents and fleet overview** — "Agents run on your infrastructure, handle key generation locally (ECDSA P-256). Fleet view shows OS, architecture, and version distribution"
 7. **Show profiles** — "Certificate profiles enforce crypto constraints — key types, max TTL, compliance requirements"
 8. **Show policies** — "Guardrails prevent teams from going outside approved scope"
 9. **Show bulk operations** — "Select multiple certs, trigger renewal or revoke in bulk with progress tracking"
 10. **Show certificate discovery** — "Agents scan your infrastructure for existing certificates you're not managing yet. We automatically deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
-11. **Show the API** — "Everything you see here is API-first. We also have a CLI tool and an MCP server for AI assistant integration"
+11. **Show the immutable audit trail** — "Every action in the system is recorded: who did it, what they did, when, what changed. Export to CSV/JSON for compliance"
+12. **Show advanced query features** — "Sort by any field, filter by date range, paginate efficiently with cursor-based pagination, select just the fields you need"
+13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 76 tools. Everything is API-first"
 
 The whole walkthrough takes 5-10 minutes.
 

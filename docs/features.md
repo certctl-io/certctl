@@ -229,13 +229,13 @@ Named enrollment profiles defining certificate issuance constraints.
 
 ### F5 BIG-IP (Stub)
 - **Protocol** — iControl REST API via proxy agent
-- **Status** — Interface only in V2; implementation planned for V2 or V3
+- **Status** — Interface only in V2; implementation in V3 (paid)
 - **Deployment Model** — Proxy agent + BIG-IP API client in same network zone
 - **Authentication** — iControl credentials stored in target config
 
 ### IIS (Stub)
 - **Dual-Mode Architecture** — Agent-local PowerShell (primary) or proxy agent WinRM (agentless)
-- **Status** — Interface only in V2; implementation planned for V2 or V3
+- **Status** — Interface only in V2; implementation in V3 (paid)
 - **Deployment Model** — Agent runs PowerShell cmdlets locally or proxy agent invokes WinRM
 - **Binding** — Bind certificate to IIS site by hostname
 
@@ -660,7 +660,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 78 operations (76 API endpoints + /health + /ready)
+- **Scope** — 85 operations (84 API + /health)
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)
@@ -858,12 +858,28 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | `CERTCTL_AGENT_NAME` | string | (generated) | Agent display name |
 | `CERTCTL_KEY_DIR` | string | /var/lib/certctl/keys | Local private key storage directory |
 | `CERTCTL_AGENT_ID` | string | (env or generated) | Agent unique ID (mc-xxx prefix) |
+| `CERTCTL_DISCOVERY_DIRS` | string | (empty) | Comma-separated directories for cert discovery |
 
 #### MCP Server
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
 | `CERTCTL_SERVER_URL` | string | http://localhost:8080 | Base URL of certctl server |
 | `CERTCTL_API_KEY` | string | (required) | API key for authentication |
+
+---
+
+## Compliance Mapping Documentation
+
+Mapping guides that document how certctl's features align with compliance frameworks. These are not certifications — they help auditors and evaluators assess how certctl supports their organization's compliance posture.
+
+| Guide | Framework | Key Sections |
+|-------|-----------|-------------|
+| [SOC 2 Type II](compliance-soc2.md) | AICPA Trust Service Criteria | CC6 (logical access), CC7 (system operations), CC8 (change management), A1 (availability) |
+| [PCI-DSS 4.0](compliance-pci-dss.md) | Payment Card Industry DSS | Req 3 (key management), Req 4 (data in transit), Req 8 (auth), Req 10 (audit logging) |
+| [NIST SP 800-57](compliance-nist.md) | Key Management Guidelines | Key generation, storage, cryptoperiods, key states, algorithms, revocation |
+| [Overview](compliance.md) | All three frameworks | Framework comparison, quick reference, V3 enhancement notes |
+
+Each guide includes an evidence summary table mapping specific criteria to certctl API endpoints, configuration, and database evidence.
 
 ---
 
@@ -882,13 +898,17 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | Revocation (RFC 5280, CRL, OCSP) | ✓ | ✓ | Shipped |
 | Dashboard + 19 pages | ✓ | ✓ | Shipped |
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
-| REST API (77 endpoints) | ✓ | ✓ | Shipped |
+| REST API (84 endpoints) | ✓ | ✓ | Shipped |
 | MCP server (76 tools) | ✓ | ✓ | Shipped v2.1 |
 | CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
+| Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |
+| Filesystem cert discovery (M18b) | ✓ | ✓ | Shipped |
+| Enhanced query API (sort, filter, cursor, fields) | ✓ | ✓ | Shipped |
+| Immutable API audit log | ✓ | ✓ | Shipped |
 | **OIDC/SSO auth** | ✗ | ✓ | Planned V3 |
 | **RBAC (role-based access control)** | ✗ | ✓ | Planned V3 |
-| **F5 BIG-IP implementation** | Stub | ✓ | Stub in V2 |
-| **IIS implementation** | Stub | ✓ | Stub in V2 |
+| **F5 BIG-IP implementation** | Stub | ✓ | Planned V3 |
+| **IIS implementation** | Stub | ✓ | Planned V3 |
 | **NATS event bus** | ✗ | ✓ | Planned V3 |
 | **Real-time updates (SSE/WebSocket)** | ✗ | ✓ | Planned V3 |
 | **Advanced search DSL** | ✗ | ✓ | Planned V3 |
@@ -916,9 +936,9 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | **Certificate States** | 8 (Pending, Active, Expiring, Expired, RenewalInProgress, Failed, Revoked, Archived) |
 | **Revocation Reason Codes** | 8 (RFC 5280 compliant) |
 | **Discovery Statuses** | 3 (Unmanaged, Managed, Dismissed) |
-| **MCP Tools** | 83 (17 resource domains) |
+| **MCP Tools** | 76 (16 resource domains) |
 | **CLI Subcommands** | 10 |
 | **Database Tables** | 20+ |
-| **Test Suite** | 881+ tests |
+| **Test Suite** | 860+ tests (Go backend + frontend) |
 | **Environment Variables** | 41+ configuration options |
 

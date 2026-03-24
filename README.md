@@ -102,6 +102,7 @@ export CERTCTL_AGENT_ID=agent-local-01
 | [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
+| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
 
 ## Architecture
 
@@ -508,7 +509,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
 - **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
 - **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
-- **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
+- **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
 ### V3: Team & Enterprise
 Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.

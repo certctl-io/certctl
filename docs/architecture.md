@@ -605,7 +605,7 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 78 operations, all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 78 documented operations (including health, readiness, and auth endpoints; 7 discovery endpoints from M18b pending spec update), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
@@ -783,5 +783,6 @@ certctl uses a layered testing approach aligned with the handler → service →
 - [Quick Start](quickstart.md) — Get certctl running locally
 - [Advanced Demo](demo-advanced.md) — Issue a certificate end-to-end
 - [Connector Guide](connectors.md) — Build custom connectors
+- [Compliance Mapping](compliance.md) — SOC 2, PCI-DSS 4.0, and NIST SP 800-57 alignment
 - [MCP Server Guide](mcp.md) — AI-native access to the API
 - [OpenAPI Spec](openapi.md) — Full API reference and SDK generation
