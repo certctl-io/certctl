@@ -12,7 +12,6 @@ import (
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // MockDiscoveryService is a mock implementation of DiscoveryService interface.

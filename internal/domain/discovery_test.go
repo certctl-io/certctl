@@ -62,17 +62,6 @@ func TestDiscoveredCertificate_IsExpired(t *testing.T) {
 func TestDiscoveredCertificate_DaysUntilExpiry(t *testing.T) {
 	now := time.Now()
 
-	tests := []struct {
-		name     string
-		notAfter *time.Time
-		wantDays int
-	}{
-		{"nil NotAfter", nil, -1},
-		{"expires in 30 days", &time.Time{}, 0}, // placeholder, will be calculated below
-		{"expires in 1 day", &time.Time{}, 1},
-		{"expires in 0 days (expired)", &time.Time{}, 0},
-	}
-
 	// Test with actual future times
 	thirtyDaysFromNow := now.AddDate(0, 0, 30)
 	oneDayFromNow := now.AddDate(0, 0, 1)
