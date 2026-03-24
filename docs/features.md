@@ -1,0 +1,858 @@
+# certctl V2 Feature Inventory
+
+Complete reference of all features shipped in the V2 release (as of March 2026).
+
+---
+
+## API Surface
+
+### Overview
+- **77 endpoints** across 16 resource domains under `/api/v1/`
+- REST API with HTTP semantics (GET, POST, PUT, DELETE)
+- All endpoints require authentication by default (configurable)
+- OpenAPI 3.1 spec with full schema documentation
+
+### Authentication & Security
+- **API Key Authentication** — SHA-256 hashed keys with constant-time comparison
+- **Bearer Token Flow** — `Authorization: Bearer {api_key}` header
+- **Auth Configuration** — Configurable via `CERTCTL_AUTH_TYPE` (api-key, jwt, none)
+- **Auth Info Endpoint** — `GET /api/v1/auth/info` (no auth required for GUI pre-login detection)
+- **Auth Check Endpoint** — `GET /api/v1/auth/check` (validate credentials)
+
+### Rate Limiting
+- **Token Bucket Algorithm** — Configurable requests-per-second (RPS) and burst size
+- **429 Responses** — Rate limit exceeded with `Retry-After` header
+- **Configuration** — `CERTCTL_RATE_LIMIT_ENABLED`, `CERTCTL_RATE_LIMIT_RPS` (default 50), `CERTCTL_RATE_LIMIT_BURST` (default 100)
+
+### CORS
+- **Configurable Per-Origin Allowlist** — `CERTCTL_CORS_ORIGINS` (comma-separated or wildcard)
+- **Preflight Caching** — Standard CORS headers
+
+### Query Features (M20)
+
+| Feature | Details |
+|---------|---------|
+| **Sorting** | `?sort=-notAfter` (8 fields: notAfter, expiresAt, createdAt, updatedAt, commonName, name, status, environment) |
+| **Pagination (Page-Based)** | `?page=1&per_page=50` (max 500, default 50) |
+| **Pagination (Cursor)** | `?cursor=base64_token&page_size=100` (keyset pagination with `next_cursor` in response) |
+| **Time-Range Filters** | `?expires_before=2026-12-31T23:59:59Z&expires_after=2026-01-01T00:00:00Z&created_after=...&updated_after=...` (RFC3339 format) |
+| **Sparse Fields** | `?fields=id,common_name,status` (reduce response size) |
+| **Additional Filters** | `?status=active&agent_id=a-xxx&profile_id=p-xxx&issuer_id=...&owner_id=...&team_id=...` |
+
+### Endpoint Breakdown by Domain
+
+| Domain | Endpoints | Key Operations |
+|--------|-----------|-----------------|
+| **Certificates** | 11 | List, create, get, update (archive), versions, deployments, trigger renewal, trigger deployment, revoke |
+| **CRL & OCSP** | 3 | JSON CRL, DER CRL per issuer, OCSP responder |
+| **Issuers** | 6 | List, create, get, update, delete, test connection |
+| **Targets** | 5 | List, create, get, update, delete |
+| **Agents** | 7 | List, register, get, heartbeat, CSR submit, certificate pickup, get work, report job status |
+| **Jobs** | 5 | List, get, cancel, approve, reject |
+| **Policies** | 6 | List, create, get, update, delete, list violations |
+| **Profiles** | 5 | List, create, get, update, delete |
+| **Teams** | 5 | List, create, get, update, delete |
+| **Owners** | 5 | List, create, get, update, delete |
+| **Agent Groups** | 6 | List, create, get, update, delete, list agents in group |
+| **Audit** | 3 | List events, list by resource, export (CSV/JSON) |
+| **Notifications** | 3 | List, get, mark as read |
+| **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
+| **Metrics** | 1 | JSON metrics (gauges, counters, uptime) |
+| **Health** | 4 | Health check, readiness check, auth info, auth check |
+
+---
+
+## Certificate Lifecycle
+
+### Certificate States (8 total)
+- **Pending** — Created, awaiting issuance
+- **Active** — Valid and deployed
+- **Expiring** — Within configured threshold (default 30 days)
+- **Expired** — Past NotAfter date
+- **RenewalInProgress** — Renewal job submitted
+- **Failed** — Issuance or renewal failed
+- **Revoked** — Revoked via POST /api/v1/certificates/{id}/revoke
+- **Archived** — Manually archived via DELETE endpoint
+
+### Key Generation Modes
+| Mode | Details |
+|------|---------|
+| **Agent-Side (Default)** | ECDSA P-256 key generation on agent; private keys never touch control plane |
+| **Server-Side (Demo Only)** | RSA-2048 key generation on server; requires explicit `CERTCTL_KEYGEN_MODE=server` with log warning |
+
+### Certificate Versions
+- Multiple versions per certificate (issuance, renewal)
+- Each version includes: serial number, fingerprint, PEM-encoded chain
+- CSR preserved for audit trail
+- Version history with rollback capability in GUI
+
+### AwaitingCSR Job State
+- Renewal and issuance jobs pause when `CERTCTL_KEYGEN_MODE=agent`
+- Agent generates ECDSA P-256 key locally, creates CSR, submits via `POST /api/v1/agents/{id}/csr`
+- Server signs and stores certificate version
+- Work endpoint enriched with `common_name` and `sans` for agent CSR generation
+
+---
+
+## Revocation Infrastructure
+
+### Revocation API
+- **Endpoint** — `POST /api/v1/certificates/{id}/revoke` (RFC 5280 reason codes)
+- **8 Reason Codes** — unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn
+- **Best-Effort Issuer Notification** — Issuer connector failure doesn't block revocation
+- **Immutable Recording** — `certificate_revocations` table with idempotent ON CONFLICT logic
+
+### CRL (Certificate Revocation List)
+- **JSON CRL** — `GET /api/v1/crl` returns entries array with serial numbers, reasons, revoked timestamps
+- **DER X.509 CRL** — `GET /api/v1/crl/{issuer_id}` returns proper DER-encoded CRL signed by issuing CA
+- **24-Hour Validity** — CRL refreshed every 24 hours
+- **CA Key Required** — Sub-CA or issuing CA key must be available for signing
+
+### OCSP Responder
+- **Endpoint** — `GET /api/v1/ocsp/{issuer_id}/{serial}`
+- **Responses** — good (certificate valid), revoked (in CRL), unknown (not issued by this CA)
+- **Signed** — OCSP responses signed by issuing CA
+
+### Short-Lived Certificate Exemption
+- **Policy** — Certificates with TTL < 1 hour (from profile) skip CRL/OCSP
+- **Rationale** — Expiry is sufficient revocation signal for short-lived certs
+- **Exemption Applied** — During CRL generation and OCSP response construction
+
+### Revocation Notifications
+- Webhook + email notifications on revocation events
+- Routed by certificate owner email via existing notifier system
+
+---
+
+## Certificate Profiles
+
+### Profile Model
+Named enrollment profiles defining certificate issuance constraints.
+
+| Field | Details |
+|-------|---------|
+| **ID** | Prefixed text PK (p-xxx) |
+| **Name** | Human-readable profile name |
+| **Allowed Key Algorithms** | RSA, ECDSA, Ed25519 with minimum key sizes (e.g., RSA 2048+, ECDSA P-256+) |
+| **Max TTL** | Maximum certificate lifetime (days or duration) |
+| **Allowed EKUs** | Extended key usage OIDs (serverAuth, clientAuth, etc.) |
+| **Required SANs** | Mandatory Subject Alternative Names (patterns or fixed values) |
+| **Short-Lived Support** | TTL < 1 hour triggers CRL/OCSP exemption |
+
+### GUI Management
+- Full CRUD page with profile details
+- Crypto constraint badges visible in list view
+- Profile assignment dropdown on certificate detail
+
+---
+
+## Policy Engine
+
+### Policy Rules (5 types)
+| Rule Type | Purpose | Example |
+|-----------|---------|---------|
+| **AllowedIssuers** | Restrict which CAs can issue | Only LetsEncrypt or Internal CA |
+| **AllowedDomains** | Domain whitelist/blacklist | Allow *.example.com, deny *.staging.example.com |
+| **RequiredMetadata** | Enforce ownership, team | Require owner_id and team_id populated |
+| **AllowedEnvironments** | Environment constraints | Restrict to production or staging |
+| **RenewalLeadTime** | Minimum renewal window | Renew 60 days before expiry (minimum) |
+
+### Violation Tracking
+- **Severity Levels** — Warning, Error, Critical
+- **Per-Policy Violations** — `GET /api/v1/policies/{id}/violations` with timestamp and violated certificate ID
+- **Real-Time Evaluation** — Violations checked during issuance, renewal, and deployment
+- **Audit Trail** — All violations logged to audit events table
+
+### Policy Application Scope
+- Applied at renewal policy level
+- Scoped to agent groups via `agent_group_id` foreign key
+- Rule set can be enabled/disabled per policy
+
+---
+
+## Issuer Connectors (4 Implemented)
+
+### Local CA
+- **Mode** — Self-signed (default) or sub-CA (production)
+- **Sub-CA Configuration** — Load CA cert+key from disk (`CERTCTL_CA_CERT_PATH`, `CERTCTL_CA_KEY_PATH`)
+- **Key Formats Supported** — RSA, ECDSA, PKCS#8
+- **CRL Generation** — Signed by CA, 24h validity
+- **OCSP Signing** — Delegates to CA's private key
+- **Use Case** — Internal PKI, enterprise trust chains
+
+### ACME v2
+- **Challenge Types** — HTTP-01 (default) and DNS-01 (wildcard support)
+- **DNS-01 Script Hooks** — Pluggable DNS solver for any provider (Cloudflare, Route53, Azure DNS, etc.)
+- **Configuration** — `CERTCTL_ACME_DIRECTORY_URL`, `CERTCTL_ACME_EMAIL`, `CERTCTL_ACME_CHALLENGE_TYPE=dns-01`, `CERTCTL_ACME_DNS_PRESENT_SCRIPT`, `CERTCTL_ACME_DNS_CLEANUP_SCRIPT`
+- **DNS Propagation Wait** — Configurable timeout before validation
+- **Use Case** — Public CAs (LetsEncrypt), wildcard certs
+
+### step-ca
+- **Protocol** — Native `/sign` and `/revoke` API (not ACME)
+- **Authentication** — JWK provisioner with key file + password
+- **Configuration** — `CERTCTL_STEPCA_URL`, `CERTCTL_STEPCA_PROVISIONER_NAME`, `CERTCTL_STEPCA_PROVISIONER_KEY_PATH`, `CERTCTL_STEPCA_PROVISIONER_PASSWORD`
+- **Operations** — Issue, renew, revoke
+- **Use Case** — Smallstep private CA, internal PKI with strong auth
+
+### OpenSSL / Custom CA
+- **Mechanism** — Delegate signing to user-provided shell scripts
+- **Scripts** — Sign script (CSR→cert), revoke script (serial+reason), CRL script (full CRL)
+- **Timeout** — Configurable timeout (default 30s) with process interruption
+- **Configuration** — `CERTCTL_OPENSSL_SIGN_SCRIPT`, `CERTCTL_OPENSSL_REVOKE_SCRIPT`, `CERTCTL_OPENSSL_CRL_SCRIPT`, `CERTCTL_OPENSSL_TIMEOUT_SECONDS`
+- **Use Case** — PKIX-compliant external CAs, PowerShell issuers, custom workflows
+
+---
+
+## Target Connectors (3 Implemented + 2 Stubs)
+
+### NGINX
+- **Deployment** — Separate cert, chain, and key files
+- **Validation** — `nginx -t` configuration test
+- **Reload** — Graceful reload via SIGHUP (or nginx -s reload)
+- **Target Config** — Certificate path, chain path, key path
+- **Status** — Fully implemented (M10)
+
+### Apache httpd
+- **Deployment** — Separate cert, chain, and key files
+- **Validation** — `apachectl configtest` or `apache2ctl configtest`
+- **Reload** — Graceful reload via `apachectl graceful` or `apache2ctl graceful`
+- **Target Config** — Certificate path, chain path, key path
+- **Status** — Fully implemented (M10)
+
+### HAProxy
+- **Deployment** — Combined PEM file (cert + chain + key concatenated)
+- **Validation** — Optional `haproxy -c -f config` test
+- **Reload** — Process signal or socket-based reload (configurable)
+- **Target Config** — Combined PEM path, optional reload command
+- **Status** — Fully implemented (M10)
+
+### F5 BIG-IP (Stub)
+- **Protocol** — iControl REST API via proxy agent
+- **Status** — Interface only in V2; implementation planned for V2 or V3
+- **Deployment Model** — Proxy agent + BIG-IP API client in same network zone
+- **Authentication** — iControl credentials stored in target config
+
+### IIS (Stub)
+- **Dual-Mode Architecture** — Agent-local PowerShell (primary) or proxy agent WinRM (agentless)
+- **Status** — Interface only in V2; implementation planned for V2 or V3
+- **Deployment Model** — Agent runs PowerShell cmdlets locally or proxy agent invokes WinRM
+- **Binding** — Bind certificate to IIS site by hostname
+
+---
+
+## Notifier Connectors (6 Channels)
+
+### Email
+- **SMTP** — Standard SMTP or TLS endpoint
+- **Configuration** — Server, port, auth credentials (env vars)
+- **Use Case** — Owner notifications, compliance distribution lists
+
+### Webhook
+- **HTTP POST** — Custom JSON payload to any endpoint
+- **Headers** — Content-Type, custom auth headers (configurable)
+- **Use Case** — Slack (via custom webhook), Microsoft Power Automate, custom platforms
+
+### Slack
+- **Protocol** — Incoming Webhook
+- **Message Format** — Markdown with bold subject, formatted body
+- **Overrides** — Channel (`CERTCTL_SLACK_CHANNEL`), username (`CERTCTL_SLACK_USERNAME`), emoji
+- **Configuration** — `CERTCTL_SLACK_WEBHOOK_URL`
+- **Use Case** — Team notifications, ops channels
+
+### Microsoft Teams
+- **Protocol** — Incoming Webhook
+- **Message Format** — MessageCard with ThemeColor, Summary, Sections
+- **Markdown Support** — Formatted text within sections
+- **Configuration** — `CERTCTL_TEAMS_WEBHOOK_URL`
+- **Use Case** — Team-wide alerts, cross-team visibility
+
+### PagerDuty
+- **Protocol** — Events API v2
+- **Trigger Events** — Alert on expiration, failure, revocation
+- **Severity** — Configurable default (default "warning")
+- **Custom Details** — Certificate ID, days remaining, owner, etc.
+- **Configuration** — `CERTCTL_PAGERDUTY_ROUTING_KEY`, `CERTCTL_PAGERDUTY_SEVERITY`
+- **Use Case** — Incident response, on-call escalations
+
+### OpsGenie
+- **Protocol** — Alert API v2
+- **Priority** — Configurable default (default "P3")
+- **Tags** — Category tags (cert expiration, deployment failure, etc.)
+- **Responders** — Optional team routing
+- **Configuration** — `CERTCTL_OPSGENIE_API_KEY`, `CERTCTL_OPSGENIE_PRIORITY`
+- **Use Case** — Multi-team alerting, escalation policies
+
+### Notification Types
+- **Expiration Alert** — Certificate approaching threshold (30/14/7/0 days)
+- **Renewal Started** — Renewal job initiated
+- **Renewal Completed** — Certificate successfully renewed
+- **Deployment Completed** — Certificate deployed to target
+- **Deployment Failed** — Target deployment error
+- **Revocation** — Certificate revoked with reason
+- **Policy Violation** — Certificate violates renewal policy
+
+---
+
+## Agent Fleet
+
+### Agent Registration & Heartbeat
+- **Registration** — `POST /api/v1/agents` with agent name and API key
+- **Heartbeat** — `POST /api/v1/agents/{id}/heartbeat` every 60 seconds
+- **Auto-Offline** — Agents marked offline after 3 missed heartbeats (configurable)
+- **Last Heartbeat Timestamp** — Tracked in `agents` table
+
+### Agent Metadata (M10)
+Collected via runtime introspection and network utilities.
+
+| Field | Source | Example |
+|-------|--------|---------|
+| **OS** | `runtime.GOOS` | linux, darwin, windows |
+| **Architecture** | `runtime.GOARCH` | amd64, arm64 |
+| **Hostname** | `os.Hostname()` | nginx-prod-1 |
+| **IP Address** | `net.Interface` + `net.IP` | 10.0.1.5 |
+| **Version** | Agent binary version (from build flags) | v2.1.0 |
+
+### Agent Groups (M11b)
+Dynamic grouping and filtering for policy assignment and deployment targeting.
+
+| Criterion | Details | Example |
+|-----------|---------|---------|
+| **OS Match** | Exact string match | linux, darwin, windows |
+| **Architecture Match** | Exact string match | amd64, arm64, 386 |
+| **IP CIDR Match** | IPv4 or IPv6 CIDR block | 10.0.0.0/8, 192.168.1.0/24 |
+| **Version Match** | Semantic version range (optional) | >=2.0.0, <3.0.0 |
+| **Manual Membership** | Explicit include/exclude | Include a-xxx, exclude a-yyy |
+| **MatchesAgent()** | Dynamic evaluation at job time | Criteria match→agent included |
+
+### Agent Group GUI
+- List with dynamic match criteria badges (color-coded)
+- Enable/disable toggle per group
+- Manual membership editor (include/exclude lists)
+- Agent count per group (dynamic)
+- Scoped to renewal policies via `agent_group_id` FK
+
+### Agent Capabilities
+Agents report to `/api/v1/agents/{id}/work` with supported target types and issuers.
+
+- **Target Deployment** — NGINX, Apache httpd, HAProxy, F5 BIG-IP (proxy), IIS (proxy)
+- **Key Management** — ECDSA P-256 keygen, key storage at `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`), 0600 file permissions
+- **CSR Submission** — `POST /api/v1/agents/{id}/csr` for AwaitingCSR jobs
+
+### Fleet Overview Page
+- **OS/Architecture Grouping** — Agents grouped by GOOS + GOARCH
+- **Charts** — Status distribution (pie), version breakdown (bar)
+- **Per-Platform Listing** — Expandable agent list under each OS/Arch combo
+- **Health Indicators** — Online/offline status, last heartbeat, uptime
+
+---
+
+## Ownership & Accountability
+
+### Teams
+- **Model** — Team grouping for organizational structure
+- **Team Assignment** — Certificates and policies assigned to teams
+- **Email Distribution** — Optional team email for notifications
+- **Resolver Logic** — Team name → member lookup via API (external resolution)
+- **GUI** — CRUD page with member management
+
+### Owners
+- **Model** — Individual person responsible for certificates
+- **Email Routing** — Owner email used for notification delivery
+- **Team Association** — Owners belong to teams
+- **Certificate Assignment** — Certificates assigned to owner (1:1 or group)
+- **Notification Routing** — Expiration/renewal/revocation alerts sent to owner email
+- **GUI** — CRUD page with team picker, email validation
+
+### Interactive Renewal Approval (M11b)
+- **AwaitingApproval Job State** — Renewal jobs pause for human approval
+- **Approval Flow** — `POST /api/v1/jobs/{id}/approve` (proceed with renewal)
+- **Rejection Flow** — `POST /api/v1/jobs/{id}/reject` with reason text (cancel job)
+- **Reason Tracking** — Approval/rejection reason logged to job history and audit
+- **Use Case** — Change control, compliance gates, sensitive certificate renewal
+
+---
+
+## Observability
+
+### Observability Layers
+
+#### Dashboard Charts (M14)
+Live aggregated views of certificate and job metrics.
+
+| Chart | Type | Details |
+|-------|------|---------|
+| **Expiration Heatmap** | Stacked bar | 90-day weekly buckets; per-status color bands |
+| **Renewal Success Rate** | Line (30-day) | Success % trending over time |
+| **Certificate Status Distribution** | Donut | Pie breakdown: Active, Expiring, Expired, Failed, Revoked, etc. |
+| **Issuance Rate** | Bar (30-day) | Certs issued per day; trend line |
+
+#### Metrics Endpoint
+- **URL** — `GET /api/v1/metrics`
+- **Format** — JSON with timestamp
+- **Gauges** — Certificate counts by status, agent count (online/offline), pending job count
+- **Counters** — Total jobs completed, total jobs failed, total renewals, total issuances
+- **Uptime** — Server uptime in seconds
+
+#### Stats API (M14)
+Five parameterized endpoints for dashboard data.
+
+| Endpoint | Parameters | Response |
+|----------|------------|----------|
+| **GET /api/v1/stats/summary** | None | Total certs, expiring soon, renewals in progress, failed jobs, agents online |
+| **GET /api/v1/stats/certificates-by-status** | None | Count per status (Active, Expiring, Expired, etc.) |
+| **GET /api/v1/stats/expiration-timeline** | days (default 90) | Weekly buckets with cert counts; 90-day default |
+| **GET /api/v1/stats/job-trends** | days (default 30) | Daily completed/failed job counts; line chart ready |
+| **GET /api/v1/stats/issuance-rate** | days (default 30) | Certs issued per day; 30-day default |
+
+#### Structured Logging (M14)
+- **Library** — Go's `log/slog` (structured, context-aware)
+- **Request ID Propagation** — Per-request UUID in context; logged on all operations
+- **Middleware** — `NewLogging(logger *slog.Logger)` middleware wrapping all API calls
+- **Log Format** — JSON (default) or text; configurable via `CERTCTL_LOG_FORMAT`
+- **Log Level** — debug, info, warn, error; configurable via `CERTCTL_LOG_LEVEL`
+
+#### API Audit Middleware (M19)
+Every API call recorded to immutable `audit_events` table.
+
+| Logged Field | Details |
+|--------------|---------|
+| **Method** | HTTP verb (GET, POST, PUT, DELETE) |
+| **Path** | Request path (e.g., /api/v1/certificates) |
+| **Actor** | Authenticated user/API key (or "anonymous") |
+| **Body Hash** | SHA-256 of request body (truncated first 16 chars for brevity) |
+| **Response Status** | HTTP status code |
+| **Latency** | Request processing time in ms |
+| **Timestamp** | RFC3339 format |
+
+#### Immutable Audit Trail
+- **Table** — `audit_events` append-only (no UPDATE/DELETE)
+- **Events** — Issuance, renewal, deployment, revocation, policy violations, approval/rejection
+- **Retention** — Indefinite (no expiration)
+- **GUI Export** — CSV/JSON export with applied time-range, actor, action filters
+- **Query API** — `GET /api/v1/audit?actor=...&resource=...&action=...&before=...&after=...`
+
+#### Deployment Rollback Support (M14)
+- **Version History** — Sorted by deployment timestamp
+- **Current Badge** — Visual indicator on latest deployed version
+- **Rollback Button** — Click to re-deploy previous version
+- **Versioning** — Each cert version tracked (serial, fingerprint, PEM)
+
+---
+
+## Job System
+
+### Job Types (4 total)
+| Type | Trigger | States | Output |
+|------|---------|--------|--------|
+| **Issuance** | New certificate creation | Pending → AwaitingCSR/Running → Completed/Failed | Certificate version with serial |
+| **Renewal** | Auto-renewal or manual trigger | Pending → AwaitingCSR/AwaitingApproval/Running → Completed/Failed | New certificate version |
+| **Deployment** | Automatic or manual post-renewal | Pending → AwaitingCSR/Running → Completed/Failed | Target-specific status |
+| **Validation** | Scheduled or manual | Pending → Running → Completed/Failed | Validation report (TBD V3) |
+
+### Job States (7 total)
+| State | Meaning | Transition |
+|-------|---------|-----------|
+| **Pending** | Created, awaiting processing | → AwaitingCSR or Running |
+| **AwaitingCSR** | Agent needs to generate key + submit CSR | → Running (after CSR received) |
+| **AwaitingApproval** | Human approval required (renewal only) | → Running (approve) or Cancelled (reject) |
+| **Running** | Active processing (issuance, deployment, etc.) | → Completed or Failed |
+| **Completed** | Successfully finished | (terminal) |
+| **Failed** | Error during processing; no retry auto-scheduled | (terminal; manual retry available) |
+| **Cancelled** | Explicitly cancelled by user or system | (terminal) |
+
+### Job Lifecycle Example (Agent Keygen)
+1. **Renewal triggered** → Job created in `Pending` state
+2. **Scheduler polls** → Job transitioned to `AwaitingCSR`
+3. **Work endpoint** → Agent receives job with common_name and SANs
+4. **Agent keygen** → ECDSA P-256 key created locally; CSR submitted
+5. **CSR received** → Server signs; Job transitioned to `Running`
+6. **Deployment scheduled** → New Deployment job created in `Pending`
+7. **Agent deploys** → Deployment job → `Running` → `Completed`
+8. **Status reported** → `POST /api/v1/agents/{id}/jobs/{job_id}/status`
+
+### Approval Flow (Interactive)
+1. **Renewal job created** in `AwaitingApproval` state (if policy requires)
+2. **Human reviews** on GUI
+3. **Approve** → `POST /api/v1/jobs/{id}/approve` → Job → `Running`
+4. **Reject** → `POST /api/v1/jobs/{id}/reject` + reason → Job → `Cancelled`
+
+### Background Scheduler (5 loops)
+| Loop | Interval | Task |
+|------|----------|------|
+| **Renewal Checker** | 1 hour | Scan policies; trigger renewals if cert expires soon |
+| **Job Processor** | 30 seconds | Process Pending → AwaitingCSR/Running; poll agent status |
+| **Health Checker** | 2 minutes | Check agent heartbeat; mark offline if >3 missed |
+| **Notification Processor** | 1 minute | Send queued notifications (email, Slack, webhook, etc.) |
+| **Short-Lived Cleanup** | 30 seconds | Audit short-lived credential expirations |
+
+All loops have configurable intervals via environment variables (`CERTCTL_SCHEDULER_*_INTERVAL`).
+
+---
+
+## Web Dashboard (19 Pages)
+
+### Overview
+The web dashboard is the primary operational interface for certctl. Built with **Vite + React 18 + TypeScript + TanStack Query v5 + Tailwind CSS 3 + Recharts**.
+
+| Page | Route | Purpose |
+|------|-------|---------|
+| **Dashboard** | `/` | Overview: summary cards, 4 charts (expiration, renewal rate, status, issuance), quick actions |
+| **Certificates** | `/certificates` | List with multi-select, bulk operations (renew/revoke/reassign), new cert modal, sorting/filtering |
+| **Certificate Detail** | `/certificates/:id` | Full cert view: deployment timeline, inline policy editor, version history, rollback, revoke, archive, renew actions |
+| **Agents** | `/agents` | List with metadata (OS, architecture, IP, version), online status, uptime |
+| **Agent Detail** | `/agents/:id` | Full system information, recent jobs, heartbeat graph, capabilities, metrics |
+| **Agent Fleet Overview** | `/fleet` | OS/architecture grouping with pie charts (status, version), per-platform agent listing |
+| **Jobs** | `/jobs` | Queue view with type filter, status filter, inline cancel/approve/reject, retry button |
+| **Notifications** | `/notifications` | Grouped by certificate, mark-as-read toggle, filter by type (expiration, deployment, revocation) |
+| **Policies** | `/policies` | CRUD with rule builder, enable/disable toggle, violations summary bar, violation list |
+| **Profiles** | `/profiles` | List with crypto constraints (key algorithms, TTL, EKUs), create/edit/delete |
+| **Issuers** | `/issuers` | List, create new issuer, test connection button, delete |
+| **Targets** | `/targets` | List, 3-step configuration wizard (Select Type → Configure → Review), type-specific fields |
+| **Owners** | `/owners` | List, create/edit with team picker, email field, delete |
+| **Teams** | `/teams` | List, create/edit with member resolver, delete |
+| **Agent Groups** | `/agent-groups` | List with dynamic match criteria badges (OS, arch, IP CIDR, version), manual membership editor |
+| **Audit Trail** | `/audit` | Filtered view (time range, actor, action), CSV/JSON export buttons, event detail modal |
+| **Short-Lived Credentials** | `/short-lived` | Filtered by profile with TTL < 1 hour, live countdown timer, auto-refresh every 10s, stats bar |
+| **Login** | `/login` | API key entry, auth mode detection, redirect after successful auth |
+| **ErrorBoundary** | (all pages) | Graceful crash recovery; displays user-friendly error message instead of white screen |
+
+### Dashboard Features
+
+#### Bulk Operations
+- **Multi-Select** — Checkbox column in certificate list; "Select All" toggle
+- **Bulk Renew** — Trigger renewal on selected certs; progress bar
+- **Bulk Revoke** — Select reason codes per cert; sequential revocation; progress
+- **Bulk Reassign** — Owner picker modal; assign to multiple certs at once
+
+#### Deployment Timeline
+- **Visual 4-Step Timeline** — Requested → Issued → Deploying → Active
+- **Per-Certificate Job Queries** — Query jobs to get current phase
+- **Status Indicators** — Checkmarks for completed phases; spinner for running; X for failed
+
+#### Inline Policy Editor
+- **Edit Mode** — Click edit button on cert detail
+- **Policy Dropdown** — Select from list of policies
+- **Renewal Threshold Config** — Inline sliders/inputs for 30/14/7/0 day thresholds
+- **Save/Cancel** — API mutations with optimistic updates via TanStack Query
+
+#### Target Configuration Wizard
+- **Step 1: Select Type** — Radio or dropdown (NGINX, Apache, HAProxy, F5, IIS)
+- **Step 2: Configure** — Type-specific fields (cert path, chain path, key path, etc.)
+- **Step 3: Review** — Summary of config; confirm create
+- **Validation** — Real-time field validation; show errors; disable Create if invalid
+
+#### Auth & Session
+- **Auth Context** — React context with API key, auth mode, session state
+- **Auto-Redirect** — 401 response → redirect to /login
+- **Logout** — Button in sidebar; clears context; redirects to /login
+- **Remember API Key** — Persisted in localStorage (production should clear on logout)
+
+#### Demo Mode
+- Activates when API is unreachable
+- Renders realistic mock data for screenshots
+- Useful for offline presentations
+
+---
+
+## Integration Interfaces
+
+### MCP Server (M18a)
+**Separate binary** (`cmd/mcp-server/`) providing AI-native access to certctl via Claude, Cursor, OpenClaw.
+
+- **Transport** — stdio (stdin/stdout)
+- **Protocol** — Model Context Protocol v1
+- **SDK** — Official `modelcontextprotocol/go-sdk` v1.4.1
+- **Tools** — 76 MCP tools covering all API endpoints
+- **Organization** — 16 resource domains (Certificates, Issuers, Targets, Agents, Jobs, etc.)
+- **Authentication** — Bearer token via `CERTCTL_API_KEY` env var
+- **Configuration** — `CERTCTL_SERVER_URL` (e.g., http://localhost:8080) + `CERTCTL_API_KEY`
+- **Input Types** — 33 typed structs with `jsonschema` tags for auto-generated LLM-friendly schemas
+- **Stateless Design** — HTTP proxy (no state held in MCP server; all logic in REST API)
+
+### CLI Tool (certctl-cli, M16b)
+**Lightweight command-line wrapper** around REST API.
+
+| Subcommand | Usage | Output Format |
+|------------|-------|----------------|
+| **list-certs** | `certctl-cli list-certs [--filter]` | Table or JSON (--format=json) |
+| **get-cert** | `certctl-cli get-cert <id>` | JSON cert details |
+| **renew-cert** | `certctl-cli renew-cert <id>` | Job ID confirmation |
+| **revoke-cert** | `certctl-cli revoke-cert <id> [--reason]` | Revocation confirmation |
+| **list-agents** | `certctl-cli list-agents` | Table or JSON |
+| **list-jobs** | `certctl-cli list-jobs [--filter]` | Table or JSON |
+| **health** | `certctl-cli health` | Server status |
+| **metrics** | `certctl-cli metrics` | JSON metrics |
+| **import** | `certctl-cli import <pem-file>` | Bulk import cert count |
+| **help** | `certctl-cli help [command]` | Command documentation |
+
+**Implementation Details:**
+- Stdlib-only (flag + text/tabwriter); no Cobra dependency
+- JSON + table output formatters
+- PEM parser for bulk import (multi-cert PEM files)
+- Environment variables: `CERTCTL_SERVER_URL`, `CERTCTL_API_KEY`
+- CLI flags: `--server`, `--api-key`, `--format` (json/table)
+- Tested with httptest mock server; all commands covered
+
+### OpenAPI 3.1 Specification
+- **File** — `api/openapi.yaml`
+- **Scope** — 78 operations (76 API endpoints + /health + /ready)
+- **Schemas** — Complete domain models with examples
+- **Enums** — Job types, states, policy rule types, notification types
+- **Pagination** — Standard envelope (data, total, page, per_page)
+- **Security** — Bearer token security scheme
+- **SDK Generation** — Supports go-swagger, openapi-generator, etc.
+
+---
+
+## Security Architecture
+
+### Private Key Isolation
+- **Agent-Side Keygen (Default)** — ECDSA P-256 keys generated on agents via Go's `crypto/ecdsa`
+- **Local Key Storage** — Keys written to agent's `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions (user-readable only)
+- **Server-Side Keygen (Demo Only)** — RSA-2048 keygen available via `CERTCTL_KEYGEN_MODE=server` with explicit log warning; never used in production
+- **CSR Submission Only** — Agents submit CSRs (public) to control plane; private keys never leave agent infrastructure
+- **Key Rotation** — Agents can re-key without control plane involvement (local only)
+
+### Pull-Only Deployment Model
+- **No Outbound Initiations** — Server never initiates connections to agents or targets
+- **Agent Polling** — Agents poll `GET /api/v1/agents/{id}/work` every 30 seconds
+- **Proxy Agent Pattern** — For network appliances (F5, Palo Alto) or agentless targets (Windows servers), a "proxy agent" in the same network zone executes deployments via the target's API
+- **Credential Scope** — Proxy agent credentials limited to its zone; control plane never stores target credentials directly
+- **Firewall-Friendly** — Control plane can be completely locked down; no inbound rules needed for agents
+
+### Sub-CA Capability
+- **Enterprise Integration** — Local CA can operate as subordinate CA under enterprise root (e.g., ADCS)
+- **Disk-Based Cert+Key** — `CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH` load pre-signed CA cert and key
+- **Chain Validation** — Issued certs chain to enterprise root; full trust hierarchy
+- **Self-Signed Fallback** — Default mode generates self-signed root if paths not set (development/demo)
+- **Key Formats** — RSA, ECDSA, PKCS#8 support with auto-detection
+
+### API Authentication
+- **SHA-256 Hashing** — API keys hashed with SHA-256 before storage
+- **Constant-Time Comparison** — Prevents timing attacks during key validation
+- **Bearer Token** — `Authorization: Bearer {api_key}` header on all authenticated endpoints
+- **Configurable** — `CERTCTL_AUTH_TYPE=api-key` (default) enforced; "none" requires explicit opt-in with log warning
+
+### Rate Limiting
+- **Token Bucket** — Smooth rate limiting with burst capacity
+- **RPS + Burst** — Configurable `CERTCTL_RATE_LIMIT_RPS` (default 50) and `CERTCTL_RATE_LIMIT_BURST` (default 100)
+- **429 Responses** — Rate limit exceeded responses include `Retry-After` header
+- **Per-Client** — Implemented per IP (future: per API key)
+
+### Audit & Compliance
+- **Immutable Audit Trail** — Append-only table; no UPDATE/DELETE operations
+- **API Audit Middleware** — Every call logged with method, path, actor, body hash, status, latency
+- **Event Timestamps** — RFC3339 format with second precision
+- **Actor Tracking** — API key ID or username extracted from auth context
+- **Compliance Export** — CSV/JSON export of audit events with filtering
+
+---
+
+## Infrastructure
+
+### Deployment Architecture
+- **Server** — Go HTTP server (net/http stdlib) on `:8080` (default) or `:8443` (Docker)
+- **Database** — PostgreSQL 16 with 18+ tables, TEXT primary keys (human-readable prefixed IDs)
+- **Agent** — Lightweight Go binary on target infrastructure
+- **Dashboard** — React SPA served from `/web/dist/` (Vite build)
+
+### Docker Compose Deployment
+- **Services** — PostgreSQL 16, certctl server, agent
+- **Health Checks** — On all services (server health check, database readiness)
+- **Seed Data** — Demo dataset with 15 certs, 5 agents, 5 targets, policies, audit events
+- **Credentials** — Environment variables in `.env` file; app.key for API key
+
+### PostgreSQL Schema
+- **18+ Tables** — Certificates, agents, jobs, targets, issuers, policies, profiles, teams, owners, agent groups, audit events, notifications, revocations, versions, etc.
+- **TEXT Primary Keys** — Human-readable prefixed IDs: mc-*, t-*, a-*, j-*, p-*, etc.
+- **Indexes** — 5+ performance indexes on foreign keys, timestamps, status fields
+- **Migrations** — Idempotent migrations with `IF NOT EXISTS`, `ON CONFLICT`, numbered sequentially
+- **Max Connections** — Configurable via `CERTCTL_DATABASE_MAX_CONNS` (default 25)
+
+### CI/CD Pipeline
+- **GitHub Actions** — `.github/workflows/ci.yml`
+- **Parallel Jobs** — Go (build, vet, test+coverage, gates) and Frontend (tsc, vitest, vite build)
+- **Coverage Gates** — Service layer ≥30%, handler layer ≥50%
+- **Release Workflow** — Tag push → build → publish Docker images to `ghcr.io`
+- **Docker Tags** — `:latest`, `:v{version}` (ghcr.io/shankar0123/certctl)
+
+### Test Suite
+- **Unit Tests** — 625+ test functions across service, handler, middleware, domain layers
+- **Integration Tests** — End-to-end workflows (issuance→renewal→deployment)
+- **Negative Tests** — Malformed input, nonexistent resources, error conditions
+- **Frontend Tests** — 86 Vitest tests (API client, utilities, stats/metrics, full endpoint coverage)
+- **Total Coverage** — 860+ tests (Go + frontend combined)
+
+### Licensing
+- **License** — Business Source License 1.1 (BSL 1.1)
+- **Conversion** — Automatic conversion to Apache 2.0 on March 23, 2033 (7-year term)
+- **Source-Available** — Code available for inspection; copying/modification restricted until conversion
+
+---
+
+## Configuration Reference
+
+### Environment Variables (All `CERTCTL_` Prefixed)
+
+#### Server
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_SERVER_HOST` | string | 127.0.0.1 | Bind address |
+| `CERTCTL_SERVER_PORT` | int | 8080 | Listen port |
+
+#### Database
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_DATABASE_URL` | string | postgres://localhost/certctl | PostgreSQL connection string |
+| `CERTCTL_DATABASE_MAX_CONNS` | int | 25 | Max connection pool size |
+| `CERTCTL_DATABASE_MIGRATIONS_PATH` | string | ./migrations | Migration file directory |
+
+#### Scheduler
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | duration | 1h | Renewal checker loop interval |
+| `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | duration | 30s | Job processor loop interval |
+| `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | duration | 2m | Agent health checker loop interval |
+| `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | duration | 1m | Notification processor loop interval |
+
+#### Logging
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_LOG_LEVEL` | string | info | debug, info, warn, error |
+| `CERTCTL_LOG_FORMAT` | string | json | json or text |
+
+#### Authentication
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_AUTH_TYPE` | string | api-key | api-key, jwt, or none |
+| `CERTCTL_AUTH_SECRET` | string | (required) | API key or JWT secret |
+
+#### Rate Limiting
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_RATE_LIMIT_ENABLED` | bool | true | Enable/disable rate limiting |
+| `CERTCTL_RATE_LIMIT_RPS` | float | 50 | Requests per second |
+| `CERTCTL_RATE_LIMIT_BURST` | int | 100 | Max burst size |
+
+#### CORS
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_CORS_ORIGINS` | string | (empty) | Comma-separated origins or * for all |
+
+#### Key Generation
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_KEYGEN_MODE` | string | agent | agent or server |
+
+#### Local CA Sub-CA Mode
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_CA_CERT_PATH` | string | (empty) | Path to PEM-encoded CA cert (sub-CA mode) |
+| `CERTCTL_CA_KEY_PATH` | string | (empty) | Path to PEM-encoded CA key (sub-CA mode) |
+
+#### ACME Issuer
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_ACME_DIRECTORY_URL` | string | (empty) | ACME server directory URL |
+| `CERTCTL_ACME_EMAIL` | string | (empty) | Account email for ACME registration |
+| `CERTCTL_ACME_CHALLENGE_TYPE` | string | http-01 | http-01 or dns-01 |
+| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | string | (empty) | Script path for DNS-01 present hook |
+| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | string | (empty) | Script path for DNS-01 cleanup hook |
+
+#### step-ca Issuer
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_STEPCA_URL` | string | (empty) | step-ca server URL |
+| `CERTCTL_STEPCA_PROVISIONER_NAME` | string | (empty) | JWK provisioner name |
+| `CERTCTL_STEPCA_PROVISIONER_KEY_PATH` | string | (empty) | Path to provisioner JWK private key |
+| `CERTCTL_STEPCA_PROVISIONER_PASSWORD` | string | (empty) | Provisioner key password (if encrypted) |
+
+#### OpenSSL/Custom CA Issuer
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_OPENSSL_SIGN_SCRIPT` | string | (empty) | Path to sign script (CSR → cert) |
+| `CERTCTL_OPENSSL_REVOKE_SCRIPT` | string | (empty) | Path to revoke script (serial+reason) |
+| `CERTCTL_OPENSSL_CRL_SCRIPT` | string | (empty) | Path to CRL generation script |
+| `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | int | 30 | Script timeout in seconds |
+
+#### Notifiers
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_SLACK_WEBHOOK_URL` | string | (empty) | Slack incoming webhook URL |
+| `CERTCTL_SLACK_CHANNEL` | string | (empty) | Slack channel override |
+| `CERTCTL_SLACK_USERNAME` | string | certctl | Slack username override |
+| `CERTCTL_TEAMS_WEBHOOK_URL` | string | (empty) | Microsoft Teams webhook URL |
+| `CERTCTL_PAGERDUTY_ROUTING_KEY` | string | (empty) | PagerDuty Events API routing key |
+| `CERTCTL_PAGERDUTY_SEVERITY` | string | warning | PagerDuty event severity |
+| `CERTCTL_OPSGENIE_API_KEY` | string | (empty) | OpsGenie API key |
+| `CERTCTL_OPSGENIE_PRIORITY` | string | P3 | OpsGenie alert priority |
+
+#### Agent
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_AGENT_NAME` | string | (generated) | Agent display name |
+| `CERTCTL_KEY_DIR` | string | /var/lib/certctl/keys | Local private key storage directory |
+| `CERTCTL_AGENT_ID` | string | (env or generated) | Agent unique ID (mc-xxx prefix) |
+
+#### MCP Server
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_SERVER_URL` | string | http://localhost:8080 | Base URL of certctl server |
+| `CERTCTL_API_KEY` | string | (required) | API key for authentication |
+
+---
+
+## Feature Matrix: V2 Free vs. V3 Paid (Roadmap)
+
+| Feature | V2 | V3 (Paid) | Status |
+|---------|----|-----------|-|
+| Certificate lifecycle (create/renew/revoke) | ✓ | ✓ | Shipped v1.0+ |
+| 4 issuer connectors (Local CA, ACME, step-ca, OpenSSL) | ✓ | ✓ | Shipped |
+| 3 target connectors (NGINX, Apache, HAProxy) | ✓ | ✓ | Shipped |
+| 6 notifier channels (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) | ✓ | ✓ | Shipped |
+| Agent fleet + metadata | ✓ | ✓ | Shipped |
+| Agent groups (dynamic + manual) | ✓ | ✓ | Shipped |
+| Policies + violations | ✓ | ✓ | Shipped |
+| Profiles + crypto constraints | ✓ | ✓ | Shipped |
+| Revocation (RFC 5280, CRL, OCSP) | ✓ | ✓ | Shipped |
+| Dashboard + 19 pages | ✓ | ✓ | Shipped |
+| Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
+| REST API (77 endpoints) | ✓ | ✓ | Shipped |
+| MCP server (76 tools) | ✓ | ✓ | Shipped v2.1 |
+| CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
+| **OIDC/SSO auth** | ✗ | ✓ | Planned V3 |
+| **RBAC (role-based access control)** | ✗ | ✓ | Planned V3 |
+| **F5 BIG-IP implementation** | Stub | ✓ | Stub in V2 |
+| **IIS implementation** | Stub | ✓ | Stub in V2 |
+| **NATS event bus** | ✗ | ✓ | Planned V3 |
+| **Real-time updates (SSE/WebSocket)** | ✗ | ✓ | Planned V3 |
+| **Advanced search DSL** | ✗ | ✓ | Planned V3 |
+| **Bulk operations** | ✓ | ✓ | M13 (free) |
+| **Bulk revocation** | ✗ | ✓ | Planned V3 (paid) |
+| **Certificate health scores** | ✗ | ✓ | Planned V3 |
+| **Compliance scoring** | ✗ | ✓ | Planned V3 |
+| **DigiCert issuer** | ✗ | ✓ | Planned V3 |
+| **CT Log monitoring** | ✗ | ✓ | Planned V3 |
+
+---
+
+## Summary Statistics
+
+| Category | Count |
+|----------|-------|
+| **API Endpoints** | 77 (under /api/v1/) |
+| **Dashboard Pages** | 19 |
+| **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
+| **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |
+| **Notifier Channels** | 6 (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) |
+| **Job Types** | 4 (Issuance, Renewal, Deployment, Validation) |
+| **Job States** | 7 (Pending, AwaitingCSR, AwaitingApproval, Running, Completed, Failed, Cancelled) |
+| **Policy Rule Types** | 5 (AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime) |
+| **Certificate States** | 8 (Pending, Active, Expiring, Expired, RenewalInProgress, Failed, Revoked, Archived) |
+| **Revocation Reason Codes** | 8 (RFC 5280 compliant) |
+| **MCP Tools** | 76 (16 resource domains) |
+| **CLI Subcommands** | 10 |
+| **Database Tables** | 18+ |
+| **Test Suite** | 860+ tests |
+| **Environment Variables** | 40+ configuration options |
+

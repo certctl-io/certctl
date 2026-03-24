@@ -389,7 +389,7 @@ Certctl sends notifications for certificate lifecycle events. Check what notific
 curl -s $API/api/v1/notifications | jq '.data[0:5]'
 ```
 
-**How it works:** The `NotificationService` generates notification records in the `notification_events` table whenever significant events occur — expiration warnings at configurable thresholds (30, 14, 7, 0 days by default), renewal success/failure, deployment results, and policy violations. Each notification has a `channel` (Email, Webhook) and a `recipient`.
+**How it works:** The `NotificationService` generates notification records in the `notification_events` table whenever significant events occur — expiration warnings at configurable thresholds (30, 14, 7, 0 days by default), renewal success/failure, deployment results, and policy violations. Each notification has a `channel` (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) and a `recipient`.
 
 **Threshold-Based Alerting:** Each renewal policy defines configurable alert thresholds via the `alert_thresholds_days` field (e.g., `[30, 14, 7, 0]` for the standard policy, `[14, 7, 3, 0]` for the urgent policy). The scheduler checks which thresholds each certificate has crossed and sends one notification per threshold, deduplicated so the same alert is never sent twice. Certificates are automatically transitioned to `Expiring` status when entering the alert window and `Expired` when they hit 0 days.
 
@@ -554,6 +554,127 @@ curl -s $API/api/v1/metrics | jq .
 
 ---
 
+## Part 10: Certificate Profiles
+
+Profiles define the cryptographic constraints for a class of certificates. Let's explore the demo profiles:
+
+```bash
+# List all profiles
+curl -s $API/api/v1/profiles | jq '.data[] | {id, name, allowed_key_algorithms, max_validity_days}'
+```
+
+Create a new profile for high-security certificates:
+
+```bash
+curl -s -X POST $API/api/v1/profiles \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "prof-demo-hsec",
+    "name": "Demo High Security",
+    "description": "ECDSA-only with 90-day max TTL",
+    "allowed_key_algorithms": [{"algorithm": "ECDSA", "min_size": 256}],
+    "max_validity_days": 90,
+    "allowed_ekus": ["serverAuth"],
+    "enabled": true
+  }' | jq .
+```
+
+**How it works:** Certificate profiles are stored in the `certificate_profiles` table with a `allowed_key_algorithms` JSONB column that defines which key types and minimum sizes are acceptable. When a certificate is assigned to a profile, the profile constraints are enforced during CSR validation. The `max_validity_days` field controls the maximum certificate lifetime — profiles with values translating to under 1 hour enable short-lived certificate mode, where certs are exempt from CRL/OCSP.
+
+**Why profiles matter:** Without profiles, any agent can submit a CSR with any key type and any validity period. Profiles create crypto policy guardrails — "production TLS certs must use ECDSA P-256 with 90-day max TTL" — that prevent configuration drift and enforce compliance requirements across the fleet.
+
+**In the dashboard**, click "Profiles" in the sidebar to see and manage certificate profiles.
+
+---
+
+## Part 11: Agent Groups
+
+Agent groups let you organize your agent fleet by criteria for dynamic policy scoping:
+
+```bash
+# List existing agent groups
+curl -s $API/api/v1/agent-groups | jq '.data[] | {id, name, match_os, match_architecture}'
+```
+
+Create a group that matches all Linux agents:
+
+```bash
+curl -s -X POST $API/api/v1/agent-groups \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "ag-demo-linux",
+    "name": "Demo Linux Agents",
+    "description": "All agents running Linux",
+    "match_os": "linux",
+    "enabled": true
+  }' | jq .
+```
+
+**How it works:** Agent groups use dynamic matching criteria — `match_os`, `match_architecture`, `match_ip_cidr`, and `match_version` — that are compared against agent metadata reported via heartbeat. Agents automatically join groups when their metadata matches the criteria. Manual membership (explicit include/exclude) is also supported for edge cases. Renewal policies can be scoped to agent groups via the `agent_group_id` foreign key, so you can say "this renewal policy applies only to Linux agents."
+
+**In the dashboard**, click "Agent Groups" to see groups with visual match criteria badges. The "Fleet Overview" page shows OS/architecture distribution charts powered by agent metadata.
+
+---
+
+## Part 12: Interactive Approval Workflow
+
+For high-value certificates, you may want human oversight before renewal proceeds. Create a policy that requires approval:
+
+```bash
+# Check jobs that need approval
+curl -s "$API/api/v1/jobs?status=AwaitingApproval" | jq '.data[] | {id, type, certificate_id, status}'
+```
+
+If there are jobs awaiting approval, approve or reject them:
+
+```bash
+# Approve a job
+curl -s -X POST $API/api/v1/jobs/JOB_ID/approve \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Verified key type meets compliance requirements"}' | jq .
+
+# Reject a job
+curl -s -X POST $API/api/v1/jobs/JOB_ID/reject \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Key type does not meet PCI requirements"}' | jq .
+```
+
+**How it works:** When a renewal policy has `auto_renew` set to false, renewal jobs enter the `AwaitingApproval` state instead of being processed immediately. An operator must explicitly approve or reject the job via the API or the GUI. Approved jobs transition to `Pending` and are picked up by the job processor. Rejected jobs move to `Cancelled` with the provided reason recorded in the audit trail.
+
+**Why interactive approval:** Not every certificate renewal should be automatic. PCI-scoped certificates, certs with specific compliance requirements, or certificates being migrated between issuers benefit from a human checkpoint. The AwaitingApproval state creates that checkpoint without blocking the entire job pipeline.
+
+---
+
+## Part 13: Advanced Query Features
+
+certctl's API supports sorting, filtering, cursor pagination, and sparse field selection:
+
+```bash
+# Sort by expiration date (ascending)
+curl -s "$API/api/v1/certificates?sort=notAfter" | jq '.data[] | {id, common_name, expires_at}'
+
+# Sort descending (prefix with -)
+curl -s "$API/api/v1/certificates?sort=-createdAt" | jq '.data[0:3]'
+
+# Time-range filter: certs expiring before May 2026
+curl -s "$API/api/v1/certificates?expires_before=2026-05-01T00:00:00Z" | jq '.data | length'
+
+# Sparse fields: only return id, status, and expiry
+curl -s "$API/api/v1/certificates?fields=id,status,expires_at" | jq '.data[0]'
+
+# Cursor pagination: page through results efficiently
+curl -s "$API/api/v1/certificates?page_size=3" | jq '{next_cursor: .next_cursor, count: (.data | length)}'
+
+# View deployment targets for a certificate
+curl -s "$API/api/v1/certificates/mc-demo-api/deployments" | jq .
+```
+
+**How it works:** Sort uses a whitelist of allowed fields (notAfter, createdAt, updatedAt, commonName, name, status, environment) mapped to SQL columns. Cursor pagination uses keyset pagination (`(created_at, id) < (cursor_time, cursor_id)`) which is more efficient than OFFSET-based pagination for large datasets. Sparse fields marshal the full object to JSON, then strip unrequested keys — lightweight but effective. Time-range filters add WHERE clauses to the SQL query.
+
+**Why cursor pagination:** Page-based pagination (`?page=50&per_page=100`) requires the database to skip rows, which gets slower as page numbers increase. Cursor-based pagination (`?cursor=<token>&page_size=100`) uses an indexed seek, maintaining constant performance regardless of how deep you paginate. For large certificate inventories (thousands of certs), this is the difference between sub-millisecond and multi-second queries.
+
+---
+
 ## End-to-End Architecture Summary
 
 Here's what we just walked through, mapped to the system architecture:
@@ -565,14 +686,18 @@ flowchart TB
         U2 --> U3["POST /certificates"]
         U3 --> U4["POST /certificates/{id}/renew"]
         U4 --> U5["POST /certificates/{id}/deploy"]
-        U5 --> U6["GET /audit"]
+        U5 --> U5b["POST /certificates/{id}/revoke"]
+        U5b --> U6["GET /stats + /metrics"]
+        U6 --> U7["POST /profiles"]
+        U7 --> U8["POST /agent-groups"]
+        U8 --> U9["GET /audit"]
     end
 
     subgraph "Control Plane (certctl-server)"
         API["REST API\nGo net/http"]
         SVC["Service Layer\nBusiness Logic"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\n4 background loops"]
+        SCHED["Scheduler\n5 background loops"]
         CONN["Connector Registry\nIssuer + Target + Notifier"]
     end
 

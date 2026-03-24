@@ -305,6 +305,8 @@ sequenceDiagram
     Note over A: Agent deploys using locally-held private key
 ```
 
+**Profile enforcement:** If the certificate is assigned to a profile (`certificate_profile_id`), the profile's `allowed_key_algorithms` and `max_validity_days` constraints are checked during CSR validation. A CSR with a disallowed key type or a validity period exceeding the profile maximum is rejected before reaching the issuer connector.
+
 #### Server-Side Key Generation (Demo Only)
 
 Set `CERTCTL_KEYGEN_MODE=server` for development/demo with Local CA. The control plane generates RSA-2048 keys server-side. A log warning is emitted at startup.
@@ -339,6 +341,36 @@ The agent deploys certificates using target connectors. Each connector knows how
 - **IIS** (planned, dual-mode): (1) Agent-local (recommended) — a Windows agent on the IIS box runs PowerShell `Import-PfxCertificate` + `Set-WebBinding` directly. (2) Proxy agent WinRM — for agentless IIS targets, a nearby Windows agent reaches the IIS box via WinRM.
 
 The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key and never initiates outbound connections to agents or targets (pull-only model).
+
+### 3.5 Revoke a Certificate
+
+When a certificate needs immediate revocation (key compromise, decommission, etc.), the control plane executes a 7-step process:
+
+```mermaid
+sequenceDiagram
+    participant U as User / API Client
+    participant API as REST API
+    participant SVC as CertificateService
+    participant DB as PostgreSQL
+    participant ISS as Issuer Connector
+    participant NOT as Notification Service
+
+    U->>API: POST /api/v1/certificates/{id}/revoke<br/>{reason: "keyCompromise"}
+    API->>SVC: RevokeCertificateWithActor(id, reason, actor)
+    SVC->>DB: Validate cert is not already revoked/archived
+    SVC->>DB: Get latest certificate version (serial number)
+    SVC->>DB: UPDATE managed_certificates SET status='Revoked'
+    SVC->>DB: INSERT INTO certificate_revocations<br/>(ON CONFLICT DO NOTHING for idempotency)
+    SVC->>ISS: RevokeCertificate(serial, reason)<br/>(best-effort — failure doesn't block)
+    SVC->>DB: INSERT audit_event (certificate_revoked)
+    SVC->>NOT: SendRevocationNotification(cert, reason)
+    SVC-->>API: Updated certificate with Revoked status
+    API-->>U: 200 OK
+```
+
+The revocation is recorded in the `certificate_revocations` table (separate from the certificate status update) for CRL generation. The DER-encoded CRL at `GET /api/v1/crl/{issuer_id}` is generated on-demand by querying this table and signing with the issuing CA's key. The OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}` checks both the certificate status and the revocations table to return signed good/revoked/unknown responses.
+
+Short-lived certificates (those with profile TTL < 1 hour) return "good" from OCSP and are excluded from CRL — their rapid expiry is treated as sufficient revocation.
 
 ### 4. Automatic Renewal
 
@@ -573,7 +605,18 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
 
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 78 operations, all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
+
+**Enhanced Query Features (M20):** Certificate list endpoints support additional query capabilities beyond basic pagination:
+
+- **Sorting**: `?sort=notAfter` (ascending) or `?sort=-createdAt` (descending). Whitelist: notAfter, expiresAt, createdAt, updatedAt, commonName, name, status, environment.
+- **Time-range filters**: `?expires_before=`, `?expires_after=`, `?created_after=`, `?updated_after=` (RFC 3339 format).
+- **Cursor pagination**: `?cursor=<token>&page_size=100` for efficient keyset pagination alongside traditional page-based.
+- **Sparse fields**: `?fields=id,common_name,status` to reduce response payload.
+- **Additional filters**: `?agent_id=`, `?profile_id=` (in addition to existing status, environment, owner_id, team_id, issuer_id).
+- **Deployments**: `GET /api/v1/certificates/{id}/deployments` returns deployment targets for a certificate.
 
 Certificate revocation: `POST /api/v1/certificates/{id}/revoke` with optional `{"reason": "keyCompromise"}`. Supports RFC 5280 reason codes (unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn). Returns the updated certificate status. Best-effort issuer notification — the revocation succeeds even if the issuer connector is unavailable. A JSON-formatted CRL is available at `GET /api/v1/crl`, and a DER-encoded X.509 CRL signed by the issuing CA at `GET /api/v1/crl/{issuer_id}`. An embedded OCSP responder serves signed responses at `GET /api/v1/ocsp/{issuer_id}/{serial}`. Short-lived certificates (profile TTL < 1 hour) are exempt from CRL/OCSP — expiry is sufficient revocation.
 
@@ -603,6 +646,14 @@ flowchart LR
 The MCP server is a stateless HTTP proxy — every MCP tool call translates to an HTTP request to the certctl REST API. It adds no new state, no new dependencies, and no new attack surface beyond what the API already exposes. Configuration is minimal: `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables.
 
 The 76 tools are organized across 16 resource domains with typed input structs and `jsonschema` struct tags for automatic LLM-friendly schema generation. Binary response support handles DER CRL and OCSP endpoints.
+
+## CLI Tool
+
+certctl ships with a command-line tool (`certctl-cli`, built from `cmd/cli/main.go`) that wraps the REST API for terminal workflows. The CLI uses Go's standard library only (`flag` + `text/tabwriter`) — no Cobra or other framework dependencies.
+
+10 subcommands: `list-certs`, `get-cert`, `renew-cert`, `revoke-cert`, `list-agents`, `list-jobs`, `health`, `metrics`, and `import` (bulk PEM import). Output is available in table (default) or JSON format via `--format`. Connection is configured via `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables or CLI flags.
+
+The bulk import command (`certctl-cli import <file.pem>`) parses multi-certificate PEM files and creates certificate records via the API — useful for bootstrapping certctl with existing certificate inventory.
 
 ## Deployment Topologies
 
@@ -660,7 +711,7 @@ certctl uses a layered testing approach aligned with the handler → service →
 
 **Handler layer tests** (`internal/api/handler/*_test.go`) — ~257 test functions across 11 files using Go's `httptest` package. Every handler file has a corresponding test file: certificates (50 tests including revocation, DER CRL, and OCSP), agents (28 tests), jobs (21 tests including approve/reject), notifications (11 tests), policies (19 tests), profiles (18 tests), issuers (17 tests), targets (17 tests), agent groups (12 tests), teams (26 tests), and owners (21 tests). Each test file follows the same pattern: a mock service struct with function fields, `httptest.NewRecorder` for capturing responses, and a shared `contextWithRequestID()` helper. Tests cover the happy path, input validation (missing fields, invalid JSON, empty IDs, name length limits), error propagation from the service layer, method-not-allowed responses, and pagination parameters.
 
-**Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 14 subtests covering error paths, 19 M11b endpoint tests, and 8 revocation endpoint tests (M15a+M15b): nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, expired certificate lifecycle, team/owner/agent group CRUD validation, revocation success, already-revoked rejection, not-found revocation, JSON CRL retrieval, DER CRL retrieval, OCSP response retrieval, and short-lived cert exemption. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector.
+**Integration tests** (`internal/integration/`) — Two test files exercising the full stack from HTTP request through router, handler, service, and postgres repository layers. `lifecycle_test.go` has 11 subtests covering the complete certificate lifecycle: team/owner creation, certificate creation, issuer verification, renewal trigger, job verification, agent registration, CSR submission, deployment, and status reporting. `negative_test.go` has 14 subtests covering error paths, 19 M11b endpoint tests, and 8 revocation endpoint tests (M15a+M15b): nonexistent resource lookups (404s), invalid request bodies (malformed JSON, missing required fields), invalid CSR submission, heartbeat for nonexistent agents, wrong HTTP methods on list endpoints, empty list responses, renewal on nonexistent certificates, expired certificate lifecycle, team/owner/agent group CRUD validation, revocation success, already-revoked rejection, not-found revocation, JSON CRL retrieval, DER CRL retrieval, OCSP response retrieval, and short-lived cert exemption. Both use a shared `setupTestServer()` that builds a fully-wired server with real postgres repositories and the Local CA issuer connector. A third file, `e2e_test.go`, contains 8 cross-milestone test functions with 48+ subtests that exercise features across milestones end-to-end: M10 agent metadata via heartbeat, M11 profiles/teams/owners/agent-groups CRUD, M12 issuer registry verification, M13 GUI operation endpoints, M14 stats and metrics, M15 revocation and CRL, M16 notification channels, and M20 enhanced query API (sorting, cursor pagination, sparse fields, time-range filters).
 
 **Frontend tests** (`web/src/api/client.test.ts`, `web/src/api/utils.test.ts`) — 86 Vitest tests covering the API client, stats/metrics endpoints, and utility functions. The API client tests mock `globalThis.fetch` and verify all endpoint functions (certificates, agents, jobs, policies, issuers, targets, notifications, audit, stats, metrics, health) send correct HTTP methods, URLs, headers, and request bodies. They also test API key management (store/retrieve/clear), auth header propagation, 401 event dispatching, and error handling (server messages, error fields, status text fallback). The stats/metrics endpoint tests verify correct query parameter handling and response shape validation. The utility tests use `vi.useFakeTimers()` for deterministic date testing and cover `formatDate`, `formatDateTime`, `timeAgo`, `daysUntil`, and `expiryColor`. The test environment uses jsdom with `@testing-library/jest-dom` matchers.
 
@@ -668,7 +719,7 @@ certctl uses a layered testing approach aligned with the handler → service →
 
 **CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs: Go (build, vet, test with coverage, coverage threshold enforcement) and Frontend (TypeScript type check, Vitest test suite, Vite production build). The Go job runs all tests with `-coverprofile`, then enforces coverage thresholds: service layer must be at least 30% (current: ~35%) and handler layer must be at least 50% (current: ~63%). These thresholds act as regression floors — they can only go up. The service layer threshold is deliberately lower because much of the service code depends on postgres repositories and external connectors that require real infrastructure to test meaningfully. Connector tests are included via `./internal/connector/issuer/...` and `./internal/connector/target/...` (covers Local CA, ACME, step-ca, NGINX, Apache, and HAProxy packages with unit tests for certificate signing logic, DNS solver, issuer validation, and deployment flows). The Frontend job runs `npx vitest run` between the TypeScript check and production build steps.
 
-**Connector tests** (`internal/connector/`) — 23 test functions covering issuer and target connectors. The Local CA connector has tests for self-signed and sub-CA modes (RSA, ECDSA, config validation, non-CA cert rejection). The ACME DNS solver has 6 tests for script-based DNS-01 challenges. The step-ca connector has tests with a mock HTTP server for issuance, renewal, revocation, and error paths. The NGINX target connector has 13 tests covering config validation, certificate deployment (file writing, permissions, validate/reload commands), and deployment validation. Apache httpd and HAProxy connectors each have 3 tests covering config validation, deployment, and validation flows.
+**Connector tests** (`internal/connector/`) — 57 test functions covering issuer, target, and notifier connectors. The Local CA connector has tests for self-signed and sub-CA modes (RSA, ECDSA, config validation, non-CA cert rejection). The ACME DNS solver has 6 tests for script-based DNS-01 challenges. The step-ca connector has tests with a mock HTTP server for issuance, renewal, revocation, and error paths. The OpenSSL/Custom CA connector has 14 tests covering config validation, issuance success/failure/timeout, renewal, revocation, and CRL generation. The NGINX target connector has 13 tests covering config validation, certificate deployment (file writing, permissions, validate/reload commands), and deployment validation. Apache httpd and HAProxy connectors each have 3 tests covering config validation, deployment, and validation flows. Notifier connector tests span 20 tests across Slack (5), Teams (4), PagerDuty (6), and OpsGenie (5) — verifying channel identity, payload formatting, HTTP error handling, connection failures, auth headers, and configuration defaults.
 
 **What's not tested and why:** Postgres repository implementations (`internal/repository/postgres/`) require a real database and are tested only through integration tests, not unit tests. Target connectors for F5 BIG-IP and IIS are interface stubs (implementation planned for a future release). Scheduler loops are time-dependent and tested manually during development. The ACME connector requires a real ACME server (tested manually against Let's Encrypt staging). These are all candidates for future expansion as the test infrastructure matures.
 
