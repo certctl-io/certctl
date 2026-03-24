@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -61,9 +62,10 @@ func (s *StatsService) GetDashboardSummary(ctx context.Context) (interface{}, er
 	thirtyDaysFromNow := now.AddDate(0, 0, 30)
 
 	for _, cert := range allCerts {
-		if cert.Status == domain.CertificateStatusRevoked {
+		normalizedStatus := strings.ToLower(string(cert.Status))
+		if normalizedStatus == "revoked" {
 			summary.RevokedCertificates++
-		} else if cert.Status == domain.CertificateStatusExpired || (!cert.ExpiresAt.IsZero() && cert.ExpiresAt.Before(now)) {
+		} else if normalizedStatus == "expired" || (!cert.ExpiresAt.IsZero() && cert.ExpiresAt.Before(now)) {
 			summary.ExpiredCertificates++
 		} else if !cert.ExpiresAt.IsZero() && cert.ExpiresAt.Before(thirtyDaysFromNow) && cert.ExpiresAt.After(now) {
 			summary.ExpiringCertificates++
@@ -126,7 +128,9 @@ func (s *StatsService) GetCertificatesByStatus(ctx context.Context) (interface{}
 
 	for _, cert := range allCerts {
 		status := string(cert.Status)
-		if status == "" || status == "Active" {
+		// Normalize status to PascalCase to handle legacy lowercase values in the database
+		switch strings.ToLower(status) {
+		case "", "active":
 			if !cert.ExpiresAt.IsZero() {
 				if cert.ExpiresAt.Before(now) {
 					status = "Expired"
@@ -138,6 +142,20 @@ func (s *StatsService) GetCertificatesByStatus(ctx context.Context) (interface{}
 			} else {
 				status = "Active"
 			}
+		case "expiring":
+			status = "Expiring"
+		case "expired":
+			status = "Expired"
+		case "renewalinprogress", "renewal_in_progress":
+			status = "RenewalInProgress"
+		case "failed":
+			status = "Failed"
+		case "revoked":
+			status = "Revoked"
+		case "archived":
+			status = "Archived"
+		case "pending":
+			status = "Pending"
 		}
 		counts[status]++
 	}
