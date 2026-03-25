@@ -103,6 +103,7 @@ export CERTCTL_AGENT_ID=agent-local-01
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
+| [Manual Testing Guide](docs/testing-guide.md) | 284 tests across 25 areas — full V2 QA runbook with exact commands and pass/fail criteria |
 
 ## Architecture
 
