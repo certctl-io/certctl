@@ -103,6 +103,14 @@ func (m *mockCertRepo) GetExpiringCertificates(ctx context.Context, before time.
 	return expiring, nil
 }
 
+func (m *mockCertRepo) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
+	versions := m.Versions[certID]
+	if len(versions) == 0 {
+		return nil, errNotFound
+	}
+	return versions[len(versions)-1], nil
+}
+
 func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 	m.Certs[cert.ID] = cert
 }
@@ -477,7 +485,7 @@ func (m *mockAgentRepo) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string) error {
+func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
 	if m.UpdateHeartbeatErr != nil {
 		return m.UpdateHeartbeatErr
 	}
@@ -605,6 +613,27 @@ func (m *mockIssuerConnector) RenewCertificate(ctx context.Context, commonName s
 	return m.IssueCertificate(ctx, commonName, sans, csrPEM)
 }
 
+func (m *mockIssuerConnector) RevokeCertificate(ctx context.Context, serial string, reason string) error {
+	if m.Err != nil {
+		return m.Err
+	}
+	return nil
+}
+
+func (m *mockIssuerConnector) GenerateCRL(ctx context.Context, entries []CRLEntry) ([]byte, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return []byte("-----BEGIN X509 CRL-----\nmock-crl-data\n-----END X509 CRL-----"), nil
+}
+
+func (m *mockIssuerConnector) SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	return []byte("mock-ocsp-response"), nil
+}
+
 // Constructor functions for mocks
 
 func newMockCertificateRepository() *mockCertRepo {
@@ -723,6 +752,63 @@ func (m *mockIssuerRepository) Delete(ctx context.Context, id string) error {
 
 func (m *mockIssuerRepository) AddIssuer(issuer *domain.Issuer) {
 	m.issuers[issuer.ID] = issuer
+}
+
+// mockRevocationRepo is a test implementation of RevocationRepository
+type mockRevocationRepo struct {
+	Revocations []*domain.CertificateRevocation
+	CreateErr   error
+	ListErr     error
+}
+
+func (m *mockRevocationRepo) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
+	if m.CreateErr != nil {
+		return m.CreateErr
+	}
+	m.Revocations = append(m.Revocations, revocation)
+	return nil
+}
+
+func (m *mockRevocationRepo) GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error) {
+	for _, r := range m.Revocations {
+		if r.SerialNumber == serial {
+			return r, nil
+		}
+	}
+	return nil, errNotFound
+}
+
+func (m *mockRevocationRepo) ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error) {
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	return m.Revocations, nil
+}
+
+func (m *mockRevocationRepo) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
+	var result []*domain.CertificateRevocation
+	for _, r := range m.Revocations {
+		if r.CertificateID == certID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockRevocationRepo) MarkIssuerNotified(ctx context.Context, id string) error {
+	for _, r := range m.Revocations {
+		if r.ID == id {
+			r.IssuerNotified = true
+			return nil
+		}
+	}
+	return errNotFound
+}
+
+func newMockRevocationRepository() *mockRevocationRepo {
+	return &mockRevocationRepo{
+		Revocations: make([]*domain.CertificateRevocation, 0),
+	}
 }
 
 // mockNotifier is a simple notifier for testing

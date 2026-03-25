@@ -42,10 +42,10 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 		return fmt.Errorf("failed to read migrations directory: %w", err)
 	}
 
-	// Sort and filter SQL files
+	// Sort and filter to only .up.sql migration files (skip .down.sql rollbacks and seed files)
 	var sqlFiles []string
 	for _, file := range files {
-		if !file.IsDir() && strings.HasSuffix(file.Name(), ".sql") {
+		if !file.IsDir() && strings.HasSuffix(file.Name(), ".up.sql") {
 			sqlFiles = append(sqlFiles, file.Name())
 		}
 	}

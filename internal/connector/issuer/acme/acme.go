@@ -27,6 +27,22 @@ type Config struct {
 	EABKid       string `json:"eab_kid,omitempty"`   // External Account Binding Key ID (for some CAs)
 	EABHmac      string `json:"eab_hmac,omitempty"`  // External Account Binding HMAC Key
 	HTTPPort     int    `json:"http_port,omitempty"` // Port for HTTP-01 challenge server (default: 80)
+
+	// ChallengeType selects the ACME challenge method: "http-01" (default) or "dns-01".
+	// DNS-01 is required for wildcard certificates (*.example.com).
+	ChallengeType string `json:"challenge_type,omitempty"`
+
+	// DNSPresentScript is the path to a script that creates DNS TXT records (dns-01 only).
+	// The script receives CERTCTL_DNS_DOMAIN, CERTCTL_DNS_FQDN, CERTCTL_DNS_VALUE, CERTCTL_DNS_TOKEN.
+	DNSPresentScript string `json:"dns_present_script,omitempty"`
+
+	// DNSCleanUpScript is the path to a script that removes DNS TXT records (dns-01 only).
+	// Optional — if not set, records are not cleaned up automatically.
+	DNSCleanUpScript string `json:"dns_cleanup_script,omitempty"`
+
+	// DNSPropagationWait is how long to wait (in seconds) after creating the TXT record
+	// before telling the CA to validate. Defaults to 30 seconds.
+	DNSPropagationWait int `json:"dns_propagation_wait,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for ACME-compatible CAs
@@ -46,18 +62,40 @@ type Connector struct {
 	// HTTP-01 challenge solver state
 	challengeMu     sync.RWMutex
 	challengeTokens map[string]string // token → key authorization
+
+	// DNS-01 challenge solver (nil if using HTTP-01)
+	dnsSolver DNSSolver
 }
 
 // New creates a new ACME connector with the given configuration and logger.
 func New(config *Config, logger *slog.Logger) *Connector {
-	if config != nil && config.HTTPPort == 0 {
-		config.HTTPPort = 80
+	if config != nil {
+		if config.HTTPPort == 0 {
+			config.HTTPPort = 80
+		}
+		if config.ChallengeType == "" {
+			config.ChallengeType = "http-01"
+		}
+		if config.DNSPropagationWait == 0 {
+			config.DNSPropagationWait = 30
+		}
 	}
-	return &Connector{
+
+	c := &Connector{
 		config:          config,
 		logger:          logger,
 		challengeTokens: make(map[string]string),
 	}
+
+	// Initialize DNS solver if dns-01 challenge type is configured
+	if config != nil && config.ChallengeType == "dns-01" && config.DNSPresentScript != "" {
+		c.dnsSolver = NewScriptDNSSolver(config.DNSPresentScript, config.DNSCleanUpScript, logger)
+		logger.Info("DNS-01 challenge solver configured",
+			"present_script", config.DNSPresentScript,
+			"cleanup_script", config.DNSCleanUpScript)
+	}
+
+	return c
 }
 
 // ValidateConfig checks that the ACME directory URL is reachable and valid.
@@ -98,8 +136,33 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		cfg.HTTPPort = 80
 	}
 
+	if cfg.ChallengeType == "" {
+		cfg.ChallengeType = "http-01"
+	}
+
+	// Validate challenge type
+	if cfg.ChallengeType != "http-01" && cfg.ChallengeType != "dns-01" {
+		return fmt.Errorf("invalid challenge_type: %s (must be http-01 or dns-01)", cfg.ChallengeType)
+	}
+
+	// DNS-01 requires a present script
+	if cfg.ChallengeType == "dns-01" && cfg.DNSPresentScript == "" {
+		return fmt.Errorf("dns_present_script is required for dns-01 challenge type")
+	}
+
+	if cfg.DNSPropagationWait == 0 {
+		cfg.DNSPropagationWait = 30
+	}
+
 	c.config = &cfg
-	c.logger.Info("ACME configuration validated")
+
+	// Re-initialize DNS solver if switching to dns-01
+	if cfg.ChallengeType == "dns-01" && cfg.DNSPresentScript != "" {
+		c.dnsSolver = NewScriptDNSSolver(cfg.DNSPresentScript, cfg.DNSCleanUpScript, c.logger)
+	}
+
+	c.logger.Info("ACME configuration validated",
+		"challenge_type", cfg.ChallengeType)
 	return nil
 }
 
@@ -271,8 +334,17 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 	return status, nil
 }
 
-// solveAuthorizations processes all authorization URLs and solves their HTTP-01 challenges.
+// solveAuthorizations processes all authorization URLs and solves their challenges.
+// Supports both HTTP-01 and DNS-01 challenge types based on configuration.
 func (c *Connector) solveAuthorizations(ctx context.Context, authzURLs []string) error {
+	if c.config.ChallengeType == "dns-01" {
+		return c.solveAuthorizationsDNS01(ctx, authzURLs)
+	}
+	return c.solveAuthorizationsHTTP01(ctx, authzURLs)
+}
+
+// solveAuthorizationsHTTP01 solves challenges using the HTTP-01 method.
+func (c *Connector) solveAuthorizationsHTTP01(ctx context.Context, authzURLs []string) error {
 	// Start the challenge server
 	srv, err := c.startChallengeServer()
 	if err != nil {
@@ -339,6 +411,87 @@ func (c *Connector) solveAuthorizations(ctx context.Context, authzURLs []string)
 		c.challengeMu.Lock()
 		delete(c.challengeTokens, httpChallenge.Token)
 		c.challengeMu.Unlock()
+	}
+
+	return nil
+}
+
+// solveAuthorizationsDNS01 solves challenges using the DNS-01 method.
+// DNS-01 is required for wildcard certificates (*.example.com) and works
+// when the server is not publicly reachable on port 80.
+func (c *Connector) solveAuthorizationsDNS01(ctx context.Context, authzURLs []string) error {
+	if c.dnsSolver == nil {
+		return fmt.Errorf("DNS-01 challenge type configured but no DNS solver available")
+	}
+
+	for _, authzURL := range authzURLs {
+		authz, err := c.client.GetAuthorization(ctx, authzURL)
+		if err != nil {
+			return fmt.Errorf("failed to get authorization %s: %w", authzURL, err)
+		}
+
+		if authz.Status == acme.StatusValid {
+			continue
+		}
+
+		// Find the DNS-01 challenge
+		var dnsChallenge *acme.Challenge
+		for _, ch := range authz.Challenges {
+			if ch.Type == "dns-01" {
+				dnsChallenge = ch
+				break
+			}
+		}
+
+		if dnsChallenge == nil {
+			return fmt.Errorf("no DNS-01 challenge found for %s", authz.Identifier.Value)
+		}
+
+		// Compute the DNS-01 key authorization (base64url-encoded SHA-256 digest)
+		keyAuth, err := c.client.DNS01ChallengeRecord(dnsChallenge.Token)
+		if err != nil {
+			return fmt.Errorf("failed to compute DNS-01 key authorization: %w", err)
+		}
+
+		domain := authz.Identifier.Value
+
+		c.logger.Info("presenting DNS-01 challenge",
+			"domain", domain,
+			"token", dnsChallenge.Token)
+
+		// Create the DNS TXT record
+		if err := c.dnsSolver.Present(ctx, domain, dnsChallenge.Token, keyAuth); err != nil {
+			return fmt.Errorf("failed to present DNS record for %s: %w", domain, err)
+		}
+
+		// Wait for DNS propagation
+		propagationWait := time.Duration(c.config.DNSPropagationWait) * time.Second
+		c.logger.Info("waiting for DNS propagation",
+			"domain", domain,
+			"wait_seconds", c.config.DNSPropagationWait)
+		time.Sleep(propagationWait)
+
+		// Tell the CA we're ready
+		if _, err := c.client.Accept(ctx, dnsChallenge); err != nil {
+			// Clean up even on failure
+			_ = c.dnsSolver.CleanUp(ctx, domain, dnsChallenge.Token, keyAuth)
+			return fmt.Errorf("failed to accept DNS-01 challenge: %w", err)
+		}
+
+		// Wait for authorization to be valid
+		if _, err := c.client.WaitAuthorization(ctx, authzURL); err != nil {
+			_ = c.dnsSolver.CleanUp(ctx, domain, dnsChallenge.Token, keyAuth)
+			return fmt.Errorf("DNS-01 authorization failed for %s: %w", domain, err)
+		}
+
+		c.logger.Info("DNS-01 authorization validated", "domain", domain)
+
+		// Clean up the DNS record
+		if err := c.dnsSolver.CleanUp(ctx, domain, dnsChallenge.Token, keyAuth); err != nil {
+			c.logger.Warn("failed to clean up DNS record (non-fatal)",
+				"domain", domain,
+				"error", err)
+		}
 	}
 
 	return nil
@@ -455,4 +608,14 @@ func parseDERChain(derChain [][]byte) (certPEM string, chainPEM string, serial s
 	}
 
 	return
+}
+
+// GenerateCRL is not supported by ACME issuers.
+func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	return nil, fmt.Errorf("ACME issuers do not support CRL generation")
+}
+
+// SignOCSPResponse is not supported by ACME issuers.
+func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	return nil, fmt.Errorf("ACME issuers do not support OCSP response signing")
 }

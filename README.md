@@ -1,6 +1,8 @@
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certificates across your infrastructure with a web dashboard, REST API, and agent-based architecture where private keys never leave your servers.
+TLS certificate lifespans are shrinking. The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) unanimously in April 2025, setting a phased reduction: **200 days** by March 2026, **100 days** by March 2027, and **47 days** by March 2029. Manual certificate management is no longer viable at any scale.
+
+certctl is a self-hosted platform for **end-to-end certificate lifecycle automation** — from issuance through renewal to deployment — with zero human intervention. Track every certificate in your organization, automatically renew them before they expire, and deploy them to your servers without touching a terminal. Private keys never leave your infrastructure.
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
@@ -8,7 +10,7 @@ A self-hosted certificate lifecycle platform. Track, renew, and deploy TLS certi
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (55 endpoints) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally and submit CSRs — private keys never leave your servers.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (91 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -19,14 +21,14 @@ flowchart LR
 
     subgraph "Your Infrastructure"
         A1["Agent"] --> T1["NGINX"]
-        A2["Agent"] --> T2["F5 BIG-IP"]
-        A3["Agent"] --> T3["IIS"]
+        A2["Agent"] --> T2["Apache / HAProxy"]
+        A3["Agent"] --> T3["F5 · IIS"]
     end
 
     API --> PG
     A1 & A2 & A3 -->|"CSR + status\n(no private keys)"| API
     API -->|"Signed certs"| A1 & A2 & A3
-    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME"]
+    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME · step-ca · OpenSSL"]
 ```
 
 ### Screenshots
@@ -40,7 +42,7 @@ flowchart LR
 | ![Notifications](docs/screenshots/notifications.png) | ![Policies](docs/screenshots/policies.png) |
 | **Notifications** — threshold alerts grouped by certificate | **Policies** — enforcement rules with enable/disable and delete |
 | ![Issuers](docs/screenshots/issuers.png) | ![Targets](docs/screenshots/targets.png) |
-| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, F5, IIS) |
+| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, Apache, HAProxy, F5, IIS) |
 | ![Audit Trail](docs/screenshots/audit-trail.png) | |
 | **Audit Trail** — immutable log of every action | |
 
@@ -100,6 +102,8 @@ export CERTCTL_AGENT_ID=agent-local-01
 | [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
+| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
+| [Manual Testing Guide](docs/testing-guide.md) | 284 tests across 25 areas — full V2 QA runbook with exact commands and pass/fail criteria |
 
 ## Architecture
 
@@ -110,11 +114,11 @@ flowchart TB
         API["REST API\nGo 1.22 net/http"]
         SVC["Service Layer"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications"]
+        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry · Network Scan"]
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n14 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n21 tables\nTEXT primary keys")]
     end
 
     subgraph "Agents"
@@ -144,7 +148,7 @@ flowchart TB
 | `renewal_policies` | Renewal window, auto-renew settings, retry config, alert thresholds |
 | `issuers` | CA configurations (Local CA, ACME, etc.) |
 | `deployment_targets` | Target systems (NGINX, F5, IIS) with agent assignments |
-| `agents` | Registered agents with heartbeat tracking |
+| `agents` | Registered agents with heartbeat tracking, OS/arch/IP metadata |
 | `jobs` | Issuance, renewal, deployment, and validation jobs |
 | `teams` | Organizational groups for certificate ownership |
 | `owners` | Individual owners with email for notifications |
@@ -153,6 +157,13 @@ flowchart TB
 | `audit_events` | Immutable action log (append-only, no update/delete) |
 | `notification_events` | Email and webhook notification records |
 | `certificate_target_mappings` | Many-to-many cert ↔ target relationships |
+| `certificate_profiles` | Named enrollment profiles with allowed key types, max TTL, crypto constraints |
+| `agent_groups` | Dynamic device grouping by OS, architecture, IP CIDR, version |
+| `agent_group_members` | Manual include/exclude membership for agent groups |
+| `certificate_revocations` | Revocation records with RFC 5280 reason codes, serial numbers, issuer notification status |
+| `discovered_certificates` | Filesystem and network-discovered certificates with fingerprint deduplication |
+| `discovery_scans` | Discovery scan history with timestamps and agent attribution |
+| `network_scan_targets` | Network scan target definitions with CIDRs, ports, schedule, and scan metrics |
 
 ## Configuration
 
@@ -171,6 +182,34 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_KEYGEN_MODE` | `agent` | Key generation mode: `agent` (production) or `server` (demo only) |
 | `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
 | `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
+| `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default) or `dns-01` |
+| `CERTCTL_CA_CERT_PATH` | — | Path to CA certificate for sub-CA mode |
+| `CERTCTL_CA_KEY_PATH` | — | Path to CA private key for sub-CA mode |
+| `CERTCTL_CORS_ORIGINS` | — | Comma-separated allowed CORS origins (empty = same-origin, `*` = all) |
+| `CERTCTL_RATE_LIMIT_ENABLED` | `true` | Enable/disable token bucket rate limiting |
+| `CERTCTL_RATE_LIMIT_RPS` | `50` | Requests per second limit |
+| `CERTCTL_RATE_LIMIT_BURST` | `100` | Maximum burst size for rate limiter |
+| `CERTCTL_DATABASE_MIGRATIONS_PATH` | `./migrations` | Path to SQL migration files |
+| `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | `1h` | How often the scheduler checks for expiring certs |
+| `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | `30s` | How often the scheduler processes pending jobs |
+| `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | `2m` | How often the scheduler checks agent health |
+| `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | `1m` | How often the scheduler processes pending notifications |
+| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | — | Script to create DNS-01 `_acme-challenge` TXT record |
+| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | — | Script to remove DNS-01 `_acme-challenge` TXT record |
+| `CERTCTL_STEPCA_URL` | — | step-ca server URL |
+| `CERTCTL_STEPCA_PROVISIONER` | — | step-ca JWK provisioner name |
+| `CERTCTL_STEPCA_KEY_PATH` | — | Path to step-ca provisioner private key (JWK JSON) |
+| `CERTCTL_STEPCA_PASSWORD` | — | step-ca provisioner key password |
+| `CERTCTL_OPENSSL_SIGN_SCRIPT` | — | Script for OpenSSL/Custom CA certificate signing |
+| `CERTCTL_OPENSSL_REVOKE_SCRIPT` | — | Script for OpenSSL/Custom CA certificate revocation |
+| `CERTCTL_OPENSSL_CRL_SCRIPT` | — | Script for OpenSSL/Custom CA CRL generation |
+| `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | `30` | Timeout for OpenSSL script execution |
+| `CERTCTL_NETWORK_SCAN_ENABLED` | `false` | Enable server-side network certificate discovery (TLS scanning) |
+| `CERTCTL_NETWORK_SCAN_INTERVAL` | `6h` | How often the scheduler runs network scans |
+| `CERTCTL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for notifications |
+| `CERTCTL_TEAMS_WEBHOOK_URL` | — | Microsoft Teams incoming webhook URL |
+| `CERTCTL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 routing key |
+| `CERTCTL_OPSGENIE_API_KEY` | — | OpsGenie Alert API key |
 
 Agent environment variables:
 
@@ -181,23 +220,89 @@ Agent environment variables:
 | `CERTCTL_AGENT_NAME` | `certctl-agent` | Agent display name |
 | `CERTCTL_AGENT_ID` | — | Registered agent ID (required) |
 | `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Directory for storing private keys (agent keygen mode) |
+| `CERTCTL_DISCOVERY_DIRS` | — | Comma-separated directories to scan for existing certificates (e.g., `/etc/nginx/certs,/etc/ssl/certs`) |
 
 Docker Compose overrides these for the demo stack (see `deploy/docker-compose.yml`): port `8443`, auth type `none`, database pointing to the postgres container.
 
+## MCP Server (AI Integration)
+
+certctl ships a standalone MCP (Model Context Protocol) server that exposes all 78 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
+
+```bash
+# Install
+go install github.com/shankar0123/certctl/cmd/mcp-server@latest
+
+# Configure
+export CERTCTL_SERVER_URL=http://localhost:8443   # certctl API endpoint
+export CERTCTL_API_KEY=your-api-key               # optional if auth disabled
+
+# Run (stdio transport — add to your AI client config)
+mcp-server
+```
+
+**Claude Desktop** (`claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "certctl": {
+      "command": "mcp-server",
+      "env": {
+        "CERTCTL_SERVER_URL": "http://localhost:8443",
+        "CERTCTL_API_KEY": "your-api-key"
+      }
+    }
+  }
+}
+```
+
+78 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
+
+## CLI
+
+certctl ships a command-line tool for terminal-based certificate management workflows.
+
+```bash
+# Install
+go install github.com/shankar0123/certctl/cmd/cli@latest
+
+# Configure
+export CERTCTL_SERVER_URL=http://localhost:8443
+export CERTCTL_API_KEY=your-api-key
+
+# Commands
+certctl-cli list-certs                    # List all certificates
+certctl-cli get-cert --id mc-api-prod     # Get certificate details
+certctl-cli renew-cert --id mc-api-prod   # Trigger renewal
+certctl-cli revoke-cert --id mc-api-prod --reason keyCompromise
+certctl-cli list-agents                   # List registered agents
+certctl-cli list-jobs                     # List jobs
+certctl-cli health                        # Server health check
+certctl-cli metrics                       # Server metrics
+certctl-cli import --file certs.pem       # Bulk import from PEM file
+
+# Output formats
+certctl-cli list-certs --format json      # JSON output (default: table)
+```
+
 ## API Overview
 
-All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`).
+All endpoints are under `/api/v1/` and return JSON. List endpoints support pagination (`?page=1&per_page=50`). Full request/response schemas are available in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Certificates
 ```
-GET    /api/v1/certificates              List (filter: status, environment, owner_id, team_id)
+GET    /api/v1/certificates              List (filter, sort, cursor, sparse fields)
 POST   /api/v1/certificates              Create
 GET    /api/v1/certificates/{id}          Get
 PUT    /api/v1/certificates/{id}          Update
 DELETE /api/v1/certificates/{id}          Archive (soft delete)
 GET    /api/v1/certificates/{id}/versions Version history
+GET    /api/v1/certificates/{id}/deployments  List deployment targets
 POST   /api/v1/certificates/{id}/renew    Trigger renewal → 202 Accepted
 POST   /api/v1/certificates/{id}/deploy   Trigger deployment → 202 Accepted
+POST   /api/v1/certificates/{id}/revoke   Revoke with RFC 5280 reason code
+GET    /api/v1/crl                        Certificate Revocation List (JSON)
+GET    /api/v1/crl/{issuer_id}            DER-encoded X.509 CRL
+GET    /api/v1/ocsp/{issuer_id}/{serial}  OCSP responder (good/revoked/unknown)
 ```
 
 ### Agents
@@ -210,6 +315,17 @@ POST   /api/v1/agents/{id}/csr            Submit CSR for issuance
 GET    /api/v1/agents/{id}/certificates/{certId}  Retrieve signed certificate
 GET    /api/v1/agents/{id}/work            Poll for pending deployment jobs
 POST   /api/v1/agents/{id}/jobs/{jobId}/status  Report job completion/failure
+POST   /api/v1/agents/{id}/discoveries    Submit certificate discovery scan results
+```
+
+### Certificate Discovery
+```
+GET    /api/v1/discovered-certificates    List discovered certificates (?agent_id, ?status)
+GET    /api/v1/discovered-certificates/{id}  Get discovery detail
+POST   /api/v1/discovered-certificates/{id}/claim  Link discovered cert to managed cert
+POST   /api/v1/discovered-certificates/{id}/dismiss  Dismiss discovery
+GET    /api/v1/discovery-scans            List discovery scan history
+GET    /api/v1/discovery-summary          Aggregated discovery status (new, claimed, dismissed counts)
 ```
 
 ### Infrastructure
@@ -247,16 +363,55 @@ DELETE /api/v1/owners/{id}                Delete
 GET    /api/v1/jobs                       List (filter: status, type)
 GET    /api/v1/jobs/{id}                  Get
 POST   /api/v1/jobs/{id}/cancel           Cancel
+POST   /api/v1/jobs/{id}/approve          Approve (interactive renewal)
+POST   /api/v1/jobs/{id}/reject           Reject (interactive renewal)
 
 GET    /api/v1/policies                   List policy rules
 POST   /api/v1/policies                   Create
+GET    /api/v1/policies/{id}              Get
 PUT    /api/v1/policies/{id}              Update (enable/disable)
 DELETE /api/v1/policies/{id}              Delete
 GET    /api/v1/policies/{id}/violations   List violations for rule
 
+GET    /api/v1/profiles                   List certificate profiles
+POST   /api/v1/profiles                   Create
+GET    /api/v1/profiles/{id}              Get
+PUT    /api/v1/profiles/{id}              Update
+DELETE /api/v1/profiles/{id}              Delete
+
+GET    /api/v1/agent-groups               List agent groups
+POST   /api/v1/agent-groups               Create
+GET    /api/v1/agent-groups/{id}          Get
+PUT    /api/v1/agent-groups/{id}          Update
+DELETE /api/v1/agent-groups/{id}          Delete
+GET    /api/v1/agent-groups/{id}/members  List members
+
 GET    /api/v1/audit                      Query audit trail
+GET    /api/v1/audit/{id}                 Get audit event
 GET    /api/v1/notifications              List notifications
+GET    /api/v1/notifications/{id}         Get notification
 POST   /api/v1/notifications/{id}/read    Mark as read
+```
+
+### Observability
+```
+GET    /api/v1/stats/summary              Dashboard summary (totals, expiring, agents, jobs)
+GET    /api/v1/stats/certificates-by-status  Certificate counts grouped by status
+GET    /api/v1/stats/expiration-timeline   Expiration buckets (?days=30)
+GET    /api/v1/stats/job-trends            Job success/failure over time (?days=7)
+GET    /api/v1/stats/issuance-rate         Certificate issuance rate (?days=7)
+GET    /api/v1/metrics                     JSON metrics (gauges, counters, uptime)
+GET    /api/v1/metrics/prometheus          Prometheus exposition format (text/plain)
+```
+
+### Network Discovery
+```
+GET    /api/v1/network-scan-targets       List scan targets
+POST   /api/v1/network-scan-targets       Create scan target (CIDRs, ports, schedule)
+GET    /api/v1/network-scan-targets/{id}  Get scan target
+PUT    /api/v1/network-scan-targets/{id}  Update scan target
+DELETE /api/v1/network-scan-targets/{id}  Delete scan target
+POST   /api/v1/network-scan-targets/{id}/scan  Trigger immediate scan
 ```
 
 ### Auth
@@ -276,20 +431,23 @@ GET    /ready                             Readiness check
 ### Certificate Issuers
 | Issuer | Status | Type |
 |--------|--------|------|
-| Local CA (self-signed) | Implemented | `GenericCA` |
-| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01) | `ACME` |
-| step-ca | Planned (V2) | — |
-| OpenSSL / Custom CA | Planned (V2) | — |
-| ADCS (Active Directory CS) | Planned (V2) | — |
+| Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
+| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
+| step-ca | Implemented | `StepCA` |
+| OpenSSL / Custom CA | Implemented | `OpenSSL` |
 | Vault PKI | Planned | — |
 | DigiCert | Planned | — |
+
+**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS.
 
 ### Deployment Targets
 | Target | Status | Type |
 |--------|--------|------|
 | NGINX | Implemented | `NGINX` |
-| F5 BIG-IP | Interface only (V2) | `F5` |
-| Microsoft IIS | Interface only (V2) | `IIS` |
+| Apache httpd | Implemented | `Apache` |
+| HAProxy | Implemented | `HAProxy` |
+| F5 BIG-IP | Interface only | `F5` |
+| Microsoft IIS | Interface only | `IIS` |
 | Kubernetes Secrets | Planned | — |
 
 ### Notifiers
@@ -297,7 +455,10 @@ GET    /ready                             Readiness check
 |----------|--------|------|
 | Email (SMTP) | Implemented | `Email` |
 | Webhooks | Implemented | `Webhook` |
-| Slack | Planned | — |
+| Slack | Implemented | `Slack` |
+| Microsoft Teams | Implemented | `Teams` |
+| PagerDuty | Implemented | `PagerDuty` |
+| OpsGenie | Implemented | `OpsGenie` |
 
 ## Development
 
@@ -341,25 +502,39 @@ make docker-clean       # Stop + remove volumes
 
 ### Audit Trail
 - Immutable append-only log in PostgreSQL (`audit_events` table)
-- Every action attributed to an actor with timestamp and resource reference
+- Every lifecycle action attributed to an actor with timestamp and resource reference
 - No update or delete operations on audit records
+- Every API call recorded to audit trail with method, path, actor, SHA-256 body hash, response status, and latency (M19)
 
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 11 views wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. 220+ tests total: 170+ Go tests across service, handler, integration, and connector layers, plus 53 frontend Vitest tests covering API client functions and utility helpers. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 19 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
-- **V2.0: Operational Workflows** — ACME DNS-01 challenges (wildcard certs, custom validation scripts), step-ca, ADCS, and OpenSSL/custom CA issuer connectors, F5 BIG-IP, IIS, Apache httpd, and HAProxy target connector implementations, agent metadata collection (OS, platform, IP, hostname via heartbeat), dynamic device grouping for policy-based targeting, crypto policy enforcement, certificate ownership tracking, renewal approval UI, bulk cert operations, deployment timeline, real-time updates (SSE/WebSocket), target config wizard
-- **V2.1: Team Adoption** — OIDC/SSO, RBAC, CLI tool, Slack/Teams/PagerDuty/OpsGenie notifiers, bulk cert import
-- **V2.2: Observability** — expiration calendar, health scores, compliance scoring, Prometheus metrics, deployment rollback
-- **V2.3: Integrations & Distribution** — MCP server (OpenClaw/Claude/Cursor), CT Log monitoring, DigiCert issuer connector, filesystem cert discovery
+- **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
+- **M11: Crypto Policy + Profiles + Ownership** ✅ — certificate profiles (named enrollment profiles with allowed key types, max TTL, crypto constraints), certificate ownership tracking (owners + teams + notification routing), dynamic agent groups (OS/arch/IP CIDR/version matching), interactive renewal approval (AwaitingApproval state)
+- **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), step-ca issuer connector (native /sign API with JWK provisioner auth)
+- **M15a: Core Revocation** ✅ — revocation API with all RFC 5280 reason codes, JSON CRL endpoint, webhook + email revocation notifications, best-effort issuer notification, `certificate_revocations` table with idempotent recording, 48 new tests
+- **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
+- **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
+- **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
+- **M18a: MCP Server** ✅ (V2.1) — AI-native integration, all 78 REST API endpoints exposed as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
+- **M19: Immutable API Audit Log** ✅ — every API call recorded to immutable audit trail (method, path, actor, SHA-256 body hash, status, latency), async recording via goroutine, configurable path exclusions
+- **M16a: Notifier Connectors** ✅ — Slack (incoming webhook), Microsoft Teams (MessageCard), PagerDuty (Events API v2), OpsGenie (Alert API v2) — config-driven enablement via env vars
+- **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)
+- **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
+- **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
+- **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
+- **M21: Network Cert Discovery** ✅ — server-side active TLS scanning of CIDR ranges and ports, concurrent probing (50 goroutines), CIDR expansion with /20 safety cap, sentinel agent pattern for discovery pipeline reuse, CRUD API for scan targets, scheduler integration (6h default)
+- **M22: Prometheus Metrics** ✅ — `GET /api/v1/metrics/prometheus` returns Prometheus exposition format (`text/plain; version=0.0.4`), 11 metrics with `certctl_` prefix, compatible with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics
+- **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
-### V3: Discovery, Visibility & Cloud
-Discovery engine (passive/active scanning, cert chain validation, Nmap/Qualys import, unknown cert detection, triage workflows), cloud targets (AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets), extended issuers (Entrust, GlobalSign, Google CAS, EJBCA, Vault PKI), ServiceNow integration, Ansible module, compliance mapping docs
+### V3: Team & Enterprise
+Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
 
-### V4+: Platform & Scale
-Kubernetes CRD, Terraform provider, multi-region, HA control plane, HSM support, LDAP auth, API key scoping, multi-tenancy
+### V4+: Cloud, Scale & Passive Discovery
+Passive network discovery (TLS listener), Kubernetes integration, cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support, and platform-scale features.
 
 ## License
 

@@ -51,11 +51,17 @@ func (r *Router) RegisterHandlers(
 	agents handler.AgentHandler,
 	jobs handler.JobHandler,
 	policies handler.PolicyHandler,
+	profiles handler.ProfileHandler,
 	teams handler.TeamHandler,
 	owners handler.OwnerHandler,
+	agentGroups handler.AgentGroupHandler,
 	audit handler.AuditHandler,
 	notifications handler.NotificationHandler,
+	stats handler.StatsHandler,
+	metrics handler.MetricsHandler,
 	health handler.HealthHandler,
+	discovery handler.DiscoveryHandler,
+	networkScan handler.NetworkScanHandler,
 ) {
 	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
@@ -84,8 +90,17 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/certificates/{id}", http.HandlerFunc(certificates.UpdateCertificate))
 	r.Register("DELETE /api/v1/certificates/{id}", http.HandlerFunc(certificates.ArchiveCertificate))
 	r.Register("GET /api/v1/certificates/{id}/versions", http.HandlerFunc(certificates.GetCertificateVersions))
+	r.Register("GET /api/v1/certificates/{id}/deployments", http.HandlerFunc(certificates.GetCertificateDeployments))
 	r.Register("POST /api/v1/certificates/{id}/renew", http.HandlerFunc(certificates.TriggerRenewal))
 	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(certificates.TriggerDeployment))
+	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(certificates.RevokeCertificate))
+
+	// CRL endpoints: /api/v1/crl (JSON) and /api/v1/crl/{issuer_id} (DER)
+	r.Register("GET /api/v1/crl", http.HandlerFunc(certificates.GetCRL))
+	r.Register("GET /api/v1/crl/{issuer_id}", http.HandlerFunc(certificates.GetDERCRL))
+
+	// OCSP responder: /api/v1/ocsp/{issuer_id}/{serial}
+	r.Register("GET /api/v1/ocsp/{issuer_id}/{serial}", http.HandlerFunc(certificates.HandleOCSP))
 
 	// Issuers routes: /api/v1/issuers
 	r.Register("GET /api/v1/issuers", http.HandlerFunc(issuers.ListIssuers))
@@ -116,6 +131,8 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/jobs", http.HandlerFunc(jobs.ListJobs))
 	r.Register("GET /api/v1/jobs/{id}", http.HandlerFunc(jobs.GetJob))
 	r.Register("POST /api/v1/jobs/{id}/cancel", http.HandlerFunc(jobs.CancelJob))
+	r.Register("POST /api/v1/jobs/{id}/approve", http.HandlerFunc(jobs.ApproveJob))
+	r.Register("POST /api/v1/jobs/{id}/reject", http.HandlerFunc(jobs.RejectJob))
 
 	// Policies routes: /api/v1/policies
 	r.Register("GET /api/v1/policies", http.HandlerFunc(policies.ListPolicies))
@@ -124,6 +141,13 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/policies/{id}", http.HandlerFunc(policies.UpdatePolicy))
 	r.Register("DELETE /api/v1/policies/{id}", http.HandlerFunc(policies.DeletePolicy))
 	r.Register("GET /api/v1/policies/{id}/violations", http.HandlerFunc(policies.ListViolations))
+
+	// Profiles routes: /api/v1/profiles
+	r.Register("GET /api/v1/profiles", http.HandlerFunc(profiles.ListProfiles))
+	r.Register("POST /api/v1/profiles", http.HandlerFunc(profiles.CreateProfile))
+	r.Register("GET /api/v1/profiles/{id}", http.HandlerFunc(profiles.GetProfile))
+	r.Register("PUT /api/v1/profiles/{id}", http.HandlerFunc(profiles.UpdateProfile))
+	r.Register("DELETE /api/v1/profiles/{id}", http.HandlerFunc(profiles.DeleteProfile))
 
 	// Teams routes: /api/v1/teams
 	r.Register("GET /api/v1/teams", http.HandlerFunc(teams.ListTeams))
@@ -139,6 +163,14 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/owners/{id}", http.HandlerFunc(owners.UpdateOwner))
 	r.Register("DELETE /api/v1/owners/{id}", http.HandlerFunc(owners.DeleteOwner))
 
+	// Agent Groups routes: /api/v1/agent-groups
+	r.Register("GET /api/v1/agent-groups", http.HandlerFunc(agentGroups.ListAgentGroups))
+	r.Register("POST /api/v1/agent-groups", http.HandlerFunc(agentGroups.CreateAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.GetAgentGroup))
+	r.Register("PUT /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.UpdateAgentGroup))
+	r.Register("DELETE /api/v1/agent-groups/{id}", http.HandlerFunc(agentGroups.DeleteAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}/members", http.HandlerFunc(agentGroups.ListAgentGroupMembers))
+
 	// Audit routes: /api/v1/audit
 	r.Register("GET /api/v1/audit", http.HandlerFunc(audit.ListAuditEvents))
 	r.Register("GET /api/v1/audit/{id}", http.HandlerFunc(audit.GetAuditEvent))
@@ -147,6 +179,34 @@ func (r *Router) RegisterHandlers(
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(notifications.ListNotifications))
 	r.Register("GET /api/v1/notifications/{id}", http.HandlerFunc(notifications.GetNotification))
 	r.Register("POST /api/v1/notifications/{id}/read", http.HandlerFunc(notifications.MarkAsRead))
+
+	// Stats routes: /api/v1/stats
+	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(stats.GetDashboardSummary))
+	r.Register("GET /api/v1/stats/certificates-by-status", http.HandlerFunc(stats.GetCertificatesByStatus))
+	r.Register("GET /api/v1/stats/expiration-timeline", http.HandlerFunc(stats.GetExpirationTimeline))
+	r.Register("GET /api/v1/stats/job-trends", http.HandlerFunc(stats.GetJobTrends))
+	r.Register("GET /api/v1/stats/issuance-rate", http.HandlerFunc(stats.GetIssuanceRate))
+
+	// Metrics routes: /api/v1/metrics
+	r.Register("GET /api/v1/metrics", http.HandlerFunc(metrics.GetMetrics))
+	r.Register("GET /api/v1/metrics/prometheus", http.HandlerFunc(metrics.GetPrometheusMetrics))
+
+	// Discovery routes: /api/v1/discovered-certificates, /api/v1/discovery-scans
+	r.Register("POST /api/v1/agents/{id}/discoveries", http.HandlerFunc(discovery.SubmitDiscoveryReport))
+	r.Register("GET /api/v1/discovered-certificates", http.HandlerFunc(discovery.ListDiscovered))
+	r.Register("GET /api/v1/discovered-certificates/{id}", http.HandlerFunc(discovery.GetDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/claim", http.HandlerFunc(discovery.ClaimDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", http.HandlerFunc(discovery.DismissDiscovered))
+	r.Register("GET /api/v1/discovery-scans", http.HandlerFunc(discovery.ListScans))
+	r.Register("GET /api/v1/discovery-summary", http.HandlerFunc(discovery.GetDiscoverySummary))
+
+	// Network scan routes: /api/v1/network-scan-targets
+	r.Register("GET /api/v1/network-scan-targets", http.HandlerFunc(networkScan.ListNetworkScanTargets))
+	r.Register("POST /api/v1/network-scan-targets", http.HandlerFunc(networkScan.CreateNetworkScanTarget))
+	r.Register("GET /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.GetNetworkScanTarget))
+	r.Register("PUT /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.UpdateNetworkScanTarget))
+	r.Register("DELETE /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.DeleteNetworkScanTarget))
+	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(networkScan.TriggerNetworkScan))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

@@ -16,8 +16,15 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
 	"github.com/shankar0123/certctl/internal/config"
+	"github.com/shankar0123/certctl/internal/domain"
 	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
+	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
+	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
+	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
+	notifyslack "github.com/shankar0123/certctl/internal/connector/notifier/slack"
+	notifyteams "github.com/shankar0123/certctl/internal/connector/notifier/teams"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
@@ -68,49 +75,161 @@ func main() {
 	policyRepo := postgres.NewPolicyRepository(db)
 	notificationRepo := postgres.NewNotificationRepository(db)
 	renewalPolicyRepo := postgres.NewRenewalPolicyRepository(db)
+	profileRepo := postgres.NewProfileRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	ownerRepo := postgres.NewOwnerRepository(db)
 	logger.Info("initialized all repositories")
 
-	// Initialize Local CA issuer connector
-	// This provides in-memory certificate signing for development, testing, and demo.
-	// The CA is ephemeral (regenerated on restart) and NOT suitable for production.
-	localCA := local.New(nil, logger)
+	// Initialize Local CA issuer connector.
+	// In sub-CA mode (CERTCTL_CA_CERT_PATH + CERTCTL_CA_KEY_PATH set), loads a pre-signed
+	// CA cert+key from disk. All issued certs chain to the upstream root (e.g., ADCS).
+	// Otherwise, generates an ephemeral self-signed CA for development/demo.
+	localCAConfig := &local.Config{}
+	if cfg.CA.CertPath != "" && cfg.CA.KeyPath != "" {
+		localCAConfig.CACertPath = cfg.CA.CertPath
+		localCAConfig.CAKeyPath = cfg.CA.KeyPath
+		logger.Info("Local CA configured in sub-CA mode",
+			"cert_path", cfg.CA.CertPath,
+			"key_path", cfg.CA.KeyPath)
+	} else {
+		logger.Info("Local CA configured in self-signed mode (ephemeral)")
+	}
+	localCA := local.New(localCAConfig, logger)
 	logger.Info("initialized Local CA issuer connector")
 
 	// Initialize ACME issuer connector (for Let's Encrypt, Sectigo, etc.)
-	// The ACME connector is registered but only activated when an issuer record
-	// in the database references it. Configuration comes from the issuer's config JSON.
+	// Supports HTTP-01 (default) and DNS-01 (for wildcards) challenge types.
 	acmeConnector := acmeissuer.New(&acmeissuer.Config{
-		DirectoryURL: os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
-		Email:        os.Getenv("CERTCTL_ACME_EMAIL"),
+		DirectoryURL:       os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
+		Email:              os.Getenv("CERTCTL_ACME_EMAIL"),
+		ChallengeType:      os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
+		DNSPresentScript:   os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
+		DNSCleanUpScript:   os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
 	}, logger)
 	logger.Info("initialized ACME issuer connector")
+
+	// Initialize step-ca issuer connector (for Smallstep private CA).
+	// Uses the native /sign API with JWK provisioner authentication.
+	stepcaConnector := stepcaissuer.New(&stepcaissuer.Config{
+		CAURL:               os.Getenv("CERTCTL_STEPCA_URL"),
+		ProvisionerName:     os.Getenv("CERTCTL_STEPCA_PROVISIONER"),
+		ProvisionerKeyPath:  os.Getenv("CERTCTL_STEPCA_KEY_PATH"),
+		ProvisionerPassword: os.Getenv("CERTCTL_STEPCA_PASSWORD"),
+	}, logger)
+	logger.Info("initialized step-ca issuer connector")
+
+	// Initialize OpenSSL/Custom CA issuer connector (for script-based CA integrations).
+	// Delegates certificate signing to user-provided scripts.
+	opensslConnector := opensslissuer.New(&opensslissuer.Config{
+		SignScript:     os.Getenv("CERTCTL_OPENSSL_SIGN_SCRIPT"),
+		RevokeScript:   os.Getenv("CERTCTL_OPENSSL_REVOKE_SCRIPT"),
+		CRLScript:      os.Getenv("CERTCTL_OPENSSL_CRL_SCRIPT"),
+		TimeoutSeconds: getEnvIntDefault(os.Getenv("CERTCTL_OPENSSL_TIMEOUT_SECONDS"), 30),
+	}, logger)
+	logger.Info("initialized OpenSSL/Custom CA issuer connector")
 
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
+	// "iss-stepca" is the step-ca private CA connector.
+	// "iss-openssl" is the custom CA/OpenSSL connector.
 	issuerRegistry := map[string]service.IssuerConnector{
 		"iss-local":        service.NewIssuerConnectorAdapter(localCA),
 		"iss-acme-staging": service.NewIssuerConnectorAdapter(acmeConnector),
 		"iss-acme-prod":    service.NewIssuerConnectorAdapter(acmeConnector),
+		"iss-stepca":       service.NewIssuerConnectorAdapter(stepcaConnector),
+		"iss-openssl":      service.NewIssuerConnectorAdapter(opensslConnector),
 	}
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
+
+	// Initialize revocation repository
+	revocationRepo := postgres.NewRevocationRepository(db)
 
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
-	notificationService := service.NewNotificationService(notificationRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
+	notifierRegistry := make(map[string]service.Notifier)
+
+	// Wire notifier connectors from config
+	if cfg.Notifiers.SlackWebhookURL != "" {
+		slackNotifier := notifyslack.New(notifyslack.Config{
+			WebhookURL:      cfg.Notifiers.SlackWebhookURL,
+			ChannelOverride: cfg.Notifiers.SlackChannel,
+			Username:        cfg.Notifiers.SlackUsername,
+		})
+		notifierRegistry["Slack"] = slackNotifier
+		logger.Info("Slack notifier enabled")
+	}
+	if cfg.Notifiers.TeamsWebhookURL != "" {
+		teamsNotifier := notifyteams.New(notifyteams.Config{
+			WebhookURL: cfg.Notifiers.TeamsWebhookURL,
+		})
+		notifierRegistry["Teams"] = teamsNotifier
+		logger.Info("Teams notifier enabled")
+	}
+	if cfg.Notifiers.PagerDutyRoutingKey != "" {
+		pdNotifier := notifypagerduty.New(notifypagerduty.Config{
+			RoutingKey: cfg.Notifiers.PagerDutyRoutingKey,
+			Severity:   cfg.Notifiers.PagerDutySeverity,
+		})
+		notifierRegistry["PagerDuty"] = pdNotifier
+		logger.Info("PagerDuty notifier enabled")
+	}
+	if cfg.Notifiers.OpsGenieAPIKey != "" {
+		ogNotifier := notifyopsgenie.New(notifyopsgenie.Config{
+			APIKey:   cfg.Notifiers.OpsGenieAPIKey,
+			Priority: cfg.Notifiers.OpsGeniePriority,
+		})
+		notifierRegistry["OpsGenie"] = ogNotifier
+		logger.Info("OpsGenie notifier enabled")
+	}
+
+	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
+	notificationService.SetOwnerRepo(ownerRepo)
+
+	// Wire revocation dependencies into CertificateService
+	certificateService.SetRevocationRepo(revocationRepo)
+	certificateService.SetNotificationService(notificationService)
+	certificateService.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetProfileRepo(profileRepo)
+	certificateService.SetTargetRepo(targetRepo)
+	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	issuerService := service.NewIssuerService(issuerRepo, auditService)
 	targetService := service.NewTargetService(targetRepo, auditService)
+	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
+	agentGroupRepo := postgres.NewAgentGroupRepository(db)
+	agentGroupService := service.NewAgentGroupService(agentGroupRepo, auditService)
+	discoveryRepo := postgres.NewDiscoveryRepository(db)
+	discoveryService := service.NewDiscoveryService(discoveryRepo, certificateRepo, auditService)
+	networkScanRepo := postgres.NewNetworkScanRepository(db)
+	networkScanService := service.NewNetworkScanService(networkScanRepo, discoveryService, auditService, logger)
+	logger.Info("initialized network scan service")
+
+	// Ensure the sentinel "server-scanner" agent exists for network discovery dedup.
+	// This agent ID is used as the agent_id in discovered_certificates for network-scanned certs.
+	if cfg.NetworkScan.Enabled {
+		sentinelAgent := &domain.Agent{
+			ID:     service.SentinelAgentID,
+			Name:   "Network Scanner (Server-Side)",
+			Status: domain.AgentStatusOnline,
+		}
+		if err := agentRepo.Create(context.Background(), sentinelAgent); err != nil {
+			// Ignore duplicate key errors (agent already exists)
+			logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAgentID)
+		}
+	}
+
 	logger.Info("initialized all services")
+
+	// Initialize stats and metrics services
+	statsService := service.NewStatsService(certificateRepo, jobRepo, agentRepo)
+	logger.Info("initialized stats service")
 
 	// Initialize API handlers
 	certificateHandler := handler.NewCertificateHandler(certificateService)
@@ -119,11 +238,17 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(profileService)
 	teamHandler := handler.NewTeamHandler(teamService)
 	ownerHandler := handler.NewOwnerHandler(ownerService)
+	agentGroupHandler := handler.NewAgentGroupHandler(agentGroupService)
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
+	statsHandler := handler.NewStatsHandler(statsService)
+	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
+	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
+	networkScanHandler := handler.NewNetworkScanHandler(networkScanService)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -136,6 +261,7 @@ func main() {
 		jobService,
 		agentService,
 		notificationService,
+		networkScanService,
 		logger,
 	)
 
@@ -144,6 +270,10 @@ func main() {
 	sched.SetJobProcessorInterval(cfg.Scheduler.JobProcessorInterval)
 	sched.SetAgentHealthCheckInterval(cfg.Scheduler.AgentHealthCheckInterval)
 	sched.SetNotificationProcessInterval(cfg.Scheduler.NotificationProcessInterval)
+	if cfg.NetworkScan.Enabled {
+		sched.SetNetworkScanInterval(cfg.NetworkScan.ScanInterval)
+		logger.Info("network scanning enabled", "interval", cfg.NetworkScan.ScanInterval.String())
+	}
 
 	// Start scheduler
 	logger.Info("starting scheduler")
@@ -160,11 +290,17 @@ func main() {
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
+		statsHandler,
+		metricsHandler,
 		healthHandler,
+		discoveryHandler,
+		networkScanHandler,
 	)
 	logger.Info("registered all API handlers")
 
@@ -177,12 +313,27 @@ func main() {
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
 
+	structuredLogger := middleware.NewLogging(logger)
+
+	// API audit log middleware — records every API call to the audit trail
+	auditAdapter := middleware.NewAuditServiceAdapter(
+		func(ctx context.Context, actor string, actorType string, action string, resourceType string, resourceID string, details map[string]interface{}) error {
+			return auditService.RecordEvent(ctx, actor, domain.ActorType(actorType), action, resourceType, resourceID, details)
+		},
+	)
+	auditMiddleware := middleware.NewAuditLog(auditAdapter, middleware.AuditConfig{
+		ExcludePaths: []string{"/health", "/ready"},
+		Logger:       logger,
+	})
+	logger.Info("API audit logging enabled (excluding /health, /ready)")
+
 	middlewareStack := []func(http.Handler) http.Handler{
 		middleware.RequestID,
-		middleware.Logging,
+		structuredLogger,
 		middleware.Recovery,
 		corsMiddleware,
 		authMiddleware,
+		auditMiddleware,
 	}
 
 	// Add rate limiter if enabled
@@ -193,11 +344,12 @@ func main() {
 		})
 		middlewareStack = []func(http.Handler) http.Handler{
 			middleware.RequestID,
-			middleware.Logging,
+			structuredLogger,
 			middleware.Recovery,
 			rateLimiter,
 			corsMiddleware,
 			authMiddleware,
+			auditMiddleware,
 		}
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
 	}
@@ -290,4 +442,16 @@ func main() {
 	}
 
 	logger.Info("certctl server stopped")
+}
+
+// getEnvIntDefault parses an integer from a string with a default fallback.
+func getEnvIntDefault(s string, defaultVal int) int {
+	if s == "" {
+		return defaultVal
+	}
+	val, err := strconv.Atoi(s)
+	if err != nil {
+		return defaultVal
+	}
+	return val
 }

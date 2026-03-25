@@ -42,6 +42,7 @@ export default function AgentsPage() {
       render: (a) => <StatusBadge status={a.status || heartbeatStatus(a.last_heartbeat)} />,
     },
     { key: 'hostname', label: 'Hostname', render: (a) => <span className="text-slate-300 font-mono text-xs">{a.hostname || '—'}</span> },
+    { key: 'os', label: 'OS / Arch', render: (a) => <span className="text-slate-400 text-xs">{a.os && a.architecture ? `${a.os}/${a.architecture}` : a.os || '—'}</span> },
     { key: 'ip', label: 'IP Address', render: (a) => <span className="text-slate-400 font-mono text-xs">{a.ip_address || '—'}</span> },
     { key: 'version', label: 'Version', render: (a) => <span className="text-slate-400 text-xs">{a.version || '—'}</span> },
     {

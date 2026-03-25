@@ -6,11 +6,11 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA, ACME implemented; step-ca, ADCS, OpenSSL planned V2; DigiCert, Entrust, GlobalSign, EJBCA, Vault PKI, Google CAS planned V3)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX implemented; F5, IIS interface only; Apache httpd, HAProxy planned V2; AWS ALB, Azure Key Vault, Palo Alto, FortiGate, Citrix ADC, Kubernetes Secrets planned V3)
-3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks; Slack, Teams, PagerDuty, OpsGenie planned V2.1)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
+3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
-All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents.
+All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
 
 ## Issuer Connector
 
@@ -58,38 +58,44 @@ type RenewalRequest struct {
     CommonName string
     SANs       []string
     CSRPEM     string
-    OrderID    string // optional, for tracking
+    OrderID    *string // optional, for tracking (pointer — nil when not provided)
 }
 
 type RevocationRequest struct {
     Serial string
-    Reason string // optional
+    Reason *string // optional (pointer — nil when not provided)
 }
 
 type OrderStatus struct {
     OrderID   string
-    Status    string // "pending", "valid", "invalid", "expired"
-    Message   string
-    CertPEM   string
-    ChainPEM  string
-    Serial    string
-    NotBefore time.Time
-    NotAfter  time.Time
+    Status    string     // "pending", "valid", "invalid", "expired"
+    Message   *string    // optional (pointer fields are omitted from JSON when nil)
+    CertPEM   *string    // populated when order is complete
+    ChainPEM  *string    // populated when order is complete
+    Serial    *string    // populated when order is complete
+    NotBefore *time.Time // populated when order is complete
+    NotAfter  *time.Time // populated when order is complete
     UpdatedAt time.Time
 }
 ```
 
 ### Built-in: Local CA
 
-The Local CA issuer generates self-signed certificates using Go's `crypto/x509` library. It creates a CA on first use (in memory), issues certificates with proper serial numbers, validity periods, SANs, and key usage extensions.
+The Local CA issuer signs certificates using Go's `crypto/x509` library. It supports two modes:
 
-This issuer is designed for development and demos only — certificates are self-signed and not trusted by browsers.
+**Self-signed mode (default):** Creates a CA on first use (in memory), issues certificates with proper serial numbers, validity periods, SANs, and key usage extensions. Designed for development and demos — certificates are self-signed and not trusted by browsers.
+
+**Sub-CA mode:** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. Supports RSA, ECDSA, and PKCS#8 key formats. If the paths are not set, falls back to self-signed mode. The loaded certificate must have `IsCA=true` and `KeyUsageCertSign`.
+
+**CRL and OCSP support (M15b):** The Local CA supports DER-encoded X.509 CRL generation via `GET /api/v1/crl/{issuer_id}` with 24-hour validity. An embedded OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}` returns signed OCSP responses for issued certificates (good/revoked/unknown status). Certificates with profile TTL < 1 hour automatically skip CRL/OCSP — expiry is treated as sufficient revocation for short-lived credentials.
 
 Configuration:
 ```json
 {
   "ca_common_name": "CertCtl Local CA",
-  "validity_days": 90
+  "validity_days": 90,
+  "ca_cert_path": "/etc/certctl/ca/ca.pem",
+  "ca_key_path": "/etc/certctl/ca/ca-key.pem"
 }
 ```
 
@@ -97,9 +103,13 @@ Location: `internal/connector/issuer/local/local.go`
 
 ### Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)
 
-The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports HTTP-01 challenge solving via a built-in temporary HTTP server that starts on demand during certificate issuance.
+The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports two challenge methods:
 
-Configuration:
+**HTTP-01 (default):** A built-in temporary HTTP server starts on demand during certificate issuance. The domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet.
+
+**DNS-01 (for wildcards):** Creates DNS TXT records via user-provided scripts. Required for wildcard certificates (`*.example.com`) and hosts that can't serve HTTP on port 80. The connector invokes external scripts to create and clean up `_acme-challenge` TXT records, making it compatible with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
+
+HTTP-01 configuration:
 ```json
 {
   "directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory",
@@ -108,27 +118,94 @@ Configuration:
 }
 ```
 
-For HTTP-01 to work, the domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet. The connector automatically registers an ACME account, creates orders, solves challenges, finalizes with the CSR, and downloads the issued certificate chain.
+DNS-01 configuration:
+```json
+{
+  "directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+  "email": "admin@example.com",
+  "challenge_type": "dns-01",
+  "dns_present_script": "/etc/certctl/dns/create-record.sh",
+  "dns_cleanup_script": "/etc/certctl/dns/delete-record.sh",
+  "dns_propagation_wait": 30
+}
+```
 
-**Limitation:** v1 supports HTTP-01 challenges only. DNS-01 challenge support (required for wildcard certificates and hosts that can't serve HTTP on port 80) is planned for V2, including provider-specific DNS adapters (Cloudflare, Route53, etc.) and custom validation script hooks.
+DNS hook scripts receive these environment variables: `CERTCTL_DNS_DOMAIN` (domain being validated), `CERTCTL_DNS_FQDN` (full record name, e.g., `_acme-challenge.example.com`), `CERTCTL_DNS_VALUE` (TXT record value), `CERTCTL_DNS_TOKEN` (ACME challenge token). The present script must create the TXT record and exit 0; the cleanup script removes it.
 
 Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
 - `CERTCTL_ACME_EMAIL` — Contact email for account registration
+- `CERTCTL_ACME_CHALLENGE_TYPE` — `http-01` (default) or `dns-01`
+- `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 only)
+- `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only)
 
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 
-Location: `internal/connector/issuer/acme/acme.go`
+**Note:** ACME-issued certificates rely on the Local CA for CRL/OCSP endpoints if they are stored in certctl's inventory. For issuers with their own public CRL/OCSP infrastructure (e.g., Let's Encrypt), clients should validate against the issuer's endpoints instead.
 
-### Planned Issuers (V2)
+Location: `internal/connector/issuer/acme/acme.go`, `internal/connector/issuer/acme/dns.go`
 
-The following issuer connectors are planned for V2:
+### Built-in: step-ca (Smallstep Private CA)
 
-- **step-ca** — Smallstep's private CA and ACME server. Would allow certctl to issue certificates from a self-hosted step-ca instance via its ACME or provisioner APIs.
-- **OpenSSL / Custom CA** — Support for external CAs that use OpenSSL-based signing workflows, including custom script hooks for organizations with existing CA tooling.
-- **ADCS (Active Directory Certificate Services)** — Microsoft's enterprise CA. Would allow certctl to request certificates from an existing ADCS infrastructure, useful for organizations that need lifecycle management around their Windows PKI.
-- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA.
-- **DigiCert** — Commercial CA integration via DigiCert's REST API.
+The step-ca connector integrates with Smallstep's step-ca private certificate authority using its native `/sign` API with JWK provisioner authentication. This is simpler than ACME for internal PKI — no challenge solving, no domain validation, just CSR + auth token → signed certificate.
+
+Configuration:
+```json
+{
+  "ca_url": "https://ca.internal:9000",
+  "provisioner_name": "certctl",
+  "provisioner_key_path": "/etc/certctl/stepca/provisioner.json",
+  "provisioner_password": "...",
+  "root_cert_path": "/etc/certctl/stepca/root_ca.crt",
+  "validity_days": 90
+}
+```
+
+Environment variables:
+- `CERTCTL_STEPCA_URL` — step-ca server URL
+- `CERTCTL_STEPCA_PROVISIONER` — JWK provisioner name
+- `CERTCTL_STEPCA_KEY_PATH` — Path to provisioner private key (JWK JSON)
+- `CERTCTL_STEPCA_PASSWORD` — Provisioner key password
+
+The connector is registered in the issuer registry under `iss-stepca`. step-ca also works with the existing ACME connector (point `iss-acme-*` at step-ca's ACME directory URL for ACME-based issuance).
+
+**Note:** step-ca-issued certificates rely on step-ca's own CRL/OCSP infrastructure. certctl's local CRL/OCSP endpoints (`GET /api/v1/crl/{issuer_id}` and `GET /api/v1/ocsp/{issuer_id}/{serial}`) are populated from step-ca's revocation data if available, but clients should validate against step-ca's endpoints for the authoritative status.
+
+Location: `internal/connector/issuer/stepca/stepca.go`
+
+### OpenSSL / Custom CA
+
+Script-based issuer connector for organizations with existing CA tooling. Delegates certificate signing, revocation, and CRL generation to user-provided shell scripts.
+
+**Configuration:**
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `CERTCTL_OPENSSL_SIGN_SCRIPT` | Yes | Script that receives CSR on stdin and outputs signed PEM cert on stdout |
+| `CERTCTL_OPENSSL_REVOKE_SCRIPT` | No | Script to revoke a certificate (receives serial number as argument) |
+| `CERTCTL_OPENSSL_CRL_SCRIPT` | No | Script that outputs DER-encoded CRL on stdout |
+| `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | No | Script execution timeout (default: 30s) |
+
+The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information.
+
+### Revocation Across Issuers
+
+All issuer connectors implement `RevokeCertificate(ctx, serial, reason)`. When a certificate is revoked via `POST /api/v1/certificates/{id}/revoke`, certctl notifies the issuing CA on a best-effort basis — the revocation succeeds in certctl's inventory even if the CA notification fails (e.g., CA is temporarily unreachable). This ensures revocation is never blocked by external dependencies.
+
+Each issuer handles revocation differently:
+
+- **Local CA**: Updates the in-memory revocation list. DER-encoded CRLs and OCSP responses are generated from this list.
+- **ACME**: ACME v2 has limited revocation support — certctl records the revocation locally and serves it via CRL/OCSP.
+- **step-ca**: Calls step-ca's `/revoke` API endpoint. Clients should check step-ca's own CRL/OCSP for authoritative status.
+- **OpenSSL/Custom CA**: Invokes the configured revoke script (`CERTCTL_OPENSSL_REVOKE_SCRIPT`) with the serial number as an argument.
+
+### Planned Issuers
+
+The following issuer connectors are planned for future milestones:
+
+- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA (planned for V4.0+).
+- **DigiCert** — Commercial CA integration via DigiCert's REST API (planned for V3 paid release).
+
+Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 
 ### Building a Custom Issuer
 
@@ -280,9 +357,47 @@ The `reload_command` defaults to `systemctl reload nginx` but can be overridden 
 
 Location: `internal/connector/target/nginx/nginx.go`
 
-### Planned: F5 BIG-IP (Interface Only)
+### Built-in: Apache httpd
 
-The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for V2.
+The Apache httpd connector follows the same pattern as NGINX: it writes separate certificate, chain, and key files to disk, validates the Apache configuration with `apachectl configtest`, and performs a graceful reload. The key difference is that private keys are written with 0600 permissions (owner-only read) for security, while cert and chain files use 0644.
+
+Configuration:
+```json
+{
+  "cert_path": "/etc/apache2/ssl/cert.pem",
+  "chain_path": "/etc/apache2/ssl/chain.pem",
+  "key_path": "/etc/apache2/ssl/key.pem",
+  "reload_command": "apachectl graceful",
+  "validate_command": "apachectl configtest"
+}
+```
+
+The `reload_command` can be customized for different environments (e.g., `systemctl reload apache2` for systemd, `httpd -k graceful` for RHEL/CentOS). Validation output is captured and included in error messages for debugging.
+
+Location: `internal/connector/target/apache/apache.go`
+
+### Built-in: HAProxy
+
+The HAProxy connector differs from NGINX and Apache because HAProxy expects all TLS material in a single combined PEM file (certificate + chain + private key concatenated). The connector builds this combined file, writes it with 0600 permissions (since it contains the private key), optionally validates the HAProxy configuration, and reloads.
+
+Configuration:
+```json
+{
+  "pem_path": "/etc/haproxy/certs/site.pem",
+  "reload_command": "systemctl reload haproxy",
+  "validate_command": "haproxy -c -f /etc/haproxy/haproxy.cfg"
+}
+```
+
+The combined PEM is built in this order: server certificate, intermediate/chain certificates, private key. The `validate_command` is optional — if omitted, the connector skips config validation and goes straight to reload.
+
+Location: `internal/connector/target/haproxy/haproxy.go`
+
+### V3 (Paid): F5 BIG-IP (Interface Only)
+
+The F5 BIG-IP target connector interface is built with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it. Implementation is planned for the paid V3 release.
+
+The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status. Implementation is planned for a future release.
 
 Configuration (defined, not yet functional):
 ```json
@@ -295,23 +410,32 @@ Configuration (defined, not yet functional):
 }
 ```
 
+Note: F5 credentials are stored on the proxy agent, not on the control plane server. This limits the credential blast radius to the proxy agent's network zone.
+
 Location: `internal/connector/target/f5/f5.go`
 
-### Planned: IIS (Interface Only)
+### V3 (Paid): IIS (Interface Only, Dual-Mode)
 
-The IIS target connector interface is built with the WinRM/PowerShell flow mapped out, but the actual remote execution is not yet implemented. The planned flow is: transfer a PFX bundle to the Windows server via WinRM, run `Import-PfxCertificate` to install it into the certificate store, and run `Set-WebBinding` to bind the certificate to the IIS site. Implementation is planned for V2.
+The IIS target connector supports two deployment modes planned for the paid V3 release:
+
+**Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
+
+**Proxy agent WinRM (for agentless targets):** For Windows servers where you don't want to install an agent, a nearby Windows agent acts as a proxy and reaches the IIS box via WinRM. The proxy agent picks up the deployment job, transfers the PFX bundle over WinRM, and runs the PowerShell commands remotely. WinRM credentials are stored on the proxy agent, not on the control plane.
 
 Configuration (defined, not yet functional):
 ```json
 {
-  "host": "iis-server.internal.example.com",
-  "username": "Administrator",
-  "password": "...",
+  "mode": "local",
   "site_name": "Default Web Site",
   "cert_store": "WebHosting",
-  "use_https": true
+  "winrm_host": "",
+  "winrm_username": "",
+  "winrm_password": "",
+  "winrm_use_https": true
 }
 ```
+
+When `mode` is `"local"`, the `winrm_*` fields are ignored. When `mode` is `"proxy"`, the agent connects to the remote IIS server via WinRM using the provided credentials.
 
 Location: `internal/connector/target/iis/iis.go`
 
@@ -344,7 +468,16 @@ type Connector interface {
 }
 ```
 
-Built-in notifiers: **Email** (SMTP) and **Webhook** (HTTP POST).
+Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard webhook), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2).
+
+Each notifier is enabled by its configuration env var:
+
+| Notifier | Env Var | Description |
+|----------|---------|-------------|
+| Slack | `CERTCTL_SLACK_WEBHOOK_URL` | Incoming webhook URL. Optional: `CERTCTL_SLACK_CHANNEL`, `CERTCTL_SLACK_USERNAME` |
+| Teams | `CERTCTL_TEAMS_WEBHOOK_URL` | Incoming webhook URL (MessageCard format) |
+| PagerDuty | `CERTCTL_PAGERDUTY_ROUTING_KEY` | Events API v2 routing key. Optional: `CERTCTL_PAGERDUTY_SEVERITY` (default: "warning") |
+| OpsGenie | `CERTCTL_OPSGENIE_API_KEY` | Alert API GenieKey. Optional: `CERTCTL_OPSGENIE_PRIORITY` (default: "P3") |
 
 In demo mode, notifications are marked as "sent" even without a configured notifier — this prevents error spam in the logs while still generating notification records for the dashboard to display.
 
@@ -447,6 +580,142 @@ docker rm -f nginx
 5. **Support dry-run** — Where possible, support a validation/dry-run mode for deployment testing
 6. **Idempotent operations** — Deploying the same certificate twice should succeed, not fail
 7. **Report metadata** — Return deployment duration, target address, and other useful data in results
+
+## Agent Discovery Scanner
+
+Agents include a built-in certificate discovery scanner that walks configured directories and reports unmanaged certificates to the control plane. This is useful for discovering existing certificates already deployed in your infrastructure, so you can bring them under certctl's management.
+
+### Configuration
+
+Enable discovery on an agent by setting `CERTCTL_DISCOVERY_DIRS` to a comma-separated list of directories:
+
+```bash
+export CERTCTL_DISCOVERY_DIRS="/etc/nginx/certs,/etc/ssl/certs,/etc/apache2/ssl"
+```
+
+Or via command-line flag:
+
+```bash
+./agent --agent-id agent-nginx-01 --discovery-dirs "/etc/nginx/certs,/etc/ssl/certs"
+```
+
+The agent scans these directories on startup and every 6 hours, looking for certificate files in PEM or DER format (extensions: `.pem`, `.crt`, `.cer`, `.cert`, `.der`).
+
+### How It Works
+
+1. **Scan**: Agent recursively walks directories, extracts certificates
+2. **Deduplicate**: Control plane deduplicates by SHA-256 fingerprint (same cert in multiple locations is one discovery)
+3. **Store**: Discovered certificates stored with metadata (agent ID, file path, found date, fingerprint)
+4. **Triage**: Operators query discovered certs via API, claim to link to managed certificates, or dismiss false positives
+
+### API Endpoints
+
+```bash
+# List discovered certificates (filter by agent, status)
+curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-01&status=new" | jq .
+
+# Get discovery detail
+curl -s http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID | jq .
+
+# Claim a discovered cert (link to managed certificate)
+curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim \
+  -H "Content-Type: application/json" \
+  -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
+
+# Dismiss a discovery
+curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/dismiss | jq .
+
+# View discovery scan history
+curl -s http://localhost:8443/api/v1/discovery-scans | jq .
+
+# Summary counts (new, claimed, dismissed)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+```
+
+### Use Cases
+
+- **Inventory audit** — Find all TLS certificates running in your infrastructure
+- **Migration** — Onboard existing certificates that were issued outside certctl
+- **Compliance** — Detect rogue/unauthorized certificates in monitored directories
+- **Integration** — Pull certificate data from systems that pre-generate certs (e.g., Kubernetes CertManager)
+
+## Network Certificate Scanner (M21)
+
+The control plane includes a built-in active TLS scanner that probes network endpoints and discovers certificates without requiring agent deployment. This complements the agent-based filesystem discovery with network-level visibility.
+
+### Configuration
+
+Enable network scanning on the server:
+
+```bash
+export CERTCTL_NETWORK_SCAN_ENABLED=true
+export CERTCTL_NETWORK_SCAN_INTERVAL=6h  # default
+```
+
+### Creating Scan Targets
+
+Network scan targets define which CIDR ranges and ports to probe:
+
+```bash
+# Create a scan target for your internal network
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Web Servers",
+    "cidrs": ["10.0.1.0/24", "10.0.2.0/24"],
+    "ports": [443, 8443, 6443],
+    "enabled": true,
+    "scan_interval_hours": 6,
+    "timeout_ms": 5000
+  }' | jq .
+```
+
+### How It Works
+
+1. **Expand**: CIDR ranges are expanded to individual IPs (safety cap at /20 = 4096 IPs)
+2. **Probe**: Concurrent TLS connections (50 goroutines) with configurable timeout per endpoint
+3. **Extract**: Certificate metadata extracted from TLS handshake (CN, SANs, serial, issuer, key info, fingerprint)
+4. **Pipeline**: Results fed into the same `DiscoveryService.ProcessDiscoveryReport()` as filesystem discovery
+5. **Deduplicate**: Sentinel agent ID (`server-scanner`) with source_path as `ip:port` ensures proper dedup
+6. **Triage**: Discovered certs appear in `GET /api/v1/discovered-certificates` with `agent_id=server-scanner`
+
+### API Endpoints
+
+```bash
+# List all scan targets
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
+
+# Create a scan target
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{"name": "DMZ", "cidrs": ["172.16.0.0/24"], "ports": [443]}' | jq .
+
+# Get a specific target (includes last_scan_at, last_scan_certs_found)
+curl -s http://localhost:8443/api/v1/network-scan-targets/nst-dmz | jq .
+
+# Trigger an immediate scan (doesn't wait for scheduler)
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-dmz/scan | jq .
+
+# Update scan configuration
+curl -s -X PUT http://localhost:8443/api/v1/network-scan-targets/nst-dmz \
+  -H "Content-Type: application/json" \
+  -d '{"ports": [443, 8443, 9443], "timeout_ms": 3000}' | jq .
+
+# Delete a scan target
+curl -s -X DELETE http://localhost:8443/api/v1/network-scan-targets/nst-dmz
+```
+
+### Scheduler Integration
+
+When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs a 6th scheduler loop (alongside renewal, jobs, health, notifications, and short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health.
+
+### Use Cases
+
+- **Network inventory** — "What TLS certs are deployed across my network?" without deploying agents
+- **Shadow certificate detection** — Find certificates on services you didn't know were running TLS
+- **Compliance scanning** — Prove to auditors that all TLS endpoints are inventoried
+- **Migration assessment** — Scan a network range before onboarding to certctl management
+- **Expiration monitoring** — Discover soon-to-expire certs on network endpoints before they cause outages
 
 ## What's Next
 

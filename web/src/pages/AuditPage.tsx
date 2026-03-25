@@ -18,6 +18,7 @@ const actionColors: Record<string, string> = {
   expiration_alert_sent: 'text-amber-400',
   agent_registered: 'text-blue-400',
   policy_violated: 'text-red-400',
+  certificate_revoked: 'text-red-400',
 };
 
 const RESOURCE_TYPES = ['', 'certificate', 'agent', 'job', 'notification', 'policy', 'target', 'issuer'];
@@ -29,14 +30,49 @@ const TIME_RANGES = [
   { label: 'Last 30 days', value: '30d' },
 ];
 
+function downloadFile(content: string, filename: string, type: string) {
+  const blob = new Blob([content], { type });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  document.body.removeChild(a);
+  URL.revokeObjectURL(url);
+}
+
+function exportCSV(events: AuditEvent[]) {
+  const headers = ['ID', 'Action', 'Actor', 'Actor Type', 'Resource Type', 'Resource ID', 'Details', 'Timestamp'];
+  const rows = events.map(e => [
+    e.id,
+    e.action,
+    e.actor,
+    e.actor_type,
+    e.resource_type,
+    e.resource_id,
+    JSON.stringify(e.details || {}),
+    e.timestamp,
+  ]);
+  const csv = [headers, ...rows].map(row => row.map(cell => `"${String(cell).replace(/"/g, '""')}"`).join(',')).join('\n');
+  downloadFile(csv, `audit-trail-${new Date().toISOString().slice(0, 10)}.csv`, 'text/csv');
+}
+
+function exportJSON(events: AuditEvent[]) {
+  const json = JSON.stringify(events, null, 2);
+  downloadFile(json, `audit-trail-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
+}
+
 export default function AuditPage() {
   const [resourceType, setResourceType] = useState('');
   const [actorFilter, setActorFilter] = useState('');
   const [timeRange, setTimeRange] = useState('');
+  const [actionFilter, setActionFilter] = useState('');
 
   const params: Record<string, string> = {};
   if (resourceType) params.resource_type = resourceType;
   if (actorFilter) params.actor = actorFilter;
+  if (actionFilter) params.action = actionFilter;
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['audit', params],
@@ -98,9 +134,26 @@ export default function AuditPage() {
     { key: 'time', label: 'Time', render: (e) => <span className="text-xs text-slate-400">{formatDateTime(e.timestamp)}</span> },
   ];
 
+  const hasFilters = resourceType || actorFilter || timeRange || actionFilter;
+
   return (
     <>
-      <PageHeader title="Audit Trail" subtitle={data ? `${filtered.length} events` : undefined} />
+      <PageHeader
+        title="Audit Trail"
+        subtitle={data ? `${filtered.length} events` : undefined}
+        action={
+          filtered.length > 0 ? (
+            <div className="flex gap-2">
+              <button onClick={() => exportCSV(filtered)} className="btn btn-ghost text-xs border border-slate-600">
+                Export CSV
+              </button>
+              <button onClick={() => exportJSON(filtered)} className="btn btn-ghost text-xs border border-slate-600">
+                Export JSON
+              </button>
+            </div>
+          ) : undefined
+        }
+      />
       <div className="px-4 py-3 flex flex-wrap gap-3 border-b border-slate-700/50">
         <select
           value={resourceType}
@@ -119,6 +172,13 @@ export default function AuditPage() {
           onChange={(e) => setActorFilter(e.target.value)}
           className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-xs text-slate-300 placeholder-slate-500 focus:outline-none focus:border-blue-500 w-40"
         />
+        <input
+          type="text"
+          placeholder="Filter by action..."
+          value={actionFilter}
+          onChange={(e) => setActionFilter(e.target.value)}
+          className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-xs text-slate-300 placeholder-slate-500 focus:outline-none focus:border-blue-500 w-40"
+        />
         <select
           value={timeRange}
           onChange={(e) => setTimeRange(e.target.value)}
@@ -128,9 +188,9 @@ export default function AuditPage() {
             <option key={r.value} value={r.value}>{r.label}</option>
           ))}
         </select>
-        {(resourceType || actorFilter || timeRange) && (
+        {hasFilters && (
           <button
-            onClick={() => { setResourceType(''); setActorFilter(''); setTimeRange(''); }}
+            onClick={() => { setResourceType(''); setActorFilter(''); setTimeRange(''); setActionFilter(''); }}
             className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
           >
             Clear filters

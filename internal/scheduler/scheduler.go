@@ -16,13 +16,16 @@ type Scheduler struct {
 	jobService          *service.JobService
 	agentService        *service.AgentService
 	notificationService *service.NotificationService
+	networkScanService  *service.NetworkScanService
 	logger              *slog.Logger
 
 	// Configurable tick intervals
-	renewalCheckInterval        time.Duration
-	jobProcessorInterval        time.Duration
-	agentHealthCheckInterval    time.Duration
-	notificationProcessInterval time.Duration
+	renewalCheckInterval            time.Duration
+	jobProcessorInterval            time.Duration
+	agentHealthCheckInterval        time.Duration
+	notificationProcessInterval     time.Duration
+	shortLivedExpiryCheckInterval   time.Duration
+	networkScanInterval             time.Duration
 }
 
 // NewScheduler creates a new scheduler with configurable intervals.
@@ -31,6 +34,7 @@ func NewScheduler(
 	jobService *service.JobService,
 	agentService *service.AgentService,
 	notificationService *service.NotificationService,
+	networkScanService *service.NetworkScanService,
 	logger *slog.Logger,
 ) *Scheduler {
 	return &Scheduler{
@@ -38,13 +42,16 @@ func NewScheduler(
 		jobService:          jobService,
 		agentService:        agentService,
 		notificationService: notificationService,
+		networkScanService:  networkScanService,
 		logger:              logger,
 
 		// Default intervals
-		renewalCheckInterval:        1 * time.Hour,
-		jobProcessorInterval:        30 * time.Second,
-		agentHealthCheckInterval:    2 * time.Minute,
-		notificationProcessInterval: 1 * time.Minute,
+		renewalCheckInterval:          1 * time.Hour,
+		jobProcessorInterval:          30 * time.Second,
+		agentHealthCheckInterval:      2 * time.Minute,
+		notificationProcessInterval:   1 * time.Minute,
+		shortLivedExpiryCheckInterval: 30 * time.Second,
+		networkScanInterval:           6 * time.Hour,
 	}
 }
 
@@ -68,6 +75,11 @@ func (s *Scheduler) SetNotificationProcessInterval(d time.Duration) {
 	s.notificationProcessInterval = d
 }
 
+// SetNetworkScanInterval configures the interval for network scanning.
+func (s *Scheduler) SetNetworkScanInterval(d time.Duration) {
+	s.networkScanInterval = d
+}
+
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
@@ -87,6 +99,10 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go s.jobProcessorLoop(ctx)
 		go s.agentHealthCheckLoop(ctx)
 		go s.notificationProcessLoop(ctx)
+		go s.shortLivedExpiryCheckLoop(ctx)
+		if s.networkScanService != nil {
+			go s.networkScanLoop(ctx)
+		}
 
 		// Wait for context cancellation
 		<-ctx.Done()
@@ -223,5 +239,67 @@ func (s *Scheduler) runNotificationProcess(ctx context.Context) {
 			"interval", s.notificationProcessInterval.String())
 	} else {
 		s.logger.Debug("notification processor completed")
+	}
+}
+
+// shortLivedExpiryCheckLoop runs every shortLivedExpiryCheckInterval and marks expired
+// short-lived certificates. For certs with TTL < 1 hour, expiry IS revocation —
+// no CRL/OCSP needed.
+func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.shortLivedExpiryCheckInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runShortLivedExpiryCheck(ctx)
+		}
+	}
+}
+
+// runShortLivedExpiryCheck executes a single short-lived expiry check with error recovery.
+func (s *Scheduler) runShortLivedExpiryCheck(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
+	if err := s.renewalService.ExpireShortLivedCertificates(opCtx); err != nil {
+		s.logger.Error("short-lived expiry check failed",
+			"error", err,
+			"interval", s.shortLivedExpiryCheckInterval.String())
+	} else {
+		s.logger.Debug("short-lived expiry check completed")
+	}
+}
+
+// networkScanLoop runs every networkScanInterval and performs active TLS scanning
+// of configured network targets.
+func (s *Scheduler) networkScanLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.networkScanInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start
+	s.runNetworkScan(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runNetworkScan(ctx)
+		}
+	}
+}
+
+// runNetworkScan executes a single network scan cycle with error recovery.
+func (s *Scheduler) runNetworkScan(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	if err := s.networkScanService.ScanAllTargets(opCtx); err != nil {
+		s.logger.Error("network scan failed",
+			"error", err,
+			"interval", s.networkScanInterval.String())
+	} else {
+		s.logger.Debug("network scan completed")
 	}
 }

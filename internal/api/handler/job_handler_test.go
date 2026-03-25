@@ -2,8 +2,10 @@ package handler
 
 import (
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -12,9 +14,11 @@ import (
 
 // MockJobService is a mock implementation of JobService interface.
 type MockJobService struct {
-	ListJobsFn  func(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
-	GetJobFn    func(id string) (*domain.Job, error)
-	CancelJobFn func(id string) error
+	ListJobsFn   func(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
+	GetJobFn     func(id string) (*domain.Job, error)
+	CancelJobFn  func(id string) error
+	ApproveJobFn func(id string) error
+	RejectJobFn  func(id string, reason string) error
 }
 
 func (m *MockJobService) ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
@@ -34,6 +38,20 @@ func (m *MockJobService) GetJob(id string) (*domain.Job, error) {
 func (m *MockJobService) CancelJob(id string) error {
 	if m.CancelJobFn != nil {
 		return m.CancelJobFn(id)
+	}
+	return nil
+}
+
+func (m *MockJobService) ApproveJob(id string) error {
+	if m.ApproveJobFn != nil {
+		return m.ApproveJobFn(id)
+	}
+	return nil
+}
+
+func (m *MockJobService) RejectJob(id string, reason string) error {
+	if m.RejectJobFn != nil {
+		return m.RejectJobFn(id, reason)
 	}
 	return nil
 }
@@ -323,5 +341,166 @@ func TestCancelJob_EmptyID(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestApproveJob_Success(t *testing.T) {
+	var approvedID string
+	mock := &MockJobService{
+		ApproveJobFn: func(id string) error {
+			approvedID = id
+			return nil
+		},
+	}
+
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-001/approve", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.ApproveJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if approvedID != "job-001" {
+		t.Errorf("expected approved ID 'job-001', got '%s'", approvedID)
+	}
+
+	var resp map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["status"] != "job_approved" {
+		t.Errorf("expected status 'job_approved', got '%s'", resp["status"])
+	}
+}
+
+func TestApproveJob_NotFound(t *testing.T) {
+	mock := &MockJobService{
+		ApproveJobFn: func(id string) error {
+			return fmt.Errorf("job not found: no rows")
+		},
+	}
+
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-ghost/approve", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.ApproveJob(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestApproveJob_BadStatus(t *testing.T) {
+	mock := &MockJobService{
+		ApproveJobFn: func(id string) error {
+			return fmt.Errorf("cannot approve job with status Running")
+		},
+	}
+
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-001/approve", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.ApproveJob(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestApproveJob_MethodNotAllowed(t *testing.T) {
+	h := NewJobHandler(&MockJobService{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/job-001/approve", nil)
+	w := httptest.NewRecorder()
+
+	h.ApproveJob(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", w.Code)
+	}
+}
+
+func TestRejectJob_Success(t *testing.T) {
+	var rejectedID, capturedReason string
+	mock := &MockJobService{
+		RejectJobFn: func(id string, reason string) error {
+			rejectedID = id
+			capturedReason = reason
+			return nil
+		},
+	}
+
+	body := `{"reason":"Certificate no longer needed"}`
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-002/reject", strings.NewReader(body))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.RejectJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	if rejectedID != "job-002" {
+		t.Errorf("expected rejected ID 'job-002', got '%s'", rejectedID)
+	}
+	if capturedReason != "Certificate no longer needed" {
+		t.Errorf("expected reason 'Certificate no longer needed', got '%s'", capturedReason)
+	}
+}
+
+func TestRejectJob_NoReason(t *testing.T) {
+	mock := &MockJobService{
+		RejectJobFn: func(id string, reason string) error {
+			return nil
+		},
+	}
+
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-002/reject", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.RejectJob(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+}
+
+func TestRejectJob_NotFound(t *testing.T) {
+	mock := &MockJobService{
+		RejectJobFn: func(id string, reason string) error {
+			return fmt.Errorf("job not found: no rows")
+		},
+	}
+
+	h := NewJobHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/jobs/job-ghost/reject", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	h.RejectJob(w, req)
+
+	if w.Code != http.StatusNotFound {
+		t.Fatalf("expected status 404, got %d", w.Code)
+	}
+}
+
+func TestRejectJob_MethodNotAllowed(t *testing.T) {
+	h := NewJobHandler(&MockJobService{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/jobs/job-001/reject", nil)
+	w := httptest.NewRecorder()
+
+	h.RejectJob(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", w.Code)
 	}
 }

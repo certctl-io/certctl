@@ -120,9 +120,9 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	// Validate NGINX configuration before reload
 	c.logger.Debug("validating NGINX configuration", "validate_command", c.config.ValidateCommand)
 	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
-	if err := validateCmd.Run(); err != nil {
-		errMsg := fmt.Sprintf("NGINX config validation failed: %v", err)
-		c.logger.Error("NGINX validation failed", "error", err)
+	if output, err := validateCmd.CombinedOutput(); err != nil {
+		errMsg := fmt.Sprintf("NGINX config validation failed: %v (output: %s)", err, string(output))
+		c.logger.Error("NGINX validation failed", "error", err, "output", string(output))
 		return &target.DeploymentResult{
 			Success:       false,
 			TargetAddress: c.config.CertPath,
@@ -134,9 +134,9 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	// Reload NGINX
 	c.logger.Debug("reloading NGINX", "reload_command", c.config.ReloadCommand)
 	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
-	if err := reloadCmd.Run(); err != nil {
-		errMsg := fmt.Sprintf("NGINX reload failed: %v", err)
-		c.logger.Error("NGINX reload failed", "error", err)
+	if output, err := reloadCmd.CombinedOutput(); err != nil {
+		errMsg := fmt.Sprintf("NGINX reload failed: %v (output: %s)", err, string(output))
+		c.logger.Error("NGINX reload failed", "error", err, "output", string(output))
 		return &target.DeploymentResult{
 			Success:       false,
 			TargetAddress: c.config.CertPath,

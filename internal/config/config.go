@@ -11,14 +11,30 @@ import (
 // Config represents the complete application configuration.
 // All configuration values are read from environment variables with CERTCTL_ prefix.
 type Config struct {
-	Server    ServerConfig
-	Database  DatabaseConfig
-	Scheduler SchedulerConfig
-	Log       LogConfig
-	Auth      AuthConfig
-	RateLimit RateLimitConfig
-	CORS      CORSConfig
-	Keygen    KeygenConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	Scheduler    SchedulerConfig
+	Log          LogConfig
+	Auth         AuthConfig
+	RateLimit    RateLimitConfig
+	CORS         CORSConfig
+	Keygen       KeygenConfig
+	CA           CAConfig
+	Notifiers    NotifierConfig
+	NetworkScan  NetworkScanConfig
+}
+
+// NotifierConfig contains configuration for notification connectors.
+// Each notifier is enabled by setting its required env var (webhook URL or API key).
+type NotifierConfig struct {
+	SlackWebhookURL      string
+	SlackChannel         string
+	SlackUsername         string
+	TeamsWebhookURL      string
+	PagerDutyRoutingKey  string
+	PagerDutySeverity    string
+	OpsGenieAPIKey       string
+	OpsGeniePriority     string
 }
 
 // KeygenConfig controls where private keys are generated.
@@ -27,6 +43,48 @@ type KeygenConfig struct {
 	// In "agent" mode, renewal/issuance jobs enter AwaitingCSR state and agents generate keys locally.
 	// In "server" mode, the control plane generates keys (private keys touch the server — demo only).
 	Mode string
+}
+
+// CAConfig controls the Local CA's operating mode.
+type CAConfig struct {
+	// CertPath is the path to a PEM-encoded CA certificate for sub-CA mode.
+	// When set with KeyPath, the Local CA loads this cert instead of generating a self-signed root.
+	CertPath string
+
+	// KeyPath is the path to a PEM-encoded CA private key for sub-CA mode.
+	// Supports RSA, ECDSA, and PKCS#8 encoded keys.
+	KeyPath string
+}
+
+// StepCAConfig contains step-ca issuer connector configuration.
+type StepCAConfig struct {
+	URL                 string
+	ProvisionerName     string
+	ProvisionerKeyPath  string
+	ProvisionerPassword string
+}
+
+// ACMEConfig contains ACME issuer connector configuration.
+type ACMEConfig struct {
+	DirectoryURL     string
+	Email            string
+	ChallengeType    string // "http-01" (default) or "dns-01"
+	DNSPresentScript string
+	DNSCleanUpScript string
+}
+
+// OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
+type OpenSSLConfig struct {
+	SignScript     string
+	RevokeScript   string
+	CRLScript      string
+	TimeoutSeconds int
+}
+
+// NetworkScanConfig controls the server-side active TLS scanner.
+type NetworkScanConfig struct {
+	Enabled      bool          // Enable network scanning (default false)
+	ScanInterval time.Duration // How often to run network scans (default 6h)
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -112,6 +170,24 @@ func Load() (*Config, error) {
 		},
 		Keygen: KeygenConfig{
 			Mode: getEnv("CERTCTL_KEYGEN_MODE", "agent"),
+		},
+		CA: CAConfig{
+			CertPath: getEnv("CERTCTL_CA_CERT_PATH", ""),
+			KeyPath:  getEnv("CERTCTL_CA_KEY_PATH", ""),
+		},
+		Notifiers: NotifierConfig{
+			SlackWebhookURL:     getEnv("CERTCTL_SLACK_WEBHOOK_URL", ""),
+			SlackChannel:        getEnv("CERTCTL_SLACK_CHANNEL", ""),
+			SlackUsername:        getEnv("CERTCTL_SLACK_USERNAME", "certctl"),
+			TeamsWebhookURL:     getEnv("CERTCTL_TEAMS_WEBHOOK_URL", ""),
+			PagerDutyRoutingKey: getEnv("CERTCTL_PAGERDUTY_ROUTING_KEY", ""),
+			PagerDutySeverity:   getEnv("CERTCTL_PAGERDUTY_SEVERITY", "warning"),
+			OpsGenieAPIKey:      getEnv("CERTCTL_OPSGENIE_API_KEY", ""),
+			OpsGeniePriority:    getEnv("CERTCTL_OPSGENIE_PRIORITY", "P3"),
+		},
+		NetworkScan: NetworkScanConfig{
+			Enabled:      getEnvBool("CERTCTL_NETWORK_SCAN_ENABLED", false),
+			ScanInterval: getEnvDuration("CERTCTL_NETWORK_SCAN_INTERVAL", 6*time.Hour),
 		},
 	}
 

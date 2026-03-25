@@ -249,3 +249,50 @@ func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]doma
 func (s *JobService) GetJob(id string) (*domain.Job, error) {
 	return s.jobRepo.Get(context.Background(), id)
 }
+
+// ApproveJob approves a renewal job that is awaiting approval.
+// Transitions the job from AwaitingApproval to Pending so the scheduler picks it up.
+func (s *JobService) ApproveJob(id string) error {
+	ctx := context.Background()
+	job, err := s.jobRepo.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("job not found: %w", err)
+	}
+
+	if job.Status != domain.JobStatusAwaitingApproval {
+		return fmt.Errorf("cannot approve job with status %s (must be AwaitingApproval)", job.Status)
+	}
+
+	if err := s.jobRepo.UpdateStatus(ctx, id, domain.JobStatusPending, ""); err != nil {
+		return fmt.Errorf("failed to approve job: %w", err)
+	}
+
+	s.logger.Info("renewal job approved", "job_id", id, "certificate_id", job.CertificateID)
+	return nil
+}
+
+// RejectJob rejects a renewal job that is awaiting approval.
+// Transitions the job to Cancelled with a rejection reason.
+func (s *JobService) RejectJob(id string, reason string) error {
+	ctx := context.Background()
+	job, err := s.jobRepo.Get(ctx, id)
+	if err != nil {
+		return fmt.Errorf("job not found: %w", err)
+	}
+
+	if job.Status != domain.JobStatusAwaitingApproval {
+		return fmt.Errorf("cannot reject job with status %s (must be AwaitingApproval)", job.Status)
+	}
+
+	msg := "rejected by user"
+	if reason != "" {
+		msg = "rejected: " + reason
+	}
+
+	if err := s.jobRepo.UpdateStatus(ctx, id, domain.JobStatusCancelled, msg); err != nil {
+		return fmt.Errorf("failed to reject job: %w", err)
+	}
+
+	s.logger.Info("renewal job rejected", "job_id", id, "certificate_id", job.CertificateID, "reason", reason)
+	return nil
+}

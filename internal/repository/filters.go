@@ -9,8 +9,27 @@ type CertificateFilter struct {
 	OwnerID     string
 	TeamID      string
 	IssuerID    string
-	Page        int // 1-indexed; default 1
-	PerPage     int // default 50, max 500
+	AgentID     string // filter by agent_id (via deployment targets)
+	ProfileID   string // filter by certificate_profile_id
+	Page        int    // 1-indexed; default 1
+	PerPage     int    // default 50, max 500
+
+	// Time-range filters
+	ExpiresBefore *time.Time // certs expiring before this date
+	ExpiresAfter  *time.Time // certs expiring after this date
+	CreatedAfter  *time.Time // certs created after this date
+	UpdatedAfter  *time.Time // certs updated after this date
+
+	// Sorting
+	Sort     string // field name to sort by (e.g., "notAfter", "createdAt", "commonName")
+	SortDesc bool   // true = DESC, false = ASC
+
+	// Cursor pagination (alternative to page-based)
+	Cursor   string // opaque cursor token (base64-encoded "created_at:id")
+	PageSize int    // for cursor-based pagination (alias for PerPage)
+
+	// Sparse fields
+	Fields []string // if non-empty, only return these JSON field names
 }
 
 // JobFilter defines filtering criteria for job queries.

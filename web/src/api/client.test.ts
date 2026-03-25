@@ -10,24 +10,57 @@ import {
   triggerDeployment,
   updateCertificate,
   archiveCertificate,
+  revokeCertificate,
   getAgents,
   getAgent,
   registerAgent,
   getJobs,
   cancelJob,
+  approveRenewal,
+  rejectRenewal,
   getNotifications,
   markNotificationRead,
   getAuditEvents,
   getPolicies,
+  createPolicy,
   updatePolicy,
   deletePolicy,
+  getPolicyViolations,
   getIssuers,
+  createIssuer,
   testIssuerConnection,
   deleteIssuer,
   getTargets,
   createTarget,
   deleteTarget,
+  getProfiles,
+  getProfile,
+  createProfile,
+  updateProfile,
+  deleteProfile,
+  getOwners,
+  getOwner,
+  createOwner,
+  updateOwner,
+  deleteOwner,
+  getTeams,
+  getTeam,
+  createTeam,
+  updateTeam,
+  deleteTeam,
+  getAgentGroups,
+  getAgentGroup,
+  createAgentGroup,
+  updateAgentGroup,
+  deleteAgentGroup,
+  getAgentGroupMembers,
   getHealth,
+  getDashboardSummary,
+  getCertificatesByStatus,
+  getExpirationTimeline,
+  getJobTrends,
+  getIssuanceRate,
+  getMetrics,
 } from './client';
 
 // Mock global fetch
@@ -209,6 +242,15 @@ describe('API Client', () => {
       expect(init.method).toBe('POST');
       expect(JSON.parse(init.body)).toEqual({ target_id: 't-nginx' });
     });
+
+    it('revokeCertificate sends POST with reason', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ status: 'revoked' }));
+      await revokeCertificate('mc-test', 'keyCompromise');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates/mc-test/revoke');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ reason: 'keyCompromise' });
+    });
   });
 
   // ─── Agents ─────────────────────────────────────────
@@ -357,6 +399,219 @@ describe('API Client', () => {
     });
   });
 
+  // ─── Approval ──────────────────────────────────────
+
+  describe('Renewal Approvals', () => {
+    it('approveRenewal sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'approved' }));
+      await approveRenewal('job-123');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/jobs/job-123/approve');
+      expect(init.method).toBe('POST');
+    });
+
+    it('rejectRenewal sends POST with reason', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'rejected' }));
+      await rejectRenewal('job-123', 'not authorized');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/jobs/job-123/reject');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ reason: 'not authorized' });
+    });
+  });
+
+  // ─── Profiles ────────────────────────────────────────
+
+  describe('Profiles', () => {
+    it('getProfiles sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getProfiles();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/profiles');
+    });
+
+    it('getProfile fetches by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'prof-1', name: 'Standard' }));
+      const profile = await getProfile('prof-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/profiles/prof-1');
+      expect(profile.id).toBe('prof-1');
+    });
+
+    it('createProfile sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'prof-new', name: 'New Profile' }));
+      await createProfile({ name: 'New Profile' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/profiles');
+      expect(init.method).toBe('POST');
+    });
+
+    it('updateProfile sends PUT', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'prof-1', name: 'Updated' }));
+      await updateProfile('prof-1', { name: 'Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/profiles/prof-1');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('deleteProfile sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'deleted' }));
+      await deleteProfile('prof-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/profiles/prof-1');
+      expect(init.method).toBe('DELETE');
+    });
+  });
+
+  // ─── Owners ──────────────────────────────────────────
+
+  describe('Owners', () => {
+    it('getOwners sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getOwners();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/owners');
+    });
+
+    it('getOwner fetches by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'o-alice', name: 'Alice' }));
+      const owner = await getOwner('o-alice');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/owners/o-alice');
+      expect(owner.name).toBe('Alice');
+    });
+
+    it('createOwner sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'o-new', name: 'Bob' }));
+      await createOwner({ name: 'Bob', email: 'bob@example.com' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/owners');
+      expect(init.method).toBe('POST');
+    });
+
+    it('updateOwner sends PUT', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'o-alice', name: 'Alice Updated' }));
+      await updateOwner('o-alice', { name: 'Alice Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/owners/o-alice');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('deleteOwner sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'deleted' }));
+      await deleteOwner('o-alice');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/owners/o-alice');
+      expect(init.method).toBe('DELETE');
+    });
+  });
+
+  // ─── Teams ───────────────────────────────────────────
+
+  describe('Teams', () => {
+    it('getTeams sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getTeams();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/teams');
+    });
+
+    it('getTeam fetches by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 't-platform', name: 'Platform' }));
+      const team = await getTeam('t-platform');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/teams/t-platform');
+      expect(team.name).toBe('Platform');
+    });
+
+    it('createTeam sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 't-new', name: 'New Team' }));
+      await createTeam({ name: 'New Team' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/teams');
+      expect(init.method).toBe('POST');
+    });
+
+    it('updateTeam sends PUT', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 't-platform', name: 'Updated' }));
+      await updateTeam('t-platform', { name: 'Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/teams/t-platform');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('deleteTeam sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'deleted' }));
+      await deleteTeam('t-platform');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/teams/t-platform');
+      expect(init.method).toBe('DELETE');
+    });
+  });
+
+  // ─── Agent Groups ────────────────────────────────────
+
+  describe('Agent Groups', () => {
+    it('getAgentGroups sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getAgentGroups();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/agent-groups');
+    });
+
+    it('getAgentGroup fetches by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'ag-linux', name: 'Linux Servers' }));
+      const group = await getAgentGroup('ag-linux');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/agent-groups/ag-linux');
+      expect(group.name).toBe('Linux Servers');
+    });
+
+    it('createAgentGroup sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'ag-new', name: 'New Group' }));
+      await createAgentGroup({ name: 'New Group' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/agent-groups');
+      expect(init.method).toBe('POST');
+    });
+
+    it('updateAgentGroup sends PUT', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'ag-linux', name: 'Updated' }));
+      await updateAgentGroup('ag-linux', { name: 'Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/agent-groups/ag-linux');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('deleteAgentGroup sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'deleted' }));
+      await deleteAgentGroup('ag-linux');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/agent-groups/ag-linux');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('getAgentGroupMembers fetches members', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getAgentGroupMembers('ag-linux');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/agent-groups/ag-linux/members');
+    });
+  });
+
+  // ─── Policy Violations ───────────────────────────────
+
+  describe('Policy Violations', () => {
+    it('getPolicyViolations sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getPolicyViolations('pol-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/policies/pol-1/violations');
+    });
+  });
+
+  // ─── Issuer Create ───────────────────────────────────
+
+  describe('Issuer Create', () => {
+    it('createIssuer sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-new', name: 'New Issuer' }));
+      await createIssuer({ name: 'New Issuer', type: 'local_ca' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/issuers');
+      expect(init.method).toBe('POST');
+    });
+  });
+
   // ─── Audit ──────────────────────────────────────────
 
   describe('Audit', () => {
@@ -365,6 +620,59 @@ describe('API Client', () => {
       await getAuditEvents({ resource_type: 'certificate' });
       const url = mockFetch.mock.calls[0][0] as string;
       expect(url).toContain('resource_type=certificate');
+    });
+  });
+
+  // ─── Stats ─────────────────────────────────────────
+
+  describe('Stats', () => {
+    it('getDashboardSummary calls /api/v1/stats/summary', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ total_certificates: 10 }));
+      const result = await getDashboardSummary();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/summary');
+      expect(result.total_certificates).toBe(10);
+    });
+
+    it('getCertificatesByStatus calls /api/v1/stats/certificates-by-status', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([{ status: 'Active', count: 5 }]));
+      const result = await getCertificatesByStatus();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/certificates-by-status');
+      expect(result).toHaveLength(1);
+    });
+
+    it('getExpirationTimeline calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getExpirationTimeline(60);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/expiration-timeline?days=60');
+    });
+
+    it('getExpirationTimeline uses default 30 days', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getExpirationTimeline();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/expiration-timeline?days=30');
+    });
+
+    it('getJobTrends calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getJobTrends(14);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/job-trends?days=14');
+    });
+
+    it('getIssuanceRate calls with days parameter', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse([]));
+      await getIssuanceRate(7);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/stats/issuance-rate?days=7');
+    });
+
+    it('getMetrics calls /api/v1/metrics', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({
+        gauge: { certificate_total: 10 },
+        counter: { job_completed_total: 5 },
+        uptime: { uptime_seconds: 3600 },
+      }));
+      const result = await getMetrics();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/metrics');
+      expect(result.gauge.certificate_total).toBe(10);
     });
   });
 

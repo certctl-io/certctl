@@ -52,7 +52,12 @@ func TestCertificateLifecycle(t *testing.T) {
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, "server")
+	revocationRepo := newMockRevocationRepository()
+	certificateService.SetRevocationRepo(revocationRepo)
+	certificateService.SetNotificationService(notificationService)
+	certificateService.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetTargetRepo(targetRepo)
+	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
@@ -65,11 +70,17 @@ func TestCertificateLifecycle(t *testing.T) {
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
+	agentGroupHandler := handler.NewAgentGroupHandler(&mockAgentGroupService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
+	statsHandler := handler.NewStatsHandler(&mockStatsService{})
+	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
+	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
+	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
 	// Create router and register handlers
 	r := router.New()
@@ -80,11 +91,17 @@ func TestCertificateLifecycle(t *testing.T) {
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
+		statsHandler,
+		metricsHandler,
 		healthHandler,
+		discoveryHandler,
+		networkScanHandler,
 	)
 
 	// Create test server
@@ -541,6 +558,14 @@ func (m *mockCertificateRepository) GetExpiringCertificates(ctx context.Context,
 	return expiring, nil
 }
 
+func (m *mockCertificateRepository) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
+	versions := m.versions[certID]
+	if len(versions) == 0 {
+		return nil, fmt.Errorf("no versions found")
+	}
+	return versions[len(versions)-1], nil
+}
+
 type mockJobRepository struct {
 	jobs map[string]*domain.Job
 }
@@ -684,7 +709,7 @@ func (m *mockAgentRepository) Delete(ctx context.Context, id string) error {
 	return nil
 }
 
-func (m *mockAgentRepository) UpdateHeartbeat(ctx context.Context, id string) error {
+func (m *mockAgentRepository) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
 	agent, ok := m.agents[id]
 	if !ok {
 		return fmt.Errorf("agent not found")
@@ -993,4 +1018,188 @@ func (m *mockOwnerService) UpdateOwner(id string, owner domain.Owner) (*domain.O
 
 func (m *mockOwnerService) DeleteOwner(id string) error {
 	return nil
+}
+
+type mockProfileService struct{}
+
+func (m *mockProfileService) ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error) {
+	return []domain.CertificateProfile{}, 0, nil
+}
+
+func (m *mockProfileService) GetProfile(id string) (*domain.CertificateProfile, error) {
+	return nil, fmt.Errorf("profile not found")
+}
+
+func (m *mockProfileService) CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+	return &profile, nil
+}
+
+func (m *mockProfileService) UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+	profile.ID = id
+	return &profile, nil
+}
+
+func (m *mockProfileService) DeleteProfile(id string) error {
+	return nil
+}
+
+type mockAgentGroupService struct{}
+
+func (m *mockAgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error) {
+	return []domain.AgentGroup{}, 0, nil
+}
+
+func (m *mockAgentGroupService) GetAgentGroup(id string) (*domain.AgentGroup, error) {
+	return nil, fmt.Errorf("agent group not found")
+}
+
+func (m *mockAgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error) {
+	return &group, nil
+}
+
+func (m *mockAgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
+	group.ID = id
+	return &group, nil
+}
+
+func (m *mockAgentGroupService) DeleteAgentGroup(id string) error {
+	return nil
+}
+
+func (m *mockAgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
+	return []domain.Agent{}, 0, nil
+}
+
+// mockRevocationRepository is a test implementation of RevocationRepository for integration tests.
+type mockRevocationRepository struct {
+	revocations []*domain.CertificateRevocation
+}
+
+func newMockRevocationRepository() *mockRevocationRepository {
+	return &mockRevocationRepository{
+		revocations: make([]*domain.CertificateRevocation, 0),
+	}
+}
+
+func (m *mockRevocationRepository) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
+	m.revocations = append(m.revocations, revocation)
+	return nil
+}
+
+func (m *mockRevocationRepository) GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error) {
+	for _, r := range m.revocations {
+		if r.SerialNumber == serial {
+			return r, nil
+		}
+	}
+	return nil, fmt.Errorf("revocation not found")
+}
+
+func (m *mockRevocationRepository) ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error) {
+	return m.revocations, nil
+}
+
+func (m *mockRevocationRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
+	var result []*domain.CertificateRevocation
+	for _, r := range m.revocations {
+		if r.CertificateID == certID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
+func (m *mockRevocationRepository) MarkIssuerNotified(ctx context.Context, id string) error {
+	for _, r := range m.revocations {
+		if r.ID == id {
+			r.IssuerNotified = true
+			return nil
+		}
+	}
+	return fmt.Errorf("revocation not found")
+}
+
+// mockStatsService implements both handler.StatsService and handler.MetricsService for integration tests.
+type mockStatsService struct{}
+
+func (m *mockStatsService) GetDashboardSummary(ctx context.Context) (interface{}, error) {
+	return &handler.DashboardSummary{}, nil
+}
+
+func (m *mockStatsService) GetCertificatesByStatus(ctx context.Context) (interface{}, error) {
+	return map[string]int64{}, nil
+}
+
+func (m *mockStatsService) GetExpirationTimeline(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
+}
+
+func (m *mockStatsService) GetJobStats(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
+}
+
+func (m *mockStatsService) GetIssuanceRate(ctx context.Context, days int) (interface{}, error) {
+	return []interface{}{}, nil
+}
+
+// mockDiscoveryService implements handler.DiscoveryService for integration tests.
+type mockDiscoveryService struct{}
+
+func (m *mockDiscoveryService) ProcessDiscoveryReport(ctx context.Context, report *domain.DiscoveryReport) (*domain.DiscoveryScan, error) {
+	return &domain.DiscoveryScan{ID: "dscan-test"}, nil
+}
+
+func (m *mockDiscoveryService) ListDiscovered(ctx context.Context, agentID, status string, page, perPage int) ([]*domain.DiscoveredCertificate, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockDiscoveryService) GetDiscovered(ctx context.Context, id string) (*domain.DiscoveredCertificate, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string) error {
+	return nil
+}
+
+func (m *mockDiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockDiscoveryService) ListScans(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error) {
+	return nil, 0, nil
+}
+
+func (m *mockDiscoveryService) GetScan(ctx context.Context, id string) (*domain.DiscoveryScan, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockDiscoveryService) GetDiscoverySummary(ctx context.Context) (map[string]int, error) {
+	return map[string]int{}, nil
+}
+
+// mockNetworkScanService implements handler.NetworkScanService for integration tests.
+type mockNetworkScanService struct{}
+
+func (m *mockNetworkScanService) ListTargets(ctx context.Context) ([]*domain.NetworkScanTarget, error) {
+	return nil, nil
+}
+
+func (m *mockNetworkScanService) GetTarget(ctx context.Context, id string) (*domain.NetworkScanTarget, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockNetworkScanService) CreateTarget(ctx context.Context, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
+	return target, nil
+}
+
+func (m *mockNetworkScanService) UpdateTarget(ctx context.Context, id string, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
+	return target, nil
+}
+
+func (m *mockNetworkScanService) DeleteTarget(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID string) (*domain.DiscoveryScan, error) {
+	return nil, nil
 }

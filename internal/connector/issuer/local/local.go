@@ -2,6 +2,9 @@ package local
 
 import (
 	"context"
+	"crypto"
+	"crypto/ecdsa"
+	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -12,8 +15,12 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"net"
+	"os"
 	"sync"
 	"time"
+
+	"golang.org/x/crypto/ocsp"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 )
@@ -21,41 +28,57 @@ import (
 // Config represents the local CA issuer connector configuration.
 type Config struct {
 	// CACommonName is the CN for the self-signed CA certificate.
-	// Defaults to "CertCtl Local CA".
+	// Defaults to "CertCtl Local CA". Ignored in sub-CA mode.
 	CACommonName string `json:"ca_common_name,omitempty"`
 
 	// ValidityDays is the number of days a certificate is valid.
 	// Defaults to 90.
 	ValidityDays int `json:"validity_days,omitempty"`
+
+	// CACertPath is the path to a PEM-encoded CA certificate file.
+	// When set along with CAKeyPath, the connector operates in sub-CA mode:
+	// it loads the CA cert+key from disk instead of generating a self-signed root.
+	// The loaded CA cert should be signed by an upstream CA (e.g., ADCS).
+	// All issued certificates will chain to the upstream root.
+	CACertPath string `json:"ca_cert_path,omitempty"`
+
+	// CAKeyPath is the path to a PEM-encoded CA private key file (RSA or ECDSA).
+	// Required when CACertPath is set.
+	CAKeyPath string `json:"ca_key_path,omitempty"`
 }
 
-// Connector implements the issuer.Connector interface for local self-signed certificate generation.
+// Connector implements the issuer.Connector interface for local certificate generation.
 //
-// This connector generates self-signed certificates using an in-memory CA. It is designed for
-// development, testing, and demo purposes only and should NOT be used in production.
+// It supports two modes:
 //
-// On first use, it generates a self-signed CA root certificate and stores it in memory.
-// All issued certificates are signed by this local CA.
+// Self-signed mode (default):
+//   - Generates an ephemeral self-signed CA root on first use
+//   - Designed for development, testing, and demo purposes
+//   - CA certificate is lost on service restart
+//
+// Sub-CA mode (when CACertPath + CAKeyPath are set):
+//   - Loads a pre-signed CA cert+key from disk
+//   - The CA cert should be signed by an upstream CA (e.g., ADCS, enterprise root)
+//   - All issued certificates chain to the upstream root
+//   - Suitable for production when the upstream CA is trusted
 //
 // Features:
 //   - Instant certificate issuance (no external CA required)
-//   - Full lifecycle demo support (issue, renew, revoke)
-//   - In-memory certificate storage
+//   - Full lifecycle support (issue, renew, revoke)
 //   - Proper X.509 certificate generation with SANs, serial numbers, and validity periods
 //
 // Limitations:
-//   - Not suitable for production use
-//   - Certificates are not trusted by default browsers/systems
-//   - No actual revocation checking (revocation is tracked in memory only)
-//   - CA certificate is ephemeral and lost on service restart
+//   - Revocation is tracked in memory only (not persistent)
+//   - In self-signed mode, CA is ephemeral
 type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	mu         sync.RWMutex
-	caKey      *rsa.PrivateKey
+	caKey      crypto.Signer // RSA or ECDSA private key
 	caCert     *x509.Certificate
 	caCertPEM  string
-	revokedMap map[string]bool // serial -> revoked status
+	subCA      bool                // true when loaded from disk (sub-CA mode)
+	revokedMap map[string]bool     // serial -> revoked status
 }
 
 // New creates a new local CA connector with the given configuration and logger.
@@ -80,7 +103,6 @@ func New(config *Config, logger *slog.Logger) *Connector {
 }
 
 // ValidateConfig validates the local CA configuration.
-// This always succeeds as the local CA has minimal requirements.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
@@ -91,12 +113,32 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("validity_days must be at least 1")
 	}
 
+	// Sub-CA mode: both paths must be set or neither
+	if (cfg.CACertPath != "") != (cfg.CAKeyPath != "") {
+		return fmt.Errorf("ca_cert_path and ca_key_path must both be set for sub-CA mode")
+	}
+
+	// Validate paths exist if set
+	if cfg.CACertPath != "" {
+		if _, err := os.Stat(cfg.CACertPath); err != nil {
+			return fmt.Errorf("ca_cert_path not accessible: %w", err)
+		}
+		if _, err := os.Stat(cfg.CAKeyPath); err != nil {
+			return fmt.Errorf("ca_key_path not accessible: %w", err)
+		}
+	}
+
 	c.config = &cfg
 	if c.config.CACommonName == "" {
 		c.config.CACommonName = "CertCtl Local CA"
 	}
 
+	mode := "self-signed"
+	if cfg.CACertPath != "" {
+		mode = "sub-CA"
+	}
 	c.logger.Info("local CA configuration validated",
+		"mode", mode,
 		"ca_common_name", c.config.CACommonName,
 		"validity_days", c.config.ValidityDays)
 
@@ -267,8 +309,8 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 }
 
 // ensureCA initializes the CA certificate and key if not already done.
-// This is called on first IssueCertificate or RenewCertificate call.
-// The CA is generated once and reused for all subsequent operations.
+// In sub-CA mode (CACertPath + CAKeyPath set), loads from disk.
+// Otherwise, generates an ephemeral self-signed CA.
 func (c *Connector) ensureCA(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
@@ -277,7 +319,81 @@ func (c *Connector) ensureCA(ctx context.Context) error {
 		return nil // CA already initialized
 	}
 
-	c.logger.Info("initializing local CA", "common_name", c.config.CACommonName)
+	if c.config.CACertPath != "" && c.config.CAKeyPath != "" {
+		return c.loadCAFromDisk()
+	}
+
+	return c.generateSelfSignedCA()
+}
+
+// loadCAFromDisk loads a CA certificate and private key from PEM files on disk.
+// This enables sub-CA mode where certctl operates as a subordinate CA under an
+// enterprise root (e.g., ADCS). The loaded cert should have IsCA=true and
+// KeyUsageCertSign set by the upstream CA.
+func (c *Connector) loadCAFromDisk() error {
+	c.logger.Info("loading CA from disk (sub-CA mode)",
+		"cert_path", c.config.CACertPath,
+		"key_path", c.config.CAKeyPath)
+
+	// Load CA certificate
+	certPEM, err := os.ReadFile(c.config.CACertPath)
+	if err != nil {
+		return fmt.Errorf("failed to read CA certificate: %w", err)
+	}
+
+	certBlock, _ := pem.Decode(certPEM)
+	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
+		return fmt.Errorf("invalid CA certificate PEM (expected CERTIFICATE block)")
+	}
+
+	caCert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return fmt.Errorf("failed to parse CA certificate: %w", err)
+	}
+
+	// Validate CA certificate properties
+	if !caCert.IsCA {
+		return fmt.Errorf("loaded certificate is not a CA (BasicConstraints.IsCA=false)")
+	}
+	if caCert.KeyUsage&x509.KeyUsageCertSign == 0 {
+		return fmt.Errorf("loaded CA certificate does not have KeyUsageCertSign")
+	}
+
+	// Load CA private key (supports RSA and ECDSA)
+	keyPEM, err := os.ReadFile(c.config.CAKeyPath)
+	if err != nil {
+		return fmt.Errorf("failed to read CA private key: %w", err)
+	}
+
+	keyBlock, _ := pem.Decode(keyPEM)
+	if keyBlock == nil {
+		return fmt.Errorf("invalid CA private key PEM")
+	}
+
+	caKey, err := parsePrivateKey(keyBlock)
+	if err != nil {
+		return fmt.Errorf("failed to parse CA private key: %w", err)
+	}
+
+	// Encode CA cert PEM for chain responses
+	c.caKey = caKey
+	c.caCert = caCert
+	c.caCertPEM = string(certPEM)
+	c.subCA = true
+
+	c.logger.Info("sub-CA initialized from disk",
+		"subject", caCert.Subject.CommonName,
+		"issuer", caCert.Issuer.CommonName,
+		"serial", caCert.SerialNumber,
+		"not_after", caCert.NotAfter,
+		"is_self_signed", caCert.Issuer.CommonName == caCert.Subject.CommonName)
+
+	return nil
+}
+
+// generateSelfSignedCA creates an ephemeral self-signed CA for development/demo.
+func (c *Connector) generateSelfSignedCA() error {
+	c.logger.Info("generating self-signed CA (ephemeral mode)", "common_name", c.config.CACommonName)
 
 	// Generate CA private key
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -319,11 +435,34 @@ func (c *Connector) ensureCA(ctx context.Context) error {
 	c.caCert = caCert
 	c.caCertPEM = string(caCertPEM)
 
-	c.logger.Info("local CA initialized successfully",
+	c.logger.Info("self-signed CA initialized",
 		"serial", caCert.SerialNumber,
 		"not_after", caCert.NotAfter)
 
 	return nil
+}
+
+// parsePrivateKey parses a PEM block into an RSA or ECDSA private key.
+func parsePrivateKey(block *pem.Block) (crypto.Signer, error) {
+	switch block.Type {
+	case "RSA PRIVATE KEY":
+		return x509.ParsePKCS1PrivateKey(block.Bytes)
+	case "EC PRIVATE KEY":
+		return x509.ParseECPrivateKey(block.Bytes)
+	case "PRIVATE KEY":
+		// PKCS#8 — can contain RSA or ECDSA
+		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("failed to parse PKCS#8 key: %w", err)
+		}
+		signer, ok := key.(crypto.Signer)
+		if !ok {
+			return nil, fmt.Errorf("PKCS#8 key is not a signing key")
+		}
+		return signer, nil
+	default:
+		return nil, fmt.Errorf("unsupported private key type: %s (expected RSA PRIVATE KEY, EC PRIVATE KEY, or PRIVATE KEY)", block.Type)
+	}
 }
 
 // generateCertificate creates an X.509 certificate signed by the local CA.
@@ -420,9 +559,15 @@ func parseIP(s string) []byte {
 	if s == "localhost" {
 		return []byte{127, 0, 0, 1}
 	}
-	// In production, use net.ParseIP for proper parsing.
-	// For now, return nil for non-localhost IPs.
-	return nil
+	ip := net.ParseIP(s)
+	if ip == nil {
+		return nil
+	}
+	// Prefer 4-byte representation for IPv4
+	if v4 := ip.To4(); v4 != nil {
+		return v4
+	}
+	return ip
 }
 
 // isEmail checks if a string looks like an email address.
@@ -441,6 +586,81 @@ func hashPublicKey(pub interface{}) []byte {
 	switch k := pub.(type) {
 	case *rsa.PublicKey:
 		h.Write(k.N.Bytes())
+	case *ecdsa.PublicKey:
+		h.Write(elliptic.Marshal(k.Curve, k.X, k.Y))
 	}
 	return h.Sum(nil)[:4] // Use first 4 bytes for brevity
+}
+
+// GenerateCRL generates a DER-encoded X.509 CRL signed by this local CA.
+func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
+	if err := c.ensureCA(ctx); err != nil {
+		return nil, fmt.Errorf("CA initialization failed: %w", err)
+	}
+
+	now := time.Now()
+	revokedEntries := make([]x509.RevocationListEntry, 0, len(revokedCerts))
+	for _, cert := range revokedCerts {
+		revokedEntries = append(revokedEntries, x509.RevocationListEntry{
+			SerialNumber:   cert.SerialNumber,
+			RevocationTime: cert.RevokedAt,
+			ReasonCode:     cert.ReasonCode,
+		})
+	}
+
+	template := &x509.RevocationList{
+		RevokedCertificateEntries: revokedEntries,
+		Number:                    big.NewInt(time.Now().Unix()),
+		ThisUpdate:                now,
+		NextUpdate:                now.Add(24 * time.Hour),
+	}
+
+	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, c.caCert, c.caKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create CRL: %w", err)
+	}
+
+	c.logger.Info("CRL generated",
+		"entries", len(revokedCerts),
+		"next_update", template.NextUpdate)
+
+	return crlBytes, nil
+}
+
+// SignOCSPResponse signs an OCSP response for the given certificate.
+func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
+	if err := c.ensureCA(ctx); err != nil {
+		return nil, fmt.Errorf("CA initialization failed: %w", err)
+	}
+
+	// Import OCSP after we confirm golang.org/x/crypto is available
+	// This will be added to imports below
+	template := ocsp.Response{
+		SerialNumber: req.CertSerial,
+		ThisUpdate:   req.ThisUpdate,
+		NextUpdate:   req.NextUpdate,
+		Certificate:  c.caCert,
+	}
+
+	switch req.CertStatus {
+	case 0: // good
+		template.Status = ocsp.Good
+	case 1: // revoked
+		template.Status = ocsp.Revoked
+		template.RevokedAt = req.RevokedAt
+		template.RevocationReason = req.RevocationReason
+	default: // unknown
+		template.Status = ocsp.Unknown
+	}
+
+	respBytes, err := ocsp.CreateResponse(c.caCert, c.caCert, template, c.caKey)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create OCSP response: %w", err)
+	}
+
+	c.logger.Info("OCSP response signed",
+		"serial", req.CertSerial,
+		"status", req.CertStatus)
+
+	return respBytes, nil
 }

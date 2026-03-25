@@ -28,13 +28,17 @@ const (
 	NotificationTypeDeploymentSuccess NotificationType = "DeploymentSuccess"
 	NotificationTypeDeploymentFailure NotificationType = "DeploymentFailure"
 	NotificationTypePolicyViolation   NotificationType = "PolicyViolation"
+	NotificationTypeRevocation        NotificationType = "Revocation"
 )
 
 // NotificationChannel represents the communication medium for a notification.
 type NotificationChannel string
 
 const (
-	NotificationChannelEmail   NotificationChannel = "Email"
-	NotificationChannelWebhook NotificationChannel = "Webhook"
-	NotificationChannelSlack   NotificationChannel = "Slack"
+	NotificationChannelEmail     NotificationChannel = "Email"
+	NotificationChannelWebhook   NotificationChannel = "Webhook"
+	NotificationChannelSlack     NotificationChannel = "Slack"
+	NotificationChannelTeams     NotificationChannel = "Teams"
+	NotificationChannelPagerDuty NotificationChannel = "PagerDuty"
+	NotificationChannelOpsGenie  NotificationChannel = "OpsGenie"
 )

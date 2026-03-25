@@ -1,6 +1,6 @@
 # Quick Start Guide
 
-Get certctl running locally and managing certificates in under 5 minutes.
+Get certctl running locally and managing certificates in under 5 minutes. With TLS certificate lifespans dropping to 47 days by 2029, automated lifecycle management isn't optional — it's infrastructure. This guide gets you hands-on with certctl's automation loop: tracking, renewing, and deploying certificates without manual intervention.
 
 New to certificates? Read the [Concepts Guide](concepts.md) first — it explains TLS, CAs, and private keys in plain language.
 
@@ -206,6 +206,24 @@ curl -s http://localhost:8443/api/v1/audit | jq '.data[0:3]'
 
 Refresh the dashboard at http://localhost:8443 — your new certificate appears in the inventory.
 
+### Step 5: Revoke a certificate
+
+If a certificate's private key is compromised or the service is decommissioned, revoke it:
+
+```bash
+curl -s -X POST http://localhost:8443/api/v1/certificates/$CERT_ID/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "superseded"}' | jq .
+```
+
+Supported RFC 5280 reason codes: `unspecified`, `keyCompromise`, `caCompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `privilegeWithdrawn`. If you omit the reason, it defaults to `unspecified`.
+
+Check the CRL to confirm:
+
+```bash
+curl -s http://localhost:8443/api/v1/crl | jq .
+```
+
 ## Understanding the Demo Data
 
 The demo comes pre-loaded with realistic data so you can explore certctl's features immediately:
@@ -214,13 +232,106 @@ The demo comes pre-loaded with realistic data so you can explore certctl's featu
 |----------|-------|---------|
 | Teams | 5 | Platform, Security, Payments, Frontend, Data |
 | Owners | 5 | Alice, Bob, Carol, Dave, Eve |
-| Issuers | 3 | Local Dev CA, Let's Encrypt Staging, DigiCert |
+| Issuers | 4 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, DigiCert (disabled) |
 | Agents | 5 | nginx-prod, nginx-staging, f5-prod, iis-prod, data-agent |
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
 | Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |
+| Profiles | 3 | Default TLS, Short-Lived, High-Security |
+| Agent Groups | 5 | Linux agents, ARM agents, Production subnet, etc. |
 
 Certificates have varied statuses so you can see what each state looks like in the dashboard: healthy certs with 45+ days remaining, certs about to expire (5-12 days), certs that already expired, and a failed renewal.
+
+## Advanced API Features
+
+### Sorting and filtering
+
+```bash
+# Sort certificates by expiration date (ascending)
+curl -s "http://localhost:8443/api/v1/certificates?sort=notAfter" | jq .
+
+# Sort descending (prefix with -)
+curl -s "http://localhost:8443/api/v1/certificates?sort=-createdAt" | jq .
+
+# Time-range filters (RFC3339 format)
+curl -s "http://localhost:8443/api/v1/certificates?expires_before=2026-05-01T00:00:00Z" | jq .
+curl -s "http://localhost:8443/api/v1/certificates?created_after=2026-03-01T00:00:00Z" | jq .
+```
+
+Supported sort fields: `notAfter`, `expiresAt`, `createdAt`, `updatedAt`, `commonName`, `name`, `status`, `environment`.
+
+### Sparse field selection
+
+Request only the fields you need to reduce response size:
+
+```bash
+curl -s "http://localhost:8443/api/v1/certificates?fields=id,common_name,status,expires_at" | jq .
+```
+
+### Cursor-based pagination
+
+For large datasets, cursor pagination is more efficient than page-based:
+
+```bash
+# First page
+curl -s "http://localhost:8443/api/v1/certificates?page_size=5" | jq '{next_cursor: .next_cursor, count: (.data | length)}'
+
+# Next page (use the next_cursor from the previous response)
+curl -s "http://localhost:8443/api/v1/certificates?cursor=<next_cursor_value>&page_size=5" | jq .
+```
+
+### Stats and metrics
+
+```bash
+# Dashboard summary
+curl -s http://localhost:8443/api/v1/stats/summary | jq .
+
+# Certificates by status
+curl -s http://localhost:8443/api/v1/stats/certificates-by-status | jq .
+
+# Expiration timeline (next 90 days)
+curl -s "http://localhost:8443/api/v1/stats/expiration-timeline?days=90" | jq .
+
+# Job trends (last 30 days)
+curl -s "http://localhost:8443/api/v1/stats/job-trends?days=30" | jq .
+
+# System metrics (JSON)
+curl -s http://localhost:8443/api/v1/metrics | jq .
+
+# System metrics (Prometheus format — for scraping by Prometheus, Grafana Agent, Datadog)
+curl -s http://localhost:8443/api/v1/metrics/prometheus
+```
+
+### Certificate profiles
+
+```bash
+# List all profiles
+curl -s http://localhost:8443/api/v1/profiles | jq .
+
+# Get a specific profile
+curl -s http://localhost:8443/api/v1/profiles/prof-default | jq .
+```
+
+### Certificate deployments
+
+```bash
+# View deployment targets for a certificate
+curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
+```
+
+### Interactive approval workflow
+
+```bash
+# Approve a pending job
+curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/approve \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Approved for production deployment"}' | jq .
+
+# Reject a pending job
+curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/reject \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "Key type does not meet compliance requirements"}' | jq .
+```
 
 ## Tear Down
 
@@ -230,9 +341,65 @@ docker compose -f deploy/docker-compose.yml down -v
 
 The `-v` flag removes the PostgreSQL data volume so you get a clean slate next time.
 
+### Certificate Discovery
+
+Agents can scan your infrastructure for existing certificates you're not yet managing:
+
+```bash
+# Configure agent to scan directories
+export CERTCTL_DISCOVERY_DIRS="/etc/nginx/certs,/etc/ssl/certs,/var/lib/certs"
+
+# Agent scans on startup + every 6 hours, reports findings to control plane
+```
+
+Query discovered certificates:
+
+```bash
+# List all discovered certs from a specific agent
+curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-prod" | jq .
+
+# Get discovery summary (counts by status)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+
+# Claim a discovered cert (link to managed cert)
+curl -s -X POST "http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim" \
+  -H "Content-Type: application/json" \
+  -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
+```
+
+### Network Certificate Discovery
+
+The server can also discover certificates by scanning TLS endpoints directly — no agent required:
+
+```bash
+# Enable network scanning (set in environment or docker-compose)
+export CERTCTL_NETWORK_SCAN_ENABLED=true
+
+# Create a scan target (e.g., scan your internal network on port 443)
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Internal Network",
+    "cidrs": ["10.0.1.0/24"],
+    "ports": [443, 8443],
+    "enabled": true,
+    "scan_interval_hours": 6,
+    "timeout_ms": 5000
+  }' | jq .
+
+# Trigger an immediate scan
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-internal-network/scan | jq .
+
+# List scan targets with results
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
+```
+
+Discovered network certificates appear in the same `GET /api/v1/discovered-certificates` list as filesystem-discovered certs, with `agent_id=server-scanner` and `source_format=network`.
+
 ## What's Next
 
 - **[Advanced Demo](demo-advanced.md)** — Issue a real certificate via the Local CA and watch it appear in the dashboard
 - **[Demo Walkthrough](demo-guide.md)** — Guided 5-minute stakeholder presentation
 - **[Architecture](architecture.md)** — How the control plane, agents, and connectors work together
 - **[Connector Guide](connectors.md)** — Build custom connectors for your infrastructure
+- **[CLI Reference](cli.md)** — Manage certificates from your terminal

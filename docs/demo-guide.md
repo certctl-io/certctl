@@ -1,6 +1,6 @@
 # certctl Demo Guide
 
-A 5-7 minute guided walkthrough of certctl's dashboard and API. Perfect for stakeholder presentations and team demos.
+A 5-10 minute guided walkthrough of certctl's dashboard and API. Perfect for stakeholder presentations and team demos.
 
 New to certificates? Read the [Concepts Guide](concepts.md) first. Want a hands-on demo where you issue certificates yourself? See the [Advanced Demo](demo-advanced.md).
 
@@ -28,7 +28,7 @@ The main dashboard shows at a glance:
 - **Active** — healthy certificates with time remaining
 - **Renewal success rate** — percentage of automated renewals that succeeded
 
-Below the stats, you'll see an **expiry timeline** showing how many certs expire in each time bucket (7/14/30/60/90 days), and a **recent activity feed** with the latest audit events.
+Below the stats, interactive charts provide deeper visibility: an **expiration heatmap** (90-day weekly buckets), **renewal success rate trends** (30-day line chart), **certificate status distribution** (donut chart), and **issuance rate** (30-day bar chart).
 
 ### Certificates View
 Click "Certificates" in the sidebar to see the full inventory:
@@ -57,9 +57,24 @@ Click "Agents" in the sidebar. Four agents are online, one (`iis-prod-agent`) we
 **6. "What policies are enforced?"**
 Click "Policies" to see the active rules: required owner metadata, allowed environments, max certificate lifetime, minimum renewal window. Check the violations list to see which certs are non-compliant.
 
-## API Walkthrough
+**7. "Can I revoke a compromised cert?"**
+Click any active certificate, then click the "Revoke" button. A modal appears with RFC 5280 reason codes (Key Compromise, Superseded, Cessation of Operation, etc.). After revocation, the cert shows a revocation banner with the reason and timestamp.
 
-The dashboard is backed by a real REST API. Try these while the demo is running:
+**8. "Show me short-lived credentials"**
+Click "Short-Lived" in the sidebar. This view shows certificates with TTL under 1 hour — live countdown timers, auto-refresh every 10 seconds, and profile-based filtering. These are for service-to-service auth where rapid expiry replaces revocation.
+
+**9. "What about bulk operations?"**
+On the Certificates page, select multiple certificates using the checkboxes. A bulk action bar appears with options to trigger renewal, revoke (with reason codes), or reassign ownership — all with progress tracking.
+
+**10. "How do I see the deployment history?"**
+Click any certificate, then scroll to the deployment timeline. A visual 4-step timeline shows the lifecycle: Requested → Issued → Deploying → Active. Previous versions show a rollback button.
+
+**11. "What about certificates already running in production?"**
+Enable discovery on agents by setting `CERTCTL_DISCOVERY_DIRS` to directories containing certificates (e.g., `/etc/nginx/certs`). Agents scan on startup and every 6 hours, report findings to the control plane. For network-based discovery without agents, enable `CERTCTL_NETWORK_SCAN_ENABLED=true` and configure scan targets via the API — the server probes TLS endpoints on configured CIDR ranges and ports. Click "Discovered Certificates" to see what agents and network scans found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
+
+## REST API Walkthrough
+
+The dashboard is backed by a real REST API (91 endpoints). Try these while the demo is running:
 
 ```bash
 # List all certificates
@@ -68,13 +83,22 @@ curl -s http://localhost:8443/api/v1/certificates | jq .
 # Get expiring certs
 curl -s "http://localhost:8443/api/v1/certificates?status=expiring" | jq .
 
+# Advanced query: sort by expiration, sparse fields, cursor pagination
+curl -s "http://localhost:8443/api/v1/certificates?sort=-expires_at&fields=id,common_name,expires_at" | jq .
+
+# Time-range filter: certs expiring before June 2026
+curl -s "http://localhost:8443/api/v1/certificates?expires_before=2026-06-01T00:00:00Z" | jq .
+
 # Get a specific certificate
 curl -s http://localhost:8443/api/v1/certificates/mc-api-prod | jq .
+
+# Get deployment targets for a certificate
+curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
 
 # List agents
 curl -s http://localhost:8443/api/v1/agents | jq .
 
-# View audit trail
+# View audit trail (immutable API audit log of all actions)
 curl -s http://localhost:8443/api/v1/audit | jq .
 
 # View policy violations (replace POLICY_ID with a real policy ID, e.g. pr-require-owner)
@@ -82,9 +106,107 @@ curl -s http://localhost:8443/api/v1/policies/pr-require-owner/violations | jq .
 
 # Check system health
 curl -s http://localhost:8443/health | jq .
+
+# Dashboard stats and metrics
+curl -s http://localhost:8443/api/v1/stats/summary | jq .
+curl -s http://localhost:8443/api/v1/stats/certificates-by-status | jq .
+curl -s http://localhost:8443/api/v1/stats/expiration-timeline | jq .
+curl -s http://localhost:8443/api/v1/stats/job-trends | jq .
+curl -s http://localhost:8443/api/v1/stats/issuance-rate | jq .
+curl -s http://localhost:8443/api/v1/metrics | jq .
+curl -s http://localhost:8443/api/v1/metrics/prometheus  # Prometheus format
+
+# Certificate profiles
+curl -s http://localhost:8443/api/v1/profiles | jq .
+
+# Agent groups
+curl -s http://localhost:8443/api/v1/agent-groups | jq .
+
+# Revoke a certificate
+curl -s -X POST http://localhost:8443/api/v1/certificates/mc-api-prod/revoke \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "superseded"}' | jq .
+
+# CRL and OCSP endpoints
+curl -s http://localhost:8443/api/v1/crl | jq .
+curl -s http://localhost:8443/api/v1/crl/iss-local -o /tmp/crl.der
+
+# List discovered certificates
+curl -s http://localhost:8443/api/v1/discovered-certificates | jq .
+
+# Discovery summary (counts by status)
+curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+
+# Network scan targets (active TLS scanning)
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
 ```
 
-## Demo Without Docker
+## CLI Tool
+
+certctl ships with a command-line tool (`certctl-cli`) for terminal users:
+
+```bash
+# Build the CLI
+cd cmd/cli && go build -o certctl-cli .
+
+# Set credentials
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+# List certificates (JSON or table format)
+./certctl-cli list-certs --format json
+./certctl-cli list-certs --format table
+
+# Get certificate details
+./certctl-cli get-cert mc-api-prod
+
+# Trigger renewal
+./certctl-cli renew-cert mc-api-prod
+
+# Revoke a certificate (with RFC 5280 reason)
+./certctl-cli revoke-cert mc-api-prod --reason keyCompromise
+
+# List agents
+./certctl-cli list-agents
+
+# List pending jobs
+./certctl-cli list-jobs
+
+# Bulk import certificates from PEM files
+./certctl-cli import /path/to/certs.pem
+
+# Check health and metrics
+./certctl-cli health
+./certctl-cli metrics
+```
+
+## MCP Server for AI Integration
+
+certctl exposes its 78 API endpoints as tools via the Model Context Protocol (MCP), enabling integration with Claude, Cursor, and other AI assistants:
+
+```bash
+# Build and run the MCP server
+cd cmd/mcp-server && go build -o mcp-server .
+
+export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_API_KEY="test-key-123"
+
+./mcp-server
+```
+
+The MCP server:
+- Exposes all 78 API endpoints as MCP tools with typed schemas
+- Handles binary responses (DER CRL, OCSP responses)
+- Uses stdio transport for Claude/Cursor/OpenClaw integration
+- Zero external dependencies — pure Go with official MCP SDK
+
+You can then ask Claude questions like:
+- "What certificates are expiring in the next 30 days?"
+- "Revoke the payments certificate due to key compromise"
+- "Show me the audit trail for the last 10 actions"
+- "List all certificates with PCI compliance tags"
+
+## Dashboard Demo Mode
 
 The dashboard includes a **Demo Mode** that works without any backend. Build and serve the frontend with Vite:
 
@@ -109,15 +231,21 @@ The `-v` flag removes the PostgreSQL data volume so you get a clean slate next t
 
 If you're demoing to a team or customer, here's a suggested flow:
 
-1. **Start with the dashboard** — "This is your certificate inventory at a glance"
+1. **Start with the dashboard** — "This is your certificate inventory at a glance, with real-time charts showing expiration trends and renewal health"
 2. **Show the expiring certs** — "These three would have caused outages without this platform"
-3. **Click into auth-production** — "Here's the full lifecycle: who owns it, where it's deployed, when it was last renewed"
-4. **Show the failed VPN cert** — "The system tried 3 times, then alerted the team via webhook"
-5. **Show agents** — "Agents run on your infrastructure, handle key generation locally, and report back"
-6. **Show policies** — "Guardrails prevent teams from going outside approved scope"
-7. **Show the API** — "Everything you see here is API-first, so you can automate on top of it"
+3. **Click into auth-production** — "Here's the full lifecycle: who owns it, where it's deployed, deployment timeline, when it was last renewed"
+4. **Show revocation** — "If a key is compromised, one click revokes the cert with an RFC 5280 reason code. CRL and OCSP are served automatically"
+5. **Show the failed VPN cert** — "The system tried 3 times, then alerted the team via Slack, Teams, PagerDuty, or OpsGenie"
+6. **Show agents and fleet overview** — "Agents run on your infrastructure, handle key generation locally (ECDSA P-256). Fleet view shows OS, architecture, and version distribution"
+7. **Show profiles** — "Certificate profiles enforce crypto constraints — key types, max TTL, compliance requirements"
+8. **Show policies** — "Guardrails prevent teams from going outside approved scope"
+9. **Show bulk operations** — "Select multiple certs, trigger renewal or revoke in bulk with progress tracking"
+10. **Show certificate discovery** — "We discover certificates two ways: agents scan local filesystems, and the server actively probes TLS endpoints on your network. We deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
+11. **Show the immutable audit trail** — "Every action in the system is recorded: who did it, what they did, when, what changed. Export to CSV/JSON for compliance"
+12. **Show advanced query features** — "Sort by any field, filter by date range, paginate efficiently with cursor-based pagination, select just the fields you need"
+13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 78 tools. Everything is API-first"
 
-The whole walkthrough takes 5-7 minutes.
+The whole walkthrough takes 5-10 minutes.
 
 ## Next Steps
 

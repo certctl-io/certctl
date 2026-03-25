@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"encoding/json"
+	"io"
 	"net/http"
 	"strconv"
 	"strings"
@@ -14,6 +16,8 @@ type JobService interface {
 	ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
 	GetJob(id string) (*domain.Job, error)
 	CancelJob(id string) error
+	ApproveJob(id string) error
+	RejectJob(id string, reason string) error
 }
 
 // JobHandler handles HTTP requests for job operations.
@@ -125,4 +129,82 @@ func (h JobHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 
 	JSON(w, http.StatusOK, response)
+}
+
+// ApproveJob approves a renewal job awaiting approval.
+// POST /api/v1/jobs/{id}/approve
+func (h JobHandler) ApproveJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Job ID is required", requestID)
+		return
+	}
+	jobID := parts[0]
+
+	if err := h.svc.ApproveJob(jobID); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot approve") {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to approve job", requestID)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]string{"status": "job_approved"})
+}
+
+// RejectJob rejects a renewal job awaiting approval.
+// POST /api/v1/jobs/{id}/reject
+func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/jobs/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Job ID is required", requestID)
+		return
+	}
+	jobID := parts[0]
+
+	var body struct {
+		Reason string `json:"reason"`
+	}
+	if r.Body != nil && r.Body != http.NoBody {
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil && err != io.EOF {
+			ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+			return
+		}
+	}
+
+	if err := h.svc.RejectJob(jobID, body.Reason); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
+			return
+		}
+		if strings.Contains(err.Error(), "cannot reject") {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to reject job", requestID)
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]string{"status": "job_rejected"})
 }

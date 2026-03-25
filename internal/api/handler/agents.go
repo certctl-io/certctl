@@ -15,7 +15,7 @@ type AgentService interface {
 	ListAgents(page, perPage int) ([]domain.Agent, int64, error)
 	GetAgent(id string) (*domain.Agent, error)
 	RegisterAgent(agent domain.Agent) (*domain.Agent, error)
-	Heartbeat(agentID string) error
+	Heartbeat(agentID string, metadata *domain.AgentMetadata) error
 	CSRSubmit(agentID string, csrPEM string) (string, error)
 	CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error)
 	CertificatePickup(agentID, certID string) (string, error)
@@ -159,7 +159,30 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 	agentID := parts[0]
 
-	if err := h.svc.Heartbeat(agentID); err != nil {
+	// Parse optional metadata from request body
+	var metadata *domain.AgentMetadata
+	if r.Body != nil {
+		var body struct {
+			Version      string `json:"version"`
+			Hostname     string `json:"hostname"`
+			OS           string `json:"os"`
+			Architecture string `json:"architecture"`
+			IPAddress    string `json:"ip_address"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			if body.Version != "" || body.Hostname != "" || body.OS != "" || body.Architecture != "" || body.IPAddress != "" {
+				metadata = &domain.AgentMetadata{
+					Version:      body.Version,
+					Hostname:     body.Hostname,
+					OS:           body.OS,
+					Architecture: body.Architecture,
+					IPAddress:    body.IPAddress,
+				}
+			}
+		}
+	}
+
+	if err := h.svc.Heartbeat(agentID, metadata); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to record heartbeat", requestID)
 		return
 	}

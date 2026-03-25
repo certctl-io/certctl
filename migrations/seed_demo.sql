@@ -32,16 +32,17 @@ ON CONFLICT (id) DO NOTHING;
 INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VALUES
   ('iss-local',    'Local Dev CA',          'local',      '{"ca_common_name": "CertCtl Demo CA", "validity_days": 90}', true,  NOW(), NOW()),
   ('iss-acme-le',  'Let''s Encrypt Staging', 'acme',      '{"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "admin@example.com"}', true,  NOW(), NOW()),
+  ('iss-stepca',   'step-ca Internal',      'stepca',     '{"ca_url": "https://ca.internal:9000", "provisioner_name": "certctl", "validity_days": 90}', false, NOW(), NOW()),
   ('iss-digicert', 'DigiCert (disabled)',    'generic_ca', '{"api_url": "https://api.digicert.com", "api_key": "REDACTED"}', false, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- Agents
-INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash) VALUES
-  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '90 days', 'demo_hash_1'),
-  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '60 days', 'demo_hash_2'),
-  ('ag-lb-prod',     'lb-prod-agent',     'f5-prod-01.internal',    'online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_3'),
-  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '30 days', 'demo_hash_4'),
-  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '45 days', 'demo_hash_5')
+INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
+  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '90 days', 'demo_hash_1', 'linux', 'amd64', '10.0.1.10', '1.0.0'),
+  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '60 days', 'demo_hash_2', 'linux', 'amd64', '10.0.2.20', '1.0.0'),
+  ('ag-lb-prod',     'lb-prod-agent',     'f5-prod-01.internal',    'online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_3', 'linux', 'amd64', '10.0.1.50', '1.0.0'),
+  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '30 days', 'demo_hash_4', 'windows', 'amd64', '10.0.3.15', '1.0.0'),
+  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '45 days', 'demo_hash_5', 'linux', 'arm64', '10.0.4.30', '1.0.0')
 ON CONFLICT (id) DO NOTHING;
 
 -- Deployment Targets
@@ -53,36 +54,72 @@ INSERT INTO deployment_targets (id, name, type, agent_id, config, enabled, creat
   ('tgt-nginx-data',    'NGINX Data Services', 'nginx', 'ag-data-prod',  '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
+-- Certificate Profiles
+INSERT INTO certificate_profiles (id, name, description, allowed_key_algorithms, max_ttl_seconds, allowed_ekus, required_san_patterns, spiffe_uri_pattern, allow_short_lived, enabled, created_at, updated_at) VALUES
+  ('prof-standard-tls', 'Standard TLS',
+   'Default profile for web-facing TLS certificates. Requires ECDSA P-256+ or RSA 2048+.',
+   '[{"algorithm": "ECDSA", "min_size": 256}, {"algorithm": "RSA", "min_size": 2048}]'::jsonb,
+   7776000, -- 90 days
+   '["serverAuth"]'::jsonb,
+   '[]'::jsonb,
+   '', false, true, NOW(), NOW()),
+
+  ('prof-internal-mtls', 'Internal mTLS',
+   'Mutual TLS profile for internal service-to-service communication.',
+   '[{"algorithm": "ECDSA", "min_size": 256}]'::jsonb,
+   2592000, -- 30 days
+   '["serverAuth", "clientAuth"]'::jsonb,
+   '[".*\\.internal\\.example\\.com$"]'::jsonb,
+   '', false, true, NOW(), NOW()),
+
+  ('prof-short-lived', 'Short-Lived Credential',
+   'Ephemeral certificates for CI/CD pipelines and container workloads. TTL under 1 hour, expiry = revocation.',
+   '[{"algorithm": "ECDSA", "min_size": 256}]'::jsonb,
+   300, -- 5 minutes
+   '["serverAuth", "clientAuth"]'::jsonb,
+   '[]'::jsonb,
+   'spiffe://example.com/workload/*',
+   true, true, NOW(), NOW()),
+
+  ('prof-high-security', 'High Security',
+   'For PCI-DSS and compliance-sensitive workloads. RSA 4096+ or ECDSA P-384+ only.',
+   '[{"algorithm": "ECDSA", "min_size": 384}, {"algorithm": "RSA", "min_size": 4096}]'::jsonb,
+   4060800, -- 47 days (Ballot SC-081v3 target)
+   '["serverAuth"]'::jsonb,
+   '[".*\\.example\\.com$"]'::jsonb,
+   '', false, true, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
 -- Managed Certificates — varied statuses and expiry dates for realistic dashboard
 INSERT INTO managed_certificates (id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at) VALUES
   -- Active, healthy certs
-  ('mc-api-prod',      'api-production',       'api.example.com',       ARRAY['api.example.com', 'api-v2.example.com'],                 'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '75 days',  '{"service": "api-gateway", "tier": "critical"}',   NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days', NOW() - INTERVAL '180 days', NOW()),
-  ('mc-web-prod',      'web-production',       'www.example.com',       ARRAY['www.example.com', 'example.com'],                        'production',  'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '60 days',  '{"service": "web-app", "tier": "critical"}',       NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days', NOW() - INTERVAL '365 days', NOW()),
-  ('mc-pay-prod',      'payments-production',  'pay.example.com',       ARRAY['pay.example.com', 'checkout.example.com'],               'production',  'o-carol', 't-payments', 'iss-local', 'rp-urgent',   'active',              NOW() + INTERVAL '45 days',  '{"service": "payments", "tier": "critical", "pci": "true"}', NOW() - INTERVAL '45 days', NOW() - INTERVAL '45 days', NOW() - INTERVAL '200 days', NOW()),
-  ('mc-dash-prod',     'dashboard-production', 'dashboard.example.com', ARRAY['dashboard.example.com'],                                 'production',  'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '82 days',  '{"service": "dashboard", "tier": "high"}',         NOW() - INTERVAL '8 days',  NOW() - INTERVAL '8 days',  NOW() - INTERVAL '100 days', NOW()),
-  ('mc-data-prod',     'data-api-production',  'data.example.com',      ARRAY['data.example.com', 'analytics.example.com'],             'production',  'o-eve',   't-data',     'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '55 days',  '{"service": "data-api", "tier": "high"}',          NOW() - INTERVAL '35 days', NOW() - INTERVAL '35 days', NOW() - INTERVAL '150 days', NOW()),
+  ('mc-api-prod',      'api-production',       'api.example.com',       ARRAY['api.example.com', 'api-v2.example.com'],                 'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '75 days',  '{"service": "api-gateway", "tier": "critical"}',   NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days', NOW() - INTERVAL '180 days', NOW()),
+  ('mc-web-prod',      'web-production',       'www.example.com',       ARRAY['www.example.com', 'example.com'],                        'production',  'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '60 days',  '{"service": "web-app", "tier": "critical"}',       NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days', NOW() - INTERVAL '365 days', NOW()),
+  ('mc-pay-prod',      'payments-production',  'pay.example.com',       ARRAY['pay.example.com', 'checkout.example.com'],               'production',  'o-carol', 't-payments', 'iss-local', 'rp-urgent',   'Active',              NOW() + INTERVAL '45 days',  '{"service": "payments", "tier": "critical", "pci": "true"}', NOW() - INTERVAL '45 days', NOW() - INTERVAL '45 days', NOW() - INTERVAL '200 days', NOW()),
+  ('mc-dash-prod',     'dashboard-production', 'dashboard.example.com', ARRAY['dashboard.example.com'],                                 'production',  'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '82 days',  '{"service": "dashboard", "tier": "high"}',         NOW() - INTERVAL '8 days',  NOW() - INTERVAL '8 days',  NOW() - INTERVAL '100 days', NOW()),
+  ('mc-data-prod',     'data-api-production',  'data.example.com',      ARRAY['data.example.com', 'analytics.example.com'],             'production',  'o-eve',   't-data',     'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '55 days',  '{"service": "data-api", "tier": "high"}',          NOW() - INTERVAL '35 days', NOW() - INTERVAL '35 days', NOW() - INTERVAL '150 days', NOW()),
 
   -- Expiring soon (< 30 days)
-  ('mc-auth-prod',     'auth-production',      'auth.example.com',      ARRAY['auth.example.com', 'login.example.com', 'sso.example.com'], 'production', 'o-bob', 't-security', 'iss-local', 'rp-urgent', 'expiring',            NOW() + INTERVAL '12 days',  '{"service": "auth", "tier": "critical"}',          NOW() - INTERVAL '78 days', NOW() - INTERVAL '78 days', NOW() - INTERVAL '300 days', NOW()),
-  ('mc-cdn-prod',      'cdn-production',       'cdn.example.com',       ARRAY['cdn.example.com', 'static.example.com'],                 'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'expiring',            NOW() + INTERVAL '8 days',   '{"service": "cdn", "tier": "high"}',               NOW() - INTERVAL '82 days', NOW() - INTERVAL '82 days', NOW() - INTERVAL '250 days', NOW()),
-  ('mc-mail-prod',     'mail-production',      'mail.example.com',      ARRAY['mail.example.com', 'smtp.example.com'],                  'production',  'o-bob',   't-security', 'iss-local', 'rp-standard', 'expiring',            NOW() + INTERVAL '5 days',   '{"service": "email", "tier": "medium"}',           NOW() - INTERVAL '85 days', NOW() - INTERVAL '85 days', NOW() - INTERVAL '400 days', NOW()),
+  ('mc-auth-prod',     'auth-production',      'auth.example.com',      ARRAY['auth.example.com', 'login.example.com', 'sso.example.com'], 'production', 'o-bob', 't-security', 'iss-local', 'rp-urgent', 'Expiring',            NOW() + INTERVAL '12 days',  '{"service": "auth", "tier": "critical"}',          NOW() - INTERVAL '78 days', NOW() - INTERVAL '78 days', NOW() - INTERVAL '300 days', NOW()),
+  ('mc-cdn-prod',      'cdn-production',       'cdn.example.com',       ARRAY['cdn.example.com', 'static.example.com'],                 'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'Expiring',            NOW() + INTERVAL '8 days',   '{"service": "cdn", "tier": "high"}',               NOW() - INTERVAL '82 days', NOW() - INTERVAL '82 days', NOW() - INTERVAL '250 days', NOW()),
+  ('mc-mail-prod',     'mail-production',      'mail.example.com',      ARRAY['mail.example.com', 'smtp.example.com'],                  'production',  'o-bob',   't-security', 'iss-local', 'rp-standard', 'Expiring',            NOW() + INTERVAL '5 days',   '{"service": "email", "tier": "medium"}',           NOW() - INTERVAL '85 days', NOW() - INTERVAL '85 days', NOW() - INTERVAL '400 days', NOW()),
 
   -- Expired
-  ('mc-legacy-prod',   'legacy-app',           'legacy.example.com',    ARRAY['legacy.example.com'],                                    'production',  'o-alice', 't-platform', 'iss-local', 'rp-manual',   'expired',             NOW() - INTERVAL '3 days',   '{"service": "legacy", "tier": "low", "decom": "planned"}', NOW() - INTERVAL '93 days', NOW() - INTERVAL '93 days', NOW() - INTERVAL '500 days', NOW()),
-  ('mc-old-api',       'old-api-v1',           'api-v1.example.com',    ARRAY['api-v1.example.com'],                                    'production',  'o-alice', 't-platform', 'iss-local', 'rp-manual',   'expired',             NOW() - INTERVAL '15 days',  '{"service": "api-v1", "tier": "low", "deprecated": "true"}', NULL, NULL, NOW() - INTERVAL '600 days', NOW()),
+  ('mc-legacy-prod',   'legacy-app',           'legacy.example.com',    ARRAY['legacy.example.com'],                                    'production',  'o-alice', 't-platform', 'iss-local', 'rp-manual',   'Expired',             NOW() - INTERVAL '3 days',   '{"service": "legacy", "tier": "low", "decom": "planned"}', NOW() - INTERVAL '93 days', NOW() - INTERVAL '93 days', NOW() - INTERVAL '500 days', NOW()),
+  ('mc-old-api',       'old-api-v1',           'api-v1.example.com',    ARRAY['api-v1.example.com'],                                    'production',  'o-alice', 't-platform', 'iss-local', 'rp-manual',   'Expired',             NOW() - INTERVAL '15 days',  '{"service": "api-v1", "tier": "low", "deprecated": "true"}', NULL, NULL, NOW() - INTERVAL '600 days', NOW()),
 
   -- Staging certs
-  ('mc-api-stg',       'api-staging',          'api.staging.example.com', ARRAY['api.staging.example.com'],                             'staging',     'o-alice', 't-platform', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '65 days',  '{"service": "api-gateway", "tier": "low"}',        NOW() - INTERVAL '25 days', NOW() - INTERVAL '25 days', NOW() - INTERVAL '120 days', NOW()),
-  ('mc-web-stg',       'web-staging',          'www.staging.example.com', ARRAY['www.staging.example.com', 'staging.example.com'],      'staging',     'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '70 days',  '{"service": "web-app", "tier": "low"}',            NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days', NOW() - INTERVAL '100 days', NOW()),
+  ('mc-api-stg',       'api-staging',          'api.staging.example.com', ARRAY['api.staging.example.com'],                             'staging',     'o-alice', 't-platform', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '65 days',  '{"service": "api-gateway", "tier": "low"}',        NOW() - INTERVAL '25 days', NOW() - INTERVAL '25 days', NOW() - INTERVAL '120 days', NOW()),
+  ('mc-web-stg',       'web-staging',          'www.staging.example.com', ARRAY['www.staging.example.com', 'staging.example.com'],      'staging',     'o-dave',  't-frontend', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '70 days',  '{"service": "web-app", "tier": "low"}',            NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days', NOW() - INTERVAL '100 days', NOW()),
 
   -- Renewal in progress
-  ('mc-grafana-prod',  'grafana-production',   'grafana.example.com',   ARRAY['grafana.example.com', 'metrics.example.com'],            'production',  'o-eve',   't-data',     'iss-local', 'rp-standard', 'renewal_in_progress', NOW() + INTERVAL '3 days',   '{"service": "monitoring", "tier": "high"}',        NOW() - INTERVAL '87 days', NOW() - INTERVAL '87 days', NOW() - INTERVAL '180 days', NOW()),
+  ('mc-grafana-prod',  'grafana-production',   'grafana.example.com',   ARRAY['grafana.example.com', 'metrics.example.com'],            'production',  'o-eve',   't-data',     'iss-local', 'rp-standard', 'RenewalInProgress', NOW() + INTERVAL '3 days',   '{"service": "monitoring", "tier": "high"}',        NOW() - INTERVAL '87 days', NOW() - INTERVAL '87 days', NOW() - INTERVAL '180 days', NOW()),
 
   -- Failed
-  ('mc-vpn-prod',      'vpn-production',       'vpn.example.com',       ARRAY['vpn.example.com'],                                      'production',  'o-bob',   't-security', 'iss-acme-le', 'rp-urgent', 'failed',              NOW() + INTERVAL '1 day',    '{"service": "vpn", "tier": "critical"}',           NULL, NULL, NOW() - INTERVAL '90 days', NOW()),
+  ('mc-vpn-prod',      'vpn-production',       'vpn.example.com',       ARRAY['vpn.example.com'],                                      'production',  'o-bob',   't-security', 'iss-acme-le', 'rp-urgent', 'Failed',              NOW() + INTERVAL '1 day',    '{"service": "vpn", "tier": "critical"}',           NULL, NULL, NOW() - INTERVAL '90 days', NOW()),
 
   -- Wildcard
-  ('mc-wildcard-prod', 'wildcard-production',  '*.example.com',         ARRAY['*.example.com', 'example.com'],                          'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'active',              NOW() + INTERVAL '50 days',  '{"service": "wildcard", "tier": "critical"}',      NOW() - INTERVAL '40 days', NOW() - INTERVAL '40 days', NOW() - INTERVAL '365 days', NOW())
+  ('mc-wildcard-prod', 'wildcard-production',  '*.example.com',         ARRAY['*.example.com', 'example.com'],                          'production',  'o-alice', 't-platform', 'iss-local', 'rp-standard', 'Active',              NOW() + INTERVAL '50 days',  '{"service": "wildcard", "tier": "critical"}',      NOW() - INTERVAL '40 days', NOW() - INTERVAL '40 days', NOW() - INTERVAL '365 days', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- Certificate-Target Mappings
@@ -154,3 +191,26 @@ INSERT INTO notification_events (id, type, certificate_id, channel, recipient, m
   ('ne-demo-05', 'renewal_success',     'mc-api-prod',      'email',   'alice@example.com',   'Certificate api-production renewed successfully',        NOW() - INTERVAL '15 days',    'sent',   NULL),
   ('ne-demo-06', 'deployment_success',  'mc-api-prod',      'webhook', 'https://hooks.example.com/certctl', 'Certificate api-production deployed to NGINX Production', NOW() - INTERVAL '15 days', 'sent', NULL)
 ON CONFLICT (id) DO NOTHING;
+
+-- Agent Groups
+INSERT INTO agent_groups (id, name, description, match_os, match_architecture, match_ip_cidr, match_version, enabled, created_at, updated_at) VALUES
+  ('ag-linux-prod',   'Linux Production',    'All Linux agents in production',          'linux',   '',       '',              '',      true,  NOW(), NOW()),
+  ('ag-linux-amd64',  'Linux AMD64',         'Linux agents on x86_64 architecture',     'linux',   'amd64', '',              '',      true,  NOW(), NOW()),
+  ('ag-windows',      'Windows Agents',      'All Windows-based agents',                'windows', '',       '',              '',      true,  NOW(), NOW()),
+  ('ag-datacenter-a', 'Datacenter A',        'Agents in 10.0.1.0/24 subnet',           '',        '',       '10.0.1.0/24',  '',      true,  NOW(), NOW()),
+  ('ag-manual',       'Manual Group',        'Manually managed agent group (no dynamic criteria)', '', '',   '',              '',      false, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Network Scan Targets
+INSERT INTO network_scan_targets (id, name, cidrs, ports, enabled, scan_interval_hours, timeout_ms, created_at, updated_at) VALUES
+  ('nst-dc1-web',  'DC1 Web Servers',     '{10.0.1.0/24}',              '{443,8443}',  true,  6, 5000, NOW(), NOW()),
+  ('nst-dc2-apps', 'DC2 Application Tier', '{10.0.2.0/24,10.0.3.0/24}', '{443}',       true,  6, 5000, NOW(), NOW()),
+  ('nst-dmz',      'DMZ Public Endpoints', '{192.168.100.0/24}',         '{443,8443,9443}', true, 12, 3000, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
+-- Agent Group Members (manual membership for the manual group)
+INSERT INTO agent_group_members (agent_group_id, agent_id, membership_type, created_at) VALUES
+  ('ag-manual', 'ag-web-prod',    'include', NOW()),
+  ('ag-manual', 'ag-web-staging', 'include', NOW()),
+  ('ag-manual', 'ag-iis-prod',    'exclude', NOW())
+ON CONFLICT (agent_group_id, agent_id) DO NOTHING;

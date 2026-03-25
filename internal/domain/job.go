@@ -35,12 +35,13 @@ const (
 type JobStatus string
 
 const (
-	JobStatusPending     JobStatus = "Pending"
-	JobStatusAwaitingCSR JobStatus = "AwaitingCSR"
-	JobStatusRunning     JobStatus = "Running"
-	JobStatusCompleted   JobStatus = "Completed"
-	JobStatusFailed      JobStatus = "Failed"
-	JobStatusCancelled   JobStatus = "Cancelled"
+	JobStatusPending          JobStatus = "Pending"
+	JobStatusAwaitingCSR      JobStatus = "AwaitingCSR"
+	JobStatusAwaitingApproval JobStatus = "AwaitingApproval"
+	JobStatusRunning          JobStatus = "Running"
+	JobStatusCompleted        JobStatus = "Completed"
+	JobStatusFailed           JobStatus = "Failed"
+	JobStatusCancelled        JobStatus = "Cancelled"
 )
 
 // DeploymentJob represents a job that deploys a certificate to a target via an agent.

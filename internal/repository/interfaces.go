@@ -25,6 +25,22 @@ type CertificateRepository interface {
 	CreateVersion(ctx context.Context, version *domain.CertificateVersion) error
 	// GetExpiringCertificates returns certificates expiring before the given time.
 	GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error)
+	// GetLatestVersion returns the most recent certificate version for a certificate.
+	GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error)
+}
+
+// RevocationRepository defines operations for managing certificate revocations.
+type RevocationRepository interface {
+	// Create records a new certificate revocation.
+	Create(ctx context.Context, revocation *domain.CertificateRevocation) error
+	// GetBySerial retrieves a revocation by serial number.
+	GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error)
+	// ListAll returns all revocations, ordered by revocation time (for CRL generation).
+	ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error)
+	// ListByCertificate returns all revocations for a certificate.
+	ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error)
+	// MarkIssuerNotified updates the issuer_notified flag for a revocation.
+	MarkIssuerNotified(ctx context.Context, id string) error
 }
 
 // IssuerRepository defines operations for managing certificate issuers.
@@ -69,8 +85,8 @@ type AgentRepository interface {
 	Update(ctx context.Context, agent *domain.Agent) error
 	// Delete removes an agent.
 	Delete(ctx context.Context, id string) error
-	// UpdateHeartbeat updates the agent's last heartbeat timestamp.
-	UpdateHeartbeat(ctx context.Context, id string) error
+	// UpdateHeartbeat updates the agent's last heartbeat timestamp and metadata.
+	UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error
 	// GetByAPIKey retrieves an agent by hashed API key.
 	GetByAPIKey(ctx context.Context, keyHash string) (*domain.Agent, error)
 }
@@ -153,6 +169,91 @@ type TeamRepository interface {
 	Update(ctx context.Context, team *domain.Team) error
 	// Delete removes a team.
 	Delete(ctx context.Context, id string) error
+}
+
+// CertificateProfileRepository defines operations for managing certificate profiles.
+type CertificateProfileRepository interface {
+	// List returns all certificate profiles.
+	List(ctx context.Context) ([]*domain.CertificateProfile, error)
+	// Get retrieves a certificate profile by ID.
+	Get(ctx context.Context, id string) (*domain.CertificateProfile, error)
+	// Create stores a new certificate profile.
+	Create(ctx context.Context, profile *domain.CertificateProfile) error
+	// Update modifies an existing certificate profile.
+	Update(ctx context.Context, profile *domain.CertificateProfile) error
+	// Delete removes a certificate profile.
+	Delete(ctx context.Context, id string) error
+}
+
+// AgentGroupRepository defines operations for managing agent groups.
+type AgentGroupRepository interface {
+	// List returns all agent groups.
+	List(ctx context.Context) ([]*domain.AgentGroup, error)
+	// Get retrieves an agent group by ID.
+	Get(ctx context.Context, id string) (*domain.AgentGroup, error)
+	// Create stores a new agent group.
+	Create(ctx context.Context, group *domain.AgentGroup) error
+	// Update modifies an existing agent group.
+	Update(ctx context.Context, group *domain.AgentGroup) error
+	// Delete removes an agent group.
+	Delete(ctx context.Context, id string) error
+	// ListMembers returns agents in a group (both dynamic matches and manual includes).
+	ListMembers(ctx context.Context, groupID string) ([]*domain.Agent, error)
+	// AddMember adds a manual membership.
+	AddMember(ctx context.Context, groupID, agentID, membershipType string) error
+	// RemoveMember removes a manual membership.
+	RemoveMember(ctx context.Context, groupID, agentID string) error
+}
+
+// DiscoveryRepository defines operations for managing certificate discovery.
+type DiscoveryRepository interface {
+	// CreateScan stores a new discovery scan record.
+	CreateScan(ctx context.Context, scan *domain.DiscoveryScan) error
+	// GetScan retrieves a discovery scan by ID.
+	GetScan(ctx context.Context, id string) (*domain.DiscoveryScan, error)
+	// ListScans returns discovery scans, optionally filtered by agent ID.
+	ListScans(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error)
+	// CreateDiscovered stores a new discovered certificate (upserts by fingerprint+agent+path).
+	// Returns true if the certificate was newly inserted (not just updated).
+	CreateDiscovered(ctx context.Context, cert *domain.DiscoveredCertificate) (bool, error)
+	// GetDiscovered retrieves a discovered certificate by ID.
+	GetDiscovered(ctx context.Context, id string) (*domain.DiscoveredCertificate, error)
+	// ListDiscovered returns discovered certificates matching the filter.
+	ListDiscovered(ctx context.Context, filter *DiscoveryFilter) ([]*domain.DiscoveredCertificate, int, error)
+	// UpdateDiscoveredStatus updates the status and optional managed certificate link.
+	UpdateDiscoveredStatus(ctx context.Context, id string, status domain.DiscoveryStatus, managedCertID string) error
+	// GetByFingerprint retrieves discovered certificates by SHA-256 fingerprint.
+	GetByFingerprint(ctx context.Context, fingerprint string) ([]*domain.DiscoveredCertificate, error)
+	// CountByStatus returns counts of discovered certificates grouped by status.
+	CountByStatus(ctx context.Context) (map[string]int, error)
+}
+
+// DiscoveryFilter defines filters for listing discovered certificates.
+type DiscoveryFilter struct {
+	AgentID   string
+	Status    string
+	IsExpired bool
+	IsCA      bool
+	Page      int
+	PerPage   int
+}
+
+// NetworkScanRepository defines operations for managing network scan targets.
+type NetworkScanRepository interface {
+	// List returns all network scan targets.
+	List(ctx context.Context) ([]*domain.NetworkScanTarget, error)
+	// ListEnabled returns only enabled scan targets.
+	ListEnabled(ctx context.Context) ([]*domain.NetworkScanTarget, error)
+	// Get retrieves a network scan target by ID.
+	Get(ctx context.Context, id string) (*domain.NetworkScanTarget, error)
+	// Create stores a new network scan target.
+	Create(ctx context.Context, target *domain.NetworkScanTarget) error
+	// Update modifies an existing network scan target.
+	Update(ctx context.Context, target *domain.NetworkScanTarget) error
+	// Delete removes a network scan target.
+	Delete(ctx context.Context, id string) error
+	// UpdateScanResults records the outcome of the last scan for a target.
+	UpdateScanResults(ctx context.Context, id string, scanAt time.Time, durationMs int, certsFound int) error
 }
 
 // OwnerRepository defines operations for managing certificate owners.

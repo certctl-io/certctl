@@ -6,6 +6,8 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/rsa"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -14,32 +16,38 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
 	"path/filepath"
+	"runtime"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
+	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/nginx"
 )
 
 // AgentConfig represents the agent-side configuration.
 type AgentConfig struct {
-	ServerURL string // Control plane server URL (e.g., http://localhost:8443)
-	APIKey    string // Agent API key for authentication
-	AgentName string // Agent name for identification
-	AgentID   string // Agent ID for API calls (set after registration or from env)
-	Hostname  string // Server hostname
-	KeyDir    string // Directory for storing private keys (default: /var/lib/certctl/keys)
+	ServerURL     string   // Control plane server URL (e.g., http://localhost:8443)
+	APIKey        string   // Agent API key for authentication
+	AgentName     string   // Agent name for identification
+	AgentID       string   // Agent ID for API calls (set after registration or from env)
+	Hostname      string   // Server hostname
+	KeyDir        string   // Directory for storing private keys (default: /var/lib/certctl/keys)
+	DiscoveryDirs []string // Directories to scan for certificates (comma-separated via env)
 }
 
 // Agent represents the local agent that runs on target servers.
-// It periodically sends heartbeats, polls for work, and executes deployment and CSR jobs.
+// It periodically sends heartbeats, polls for work, executes deployment and CSR jobs,
+// and scans configured directories for existing certificates.
 // In agent keygen mode, private keys are generated and stored locally — they never leave
 // this process or filesystem.
 type Agent struct {
@@ -50,6 +58,7 @@ type Agent struct {
 	// Configuration
 	heartbeatInterval     time.Duration
 	pollInterval          time.Duration
+	discoveryInterval     time.Duration
 	consecutiveFailures   int
 }
 
@@ -80,6 +89,7 @@ func NewAgent(cfg *AgentConfig, logger *slog.Logger) *Agent {
 		client:            &http.Client{Timeout: 30 * time.Second},
 		heartbeatInterval: 60 * time.Second,
 		pollInterval:      30 * time.Second,
+		discoveryInterval: 6 * time.Hour, // scan for certs every 6 hours
 	}
 }
 
@@ -102,7 +112,7 @@ func (a *Agent) Run(ctx context.Context) error {
 		a.logger.Warn("failed to enforce key directory permissions", "path", a.config.KeyDir, "error", err)
 	}
 
-	// Create ticker channels for heartbeat and polling
+	// Create ticker channels for heartbeat, polling, and discovery
 	heartbeatTicker := time.NewTicker(a.heartbeatInterval)
 	defer heartbeatTicker.Stop()
 
@@ -112,6 +122,22 @@ func (a *Agent) Run(ctx context.Context) error {
 	// Run initial heartbeat and poll
 	a.sendHeartbeat(ctx)
 	a.pollForWork(ctx)
+
+	// Discovery: run initial scan if directories configured, then on interval
+	var discoveryTicker *time.Ticker
+	if len(a.config.DiscoveryDirs) > 0 {
+		a.logger.Info("certificate discovery enabled",
+			"directories", a.config.DiscoveryDirs,
+			"interval", a.discoveryInterval.String())
+		a.runDiscoveryScan(ctx)
+		discoveryTicker = time.NewTicker(a.discoveryInterval)
+		defer discoveryTicker.Stop()
+	} else {
+		a.logger.Info("certificate discovery disabled (no CERTCTL_DISCOVERY_DIRS configured)")
+		// Create a stopped ticker so the select compiles
+		discoveryTicker = time.NewTicker(24 * time.Hour)
+		discoveryTicker.Stop()
+	}
 
 	// Main event loop
 	for {
@@ -135,19 +161,38 @@ func (a *Agent) Run(ctx context.Context) error {
 				time.Sleep(backoff)
 			}
 			a.pollForWork(ctx)
+
+		case <-discoveryTicker.C:
+			if len(a.config.DiscoveryDirs) > 0 {
+				a.runDiscoveryScan(ctx)
+			}
 		}
 	}
 }
 
-// sendHeartbeat sends a heartbeat to the control plane.
+// getOutboundIP returns the preferred outbound IP address of this machine.
+func getOutboundIP() string {
+	conn, err := net.Dial("udp", "8.8.8.8:80")
+	if err != nil {
+		return ""
+	}
+	defer conn.Close()
+	localAddr := conn.LocalAddr().(*net.UDPAddr)
+	return localAddr.IP.String()
+}
+
+// sendHeartbeat sends a heartbeat to the control plane with agent metadata.
 // POST /api/v1/agents/{agentID}/heartbeat
 func (a *Agent) sendHeartbeat(ctx context.Context) {
 	a.logger.Debug("sending heartbeat", "agent_id", a.config.AgentID)
 
 	path := fmt.Sprintf("/api/v1/agents/%s/heartbeat", a.config.AgentID)
 	resp, err := a.makeRequest(ctx, http.MethodPost, path, map[string]string{
-		"version":  "1.0.0",
-		"hostname": a.config.Hostname,
+		"version":      "1.0.0",
+		"hostname":     a.config.Hostname,
+		"os":           runtime.GOOS,
+		"architecture": runtime.GOARCH,
+		"ip_address":   getOutboundIP(),
 	})
 	if err != nil {
 		a.logger.Error("heartbeat failed", "error", err)
@@ -489,6 +534,24 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 		}
 		return nginx.New(&cfg, a.logger), nil
 
+	case "Apache":
+		var cfg apache.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Apache config: %w", err)
+			}
+		}
+		return apache.New(&cfg, a.logger), nil
+
+	case "HAProxy":
+		var cfg haproxy.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid HAProxy config: %w", err)
+			}
+		}
+		return haproxy.New(&cfg, a.logger), nil
+
 	case "F5":
 		var cfg f5.Config
 		if len(configJSON) > 0 {
@@ -616,6 +679,239 @@ func (a *Agent) makeRequest(ctx context.Context, method, path string, body inter
 	return resp, nil
 }
 
+// runDiscoveryScan walks configured directories, parses certificate files, and reports
+// discovered certificates to the control plane.
+// Supports PEM and DER encoded X.509 certificates.
+func (a *Agent) runDiscoveryScan(ctx context.Context) {
+	a.logger.Info("starting filesystem certificate discovery scan",
+		"directories", a.config.DiscoveryDirs)
+
+	startTime := time.Now()
+	var certs []discoveredCertEntry
+	var scanErrors []string
+
+	for _, dir := range a.config.DiscoveryDirs {
+		a.logger.Debug("scanning directory", "path", dir)
+
+		err := filepath.Walk(dir, func(path string, info os.FileInfo, err error) error {
+			if err != nil {
+				scanErrors = append(scanErrors, fmt.Sprintf("walk error at %s: %v", path, err))
+				return nil // continue walking
+			}
+			if info.IsDir() {
+				return nil
+			}
+
+			// Skip files larger than 1MB (unlikely to be a certificate)
+			if info.Size() > 1*1024*1024 {
+				return nil
+			}
+
+			// Check file extension
+			ext := strings.ToLower(filepath.Ext(path))
+			switch ext {
+			case ".pem", ".crt", ".cer", ".cert":
+				found := a.parsePEMFile(path)
+				certs = append(certs, found...)
+			case ".der":
+				if entry, err := a.parseDERFile(path); err == nil {
+					certs = append(certs, entry)
+				} else {
+					a.logger.Debug("skipping non-cert DER file", "path", path, "error", err)
+				}
+			default:
+				// Try PEM parsing for extensionless files or unknown extensions
+				if ext == "" || ext == ".key" {
+					return nil // skip key files and extensionless
+				}
+				found := a.parsePEMFile(path)
+				if len(found) > 0 {
+					certs = append(certs, found...)
+				}
+			}
+			return nil
+		})
+		if err != nil {
+			scanErrors = append(scanErrors, fmt.Sprintf("failed to walk %s: %v", dir, err))
+		}
+	}
+
+	scanDuration := time.Since(startTime)
+	a.logger.Info("discovery scan completed",
+		"certificates_found", len(certs),
+		"errors", len(scanErrors),
+		"duration_ms", scanDuration.Milliseconds())
+
+	if len(certs) == 0 && len(scanErrors) == 0 {
+		a.logger.Debug("no certificates found and no errors, skipping report")
+		return
+	}
+
+	// Build report payload
+	entries := make([]map[string]interface{}, len(certs))
+	for i, c := range certs {
+		entries[i] = map[string]interface{}{
+			"fingerprint_sha256": c.FingerprintSHA256,
+			"common_name":        c.CommonName,
+			"sans":               c.SANs,
+			"serial_number":      c.SerialNumber,
+			"issuer_dn":          c.IssuerDN,
+			"subject_dn":         c.SubjectDN,
+			"not_before":         c.NotBefore,
+			"not_after":          c.NotAfter,
+			"key_algorithm":      c.KeyAlgorithm,
+			"key_size":           c.KeySize,
+			"is_ca":              c.IsCA,
+			"pem_data":           c.PEMData,
+			"source_path":        c.SourcePath,
+			"source_format":      c.SourceFormat,
+		}
+	}
+
+	report := map[string]interface{}{
+		"agent_id":         a.config.AgentID,
+		"directories":      a.config.DiscoveryDirs,
+		"certificates":     entries,
+		"errors":           scanErrors,
+		"scan_duration_ms": int(scanDuration.Milliseconds()),
+	}
+
+	// Submit to control plane
+	path := fmt.Sprintf("/api/v1/agents/%s/discoveries", a.config.AgentID)
+	resp, err := a.makeRequest(ctx, http.MethodPost, path, report)
+	if err != nil {
+		a.logger.Error("failed to submit discovery report", "error", err)
+		return
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusAccepted {
+		body, _ := io.ReadAll(resp.Body)
+		a.logger.Error("discovery report rejected",
+			"status", resp.StatusCode,
+			"body", string(body))
+		return
+	}
+
+	a.logger.Info("discovery report submitted successfully",
+		"certificates", len(certs),
+		"errors", len(scanErrors))
+}
+
+// discoveredCertEntry holds parsed certificate metadata for reporting.
+type discoveredCertEntry struct {
+	FingerprintSHA256 string   `json:"fingerprint_sha256"`
+	CommonName        string   `json:"common_name"`
+	SANs              []string `json:"sans"`
+	SerialNumber      string   `json:"serial_number"`
+	IssuerDN          string   `json:"issuer_dn"`
+	SubjectDN         string   `json:"subject_dn"`
+	NotBefore         string   `json:"not_before"`
+	NotAfter          string   `json:"not_after"`
+	KeyAlgorithm      string   `json:"key_algorithm"`
+	KeySize           int      `json:"key_size"`
+	IsCA              bool     `json:"is_ca"`
+	PEMData           string   `json:"pem_data"`
+	SourcePath        string   `json:"source_path"`
+	SourceFormat      string   `json:"source_format"`
+}
+
+// parsePEMFile reads a file and extracts all X.509 certificates from PEM blocks.
+func (a *Agent) parsePEMFile(path string) []discoveredCertEntry {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		a.logger.Debug("failed to read file", "path", path, "error", err)
+		return nil
+	}
+
+	var entries []discoveredCertEntry
+	rest := data
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			a.logger.Debug("failed to parse certificate in PEM", "path", path, "error", err)
+			continue
+		}
+
+		pemStr := string(pem.EncodeToMemory(block))
+		entries = append(entries, certToEntry(cert, path, "PEM", pemStr))
+	}
+	return entries
+}
+
+// parseDERFile reads a DER-encoded certificate file.
+func (a *Agent) parseDERFile(path string) (discoveredCertEntry, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return discoveredCertEntry{}, fmt.Errorf("read failed: %w", err)
+	}
+
+	cert, err := x509.ParseCertificate(data)
+	if err != nil {
+		return discoveredCertEntry{}, fmt.Errorf("parse failed: %w", err)
+	}
+
+	// Convert to PEM for storage
+	pemStr := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: data}))
+	return certToEntry(cert, path, "DER", pemStr), nil
+}
+
+// certToEntry converts a parsed x509.Certificate into a discoveredCertEntry.
+func certToEntry(cert *x509.Certificate, path, format, pemData string) discoveredCertEntry {
+	// Compute SHA-256 fingerprint
+	fingerprint := fmt.Sprintf("%x", sha256Sum(cert.Raw))
+
+	// Determine key algorithm and size
+	keyAlg, keySize := certKeyInfo(cert)
+
+	return discoveredCertEntry{
+		FingerprintSHA256: fingerprint,
+		CommonName:        cert.Subject.CommonName,
+		SANs:              cert.DNSNames,
+		SerialNumber:      cert.SerialNumber.Text(16),
+		IssuerDN:          cert.Issuer.String(),
+		SubjectDN:         cert.Subject.String(),
+		NotBefore:         cert.NotBefore.UTC().Format(time.RFC3339),
+		NotAfter:          cert.NotAfter.UTC().Format(time.RFC3339),
+		KeyAlgorithm:      keyAlg,
+		KeySize:           keySize,
+		IsCA:              cert.IsCA,
+		PEMData:           pemData,
+		SourcePath:        path,
+		SourceFormat:      format,
+	}
+}
+
+// sha256Sum returns the SHA-256 hash of data.
+func sha256Sum(data []byte) [32]byte {
+	return sha256.Sum256(data)
+}
+
+// certKeyInfo extracts key algorithm name and size from a certificate.
+func certKeyInfo(cert *x509.Certificate) (string, int) {
+	switch pub := cert.PublicKey.(type) {
+	case *ecdsa.PublicKey:
+		return "ECDSA", pub.Curve.Params().BitSize
+	case *rsa.PublicKey:
+		return "RSA", pub.N.BitLen()
+	default:
+		switch cert.PublicKeyAlgorithm {
+		case x509.Ed25519:
+			return "Ed25519", 256
+		default:
+			return cert.PublicKeyAlgorithm.String(), 0
+		}
+	}
+}
+
 func main() {
 	// Parse command-line flags (with env var fallbacks for Docker deployment)
 	serverURL := flag.String("server", getEnvDefault("CERTCTL_SERVER_URL", "http://localhost:8443"), "Control plane server URL")
@@ -623,6 +919,7 @@ func main() {
 	agentName := flag.String("name", getEnvDefault("CERTCTL_AGENT_NAME", "certctl-agent"), "Agent name")
 	agentID := flag.String("agent-id", getEnvDefault("CERTCTL_AGENT_ID", ""), "Agent ID (from registration)")
 	keyDir := flag.String("key-dir", getEnvDefault("CERTCTL_KEY_DIR", "/var/lib/certctl/keys"), "Directory for storing private keys")
+	discoveryDirsStr := flag.String("discovery-dirs", getEnvDefault("CERTCTL_DISCOVERY_DIRS", ""), "Comma-separated directories to scan for certificates")
 	flag.Parse()
 
 	if *apiKey == "" {
@@ -651,14 +948,26 @@ func main() {
 		hostname = "unknown"
 	}
 
+	// Parse discovery directories
+	var discoveryDirs []string
+	if *discoveryDirsStr != "" {
+		for _, d := range strings.Split(*discoveryDirsStr, ",") {
+			d = strings.TrimSpace(d)
+			if d != "" {
+				discoveryDirs = append(discoveryDirs, d)
+			}
+		}
+	}
+
 	// Create agent configuration
 	agentCfg := &AgentConfig{
-		ServerURL: *serverURL,
-		APIKey:    *apiKey,
-		AgentName: *agentName,
-		AgentID:   *agentID,
-		Hostname:  hostname,
-		KeyDir:    *keyDir,
+		ServerURL:     *serverURL,
+		APIKey:        *apiKey,
+		AgentName:     *agentName,
+		AgentID:       *agentID,
+		Hostname:      hostname,
+		KeyDir:        *keyDir,
+		DiscoveryDirs: discoveryDirs,
 	}
 
 	// Create and start agent

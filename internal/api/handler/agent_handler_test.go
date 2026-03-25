@@ -16,7 +16,7 @@ type MockAgentService struct {
 	ListAgentsFn         func(page, perPage int) ([]domain.Agent, int64, error)
 	GetAgentFn           func(id string) (*domain.Agent, error)
 	RegisterAgentFn      func(agent domain.Agent) (*domain.Agent, error)
-	HeartbeatFn          func(agentID string) error
+	HeartbeatFn          func(agentID string, metadata *domain.AgentMetadata) error
 	CSRSubmitFn          func(agentID string, csrPEM string) (string, error)
 	CSRSubmitForCertFn   func(agentID string, certID string, csrPEM string) (string, error)
 	CertificatePickupFn  func(agentID, certID string) (string, error)
@@ -46,9 +46,9 @@ func (m *MockAgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, err
 	return nil, nil
 }
 
-func (m *MockAgentService) Heartbeat(agentID string) error {
+func (m *MockAgentService) Heartbeat(agentID string, metadata *domain.AgentMetadata) error {
 	if m.HeartbeatFn != nil {
-		return m.HeartbeatFn(agentID)
+		return m.HeartbeatFn(agentID, metadata)
 	}
 	return nil
 }
@@ -309,7 +309,7 @@ func TestRegisterAgent_InvalidBody(t *testing.T) {
 // Test Heartbeat - success case
 func TestHeartbeat_Success(t *testing.T) {
 	mock := &MockAgentService{
-		HeartbeatFn: func(agentID string) error {
+		HeartbeatFn: func(agentID string, metadata *domain.AgentMetadata) error {
 			if agentID == "a-prod-001" {
 				return nil
 			}
@@ -341,7 +341,7 @@ func TestHeartbeat_Success(t *testing.T) {
 // Test Heartbeat - service error
 func TestHeartbeat_ServiceError(t *testing.T) {
 	mock := &MockAgentService{
-		HeartbeatFn: func(agentID string) error {
+		HeartbeatFn: func(agentID string, metadata *domain.AgentMetadata) error {
 			return ErrMockServiceFailed
 		},
 	}

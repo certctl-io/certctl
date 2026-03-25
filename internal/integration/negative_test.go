@@ -8,6 +8,7 @@ import (
 	"log/slog"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -39,11 +40,18 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		"iss-local": service.NewIssuerConnectorAdapter(localCA),
 	}
 
+	revocationRepo := newMockRevocationRepository()
+
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
-	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, auditService, notificationService, issuerRegistry, "server")
+
+	// Wire revocation dependencies
+	certificateService.SetRevocationRepo(revocationRepo)
+	certificateService.SetNotificationService(notificationService)
+	certificateService.SetIssuerRegistry(issuerRegistry)
+	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
@@ -55,11 +63,17 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	profileHandler := handler.NewProfileHandler(&mockProfileService{})
 	teamHandler := handler.NewTeamHandler(&mockTeamService{})
 	ownerHandler := handler.NewOwnerHandler(&mockOwnerService{})
+	agentGroupHandler := handler.NewAgentGroupHandler(&mockAgentGroupService{})
 	auditHandler := handler.NewAuditHandler(auditService)
 	notificationHandler := handler.NewNotificationHandler(notificationService)
+	statsHandler := handler.NewStatsHandler(&mockStatsService{})
+	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
+	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
+	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
 	r := router.New()
 	r.RegisterHandlers(
@@ -69,11 +83,17 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		agentHandler,
 		jobHandler,
 		policyHandler,
+		profileHandler,
 		teamHandler,
 		ownerHandler,
+		agentGroupHandler,
 		auditHandler,
 		notificationHandler,
+		statsHandler,
+		metricsHandler,
 		healthHandler,
+		discoveryHandler,
+		networkScanHandler,
 	)
 
 	server := httptest.NewServer(r)
@@ -388,3 +408,395 @@ func TestCertificateLifecycleWithExpiredCert(t *testing.T) {
 		t.Logf("Renewal trigger on expired cert returned status: %d", resp.StatusCode)
 	})
 }
+
+// TestM11bEndpoints exercises the M11b endpoints: teams, owners, agent groups.
+// Tests M11b feature coverage through the HTTP API.
+func TestM11bEndpoints(t *testing.T) {
+	server, _, _, _ := setupTestServer(t)
+
+	// ========================
+	// Teams API
+	// ========================
+	t.Run("Teams", func(t *testing.T) {
+		t.Run("CreateTeam_Success", func(t *testing.T) {
+			payload := map[string]string{"name": "Platform", "description": "Platform team"}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/teams", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Errorf("expected 201, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+			var team domain.Team
+			json.NewDecoder(resp.Body).Decode(&team)
+			if team.Name != "Platform" {
+				t.Errorf("expected name=Platform, got %s", team.Name)
+			}
+		})
+
+		t.Run("CreateTeam_MissingName", func(t *testing.T) {
+			payload := map[string]string{"description": "No name team"}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/teams", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("CreateTeam_NameTooLong", func(t *testing.T) {
+			longName := ""
+			for i := 0; i < 256; i++ {
+				longName += "a"
+			}
+			payload := map[string]string{"name": longName}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/teams", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("CreateTeam_InvalidJSON", func(t *testing.T) {
+			resp, err := http.Post(server.URL+"/api/v1/teams", "application/json", bytes.NewReader([]byte("not json")))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("GetTeam_NotFound", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/teams/t-nonexistent")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("ListTeams_Empty", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/teams")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("expected 200, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("DeleteTeam_Success", func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/teams/t-platform", nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("expected 204, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("ListTeams_MethodNotAllowed", func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/teams", nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusMethodNotAllowed {
+				t.Errorf("expected 405, got %d", resp.StatusCode)
+			}
+		})
+	})
+
+	// ========================
+	// Owners API
+	// ========================
+	t.Run("Owners", func(t *testing.T) {
+		t.Run("CreateOwner_Success", func(t *testing.T) {
+			payload := map[string]string{"name": "Alice", "email": "alice@example.com", "team_id": "t-platform"}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/owners", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Errorf("expected 201, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+			var owner domain.Owner
+			json.NewDecoder(resp.Body).Decode(&owner)
+			if owner.Name != "Alice" {
+				t.Errorf("expected name=Alice, got %s", owner.Name)
+			}
+			if owner.Email != "alice@example.com" {
+				t.Errorf("expected email=alice@example.com, got %s", owner.Email)
+			}
+		})
+
+		t.Run("CreateOwner_MissingName", func(t *testing.T) {
+			payload := map[string]string{"email": "bob@example.com"}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/owners", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("GetOwner_NotFound", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/owners/o-nonexistent")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("ListOwners_Empty", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/owners")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("expected 200, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("DeleteOwner_Success", func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/owners/o-alice", nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("expected 204, got %d", resp.StatusCode)
+			}
+		})
+	})
+
+	// ========================
+	// Agent Groups API
+	// ========================
+	t.Run("AgentGroups", func(t *testing.T) {
+		t.Run("CreateAgentGroup_Success", func(t *testing.T) {
+			payload := map[string]interface{}{
+				"name":        "Linux Servers",
+				"description": "All linux-based agents",
+				"match_os":    "linux",
+				"match_architecture": "amd64",
+				"enabled":     true,
+			}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/agent-groups", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusCreated {
+				bodyBytes, _ := io.ReadAll(resp.Body)
+				t.Errorf("expected 201, got %d: %s", resp.StatusCode, string(bodyBytes))
+			}
+			var group domain.AgentGroup
+			json.NewDecoder(resp.Body).Decode(&group)
+			if group.Name != "Linux Servers" {
+				t.Errorf("expected name=Linux Servers, got %s", group.Name)
+			}
+		})
+
+		t.Run("CreateAgentGroup_MissingName", func(t *testing.T) {
+			payload := map[string]string{"description": "No name group"}
+			body, _ := json.Marshal(payload)
+			resp, err := http.Post(server.URL+"/api/v1/agent-groups", "application/json", bytes.NewReader(body))
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusBadRequest {
+				t.Errorf("expected 400, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("GetAgentGroup_NotFound", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/agent-groups/ag-nonexistent")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNotFound {
+				t.Errorf("expected 404, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("ListAgentGroups_Empty", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/agent-groups")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("expected 200, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("DeleteAgentGroup_Success", func(t *testing.T) {
+			req, _ := http.NewRequest(http.MethodDelete, server.URL+"/api/v1/agent-groups/ag-linux", nil)
+			resp, err := http.DefaultClient.Do(req)
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusNoContent {
+				t.Errorf("expected 204, got %d", resp.StatusCode)
+			}
+		})
+
+		t.Run("ListAgentGroupMembers_Empty", func(t *testing.T) {
+			resp, err := http.Get(server.URL + "/api/v1/agent-groups/ag-linux/members")
+			if err != nil {
+				t.Fatalf("request failed: %v", err)
+			}
+			defer resp.Body.Close()
+			if resp.StatusCode != http.StatusOK {
+				t.Errorf("expected 200, got %d", resp.StatusCode)
+			}
+		})
+	})
+}
+
+// TestRevocationEndpoints exercises the revocation API endpoints through a full integration stack.
+func TestRevocationEndpoints(t *testing.T) {
+	server, certRepo, _, _ := setupTestServer(t)
+
+	// Create a test certificate with a version
+	now := time.Now()
+	cert := &domain.ManagedCertificate{
+		ID:              "mc-revoke-test",
+		Name:            "Revocation Test Cert",
+		CommonName:      "revoke-test.example.com",
+		SANs:            []string{},
+		Environment:     "test",
+		OwnerID:         "owner-test",
+		TeamID:          "team-test",
+		IssuerID:        "iss-local",
+		RenewalPolicyID: "policy-1",
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       now.AddDate(0, 6, 0),
+		Tags:            map[string]string{},
+		CreatedAt:       now,
+		UpdatedAt:       now,
+	}
+	certRepo.certs["mc-revoke-test"] = cert
+	certRepo.versions["mc-revoke-test"] = []*domain.CertificateVersion{
+		{
+			ID:            "cv-revoke-test",
+			CertificateID: "mc-revoke-test",
+			SerialNumber:  "REVOKE-SERIAL-001",
+			NotBefore:     now,
+			NotAfter:      now.AddDate(1, 0, 0),
+			CreatedAt:     now,
+		},
+	}
+
+	t.Run("RevokeCertificate_Success", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"reason":"keyCompromise"}`)
+		resp, err := http.Post(server.URL+"/api/v1/certificates/mc-revoke-test/revoke", "application/json", body)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		var result map[string]string
+		json.NewDecoder(resp.Body).Decode(&result)
+		if result["status"] != "revoked" {
+			t.Errorf("expected status 'revoked', got %s", result["status"])
+		}
+
+		// Verify certificate status updated
+		if cert.Status != domain.CertificateStatusRevoked {
+			t.Errorf("expected Revoked status, got %s", cert.Status)
+		}
+	})
+
+	t.Run("RevokeCertificate_AlreadyRevoked", func(t *testing.T) {
+		body := bytes.NewBufferString(`{"reason":"superseded"}`)
+		resp, err := http.Post(server.URL+"/api/v1/certificates/mc-revoke-test/revoke", "application/json", body)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 for already revoked, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("RevokeCertificate_NotFound", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/api/v1/certificates/mc-nonexistent/revoke", "application/json", strings.NewReader("{}"))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusNotFound {
+			t.Errorf("expected 404, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetCRL_Success", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/crl")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		var crl map[string]interface{}
+		json.NewDecoder(resp.Body).Decode(&crl)
+
+		if crl["version"] != float64(1) {
+			t.Errorf("expected CRL version 1, got %v", crl["version"])
+		}
+
+		// Should have at least 1 entry from the revocation above
+		total, _ := crl["total"].(float64)
+		if total < 1 {
+			t.Errorf("expected at least 1 CRL entry, got %v", total)
+		}
+	})
+}
+
+// mockNetworkScanService is defined in lifecycle_test.go (same package)

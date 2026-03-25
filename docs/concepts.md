@@ -1,6 +1,6 @@
 # Understanding Certificates: A Beginner's Guide
 
-If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why managing them at scale is hard enough to need a tool like certctl.
+If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why the industry's move toward shorter certificate lifespans — down to 47 days by 2029 — makes automated lifecycle management essential.
 
 ## What Is a TLS Certificate?
 
@@ -12,11 +12,15 @@ Think of it like a notarized ID badge for a website. The badge says "I am api.ex
 
 ## Why Do Certificates Expire?
 
-Every certificate has an expiration date, typically 90 days for Let's Encrypt or up to 1 year for commercial CAs. This isn't a bug — it's a security feature. Short lifetimes limit the damage if a private key is compromised, and they force organizations to prove they still control their domains.
+Every certificate has an expiration date. This isn't a bug — it's a security feature. Short lifetimes limit the damage if a private key is compromised, and they force organizations to prove they still control their domains.
 
-The problem? When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, F5 load balancers, and IIS boxes in three environments, it becomes a ticking time bomb. One missed renewal means a production outage — your site goes down, your API returns errors, and your customers see scary browser warnings.
+Certificate lifespans have been shrinking steadily. A decade ago, certificates lasted up to 5 years. Then the CA/Browser Forum — the industry body that sets certificate rules — reduced the maximum to 3 years, then 2 years, then 398 days. In April 2025, they passed Ballot SC-081v3 with zero opposition (25 CAs in favor, 5 abstentions, all 4 browser vendors in favor), setting a phased reduction to **200 days** (March 2026), **100 days** (March 2027), and **47 days** (March 2029). Let's Encrypt already issues 90-day certificates by default.
 
-**This is the core problem certctl solves**: automated tracking, renewal, and deployment of certificates across your entire infrastructure.
+The trend is clear: shorter lifespans, more frequent renewals, and zero tolerance for manual processes.
+
+When you have 5 certificates, tracking expiry dates is trivial. When you have 500 certificates spread across NGINX servers, Apache instances, HAProxy load balancers, F5 appliances, and IIS boxes in three environments — and each certificate needs renewal every 47 days — manual management becomes impossible. One missed renewal means a production outage: your site goes down, your API returns errors, and your customers see browser warnings.
+
+**This is the core problem certctl solves**: end-to-end automation of the certificate lifecycle — issuance, renewal, and deployment — across your entire infrastructure, with no human intervention required.
 
 ## The Cast of Characters
 
@@ -26,11 +30,13 @@ A CA is the trusted third party that signs your certificates. When a CA signs a 
 
 Common CAs include Let's Encrypt (free, automated), DigiCert, Sectigo, and your organization's internal/private CA. Each issues certificates through different protocols and APIs.
 
+certctl includes a built-in **Local CA** that can operate in two modes: self-signed (default, for development and demos) or as a **subordinate CA** under an enterprise root like Active Directory Certificate Services (ADCS). In sub-CA mode, you load a CA certificate and key signed by your enterprise root, and all certificates certctl issues automatically chain to the enterprise trust hierarchy — no manual trust configuration needed on clients that already trust your enterprise root. certctl also integrates with **step-ca** (Smallstep's private CA) via its native /sign API, providing a lightweight alternative to ACME for internal PKI.
+
 ### ACME Protocol
 
 ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01) or creating a DNS record (DNS-01).
 
-certctl speaks ACME natively via HTTP-01 challenges, so it can request certificates from Let's Encrypt or any ACME-compatible CA without manual intervention. DNS-01 challenge support (required for wildcard certificates) is planned for V2.
+certctl speaks ACME natively with both HTTP-01 and DNS-01 challenges, so it can request certificates — including wildcard certificates — from Let's Encrypt or any ACME-compatible CA without manual intervention. HTTP-01 uses a built-in temporary HTTP server for domain validation; DNS-01 uses pluggable script-based hooks to create TXT records with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
 
 ### Private Key
 
@@ -58,7 +64,7 @@ The control plane never touches private keys. It coordinates the certificate lif
 
 ### Agents
 
-Agents are lightweight processes that run on or near your infrastructure. They do the actual work: generating private keys, creating Certificate Signing Requests (CSRs), receiving signed certificates, and deploying them to servers. An agent might run on the same machine as your NGINX server, or on a management host that has SSH access to your web servers.
+Agents are lightweight processes that run on or near your infrastructure. They do the actual work: generating private keys, creating Certificate Signing Requests (CSRs), receiving signed certificates, and deploying them to target systems. An agent typically runs on the same machine as the target (e.g., your NGINX or IIS server), deploying certificates locally. For network appliances where you can't install an agent, a proxy agent in the same network zone handles deployment via the appliance's API.
 
 The flow looks like this:
 
@@ -72,9 +78,13 @@ The flow looks like this:
 
 At no point does the private key leave the agent. This is a fundamental security property.
 
+Agents also report **metadata** about themselves — their operating system, CPU architecture, IP address, hostname, and version — with every heartbeat. This gives ops teams fleet-wide visibility (e.g., "how many agents are running on ARM?", "which agents are still on v1.0.0?") and powers **agent groups** — dynamic device grouping where policies can be scoped to specific agent criteria like OS type, architecture, or network subnet.
+
 ### Deployment Targets
 
-Targets are the systems where certificates actually get installed — NGINX web servers, F5 BIG-IP load balancers, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX config, calling the F5 REST API, running PowerShell commands on IIS via WinRM).
+Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, F5 BIG-IP appliances, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy).
+
+For targets where an agent runs directly on the machine (NGINX, Apache, HAProxy, IIS), the agent deploys certificates locally — no remote access needed. For network appliances where you can't install an agent (F5 BIG-IP, Palo Alto, etc.), a **proxy agent** in the same network zone picks up the deployment job and calls the appliance's API. The server never initiates outbound connections to any target.
 
 ## The Certificate Lifecycle
 
@@ -112,7 +122,45 @@ certctl is for organizations that need visibility, automation, and accountabilit
 
 ### Teams and Owners
 
-Every certificate belongs to a **team** and has an **owner**. This answers the question "whose problem is it when this cert expires?" In a large organization, the platform team might own infrastructure certs while the payments team owns payment gateway certs.
+Every certificate belongs to a **team** and has an **owner**. This answers the question "whose problem is it when this cert expires?" In a large organization, the platform team might own infrastructure certs while the payments team owns payment gateway certs. Notifications are routed to the owner's email address automatically.
+
+### Agent Groups
+
+Agent groups let you organize agents by criteria — OS, architecture, IP subnet, or version — for dynamic policy scoping. For example, you can create a group matching all Linux agents and scope a renewal policy to that group. Groups can use dynamic matching criteria (agents automatically join when they match) or manual membership (explicitly include/exclude specific agents). Agent groups are managed via the GUI and API.
+
+### Certificate Profiles
+
+Certificate profiles define the cryptographic and lifecycle constraints for a class of certificates. A profile specifies which key types are allowed (e.g., RSA-2048, ECDSA P-256), the maximum validity period, and other enrollment rules. When a certificate is assigned to a profile, certctl enforces these constraints during issuance — if an agent submits a CSR with a disallowed key type, issuance is rejected.
+
+Profiles answer the question "what kind of certificate is this?" while policies answer "is this certificate compliant?" A production TLS profile might allow only ECDSA P-256 with a 90-day max TTL, while a development profile might allow RSA-2048 with a 365-day TTL. Short-lived profiles (TTL under 1 hour) enable machine-to-machine authentication patterns where certificates are issued frequently and expire quickly — these are exempt from CRL/OCSP since expiry itself is sufficient revocation.
+
+Profiles are managed via the API (`/api/v1/profiles`) and the GUI, and can be assigned to certificates during creation or updated later.
+
+### Interactive Renewal Approval
+
+For policies with `auto_renew` disabled, renewal jobs enter an **AwaitingApproval** state instead of processing immediately. An operator must explicitly approve or reject the renewal via the API or GUI. Approved jobs transition to Pending and are picked up by the scheduler. Rejected jobs are cancelled with an optional reason. This is useful for high-value certificates where you want human oversight before renewal.
+
+### Certificate Revocation
+
+When a private key is compromised, a certificate is superseded, or a service is decommissioned, you need to revoke the certificate immediately — not wait for it to expire. Revocation tells clients "stop trusting this certificate right now."
+
+certctl implements revocation using three complementary mechanisms:
+
+**Revocation API**: `POST /api/v1/certificates/{id}/revoke` marks a certificate as revoked in the inventory, records the revocation in a dedicated `certificate_revocations` table, notifies the issuing CA (best-effort — the revocation succeeds even if the CA is unreachable), creates an audit trail entry, and sends notifications. You can specify an RFC 5280 reason code (keyCompromise, superseded, cessationOfOperation, etc.) or let it default to "unspecified."
+
+**Certificate Revocation List (CRL)**: certctl serves both a JSON-formatted CRL at `GET /api/v1/crl` and DER-encoded X.509 CRLs per issuer at `GET /api/v1/crl/{issuer_id}`. The DER CRL is signed by the issuing CA's key and has 24-hour validity — clients can download it periodically to check revocation status offline.
+
+**OCSP Responder**: For real-time revocation checking, certctl includes an embedded OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}`. It returns signed OCSP responses (good, revoked, or unknown) so clients can verify certificate status without downloading the full CRL.
+
+Short-lived certificates (those assigned to profiles with TTL under 1 hour) are exempt from CRL and OCSP — their rapid expiry is considered sufficient revocation. This is a deliberate design choice to reduce infrastructure overhead for ephemeral machine-to-machine credentials.
+
+### Short-Lived Certificates
+
+Short-lived certificates are certificates with a TTL under 1 hour, typically used for service-to-service authentication in microservice architectures. Instead of revoking these certificates when something goes wrong, you simply stop issuing new ones — the existing certificates expire within minutes.
+
+certctl provides a dedicated dashboard view for short-lived credentials that shows active certificates with live TTL countdowns, auto-refreshes every 10 seconds, and filters by profile. This gives ops teams real-time visibility into ephemeral credential activity without cluttering the main certificate inventory.
+
+Short-lived certificates are defined by their profile — assign a certificate to a profile with `max_validity_days` that translates to under 1 hour, and certctl automatically treats it as short-lived: no CRL/OCSP entries, no revocation overhead, just rapid issuance and natural expiry.
 
 ### Policies
 
@@ -120,7 +168,7 @@ Policies are guardrails. You can enforce rules like "production certificates mus
 
 ### Jobs
 
-Every action in certctl — issuing a certificate, renewing one, deploying to a target — is tracked as a **job**. Jobs have states (Pending, Running, Completed, Failed, Cancelled), retry logic, and a full audit trail. If a deployment fails, you can see exactly what happened and when.
+Every action in certctl — issuing a certificate, renewing one, deploying to a target — is tracked as a **job**. Jobs have states (Pending, AwaitingCSR, AwaitingApproval, Running, Completed, Failed, Cancelled), retry logic, and a full audit trail. AwaitingCSR means the job is waiting for an agent to generate a key and submit a CSR. AwaitingApproval means the job requires human approval before proceeding (used with non-auto-renew policies). If a deployment fails, you can see exactly what happened and when.
 
 ### Audit Trail
 
@@ -128,10 +176,41 @@ Every action is logged: who did it, what changed, when, and why. This is essenti
 
 ### Notifications
 
-certctl can alert you when certificates are expiring, when renewals fail, when deployments succeed, or when policy violations are detected. Notifications go out via email or webhooks, with Slack support planned.
+certctl can alert you when certificates are expiring, when renewals fail, when deployments succeed, or when policy violations are detected. Notifications are delivered via six channels: Email, Webhook, Slack, Microsoft Teams, PagerDuty, and OpsGenie. Each notifier is configured independently via environment variables and can be enabled or disabled as needed.
+
+### CLI
+
+certctl ships with a command-line tool (`certctl-cli`) for operators who prefer terminal workflows or need to integrate certctl into shell scripts and CI/CD pipelines. The CLI wraps the REST API with 10 subcommands: `list-certs`, `get-cert`, `renew-cert`, `revoke-cert`, `list-agents`, `list-jobs`, `health`, `metrics`, and `import` (for bulk PEM import).
+
+The CLI supports both table and JSON output formats (`--format table` or `--format json`), connects to the server via `CERTCTL_SERVER_URL` and authenticates with `CERTCTL_API_KEY`. It's built with Go's standard library only — no external dependencies.
+
+### MCP Server (AI Integration)
+
+certctl includes an MCP (Model Context Protocol) server that exposes all 78 API endpoints as MCP tools. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
+
+The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport and acts as a stateless HTTP proxy to the certctl REST API. It requires no additional infrastructure — just point it at your certctl server URL and API key.
+
+### Certificate Discovery
+
+Certificate discovery is the process of automatically finding existing certificates in your infrastructure — certificates you didn't issue through certctl, possibly issued by other CAs or tools. This is essential for building a complete inventory before you can manage everything.
+
+**How it works:** There are two discovery modes. *Filesystem discovery* — agents scan configured directories (configured via `CERTCTL_DISCOVERY_DIRS`) for certificate files. On startup and every 6 hours, the agent walks directories recursively, parses PEM and DER files, extracts metadata, and reports findings to the control plane. *Network discovery* — the control plane itself probes TLS endpoints across configured CIDR ranges and ports (enabled via `CERTCTL_NETWORK_SCAN_ENABLED=true`). It connects to each endpoint, extracts certificates from the TLS handshake, and feeds results into the same discovery pipeline. This finds certificates on services you may not have agents on. In both cases, the server deduplicates by fingerprint and stores discovered certs with a status: **Unmanaged** (discovered but not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage it).
+
+This gives you a three-step triage workflow:
+1. **Discover** — Agents find all existing certs on your infrastructure
+2. **Triage** — Operators review discoveries and decide: claim it (enroll for management), or dismiss it (not worth managing)
+3. **Baseline** — Once triaged, you have a complete baseline of what's deployed, what you're managing, and what's unmanaged
+
+This is a prerequisite for multi-CA migration, compliance audits, and building confidence that you've found all the certificates that matter.
+
+### Observability
+
+certctl exposes metrics in two formats: a JSON endpoint at `GET /api/v1/metrics` and a Prometheus exposition format at `GET /api/v1/metrics/prometheus` (compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics). Both provide gauges (certificate totals by status, agent counts, pending jobs), counters (completed/failed jobs), and uptime. Five stats endpoints power the dashboard charts: summary statistics, certificates by status, expiration timeline, job trends, and issuance rate.
+
+The agent fleet overview page groups agents by OS, architecture, and version, showing distribution charts that help ops teams track fleet health and identify outdated agents. All API requests are logged via structured `slog` middleware with request IDs for correlation.
 
 ## What's Next
 
 Now that you understand the concepts, head to the [Quick Start Guide](quickstart.md) to get certctl running locally in under 5 minutes. You'll see a pre-loaded dashboard with demo certificates, explore the API, and understand how everything fits together.
 
-For a deeper look at the system design, see the [Architecture Guide](architecture.md).
+For a deeper look at the system design, see the [Architecture Guide](architecture.md). For terminal-based workflows, check out the CLI Guide (docs coming soon). For AI-native integration, see the [MCP Server Guide](mcp.md). For the full API reference, see the [OpenAPI Spec Guide](openapi.md).

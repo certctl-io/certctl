@@ -54,9 +54,14 @@ temp/
 # Build artifacts
 certctl-server
 certctl-agent
+certctl-cli
 /server
 /agent
+
+# Private strategy docs
+roadmap.md
 
 # OS
 .DS_Store
 Thumbs.db
+mcp-server
