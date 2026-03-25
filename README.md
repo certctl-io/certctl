@@ -26,8 +26,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 | Guide | Description |
 |-------|-------------|
 | [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
-| [Quick Start](docs/quickstart.md) | Get running in 5 minutes with accurate API examples |
-| [Demo Walkthrough](docs/demo-guide.md) | 5-7 minute guided stakeholder presentation |
+| [Quick Start](docs/quickstart.md) | Get running in 5 minutes — dashboard, API, CLI, discovery, stakeholder demo flow |
 | [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |

@@ -3665,7 +3665,7 @@ docker compose logs certctl-server 2>&1 | grep -v "^certctl-server" | grep -cv "
 | 24.1.4 | `docs/architecture.md` | Component diagram matches `docker compose ps`. Says "21 tables", "78 MCP Tools", "900+ tests". | PASS if numbers match |
 | 24.1.5 | `docs/connectors.md` | All 5 issuer types and 5 target types documented. F5/IIS marked as stubs. | PASS if all documented |
 | 24.1.6 | `docs/features.md` | Endpoint count (93), MCP tools (78), table count (21), test count (900+) all accurate. | PASS if numbers match |
-| 24.1.7 | `docs/demo-guide.md` | Demo walkthrough works against fresh `docker compose up`. | PASS if all steps work |
+| 24.1.7 | `docs/quickstart.md` | Quick start + demo walkthrough works against fresh `docker compose up`. | PASS if all steps work |
 | 24.1.8 | `docs/demo-advanced.md` | All parts executable against running stack. Network discovery section present. | PASS if all executable |
 | 24.1.9 | `docs/compliance.md` | Framework links resolve, mapping references real features. | PASS if links work |
 | 24.1.10 | `docs/compliance-soc2.md` | API endpoints cited actually exist in the router. | PASS if endpoints exist |
