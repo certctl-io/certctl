@@ -10,10 +10,12 @@ import (
 	"encoding/base64"
 	"encoding/pem"
 	"errors"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 )
@@ -80,9 +82,33 @@ func generateTestCSRBase64DER(t *testing.T) string {
 	return base64.StdEncoding.EncodeToString(csrDER)
 }
 
+// generateTestCertPEM creates a real self-signed certificate PEM for testing.
+func generateTestCertPEM(t *testing.T) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("failed to generate key: %v", err)
+	}
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "Test CA"},
+		NotBefore:    time.Now().Add(-1 * time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+		KeyUsage:     x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:         true,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("failed to create certificate: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+}
+
 func TestESTCACerts_Success(t *testing.T) {
+	certPEM := generateTestCertPEM(t)
 	svc := &mockESTService{
-		CACertPEM: "-----BEGIN CERTIFICATE-----\nMIIBmjCCAUCgAwIBAgIRATest\n-----END CERTIFICATE-----\n",
+		CACertPEM: certPEM,
 	}
 	h := NewESTHandler(svc)
 
@@ -133,10 +159,11 @@ func TestESTCACerts_ServiceError(t *testing.T) {
 
 func TestESTSimpleEnroll_Success_PEM(t *testing.T) {
 	csrPEM := generateTestCSRPEM(t)
+	certPEM := generateTestCertPEM(t)
 	svc := &mockESTService{
 		EnrollResult: &domain.ESTEnrollResult{
-			CertPEM:  "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n",
-			ChainPEM: "-----BEGIN CERTIFICATE-----\nMIIBchain\n-----END CERTIFICATE-----\n",
+			CertPEM:  certPEM,
+			ChainPEM: certPEM,
 		},
 	}
 	h := NewESTHandler(svc)
@@ -157,9 +184,10 @@ func TestESTSimpleEnroll_Success_PEM(t *testing.T) {
 
 func TestESTSimpleEnroll_Success_Base64DER(t *testing.T) {
 	csrB64 := generateTestCSRBase64DER(t)
+	certPEM := generateTestCertPEM(t)
 	svc := &mockESTService{
 		EnrollResult: &domain.ESTEnrollResult{
-			CertPEM:  "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n",
+			CertPEM:  certPEM,
 			ChainPEM: "",
 		},
 	}
@@ -232,10 +260,11 @@ func TestESTSimpleEnroll_ServiceError(t *testing.T) {
 
 func TestESTSimpleReEnroll_Success(t *testing.T) {
 	csrPEM := generateTestCSRPEM(t)
+	certPEM := generateTestCertPEM(t)
 	svc := &mockESTService{
 		EnrollResult: &domain.ESTEnrollResult{
-			CertPEM:  "-----BEGIN CERTIFICATE-----\nMIIBtest\n-----END CERTIFICATE-----\n",
-			ChainPEM: "-----BEGIN CERTIFICATE-----\nMIIBchain\n-----END CERTIFICATE-----\n",
+			CertPEM:  certPEM,
+			ChainPEM: certPEM,
 		},
 	}
 	h := NewESTHandler(svc)
@@ -326,7 +355,7 @@ func TestBuildCertsOnlyPKCS7(t *testing.T) {
 }
 
 func TestPemToDERChain(t *testing.T) {
-	pemData := "-----BEGIN CERTIFICATE-----\nMIIBmjCCAUCgAwIBAgIRATest\n-----END CERTIFICATE-----\n"
+	pemData := generateTestCertPEM(t)
 	certs, err := pemToDERChain(pemData)
 	if err != nil {
 		t.Fatalf("pemToDERChain failed: %v", err)
