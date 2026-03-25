@@ -111,7 +111,7 @@ curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
 curl -s http://localhost:8443/api/v1/agents | jq .
 
 # Check agent pending work
-curl -s http://localhost:8443/api/v1/agents/agent-nginx-prod/work | jq .
+curl -s http://localhost:8443/api/v1/agents/ag-web-prod/work | jq .
 
 # View audit trail
 curl -s http://localhost:8443/api/v1/audit | jq .
@@ -322,7 +322,7 @@ export CERTCTL_API_KEY="test-key-123"
 ./mcp-server
 ```
 
-Exposes all 78 API endpoints as MCP tools via stdio transport. Ask Claude: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
+Exposes 78 MCP tools covering the REST API via stdio transport. Ask Claude: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
 
 ## Demo Data Reference
 
@@ -331,7 +331,7 @@ Exposes all 78 API endpoints as MCP tools via stdio transport. Ask Claude: "What
 | Teams | 5 | Platform, Security, Payments, Frontend, Data |
 | Owners | 5 | Alice, Bob, Carol, Dave, Eve |
 | Issuers | 4 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, DigiCert (disabled) |
-| Agents | 5 | nginx-prod, nginx-staging, f5-prod, iis-prod, data-agent |
+| Agents | 5 | ag-web-prod, ag-web-staging, ag-lb-prod, ag-iis-prod, ag-data-prod |
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
 | Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |

@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **91 endpoints** across 19 resource domains under `/api/v1/`
+- **95 endpoints** across 20 resource domains under `/api/v1/` + `/.well-known/est/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -94,6 +94,7 @@ curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z
 | **Notifications** | 3 | List, get, mark as read |
 | **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
 | **Metrics** | 2 | JSON metrics (gauges, counters, uptime), Prometheus exposition format |
+| **EST (RFC 7030)** | 4 | CA certs (PKCS#7), simple enrollment, re-enrollment, CSR attributes |
 | **Health** | 4 | Health check, readiness check, auth info, auth check |
 
 ---
@@ -924,9 +925,39 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - CLI flags: `--server`, `--api-key`, `--format` (json/table)
 - Tested with httptest mock server; all commands covered
 
+### EST Server (RFC 7030, M23)
+**Enrollment over Secure Transport** — industry-standard protocol for device certificate enrollment. Enables WiFi/802.1X, MDM, IoT, and BYOD use cases where devices need certificates without direct API access.
+
+**Endpoints** (under `/.well-known/est/` per RFC 7030):
+
+| Endpoint | Method | Description | Wire Format |
+|----------|--------|-------------|-------------|
+| `/cacerts` | GET | CA certificate chain distribution | Base64 PKCS#7 certs-only (application/pkcs7-mime) |
+| `/simpleenroll` | POST | Initial certificate enrollment | Request: PEM or base64-DER PKCS#10; Response: PKCS#7 |
+| `/simplereenroll` | POST | Certificate re-enrollment (renewal) | Same as simpleenroll |
+| `/csrattrs` | GET | CSR attributes the server requires | ASN.1 DER (application/csrattrs) |
+
+**Architecture:**
+- **ESTService** bridges handler to existing `IssuerConnector` — no new issuance logic, reuses existing CA connectors
+- **CSR input handling** — accepts both base64-encoded DER (EST wire standard) and PEM-encoded PKCS#10 (convenience)
+- **PKCS#7 output** — hand-rolled ASN.1 degenerate SignedData builder (no external PKCS#7 dependency)
+- **CSR validation** — signature verification, Common Name extraction, SAN extraction (DNS, IP, email, URI)
+- **Configurable issuer binding** — `CERTCTL_EST_ISSUER_ID` selects which issuer connector processes enrollment
+- **Optional profile binding** — `CERTCTL_EST_PROFILE_ID` constrains enrollments to a specific certificate profile
+- **Audit trail** — all EST enrollments recorded with protocol=EST, CN, SANs, issuer ID, serial, profile ID
+
+**Configuration:**
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_EST_ENABLED` | `false` | Enable EST enrollment endpoints |
+| `CERTCTL_EST_ISSUER_ID` | `iss-local` | Issuer connector for EST enrollments |
+| `CERTCTL_EST_PROFILE_ID` | — | Optional profile ID to constrain enrollments |
+
+**Note:** EST endpoints currently use the same middleware stack as the REST API (API key auth). TLS client certificate authentication for EST is planned for V3.
+
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 93 operations (91 API + /health + /ready), all request/response schemas, enums, pagination
+- **Scope** — 97 operations (95 API + /health + /ready), all request/response schemas, enums, pagination
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)
@@ -1199,7 +1230,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 
 | Category | Count |
 |----------|-------|
-| **API Endpoints** | 91 (under /api/v1/) |
+| **API Endpoints** | 95 (under /api/v1/ + /.well-known/est/) |
 | **Dashboard** | Full web GUI |
 | **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
 | **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |

@@ -221,7 +221,7 @@ You should see:
 
 The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
 
-**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA), ACME (HTTP-01 + DNS-01 for wildcards), and step-ca (Smallstep private CA via native /sign API). OpenSSL/Custom CA is planned for V2; DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3.
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA), ACME (HTTP-01 + DNS-01 for wildcards), and step-ca (Smallstep private CA via native /sign API). V2 adds the OpenSSL/Custom CA connector (script-based signing). DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3+.
 
 ```mermaid
 flowchart TD
@@ -472,14 +472,14 @@ In production, agents poll for work and report results. You can simulate this ma
 
 ```bash
 # Poll for pending deployment work (as an agent)
-curl -s "$API/api/v1/agents/agent-nginx-prod/work" | jq .
+curl -s "$API/api/v1/agents/ag-web-prod/work" | jq .
 ```
 
 This returns pending deployment jobs assigned to the agent. The agent would then fetch the certificate, deploy it, and report back:
 
 ```bash
 # Report job completion (replace JOB_ID with an actual job ID from the work response)
-curl -s -X POST "$API/api/v1/agents/agent-nginx-prod/jobs/JOB_ID/status" \
+curl -s -X POST "$API/api/v1/agents/ag-web-prod/jobs/JOB_ID/status" \
   -H "Content-Type: application/json" \
   -d '{
     "status": "Completed",
@@ -908,7 +908,7 @@ export CERTCTL_API_KEY="test-key-123"
 
 ## Part 15: MCP Server for AI Integration (M18a)
 
-certctl exposes all 78 API endpoints as tools via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
+certctl exposes 78 MCP tools covering the REST API via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
 
 ```bash
 # Build the MCP server
@@ -922,7 +922,7 @@ export CERTCTL_API_KEY="test-key-123"
 ./mcp-server
 ```
 
-**How it works:** The MCP server uses the official Model Context Protocol Go SDK to expose stateless HTTP proxies to all 78 API endpoints. Each MCP tool corresponds to one or more REST endpoints and includes:
+**How it works:** The MCP server uses the official Model Context Protocol Go SDK to expose 78 stateless HTTP proxy tools covering the REST API. Each MCP tool corresponds to one or more REST endpoints and includes:
 
 - **Input schema** — typed arguments with JSON schema hints for LLM-friendly introspection
 - **Binary support** — handles DER-encoded CRL and OCSP responses without mangling

@@ -358,6 +358,11 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 	return nil, nil
 }
 
+// GetCACertPEM is not supported by the custom CA connector (no CA cert access).
+func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
+	return "", fmt.Errorf("custom CA connector does not provide CA certificate access")
+}
+
 // --- Helper Methods ---
 
 // writeTempFile writes data to a temporary file and returns its path.

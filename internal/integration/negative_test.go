@@ -75,6 +75,10 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
+	// EST handler — uses real Local CA issuer via ESTService
+	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
+	estHandler := handler.NewESTHandler(estService)
+
 	r := router.New()
 	r.RegisterHandlers(
 		certificateHandler,
@@ -95,6 +99,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		discoveryHandler,
 		networkScanHandler,
 	)
+	r.RegisterESTHandlers(estHandler)
 
 	server := httptest.NewServer(r)
 	t.Cleanup(func() { server.Close() })

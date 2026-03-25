@@ -664,3 +664,12 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 
 	return respBytes, nil
 }
+
+// GetCACertPEM returns the PEM-encoded CA certificate for this issuer.
+// Used by the EST /cacerts endpoint to distribute the CA trust chain.
+func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
+	if err := c.ensureCA(ctx); err != nil {
+		return "", fmt.Errorf("CA initialization failed: %w", err)
+	}
+	return c.caCertPEM, nil
+}

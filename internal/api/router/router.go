@@ -209,6 +209,16 @@ func (r *Router) RegisterHandlers(
 	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(networkScan.TriggerNetworkScan))
 }
 
+// RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.
+// EST endpoints use a separate middleware chain (no API key auth — EST uses TLS client certs).
+func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
+	// EST endpoints per RFC 7030 Section 3.2.2
+	r.Register("GET /.well-known/est/cacerts", http.HandlerFunc(est.CACerts))
+	r.Register("POST /.well-known/est/simpleenroll", http.HandlerFunc(est.SimpleEnroll))
+	r.Register("POST /.well-known/est/simplereenroll", http.HandlerFunc(est.SimpleReEnroll))
+	r.Register("GET /.well-known/est/csrattrs", http.HandlerFunc(est.CSRAttrs))
+}
+
 // GetMux returns the underlying http.ServeMux for direct access if needed.
 func (r *Router) GetMux() *http.ServeMux {
 	return r.mux

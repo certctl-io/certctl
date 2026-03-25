@@ -38,6 +38,14 @@ ACME (Automatic Certificate Management Environment) is the protocol Let's Encryp
 
 certctl speaks ACME natively with both HTTP-01 and DNS-01 challenges, so it can request certificates — including wildcard certificates — from Let's Encrypt or any ACME-compatible CA without manual intervention. HTTP-01 uses a built-in temporary HTTP server for domain validation; DNS-01 uses pluggable script-based hooks to create TXT records with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
 
+### EST Protocol (Enrollment over Secure Transport)
+
+EST (RFC 7030) is a standard protocol for devices to request certificates from a CA. While ACME was designed for web servers proving domain ownership, EST was designed for devices that need certificates without domain validation — think WiFi access points, corporate laptops connecting to 802.1X networks, IoT devices, and mobile devices managed by MDM platforms.
+
+The workflow is straightforward: a device generates a key pair and a Certificate Signing Request (CSR), sends the CSR to the EST server, and gets back a signed certificate. The EST server also distributes its CA certificate chain so devices can build a complete trust path.
+
+certctl includes a built-in EST server at `/.well-known/est/` with four operations: distributing the CA certificate chain (`/cacerts`), enrolling new devices (`/simpleenroll`), renewing existing certificates (`/simplereenroll`), and advertising CSR requirements (`/csrattrs`). EST enrollment uses the same issuer connectors as the REST API — so a certificate issued via EST and a certificate issued via the dashboard go through the same CA, appear in the same inventory, and follow the same policies.
+
 ### Private Key
 
 Every certificate has a corresponding private key. The certificate is public — anyone can see it. The private key is secret — it's what allows your server to decrypt traffic. If someone gets your private key, they can impersonate your server.
@@ -186,9 +194,15 @@ The CLI supports both table and JSON output formats (`--format table` or `--form
 
 ### MCP Server (AI Integration)
 
-certctl includes an MCP (Model Context Protocol) server that exposes all 78 API endpoints as MCP tools. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
+certctl includes an MCP (Model Context Protocol) server that exposes 78 MCP tools covering the REST API. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
 
 The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport and acts as a stateless HTTP proxy to the certctl REST API. It requires no additional infrastructure — just point it at your certctl server URL and API key.
+
+### EST Enrollment (Device Certificates)
+
+certctl's EST server enables device certificate enrollment for use cases that don't fit the traditional "ops team requests a cert via API" model. When a RADIUS server is configured to use certctl for 802.1X WiFi authentication, or an MDM platform enrolls corporate devices, they use the EST protocol at `/.well-known/est/`. The EST server validates the CSR, issues a certificate via the configured issuer connector, and returns it in PKCS#7 format — the standard wire format that every EST client understands. Each enrollment is recorded in the audit trail with the protocol, common name, SANs, issuer, and serial number.
+
+Enable it with `CERTCTL_EST_ENABLED=true`. Optionally bind enrollments to a specific issuer (`CERTCTL_EST_ISSUER_ID`) or certificate profile (`CERTCTL_EST_PROFILE_ID`) to constrain what EST clients can request.
 
 ### Certificate Discovery
 

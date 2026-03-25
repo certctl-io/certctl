@@ -467,5 +467,10 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 	return nil, fmt.Errorf("step-ca provides its own OCSP responder; use step-ca's /ocsp directly")
 }
 
+// GetCACertPEM is not directly supported; step-ca serves its own /root endpoint.
+func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
+	return "", fmt.Errorf("step-ca serves its own CA certificate at /root; use step-ca's endpoint directly")
+}
+
 // Ensure Connector implements the issuer.Connector interface.
 var _ issuer.Connector = (*Connector)(nil)

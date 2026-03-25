@@ -95,3 +95,8 @@ func (a *IssuerConnectorAdapter) SignOCSPResponse(ctx context.Context, req OCSPS
 		NextUpdate:       req.NextUpdate,
 	})
 }
+
+// GetCACertPEM delegates to the underlying connector.
+func (a *IssuerConnectorAdapter) GetCACertPEM(ctx context.Context) (string, error) {
+	return a.connector.GetCACertPEM(ctx)
+}

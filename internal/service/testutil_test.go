@@ -634,6 +634,13 @@ func (m *mockIssuerConnector) SignOCSPResponse(ctx context.Context, req OCSPSign
 	return []byte("mock-ocsp-response"), nil
 }
 
+func (m *mockIssuerConnector) GetCACertPEM(ctx context.Context) (string, error) {
+	if m.Err != nil {
+		return "", m.Err
+	}
+	return "-----BEGIN CERTIFICATE-----\nmock-ca-cert\n-----END CERTIFICATE-----", nil
+}
+
 // Constructor functions for mocks
 
 func newMockCertificateRepository() *mockCertRepo {

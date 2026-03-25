@@ -44,6 +44,8 @@ type IssuerConnector interface {
 	GenerateCRL(ctx context.Context, revokedCerts []CRLEntry) ([]byte, error)
 	// SignOCSPResponse signs an OCSP response for the given certificate serial.
 	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
+	// GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
+	GetCACertPEM(ctx context.Context) (string, error)
 }
 
 // IssuanceResult holds the result of a certificate issuance or renewal operation.

@@ -45,6 +45,11 @@ type Connector interface {
     // SignOCSPResponse signs an OCSP response for the given certificate serial.
     // Returns nil if the issuer does not support OCSP (e.g., ACME).
     SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
+
+    // GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
+    // Used by the EST server's /cacerts endpoint (RFC 7030).
+    // Returns error if the issuer doesn't provide a static CA chain (e.g., ACME, step-ca).
+    GetCACertPEM(ctx context.Context) (string, error)
 }
 
 type IssuanceRequest struct {
@@ -205,6 +210,17 @@ Each issuer handles revocation differently:
 - **ACME**: ACME v2 has limited revocation support — certctl records the revocation locally and serves it via CRL/OCSP.
 - **step-ca**: Calls step-ca's `/revoke` API endpoint. Clients should check step-ca's own CRL/OCSP for authoritative status.
 - **OpenSSL/Custom CA**: Invokes the configured revoke script (`CERTCTL_OPENSSL_REVOKE_SCRIPT`) with the serial number as an argument.
+
+### EST Integration (GetCACertPEM)
+
+The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used by the EST server's `/.well-known/est/cacerts` endpoint (RFC 7030) to distribute the CA chain to enrolling devices. Each issuer handles this differently:
+
+- **Local CA**: Returns the CA certificate PEM (self-signed or sub-CA cert). This is the primary EST issuer.
+- **ACME**: Returns error — ACME CAs provide chains per-issuance, not statically.
+- **step-ca**: Returns error — step-ca serves its own `/root` endpoint for CA distribution.
+- **OpenSSL/Custom CA**: Returns error — custom script-based CAs have no CA cert access through certctl.
+
+Note: EST (Enrollment over Secure Transport) is not a connector — it's a protocol handler (`internal/api/handler/est.go`) that delegates certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
 
 ### Planned Issuers
 

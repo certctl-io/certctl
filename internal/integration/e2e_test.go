@@ -2,9 +2,17 @@ package integration
 
 import (
 	"bytes"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"io"
 	"net/http"
+	"strings"
 	"testing"
 	"time"
 
@@ -889,6 +897,217 @@ func TestM20EnhancedQueryAPI(t *testing.T) {
 		defer resp.Body.Close()
 		if resp.StatusCode != http.StatusOK {
 			t.Errorf("expected 200 (invalid time ignored), got %d", resp.StatusCode)
+		}
+	})
+}
+
+// generateE2ECSRPEM creates a valid ECDSA P-256 CSR PEM for integration testing.
+func generateE2ECSRPEM(t *testing.T, cn string, sans []string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: cn},
+		DNSNames: sans,
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, key)
+	if err != nil {
+		t.Fatalf("create CSR: %v", err)
+	}
+	return string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+}
+
+// generateE2ECSRBase64DER creates a valid base64-encoded DER CSR for EST wire format testing.
+func generateE2ECSRBase64DER(t *testing.T, cn string, sans []string) string {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("generate key: %v", err)
+	}
+	template := &x509.CertificateRequest{
+		Subject:  pkix.Name{CommonName: cn},
+		DNSNames: sans,
+	}
+	csrDER, err := x509.CreateCertificateRequest(rand.Reader, template, key)
+	if err != nil {
+		t.Fatalf("create CSR: %v", err)
+	}
+	return base64.StdEncoding.EncodeToString(csrDER)
+}
+
+// TestESTEndpoints exercises the EST (RFC 7030) enrollment endpoints end-to-end (M23).
+func TestESTEndpoints(t *testing.T) {
+	server, _, _, _ := setupTestServer(t)
+
+	// ===========================
+	// GET /cacerts — CA certificate chain
+	// ===========================
+	t.Run("GetCACerts_Success", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/.well-known/est/cacerts")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/pkcs7-mime") {
+			t.Errorf("expected application/pkcs7-mime content type, got %s", ct)
+		}
+		cte := resp.Header.Get("Content-Transfer-Encoding")
+		if cte != "base64" {
+			t.Errorf("expected base64 content-transfer-encoding, got %s", cte)
+		}
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		if len(bodyBytes) == 0 {
+			t.Error("expected non-empty PKCS#7 response body")
+		}
+	})
+
+	t.Run("GetCACerts_MethodNotAllowed", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/.well-known/est/cacerts", "application/json", nil)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
+		}
+	})
+
+	// ===========================
+	// POST /simpleenroll — certificate enrollment
+	// ===========================
+	t.Run("SimpleEnroll_PEM_Success", func(t *testing.T) {
+		csrPEM := generateE2ECSRPEM(t, "est-test.example.com", []string{"est-test.example.com"})
+		resp, err := http.Post(server.URL+"/.well-known/est/simpleenroll", "application/pkcs10", strings.NewReader(csrPEM))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+		ct := resp.Header.Get("Content-Type")
+		if !strings.Contains(ct, "application/pkcs7-mime") {
+			t.Errorf("expected application/pkcs7-mime, got %s", ct)
+		}
+	})
+
+	t.Run("SimpleEnroll_Base64DER_Success", func(t *testing.T) {
+		csrB64 := generateE2ECSRBase64DER(t, "est-der.example.com", []string{"est-der.example.com"})
+		resp, err := http.Post(server.URL+"/.well-known/est/simpleenroll", "application/pkcs10", strings.NewReader(csrB64))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+	})
+
+	t.Run("SimpleEnroll_EmptyBody", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/.well-known/est/simpleenroll", "application/pkcs10", strings.NewReader(""))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 for empty body, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("SimpleEnroll_InvalidCSR", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/.well-known/est/simpleenroll", "application/pkcs10", strings.NewReader("not-a-valid-csr"))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusBadRequest {
+			t.Errorf("expected 400 for invalid CSR, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("SimpleEnroll_MissingCN", func(t *testing.T) {
+		csrPEM := generateE2ECSRPEM(t, "", []string{"no-cn.example.com"})
+		resp, err := http.Post(server.URL+"/.well-known/est/simpleenroll", "application/pkcs10", strings.NewReader(csrPEM))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		// Should fail because EST requires a Common Name
+		if resp.StatusCode == http.StatusOK {
+			t.Error("expected error for CSR without Common Name")
+		}
+	})
+
+	t.Run("SimpleEnroll_MethodNotAllowed", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/.well-known/est/simpleenroll")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
+		}
+	})
+
+	// ===========================
+	// POST /simplereenroll — certificate re-enrollment
+	// ===========================
+	t.Run("SimpleReEnroll_Success", func(t *testing.T) {
+		csrPEM := generateE2ECSRPEM(t, "renew-est.example.com", []string{"renew-est.example.com"})
+		resp, err := http.Post(server.URL+"/.well-known/est/simplereenroll", "application/pkcs10", strings.NewReader(csrPEM))
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+	})
+
+	t.Run("SimpleReEnroll_MethodNotAllowed", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/.well-known/est/simplereenroll")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
+		}
+	})
+
+	// ===========================
+	// GET /csrattrs — CSR attributes
+	// ===========================
+	t.Run("GetCSRAttrs_NoContent", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/.well-known/est/csrattrs")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		// Default implementation returns nil attrs → 204 No Content
+		if resp.StatusCode != http.StatusNoContent {
+			t.Errorf("expected 204, got %d", resp.StatusCode)
+		}
+	})
+
+	t.Run("GetCSRAttrs_MethodNotAllowed", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/.well-known/est/csrattrs", "application/json", nil)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
 		}
 	})
 }

@@ -302,6 +302,25 @@ func main() {
 		discoveryHandler,
 		networkScanHandler,
 	)
+	// Register EST (RFC 7030) handlers if enabled
+	if cfg.EST.Enabled {
+		issuerConn, ok := issuerRegistry[cfg.EST.IssuerID]
+		if !ok {
+			logger.Error("EST issuer not found in registry", "issuer_id", cfg.EST.IssuerID)
+			os.Exit(1)
+		}
+		estService := service.NewESTService(cfg.EST.IssuerID, issuerConn, auditService, logger)
+		if cfg.EST.ProfileID != "" {
+			estService.SetProfileID(cfg.EST.ProfileID)
+		}
+		estHandler := handler.NewESTHandler(estService)
+		apiRouter.RegisterESTHandlers(estHandler)
+		logger.Info("EST server enabled",
+			"issuer_id", cfg.EST.IssuerID,
+			"profile_id", cfg.EST.ProfileID,
+			"endpoints", "/.well-known/est/{cacerts,simpleenroll,simplereenroll,csrattrs}")
+	}
+
 	logger.Info("registered all API handlers")
 
 	// Build middleware stack
@@ -380,9 +399,10 @@ func main() {
 		fileServer := http.FileServer(http.Dir(webDir))
 		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			// API and health routes go to the API handler
+			// API, health, and EST routes go to the API handler
 			if path == "/health" || path == "/ready" ||
-				(len(path) >= 8 && path[:8] == "/api/v1/") {
+				(len(path) >= 8 && path[:8] == "/api/v1/") ||
+				(len(path) >= 16 && path[:16] == "/.well-known/est") {
 				apiHandler.ServeHTTP(w, r)
 				return
 			}

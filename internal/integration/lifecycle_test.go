@@ -82,6 +82,10 @@ func TestCertificateLifecycle(t *testing.T) {
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
+	// EST handler — uses real Local CA issuer via ESTService
+	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
+	estHandler := handler.NewESTHandler(estService)
+
 	// Create router and register handlers
 	r := router.New()
 	r.RegisterHandlers(
@@ -103,6 +107,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		discoveryHandler,
 		networkScanHandler,
 	)
+	r.RegisterESTHandlers(estHandler)
 
 	// Create test server
 	server := httptest.NewServer(r)

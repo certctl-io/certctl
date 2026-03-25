@@ -31,6 +31,10 @@ type Connector interface {
 	// SignOCSPResponse signs an OCSP response for the given certificate serial.
 	// Returns nil if the issuer does not support OCSP (e.g., ACME).
 	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
+
+	// GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
+	// Used by the EST /cacerts endpoint. Returns empty string if not available.
+	GetCACertPEM(ctx context.Context) (string, error)
 }
 
 // IssuanceRequest contains the parameters for issuing a new certificate.

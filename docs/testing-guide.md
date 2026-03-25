@@ -3832,9 +3832,248 @@ grep -rn "errors.Is.*errors.New\|errors.Is(.*err.*errors.New" internal/service/*
 
 ---
 
+## Part 26: EST Server (RFC 7030)
+
+**Scope:** Enrollment over Secure Transport — 4 endpoints under `/.well-known/est/` for device certificate enrollment. Tests cover CA cert distribution, certificate enrollment (PEM and base64-DER CSR formats), re-enrollment, CSR attributes, wire format compliance, and error handling.
+
+**Prerequisites:** Server running with `CERTCTL_EST_ENABLED=true`, `CERTCTL_EST_ISSUER_ID=iss-local` (or a valid issuer). An ECDSA P-256 key pair and CSR for enrollment tests.
+
+---
+
+**Test 26.1 — GET /.well-known/est/cacerts returns PKCS#7 CA chain**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -H "Authorization: Bearer $API_KEY" \
+  http://localhost:8443/.well-known/est/cacerts
+```
+
+**Expected:** HTTP 200, `Content-Type: application/pkcs7-mime`, `Content-Transfer-Encoding: base64`. Body is base64-encoded degenerate PKCS#7 SignedData containing the CA certificate chain.
+**PASS if** status = 200, correct content type, non-empty body.
+
+---
+
+**Test 26.2 — GET /cacerts method enforcement**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  http://localhost:8443/.well-known/est/cacerts
+```
+
+**Expected:** HTTP 405 Method Not Allowed.
+**PASS if** status = 405.
+
+---
+
+**Test 26.3 — POST /.well-known/est/simpleenroll with PEM CSR**
+
+Generate a test CSR and submit as PEM:
+
+```bash
+# Generate ECDSA P-256 key and CSR
+openssl ecparam -name prime256v1 -genkey -noout -out /tmp/est-test.key
+openssl req -new -key /tmp/est-test.key -out /tmp/est-test.csr \
+  -subj "/CN=est-test.example.com" \
+  -addext "subjectAltName=DNS:est-test.example.com"
+
+# Submit PEM CSR
+curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  --data-binary @/tmp/est-test.csr \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 200, `Content-Type: application/pkcs7-mime`, `Content-Transfer-Encoding: base64`. Body contains base64-encoded PKCS#7 with the signed certificate.
+**PASS if** status = 200, response decodes to valid PKCS#7.
+
+---
+
+**Test 26.4 — POST /simpleenroll with base64-encoded DER CSR**
+
+```bash
+# Convert PEM CSR to base64-encoded DER (EST wire format)
+openssl req -in /tmp/est-test.csr -outform DER | base64 > /tmp/est-test-b64der.csr
+
+curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  --data-binary @/tmp/est-test-b64der.csr \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 200. Server auto-detects base64-encoded DER and converts to PEM internally.
+**PASS if** status = 200.
+
+---
+
+**Test 26.5 — POST /simpleenroll with empty body**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  -X POST -d "" \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 400 Bad Request.
+**PASS if** status = 400.
+
+---
+
+**Test 26.6 — POST /simpleenroll with invalid CSR**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  -X POST -d "not-a-valid-csr-at-all" \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 400 Bad Request.
+**PASS if** status = 400.
+
+---
+
+**Test 26.7 — POST /simpleenroll with CSR missing Common Name**
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out /tmp/est-nocn.key
+openssl req -new -key /tmp/est-nocn.key -out /tmp/est-nocn.csr -subj "/"
+
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  --data-binary @/tmp/est-nocn.csr \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 500 (service returns error for missing CN). Error message should reference "Common Name".
+**PASS if** status != 200.
+
+---
+
+**Test 26.8 — POST /simpleenroll method enforcement (GET not allowed)**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  http://localhost:8443/.well-known/est/simpleenroll
+```
+
+**Expected:** HTTP 405 Method Not Allowed.
+**PASS if** status = 405.
+
+---
+
+**Test 26.9 — POST /.well-known/est/simplereenroll (re-enrollment)**
+
+```bash
+openssl ecparam -name prime256v1 -genkey -noout -out /tmp/est-renew.key
+openssl req -new -key /tmp/est-renew.key -out /tmp/est-renew.csr \
+  -subj "/CN=renew-est.example.com" \
+  -addext "subjectAltName=DNS:renew-est.example.com"
+
+curl -s -w "\n%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/pkcs10" \
+  --data-binary @/tmp/est-renew.csr \
+  http://localhost:8443/.well-known/est/simplereenroll
+```
+
+**Expected:** HTTP 200. Functionally identical to simpleenroll per RFC 7030 Section 4.2.2.
+**PASS if** status = 200, valid PKCS#7 response.
+
+---
+
+**Test 26.10 — GET /simplereenroll method enforcement**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  http://localhost:8443/.well-known/est/simplereenroll
+```
+
+**Expected:** HTTP 405 Method Not Allowed.
+**PASS if** status = 405.
+
+---
+
+**Test 26.11 — GET /.well-known/est/csrattrs returns 204 (no required attrs)**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  http://localhost:8443/.well-known/est/csrattrs
+```
+
+**Expected:** HTTP 204 No Content (default implementation requires no specific CSR attributes).
+**PASS if** status = 204.
+
+---
+
+**Test 26.12 — POST /csrattrs method enforcement**
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" \
+  -H "Authorization: Bearer $API_KEY" \
+  -X POST http://localhost:8443/.well-known/est/csrattrs
+```
+
+**Expected:** HTTP 405 Method Not Allowed.
+**PASS if** status = 405.
+
+---
+
+**Test 26.13 — EST enrollment creates audit event**
+
+After a successful simpleenroll request (Test 26.3), query the audit trail:
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/audit?page=1&per_page=10" | \
+  jq '.data[] | select(.action == "est_simple_enroll")'
+```
+
+**Expected:** At least one audit event with `action: "est_simple_enroll"`, `protocol: "EST"` in details, and the enrolled CN in the details.
+**PASS if** audit event found with correct action and details.
+
+---
+
+**Test 26.14 — EST disabled returns 404**
+
+With `CERTCTL_EST_ENABLED=false` (default), EST endpoints should not be registered:
+
+```bash
+curl -s -o /dev/null -w "%{http_code}" http://localhost:8443/.well-known/est/cacerts
+```
+
+**Expected:** HTTP 404 Not Found (endpoints not registered when EST is disabled).
+**PASS if** status = 404.
+
+---
+
+**Test 26.15 — EST with profile binding**
+
+With `CERTCTL_EST_PROFILE_ID=profile-wifi-client`, verify that audit events include the profile_id in their details:
+
+```bash
+# After enrollment with profile binding, check audit
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/audit?page=1&per_page=5" | \
+  jq '.data[0].details.profile_id'
+```
+
+**Expected:** Profile ID appears in audit event details when configured.
+**PASS if** `profile_id` present in audit details.
+
+---
+
 ## Release Sign-Off
 
-All 25 parts must pass before tagging v2.0.0.
+All 26 parts must pass before tagging v2.0.1.
 
 | Section | Pass? | Tester | Date | Notes |
 |---------|-------|--------|------|-------|
@@ -3863,6 +4102,7 @@ All 25 parts must pass before tagging v2.0.0.
 | Part 23: Structured Logging | ☐ | | | |
 | Part 24: Documentation Verification | ☐ | | | |
 | Part 25: Regression Tests | ☐ | | | |
+| Part 26: EST Server (RFC 7030) | ☐ | | | |
 
 **Automated tests (900+) must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

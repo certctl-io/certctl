@@ -521,10 +521,13 @@ type Connector interface {
     RenewCertificate(ctx context.Context, request RenewalRequest) (*IssuanceResult, error)
     RevokeCertificate(ctx context.Context, request RevocationRequest) error
     GetOrderStatus(ctx context.Context, orderID string) (*OrderStatus, error)
+    GenerateCRL(ctx context.Context, revokedCerts []RevokedCertEntry) ([]byte, error)
+    SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
+    GetCACertPEM(ctx context.Context) (string, error)
 }
 ```
 
-Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01 and DNS-01 challenges, compatible with Let's Encrypt, Sectigo, and any ACME-compliant CA), and **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance, order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks), order finalization, and DER-to-PEM chain conversion.
+Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01 and DNS-01 challenges, compatible with Let's Encrypt, Sectigo, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), and **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance, order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks), order finalization, and DER-to-PEM chain conversion. The interface also includes `GetCACertPEM(ctx)` for CA chain distribution (used by the EST server's `/cacerts` endpoint).
 
 ### Target Connector
 
@@ -559,6 +562,45 @@ type Connector interface {
 Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2). Each is enabled by setting its configuration environment variable.
 
 See the [Connector Development Guide](connectors.md) for details on building custom connectors.
+
+### EST Server (RFC 7030)
+
+The EST (Enrollment over Secure Transport) server provides an industry-standard enrollment interface for devices that need certificates without using the REST API. It runs under `/.well-known/est/` per RFC 7030 and supports four operations: CA certificate distribution (`/cacerts`), initial enrollment (`/simpleenroll`), re-enrollment (`/simplereenroll`), and CSR attributes (`/csrattrs`).
+
+**Architecture:** EST is a handler-level protocol that delegates certificate issuance to an existing `IssuerConnector`. This means EST is not a new issuer — it's a new *interface* to the existing issuance infrastructure. The `ESTService` bridges the `ESTHandler` to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`.
+
+```
+Client (WiFi AP, MDM, IoT)
+    │
+    ▼
+ESTHandler (handler layer)
+    │  CSR parsing, PKCS#7 response encoding
+    ▼
+ESTService (service layer)
+    │  CSR validation, CN/SAN extraction, audit recording
+    ▼
+IssuerConnector (connector layer via IssuerConnectorAdapter)
+    │  Certificate signing (Local CA, step-ca, etc.)
+    ▼
+Signed certificate returned as PKCS#7 certs-only
+```
+
+**Wire format:** EST uses PKCS#7 (RFC 2315) certs-only degenerate SignedData for certificate responses and base64-encoded DER for CSR requests. The handler includes a hand-rolled ASN.1 PKCS#7 builder — no external PKCS#7 dependency. The CSR reader accepts both base64-encoded DER (standard EST wire format) and PEM-encoded PKCS#10 (convenience for debugging).
+
+**Interface:** The `ESTHandler` defines an `ESTService` interface (dependency inversion, same pattern as all other handlers):
+
+```go
+type ESTService interface {
+    GetCACerts(ctx context.Context) (string, error)
+    SimpleEnroll(ctx context.Context, csrPEM string) (*domain.ESTEnrollResult, error)
+    SimpleReEnroll(ctx context.Context, csrPEM string) (*domain.ESTEnrollResult, error)
+    GetCSRAttrs(ctx context.Context) ([]byte, error)
+}
+```
+
+**Issuer connector extension:** EST required adding `GetCACertPEM(ctx) (string, error)` to the issuer connector interface so the `/cacerts` endpoint can serve the CA chain. The Local CA connector returns its CA certificate PEM; ACME, step-ca, and OpenSSL connectors return errors (they don't expose a static CA chain — their chains are per-issuance).
+
+**Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID.
 
 ## Security Model
 
@@ -646,9 +688,9 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 - **Delete**: `DELETE /api/v1/{resources}/{id}` — returns `204` (soft delete/archive)
 - **Actions**: `POST /api/v1/{resources}/{id}/{action}` — returns `202` for async operations
 
-Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
+Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications, discovered-certificates, discovery-scans, network-scan-targets, stats, metrics.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 93 endpoints across 19 resource domains (91 under `/api/v1/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, and Prometheus metrics from M22), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 97 endpoints across 20 resource domains (95 under `/api/v1/` + `/.well-known/est/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, Prometheus metrics from M22, and 4 EST enrollment endpoints from M23), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 

@@ -67,7 +67,7 @@ It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and 
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (91 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (95 endpoints under `/api/v1/` + `/.well-known/est/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The **EST server** (RFC 7030) enables device and WiFi certificate enrollment via industry-standard Enrollment over Secure Transport. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 **Core capabilities:**
 
@@ -81,6 +81,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Operational dashboard** — Full React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, and real-time short-lived credential tracking.
 - **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
 - **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
+- **EST enrollment (RFC 7030)** — built-in Enrollment over Secure Transport server for device certificate enrollment. Supports WiFi/802.1X, MDM, and IoT use cases. PKCS#7 certs-only wire format, accepts PEM or base64-encoded DER CSRs, configurable issuer and profile binding.
 - **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
 
 ```mermaid
@@ -270,6 +271,9 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | `30` | Timeout for OpenSSL script execution |
 | `CERTCTL_NETWORK_SCAN_ENABLED` | `false` | Enable server-side network certificate discovery (TLS scanning) |
 | `CERTCTL_NETWORK_SCAN_INTERVAL` | `6h` | How often the scheduler runs network scans |
+| `CERTCTL_EST_ENABLED` | `false` | Enable EST (RFC 7030) enrollment endpoints under /.well-known/est/ |
+| `CERTCTL_EST_ISSUER_ID` | `iss-local` | Issuer connector ID used for EST certificate enrollment |
+| `CERTCTL_EST_PROFILE_ID` | — | Optional certificate profile ID to constrain EST enrollments |
 | `CERTCTL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for notifications |
 | `CERTCTL_TEAMS_WEBHOOK_URL` | — | Microsoft Teams incoming webhook URL |
 | `CERTCTL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 routing key |
@@ -491,6 +495,14 @@ GET    /api/v1/auth/info                  Auth mode info (no auth required)
 GET    /api/v1/auth/check                 Validate credentials
 ```
 
+### EST Enrollment (RFC 7030)
+```
+GET    /.well-known/est/cacerts           CA certificate chain (PKCS#7 certs-only)
+POST   /.well-known/est/simpleenroll      Simple enrollment (PEM or base64-DER CSR)
+POST   /.well-known/est/simplereenroll    Simple re-enrollment (certificate renewal)
+GET    /.well-known/est/csrattrs          CSR attributes request
+```
+
 ### Health
 ```
 GET    /health                            Server health check
@@ -599,10 +611,14 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
 - **M21: Network Cert Discovery** ✅ — server-side active TLS scanning of CIDR ranges and ports, concurrent probing (50 goroutines), CIDR expansion with /20 safety cap, sentinel agent pattern for discovery pipeline reuse, CRUD API for scan targets, scheduler integration (6h default)
 - **M22: Prometheus Metrics** ✅ — `GET /api/v1/metrics/prometheus` returns Prometheus exposition format (`text/plain; version=0.0.4`), 11 metrics with `certctl_` prefix, compatible with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics
+- **M23: EST Server (RFC 7030)** ✅ — Enrollment over Secure Transport for device/WiFi certificate enrollment, 4 endpoints under /.well-known/est/, PKCS#7 certs-only wire format, base64-encoded DER CSR input, configurable issuer + profile binding, audit trail, 28 new tests
 - **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
-### V3: Team & Enterprise
+### V3: certctl Pro
+
 Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
+
+> **Need SSO, RBAC, F5/IIS deployment, or real-time fleet operations?** [Join the certctl Pro waitlist](https://forms.gle/YOUR_FORM_ID) — early access shipping Q2 2026.
 
 ### V4+: Cloud, Scale & Passive Discovery
 Passive network discovery (TLS listener), Kubernetes integration, cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support, and platform-scale features.

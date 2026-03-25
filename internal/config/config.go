@@ -22,6 +22,7 @@ type Config struct {
 	CA           CAConfig
 	Notifiers    NotifierConfig
 	NetworkScan  NetworkScanConfig
+	EST          ESTConfig
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -79,6 +80,14 @@ type OpenSSLConfig struct {
 	RevokeScript   string
 	CRLScript      string
 	TimeoutSeconds int
+}
+
+// ESTConfig controls the RFC 7030 Enrollment over Secure Transport server.
+type ESTConfig struct {
+	Enabled  bool   // Enable EST endpoints (default false)
+	IssuerID string // Which issuer connector to use for EST enrollment (e.g., "iss-local")
+	// ProfileID optionally constrains EST enrollments to a specific certificate profile.
+	ProfileID string
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -188,6 +197,11 @@ func Load() (*Config, error) {
 		NetworkScan: NetworkScanConfig{
 			Enabled:      getEnvBool("CERTCTL_NETWORK_SCAN_ENABLED", false),
 			ScanInterval: getEnvDuration("CERTCTL_NETWORK_SCAN_INTERVAL", 6*time.Hour),
+		},
+		EST: ESTConfig{
+			Enabled:   getEnvBool("CERTCTL_EST_ENABLED", false),
+			IssuerID:  getEnv("CERTCTL_EST_ISSUER_ID", "iss-local"),
+			ProfileID: getEnv("CERTCTL_EST_PROFILE_ID", ""),
 		},
 	}
 

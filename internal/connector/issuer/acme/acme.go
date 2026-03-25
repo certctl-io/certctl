@@ -619,3 +619,8 @@ func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.Revok
 func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
 	return nil, fmt.Errorf("ACME issuers do not support OCSP response signing")
 }
+
+// GetCACertPEM is not supported by ACME issuers (the CA chain is returned per-issuance).
+func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
+	return "", fmt.Errorf("ACME issuers do not provide a static CA certificate; chain is returned per-issuance")
+}
