@@ -117,7 +117,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n19 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n21 tables\nTEXT primary keys")]
     end
 
     subgraph "Agents"
@@ -225,7 +225,7 @@ Docker Compose overrides these for the demo stack (see `deploy/docker-compose.ym
 
 ## MCP Server (AI Integration)
 
-certctl ships a standalone MCP (Model Context Protocol) server that exposes all 76 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
+certctl ships a standalone MCP (Model Context Protocol) server that exposes all 78 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
 
 ```bash
 # Install
@@ -254,7 +254,7 @@ mcp-server
 }
 ```
 
-83 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), discoveries (7), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
+78 tools organized by resource: certificates (9), CRL/OCSP (3), issuers (6), targets (5), agents (8), jobs (5), policies (6), profiles (5), teams (5), owners (5), agent groups (6), audit (2), notifications (3), stats (5), metrics (1), health (4).
 
 ## CLI
 
@@ -518,7 +518,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view
 - **M14: Observability** ✅ — dashboard charts (expiration heatmap, cert status distribution, job trends, issuance rate), agent fleet overview with OS/arch grouping, JSON metrics endpoint, stats API (5 endpoints), structured logging with request IDs, deployment rollback
-- **M18a: MCP Server** ✅ (V2.1) — AI-native integration, all 76 REST API endpoints exposed as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
+- **M18a: MCP Server** ✅ (V2.1) — AI-native integration, all 78 REST API endpoints exposed as MCP tools for Claude, Cursor, OpenClaw, and any MCP-compatible client
 - **M19: Immutable API Audit Log** ✅ — every API call recorded to immutable audit trail (method, path, actor, SHA-256 body hash, status, latency), async recording via goroutine, configurable path exclusions
 - **M16a: Notifier Connectors** ✅ — Slack (incoming webhook), Microsoft Teams (MessageCard), PagerDuty (Events API v2), OpsGenie (Alert API v2) — config-driven enablement via env vars
 - **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)

@@ -186,7 +186,7 @@ The CLI supports both table and JSON output formats (`--format table` or `--form
 
 ### MCP Server (AI Integration)
 
-certctl includes an MCP (Model Context Protocol) server that exposes all 76 API endpoints as MCP tools. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
+certctl includes an MCP (Model Context Protocol) server that exposes all 78 API endpoints as MCP tools. This enables AI assistants like Claude, Cursor, and other MCP-compatible tools to interact with your certificate infrastructure using natural language — "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?"
 
 The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport and acts as a stateless HTTP proxy to the certctl REST API. It requires no additional infrastructure — just point it at your certctl server URL and API key.
 

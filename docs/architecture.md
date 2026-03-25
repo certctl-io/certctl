@@ -30,7 +30,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n19 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n21 tables\nTEXT primary keys")]
     end
 
     subgraph "Agent Fleet"
@@ -634,7 +634,7 @@ flowchart LR
     AI["AI Assistant\n(Claude, Cursor)"] -->|"stdio"| MCP["MCP Server\ncmd/mcp-server/"]
     MCP -->|"HTTP + Bearer token"| API["certctl REST API\n:8443"]
 
-    subgraph "76 MCP Tools"
+    subgraph "78 MCP Tools"
         T1["Certificate CRUD"]
         T2["Agent Management"]
         T3["Job Operations"]
@@ -648,7 +648,7 @@ flowchart LR
 
 The MCP server is a stateless HTTP proxy — every MCP tool call translates to an HTTP request to the certctl REST API. It adds no new state, no new dependencies, and no new attack surface beyond what the API already exposes. Configuration is minimal: `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables.
 
-The 76 tools are organized across 16 resource domains with typed input structs and `jsonschema` struct tags for automatic LLM-friendly schema generation. Binary response support handles DER CRL and OCSP endpoints.
+The 78 tools are organized across 16 resource domains with typed input structs and `jsonschema` struct tags for automatic LLM-friendly schema generation. Binary response support handles DER CRL and OCSP endpoints.
 
 ## CLI Tool
 
@@ -773,7 +773,7 @@ This data flow is pull-based and non-blocking. Agents discover at their own pace
 
 ## Testing Strategy
 
-certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 860+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
+certctl uses a layered testing approach aligned with the handler → service → repository architecture, with 900+ tests across five layers (service, handler, integration, connector, and frontend). The goal is high-confidence regression prevention at the service and handler layers, where the most complex business logic lives, combined with integration tests that exercise the full request path from HTTP to database.
 
 **Service layer unit tests** (`internal/service/*_test.go`) — ~238 test functions across 15 files with mock repositories. These test all business logic in isolation: certificate CRUD with validation, certificate revocation (success, already-revoked, archived, invalid reason, all RFC 5280 reason codes, issuer notification, notification service integration, OCSP/CRL generation), agent lifecycle (registration, heartbeat, CSR submission with both keygen modes), job state machine (creation, processing, cancellation, retry logic), policy evaluation (all 5 rule types, violation creation), renewal and issuance flow (server-side and agent-side keygen paths), notification deduplication (threshold tag matching, channel routing), team/owner/agent group CRUD with pagination and audit recording, issuer service CRUD with connection testing, and the issuer connector adapter (type translation between connector and service layers including revocation). Mock repositories are simple structs with function fields, avoiding heavy mocking frameworks — this keeps tests readable and avoids coupling to mock library APIs.
 

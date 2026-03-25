@@ -201,6 +201,13 @@ INSERT INTO agent_groups (id, name, description, match_os, match_architecture, m
   ('ag-manual',       'Manual Group',        'Manually managed agent group (no dynamic criteria)', '', '',   '',              '',      false, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
+-- Network Scan Targets
+INSERT INTO network_scan_targets (id, name, cidrs, ports, enabled, scan_interval_hours, timeout_ms, created_at, updated_at) VALUES
+  ('nst-dc1-web',  'DC1 Web Servers',     '{10.0.1.0/24}',              '{443,8443}',  true,  6, 5000, NOW(), NOW()),
+  ('nst-dc2-apps', 'DC2 Application Tier', '{10.0.2.0/24,10.0.3.0/24}', '{443}',       true,  6, 5000, NOW(), NOW()),
+  ('nst-dmz',      'DMZ Public Endpoints', '{192.168.100.0/24}',         '{443,8443,9443}', true, 12, 3000, NOW(), NOW())
+ON CONFLICT (id) DO NOTHING;
+
 -- Agent Group Members (manual membership for the manual group)
 INSERT INTO agent_group_members (agent_group_id, agent_id, membership_type, created_at) VALUES
   ('ag-manual', 'ag-web-prod',    'include', NOW()),

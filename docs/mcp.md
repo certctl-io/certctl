@@ -6,7 +6,7 @@ This guide covers setup, configuration, and usage with Claude, Cursor, and other
 
 ## What Is MCP?
 
-MCP is an open protocol that connects AI assistants to external tools and data sources. Instead of copying and pasting API responses into a chat window, MCP lets the AI call your tools directly. The certctl MCP server exposes all 76 API endpoints as MCP tools — the AI sees typed schemas describing what each tool does, what parameters it accepts, and what it returns.
+MCP is an open protocol that connects AI assistants to external tools and data sources. Instead of copying and pasting API responses into a chat window, MCP lets the AI call your tools directly. The certctl MCP server exposes all 78 API endpoints as MCP tools — the AI sees typed schemas describing what each tool does, what parameters it accepts, and what it returns.
 
 The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport. It's a stateless HTTP proxy: every MCP tool call becomes an HTTP request to the certctl REST API. No new state, no new database tables, no new attack surface beyond what the API already exposes.
 
@@ -56,7 +56,7 @@ Add this to your Claude Desktop MCP configuration file (`~/Library/Application S
 }
 ```
 
-Restart Claude Desktop. You should see "certctl" appear in the MCP tools list with 76 available tools.
+Restart Claude Desktop. You should see "certctl" appear in the MCP tools list with 78 available tools.
 
 ## Setting Up with Cursor
 
@@ -94,26 +94,26 @@ Add certctl as an MCP server in your project's `.mcp.json`:
 
 ## Available Tools
 
-The MCP server registers 76 tools organized across 16 resource domains:
+The MCP server registers 78 tools organized across 16 resource domains:
 
 | Domain | Tools | Examples |
 |--------|-------|---------|
-| Certificates | 10 | List, get, create, update, archive, versions, renew, deploy, revoke, deployments |
+| Certificates | 9 | List, get, create, update, archive, versions, renew, deploy, revoke |
 | CRL & OCSP | 3 | Get JSON CRL, get DER CRL by issuer, check OCSP status |
-| Issuers | 5 | List, get, create, delete, test connection |
+| Issuers | 6 | List, get, create, update, delete, test connection |
 | Targets | 5 | List, get, create, update, delete |
-| Agents | 6 | List, get, register, heartbeat, get work, report job status |
-| Jobs | 4 | List, get, cancel, approve/reject |
-| Policies | 5 | List, get, create, update, delete, list violations |
+| Agents | 8 | List, get, register, heartbeat, CSR submit, certificate pickup, get work, report job status |
+| Jobs | 5 | List, get, cancel, approve, reject |
+| Policies | 6 | List, get, create, update, delete, list violations |
 | Profiles | 5 | List, get, create, update, delete |
 | Teams | 5 | List, get, create, update, delete |
 | Owners | 5 | List, get, create, update, delete |
-| Agent Groups | 5 | List, get, create, update, delete |
+| Agent Groups | 6 | List, get, create, update, delete, list members |
 | Audit | 2 | List events (with filters), get event by ID |
 | Notifications | 3 | List, get, mark as read |
 | Stats | 5 | Summary, certs by status, expiration timeline, job trends, issuance rate |
 | Metrics | 1 | System metrics (gauges, counters, uptime) |
-| Health | 3 | Health check, readiness probe, auth info |
+| Health | 4 | Health check, readiness probe, auth info, auth check |
 
 Every tool has typed input parameters with `jsonschema` descriptions, so the AI knows exactly what arguments to provide and what each field means.
 
@@ -153,7 +153,7 @@ flowchart LR
     AI <-->|"stdio"| MCP
     MCP -->|"HTTP + Bearer token"| SERVER
 
-    MCP ~~~ TOOLS["76 tools · 16 domains\nTyped input structs"]
+    MCP ~~~ TOOLS["78 tools · 16 domains\nTyped input structs"]
 ```
 
 The MCP server is intentionally thin:

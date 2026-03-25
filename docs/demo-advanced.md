@@ -875,7 +875,7 @@ export CERTCTL_API_KEY="test-key-123"
 
 ## Part 15: MCP Server for AI Integration (M18a)
 
-certctl exposes all 76 API endpoints as tools via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
+certctl exposes all 78 API endpoints as tools via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
 
 ```bash
 # Build the MCP server
@@ -889,7 +889,7 @@ export CERTCTL_API_KEY="test-key-123"
 ./mcp-server
 ```
 
-**How it works:** The MCP server uses the official Model Context Protocol Go SDK to expose stateless HTTP proxies to all 76 API endpoints. Each MCP tool corresponds to one or more REST endpoints and includes:
+**How it works:** The MCP server uses the official Model Context Protocol Go SDK to expose stateless HTTP proxies to all 78 API endpoints. Each MCP tool corresponds to one or more REST endpoints and includes:
 
 - **Input schema** — typed arguments with JSON schema hints for LLM-friendly introspection
 - **Binary support** — handles DER-encoded CRL and OCSP responses without mangling
@@ -1028,7 +1028,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG["PostgreSQL 16\n19 tables, TEXT PKs"]
+        PG["PostgreSQL 16\n21 tables, TEXT PKs"]
     end
 
     subgraph "Agent (certctl-agent)"

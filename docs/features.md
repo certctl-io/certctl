@@ -417,7 +417,21 @@ Collected via runtime introspection and network utilities.
 | **Version** | Agent binary version (from build flags) | v2.1.0 |
 
 ### Agent Groups (M11b)
-Dynamic grouping and filtering for policy assignment and deployment targeting.
+Dynamic grouping and filtering for policy assignment and deployment targeting. Agent groups let you apply renewal policies to subsets of your fleet — for example, "all Linux amd64 agents in the 10.0.0.0/8 network" — without manually listing every agent.
+
+```bash
+# Create a group matching all Linux agents in a specific subnet
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/agent-groups -d '{
+  "id": "ag-linux-dc1", "name": "Linux DC1",
+  "os_match": "linux", "ip_cidr_match": "10.0.1.0/24"
+}'
+
+# List groups and their criteria
+curl -H "$AUTH" "$SERVER/api/v1/agent-groups" | jq '.items[] | {id, name, os_match, ip_cidr_match}'
+
+# View members of a group (dynamically matched + manual includes)
+curl -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-linux-dc1/members" | jq '.items[].agent_id'
+```
 
 | Criterion | Details | Example |
 |-----------|---------|---------|
@@ -842,7 +856,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Transport** — stdio (stdin/stdout)
 - **Protocol** — Model Context Protocol v1
 - **SDK** — Official `modelcontextprotocol/go-sdk` v1.4.1
-- **Tools** — 76 MCP tools covering all API endpoints
+- **Tools** — 78 MCP tools covering all API endpoints
 - **Organization** — 16 resource domains (Certificates, Issuers, Targets, Agents, Jobs, etc.)
 - **Authentication** — Bearer token via `CERTCTL_API_KEY` env var
 - **Configuration** — `CERTCTL_SERVER_URL` (e.g., http://localhost:8080) + `CERTCTL_API_KEY`
@@ -875,7 +889,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 93 operations (91 API + /health + /ready)
+- **Scope** — 78 documented operations (spec covers core API; discovery and network scan endpoints pending addition)
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)
@@ -932,7 +946,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### Deployment Architecture
 - **Server** — Go HTTP server (net/http stdlib) on `:8080` (default) or `:8443` (Docker)
-- **Database** — PostgreSQL 16 with 19 tables, TEXT primary keys (human-readable prefixed IDs)
+- **Database** — PostgreSQL 16 with 21 tables, TEXT primary keys (human-readable prefixed IDs)
 - **Agent** — Lightweight Go binary on target infrastructure
 - **Dashboard** — React SPA served from `/web/dist/` (Vite build)
 
@@ -943,7 +957,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Credentials** — Environment variables in `.env` file; app.key for API key
 
 ### PostgreSQL Schema
-- **19 Tables** — Certificates, certificate versions, agents, deployment targets, renewal policies, jobs, audit events, notifications, issuers, policy rules, policy violations, certificate profiles, teams, owners, agent groups, agent group members, certificate revocations, discovered certificates, discovery scans, network scan targets
+- **21 Tables** — Certificates, certificate versions, agents, deployment targets, certificate-target mappings, renewal policies, jobs, audit events, notifications, issuers, policy rules, policy violations, certificate profiles, teams, owners, agent groups, agent group members, certificate revocations, discovered certificates, discovery scans, network scan targets
 - **TEXT Primary Keys** — Human-readable prefixed IDs: mc-*, t-*, a-*, j-*, p-*, etc.
 - **Indexes** — 5+ performance indexes on foreign keys, timestamps, status fields
 - **Migrations** — Idempotent migrations with `IF NOT EXISTS`, `ON CONFLICT`, numbered sequentially
@@ -1120,7 +1134,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Dashboard + 19 pages | ✓ | ✓ | Shipped |
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
 | REST API (91 endpoints) | ✓ | ✓ | Shipped |
-| MCP server (76 tools) | ✓ | ✓ | Shipped v2.1 |
+| MCP server (78 tools) | ✓ | ✓ | Shipped v2.1 |
 | CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
 | Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |
 | Filesystem cert discovery (M18b) | ✓ | ✓ | Shipped |

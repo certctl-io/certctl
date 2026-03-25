@@ -182,7 +182,7 @@ export CERTCTL_API_KEY="test-key-123"
 
 ## MCP Server for AI Integration
 
-certctl exposes its 76 API endpoints as tools via the Model Context Protocol (MCP), enabling integration with Claude, Cursor, and other AI assistants:
+certctl exposes its 78 API endpoints as tools via the Model Context Protocol (MCP), enabling integration with Claude, Cursor, and other AI assistants:
 
 ```bash
 # Build and run the MCP server
@@ -195,7 +195,7 @@ export CERTCTL_API_KEY="test-key-123"
 ```
 
 The MCP server:
-- Exposes all 76 API endpoints as MCP tools with typed schemas
+- Exposes all 78 API endpoints as MCP tools with typed schemas
 - Handles binary responses (DER CRL, OCSP responses)
 - Uses stdio transport for Claude/Cursor/OpenClaw integration
 - Zero external dependencies — pure Go with official MCP SDK
@@ -243,7 +243,7 @@ If you're demoing to a team or customer, here's a suggested flow:
 10. **Show certificate discovery** — "We discover certificates two ways: agents scan local filesystems, and the server actively probes TLS endpoints on your network. We deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
 11. **Show the immutable audit trail** — "Every action in the system is recorded: who did it, what they did, when, what changed. Export to CSV/JSON for compliance"
 12. **Show advanced query features** — "Sort by any field, filter by date range, paginate efficiently with cursor-based pagination, select just the fields you need"
-13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 76 tools. Everything is API-first"
+13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 78 tools. Everything is API-first"
 
 The whole walkthrough takes 5-10 minutes.
 
