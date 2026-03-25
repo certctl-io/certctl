@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/screenshots/logo/certctl-logo.png" alt="certctl logo" width="350">
+  <img src="docs/screenshots/logo/certctl-logo.png" alt="certctl logo" width="450">
 </p>
 
 # certctl — Self-Hosted Certificate Lifecycle Platform
