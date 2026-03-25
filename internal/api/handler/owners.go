@@ -183,7 +183,13 @@ func (h OwnerHandler) DeleteOwner(w http.ResponseWriter, r *http.Request) {
 	id = parts[0]
 
 	if err := h.svc.DeleteOwner(id); err != nil {
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete owner", requestID)
+		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
+			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete owner: certificates are still assigned to this owner", requestID)
+		} else if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Owner not found", requestID)
+		} else {
+			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete owner", requestID)
+		}
 		return
 	}
 

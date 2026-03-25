@@ -18,6 +18,7 @@ export default function TeamsPage() {
   const deleteMutation = useMutation({
     mutationFn: deleteTeam,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['teams'] }),
+    onError: (err: Error) => alert(`Delete failed: ${err.message}`),
   });
 
   const columns: Column<Team>[] = [

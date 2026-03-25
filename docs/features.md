@@ -818,7 +818,7 @@ All loops have configurable intervals via environment variables (`CERTCTL_SCHEDU
 
 ---
 
-## Web Dashboard (19 Pages)
+## Web Dashboard
 
 ### Overview
 The web dashboard is the primary operational interface for certctl. Built with **Vite + React 18 + TypeScript + TanStack Query v5 + Tailwind CSS 3 + Recharts**.
@@ -1168,7 +1168,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Policies + violations | ✓ | ✓ | Shipped |
 | Profiles + crypto constraints | ✓ | ✓ | Shipped |
 | Revocation (RFC 5280, CRL, OCSP) | ✓ | ✓ | Shipped |
-| Dashboard + 19 pages | ✓ | ✓ | Shipped |
+| Full web dashboard | ✓ | ✓ | Shipped |
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
 | REST API (91 endpoints) | ✓ | ✓ | Shipped |
 | MCP server (78 tools) | ✓ | ✓ | Shipped v2.1 |
@@ -1200,7 +1200,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Category | Count |
 |----------|-------|
 | **API Endpoints** | 91 (under /api/v1/) |
-| **Dashboard Pages** | 19 |
+| **Dashboard** | Full web GUI |
 | **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
 | **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |
 | **Notifier Channels** | 6 (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) |

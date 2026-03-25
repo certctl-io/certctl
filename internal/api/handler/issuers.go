@@ -184,7 +184,13 @@ func (h IssuerHandler) DeleteIssuer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteIssuer(id); err != nil {
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete issuer", requestID)
+		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
+			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete issuer: certificates are still using this issuer", requestID)
+		} else if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Issuer not found", requestID)
+		} else {
+			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete issuer", requestID)
+		}
 		return
 	}
 

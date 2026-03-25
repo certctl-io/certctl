@@ -23,6 +23,7 @@ export default function OwnersPage() {
   const deleteMutation = useMutation({
     mutationFn: deleteOwner,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['owners'] }),
+    onError: (err: Error) => alert(`Delete failed: ${err.message}`),
   });
 
   const teamMap = new Map<string, Team>();

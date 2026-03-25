@@ -2094,6 +2094,49 @@ curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/agent-gr
 
 ---
 
+### 11.4 Foreign Key Constraint Behavior
+
+**What this validates:** Delete operations correctly fail with 409 when referenced entities still exist.
+
+**Why it matters:** Owners and issuers use `ON DELETE RESTRICT` — you can't delete them while certificates reference them. Teams use `ON DELETE CASCADE`, so team deletes succeed and cascade. If the server returns a silent 500 instead of 409, the GUI swallows the error and the user thinks nothing happened.
+
+**Test 11.4.1 — Delete owner with assigned certificates (expect 409)**
+
+```bash
+# Try to delete Alice Chen (o-alice) — she owns certificates in the demo data
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice" | jq .
+```
+
+**Expected:** HTTP 409 with message "Cannot delete owner: certificates are still assigned to this owner".
+**PASS if** 409 Conflict. **FAIL** if 204 (data integrity violation) or 500 (unhelpful error).
+
+---
+
+**Test 11.4.2 — Delete issuer with assigned certificates (expect 409)**
+
+```bash
+# Try to delete the Local Dev CA (iss-local) — certificates reference it
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local" | jq .
+```
+
+**Expected:** HTTP 409 with message "Cannot delete issuer: certificates are still using this issuer".
+**PASS if** 409 Conflict. **FAIL** if 204 or 500.
+
+---
+
+**Test 11.4.3 — Delete team cascades successfully**
+
+```bash
+# Create a test team, then delete it — teams use ON DELETE CASCADE
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id": "t-fk-test", "name": "FK Test Team"}' $SERVER/api/v1/teams > /dev/null
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/teams/t-fk-test"
+```
+
+**Expected:** HTTP 204 (cascade allows deletion).
+**PASS if** 204. **FAIL** if 409 or 500.
+
+---
+
 ## Part 12: Notifications
 
 **What this validates:** Notification creation, listing, and read status management.
@@ -3192,7 +3235,7 @@ echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_certificate",
 
 ## Part 19: GUI Testing
 
-**What this validates:** The web dashboard — 19 pages of operational UI.
+**What this validates:** The full web dashboard — all pages of operational UI.
 
 **Why it matters:** Operators spend 80% of their time in the GUI. If it's broken, the product is broken, regardless of how good the API is.
 
@@ -3741,7 +3784,28 @@ curl -s -H "$AUTH" "$SERVER/api/v1/network-scan-targets" | jq '{total, ids: [.it
 
 ---
 
-**Test 25.1.4 — OpenAPI spec operations match router**
+**Test 25.1.4 — GUI delete on FK-restricted entities shows error, not silent failure**
+
+```bash
+# Try deleting owner o-alice via API — she owns demo certificates
+CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice")
+echo "DELETE owner with certs: HTTP $CODE"
+cat /tmp/delete-resp.json | jq .
+
+# Try deleting issuer iss-local — certificates reference it
+CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local")
+echo "DELETE issuer with certs: HTTP $CODE"
+cat /tmp/delete-resp.json | jq .
+```
+
+**What:** Verifies that deleting owners/issuers with assigned certificates returns 409 Conflict with a descriptive message.
+**Why:** This was a real bug — the backend returned 500 (generic "Failed to delete"), `fetchJSON` threw on the error, and TanStack Query's `onError` wasn't wired up. The user clicked OK on the confirm dialog and nothing visibly happened. Fixed by: (1) backend returns 409 with descriptive message for FK constraint violations, (2) `fetchJSON` handles 204 No Content for successful deletes, (3) frontend mutation `onError` surfaces the error.
+**Expected:** Both return HTTP 409 with descriptive conflict messages.
+**PASS if** both 409 with messages. **FAIL** if 500 (unhelpful error) or 204 (data integrity violation).
+
+---
+
+**Test 25.1.5 — OpenAPI spec operations match router**
 
 ```bash
 echo "OpenAPI operations: $(grep -c 'operationId:' api/openapi.yaml)"

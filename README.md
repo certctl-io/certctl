@@ -71,7 +71,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
 - **Policy engine** — 5 rule types with violation tracking and severity levels. Certificate profiles enforce allowed key types, maximum TTL, and crypto constraints at enrollment time.
 - **Immutable audit trail** — every action recorded to an append-only log. Every API call recorded with method, path, actor, SHA-256 body hash, response status, and latency. No update or delete on audit records.
-- **Operational dashboard** — 18-page React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, and real-time short-lived credential tracking.
+- **Operational dashboard** — Full React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, and real-time short-lived credential tracking.
 - **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
 - **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
 - **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
@@ -99,16 +99,22 @@ flowchart LR
 
 | | |
 |---|---|
-| ![Dashboard](docs/screenshots/dashboard.png) | ![Certificates](docs/screenshots/certificates.png) |
-| **Dashboard** — certificate stats, expiry timeline, recent jobs | **Certificates** — full inventory with status, environment, owner filters |
-| ![Agents](docs/screenshots/agents.png) | ![Jobs](docs/screenshots/jobs.png) |
-| **Agents** — fleet health, hostname, heartbeat tracking | **Jobs** — issuance, renewal, deployment job queue |
-| ![Notifications](docs/screenshots/notifications.png) | ![Policies](docs/screenshots/policies.png) |
-| **Notifications** — threshold alerts grouped by certificate | **Policies** — enforcement rules with enable/disable and delete |
-| ![Issuers](docs/screenshots/issuers.png) | ![Targets](docs/screenshots/targets.png) |
-| **Issuers** — CA connectors with test connectivity | **Targets** — deployment targets (NGINX, Apache, HAProxy, F5, IIS) |
-| ![Audit Trail](docs/screenshots/audit-trail.png) | |
-| **Audit Trail** — immutable log of every action | |
+| ![Dashboard](docs/screenshots/v2/dashboard.png) | ![Certificates](docs/screenshots/v2/certificates.png) |
+| **Dashboard** — real-time stats, expiration heatmap, renewal trends, issuance rate | **Certificates** — full inventory with status filters, environment, owner, team |
+| ![Agents](docs/screenshots/v2/agents.png) | ![Fleet Overview](docs/screenshots/v2/fleet-overview.png) |
+| **Agents** — fleet health, hostname, OS/arch, IP, version tracking | **Fleet Overview** — OS distribution, status breakdown, version analysis |
+| ![Jobs](docs/screenshots/v2/jobs.png) | ![Notifications](docs/screenshots/v2/notifications.png) |
+| **Jobs** — issuance, renewal, deployment job queue with status filters | **Notifications** — expiration warnings, renewal results, unread/all toggle |
+| ![Policies](docs/screenshots/v2/policies.png) | ![Profiles](docs/screenshots/v2/profiles.png) |
+| **Policies** — enforcement rules for ownership, environments, lifetime, renewal | **Profiles** — enrollment templates with key types, max TTL, crypto constraints |
+| ![Issuers](docs/screenshots/v2/issuers.png) | ![Targets](docs/screenshots/v2/targets.png) |
+| **Issuers** — CA connectors (Local CA, Let's Encrypt, step-ca, DigiCert) | **Targets** — deployment targets (NGINX, F5 BIG-IP, IIS, HAProxy) |
+| ![Owners](docs/screenshots/v2/owners.png) | ![Teams](docs/screenshots/v2/teams.png) |
+| **Owners** — certificate ownership with email and team assignment | **Teams** — organizational grouping for notification routing |
+| ![Agent Groups](docs/screenshots/v2/agent-groups.png) | ![Audit Trail](docs/screenshots/v2/audit-trail.png) |
+| **Agent Groups** — dynamic grouping by OS, arch, CIDR, version | **Audit Trail** — immutable log with filters, CSV/JSON export |
+| ![Short-Lived](docs/screenshots/v2/short-lived.png) | |
+| **Short-Lived Credentials** — ephemeral certs with live TTL countdown | |
 
 ## Quick Start
 
@@ -567,7 +573,7 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 18 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a full React dashboard wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
