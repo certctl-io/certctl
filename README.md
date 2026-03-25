@@ -1,3 +1,7 @@
+<p align="center">
+  <img src="docs/screenshots/logo/certctl-logo.png" alt="certctl logo" width="200">
+</p>
+
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
 90+ API endpoints. 21 database tables. 900+ tests. Full GUI. Ships with Docker Compose.
