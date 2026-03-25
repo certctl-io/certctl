@@ -80,6 +80,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
+	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
 	// Create router and register handlers
 	r := router.New()
@@ -100,6 +101,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		metricsHandler,
 		healthHandler,
 		discoveryHandler,
+		networkScanHandler,
 	)
 
 	// Create test server
@@ -1173,4 +1175,31 @@ func (m *mockDiscoveryService) GetScan(ctx context.Context, id string) (*domain.
 
 func (m *mockDiscoveryService) GetDiscoverySummary(ctx context.Context) (map[string]int, error) {
 	return map[string]int{}, nil
+}
+
+// mockNetworkScanService implements handler.NetworkScanService for integration tests.
+type mockNetworkScanService struct{}
+
+func (m *mockNetworkScanService) ListTargets(ctx context.Context) ([]*domain.NetworkScanTarget, error) {
+	return nil, nil
+}
+
+func (m *mockNetworkScanService) GetTarget(ctx context.Context, id string) (*domain.NetworkScanTarget, error) {
+	return nil, fmt.Errorf("not found")
+}
+
+func (m *mockNetworkScanService) CreateTarget(ctx context.Context, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
+	return target, nil
+}
+
+func (m *mockNetworkScanService) UpdateTarget(ctx context.Context, id string, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
+	return target, nil
+}
+
+func (m *mockNetworkScanService) DeleteTarget(ctx context.Context, id string) error {
+	return nil
+}
+
+func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID string) (*domain.DiscoveryScan, error) {
+	return nil, nil
 }

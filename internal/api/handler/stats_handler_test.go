@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 )
@@ -201,4 +202,117 @@ func TestGetMetrics_ServiceError(t *testing.T) {
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected 500, got %d", w.Code)
 	}
+}
+
+// --- Prometheus metrics endpoint tests ---
+
+func TestGetPrometheusMetrics_Success(t *testing.T) {
+	mock := &MockStatsService{
+		GetDashboardSummaryFn: func(ctx context.Context) (interface{}, error) {
+			return &DashboardSummary{
+				TotalCertificates:    25,
+				ExpiringCertificates: 3,
+				ExpiredCertificates:  2,
+				RevokedCertificates:  1,
+				ActiveAgents:         4,
+				TotalAgents:          6,
+				PendingJobs:          2,
+				FailedJobs:           1,
+				CompleteJobs:         15,
+			}, nil
+		},
+	}
+	h := NewMetricsHandler(mock, time.Now().Add(-1*time.Hour))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.GetPrometheusMetrics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	contentType := w.Header().Get("Content-Type")
+	if contentType != "text/plain; version=0.0.4; charset=utf-8" {
+		t.Errorf("expected Prometheus content type, got %q", contentType)
+	}
+
+	body := w.Body.String()
+
+	// Check metric lines are present
+	expected := []string{
+		"certctl_certificate_total 25",
+		"certctl_certificate_active 19",
+		"certctl_certificate_expiring_soon 3",
+		"certctl_certificate_expired 2",
+		"certctl_certificate_revoked 1",
+		"certctl_agent_total 6",
+		"certctl_agent_online 4",
+		"certctl_job_pending 2",
+		"certctl_job_completed_total 15",
+		"certctl_job_failed_total 1",
+		"# TYPE certctl_certificate_total gauge",
+		"# TYPE certctl_job_completed_total counter",
+		"# HELP certctl_uptime_seconds",
+		"# TYPE certctl_uptime_seconds gauge",
+	}
+	for _, exp := range expected {
+		if !containsLine(body, exp) {
+			t.Errorf("expected body to contain %q", exp)
+		}
+	}
+}
+
+func TestGetPrometheusMetrics_MethodNotAllowed(t *testing.T) {
+	mock := &MockStatsService{}
+	h := NewMetricsHandler(mock, time.Now())
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.GetPrometheusMetrics(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+func TestGetPrometheusMetrics_ServiceError(t *testing.T) {
+	mock := &MockStatsService{
+		GetDashboardSummaryFn: func(ctx context.Context) (interface{}, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h := NewMetricsHandler(mock, time.Now())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.GetPrometheusMetrics(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestGetPrometheusMetrics_ZeroValues(t *testing.T) {
+	mock := &MockStatsService{
+		GetDashboardSummaryFn: func(ctx context.Context) (interface{}, error) {
+			return &DashboardSummary{}, nil
+		},
+	}
+	h := NewMetricsHandler(mock, time.Now())
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/metrics/prometheus", nil)
+	w := httptest.NewRecorder()
+	h.GetPrometheusMetrics(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected 200, got %d", w.Code)
+	}
+
+	body := w.Body.String()
+	if !containsLine(body, "certctl_certificate_total 0") {
+		t.Error("expected zero value for certificate_total")
+	}
+	if !containsLine(body, "certctl_job_pending 0") {
+		t.Error("expected zero value for job_pending")
+	}
+}
+
+// containsLine checks if the text contains the given substring.
+func containsLine(text, substr string) bool {
+	return strings.Contains(text, substr)
 }

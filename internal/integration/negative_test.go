@@ -73,6 +73,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
 	healthHandler := handler.NewHealthHandler("none")
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
+	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 
 	r := router.New()
 	r.RegisterHandlers(
@@ -92,6 +93,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		metricsHandler,
 		healthHandler,
 		discoveryHandler,
+		networkScanHandler,
 	)
 
 	server := httptest.NewServer(r)
@@ -796,3 +798,5 @@ func TestRevocationEndpoints(t *testing.T) {
 		}
 	})
 }
+
+// mockNetworkScanService is defined in lifecycle_test.go (same package)

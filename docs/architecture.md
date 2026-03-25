@@ -25,12 +25,12 @@ flowchart TB
         API["REST API\n(Go net/http, :8443)"]
         SVC["Service Layer"]
         REPO["Repository Layer\n(database/sql + lib/pq)"]
-        SCHED["Background Scheduler\n5 loops"]
+        SCHED["Background Scheduler\n6 loops"]
         DASH["Web Dashboard\n(React SPA)"]
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n18 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n19 tables\nTEXT primary keys")]
     end
 
     subgraph "Agent Fleet"
@@ -374,7 +374,7 @@ Short-lived certificates (those with profile TTL < 1 hour) return "good" from OC
 
 ### 4. Automatic Renewal
 
-The control plane runs a scheduler with five background loops:
+The control plane runs a scheduler with six background loops:
 
 ```mermaid
 flowchart LR
@@ -384,6 +384,7 @@ flowchart LR
         H["Agent Health\n⏱ every 2m"]
         N["Notification Processor\n⏱ every 1m"]
         SL["Short-Lived Expiry\n⏱ every 30s"]
+        NS["Network Scanner\n⏱ every 6h"]
     end
 
     R -->|"Find expiring certs\nCreate renewal jobs"| DB[("PostgreSQL")]
@@ -391,6 +392,7 @@ flowchart LR
     H -->|"Check heartbeat staleness\nMark agents offline"| DB
     N -->|"Send pending notifications\nEmail / Webhook / Slack"| DB
     SL -->|"Expire short-lived certs\nMark as Expired"| DB
+    NS -->|"Probe TLS endpoints\nStore discovered certs"| DB
 ```
 
 | Loop | Interval | Timeout | Purpose |
@@ -400,6 +402,7 @@ flowchart LR
 | Agent health check | 2 minutes | 1 minute | Marks agents as offline if heartbeat is stale |
 | Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
 | Short-lived expiry | 30 seconds | 30 seconds | Marks expired short-lived certificates (profile TTL < 1 hour) |
+| Network scanner | 6 hours | 30 minutes | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21, opt-in via `CERTCTL_NETWORK_SCAN_ENABLED`) |
 
 Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
@@ -605,7 +608,7 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 78 documented operations (including health, readiness, and auth endpoints; 7 discovery endpoints from M18b pending spec update), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 91 endpoints across 19 resource domains (including health, readiness, auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, and Prometheus metrics from M22), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
@@ -703,54 +706,64 @@ flowchart TB
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
 
-## Discovery Data Flow (M18b)
+## Discovery Data Flow (M18b + M21)
 
-Certificate discovery enables operators to build a complete inventory of existing certificates before managing them with certctl. Here's how data flows through the system:
+Certificate discovery enables operators to build a complete inventory of existing certificates before managing them with certctl. There are two discovery modes that feed into the same pipeline:
 
 ```mermaid
 flowchart TB
-    AGENT["certctl-agent\n(on infrastructure)"]
-    SCAN["Filesystem Scanner\n(CERTCTL_DISCOVERY_DIRS)"]
+    subgraph "Discovery Sources"
+        AGENT["certctl-agent\n(filesystem discovery)"]
+        SCAN["Filesystem Scanner\n(CERTCTL_DISCOVERY_DIRS)"]
+        SERVER["certctl-server\n(network discovery)"]
+        NETSCAN["TLS Scanner\n(CIDR ranges + ports)"]
+    end
+
     EXTRACT["Extract Metadata\n(CN, SANs, serial, issuer, expiry, fingerprint)"]
-    REPORT["POST /api/v1/agents/{id}/discoveries\n(submit scan results)"]
-    HANDLER["Discovery Handler\n(parse request)"]
     SERVICE["Discovery Service\n(ProcessDiscoveryReport)"]
     REPO["Discovery Repository\n(upsert with fingerprint dedup)"]
     DB["PostgreSQL\ndiscovered_certificates\ndiscovery_scans tables"]
     AUDIT["Audit Service\n(RecordDiscoveryScanCompleted)"]
     API_LIST["GET /api/v1/discovered-certificates\n(list for triage)"]
-    API_CLAIM["POST /discovered-certificates/{id}/claim\n(operator claims cert)"]
-    API_DISMISS["POST /discovered-certificates/{id}/dismiss\n(operator dismisses)"]
-    UPDATE_STATUS["Update Status\n(Unmanaged → Managed/Dismissed)"]
+    API_CLAIM["POST /discovered-certificates/{id}/claim"]
+    API_DISMISS["POST /discovered-certificates/{id}/dismiss"]
 
     AGENT -->|"Scan loop\n(startup + 6h)"| SCAN
     SCAN --> EXTRACT
-    EXTRACT --> REPORT
-    REPORT --> HANDLER
-    HANDLER --> SERVICE
+    SERVER -->|"Scheduler loop\n(every 6h)"| NETSCAN
+    NETSCAN -->|"crypto/tls.Dial\n50 goroutines"| EXTRACT
+    EXTRACT --> SERVICE
     SERVICE --> REPO
-    REPO -->|"Dedup by fingerprint\n+ agent + path"| DB
+    REPO -->|"Dedup by fingerprint\n+ agent_id + source_path"| DB
     SERVICE --> AUDIT
-    AUDIT -->|"discovery_scan_completed"| DB
-    DB -->|"query unmanaged"| API_LIST
-    API_LIST -->|"operator reviews"| API_CLAIM
-    API_LIST -->|"operator reviews"| API_DISMISS
-    API_CLAIM --> UPDATE_STATUS
-    API_DISMISS --> UPDATE_STATUS
-    UPDATE_STATUS -->|"RecordDiscoveryCertClaimed\nRecordDiscoveryCertDismissed"| AUDIT
     AUDIT --> DB
+    DB --> API_LIST
+    API_LIST --> API_CLAIM
+    API_LIST --> API_DISMISS
 ```
 
-**Key steps:**
+**Filesystem Discovery (M18b):**
 
 1. **Agent-side discovery** — Agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, walking directories recursively and parsing PEM/DER files
 2. **Metadata extraction** — For each certificate found, extract: common name, SANs, serial number, issuer DN, subject DN, expiration date, key algorithm, key size, is_ca flag, SHA-256 fingerprint (used as dedup key)
 3. **Server submission** — Agent POSTs scan results as `DiscoveryReport` to `POST /api/v1/agents/{id}/discoveries`
 4. **Deduplication** — Server uses fingerprint + agent ID + filesystem path as unique key; prevents duplicate records of the same cert on the same agent
-5. **Storage** — Records stored in `discovered_certificates` table with status = "Unmanaged"
-6. **Audit** — `discovery_scan_completed` event logged with agent ID, cert count, scan timestamp
-7. **Operator triage** — Operator queries `GET /api/v1/discovered-certificates?status=Unmanaged` to see new findings
-8. **Claim or dismiss** — For each unmanaged cert, operator either:
+
+**Network Discovery (M21):**
+
+1. **Target configuration** — Operator creates network scan targets via `POST /api/v1/network-scan-targets` with CIDR ranges, ports, and scan interval
+2. **CIDR expansion** — Ranges expanded to individual IPs with /20 safety cap (4096 IPs max)
+3. **TLS probing** — Server uses `crypto/tls.DialWithDialer` with `InsecureSkipVerify=true` to connect to each endpoint; 50 concurrent goroutines with configurable timeout
+4. **Certificate extraction** — Full X.509 metadata extracted from TLS handshake peer certificates
+5. **Sentinel agent** — Results submitted using `server-scanner` as virtual agent ID, with `source_path` set to `ip:port` and `source_format` set to `network`
+6. **Same pipeline** — Feeds into the same `DiscoveryService.ProcessDiscoveryReport()` as filesystem discovery — same dedup, same audit trail, same triage workflow
+
+**Common triage workflow (both sources):**
+
+1. **Storage** — Records stored in `discovered_certificates` table with status = "Unmanaged"
+2. **Audit** — `discovery_scan_completed` event logged with agent ID, cert count, scan timestamp
+3. **Operator triage** — Operator queries `GET /api/v1/discovered-certificates?status=Unmanaged` to see new findings
+4. **Claim or dismiss** — For each unmanaged cert, operator either:
    - **Claims it** via `POST /discovered-certificates/{id}/claim` — links to existing managed cert or creates new enrollment
    - **Dismisses it** via `POST /discovered-certificates/{id}/dismiss` — removes from triage, marked as "Dismissed"
 9. **Status tracking** — `discovery_cert_claimed` and `discovery_cert_dismissed` events audit the operator's decision

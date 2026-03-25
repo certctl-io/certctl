@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **84 endpoints** across 17 resource domains under `/api/v1/`
+- **91 endpoints** across 19 resource domains under `/api/v1/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -55,10 +55,11 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 | **Owners** | 5 | List, create, get, update, delete |
 | **Agent Groups** | 6 | List, create, get, update, delete, list agents in group |
 | **Discovery** | 7 | Submit scan results, list discovered certs, get detail, claim, dismiss, list scans, summary stats |
+| **Network Scan** | 6 | List targets, create, get, update, delete, trigger scan |
 | **Audit** | 3 | List events, list by resource, export (CSV/JSON) |
 | **Notifications** | 3 | List, get, mark as read |
 | **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
-| **Metrics** | 1 | JSON metrics (gauges, counters, uptime) |
+| **Metrics** | 2 | JSON metrics (gauges, counters, uptime), Prometheus exposition format |
 | **Health** | 4 | Health check, readiness check, auth info, auth check |
 
 ---
@@ -411,6 +412,60 @@ Each discovered certificate is parsed and its metadata extracted:
 
 ---
 
+## Network Certificate Discovery (M21)
+
+### Overview
+Server-side active TLS scanning probes network endpoints across CIDR ranges, extracts certificate metadata from TLS handshakes, and feeds results into the existing filesystem discovery pipeline. No agent deployment required — the control plane scans directly.
+
+### Configuration
+- **Enable** — `CERTCTL_NETWORK_SCAN_ENABLED=true` (disabled by default)
+- **Scan Interval** — `CERTCTL_NETWORK_SCAN_INTERVAL=6h` (default 6 hours, configurable)
+
+### Network Scan Targets
+Scan targets define what CIDR ranges and ports to probe.
+
+| Field | Details | Example |
+|-------|---------|---------|
+| **ID** | Prefixed text PK (nst-xxx) | nst-datacenter-east |
+| **Name** | Human-readable target name | Datacenter East Production |
+| **CIDRs** | Array of CIDR ranges | ["10.0.1.0/24", "10.0.2.0/24"] |
+| **Ports** | Array of TCP ports | [443, 8443, 6443] |
+| **Enabled** | Toggle scanning on/off | true |
+| **Scan Interval Hours** | Per-target scan frequency | 6 |
+| **Timeout Ms** | Per-connection timeout | 5000 |
+
+### Scanning Behavior
+- **CIDR Expansion** — Ranges expanded to individual IPs; safety cap at /20 (4096 IPs) prevents accidental large scans
+- **Concurrent Probing** — 50 goroutines (semaphore-based), configurable timeout per TLS connection
+- **TLS Extraction** — `crypto/tls.DialWithDialer` with `InsecureSkipVerify=true` discovers all certs including self-signed, expired, and internal CA certs
+- **Sentinel Agent Pattern** — Uses `server-scanner` as virtual agent ID, reusing the existing `discovered_certificates` dedup constraint without schema changes
+- **Discovery Pipeline** — Scan results feed into `DiscoveryService.ProcessDiscoveryReport()` for fingerprint dedup, audit trail, and triage workflow
+
+### Network Scan API Endpoints (M21)
+
+| Endpoint | Method | Purpose |
+|----------|--------|---------|
+| `/api/v1/network-scan-targets` | GET | List all scan targets with metrics |
+| `/api/v1/network-scan-targets` | POST | Create a new scan target |
+| `/api/v1/network-scan-targets/{id}` | GET | Get scan target details |
+| `/api/v1/network-scan-targets/{id}` | PUT | Update scan target configuration |
+| `/api/v1/network-scan-targets/{id}` | DELETE | Delete a scan target |
+| `/api/v1/network-scan-targets/{id}/scan` | POST | Trigger an immediate scan |
+
+### Scheduler Integration
+- **6th scheduler loop** — runs at configured interval (default 6h) alongside renewal (1h), jobs (30s), health (2m), notifications (1m), short-lived expiry (30s)
+- **Conditional** — only starts if `CERTCTL_NETWORK_SCAN_ENABLED=true` and network scan service is initialized
+- **Scan Metrics** — each target tracks `last_scan_at`, `last_scan_duration_ms`, `last_scan_certs_found`
+
+### Use Cases
+- **Network Inventory** — "What TLS certs are deployed across my network?" without deploying agents
+- **Shadow Certificate Detection** — Find certificates on services you didn't know were running TLS
+- **Compliance Scanning** — Prove to auditors that all TLS endpoints are inventoried
+- **Migration Assessment** — Scan a network range before onboarding to certctl management
+- **Expiration Monitoring** — Discover soon-to-expire certs on network endpoints before they cause outages
+
+---
+
 ## Ownership & Accountability
 
 ### Teams
@@ -451,12 +506,22 @@ Live aggregated views of certificate and job metrics.
 | **Certificate Status Distribution** | Donut | Pie breakdown: Active, Expiring, Expired, Failed, Revoked, etc. |
 | **Issuance Rate** | Bar (30-day) | Certs issued per day; trend line |
 
-#### Metrics Endpoint
+#### Metrics Endpoints
+
+**JSON Format**
 - **URL** — `GET /api/v1/metrics`
 - **Format** — JSON with timestamp
 - **Gauges** — Certificate counts by status, agent count (online/offline), pending job count
 - **Counters** — Total jobs completed, total jobs failed, total renewals, total issuances
 - **Uptime** — Server uptime in seconds
+
+**Prometheus Exposition Format (M22)**
+- **URL** — `GET /api/v1/metrics/prometheus`
+- **Content-Type** — `text/plain; version=0.0.4; charset=utf-8`
+- **Compatible with** — Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics, OpenMetrics scrapers
+- **Naming** — `certctl_` prefix, snake_case (e.g., `certctl_certificate_total`, `certctl_agent_online`)
+- **11 Metrics** — 8 gauges (cert total/active/expiring/expired/revoked, agent total/online, job pending), 2 counters (job completed/failed totals), 1 gauge (uptime seconds)
+- **Scrape Config** — Add to `prometheus.yml`: `scrape_configs: [{job_name: certctl, static_configs: [{targets: ['localhost:8443']}], metrics_path: /api/v1/metrics/prometheus}]`
 
 #### Stats API (M14)
 Five parameterized endpoints for dashboard data.
@@ -541,7 +606,7 @@ Every API call recorded to immutable `audit_events` table.
 3. **Approve** → `POST /api/v1/jobs/{id}/approve` → Job → `Running`
 4. **Reject** → `POST /api/v1/jobs/{id}/reject` + reason → Job → `Cancelled`
 
-### Background Scheduler (5 loops)
+### Background Scheduler (6 loops)
 | Loop | Interval | Task |
 |------|----------|------|
 | **Renewal Checker** | 1 hour | Scan policies; trigger renewals if cert expires soon |
@@ -549,6 +614,7 @@ Every API call recorded to immutable `audit_events` table.
 | **Health Checker** | 2 minutes | Check agent heartbeat; mark offline if >3 missed |
 | **Notification Processor** | 1 minute | Send queued notifications (email, Slack, webhook, etc.) |
 | **Short-Lived Cleanup** | 30 seconds | Audit short-lived credential expirations |
+| **Network Scanner** | 6 hours | Scan enabled network targets; discover TLS certificates |
 
 All loops have configurable intervals via environment variables (`CERTCTL_SCHEDULER_*_INTERVAL`).
 
@@ -898,7 +964,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Revocation (RFC 5280, CRL, OCSP) | ✓ | ✓ | Shipped |
 | Dashboard + 19 pages | ✓ | ✓ | Shipped |
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
-| REST API (84 endpoints) | ✓ | ✓ | Shipped |
+| REST API (91 endpoints) | ✓ | ✓ | Shipped |
 | MCP server (76 tools) | ✓ | ✓ | Shipped v2.1 |
 | CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
 | Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |

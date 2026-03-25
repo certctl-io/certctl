@@ -160,17 +160,20 @@ Each section includes:
 
 - **Health Endpoint** — `GET /health` returns 200 OK with service status. Consumed by Docker health checks and Kubernetes probes.
 - **Readiness Endpoint** — `GET /ready` returns 200 OK when the database is connected and migrations are applied.
-- **Background Scheduler Monitoring** — 5 background loops run on a fixed schedule:
+- **Background Scheduler Monitoring** — 6 background loops run on a fixed schedule:
   - Renewal loop: every 1 hour, scans for certificates approaching renewal threshold
   - Job processor loop: every 30 seconds, picks up pending/waiting jobs and advances their state
   - Health check loop: every 2 minutes, pings agents to detect downtime
   - Notification dispatcher loop: every 1 minute, sends queued alerts
   - Short-lived cert expiry loop: every 30 seconds, marks expired short-lived credentials
+  - Network scanner loop: every 6 hours, scans enabled TLS endpoints for certificate discovery
   Each loop includes error handling and logs failures via structured slog.
-- **JSON Metrics Endpoint** — `GET /api/v1/metrics` returns JSON object with:
-  - **Gauges** — `certificates_total`, `certificates_active`, `certificates_expiring_soon`, `agents_total`, `agents_healthy`, `pending_jobs`, `failed_jobs`
-  - **Counters** — `certs_issued_total`, `certs_renewed_total`, `certs_revoked_total`, `deployments_completed_total`, `deployments_failed_total`
-  - **Uptime** — `uptime_seconds` (seconds since server start)
+- **Metrics Endpoints** — Two formats for monitoring integration:
+  - `GET /api/v1/metrics` — JSON object with gauges, counters, and uptime for custom dashboards
+  - `GET /api/v1/metrics/prometheus` — Prometheus exposition format (`text/plain; version=0.0.4`) for native scraping by Prometheus, Grafana Agent, Datadog, and other OpenMetrics-compatible collectors
+  - **Gauges** — `certctl_certificate_total`, `certctl_certificate_active`, `certctl_certificate_expiring`, `certctl_certificate_expired`, `certctl_certificate_revoked`, `certctl_agent_total`, `certctl_agent_active`, `certctl_job_pending`
+  - **Counters** — `certctl_job_completed_total`, `certctl_job_failed_total`
+  - **Uptime** — `certctl_uptime_seconds` (seconds since server start)
   All values are point-in-time snapshots computed from database tables.
 - **Structured Logging** — All scheduler operations, API calls, and connector actions log via `slog` (Go's structured logger). Logs include timestamp, level (DEBUG/INFO/WARN/ERROR), structured fields (e.g., `actor`, `resource_id`, `latency_ms`), and request IDs for tracing.
 - **Request ID Propagation** — Each HTTP request gets a unique ID (`X-Request-ID` header). The ID is included in all correlated logs, making it easy to trace a single request through multiple service layers.
@@ -426,7 +429,7 @@ Each section includes:
 | | Metrics JSON Endpoint | `GET /api/v1/metrics` (gauges, counters, uptime) | ✅ | ✅ | Set thresholds, configure alerting |
 | | Stats API (time-series) | `GET /api/v1/stats/*` (summary, status, expiration, jobs, issuance) | ✅ | ✅ | Integrate into dashboards, SLO tracking |
 | | Structured Logging | `slog` middleware with request IDs | ✅ | ✅ | Aggregate logs to SIEM, define retention policy |
-| | Background Scheduler | 5 loops (renewal 1h, jobs 30s, health 2m, notifications 1m, short-lived 30s) | ✅ | ✅ | Alert on scheduler loop failures |
+| | Background Scheduler | 6 loops (renewal 1h, jobs 30s, health 2m, notifications 1m, short-lived 30s, network scan 6h) | ✅ | ✅ | Alert on scheduler loop failures |
 | **CC7.2** Anomaly Detection | Immutable API Audit Trail | `internal/api/middleware/audit.go`, `GET /api/v1/audit` | ✅ | Enhanced (SIEM export) | Integrate into SIEM, search for anomalies, archive long-term |
 | | Expiration Threshold Alerting | Configurable per-policy (default 30/14/7/0 days) | ✅ | ✅ | Configure thresholds, integrate notifications |
 | | Status Auto-Transitions | Active → Expiring (30d) → Expired (0d) | ✅ | ✅ | Monitor status changes in audit trail |

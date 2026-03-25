@@ -70,11 +70,11 @@ On the Certificates page, select multiple certificates using the checkboxes. A b
 Click any certificate, then scroll to the deployment timeline. A visual 4-step timeline shows the lifecycle: Requested → Issued → Deploying → Active. Previous versions show a rollback button.
 
 **11. "What about certificates already running in production?"**
-Enable discovery on agents by setting `CERTCTL_DISCOVERY_DIRS` to directories containing certificates (e.g., `/etc/nginx/certs`). Agents scan on startup and every 6 hours, report findings to the control plane. Click "Discovered Certificates" to see what agents found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
+Enable discovery on agents by setting `CERTCTL_DISCOVERY_DIRS` to directories containing certificates (e.g., `/etc/nginx/certs`). Agents scan on startup and every 6 hours, report findings to the control plane. For network-based discovery without agents, enable `CERTCTL_NETWORK_SCAN_ENABLED=true` and configure scan targets via the API — the server probes TLS endpoints on configured CIDR ranges and ports. Click "Discovered Certificates" to see what agents and network scans found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
 
 ## REST API Walkthrough
 
-The dashboard is backed by a real REST API (84 endpoints). Try these while the demo is running:
+The dashboard is backed by a real REST API (91 endpoints). Try these while the demo is running:
 
 ```bash
 # List all certificates
@@ -114,6 +114,7 @@ curl -s http://localhost:8443/api/v1/stats/expiration-timeline | jq .
 curl -s http://localhost:8443/api/v1/stats/job-trends | jq .
 curl -s http://localhost:8443/api/v1/stats/issuance-rate | jq .
 curl -s http://localhost:8443/api/v1/metrics | jq .
+curl -s http://localhost:8443/api/v1/metrics/prometheus  # Prometheus format
 
 # Certificate profiles
 curl -s http://localhost:8443/api/v1/profiles | jq .
@@ -135,6 +136,9 @@ curl -s http://localhost:8443/api/v1/discovered-certificates | jq .
 
 # Discovery summary (counts by status)
 curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+
+# Network scan targets (active TLS scanning)
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
 ```
 
 ## CLI Tool
@@ -236,7 +240,7 @@ If you're demoing to a team or customer, here's a suggested flow:
 7. **Show profiles** — "Certificate profiles enforce crypto constraints — key types, max TTL, compliance requirements"
 8. **Show policies** — "Guardrails prevent teams from going outside approved scope"
 9. **Show bulk operations** — "Select multiple certs, trigger renewal or revoke in bulk with progress tracking"
-10. **Show certificate discovery** — "Agents scan your infrastructure for existing certificates you're not managing yet. We automatically deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
+10. **Show certificate discovery** — "We discover certificates two ways: agents scan local filesystems, and the server actively probes TLS endpoints on your network. We deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
 11. **Show the immutable audit trail** — "Every action in the system is recorded: who did it, what they did, when, what changed. Export to CSV/JSON for compliance"
 12. **Show advanced query features** — "Sort by any field, filter by date range, paginate efficiently with cursor-based pagination, select just the fields you need"
 13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 76 tools. Everything is API-first"

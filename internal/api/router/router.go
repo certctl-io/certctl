@@ -61,6 +61,7 @@ func (r *Router) RegisterHandlers(
 	metrics handler.MetricsHandler,
 	health handler.HealthHandler,
 	discovery handler.DiscoveryHandler,
+	networkScan handler.NetworkScanHandler,
 ) {
 	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
@@ -188,6 +189,7 @@ func (r *Router) RegisterHandlers(
 
 	// Metrics routes: /api/v1/metrics
 	r.Register("GET /api/v1/metrics", http.HandlerFunc(metrics.GetMetrics))
+	r.Register("GET /api/v1/metrics/prometheus", http.HandlerFunc(metrics.GetPrometheusMetrics))
 
 	// Discovery routes: /api/v1/discovered-certificates, /api/v1/discovery-scans
 	r.Register("POST /api/v1/agents/{id}/discoveries", http.HandlerFunc(discovery.SubmitDiscoveryReport))
@@ -197,6 +199,14 @@ func (r *Router) RegisterHandlers(
 	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", http.HandlerFunc(discovery.DismissDiscovered))
 	r.Register("GET /api/v1/discovery-scans", http.HandlerFunc(discovery.ListScans))
 	r.Register("GET /api/v1/discovery-summary", http.HandlerFunc(discovery.GetDiscoverySummary))
+
+	// Network scan routes: /api/v1/network-scan-targets
+	r.Register("GET /api/v1/network-scan-targets", http.HandlerFunc(networkScan.ListNetworkScanTargets))
+	r.Register("POST /api/v1/network-scan-targets", http.HandlerFunc(networkScan.CreateNetworkScanTarget))
+	r.Register("GET /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.GetNetworkScanTarget))
+	r.Register("PUT /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.UpdateNetworkScanTarget))
+	r.Register("DELETE /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.DeleteNetworkScanTarget))
+	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(networkScan.TriggerNetworkScan))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

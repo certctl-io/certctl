@@ -695,11 +695,14 @@ curl -s "$API/api/v1/stats/job-trends?days=30" | jq .
 # Issuance rate — new certificates per day over 30 days
 curl -s "$API/api/v1/stats/issuance-rate?days=30" | jq .
 
-# System metrics — gauges, counters, uptime
+# System metrics — gauges, counters, uptime (JSON)
 curl -s $API/api/v1/metrics | jq .
+
+# System metrics — Prometheus exposition format (for Prometheus/Grafana/Datadog scraping)
+curl -s $API/api/v1/metrics/prometheus
 ```
 
-**How it works:** The `StatsService` computes aggregations in Go from existing repository List methods — no additional SQL queries or materialized views. This keeps the database schema simple while providing real-time dashboard data. The metrics endpoint returns gauges (cert totals by status, agent counts, pending jobs), counters (completed/failed jobs), and server uptime.
+**How it works:** The `StatsService` computes aggregations in Go from existing repository List methods — no additional SQL queries or materialized views. This keeps the database schema simple while providing real-time dashboard data. The JSON metrics endpoint returns gauges (cert totals by status, agent counts, pending jobs), counters (completed/failed jobs), and server uptime. The Prometheus endpoint (`/api/v1/metrics/prometheus`) exposes the same data in Prometheus exposition format (`text/plain; version=0.0.4`) with `certctl_` prefixed metric names — ready for scraping by Prometheus, Grafana Agent, Datadog Agent, or Victoria Metrics.
 
 **In the dashboard**, these stats power four interactive charts: an expiration heatmap, renewal success rate trends, certificate status distribution, and issuance rate. The agent fleet overview page uses agent metadata to group by OS, architecture, and version.
 
@@ -916,11 +919,13 @@ The MCP server is perfect for:
 
 ---
 
-## Part 16: Certificate Discovery (M18b)
+## Part 16: Certificate Discovery (M18b + M21)
 
-Agents can automatically discover existing certificates already deployed in your infrastructure. This is useful for building a baseline inventory before you start managing everything with certctl.
+certctl discovers existing certificates two ways: **filesystem scanning** (agents scan local directories) and **network scanning** (the server probes TLS endpoints). Both feed into the same triage pipeline.
 
-First, configure the demo agent to scan for certificates. In the Docker Compose setup, agents have a `/tmp/certs` directory (created by the seed script). Restart the agent with discovery enabled:
+### Filesystem Discovery (Agent-Side)
+
+Configure the demo agent to scan for certificates. In the Docker Compose setup, agents have a `/tmp/certs` directory (created by the seed script). Restart the agent with discovery enabled:
 
 ```bash
 # Stop the existing agent
@@ -936,17 +941,46 @@ Or with the CLI flag:
 certctl-agent --agent-id a-demo-1 --key-dir /tmp/keys --discovery-dirs /tmp/certs --server http://localhost:8443 --api-key test-key-123
 ```
 
-Now check what the agent discovered:
+### Network Discovery (Server-Side)
+
+The server can also discover certificates by actively probing TLS endpoints — no agent required. Create a scan target and trigger a scan:
 
 ```bash
-# List discovered certificates (should show unmanaged certs found on the agent)
+# Create a network scan target
+curl -s -X POST $API/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Demo Local Scan",
+    "cidrs": ["127.0.0.1/32"],
+    "ports": [8443],
+    "enabled": true,
+    "scan_interval_hours": 6,
+    "timeout_ms": 5000
+  }' | jq .
+
+# Trigger an immediate scan (otherwise runs every 6 hours)
+NST_ID=$(curl -s $API/api/v1/network-scan-targets | jq -r '.data[0].id')
+curl -s -X POST "$API/api/v1/network-scan-targets/$NST_ID/scan" | jq .
+
+# List scan targets and their results
+curl -s $API/api/v1/network-scan-targets | jq .
+```
+
+Network-discovered certificates appear in the same discovery pipeline as filesystem-discovered ones, with `agent_id=server-scanner` and `source_format=network`.
+
+### Triage Discovered Certificates
+
+Both discovery sources feed into the same triage workflow. Check what was found:
+
+```bash
+# List discovered certificates (should show unmanaged certs found by agents and network scans)
 curl -s "$API/api/v1/discovered-certificates?status=Unmanaged" | jq '.data[] | {id, common_name, expires_at, issuer_dn, status}'
 
 # Get a summary of all discoveries
 curl -s $API/api/v1/discovery-summary | jq .
 ```
 
-If the agent found certificates, you'll see entries with `status: "Unmanaged"`. Now triage them — claim the ones you want to manage or dismiss the ones you don't:
+If certificates were found, you'll see entries with `status: "Unmanaged"`. Triage them — claim the ones you want to manage or dismiss the ones you don't:
 
 ```bash
 # Claim a certificate (link it to a managed cert, or create new enrollment)
@@ -961,9 +995,9 @@ curl -s -X POST "$API/api/v1/discovered-certificates/$DISCOVERED_ID/dismiss" \
   -d '{"reason": "Self-signed test cert, not production"}' | jq .
 ```
 
-**How it works:** The agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, extracts metadata (common name, SANs, issuer, expiration, key type, fingerprint) from all PEM and DER files, and POSTs the findings to `POST /api/v1/agents/{id}/discoveries`. The server deduplicates by fingerprint (prevents duplicate records) and stores results with a status: **Unmanaged** (discovered, not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage). This gives you a triage workflow: discover → review → claim or dismiss.
+**How it works:** Filesystem discovery: the agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, extracts metadata (common name, SANs, issuer, expiration, key type, fingerprint) from all PEM and DER files, and POSTs findings to `POST /api/v1/agents/{id}/discoveries`. Network discovery: the server expands CIDR ranges (capped at /20 = 4096 IPs), connects to each IP:port via TLS, extracts the peer certificate chain, and stores results using `server-scanner` as a sentinel agent ID. Both sources deduplicate by fingerprint and store results with a status: **Unmanaged** (discovered, not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage). This gives you a triage workflow: discover → review → claim or dismiss.
 
-**In the dashboard**, the Discovery page (coming in future V2.x) will provide a visual triage interface for claiming and dismissing discovered certificates.
+**In the dashboard**, click "Discovered Certificates" in the sidebar to see what agents and network scans found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
 
 ---
 
@@ -989,12 +1023,12 @@ flowchart TB
         API["REST API\nGo net/http"]
         SVC["Service Layer\nBusiness Logic"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\n5 background loops"]
+        SCHED["Scheduler\n6 background loops"]
         CONN["Connector Registry\nIssuer + Target + Notifier"]
     end
 
     subgraph "Data Store"
-        PG["PostgreSQL 16\n18 tables, TEXT PKs"]
+        PG["PostgreSQL 16\n19 tables, TEXT PKs"]
     end
 
     subgraph "Agent (certctl-agent)"

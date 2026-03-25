@@ -11,16 +11,17 @@ import (
 // Config represents the complete application configuration.
 // All configuration values are read from environment variables with CERTCTL_ prefix.
 type Config struct {
-	Server    ServerConfig
-	Database  DatabaseConfig
-	Scheduler SchedulerConfig
-	Log       LogConfig
-	Auth      AuthConfig
-	RateLimit RateLimitConfig
-	CORS      CORSConfig
-	Keygen    KeygenConfig
-	CA        CAConfig
-	Notifiers NotifierConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	Scheduler    SchedulerConfig
+	Log          LogConfig
+	Auth         AuthConfig
+	RateLimit    RateLimitConfig
+	CORS         CORSConfig
+	Keygen       KeygenConfig
+	CA           CAConfig
+	Notifiers    NotifierConfig
+	NetworkScan  NetworkScanConfig
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -78,6 +79,12 @@ type OpenSSLConfig struct {
 	RevokeScript   string
 	CRLScript      string
 	TimeoutSeconds int
+}
+
+// NetworkScanConfig controls the server-side active TLS scanner.
+type NetworkScanConfig struct {
+	Enabled      bool          // Enable network scanning (default false)
+	ScanInterval time.Duration // How often to run network scans (default 6h)
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -177,6 +184,10 @@ func Load() (*Config, error) {
 			PagerDutySeverity:   getEnv("CERTCTL_PAGERDUTY_SEVERITY", "warning"),
 			OpsGenieAPIKey:      getEnv("CERTCTL_OPSGENIE_API_KEY", ""),
 			OpsGeniePriority:    getEnv("CERTCTL_OPSGENIE_PRIORITY", "P3"),
+		},
+		NetworkScan: NetworkScanConfig{
+			Enabled:      getEnvBool("CERTCTL_NETWORK_SCAN_ENABLED", false),
+			ScanInterval: getEnvDuration("CERTCTL_NETWORK_SCAN_INTERVAL", 6*time.Hour),
 		},
 	}
 

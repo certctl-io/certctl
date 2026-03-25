@@ -207,6 +207,24 @@ func main() {
 	agentGroupService := service.NewAgentGroupService(agentGroupRepo, auditService)
 	discoveryRepo := postgres.NewDiscoveryRepository(db)
 	discoveryService := service.NewDiscoveryService(discoveryRepo, certificateRepo, auditService)
+	networkScanRepo := postgres.NewNetworkScanRepository(db)
+	networkScanService := service.NewNetworkScanService(networkScanRepo, discoveryService, auditService, logger)
+	logger.Info("initialized network scan service")
+
+	// Ensure the sentinel "server-scanner" agent exists for network discovery dedup.
+	// This agent ID is used as the agent_id in discovered_certificates for network-scanned certs.
+	if cfg.NetworkScan.Enabled {
+		sentinelAgent := &domain.Agent{
+			ID:     service.SentinelAgentID,
+			Name:   "Network Scanner (Server-Side)",
+			Status: domain.AgentStatusOnline,
+		}
+		if err := agentRepo.Create(context.Background(), sentinelAgent); err != nil {
+			// Ignore duplicate key errors (agent already exists)
+			logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAgentID)
+		}
+	}
+
 	logger.Info("initialized all services")
 
 	// Initialize stats and metrics services
@@ -230,6 +248,7 @@ func main() {
 	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
 	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
+	networkScanHandler := handler.NewNetworkScanHandler(networkScanService)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -242,6 +261,7 @@ func main() {
 		jobService,
 		agentService,
 		notificationService,
+		networkScanService,
 		logger,
 	)
 
@@ -250,6 +270,10 @@ func main() {
 	sched.SetJobProcessorInterval(cfg.Scheduler.JobProcessorInterval)
 	sched.SetAgentHealthCheckInterval(cfg.Scheduler.AgentHealthCheckInterval)
 	sched.SetNotificationProcessInterval(cfg.Scheduler.NotificationProcessInterval)
+	if cfg.NetworkScan.Enabled {
+		sched.SetNetworkScanInterval(cfg.NetworkScan.ScanInterval)
+		logger.Info("network scanning enabled", "interval", cfg.NetworkScan.ScanInterval.String())
+	}
 
 	// Start scheduler
 	logger.Info("starting scheduler")
@@ -276,6 +300,7 @@ func main() {
 		metricsHandler,
 		healthHandler,
 		discoveryHandler,
+		networkScanHandler,
 	)
 	logger.Info("registered all API handlers")
 

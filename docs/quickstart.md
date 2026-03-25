@@ -295,8 +295,11 @@ curl -s "http://localhost:8443/api/v1/stats/expiration-timeline?days=90" | jq .
 # Job trends (last 30 days)
 curl -s "http://localhost:8443/api/v1/stats/job-trends?days=30" | jq .
 
-# System metrics
+# System metrics (JSON)
 curl -s http://localhost:8443/api/v1/metrics | jq .
+
+# System metrics (Prometheus format — for scraping by Prometheus, Grafana Agent, Datadog)
+curl -s http://localhost:8443/api/v1/metrics/prometheus
 ```
 
 ### Certificate profiles
@@ -363,6 +366,35 @@ curl -s -X POST "http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_
   -H "Content-Type: application/json" \
   -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
 ```
+
+### Network Certificate Discovery
+
+The server can also discover certificates by scanning TLS endpoints directly — no agent required:
+
+```bash
+# Enable network scanning (set in environment or docker-compose)
+export CERTCTL_NETWORK_SCAN_ENABLED=true
+
+# Create a scan target (e.g., scan your internal network on port 443)
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Internal Network",
+    "cidrs": ["10.0.1.0/24"],
+    "ports": [443, 8443],
+    "enabled": true,
+    "scan_interval_hours": 6,
+    "timeout_ms": 5000
+  }' | jq .
+
+# Trigger an immediate scan
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-internal-network/scan | jq .
+
+# List scan targets with results
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
+```
+
+Discovered network certificates appear in the same `GET /api/v1/discovered-certificates` list as filesystem-discovered certs, with `agent_id=server-scanner` and `source_format=network`.
 
 ## What's Next
 

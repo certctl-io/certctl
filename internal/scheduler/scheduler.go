@@ -16,6 +16,7 @@ type Scheduler struct {
 	jobService          *service.JobService
 	agentService        *service.AgentService
 	notificationService *service.NotificationService
+	networkScanService  *service.NetworkScanService
 	logger              *slog.Logger
 
 	// Configurable tick intervals
@@ -24,6 +25,7 @@ type Scheduler struct {
 	agentHealthCheckInterval        time.Duration
 	notificationProcessInterval     time.Duration
 	shortLivedExpiryCheckInterval   time.Duration
+	networkScanInterval             time.Duration
 }
 
 // NewScheduler creates a new scheduler with configurable intervals.
@@ -32,6 +34,7 @@ func NewScheduler(
 	jobService *service.JobService,
 	agentService *service.AgentService,
 	notificationService *service.NotificationService,
+	networkScanService *service.NetworkScanService,
 	logger *slog.Logger,
 ) *Scheduler {
 	return &Scheduler{
@@ -39,6 +42,7 @@ func NewScheduler(
 		jobService:          jobService,
 		agentService:        agentService,
 		notificationService: notificationService,
+		networkScanService:  networkScanService,
 		logger:              logger,
 
 		// Default intervals
@@ -47,6 +51,7 @@ func NewScheduler(
 		agentHealthCheckInterval:      2 * time.Minute,
 		notificationProcessInterval:   1 * time.Minute,
 		shortLivedExpiryCheckInterval: 30 * time.Second,
+		networkScanInterval:           6 * time.Hour,
 	}
 }
 
@@ -70,6 +75,11 @@ func (s *Scheduler) SetNotificationProcessInterval(d time.Duration) {
 	s.notificationProcessInterval = d
 }
 
+// SetNetworkScanInterval configures the interval for network scanning.
+func (s *Scheduler) SetNetworkScanInterval(d time.Duration) {
+	s.networkScanInterval = d
+}
+
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
@@ -90,6 +100,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go s.agentHealthCheckLoop(ctx)
 		go s.notificationProcessLoop(ctx)
 		go s.shortLivedExpiryCheckLoop(ctx)
+		if s.networkScanService != nil {
+			go s.networkScanLoop(ctx)
+		}
 
 		// Wait for context cancellation
 		<-ctx.Done()
@@ -256,5 +269,37 @@ func (s *Scheduler) runShortLivedExpiryCheck(ctx context.Context) {
 			"interval", s.shortLivedExpiryCheckInterval.String())
 	} else {
 		s.logger.Debug("short-lived expiry check completed")
+	}
+}
+
+// networkScanLoop runs every networkScanInterval and performs active TLS scanning
+// of configured network targets.
+func (s *Scheduler) networkScanLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.networkScanInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start
+	s.runNetworkScan(ctx)
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			s.runNetworkScan(ctx)
+		}
+	}
+}
+
+// runNetworkScan executes a single network scan cycle with error recovery.
+func (s *Scheduler) runNetworkScan(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 30*time.Minute)
+	defer cancel()
+	if err := s.networkScanService.ScanAllTargets(opCtx); err != nil {
+		s.logger.Error("network scan failed",
+			"error", err,
+			"interval", s.networkScanInterval.String())
+	} else {
+		s.logger.Debug("network scan completed")
 	}
 }

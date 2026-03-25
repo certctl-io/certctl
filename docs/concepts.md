@@ -194,7 +194,7 @@ The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via st
 
 Certificate discovery is the process of automatically finding existing certificates in your infrastructure — certificates you didn't issue through certctl, possibly issued by other CAs or tools. This is essential for building a complete inventory before you can manage everything.
 
-**How it works:** Agents can scan configured directories (configured via `CERTCTL_DISCOVERY_DIRS`) for certificate files. On startup and every 6 hours, the agent walks these directories recursively, parses PEM and DER files, extracts metadata (common name, SANs, expiration, issuer, key algorithm), and reports all findings to the control plane. The server deduplicates by fingerprint (prevents duplicate reports of the same cert) and stores them with a status: **Unmanaged** (discovered but not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage it).
+**How it works:** There are two discovery modes. *Filesystem discovery* — agents scan configured directories (configured via `CERTCTL_DISCOVERY_DIRS`) for certificate files. On startup and every 6 hours, the agent walks directories recursively, parses PEM and DER files, extracts metadata, and reports findings to the control plane. *Network discovery* — the control plane itself probes TLS endpoints across configured CIDR ranges and ports (enabled via `CERTCTL_NETWORK_SCAN_ENABLED=true`). It connects to each endpoint, extracts certificates from the TLS handshake, and feeds results into the same discovery pipeline. This finds certificates on services you may not have agents on. In both cases, the server deduplicates by fingerprint and stores discovered certs with a status: **Unmanaged** (discovered but not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage it).
 
 This gives you a three-step triage workflow:
 1. **Discover** — Agents find all existing certs on your infrastructure
@@ -205,7 +205,7 @@ This is a prerequisite for multi-CA migration, compliance audits, and building c
 
 ### Observability
 
-certctl exposes a JSON metrics endpoint at `GET /api/v1/metrics` with gauges (certificate totals by status, agent counts, pending jobs), counters (completed/failed jobs), and uptime. Five stats endpoints power the dashboard charts: summary statistics, certificates by status, expiration timeline, job trends, and issuance rate.
+certctl exposes metrics in two formats: a JSON endpoint at `GET /api/v1/metrics` and a Prometheus exposition format at `GET /api/v1/metrics/prometheus` (compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics). Both provide gauges (certificate totals by status, agent counts, pending jobs), counters (completed/failed jobs), and uptime. Five stats endpoints power the dashboard charts: summary statistics, certificates by status, expiration timeline, job trends, and issuance rate.
 
 The agent fleet overview page groups agents by OS, architecture, and version, showing distribution charts that help ops teams track fleet health and identify outdated agents. All API requests are logged via structured `slog` middleware with request IDs for correlation.
 

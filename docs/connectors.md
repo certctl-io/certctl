@@ -639,6 +639,84 @@ curl -s http://localhost:8443/api/v1/discovery-summary | jq .
 - **Compliance** — Detect rogue/unauthorized certificates in monitored directories
 - **Integration** — Pull certificate data from systems that pre-generate certs (e.g., Kubernetes CertManager)
 
+## Network Certificate Scanner (M21)
+
+The control plane includes a built-in active TLS scanner that probes network endpoints and discovers certificates without requiring agent deployment. This complements the agent-based filesystem discovery with network-level visibility.
+
+### Configuration
+
+Enable network scanning on the server:
+
+```bash
+export CERTCTL_NETWORK_SCAN_ENABLED=true
+export CERTCTL_NETWORK_SCAN_INTERVAL=6h  # default
+```
+
+### Creating Scan Targets
+
+Network scan targets define which CIDR ranges and ports to probe:
+
+```bash
+# Create a scan target for your internal network
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{
+    "name": "Production Web Servers",
+    "cidrs": ["10.0.1.0/24", "10.0.2.0/24"],
+    "ports": [443, 8443, 6443],
+    "enabled": true,
+    "scan_interval_hours": 6,
+    "timeout_ms": 5000
+  }' | jq .
+```
+
+### How It Works
+
+1. **Expand**: CIDR ranges are expanded to individual IPs (safety cap at /20 = 4096 IPs)
+2. **Probe**: Concurrent TLS connections (50 goroutines) with configurable timeout per endpoint
+3. **Extract**: Certificate metadata extracted from TLS handshake (CN, SANs, serial, issuer, key info, fingerprint)
+4. **Pipeline**: Results fed into the same `DiscoveryService.ProcessDiscoveryReport()` as filesystem discovery
+5. **Deduplicate**: Sentinel agent ID (`server-scanner`) with source_path as `ip:port` ensures proper dedup
+6. **Triage**: Discovered certs appear in `GET /api/v1/discovered-certificates` with `agent_id=server-scanner`
+
+### API Endpoints
+
+```bash
+# List all scan targets
+curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
+
+# Create a scan target
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+  -H "Content-Type: application/json" \
+  -d '{"name": "DMZ", "cidrs": ["172.16.0.0/24"], "ports": [443]}' | jq .
+
+# Get a specific target (includes last_scan_at, last_scan_certs_found)
+curl -s http://localhost:8443/api/v1/network-scan-targets/nst-dmz | jq .
+
+# Trigger an immediate scan (doesn't wait for scheduler)
+curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-dmz/scan | jq .
+
+# Update scan configuration
+curl -s -X PUT http://localhost:8443/api/v1/network-scan-targets/nst-dmz \
+  -H "Content-Type: application/json" \
+  -d '{"ports": [443, 8443, 9443], "timeout_ms": 3000}' | jq .
+
+# Delete a scan target
+curl -s -X DELETE http://localhost:8443/api/v1/network-scan-targets/nst-dmz
+```
+
+### Scheduler Integration
+
+When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs a 6th scheduler loop (alongside renewal, jobs, health, notifications, and short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health.
+
+### Use Cases
+
+- **Network inventory** — "What TLS certs are deployed across my network?" without deploying agents
+- **Shadow certificate detection** — Find certificates on services you didn't know were running TLS
+- **Compliance scanning** — Prove to auditors that all TLS endpoints are inventoried
+- **Migration assessment** — Scan a network range before onboarding to certctl management
+- **Expiration monitoring** — Discover soon-to-expire certs on network endpoints before they cause outages
+
 ## What's Next
 
 - [Architecture Guide](architecture.md) — Understanding the full system design

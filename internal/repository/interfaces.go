@@ -238,6 +238,24 @@ type DiscoveryFilter struct {
 	PerPage   int
 }
 
+// NetworkScanRepository defines operations for managing network scan targets.
+type NetworkScanRepository interface {
+	// List returns all network scan targets.
+	List(ctx context.Context) ([]*domain.NetworkScanTarget, error)
+	// ListEnabled returns only enabled scan targets.
+	ListEnabled(ctx context.Context) ([]*domain.NetworkScanTarget, error)
+	// Get retrieves a network scan target by ID.
+	Get(ctx context.Context, id string) (*domain.NetworkScanTarget, error)
+	// Create stores a new network scan target.
+	Create(ctx context.Context, target *domain.NetworkScanTarget) error
+	// Update modifies an existing network scan target.
+	Update(ctx context.Context, target *domain.NetworkScanTarget) error
+	// Delete removes a network scan target.
+	Delete(ctx context.Context, id string) error
+	// UpdateScanResults records the outcome of the last scan for a target.
+	UpdateScanResults(ctx context.Context, id string, scanAt time.Time, durationMs int, certsFound int) error
+}
+
 // OwnerRepository defines operations for managing certificate owners.
 type OwnerRepository interface {
 	// List returns all owners.
