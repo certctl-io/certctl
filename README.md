@@ -1,6 +1,6 @@
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-91 API endpoints. 21 database tables. 900+ tests. Full GUI. Ships with Docker Compose.
+90+ API endpoints. 21 database tables. 900+ tests. Full GUI. Ships with Docker Compose.
 
 ```mermaid
 timeline
