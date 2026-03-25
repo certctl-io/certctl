@@ -13,22 +13,56 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 - OpenAPI 3.1 spec with full schema documentation
 
 ### Authentication & Security
+
+Every API call requires authentication by default — this ensures that only authorized operators and agents can issue, renew, or revoke certificates. Without this, anyone with network access to the control plane could compromise your entire certificate infrastructure.
+
 - **API Key Authentication** — SHA-256 hashed keys with constant-time comparison
 - **Bearer Token Flow** — `Authorization: Bearer {api_key}` header
 - **Auth Configuration** — Configurable via `CERTCTL_AUTH_TYPE` (api-key, jwt, none)
 - **Auth Info Endpoint** — `GET /api/v1/auth/info` (no auth required for GUI pre-login detection)
 - **Auth Check Endpoint** — `GET /api/v1/auth/check` (validate credentials)
 
+```bash
+# Authenticate with API key
+curl -H "Authorization: Bearer your-api-key" http://localhost:8443/api/v1/certificates
+
+# Check auth mode (no auth required — used by GUI login page)
+curl http://localhost:8443/api/v1/auth/info
+# {"auth_type":"api-key"}
+```
+
 ### Rate Limiting
+
+Protects the control plane from being overwhelmed by a single client — whether a misconfigured monitoring script polling every millisecond or a bug in an agent's retry logic. Without rate limiting, one misbehaving client can DoS the server for everyone.
+
 - **Token Bucket Algorithm** — Configurable requests-per-second (RPS) and burst size
-- **429 Responses** — Rate limit exceeded with `Retry-After` header
+- **429 Responses** — Rate limit exceeded with `Retry-After` header telling clients when to retry
 - **Configuration** — `CERTCTL_RATE_LIMIT_ENABLED`, `CERTCTL_RATE_LIMIT_RPS` (default 50), `CERTCTL_RATE_LIMIT_BURST` (default 100)
 
 ### CORS
+
+Required for the web dashboard to communicate with the API when served from a different origin (e.g., during development on `localhost:3000` while the API runs on `localhost:8443`). Without CORS headers, browsers block the requests silently.
+
 - **Configurable Per-Origin Allowlist** — `CERTCTL_CORS_ORIGINS` (comma-separated or wildcard)
 - **Preflight Caching** — Standard CORS headers
 
 ### Query Features (M20)
+
+These features reduce API response sizes and enable efficient pagination at scale. When you have 10,000+ certificates, fetching the full object for each one on every list call wastes bandwidth and slows down dashboards. Sparse fields, cursor pagination, and sorting let clients request exactly what they need.
+
+```bash
+# Sparse fields — only return id, name, and status (smaller payload)
+curl -H "$AUTH" "$SERVER/api/v1/certificates?fields=id,common_name,status"
+
+# Sort by expiration date descending (most urgent first)
+curl -H "$AUTH" "$SERVER/api/v1/certificates?sort=-notAfter"
+
+# Cursor pagination — efficient for large datasets
+curl -H "$AUTH" "$SERVER/api/v1/certificates?cursor=eyJpZCI6Im1jLWFwaS1wcm9kIn0&page_size=100"
+
+# Time-range filter — certs expiring in next 30 days
+curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z&expires_after=2026-03-24T00:00:00Z"
+```
 
 | Feature | Details |
 |---------|---------|
@@ -98,6 +132,20 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 
 ## Revocation Infrastructure
 
+When a private key is compromised or a certificate is no longer needed, revocation tells clients to stop trusting it immediately. Without revocation, a stolen certificate remains valid until it expires — which could be months.
+
+```bash
+# Revoke a certificate (key compromise — most urgent reason)
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod/revoke \
+  -d '{"reason": "keyCompromise"}'
+
+# Check the CRL for an issuer
+curl -H "$AUTH" $SERVER/api/v1/crl/iss-local | jq '.entries'
+
+# Query OCSP status for a specific cert
+curl $SERVER/api/v1/ocsp/iss-local/ABC123DEF456
+```
+
 ### Revocation API
 - **Endpoint** — `POST /api/v1/certificates/{id}/revoke` (RFC 5280 reason codes)
 - **8 Reason Codes** — unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn
@@ -129,7 +177,22 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## Certificate Profiles
 
 ### Profile Model
-Named enrollment profiles defining certificate issuance constraints.
+Named enrollment profiles defining certificate issuance constraints. Profiles prevent drift — without them, different teams might issue certs with inconsistent key sizes, TTLs, or key algorithms. A profile says "all certs in this category must use ECDSA P-256, max 90-day TTL, serverAuth EKU only."
+
+```bash
+# Create a profile enforcing short-lived certs with ECDSA keys
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles -d '{
+  "name": "Short-Lived Service Mesh",
+  "allowed_key_algorithms": ["ECDSA"],
+  "max_ttl_hours": 1,
+  "allowed_ekus": ["serverAuth", "clientAuth"]
+}'
+
+# Assign profile to a certificate
+curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod -d '{
+  "profile_id": "prof-short-lived"
+}'
+```
 
 | Field | Details |
 |-------|---------|
@@ -149,6 +212,21 @@ Named enrollment profiles defining certificate issuance constraints.
 ---
 
 ## Policy Engine
+
+Policies catch misconfigurations before they reach production. For example, a policy can prevent staging certificates from being issued by your production CA, or flag certificates missing an owner (which means nobody gets alerted when they expire).
+
+```bash
+# Create a policy requiring all certs to have an owner
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/policies -d '{
+  "name": "Require Ownership",
+  "type": "RequiredMetadata",
+  "severity": "Error",
+  "config": {"required_fields": ["owner_id", "team_id"]}
+}'
+
+# Check violations for a policy
+curl -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations"
+```
 
 ### Policy Rules (5 types)
 | Rule Type | Purpose | Example |
@@ -244,6 +322,17 @@ Named enrollment profiles defining certificate issuance constraints.
 
 ## Notifier Connectors (6 Channels)
 
+Notifications route certificate events to the people and systems that need to know. Each channel is enabled by setting its env var — no code changes needed.
+
+```bash
+# Enable Slack notifications (just set the webhook URL)
+export CERTCTL_SLACK_WEBHOOK_URL="https://hooks.slack.com/services/T.../B.../xxx"
+
+# Enable PagerDuty escalation for critical events
+export CERTCTL_PAGERDUTY_ROUTING_KEY="your-routing-key"
+export CERTCTL_PAGERDUTY_SEVERITY="critical"
+```
+
 ### Email
 - **SMTP** — Standard SMTP or TLS endpoint
 - **Configuration** — Server, port, auth credentials (env vars)
@@ -296,6 +385,19 @@ Named enrollment profiles defining certificate issuance constraints.
 ---
 
 ## Agent Fleet
+
+Agents are lightweight Go binaries deployed on your servers that handle the last mile — generating private keys locally, submitting CSRs, and deploying signed certificates to web servers. The control plane never touches private keys or initiates outbound connections, keeping your security perimeter intact.
+
+```bash
+# Start an agent (it auto-registers and begins polling for work)
+export CERTCTL_SERVER_URL=http://certctl.internal:8443
+export CERTCTL_API_KEY=agent-api-key
+export CERTCTL_AGENT_ID=ag-nginx-prod-1
+./certctl-agent --key-dir /var/lib/certctl/keys --discovery-dirs /etc/ssl/certs
+
+# Check agent status from the control plane
+curl -H "$AUTH" $SERVER/api/v1/agents/ag-nginx-prod-1 | jq '{status, last_heartbeat, os, architecture}'
+```
 
 ### Agent Registration & Heartbeat
 - **Registration** — `POST /api/v1/agents` with agent name and API key
@@ -468,6 +570,19 @@ Scan targets define what CIDR ranges and ports to probe.
 
 ## Ownership & Accountability
 
+Without ownership, expiring certificates become "someone else's problem." Ownership tracking ensures every certificate has a named person and team who receive alerts and are accountable for renewal. When an auditor asks "who owns this cert?", the answer is one API call away.
+
+```bash
+# Create a team
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/teams -d '{"name": "Platform Engineering", "email": "platform@example.com"}'
+
+# Create an owner
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/owners -d '{"name": "Alice Chen", "email": "alice@example.com", "team_id": "t-platform"}'
+
+# Assign owner to certificate — Alice now receives all alerts for this cert
+curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod -d '{"owner_id": "o-alice"}'
+```
+
 ### Teams
 - **Model** — Team grouping for organizational structure
 - **Team Assignment** — Certificates and policies assigned to teams
@@ -493,6 +608,27 @@ Scan targets define what CIDR ranges and ports to probe.
 ---
 
 ## Observability
+
+Observability answers "is certctl healthy and are my certificates safe?" without opening the dashboard. Metrics integrate with your existing monitoring stack (Prometheus, Grafana, Datadog), stats power the dashboard charts, structured logs feed your SIEM, and the audit trail proves to auditors what happened and when.
+
+```bash
+# Quick health check
+curl $SERVER/health
+# {"status":"healthy"}
+
+# Dashboard summary — how many certs, what's expiring, agent health
+curl -H "$AUTH" $SERVER/api/v1/stats/summary | jq .
+
+# Prometheus metrics — scrape this from your monitoring stack
+curl -H "$AUTH" $SERVER/api/v1/metrics/prometheus
+# certctl_certificate_total 15
+# certctl_certificate_expiring 3
+# certctl_agent_active 4
+# ...
+
+# JSON metrics — for custom dashboards
+curl -H "$AUTH" $SERVER/api/v1/metrics | jq .
+```
 
 ### Observability Layers
 
@@ -570,6 +706,19 @@ Every API call recorded to immutable `audit_events` table.
 ---
 
 ## Job System
+
+Jobs are the work units that drive the certificate lifecycle. Every issuance, renewal, and deployment is tracked as a job with a clear state machine, so operators always know exactly where each operation stands and can troubleshoot failures.
+
+```bash
+# List pending jobs
+curl -H "$AUTH" "$SERVER/api/v1/jobs?status=Pending" | jq '.items[] | {id, type, status, certificate_id}'
+
+# Cancel a stuck job
+curl -X POST -H "$AUTH" $SERVER/api/v1/jobs/j-abc123/cancel
+
+# Approve a renewal waiting for human sign-off
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/j-abc123/approve -d '{"reason": "Approved per change ticket #1234"}'
+```
 
 ### Job Types (4 total)
 | Type | Trigger | States | Output |
@@ -688,7 +837,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 ## Integration Interfaces
 
 ### MCP Server (M18a)
-**Separate binary** (`cmd/mcp-server/`) providing AI-native access to certctl via Claude, Cursor, OpenClaw.
+**Separate binary** (`cmd/mcp-server/`) providing AI-native access to certctl via Claude, Cursor, OpenClaw. Instead of memorizing 91 API endpoints, ask your AI assistant "what certificates are expiring this week?" or "renew the API prod cert" and it translates to the right API calls.
 
 - **Transport** — stdio (stdin/stdout)
 - **Protocol** — Model Context Protocol v1
@@ -726,7 +875,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 85 operations (84 API + /health)
+- **Scope** — 93 operations (91 API + /health + /ready)
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)
@@ -783,7 +932,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### Deployment Architecture
 - **Server** — Go HTTP server (net/http stdlib) on `:8080` (default) or `:8443` (Docker)
-- **Database** — PostgreSQL 16 with 18+ tables, TEXT primary keys (human-readable prefixed IDs)
+- **Database** — PostgreSQL 16 with 19 tables, TEXT primary keys (human-readable prefixed IDs)
 - **Agent** — Lightweight Go binary on target infrastructure
 - **Dashboard** — React SPA served from `/web/dist/` (Vite build)
 
@@ -794,7 +943,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Credentials** — Environment variables in `.env` file; app.key for API key
 
 ### PostgreSQL Schema
-- **18+ Tables** — Certificates, agents, jobs, targets, issuers, policies, profiles, teams, owners, agent groups, audit events, notifications, revocations, versions, etc.
+- **19 Tables** — Certificates, certificate versions, agents, deployment targets, renewal policies, jobs, audit events, notifications, issuers, policy rules, policy violations, certificate profiles, teams, owners, agent groups, agent group members, certificate revocations, discovered certificates, discovery scans, network scan targets
 - **TEXT Primary Keys** — Human-readable prefixed IDs: mc-*, t-*, a-*, j-*, p-*, etc.
 - **Indexes** — 5+ performance indexes on foreign keys, timestamps, status fields
 - **Migrations** — Idempotent migrations with `IF NOT EXISTS`, `ON CONFLICT`, numbered sequentially
@@ -812,7 +961,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Integration Tests** — End-to-end workflows (issuance→renewal→deployment)
 - **Negative Tests** — Malformed input, nonexistent resources, error conditions
 - **Frontend Tests** — 86 Vitest tests (API client, utilities, stats/metrics, full endpoint coverage)
-- **Total Coverage** — 860+ tests (Go + frontend combined)
+- **Total Coverage** — 900+ tests (Go + frontend combined)
 
 ### Licensing
 - **License** — Business Source License 1.1 (BSL 1.1)
@@ -906,6 +1055,12 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | `CERTCTL_OPENSSL_CRL_SCRIPT` | string | (empty) | Path to CRL generation script |
 | `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | int | 30 | Script timeout in seconds |
 
+#### Network Discovery
+| Variable | Type | Default | Purpose |
+|----------|------|---------|---------|
+| `CERTCTL_NETWORK_SCAN_ENABLED` | bool | false | Enable server-side network certificate discovery |
+| `CERTCTL_NETWORK_SCAN_INTERVAL` | duration | 6h | How often the scheduler runs network scans |
+
 #### Notifiers
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
@@ -969,6 +1124,8 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
 | Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |
 | Filesystem cert discovery (M18b) | ✓ | ✓ | Shipped |
+| Network cert discovery (M21) | ✓ | ✓ | Shipped |
+| Prometheus metrics (M22) | ✓ | ✓ | Shipped |
 | Enhanced query API (sort, filter, cursor, fields) | ✓ | ✓ | Shipped |
 | Immutable API audit log | ✓ | ✓ | Shipped |
 | **OIDC/SSO auth** | ✗ | ✓ | Planned V3 |
@@ -991,7 +1148,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 
 | Category | Count |
 |----------|-------|
-| **API Endpoints** | 84 (under /api/v1/) |
+| **API Endpoints** | 91 (under /api/v1/) |
 | **Dashboard Pages** | 19 |
 | **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
 | **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |
@@ -1004,7 +1161,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **Discovery Statuses** | 3 (Unmanaged, Managed, Dismissed) |
 | **MCP Tools** | 76 (16 resource domains) |
 | **CLI Subcommands** | 10 |
-| **Database Tables** | 20+ |
-| **Test Suite** | 860+ tests (Go backend + frontend) |
+| **Database Tables** | 19 |
+| **Test Suite** | 900+ tests (Go backend + frontend) |
 | **Environment Variables** | 41+ configuration options |
 
