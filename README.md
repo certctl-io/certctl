@@ -10,7 +10,7 @@ certctl is a self-hosted platform for **end-to-end certificate lifecycle automat
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (84 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates in your infrastructure, and submit CSRs — private keys never leave your servers. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (91 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 ```mermaid
 flowchart LR
@@ -113,11 +113,11 @@ flowchart TB
         API["REST API\nGo 1.22 net/http"]
         SVC["Service Layer"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry"]
+        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry · Network Scan"]
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n18 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\n19 tables\nTEXT primary keys")]
     end
 
     subgraph "Agents"
@@ -160,6 +160,9 @@ flowchart TB
 | `agent_groups` | Dynamic device grouping by OS, architecture, IP CIDR, version |
 | `agent_group_members` | Manual include/exclude membership for agent groups |
 | `certificate_revocations` | Revocation records with RFC 5280 reason codes, serial numbers, issuer notification status |
+| `discovered_certificates` | Filesystem and network-discovered certificates with fingerprint deduplication |
+| `discovery_scans` | Discovery scan history with timestamps and agent attribution |
+| `network_scan_targets` | Network scan target definitions with CIDRs, ports, schedule, and scan metrics |
 
 ## Configuration
 
@@ -200,6 +203,8 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_OPENSSL_REVOKE_SCRIPT` | — | Script for OpenSSL/Custom CA certificate revocation |
 | `CERTCTL_OPENSSL_CRL_SCRIPT` | — | Script for OpenSSL/Custom CA CRL generation |
 | `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | `30` | Timeout for OpenSSL script execution |
+| `CERTCTL_NETWORK_SCAN_ENABLED` | `false` | Enable server-side network certificate discovery (TLS scanning) |
+| `CERTCTL_NETWORK_SCAN_INTERVAL` | `6h` | How often the scheduler runs network scans |
 | `CERTCTL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL for notifications |
 | `CERTCTL_TEAMS_WEBHOOK_URL` | — | Microsoft Teams incoming webhook URL |
 | `CERTCTL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 routing key |
@@ -395,6 +400,17 @@ GET    /api/v1/stats/expiration-timeline   Expiration buckets (?days=30)
 GET    /api/v1/stats/job-trends            Job success/failure over time (?days=7)
 GET    /api/v1/stats/issuance-rate         Certificate issuance rate (?days=7)
 GET    /api/v1/metrics                     JSON metrics (gauges, counters, uptime)
+GET    /api/v1/metrics/prometheus          Prometheus exposition format (text/plain)
+```
+
+### Network Discovery
+```
+GET    /api/v1/network-scan-targets       List scan targets
+POST   /api/v1/network-scan-targets       Create scan target (CIDRs, ports, schedule)
+GET    /api/v1/network-scan-targets/{id}  Get scan target
+PUT    /api/v1/network-scan-targets/{id}  Update scan target
+DELETE /api/v1/network-scan-targets/{id}  Delete scan target
+POST   /api/v1/network-scan-targets/{id}/scan  Trigger immediate scan
 ```
 
 ### Auth
@@ -509,13 +525,15 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
 - **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
 - **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
+- **M21: Network Cert Discovery** ✅ — server-side active TLS scanning of CIDR ranges and ports, concurrent probing (50 goroutines), CIDR expansion with /20 safety cap, sentinel agent pattern for discovery pipeline reuse, CRUD API for scan targets, scheduler integration (6h default)
+- **M22: Prometheus Metrics** ✅ — `GET /api/v1/metrics/prometheus` returns Prometheus exposition format (`text/plain; version=0.0.4`), 11 metrics with `certctl_` prefix, compatible with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics
 - **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
 
 ### V3: Team & Enterprise
 Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
 
-### V4+: Discovery, Cloud & Scale
-Discovery engine, Kubernetes integration, cloud infrastructure targets, extended CA support, and platform-scale features.
+### V4+: Cloud, Scale & Passive Discovery
+Passive network discovery (TLS listener), Kubernetes integration, cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support, and platform-scale features.
 
 ## License
 

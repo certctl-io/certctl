@@ -144,18 +144,16 @@ The AI calls `certctl_create_certificate` with the common name, team ID, and own
 
 ## Architecture
 
-```
-┌──────────────────┐     stdio      ┌──────────────────┐     HTTP      ┌──────────────────┐
-│   AI Assistant   │ ◄────────────► │  certctl MCP     │ ───────────► │  certctl Server  │
-│ (Claude, Cursor) │                │  cmd/mcp-server/ │  + Bearer    │  :8443           │
-└──────────────────┘                └──────────────────┘   token      └──────────────────┘
-                                           │
-                                    ┌──────┴──────┐
-                                    │ 76 tools    │
-                                    │ 16 domains  │
-                                    │ Typed input │
-                                    │ structs     │
-                                    └─────────────┘
+```mermaid
+flowchart LR
+    AI["AI Assistant\n(Claude, Cursor)"]
+    MCP["certctl MCP\ncmd/mcp-server/"]
+    SERVER["certctl Server\n:8443"]
+
+    AI <-->|"stdio"| MCP
+    MCP -->|"HTTP + Bearer token"| SERVER
+
+    MCP ~~~ TOOLS["76 tools · 16 domains\nTyped input structs"]
 ```
 
 The MCP server is intentionally thin:

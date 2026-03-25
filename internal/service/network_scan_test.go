@@ -232,13 +232,3 @@ func TestExpandEndpoints(t *testing.T) {
 		t.Errorf("expected 192.168.1.1:8443, got %s", endpoints[1])
 	}
 }
-
-// containsSubstring checks if a string contains a substring (helper)
-func containsSubstring(s, substr string) bool {
-	for i := 0; i <= len(s)-len(substr); i++ {
-		if s[i:i+len(substr)] == substr {
-			return true
-		}
-	}
-	return false
-}
