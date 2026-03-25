@@ -89,7 +89,7 @@ Each section includes:
 
 - **API Key Policy** — All API access requires an API key or explicit opt-out. Opt-out (`CERTCTL_AUTH_TYPE=none`) logs a warning: "WARNING: Auth disabled (CERTCTL_AUTH_TYPE=none) — this is insecure and only for development". Configuration choice is logged at startup.
 - **Agent Authentication** — Agents authenticate to the server via API keys (same mechanism as users). Agent credentials are separate from user API keys.
-- **Private Key Policy** — Agent-side key generation is the default (`CERTCTL_KEYGEN_MODE=agent`). Server-side keygen (`CERTCTL_KEYGEN_MODE=server`) requires explicit configuration and logs a warning: "Server-side keygen enabled — private keys will be stored in PostgreSQL (development only)".
+- **Private Key Policy** — Agent-side key generation is the default (`CERTCTL_KEYGEN_MODE=agent`). Server-side keygen (`CERTCTL_KEYGEN_MODE=server`) requires explicit configuration and logs a warning: "server-side key generation enabled (CERTCTL_KEYGEN_MODE=server) — private keys touch control plane, demo only".
 - **Password Policy** — Not applicable; certctl uses API keys exclusively. Password management is delegated to your organization's IAM system if you integrate OIDC/SSO (V3).
 
 **Evidence Locations**:
@@ -119,7 +119,7 @@ Each section includes:
 
 **certctl Implementation** (V2):
 
-- **TLS for Control Plane** — All API communication occurs over HTTPS (TLS 1.2+). Server uses `tls.Dial()` for outbound connections to issuers and targets. Configuration: `CERTCTL_SERVER_ADDR` (default `:8443`).
+- **TLS for Control Plane** — All API communication occurs over HTTPS (TLS 1.2+). Server uses `tls.Dial()` for outbound connections to issuers and targets. Configuration: `CERTCTL_SERVER_HOST` (default `127.0.0.1`) + `CERTCTL_SERVER_PORT` (default `8080`; Docker Compose maps to `8443`).
 - **Agent-to-Server Communication** — Agents submit CSRs and heartbeats over HTTPS to the server using the same TLS stack.
 - **Private Key Isolation** — Agents generate ECDSA P-256 private keys locally (`crypto/ecdsa` + `crypto/elliptic`). Private keys are never transmitted to the server — agents submit CSRs only. Private keys are stored on agent filesystem (`CERTCTL_KEY_DIR`, default `/var/lib/certctl/keys`) with 0600 (owner read/write only) permissions. Server-side keygen mode logs a development warning; production must use agent-side keygen.
 - **Certificate Storage** — Signed certificates are stored in PostgreSQL as PEM text (along with metadata). Certificates are not secrets and may be transmitted plaintext. Private keys are never stored on the control plane in production (agent-side keygen mode).

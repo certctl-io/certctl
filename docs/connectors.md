@@ -37,6 +37,14 @@ type Connector interface {
 
     // GetOrderStatus checks the status of an async issuance order
     GetOrderStatus(ctx context.Context, orderID string) (*OrderStatus, error)
+
+    // GenerateCRL generates a DER-encoded X.509 CRL signed by this issuer.
+    // Returns nil if the issuer does not support CRL generation (e.g., ACME).
+    GenerateCRL(ctx context.Context, revokedCerts []RevokedCertEntry) ([]byte, error)
+
+    // SignOCSPResponse signs an OCSP response for the given certificate serial.
+    // Returns nil if the issuer does not support OCSP (e.g., ACME).
+    SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
 }
 
 type IssuanceRequest struct {
@@ -474,6 +482,8 @@ Each notifier is enabled by its configuration env var:
 
 | Notifier | Env Var | Description |
 |----------|---------|-------------|
+| Email | `CERTCTL_EMAIL_SMTP_HOST`, `CERTCTL_EMAIL_SMTP_PORT`, `CERTCTL_EMAIL_FROM` | SMTP email delivery. Optional: `CERTCTL_EMAIL_SMTP_USERNAME`, `CERTCTL_EMAIL_SMTP_PASSWORD` |
+| Webhook | `CERTCTL_WEBHOOK_URL` | HTTP POST to any endpoint. Optional: `CERTCTL_WEBHOOK_SECRET` for HMAC signing |
 | Slack | `CERTCTL_SLACK_WEBHOOK_URL` | Incoming webhook URL. Optional: `CERTCTL_SLACK_CHANNEL`, `CERTCTL_SLACK_USERNAME` |
 | Teams | `CERTCTL_TEAMS_WEBHOOK_URL` | Incoming webhook URL (MessageCard format) |
 | PagerDuty | `CERTCTL_PAGERDUTY_ROUTING_KEY` | Events API v2 routing key. Optional: `CERTCTL_PAGERDUTY_SEVERITY` (default: "warning") |

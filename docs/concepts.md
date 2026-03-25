@@ -180,7 +180,7 @@ certctl can alert you when certificates are expiring, when renewals fail, when d
 
 ### CLI
 
-certctl ships with a command-line tool (`certctl-cli`) for operators who prefer terminal workflows or need to integrate certctl into shell scripts and CI/CD pipelines. The CLI wraps the REST API with 10 subcommands: `list-certs`, `get-cert`, `renew-cert`, `revoke-cert`, `list-agents`, `list-jobs`, `health`, `metrics`, and `import` (for bulk PEM import).
+certctl ships with a command-line tool (`certctl-cli`) for operators who prefer terminal workflows or need to integrate certctl into shell scripts and CI/CD pipelines. The CLI wraps the REST API with 12 subcommands organized by resource: `certs list`, `certs get`, `certs renew`, `certs revoke`, `agents list`, `agents get`, `jobs list`, `jobs get`, `jobs cancel`, `import` (bulk PEM import), `status` (health + summary stats), and `version`.
 
 The CLI supports both table and JSON output formats (`--format table` or `--format json`), connects to the server via `CERTCTL_SERVER_URL` and authenticates with `CERTCTL_API_KEY`. It's built with Go's standard library only — no external dependencies.
 

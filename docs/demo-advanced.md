@@ -875,28 +875,28 @@ export CERTCTL_SERVER_URL="http://localhost:8443"
 export CERTCTL_API_KEY="test-key-123"
 
 # List certificates (JSON or table format)
-./certctl-cli list-certs --format table
+./certctl-cli certs list
 
 # Get certificate details
-./certctl-cli get-cert mc-demo-api
+./certctl-cli certs get mc-demo-api
 
 # Trigger renewal
-./certctl-cli renew-cert mc-demo-api
+./certctl-cli certs renew mc-demo-api
 
 # Revoke a certificate with RFC 5280 reason
-./certctl-cli revoke-cert mc-demo-payments --reason keyCompromise
+./certctl-cli certs revoke mc-demo-payments --reason keyCompromise
 
 # List agents
-./certctl-cli list-agents
+./certctl-cli agents list
 
 # List pending jobs
-./certctl-cli list-jobs
+./certctl-cli jobs list
 
-# Check system health
-./certctl-cli health
+# Check system health and stats
+./certctl-cli status
 
-# Export metrics
-./certctl-cli metrics --format json
+# JSON output format
+./certctl-cli --format json status
 
 # Bulk import certificates from a PEM file
 ./certctl-cli import /path/to/certificates.pem

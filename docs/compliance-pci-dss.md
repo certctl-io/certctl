@@ -168,7 +168,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 - **Server-Side Fallback** (demo/development only) — `CERTCTL_KEYGEN_MODE=server`:
   - Control plane generates RSA 2048-bit or ECDSA P-256 keys using `crypto/rand` + `crypto/rsa`.
   - Server signs CSR and stores the private key in the certificate version record for agent deployment. **Security note:** In server keygen mode, the control plane holds private keys — this is why agent keygen mode is the recommended default for production.
-  - **Must not be used in production.** Explicit warning logged: `Key generation mode is server; this should only be used for testing.`
+  - **Must not be used in production.** Explicit warning logged: `server-side key generation enabled (CERTCTL_KEYGEN_MODE=server) — private keys touch control plane, demo only`
 
 - **Issuer-Specific Key Negotiation**:
   - **ACME (Let's Encrypt, ZeroSSL)**: Let's Encrypt controls key types; certctl requests ECDSA P-256 by default.
@@ -178,7 +178,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 
 **Evidence You Can Provide**:
 - Deployment configuration: `CERTCTL_KEYGEN_MODE=agent` in production (verify in `docker-compose.yml`, Kubernetes manifests, or systemd units).
-- Agent log excerpt showing key generation: `openssl genrsa...` or agent process logs with CSR submission timestamp.
+- Agent log excerpt showing key generation: Go `crypto/ecdsa.GenerateKey(elliptic.P256())` via agent process logs with CSR submission timestamp.
 - Certificate CSR audit: `GET /api/v1/audit?type=certificate_issued` showing CSR fingerprint (SHA-256 hash of CSR PEM).
 - Renewal job logs showing agent-submitted CSR, not server-generated key.
 
@@ -205,7 +205,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 - **Control Plane Key Storage** — Sensitive credentials managed via environment variables or `.env` files:
   - CA private key path: `CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH` (for Local CA sub-CA mode).
   - ACME account key: embedded in ACME issuer config (not stored separately; ACME library handles in memory).
-  - step-ca provisioner key: `CERTCTL_STEPCA_PROVISIONER_KEY` env var (JWK, in memory during runtime).
+  - step-ca provisioner key: `CERTCTL_STEPCA_KEY_PATH` env var (path to JWK private key file, loaded into memory during runtime).
   - API keys: `CERTCTL_API_KEY` (SHA-256 hashed in database, plaintext never stored).
   - Database credentials: `CERTCTL_DATABASE_URL` in `.env` file, not in source code.
 

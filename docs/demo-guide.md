@@ -154,30 +154,29 @@ export CERTCTL_SERVER_URL="http://localhost:8443"
 export CERTCTL_API_KEY="test-key-123"
 
 # List certificates (JSON or table format)
-./certctl-cli list-certs --format json
-./certctl-cli list-certs --format table
+./certctl-cli --format json certs list
+./certctl-cli certs list
 
 # Get certificate details
-./certctl-cli get-cert mc-api-prod
+./certctl-cli certs get mc-api-prod
 
 # Trigger renewal
-./certctl-cli renew-cert mc-api-prod
+./certctl-cli certs renew mc-api-prod
 
 # Revoke a certificate (with RFC 5280 reason)
-./certctl-cli revoke-cert mc-api-prod --reason keyCompromise
+./certctl-cli certs revoke mc-api-prod --reason keyCompromise
 
 # List agents
-./certctl-cli list-agents
+./certctl-cli agents list
 
 # List pending jobs
-./certctl-cli list-jobs
+./certctl-cli jobs list
 
 # Bulk import certificates from PEM files
 ./certctl-cli import /path/to/certs.pem
 
-# Check health and metrics
-./certctl-cli health
-./certctl-cli metrics
+# Check system health and stats
+./certctl-cli status
 ```
 
 ## MCP Server for AI Integration
@@ -243,7 +242,7 @@ If you're demoing to a team or customer, here's a suggested flow:
 10. **Show certificate discovery** — "We discover certificates two ways: agents scan local filesystems, and the server actively probes TLS endpoints on your network. We deduplicate by fingerprint, show you what we found, and let you claim them or dismiss them"
 11. **Show the immutable audit trail** — "Every action in the system is recorded: who did it, what they did, when, what changed. Export to CSV/JSON for compliance"
 12. **Show advanced query features** — "Sort by any field, filter by date range, paginate efficiently with cursor-based pagination, select just the fields you need"
-13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 10 subcommands. AI assistants get MCP integration with 78 tools. Everything is API-first"
+13. **Show the CLI and MCP server** — "Terminal users get `certctl-cli` with 12 subcommands. AI assistants get MCP integration with 78 tools. Everything is API-first"
 
 The whole walkthrough takes 5-10 minutes.
 

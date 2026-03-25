@@ -76,7 +76,7 @@ The control plane is a Go HTTP server backed by PostgreSQL. It manages state (ce
 
 The server exposes a REST API under `/api/v1/` and optionally serves the web dashboard as static files from the `web/` directory.
 
-**Key internals**: The server uses Go 1.22's `net/http` stdlib routing (no external router framework), structured logging via `slog`, and a handler → service → repository layered architecture. Handlers define their own service interfaces for clean dependency inversion.
+**Key internals**: The server uses Go 1.25's `net/http` stdlib routing (no external router framework), structured logging via `slog`, and a handler → service → repository layered architecture. Handlers define their own service interfaces for clean dependency inversion.
 
 ### Agents
 
@@ -122,8 +122,11 @@ erDiagram
     managed_certificates ||--o{ policy_violations : "violates"
     managed_certificates ||--o{ audit_events : "logged in"
     managed_certificates ||--o{ notification_events : "generates"
+    managed_certificates ||--o{ certificate_revocations : "revoked via"
     agent_groups ||--o{ agent_group_members : "has members"
     agents ||--o{ agent_group_members : "belongs to"
+    agents ||--o{ discovered_certificates : "discovers"
+    agents ||--o{ discovery_scans : "performs"
 
     teams {
         text id PK
@@ -241,6 +244,43 @@ erDiagram
         text agent_group_id FK
         text agent_id FK
         text membership_type
+    }
+    renewal_policies {
+        text id PK
+        text certificate_id FK
+        int renewal_days_before
+        jsonb alert_thresholds_days
+        boolean auto_renew
+        text agent_group_id FK
+    }
+    certificate_revocations {
+        text id PK
+        text certificate_id FK
+        text serial_number
+        text reason
+        timestamp revoked_at
+        boolean issuer_notified
+    }
+    discovered_certificates {
+        text id PK
+        text agent_id FK
+        text fingerprint_sha256
+        text common_name
+        text source_path
+        text status
+    }
+    discovery_scans {
+        text id PK
+        text agent_id FK
+        int certs_found
+        timestamp scanned_at
+    }
+    network_scan_targets {
+        text id PK
+        text name
+        text[] cidrs
+        int[] ports
+        boolean enabled
     }
 ```
 
@@ -608,7 +648,7 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 91 endpoints across 19 resource domains (including health, readiness, auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, and Prometheus metrics from M22), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 93 endpoints across 19 resource domains (91 under `/api/v1/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, and Prometheus metrics from M22), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
@@ -654,7 +694,7 @@ The 78 tools are organized across 16 resource domains with typed input structs a
 
 certctl ships with a command-line tool (`certctl-cli`, built from `cmd/cli/main.go`) that wraps the REST API for terminal workflows. The CLI uses Go's standard library only (`flag` + `text/tabwriter`) — no Cobra or other framework dependencies.
 
-10 subcommands: `list-certs`, `get-cert`, `renew-cert`, `revoke-cert`, `list-agents`, `list-jobs`, `health`, `metrics`, and `import` (bulk PEM import). Output is available in table (default) or JSON format via `--format`. Connection is configured via `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables or CLI flags.
+12 subcommands organized by resource: `certs list`, `certs get`, `certs renew`, `certs revoke`, `agents list`, `agents get`, `jobs list`, `jobs get`, `jobs cancel`, `import` (bulk PEM import), `status` (health + summary stats), and `version`. Output is available in table (default) or JSON format via `--format`. Connection is configured via `CERTCTL_SERVER_URL` and `CERTCTL_API_KEY` environment variables or CLI flags.
 
 The bulk import command (`certctl-cli import <file.pem>`) parses multi-certificate PEM files and creates certificate records via the API — useful for bootstrapping certctl with existing certificate inventory.
 

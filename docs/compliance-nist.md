@@ -15,7 +15,7 @@ certctl generates certificate keys on agent infrastructure using Go's `crypto/ra
 
 **Server-Side Key Generation (Demo Only)**
 - Available for development and testing via `CERTCTL_KEYGEN_MODE=server`
-- Explicitly logged as a warning at startup: "server-side keygen enabled (production deployments must use agent mode)"
+- Explicitly logged as a warning at startup: "server-side key generation enabled (CERTCTL_KEYGEN_MODE=server) — private keys touch control plane, demo only"
 - Docker Compose demo uses server mode for backward compatibility
 - Not recommended for production; agent mode is the secure default
 

@@ -1,16 +1,70 @@
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-TLS certificate lifespans are shrinking. The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) unanimously in April 2025, setting a phased reduction: **200 days** by March 2026, **100 days** by March 2027, and **47 days** by March 2029. Manual certificate management is no longer viable at any scale.
+Built by a solo developer. 91 API endpoints. 21 database tables. 900+ tests. Full GUI. Ships with Docker Compose.
 
-certctl is a self-hosted platform for **end-to-end certificate lifecycle automation** — from issuance through renewal to deployment — with zero human intervention. Track every certificate in your organization, automatically renew them before they expire, and deploy them to your servers without touching a terminal. Private keys never leave your infrastructure.
+TLS certificate lifespans are shrinking fast. The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) unanimously in April 2025, setting a phased reduction: **200 days** by March 2026, **100 days** by March 2027, and **47 days** by March 2029. Organizations managing dozens or hundreds of certificates can no longer rely on spreadsheets, calendar reminders, or manual renewal workflows. The math doesn't work — at 47-day lifespans, a team managing 100 certificates is processing 7+ renewals per week, every week, forever.
+
+certctl is a self-hosted platform that automates the entire certificate lifecycle — from issuance through renewal to deployment — with zero human intervention. It works with any certificate authority, deploys to any server, and keeps private keys on your infrastructure where they belong.
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
-![Status: v1.0.0](https://img.shields.io/badge/status-v1.0.0-brightgreen)
+![Version: v2.0.0](https://img.shields.io/badge/version-v2.0.0-brightgreen)
+
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
+| [Quick Start](docs/quickstart.md) | Get running in 5 minutes with accurate API examples |
+| [Demo Walkthrough](docs/demo-guide.md) | 5-7 minute guided stakeholder presentation |
+| [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
+| [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
+| [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
+| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
+| [Manual Testing Guide](docs/testing-guide.md) | 284 tests across 25 areas — full V2 QA runbook with exact commands and pass/fail criteria |
+
+## Contents
+
+- [Why certctl Exists](#why-certctl-exists)
+- [What It Does](#what-it-does)
+- [Screenshots](#screenshots)
+- [Quick Start](#quick-start)
+- [Architecture](#architecture)
+- [Configuration](#configuration)
+- [MCP Server (AI Integration)](#mcp-server-ai-integration)
+- [CLI](#cli)
+- [API Overview](#api-overview)
+- [Supported Integrations](#supported-integrations)
+- [Development](#development)
+- [Security](#security)
+- [Roadmap](#roadmap)
+- [License](#license)
+
+## Why certctl Exists
+
+Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
+
+certctl fills that gap. It's **CA-agnostic** — the issuer connector interface means you can plug in any certificate authority: a self-signed local CA for dev, Let's Encrypt via ACME for public certs, Smallstep step-ca for your private PKI, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. You're never locked to a single CA vendor, and you can run multiple issuers simultaneously for different certificate types.
+
+It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and HAProxy today, with the same pluggable connector model for any server that accepts cert files. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 ## What It Does
 
 certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (91 endpoints under `/api/v1/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+
+**Core capabilities:**
+
+- **Full lifecycle automation** — issuance, renewal, deployment, and revocation with zero human intervention. Configurable renewal policies trigger jobs automatically based on expiration thresholds.
+- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01 and DNS-01 challenges (Let's Encrypt, Sectigo, any ACME-compatible CA), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
+- **Agent-side key generation** — agents generate ECDSA P-256 keys locally, store them with 0600 permissions, and submit only the CSR. Private keys never touch the control plane. This is the default mode, not an opt-in feature.
+- **Certificate discovery** — agents scan filesystems for existing PEM/DER certificates and report findings for triage. The network scanner probes TLS endpoints across CIDR ranges to find certificates you didn't know existed.
+- **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
+- **Policy engine** — 5 rule types with violation tracking and severity levels. Certificate profiles enforce allowed key types, maximum TTL, and crypto constraints at enrollment time.
+- **Immutable audit trail** — every action recorded to an append-only log. Every API call recorded with method, path, actor, SHA-256 body hash, response status, and latency. No update or delete on audit records.
+- **Operational dashboard** — 18-page React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, and real-time short-lived credential tracking.
+- **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
+- **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
+- **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
 
 ```mermaid
 flowchart LR
@@ -72,7 +126,7 @@ curl -s http://localhost:8443/api/v1/certificates | jq '.total'
 ### Manual Build
 
 ```bash
-# Prerequisites: Go 1.22+, PostgreSQL 16+
+# Prerequisites: Go 1.25+, PostgreSQL 16+
 go mod download
 make build
 
@@ -92,26 +146,13 @@ export CERTCTL_AGENT_ID=agent-local-01
 ./bin/agent --agent-id=agent-local-01
 ```
 
-## Documentation
-
-| Guide | Description |
-|-------|-------------|
-| [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
-| [Quick Start](docs/quickstart.md) | Get running in 5 minutes with accurate API examples |
-| [Demo Walkthrough](docs/demo-guide.md) | 5-7 minute guided stakeholder presentation |
-| [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
-| [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
-| [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
-| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [Manual Testing Guide](docs/testing-guide.md) | 284 tests across 25 areas — full V2 QA runbook with exact commands and pass/fail criteria |
-
 ## Architecture
 
 ```mermaid
 flowchart TB
     subgraph "Control Plane (certctl-server)"
         DASH["Web Dashboard\nReact SPA"]
-        API["REST API\nGo 1.22 net/http"]
+        API["REST API\nGo 1.25 net/http"]
         SVC["Service Layer"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
         SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry · Network Scan"]
@@ -269,19 +310,26 @@ go install github.com/shankar0123/certctl/cmd/cli@latest
 export CERTCTL_SERVER_URL=http://localhost:8443
 export CERTCTL_API_KEY=your-api-key
 
-# Commands
-certctl-cli list-certs                    # List all certificates
-certctl-cli get-cert --id mc-api-prod     # Get certificate details
-certctl-cli renew-cert --id mc-api-prod   # Trigger renewal
-certctl-cli revoke-cert --id mc-api-prod --reason keyCompromise
-certctl-cli list-agents                   # List registered agents
-certctl-cli list-jobs                     # List jobs
-certctl-cli health                        # Server health check
-certctl-cli metrics                       # Server metrics
-certctl-cli import --file certs.pem       # Bulk import from PEM file
+# Certificate commands
+certctl-cli certs list                    # List all certificates
+certctl-cli certs get mc-api-prod         # Get certificate details
+certctl-cli certs renew mc-api-prod       # Trigger renewal
+certctl-cli certs revoke mc-api-prod --reason keyCompromise
+
+# Agent and job commands
+certctl-cli agents list                   # List registered agents
+certctl-cli agents get ag-web-prod        # Get agent details
+certctl-cli jobs list                     # List jobs
+certctl-cli jobs get job-123              # Get job details
+certctl-cli jobs cancel job-123           # Cancel a pending job
+
+# Operations
+certctl-cli status                        # Server health + summary stats
+certctl-cli import certs.pem              # Bulk import from PEM file
+certctl-cli version                       # Show CLI version
 
 # Output formats
-certctl-cli list-certs --format json      # JSON output (default: table)
+certctl-cli certs list --format json      # JSON output (default: table)
 ```
 
 ## API Overview
@@ -509,7 +557,7 @@ make docker-clean       # Stop + remove volumes
 ## Roadmap
 
 ### V1 (v1.0.0 released)
-All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 19 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
+All nine development milestones (M1–M9) are complete. The backend covers the full certificate lifecycle: Local CA and ACME v2 issuers, NGINX/Apache/HAProxy/F5/IIS target connectors, threshold-based expiration alerting, agent-side ECDSA P-256 key generation, API auth with rate limiting, and a React dashboard with 18 pages wired to the real API. The CI pipeline runs build, vet, test with coverage gates (service layer 30%+, handler layer 50%+), frontend type checking, Vitest test suite, and Vite production build on every push. Docker images are published to GitHub Container Registry on every version tag via the release workflow.
 
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
@@ -523,7 +571,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M19: Immutable API Audit Log** ✅ — every API call recorded to immutable audit trail (method, path, actor, SHA-256 body hash, status, latency), async recording via goroutine, configurable path exclusions
 - **M16a: Notifier Connectors** ✅ — Slack (incoming webhook), Microsoft Teams (MessageCard), PagerDuty (Events API v2), OpsGenie (Alert API v2) — config-driven enablement via env vars
 - **M17: Additional Connectors** ✅ — OpenSSL/Custom CA issuer connector (script-based signing with configurable timeout)
-- **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 10 subcommands (list/get/renew/revoke certs, list agents/jobs, health, metrics, PEM bulk import), stdlib-only, JSON/table output
+- **M16b: CLI + Bulk Import** ✅ — `certctl-cli` with 12 subcommands (certs list/get/renew/revoke, agents list/get, jobs list/get/cancel, import, status, version), stdlib-only, JSON/table output
 - **M20: Enhanced Query API** ✅ — sparse field selection (`?fields=`), sort with direction (`?sort=-notAfter`), time-range filters (`expires_before`, `created_after`, etc.), cursor-based pagination (`?cursor=&page_size=`), `GET /certificates/{id}/deployments`, additional filters (`agent_id`, `profile_id`)
 - **M18b: Filesystem Cert Discovery** ✅ — agents scan configured directories (PEM/DER), report findings to control plane, deduplication by SHA-256 fingerprint, claim/dismiss/triage workflow via API
 - **M21: Network Cert Discovery** ✅ — server-side active TLS scanning of CIDR ranges and ports, concurrent probing (50 goroutines), CIDR expansion with /20 safety cap, sentinel agent pattern for discovery pipeline reuse, CRUD API for scan targets, scheduler integration (6h default)

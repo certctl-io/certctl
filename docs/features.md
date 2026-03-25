@@ -296,7 +296,7 @@ curl -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations"
 ### step-ca
 - **Protocol** — Native `/sign` and `/revoke` API (not ACME)
 - **Authentication** — JWK provisioner with key file + password
-- **Configuration** — `CERTCTL_STEPCA_URL`, `CERTCTL_STEPCA_PROVISIONER_NAME`, `CERTCTL_STEPCA_PROVISIONER_KEY_PATH`, `CERTCTL_STEPCA_PROVISIONER_PASSWORD`
+- **Configuration** — `CERTCTL_STEPCA_URL`, `CERTCTL_STEPCA_PROVISIONER`, `CERTCTL_STEPCA_KEY_PATH`, `CERTCTL_STEPCA_PASSWORD`
 - **Operations** — Issue, renew, revoke
 - **Use Case** — Smallstep private CA, internal PKI with strong auth
 
@@ -903,16 +903,18 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 | Subcommand | Usage | Output Format |
 |------------|-------|----------------|
-| **list-certs** | `certctl-cli list-certs [--filter]` | Table or JSON (--format=json) |
-| **get-cert** | `certctl-cli get-cert <id>` | JSON cert details |
-| **renew-cert** | `certctl-cli renew-cert <id>` | Job ID confirmation |
-| **revoke-cert** | `certctl-cli revoke-cert <id> [--reason]` | Revocation confirmation |
-| **list-agents** | `certctl-cli list-agents` | Table or JSON |
-| **list-jobs** | `certctl-cli list-jobs [--filter]` | Table or JSON |
-| **health** | `certctl-cli health` | Server status |
-| **metrics** | `certctl-cli metrics` | JSON metrics |
+| **certs list** | `certctl-cli certs list` | Table or JSON (--format=json) |
+| **certs get** | `certctl-cli certs get <id>` | JSON cert details |
+| **certs renew** | `certctl-cli certs renew <id>` | Job ID confirmation |
+| **certs revoke** | `certctl-cli certs revoke <id> [--reason]` | Revocation confirmation |
+| **agents list** | `certctl-cli agents list` | Table or JSON |
+| **agents get** | `certctl-cli agents get <id>` | Agent details |
+| **jobs list** | `certctl-cli jobs list` | Table or JSON |
+| **jobs get** | `certctl-cli jobs get <id>` | Job details |
+| **jobs cancel** | `certctl-cli jobs cancel <id>` | Cancellation confirmation |
+| **status** | `certctl-cli status` | Health + summary stats |
 | **import** | `certctl-cli import <pem-file>` | Bulk import cert count |
-| **help** | `certctl-cli help [command]` | Command documentation |
+| **version** | `certctl-cli version` | Version string |
 
 **Implementation Details:**
 - Stdlib-only (flag + text/tabwriter); no Cobra dependency
@@ -1092,9 +1094,9 @@ The web dashboard is the primary operational interface for certctl. Built with *
 | Variable | Type | Default | Purpose |
 |----------|------|---------|---------|
 | `CERTCTL_STEPCA_URL` | string | (empty) | step-ca server URL |
-| `CERTCTL_STEPCA_PROVISIONER_NAME` | string | (empty) | JWK provisioner name |
-| `CERTCTL_STEPCA_PROVISIONER_KEY_PATH` | string | (empty) | Path to provisioner JWK private key |
-| `CERTCTL_STEPCA_PROVISIONER_PASSWORD` | string | (empty) | Provisioner key password (if encrypted) |
+| `CERTCTL_STEPCA_PROVISIONER` | string | (empty) | JWK provisioner name |
+| `CERTCTL_STEPCA_KEY_PATH` | string | (empty) | Path to provisioner JWK private key |
+| `CERTCTL_STEPCA_PASSWORD` | string | (empty) | Provisioner key password (if encrypted) |
 
 #### OpenSSL/Custom CA Issuer
 | Variable | Type | Default | Purpose |
@@ -1170,7 +1172,7 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
 | REST API (91 endpoints) | ✓ | ✓ | Shipped |
 | MCP server (78 tools) | ✓ | ✓ | Shipped v2.1 |
-| CLI tool (10 subcommands) | ✓ | ✓ | Shipped |
+| CLI tool (12 subcommands) | ✓ | ✓ | Shipped |
 | Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |
 | Filesystem cert discovery (M18b) | ✓ | ✓ | Shipped |
 | Network cert discovery (M21) | ✓ | ✓ | Shipped |
