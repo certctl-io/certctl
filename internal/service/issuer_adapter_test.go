@@ -96,6 +96,10 @@ func (m *mockConnectorLayerIssuer) SignOCSPResponse(ctx context.Context, req iss
 	return []byte("mock-ocsp-response"), nil
 }
 
+func (m *mockConnectorLayerIssuer) GetCACertPEM(ctx context.Context) (string, error) {
+	return "-----BEGIN CERTIFICATE-----\nmock-ca-cert\n-----END CERTIFICATE-----", nil
+}
+
 // Tests for IssueCertificate
 
 func TestIssuerConnectorAdapter_IssueCertificate_Success(t *testing.T) {
