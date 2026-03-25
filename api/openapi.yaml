@@ -58,6 +58,10 @@ tags:
     description: System metrics (gauges, counters, uptime)
   - name: Health
     description: Health and readiness probes, auth info
+  - name: Discovery
+    description: Certificate discovery — filesystem scanning by agents and network TLS probing
+  - name: Network Scan
+    description: Network scan target management for active TLS certificate discovery
 
 paths:
   # ─── Health & Auth ───────────────────────────────────────────────────
@@ -1900,7 +1904,7 @@ paths:
     get:
       tags: [Metrics]
       summary: System metrics
-      description: JSON metrics snapshot with gauges, counters, and uptime. Prometheus format deferred to V3.
+      description: JSON metrics snapshot with gauges, counters, and uptime. See also /api/v1/metrics/prometheus for Prometheus exposition format.
       operationId: getMetrics
       responses:
         "200":
@@ -1909,6 +1913,384 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/MetricsResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Prometheus Metrics (M22) ──────────────────────────────────────
+  /api/v1/metrics/prometheus:
+    get:
+      tags: [Metrics]
+      summary: Prometheus metrics
+      description: |
+        Prometheus exposition format metrics. Compatible with Prometheus, Grafana Agent,
+        Datadog Agent, Victoria Metrics, and any OpenMetrics scraper.
+        Returns 11 metrics with certctl_ prefix (8 gauges, 2 counters, 1 info).
+      operationId: getPrometheusMetrics
+      responses:
+        "200":
+          description: Prometheus text format
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: "Prometheus exposition format (text/plain; version=0.0.4)"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Certificate Deployments (M20) ─────────────────────────────────
+  /api/v1/certificates/{id}/deployments:
+    get:
+      tags: [Certificates]
+      summary: List certificate deployments
+      description: Returns deployment targets associated with this certificate.
+      operationId: getCertificateDeployments
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Deployment targets for this certificate
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/DeploymentTarget"
+                  total:
+                    type: integer
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Discovery (M18b) ─────────────────────────────────────────────
+  /api/v1/agents/{id}/discoveries:
+    post:
+      tags: [Discovery]
+      summary: Submit discovery report
+      description: |
+        Agent submits a batch of discovered certificates from filesystem scanning.
+        Server deduplicates by (fingerprint, agent_id, source_path) and records scan metadata.
+      operationId: submitDiscoveryReport
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/DiscoveryReport"
+      responses:
+        "202":
+          description: Report accepted and processed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryScan"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovered-certificates:
+    get:
+      tags: [Discovery]
+      summary: List discovered certificates
+      description: Returns discovered certificates with optional filters by agent and triage status.
+      operationId: listDiscoveredCertificates
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+          description: Filter by discovering agent
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Unmanaged, Managed, Dismissed]
+          description: Filter by triage status
+      responses:
+        "200":
+          description: Paginated list of discovered certificates
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DiscoveredCertificate"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovered-certificates/{id}:
+    get:
+      tags: [Discovery]
+      summary: Get discovered certificate
+      description: Returns a single discovered certificate by ID.
+      operationId: getDiscoveredCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Discovered certificate details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveredCertificate"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovered-certificates/{id}/claim:
+    post:
+      tags: [Discovery]
+      summary: Claim discovered certificate
+      description: Links a discovered certificate to an existing managed certificate. Changes status to Managed.
+      operationId: claimDiscoveredCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [managed_certificate_id]
+              properties:
+                managed_certificate_id:
+                  type: string
+                  description: ID of the managed certificate to link to
+      responses:
+        "200":
+          description: Certificate claimed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovered-certificates/{id}/dismiss:
+    post:
+      tags: [Discovery]
+      summary: Dismiss discovered certificate
+      description: Marks a discovered certificate as dismissed (excluded from triage queue).
+      operationId: dismissDiscoveredCertificate
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Certificate dismissed
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovery-scans:
+    get:
+      tags: [Discovery]
+      summary: List discovery scans
+      description: Returns history of discovery scan executions with optional agent filter.
+      operationId: listDiscoveryScans
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+        - name: agent_id
+          in: query
+          schema:
+            type: string
+          description: Filter by agent ID
+      responses:
+        "200":
+          description: Paginated list of discovery scans
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/DiscoveryScan"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/discovery-summary:
+    get:
+      tags: [Discovery]
+      summary: Discovery status summary
+      description: Returns aggregate counts of discovered certificates by triage status.
+      operationId: getDiscoverySummary
+      responses:
+        "200":
+          description: Status counts
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  Unmanaged:
+                    type: integer
+                  Managed:
+                    type: integer
+                  Dismissed:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Network Scan Targets (M21) ───────────────────────────────────
+  /api/v1/network-scan-targets:
+    get:
+      tags: [Network Scan]
+      summary: List network scan targets
+      description: Returns all configured network scan targets with CIDR ranges and ports.
+      operationId: listNetworkScanTargets
+      responses:
+        "200":
+          description: List of network scan targets
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/NetworkScanTarget"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [Network Scan]
+      summary: Create network scan target
+      description: |
+        Creates a new network scan target. CIDR ranges are validated and capped at /20
+        (4096 IPs max per CIDR) to prevent accidental huge scans.
+      operationId: createNetworkScanTarget
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkScanTargetCreate"
+      responses:
+        "201":
+          description: Target created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkScanTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/network-scan-targets/{id}:
+    get:
+      tags: [Network Scan]
+      summary: Get network scan target
+      description: Returns a single network scan target by ID.
+      operationId: getNetworkScanTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Network scan target details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkScanTarget"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [Network Scan]
+      summary: Update network scan target
+      description: Updates an existing network scan target.
+      operationId: updateNetworkScanTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/NetworkScanTargetCreate"
+      responses:
+        "200":
+          description: Target updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/NetworkScanTarget"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Network Scan]
+      summary: Delete network scan target
+      description: Deletes a network scan target.
+      operationId: deleteNetworkScanTarget
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Target deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/network-scan-targets/{id}/scan:
+    post:
+      tags: [Network Scan]
+      summary: Trigger network scan
+      description: |
+        Triggers an immediate scan of the specified target. Scans all configured CIDRs and ports
+        concurrently (50 goroutines). Results feed into the discovery pipeline for deduplication.
+      operationId: triggerNetworkScan
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "202":
+          description: Scan completed with certificates found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/DiscoveryScan"
+        "200":
+          description: Scan completed, no certificates found
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -2578,3 +2960,221 @@ components:
             measured_at:
               type: string
               format: date-time
+
+    # ─── Discovery (M18b) ────────────────────────────────────────────
+    DiscoveredCertificate:
+      type: object
+      properties:
+        id:
+          type: string
+        fingerprint_sha256:
+          type: string
+        common_name:
+          type: string
+        sans:
+          type: array
+          items:
+            type: string
+        serial_number:
+          type: string
+        issuer_dn:
+          type: string
+        subject_dn:
+          type: string
+        not_before:
+          type: string
+          format: date-time
+          nullable: true
+        not_after:
+          type: string
+          format: date-time
+          nullable: true
+        key_algorithm:
+          type: string
+        key_size:
+          type: integer
+        is_ca:
+          type: boolean
+        source_path:
+          type: string
+        source_format:
+          type: string
+        agent_id:
+          type: string
+        discovery_scan_id:
+          type: string
+          nullable: true
+        managed_certificate_id:
+          type: string
+          nullable: true
+        status:
+          type: string
+          enum: [Unmanaged, Managed, Dismissed]
+        first_seen_at:
+          type: string
+          format: date-time
+        last_seen_at:
+          type: string
+          format: date-time
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    DiscoveryScan:
+      type: object
+      properties:
+        id:
+          type: string
+        agent_id:
+          type: string
+        directories:
+          type: array
+          items:
+            type: string
+        certificates_found:
+          type: integer
+        certificates_new:
+          type: integer
+        errors_count:
+          type: integer
+        scan_duration_ms:
+          type: integer
+        started_at:
+          type: string
+          format: date-time
+        completed_at:
+          type: string
+          format: date-time
+          nullable: true
+
+    DiscoveryReport:
+      type: object
+      required: [agent_id, directories, certificates]
+      properties:
+        agent_id:
+          type: string
+        directories:
+          type: array
+          items:
+            type: string
+        certificates:
+          type: array
+          items:
+            type: object
+            properties:
+              fingerprint_sha256:
+                type: string
+              common_name:
+                type: string
+              sans:
+                type: array
+                items:
+                  type: string
+              serial_number:
+                type: string
+              issuer_dn:
+                type: string
+              subject_dn:
+                type: string
+              not_before:
+                type: string
+              not_after:
+                type: string
+              key_algorithm:
+                type: string
+              key_size:
+                type: integer
+              is_ca:
+                type: boolean
+              pem_data:
+                type: string
+              source_path:
+                type: string
+              source_format:
+                type: string
+        errors:
+          type: array
+          items:
+            type: string
+        scan_duration_ms:
+          type: integer
+
+    StatusMessageResponse:
+      type: object
+      properties:
+        status:
+          type: string
+        message:
+          type: string
+
+    # ─── Network Scan (M21) ──────────────────────────────────────────
+    NetworkScanTarget:
+      type: object
+      properties:
+        id:
+          type: string
+        name:
+          type: string
+        cidrs:
+          type: array
+          items:
+            type: string
+          description: CIDR ranges to scan (max /20 per CIDR)
+        ports:
+          type: array
+          items:
+            type: integer
+          description: TCP ports to probe for TLS
+        enabled:
+          type: boolean
+        scan_interval_hours:
+          type: integer
+          description: Hours between scheduled scans
+        timeout_ms:
+          type: integer
+          description: Per-connection timeout in milliseconds
+        last_scan_at:
+          type: string
+          format: date-time
+          nullable: true
+        last_scan_duration_ms:
+          type: integer
+          nullable: true
+        last_scan_certs_found:
+          type: integer
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    NetworkScanTargetCreate:
+      type: object
+      required: [name, cidrs]
+      properties:
+        name:
+          type: string
+        cidrs:
+          type: array
+          items:
+            type: string
+          description: CIDR ranges (max /20 per CIDR, max 4096 IPs)
+        ports:
+          type: array
+          items:
+            type: integer
+          description: TCP ports to probe (default [443])
+        enabled:
+          type: boolean
+          default: true
+        scan_interval_hours:
+          type: integer
+          default: 6
+        timeout_ms:
+          type: integer
+          default: 5000

@@ -128,6 +128,21 @@ curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z
 - Server signs and stores certificate version
 - Work endpoint enriched with `common_name` and `sans` for agent CSR generation
 
+### Deployment Trigger
+Push certificates to targets on demand, outside of the normal scheduler-driven flow:
+
+```bash
+# Deploy to all mapped targets
+curl -X POST -H "$AUTH" $SERVER/api/v1/certificates/mc-api-prod/deploy
+
+# Deploy to a specific target
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod/deploy \
+  -d '{"target_id": "tgt-nginx-prod"}'
+
+# Check deployment job status
+curl -H "$AUTH" "$SERVER/api/v1/certificates/mc-api-prod/deployments" | jq '.data[] | {id, name, type}'
+```
+
 ---
 
 ## Revocation Infrastructure
@@ -191,6 +206,17 @@ curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles -d '{
 # Assign profile to a certificate
 curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod -d '{
   "profile_id": "prof-short-lived"
+}'
+
+# List all profiles
+curl -H "$AUTH" "$SERVER/api/v1/profiles" | jq '.data[] | {id, name, max_ttl_hours, allowed_key_algorithms}'
+
+# Get profile details
+curl -H "$AUTH" "$SERVER/api/v1/profiles/prof-standard-tls" | jq .
+
+# Update profile constraints
+curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles/prof-standard-tls -d '{
+  "name": "Standard TLS", "max_ttl_hours": 2160, "allowed_key_algorithms": ["RSA", "ECDSA"]
 }'
 ```
 
@@ -518,6 +544,15 @@ Each discovered certificate is parsed and its metadata extracted:
 | `/api/v1/discovered-certificates/{id}/dismiss` | POST | Dismiss from triage |
 | `/api/v1/discovery-scans` | GET | List scan history with timestamps |
 | `/api/v1/discovery-summary` | GET | Aggregate status counts (Unmanaged, Managed, Dismissed) |
+
+```bash
+# Check triage status at a glance
+curl -H "$AUTH" "$SERVER/api/v1/discovery-summary" | jq .
+# → {"Unmanaged": 12, "Managed": 45, "Dismissed": 3}
+
+# Review scan execution history
+curl -H "$AUTH" "$SERVER/api/v1/discovery-scans" | jq '.data[] | {agent_id, certificates_found, certificates_new, started_at}'
+```
 
 ### Use Cases
 - **Inventory Baseline** — Scan production servers at deployment time to establish baseline of existing certificates
@@ -889,7 +924,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 78 documented operations (spec covers core API; discovery and network scan endpoints pending addition)
+- **Scope** — 93 operations (91 API + /health + /ready), all request/response schemas, enums, pagination
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)

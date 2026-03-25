@@ -372,6 +372,39 @@ curl -s "$API/api/v1/jobs" | jq '.data[] | select(.certificate_id == "mc-demo-ap
 
 ---
 
+## Part 4.5: Manage Deployment Targets
+
+Before deploying, you need targets. The demo seeds 5 targets, but you can also create, update, and delete them via API:
+
+```bash
+# List all targets
+curl -s "$API/api/v1/targets" | jq '.data[] | {id, name, type, agent_id}'
+
+# Create a new NGINX target
+curl -s -X POST "$API/api/v1/targets" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "tgt-nginx-api",
+    "name": "API NGINX",
+    "type": "nginx",
+    "agent_id": "ag-web-prod",
+    "config": {"cert_path": "/etc/nginx/certs/api.crt", "key_path": "/etc/nginx/certs/api.key", "reload_command": "systemctl reload nginx"},
+    "enabled": true
+  }' | jq .
+
+# Update a target
+curl -s -X PUT "$API/api/v1/targets/tgt-nginx-api" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "API NGINX (updated)", "type": "nginx", "agent_id": "ag-web-prod", "config": {"cert_path": "/etc/nginx/certs/api.crt"}, "enabled": true}' | jq .
+
+# Delete a target
+curl -s -X DELETE "$API/api/v1/targets/tgt-nginx-api"
+```
+
+Each target type (NGINX, Apache, HAProxy, F5, IIS) accepts different configuration fields. The `config` JSON is validated at deployment time by the target connector.
+
+---
+
 ## Part 5: Deploy the Certificate
 
 Trigger deployment to see the deployment workflow:
