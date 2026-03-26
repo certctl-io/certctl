@@ -85,25 +85,6 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Multi-purpose certificates** — certificate profiles support arbitrary EKU (Extended Key Usage) constraints. TLS (serverAuth/clientAuth) today, with S/MIME (emailProtection) and code signing support coming in v2.0.2.
 - **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
 
-```mermaid
-flowchart LR
-    subgraph "Control Plane"
-        API["REST API + Dashboard\n:8443"]
-        PG[("PostgreSQL")]
-    end
-
-    subgraph "Your Infrastructure"
-        A1["Agent"] --> T1["NGINX · Traefik · Caddy"]
-        A2["Agent"] --> T2["Apache · HAProxy"]
-        A3["Agent"] --> T3["F5 · IIS"]
-    end
-
-    API --> PG
-    A1 & A2 & A3 -->|"CSR + status\n(no private keys)"| API
-    API -->|"Signed certs"| A1 & A2 & A3
-    API -->|"Issue/Renew"| CA["Certificate Authorities\nLocal CA · ACME · step-ca · OpenSSL"]
-```
-
 ### Screenshots
 
 | | |
@@ -180,30 +161,7 @@ export CERTCTL_AGENT_ID=agent-local-01
 
 ## Architecture
 
-```mermaid
-flowchart TB
-    subgraph "Control Plane (certctl-server)"
-        DASH["Web Dashboard\nReact SPA"]
-        API["REST API\nGo 1.25 net/http"]
-        SVC["Service Layer"]
-        REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\nRenewal · Jobs · Health · Notifications · Short-Lived Expiry · Network Scan"]
-    end
-
-    subgraph "Data Store"
-        PG[("PostgreSQL 16\n21 tables\nTEXT primary keys")]
-    end
-
-    subgraph "Agents"
-        AG["certctl-agent\nKey generation · CSR · Deployment"]
-    end
-
-    DASH --> API
-    API --> SVC --> REPO --> PG
-    SCHED --> SVC
-    AG -->|"Heartbeat + CSR"| API
-    API -->|"Cert + Chain"| AG
-```
+**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment). Background scheduler runs 6 loops: renewal checks (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
 
 ### Key Design Decisions
 
