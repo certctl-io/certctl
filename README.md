@@ -630,8 +630,6 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 
 Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
 
-> **Need SSO, RBAC, F5/IIS deployment, or real-time fleet operations?** [Join the certctl Pro waitlist](https://forms.gle/YOUR_FORM_ID) — early access shipping Q2 2026.
-
 ### V4+: Cloud, Scale & Passive Discovery
 Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Vault PKI, Google CAS, EJBCA), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
 
