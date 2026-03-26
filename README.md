@@ -7,8 +7,6 @@
 
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-95+ API endpoints. 21 database tables. 930+ tests. Full GUI. Ships with Docker Compose.
-
 ```mermaid
 timeline
     title TLS Certificate Maximum Lifespan (CA/Browser Forum Ballot SC-081v3)
