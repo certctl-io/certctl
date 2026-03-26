@@ -7,7 +7,7 @@
 
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
-90+ API endpoints. 21 database tables. 900+ tests. Full GUI. Ships with Docker Compose.
+95+ API endpoints. 21 database tables. 930+ tests. Full GUI. Ships with Docker Compose.
 
 ```mermaid
 timeline
@@ -26,7 +26,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
-![Version: v2.0.0](https://img.shields.io/badge/version-v2.0.0-brightgreen)
+![Version: v2.0.1](https://img.shields.io/badge/version-v2.0.1-brightgreen)
 
 ## Documentation
 
@@ -63,7 +63,7 @@ Certificate lifecycle tooling today falls into two camps: expensive enterprise p
 
 certctl fills that gap. It's **CA-agnostic** — the issuer connector interface means you can plug in any certificate authority: a self-signed local CA for dev, Let's Encrypt via ACME for public certs, Smallstep step-ca for your private PKI, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. You're never locked to a single CA vendor, and you can run multiple issuers simultaneously for different certificate types.
 
-It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and HAProxy today, with the same pluggable connector model for any server that accepts cert files. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and HAProxy today, with Traefik and Caddy support coming next — all using the same pluggable connector model for any server that accepts cert files. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 ## What It Does
 
@@ -82,6 +82,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
 - **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
 - **EST enrollment (RFC 7030)** — built-in Enrollment over Secure Transport server for device certificate enrollment. Supports WiFi/802.1X, MDM, and IoT use cases. PKCS#7 certs-only wire format, accepts PEM or base64-encoded DER CSRs, configurable issuer and profile binding.
+- **Multi-purpose certificates** — certificate profiles support arbitrary EKU (Extended Key Usage) constraints. TLS (serverAuth/clientAuth) today, with S/MIME (emailProtection) and code signing support coming in v2.0.2.
 - **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
 
 ```mermaid
@@ -92,8 +93,8 @@ flowchart LR
     end
 
     subgraph "Your Infrastructure"
-        A1["Agent"] --> T1["NGINX"]
-        A2["Agent"] --> T2["Apache / HAProxy"]
+        A1["Agent"] --> T1["NGINX · Traefik · Caddy"]
+        A2["Agent"] --> T2["Apache · HAProxy"]
         A3["Agent"] --> T3["F5 · IIS"]
     end
 
@@ -525,10 +526,10 @@ GET    /ready                             Readiness check
 | ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
 | step-ca | Implemented | `StepCA` |
 | OpenSSL / Custom CA | Implemented | `OpenSSL` |
-| Vault PKI | Planned | — |
-| DigiCert | Planned | — |
+| Vault PKI | Future | — |
+| DigiCert | Future | — |
 
-**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS.
+**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
 
 ### Deployment Targets
 | Target | Status | Type |
@@ -536,9 +537,10 @@ GET    /ready                             Readiness check
 | NGINX | Implemented | `NGINX` |
 | Apache httpd | Implemented | `Apache` |
 | HAProxy | Implemented | `HAProxy` |
+| Traefik | Planned (v2.1.x) | `Traefik` |
+| Caddy | Planned (v2.1.x) | `Caddy` |
 | F5 BIG-IP | Interface only | `F5` |
 | Microsoft IIS | Interface only | `IIS` |
-| Kubernetes Secrets | Planned | — |
 
 ### Notifiers
 | Notifier | Status | Type |
@@ -620,6 +622,9 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M22: Prometheus Metrics** ✅ — `GET /api/v1/metrics/prometheus` returns Prometheus exposition format (`text/plain; version=0.0.4`), 11 metrics with `certctl_` prefix, compatible with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics
 - **M23: EST Server (RFC 7030)** ✅ — Enrollment over Secure Transport for device/WiFi certificate enrollment, 4 endpoints under /.well-known/est/, PKCS#7 certs-only wire format, base64-encoded DER CSR input, configurable issuer + profile binding, audit trail, 28 new tests
 - **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
+- **M24: S/MIME Certificate Support** (Planned — v2.0.2) — wire profile EKU constraints through the issuance pipeline so certctl can issue S/MIME (emailProtection), code signing, and custom EKU certificates, not just TLS
+- **M25: Traefik + Caddy Targets** (Planned — v2.1.x) — Traefik (file provider, auto-reload on filesystem change) and Caddy (Admin API, hot-reload) deployment target connectors
+- **M26: Certificate Export** (Planned — v2.1.x) — single-certificate download in PFX/PKCS12, DER, and PEM formats with optional chain inclusion, GUI download button on certificate detail page
 
 ### V3: certctl Pro
 
@@ -628,7 +633,7 @@ Team access controls, identity provider integration, enterprise deployment targe
 > **Need SSO, RBAC, F5/IIS deployment, or real-time fleet operations?** [Join the certctl Pro waitlist](https://forms.gle/YOUR_FORM_ID) — early access shipping Q2 2026.
 
 ### V4+: Cloud, Scale & Passive Discovery
-Passive network discovery (TLS listener), Kubernetes integration, cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support, and platform-scale features.
+Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Vault PKI, Google CAS, EJBCA), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
 
 ## License
 
