@@ -87,24 +87,40 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 
 ### Screenshots
 
-| | |
-|---|---|
-| ![Dashboard](docs/screenshots/v2/dashboard.png) | ![Certificates](docs/screenshots/v2/certificates.png) |
-| **Dashboard** — real-time stats, expiration heatmap, renewal trends, issuance rate | **Certificates** — full inventory with status filters, environment, owner, team |
-| ![Agents](docs/screenshots/v2/agents.png) | ![Fleet Overview](docs/screenshots/v2/fleet-overview.png) |
-| **Agents** — fleet health, hostname, OS/arch, IP, version tracking | **Fleet Overview** — OS distribution, status breakdown, version analysis |
-| ![Jobs](docs/screenshots/v2/jobs.png) | ![Notifications](docs/screenshots/v2/notifications.png) |
-| **Jobs** — issuance, renewal, deployment job queue with status filters | **Notifications** — expiration warnings, renewal results, unread/all toggle |
-| ![Policies](docs/screenshots/v2/policies.png) | ![Profiles](docs/screenshots/v2/profiles.png) |
-| **Policies** — enforcement rules for ownership, environments, lifetime, renewal | **Profiles** — enrollment templates with key types, max TTL, crypto constraints |
-| ![Issuers](docs/screenshots/v2/issuers.png) | ![Targets](docs/screenshots/v2/targets.png) |
-| **Issuers** — CA connectors (Local CA, Let's Encrypt, step-ca, DigiCert) | **Targets** — deployment targets (NGINX, F5 BIG-IP, IIS, HAProxy) |
-| ![Owners](docs/screenshots/v2/owners.png) | ![Teams](docs/screenshots/v2/teams.png) |
-| **Owners** — certificate ownership with email and team assignment | **Teams** — organizational grouping for notification routing |
-| ![Agent Groups](docs/screenshots/v2/agent-groups.png) | ![Audit Trail](docs/screenshots/v2/audit-trail.png) |
-| **Agent Groups** — dynamic grouping by OS, arch, CIDR, version | **Audit Trail** — immutable log with filters, CSV/JSON export |
-| ![Short-Lived](docs/screenshots/v2/short-lived.png) | |
-| **Short-Lived Credentials** — ephemeral certs with live TTL countdown | |
+<table>
+<tr>
+<td><a href="docs/screenshots/v2/dashboard.png"><img src="docs/screenshots/v2/dashboard.png" width="400" alt="Dashboard"></a><br><b>Dashboard</b> — real-time stats, expiration heatmap, renewal trends</td>
+<td><a href="docs/screenshots/v2/certificates.png"><img src="docs/screenshots/v2/certificates.png" width="400" alt="Certificates"></a><br><b>Certificates</b> — full inventory with status filters, owner, team</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/agents.png"><img src="docs/screenshots/v2/agents.png" width="400" alt="Agents"></a><br><b>Agents</b> — fleet health, hostname, OS/arch, IP, version</td>
+<td><a href="docs/screenshots/v2/fleet-overview.png"><img src="docs/screenshots/v2/fleet-overview.png" width="400" alt="Fleet Overview"></a><br><b>Fleet Overview</b> — OS distribution, status breakdown</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/jobs.png"><img src="docs/screenshots/v2/jobs.png" width="400" alt="Jobs"></a><br><b>Jobs</b> — issuance, renewal, deployment job queue</td>
+<td><a href="docs/screenshots/v2/notifications.png"><img src="docs/screenshots/v2/notifications.png" width="400" alt="Notifications"></a><br><b>Notifications</b> — expiration warnings, renewal results</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/policies.png"><img src="docs/screenshots/v2/policies.png" width="400" alt="Policies"></a><br><b>Policies</b> — enforcement rules for ownership, lifetime, renewal</td>
+<td><a href="docs/screenshots/v2/profiles.png"><img src="docs/screenshots/v2/profiles.png" width="400" alt="Profiles"></a><br><b>Profiles</b> — enrollment templates with crypto constraints</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/issuers.png"><img src="docs/screenshots/v2/issuers.png" width="400" alt="Issuers"></a><br><b>Issuers</b> — CA connectors (Local CA, LE, step-ca)</td>
+<td><a href="docs/screenshots/v2/targets.png"><img src="docs/screenshots/v2/targets.png" width="400" alt="Targets"></a><br><b>Targets</b> — deployment targets (NGINX, HAProxy, Apache)</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/owners.png"><img src="docs/screenshots/v2/owners.png" width="400" alt="Owners"></a><br><b>Owners</b> — certificate ownership with team assignment</td>
+<td><a href="docs/screenshots/v2/teams.png"><img src="docs/screenshots/v2/teams.png" width="400" alt="Teams"></a><br><b>Teams</b> — organizational grouping for notifications</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/agent-groups.png"><img src="docs/screenshots/v2/agent-groups.png" width="400" alt="Agent Groups"></a><br><b>Agent Groups</b> — dynamic grouping by OS, arch, CIDR</td>
+<td><a href="docs/screenshots/v2/audit-trail.png"><img src="docs/screenshots/v2/audit-trail.png" width="400" alt="Audit Trail"></a><br><b>Audit Trail</b> — immutable log with CSV/JSON export</td>
+</tr>
+<tr>
+<td><a href="docs/screenshots/v2/short-lived.png"><img src="docs/screenshots/v2/short-lived.png" width="400" alt="Short-Lived Credentials"></a><br><b>Short-Lived Credentials</b> — ephemeral certs with live TTL countdown</td>
+<td></td>
+</tr>
+</table>
 
 ## Quick Start
 
