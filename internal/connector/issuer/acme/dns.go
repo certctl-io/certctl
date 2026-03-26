@@ -82,6 +82,24 @@ func (s *ScriptDNSSolver) CleanUp(ctx context.Context, domain, token, keyAuth st
 	return s.runScript(ctx, s.CleanUpScript, domain, fqdn, token, keyAuth)
 }
 
+// PresentPersist creates a persistent DNS TXT record at _validation-persist.<domain>.
+// Used by dns-persist-01 (draft-ietf-acme-dns-persist). Unlike Present (which targets
+// _acme-challenge), this targets _validation-persist and the record is intended to be permanent.
+func (s *ScriptDNSSolver) PresentPersist(ctx context.Context, domain, token, recordValue string) error {
+	if s.PresentScript == "" {
+		return fmt.Errorf("DNS present script not configured")
+	}
+
+	fqdn := "_validation-persist." + domain
+
+	s.Logger.Info("creating persistent DNS TXT record via script",
+		"domain", domain,
+		"fqdn", fqdn,
+		"script", s.PresentScript)
+
+	return s.runScript(ctx, s.PresentScript, domain, fqdn, token, recordValue)
+}
+
 // runScript executes a DNS hook script with the appropriate environment variables.
 func (s *ScriptDNSSolver) runScript(ctx context.Context, script, domain, fqdn, token, keyAuth string) error {
 	timeout := s.Timeout

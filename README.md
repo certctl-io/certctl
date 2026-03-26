@@ -72,7 +72,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 **Core capabilities:**
 
 - **Full lifecycle automation** — issuance, renewal, deployment, and revocation with zero human intervention. Configurable renewal policies trigger jobs automatically based on expiration thresholds.
-- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01 and DNS-01 challenges (Let's Encrypt, Sectigo, any ACME-compatible CA), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
+- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01, DNS-01, and DNS-PERSIST-01 challenges (Let's Encrypt, Sectigo, any ACME-compatible CA), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
 - **Agent-side key generation** — agents generate ECDSA P-256 keys locally, store them with 0600 permissions, and submit only the CSR. Private keys never touch the control plane. This is the default mode, not an opt-in feature.
 - **Certificate discovery** — agents scan filesystems for existing PEM/DER certificates and report findings for triage. The network scanner probes TLS endpoints across CIDR ranges to find certificates you didn't know existed.
 - **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
@@ -222,7 +222,7 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_KEYGEN_MODE` | `agent` | Key generation mode: `agent` (production) or `server` (demo only) |
 | `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
 | `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
-| `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default) or `dns-01` |
+| `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default), `dns-01`, or `dns-persist-01` |
 | `CERTCTL_CA_CERT_PATH` | — | Path to CA certificate for sub-CA mode |
 | `CERTCTL_CA_KEY_PATH` | — | Path to CA private key for sub-CA mode |
 | `CERTCTL_CORS_ORIGINS` | — | Comma-separated allowed CORS origins (empty = same-origin, `*` = all) |
@@ -234,8 +234,9 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | `30s` | How often the scheduler processes pending jobs |
 | `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | `2m` | How often the scheduler checks agent health |
 | `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | `1m` | How often the scheduler processes pending notifications |
-| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | — | Script to create DNS-01 `_acme-challenge` TXT record |
-| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | — | Script to remove DNS-01 `_acme-challenge` TXT record |
+| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | — | Script to create DNS TXT record (`_acme-challenge` for dns-01, `_validation-persist` for dns-persist-01) |
+| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | — | Script to remove DNS-01 `_acme-challenge` TXT record (not used by dns-persist-01) |
+| `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN` | — | CA issuer domain for dns-persist-01 (e.g., `letsencrypt.org`) |
 | `CERTCTL_STEPCA_URL` | — | step-ca server URL |
 | `CERTCTL_STEPCA_PROVISIONER` | — | step-ca JWK provisioner name |
 | `CERTCTL_STEPCA_KEY_PATH` | — | Path to step-ca provisioner private key (JWK JSON) |
@@ -490,7 +491,7 @@ GET    /ready                             Readiness check
 | Issuer | Status | Type |
 |--------|--------|------|
 | Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
-| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01) | `ACME` |
+| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01 + DNS-PERSIST-01) | `ACME` |
 | step-ca | Implemented | `StepCA` |
 | OpenSSL / Custom CA | Implemented | `OpenSSL` |
 | Vault PKI | Future | — |
@@ -573,7 +574,7 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 ### V2: Operational Maturity
 - **M10: Agent Metadata + Targets** ✅ — agents report OS, architecture, IP, hostname, version via heartbeat; Apache httpd and HAProxy target connectors
 - **M11: Crypto Policy + Profiles + Ownership** ✅ — certificate profiles (named enrollment profiles with allowed key types, max TTL, crypto constraints), certificate ownership tracking (owners + teams + notification routing), dynamic agent groups (OS/arch/IP CIDR/version matching), interactive renewal approval (AwaitingApproval state)
-- **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), step-ca issuer connector (native /sign API with JWK provisioner auth)
+- **M12: Sub-CA + DNS-01 + step-ca** ✅ — Local CA sub-CA mode (enterprise root chain with RSA/ECDSA/PKCS#8), ACME DNS-01 challenges (script-based DNS hooks for any provider, wildcard cert support), ACME DNS-PERSIST-01 challenges (standing TXT record, no per-renewal DNS updates, auto-fallback to dns-01), step-ca issuer connector (native /sign API with JWK provisioner auth)
 - **M15a: Core Revocation** ✅ — revocation API with all RFC 5280 reason codes, JSON CRL endpoint, webhook + email revocation notifications, best-effort issuer notification, `certificate_revocations` table with idempotent recording, 48 new tests
 - **M15b: OCSP + Revocation GUI** ✅ — embedded OCSP responder (GET /api/v1/ocsp/{issuer_id}/{serial}), DER-encoded X.509 CRL (GET /api/v1/crl/{issuer_id}), short-lived cert exemption (TTL < 1h skip CRL/OCSP), revocation GUI with reason modal, ~31 new tests
 - **M13: GUI Operations** ✅ — bulk cert operations (multi-select → renew, revoke, reassign owner), deployment status timeline, inline policy/profile editor, target connector configuration wizard, audit trail export (CSV/JSON), short-lived credentials dashboard view

@@ -97,6 +97,21 @@ curl -s -X POST $API/api/v1/certificates \
   }' | jq .
 ```
 
+### ACME with DNS-PERSIST-01 (Zero-Touch Renewals)
+
+DNS-PERSIST-01 uses a standing `_validation-persist` TXT record that you set once. The CA revalidates it on every renewal — no per-renewal DNS updates, no cleanup scripts, no propagation waits. If the CA doesn't support DNS-PERSIST-01 yet, certctl falls back to DNS-01 automatically.
+
+```bash
+# Configure ACME DNS-PERSIST-01
+export CERTCTL_ACME_CHALLENGE_TYPE="dns-persist-01"
+export CERTCTL_ACME_DNS_PRESENT_SCRIPT="/usr/local/bin/dns-present.sh"
+export CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN="letsencrypt.org"
+
+# The present script creates a _validation-persist.<domain> TXT record with value:
+# "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/12345"
+# This record is set once and never touched again.
+```
+
 ### step-ca (Smallstep Private CA)
 
 For organizations running step-ca as their private CA:
@@ -221,7 +236,7 @@ You should see:
 
 The result is a structurally valid X.509 certificate — browsers won't trust it (no root CA in their trust store), but it exercises the exact same code paths that a production ACME or Vault issuer would.
 
-**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA), ACME (HTTP-01 + DNS-01 for wildcards), and step-ca (Smallstep private CA via native /sign API). V2 adds the OpenSSL/Custom CA connector (script-based signing). DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3+.
+**Why pluggable issuers:** Different organizations use different CAs. Some use Let's Encrypt (ACME protocol), some use step-ca or internal PKI (Vault), some use commercial CAs (DigiCert, Entrust, GlobalSign), and some have custom OpenSSL-based workflows. For enterprises with ADCS, certctl can operate as a sub-CA — all issued certs chain to the enterprise root. The connector interface means certctl doesn't care — it calls `IssueCertificate()` and gets back a signed cert regardless of the backend. V1 ships with Local CA (self-signed or sub-CA), ACME (HTTP-01 + DNS-01 + DNS-PERSIST-01 for wildcards), and step-ca (Smallstep private CA via native /sign API). V2 adds the OpenSSL/Custom CA connector (script-based signing). DigiCert, Vault PKI, Entrust, GlobalSign, Google CAS, and EJBCA are planned for V3+.
 
 ```mermaid
 flowchart TD

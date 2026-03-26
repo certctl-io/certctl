@@ -67,11 +67,12 @@ type StepCAConfig struct {
 
 // ACMEConfig contains ACME issuer connector configuration.
 type ACMEConfig struct {
-	DirectoryURL     string
-	Email            string
-	ChallengeType    string // "http-01" (default) or "dns-01"
-	DNSPresentScript string
-	DNSCleanUpScript string
+	DirectoryURL           string
+	Email                  string
+	ChallengeType          string // "http-01" (default), "dns-01", or "dns-persist-01"
+	DNSPresentScript       string
+	DNSCleanUpScript       string
+	DNSPersistIssuerDomain string // Required for dns-persist-01 (e.g., "letsencrypt.org")
 }
 
 // OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.

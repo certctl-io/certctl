@@ -98,13 +98,14 @@ func main() {
 	logger.Info("initialized Local CA issuer connector")
 
 	// Initialize ACME issuer connector (for Let's Encrypt, Sectigo, etc.)
-	// Supports HTTP-01 (default) and DNS-01 (for wildcards) challenge types.
+	// Supports HTTP-01 (default), DNS-01 (for wildcards), and DNS-PERSIST-01 (standing record) challenge types.
 	acmeConnector := acmeissuer.New(&acmeissuer.Config{
-		DirectoryURL:       os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
-		Email:              os.Getenv("CERTCTL_ACME_EMAIL"),
-		ChallengeType:      os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
-		DNSPresentScript:   os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
-		DNSCleanUpScript:   os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
+		DirectoryURL:           os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
+		Email:                  os.Getenv("CERTCTL_ACME_EMAIL"),
+		ChallengeType:          os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
+		DNSPresentScript:       os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
+		DNSCleanUpScript:       os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
+		DNSPersistIssuerDomain: os.Getenv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN"),
 	}, logger)
 	logger.Info("initialized ACME issuer connector")
 

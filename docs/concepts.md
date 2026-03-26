@@ -34,9 +34,9 @@ certctl includes a built-in **Local CA** that can operate in two modes: self-sig
 
 ### ACME Protocol
 
-ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01) or creating a DNS record (DNS-01).
+ACME (Automatic Certificate Management Environment) is the protocol Let's Encrypt created for automated certificate issuance. Instead of filling out forms and waiting for emails, ACME lets software request, validate, and receive certificates programmatically. The server proves domain ownership by responding to challenges — placing a specific file on the web server (HTTP-01), creating a DNS record (DNS-01), or maintaining a standing DNS record that persists across renewals (DNS-PERSIST-01).
 
-certctl speaks ACME natively with both HTTP-01 and DNS-01 challenges, so it can request certificates — including wildcard certificates — from Let's Encrypt or any ACME-compatible CA without manual intervention. HTTP-01 uses a built-in temporary HTTP server for domain validation; DNS-01 uses pluggable script-based hooks to create TXT records with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
+certctl speaks ACME natively with HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, so it can request certificates — including wildcard certificates — from Let's Encrypt or any ACME-compatible CA without manual intervention. HTTP-01 uses a built-in temporary HTTP server for domain validation; DNS-01 uses pluggable script-based hooks to create TXT records with any DNS provider (Cloudflare, Route53, Azure DNS, etc.); DNS-PERSIST-01 creates a standing `_validation-persist` TXT record once (containing the CA domain and account URI) that the CA revalidates on every renewal — no per-renewal DNS updates needed. If the CA doesn't yet support DNS-PERSIST-01, certctl automatically falls back to DNS-01.
 
 ### EST Protocol (Enrollment over Secure Transport)
 

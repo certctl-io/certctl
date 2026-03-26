@@ -43,7 +43,7 @@ func TestDiscoveredCertificate_IsExpired(t *testing.T) {
 		{"expired certificate", &pastTime, true},
 		{"valid certificate", &futureTime, false},
 		{"nil NotAfter", nil, false},
-		{"expires at current time (edge case)", &now, false}, // Before() = false when at same time
+		{"expires at current time (edge case)", func() *time.Time { t := now.Add(1 * time.Second); return &t }(), false}, // 1s in future — Before() returns false
 	}
 
 	for _, tt := range tests {

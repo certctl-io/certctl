@@ -6,7 +6,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
+1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
 2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
@@ -116,11 +116,13 @@ Location: `internal/connector/issuer/local/local.go`
 
 ### Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)
 
-The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports two challenge methods:
+The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x/crypto/acme` package. It supports three challenge methods:
 
 **HTTP-01 (default):** A built-in temporary HTTP server starts on demand during certificate issuance. The domain being validated must resolve to the machine running the connector, and the configured HTTP port must be reachable from the internet.
 
 **DNS-01 (for wildcards):** Creates DNS TXT records via user-provided scripts. Required for wildcard certificates (`*.example.com`) and hosts that can't serve HTTP on port 80. The connector invokes external scripts to create and clean up `_acme-challenge` TXT records, making it compatible with any DNS provider (Cloudflare, Route53, Azure DNS, etc.).
+
+**DNS-PERSIST-01 (standing record):** Creates a one-time persistent TXT record at `_validation-persist.<domain>` containing the CA's issuer domain and your ACME account URI. Once set, this record authorizes unlimited future certificate issuances without per-renewal DNS updates. Based on [draft-ietf-acme-dns-persist](https://datatracker.ietf.org/doc/draft-ietf-acme-dns-persist/) and CA/Browser Forum ballot SC-088v3. If the CA doesn't offer dns-persist-01 yet, the connector falls back to dns-01 automatically.
 
 HTTP-01 configuration:
 ```json
@@ -143,14 +145,29 @@ DNS-01 configuration:
 }
 ```
 
-DNS hook scripts receive these environment variables: `CERTCTL_DNS_DOMAIN` (domain being validated), `CERTCTL_DNS_FQDN` (full record name, e.g., `_acme-challenge.example.com`), `CERTCTL_DNS_VALUE` (TXT record value), `CERTCTL_DNS_TOKEN` (ACME challenge token). The present script must create the TXT record and exit 0; the cleanup script removes it.
+DNS-PERSIST-01 configuration:
+```json
+{
+  "directory_url": "https://acme-v02.api.letsencrypt.org/directory",
+  "email": "admin@example.com",
+  "challenge_type": "dns-persist-01",
+  "dns_present_script": "/etc/certctl/dns/create-record.sh",
+  "dns_persist_issuer_domain": "letsencrypt.org",
+  "dns_propagation_wait": 30
+}
+```
+
+The present script creates a TXT record at `_validation-persist.<domain>` with the value `letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/<your-id>`. This record is permanent — no cleanup script is needed.
+
+DNS hook scripts receive these environment variables: `CERTCTL_DNS_DOMAIN` (domain being validated), `CERTCTL_DNS_FQDN` (full record name — `_acme-challenge.<domain>` for dns-01, `_validation-persist.<domain>` for dns-persist-01), `CERTCTL_DNS_VALUE` (TXT record value), `CERTCTL_DNS_TOKEN` (ACME challenge token). The present script must create the TXT record and exit 0; the cleanup script removes it (dns-01 only).
 
 Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
 - `CERTCTL_ACME_EMAIL` — Contact email for account registration
-- `CERTCTL_ACME_CHALLENGE_TYPE` — `http-01` (default) or `dns-01`
-- `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 only)
-- `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only)
+- `CERTCTL_ACME_CHALLENGE_TYPE` — `http-01` (default), `dns-01`, or `dns-persist-01`
+- `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 and dns-persist-01)
+- `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only, not used by dns-persist-01)
+- `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN` — CA issuer domain for persistent record (dns-persist-01 only, e.g., `letsencrypt.org`)
 
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 

@@ -110,3 +110,86 @@ echo "cleaned $CERTCTL_DNS_FQDN" > ` + outputFile + `
 		}
 	})
 }
+
+func TestScriptDNSSolver_PresentPersist(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	t.Run("PresentPersist_Success", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outputFile := filepath.Join(tmpDir, "persist-record.txt")
+
+		scriptPath := filepath.Join(tmpDir, "present.sh")
+		script := `#!/bin/sh
+echo "DOMAIN=$CERTCTL_DNS_DOMAIN FQDN=$CERTCTL_DNS_FQDN VALUE=$CERTCTL_DNS_VALUE TOKEN=$CERTCTL_DNS_TOKEN" > ` + outputFile + `
+`
+		if err := os.WriteFile(scriptPath, []byte(script), 0755); err != nil {
+			t.Fatalf("Failed to create script: %v", err)
+		}
+
+		solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+		err := solver.PresentPersist(ctx, "example.com", "test-token", "letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123")
+		if err != nil {
+			t.Fatalf("PresentPersist failed: %v", err)
+		}
+
+		output, err := os.ReadFile(outputFile)
+		if err != nil {
+			t.Fatalf("Failed to read output file: %v", err)
+		}
+
+		// Verify _validation-persist prefix (not _acme-challenge)
+		expected := "DOMAIN=example.com FQDN=_validation-persist.example.com VALUE=letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/123 TOKEN=test-token\n"
+		if string(output) != expected {
+			t.Errorf("Script output mismatch:\ngot:  %q\nwant: %q", string(output), expected)
+		}
+	})
+
+	t.Run("PresentPersist_NoScript", func(t *testing.T) {
+		solver := acmeissuer.NewScriptDNSSolver("", "", logger)
+		err := solver.PresentPersist(ctx, "example.com", "token", "letsencrypt.org; accounturi=https://example.com/acct/1")
+		if err == nil {
+			t.Fatal("Expected error when no script is configured")
+		}
+	})
+
+	t.Run("PresentPersist_ScriptFailure", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		scriptPath := filepath.Join(tmpDir, "fail.sh")
+		script := `#!/bin/sh
+echo "error: DNS API failure" >&2
+exit 1
+`
+		os.WriteFile(scriptPath, []byte(script), 0755)
+
+		solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+		err := solver.PresentPersist(ctx, "example.com", "token", "letsencrypt.org; accounturi=https://example.com/acct/1")
+		if err == nil {
+			t.Fatal("Expected error from failing script")
+		}
+	})
+
+	t.Run("PresentPersist_WildcardDomain", func(t *testing.T) {
+		tmpDir := t.TempDir()
+		outputFile := filepath.Join(tmpDir, "persist-wildcard.txt")
+
+		scriptPath := filepath.Join(tmpDir, "present.sh")
+		script := `#!/bin/sh
+echo "FQDN=$CERTCTL_DNS_FQDN" > ` + outputFile + `
+`
+		os.WriteFile(scriptPath, []byte(script), 0755)
+
+		solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+		// For *.example.com, the persist record should be at _validation-persist.example.com
+		err := solver.PresentPersist(ctx, "example.com", "token", "letsencrypt.org; accounturi=https://example.com/acct/1")
+		if err != nil {
+			t.Fatalf("PresentPersist failed for wildcard base domain: %v", err)
+		}
+
+		output, _ := os.ReadFile(outputFile)
+		expected := "FQDN=_validation-persist.example.com\n"
+		if string(output) != expected {
+			t.Errorf("FQDN mismatch: got %q, want %q", string(output), expected)
+		}
+	})
+}

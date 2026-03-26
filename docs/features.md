@@ -288,9 +288,10 @@ curl -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations"
 - **Use Case** — Internal PKI, enterprise trust chains
 
 ### ACME v2
-- **Challenge Types** — HTTP-01 (default) and DNS-01 (wildcard support)
+- **Challenge Types** — HTTP-01 (default), DNS-01 (wildcard support), and DNS-PERSIST-01 (standing record, no per-renewal DNS updates)
 - **DNS-01 Script Hooks** — Pluggable DNS solver for any provider (Cloudflare, Route53, Azure DNS, etc.)
-- **Configuration** — `CERTCTL_ACME_DIRECTORY_URL`, `CERTCTL_ACME_EMAIL`, `CERTCTL_ACME_CHALLENGE_TYPE=dns-01`, `CERTCTL_ACME_DNS_PRESENT_SCRIPT`, `CERTCTL_ACME_DNS_CLEANUP_SCRIPT`
+- **DNS-PERSIST-01** — Standing `_validation-persist` TXT record set once, reused forever. Auto-fallback to DNS-01 if CA doesn't support it yet.
+- **Configuration** — `CERTCTL_ACME_DIRECTORY_URL`, `CERTCTL_ACME_EMAIL`, `CERTCTL_ACME_CHALLENGE_TYPE`, `CERTCTL_ACME_DNS_PRESENT_SCRIPT`, `CERTCTL_ACME_DNS_CLEANUP_SCRIPT`, `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN`
 - **DNS Propagation Wait** — Configurable timeout before validation
 - **Use Case** — Public CAs (LetsEncrypt), wildcard certs
 
@@ -1117,9 +1118,10 @@ The web dashboard is the primary operational interface for certctl. Built with *
 |----------|------|---------|---------|
 | `CERTCTL_ACME_DIRECTORY_URL` | string | (empty) | ACME server directory URL |
 | `CERTCTL_ACME_EMAIL` | string | (empty) | Account email for ACME registration |
-| `CERTCTL_ACME_CHALLENGE_TYPE` | string | http-01 | http-01 or dns-01 |
-| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | string | (empty) | Script path for DNS-01 present hook |
-| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | string | (empty) | Script path for DNS-01 cleanup hook |
+| `CERTCTL_ACME_CHALLENGE_TYPE` | string | http-01 | http-01, dns-01, or dns-persist-01 |
+| `CERTCTL_ACME_DNS_PRESENT_SCRIPT` | string | (empty) | Script path for DNS present hook (dns-01 and dns-persist-01) |
+| `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` | string | (empty) | Script path for DNS cleanup hook (dns-01 only) |
+| `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN` | string | (empty) | CA issuer domain for dns-persist-01 (e.g., letsencrypt.org) |
 
 #### step-ca Issuer
 | Variable | Type | Default | Purpose |

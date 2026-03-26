@@ -28,21 +28,28 @@ type Config struct {
 	EABHmac      string `json:"eab_hmac,omitempty"`  // External Account Binding HMAC Key
 	HTTPPort     int    `json:"http_port,omitempty"` // Port for HTTP-01 challenge server (default: 80)
 
-	// ChallengeType selects the ACME challenge method: "http-01" (default) or "dns-01".
+	// ChallengeType selects the ACME challenge method: "http-01" (default), "dns-01", or "dns-persist-01".
 	// DNS-01 is required for wildcard certificates (*.example.com).
+	// DNS-PERSIST-01 uses a standing TXT record (set once, reused forever) — no per-renewal DNS updates.
 	ChallengeType string `json:"challenge_type,omitempty"`
 
-	// DNSPresentScript is the path to a script that creates DNS TXT records (dns-01 only).
+	// DNSPresentScript is the path to a script that creates DNS TXT records (dns-01 and dns-persist-01).
 	// The script receives CERTCTL_DNS_DOMAIN, CERTCTL_DNS_FQDN, CERTCTL_DNS_VALUE, CERTCTL_DNS_TOKEN.
 	DNSPresentScript string `json:"dns_present_script,omitempty"`
 
 	// DNSCleanUpScript is the path to a script that removes DNS TXT records (dns-01 only).
 	// Optional — if not set, records are not cleaned up automatically.
+	// Not used by dns-persist-01 (records are permanent).
 	DNSCleanUpScript string `json:"dns_cleanup_script,omitempty"`
 
 	// DNSPropagationWait is how long to wait (in seconds) after creating the TXT record
 	// before telling the CA to validate. Defaults to 30 seconds.
 	DNSPropagationWait int `json:"dns_propagation_wait,omitempty"`
+
+	// DNSPersistIssuerDomain is the CA's issuer domain name for dns-persist-01 records.
+	// Used to construct the TXT record value: "<issuer-domain>; accounturi=<account-uri>".
+	// Required when ChallengeType is "dns-persist-01". For Let's Encrypt, use "letsencrypt.org".
+	DNSPersistIssuerDomain string `json:"dns_persist_issuer_domain,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for ACME-compatible CAs
@@ -87,10 +94,11 @@ func New(config *Config, logger *slog.Logger) *Connector {
 		challengeTokens: make(map[string]string),
 	}
 
-	// Initialize DNS solver if dns-01 challenge type is configured
-	if config != nil && config.ChallengeType == "dns-01" && config.DNSPresentScript != "" {
+	// Initialize DNS solver if dns-01 or dns-persist-01 challenge type is configured
+	if config != nil && (config.ChallengeType == "dns-01" || config.ChallengeType == "dns-persist-01") && config.DNSPresentScript != "" {
 		c.dnsSolver = NewScriptDNSSolver(config.DNSPresentScript, config.DNSCleanUpScript, logger)
-		logger.Info("DNS-01 challenge solver configured",
+		logger.Info("DNS challenge solver configured",
+			"challenge_type", config.ChallengeType,
 			"present_script", config.DNSPresentScript,
 			"cleanup_script", config.DNSCleanUpScript)
 	}
@@ -141,13 +149,18 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	}
 
 	// Validate challenge type
-	if cfg.ChallengeType != "http-01" && cfg.ChallengeType != "dns-01" {
-		return fmt.Errorf("invalid challenge_type: %s (must be http-01 or dns-01)", cfg.ChallengeType)
+	if cfg.ChallengeType != "http-01" && cfg.ChallengeType != "dns-01" && cfg.ChallengeType != "dns-persist-01" {
+		return fmt.Errorf("invalid challenge_type: %s (must be http-01, dns-01, or dns-persist-01)", cfg.ChallengeType)
 	}
 
-	// DNS-01 requires a present script
-	if cfg.ChallengeType == "dns-01" && cfg.DNSPresentScript == "" {
-		return fmt.Errorf("dns_present_script is required for dns-01 challenge type")
+	// DNS-01 and DNS-PERSIST-01 require a present script
+	if (cfg.ChallengeType == "dns-01" || cfg.ChallengeType == "dns-persist-01") && cfg.DNSPresentScript == "" {
+		return fmt.Errorf("dns_present_script is required for %s challenge type", cfg.ChallengeType)
+	}
+
+	// DNS-PERSIST-01 requires an issuer domain
+	if cfg.ChallengeType == "dns-persist-01" && cfg.DNSPersistIssuerDomain == "" {
+		return fmt.Errorf("dns_persist_issuer_domain is required for dns-persist-01 challenge type (e.g., \"letsencrypt.org\")")
 	}
 
 	if cfg.DNSPropagationWait == 0 {
@@ -156,8 +169,8 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 
 	c.config = &cfg
 
-	// Re-initialize DNS solver if switching to dns-01
-	if cfg.ChallengeType == "dns-01" && cfg.DNSPresentScript != "" {
+	// Re-initialize DNS solver if switching to dns-01 or dns-persist-01
+	if (cfg.ChallengeType == "dns-01" || cfg.ChallengeType == "dns-persist-01") && cfg.DNSPresentScript != "" {
 		c.dnsSolver = NewScriptDNSSolver(cfg.DNSPresentScript, cfg.DNSCleanUpScript, c.logger)
 	}
 
@@ -335,12 +348,16 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 }
 
 // solveAuthorizations processes all authorization URLs and solves their challenges.
-// Supports both HTTP-01 and DNS-01 challenge types based on configuration.
+// Supports HTTP-01, DNS-01, and DNS-PERSIST-01 challenge types based on configuration.
 func (c *Connector) solveAuthorizations(ctx context.Context, authzURLs []string) error {
-	if c.config.ChallengeType == "dns-01" {
+	switch c.config.ChallengeType {
+	case "dns-01":
 		return c.solveAuthorizationsDNS01(ctx, authzURLs)
+	case "dns-persist-01":
+		return c.solveAuthorizationsDNSPersist01(ctx, authzURLs)
+	default:
+		return c.solveAuthorizationsHTTP01(ctx, authzURLs)
 	}
-	return c.solveAuthorizationsHTTP01(ctx, authzURLs)
 }
 
 // solveAuthorizationsHTTP01 solves challenges using the HTTP-01 method.
@@ -495,6 +512,126 @@ func (c *Connector) solveAuthorizationsDNS01(ctx context.Context, authzURLs []st
 	}
 
 	return nil
+}
+
+// solveAuthorizationsDNSPersist01 solves challenges using the DNS-PERSIST-01 method.
+// DNS-PERSIST-01 uses a standing TXT record at _validation-persist.<domain> that persists
+// across renewals. The record contains the CA's issuer domain and the ACME account URI,
+// authorizing unlimited future issuances without per-renewal DNS updates.
+//
+// Flow:
+// 1. For each authorization, check if it's already valid (standing record exists)
+// 2. If pending, find the dns-persist-01 challenge
+// 3. Build the TXT record value: "<issuer-domain>; accounturi=<account-uri>"
+// 4. Create the _validation-persist TXT record via the present script (one-time)
+// 5. Wait for propagation, then accept the challenge
+// 6. No cleanup — the record is permanent by design
+//
+// See: draft-ietf-acme-dns-persist (IETF), CA/Browser Forum ballot SC-088v3
+func (c *Connector) solveAuthorizationsDNSPersist01(ctx context.Context, authzURLs []string) error {
+	if c.dnsSolver == nil {
+		return fmt.Errorf("dns-persist-01 challenge type configured but no DNS solver available")
+	}
+
+	// Get the account URI for the TXT record value
+	if err := c.ensureClient(ctx); err != nil {
+		return fmt.Errorf("ACME client init for dns-persist-01: %w", err)
+	}
+	acct, err := c.client.GetReg(ctx, "")
+	if err != nil {
+		return fmt.Errorf("failed to get ACME account URI for dns-persist-01: %w", err)
+	}
+
+	for _, authzURL := range authzURLs {
+		authz, err := c.client.GetAuthorization(ctx, authzURL)
+		if err != nil {
+			return fmt.Errorf("failed to get authorization %s: %w", authzURL, err)
+		}
+
+		// If already valid (standing record recognized), skip
+		if authz.Status == acme.StatusValid {
+			c.logger.Info("dns-persist-01 authorization already valid (standing record recognized)",
+				"domain", authz.Identifier.Value)
+			continue
+		}
+
+		// Find the dns-persist-01 challenge
+		var persistChallenge *acme.Challenge
+		for _, ch := range authz.Challenges {
+			if ch.Type == "dns-persist-01" {
+				persistChallenge = ch
+				break
+			}
+		}
+
+		// Fallback: if the CA doesn't offer dns-persist-01 yet, try dns-01
+		if persistChallenge == nil {
+			c.logger.Warn("dns-persist-01 challenge not offered by CA, falling back to dns-01",
+				"domain", authz.Identifier.Value)
+			return c.solveAuthorizationsDNS01(ctx, authzURLs)
+		}
+
+		domain := authz.Identifier.Value
+
+		// Build the persistent TXT record value per draft-ietf-acme-dns-persist:
+		// "<issuer-domain>; accounturi=<account-uri>"
+		recordValue := fmt.Sprintf("%s; accounturi=%s", c.config.DNSPersistIssuerDomain, acct.URI)
+
+		c.logger.Info("creating persistent DNS validation record",
+			"domain", domain,
+			"fqdn", "_validation-persist."+domain,
+			"issuer_domain", c.config.DNSPersistIssuerDomain,
+			"account_uri", acct.URI)
+
+		// Create the standing TXT record via the present script.
+		// The script receives CERTCTL_DNS_FQDN="_validation-persist.<domain>"
+		// and CERTCTL_DNS_VALUE="<issuer-domain>; accounturi=<account-uri>".
+		if err := c.presentPersistRecord(ctx, domain, persistChallenge.Token, recordValue); err != nil {
+			return fmt.Errorf("failed to create persistent DNS record for %s: %w", domain, err)
+		}
+
+		// Wait for DNS propagation
+		propagationWait := time.Duration(c.config.DNSPropagationWait) * time.Second
+		c.logger.Info("waiting for DNS propagation",
+			"domain", domain,
+			"wait_seconds", c.config.DNSPropagationWait)
+		time.Sleep(propagationWait)
+
+		// Tell the CA we're ready
+		if _, err := c.client.Accept(ctx, persistChallenge); err != nil {
+			return fmt.Errorf("failed to accept dns-persist-01 challenge: %w", err)
+		}
+
+		// Wait for authorization to be valid
+		if _, err := c.client.WaitAuthorization(ctx, authzURL); err != nil {
+			return fmt.Errorf("dns-persist-01 authorization failed for %s: %w", domain, err)
+		}
+
+		c.logger.Info("dns-persist-01 authorization validated (record is now permanent)",
+			"domain", domain)
+
+		// No cleanup — the record is permanent by design.
+		// Future renewals will skip challenge solving entirely (authz.Status == StatusValid).
+	}
+
+	return nil
+}
+
+// presentPersistRecord creates a _validation-persist TXT record using the DNS solver.
+// Unlike dns-01 which uses _acme-challenge, dns-persist-01 uses _validation-persist.
+func (c *Connector) presentPersistRecord(ctx context.Context, domain, token, recordValue string) error {
+	if c.dnsSolver == nil {
+		return fmt.Errorf("DNS solver not configured")
+	}
+
+	// Use PresentPersist if available (ScriptDNSSolver) — targets _validation-persist prefix.
+	if solver, ok := c.dnsSolver.(*ScriptDNSSolver); ok {
+		return solver.PresentPersist(ctx, domain, token, recordValue)
+	}
+
+	// For other DNSSolver implementations, fall back to Present.
+	// Custom implementations should read CERTCTL_DNS_FQDN to determine the record name.
+	return c.dnsSolver.Present(ctx, domain, token, recordValue)
 }
 
 // startChallengeServer starts an HTTP server that responds to ACME HTTP-01 challenges.
