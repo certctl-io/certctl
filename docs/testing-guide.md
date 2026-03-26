@@ -1,6 +1,6 @@
 # certctl V2.0 Release QA Guide
 
-Comprehensive manual testing playbook. Every test has a concrete command, an explanation of what it validates and why it matters, exact expected output, and an unambiguous pass/fail criterion. Run every test before tagging v2.0.0.
+Comprehensive manual testing playbook. Every test has a concrete command, an explanation of what it validates and why it matters, exact expected output, and an unambiguous pass/fail criterion.
 
 ---
 
