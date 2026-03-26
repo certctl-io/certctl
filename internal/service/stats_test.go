@@ -187,7 +187,7 @@ func TestGetJobStats_Empty(t *testing.T) {
 
 func TestGetJobStats_WithData(t *testing.T) {
 	svc, _, jobRepo, _ := newTestStatsService()
-	completedAt := time.Now().Add(-1 * time.Hour)
+	completedAt := time.Now()
 	jobRepo.AddJob(&domain.Job{ID: "j-1", Status: domain.JobStatusCompleted, CompletedAt: &completedAt})
 	jobRepo.AddJob(&domain.Job{ID: "j-2", Status: domain.JobStatusFailed, CompletedAt: &completedAt})
 
