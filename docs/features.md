@@ -1035,8 +1035,8 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **GitHub Actions** — `.github/workflows/ci.yml`
 - **Parallel Jobs** — Go (build, vet, test+coverage, gates) and Frontend (tsc, vitest, vite build)
 - **Coverage Gates** — Service layer ≥30%, handler layer ≥50%
-- **Release Workflow** — Tag push → build → publish Docker images to `ghcr.io`
-- **Docker Tags** — `:latest`, `:v{version}` (ghcr.io/shankar0123/certctl)
+- **Release Workflow** — Tag push → build → publish Docker images to GitHub Container Registry
+- **Docker Tags** — `:latest`, `:v{version}` (`shankar0123.docker.scarf.sh/certctl-server`, `shankar0123.docker.scarf.sh/certctl-agent`)
 
 ### Test Suite
 - **Unit Tests** — 625+ test functions across service, handler, middleware, domain layers

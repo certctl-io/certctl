@@ -65,8 +65,8 @@ jobs:
             ## Docker Images
 
             ```bash
-            docker pull ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
+            docker pull shankar0123.docker.scarf.sh/certctl-server:${{ steps.version.outputs.VERSION }}
+            docker pull shankar0123.docker.scarf.sh/certctl-agent:${{ steps.version.outputs.VERSION }}
             ```
 
             ## Quick Start
