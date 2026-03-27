@@ -61,6 +61,18 @@ import {
   getJobTrends,
   getIssuanceRate,
   getMetrics,
+  getDiscoveredCertificates,
+  getDiscoveredCertificate,
+  claimDiscoveredCertificate,
+  dismissDiscoveredCertificate,
+  getDiscoveryScans,
+  getDiscoverySummary,
+  getNetworkScanTargets,
+  getNetworkScanTarget,
+  createNetworkScanTarget,
+  updateNetworkScanTarget,
+  deleteNetworkScanTarget,
+  triggerNetworkScan,
 } from './client';
 
 // Mock global fetch
@@ -684,6 +696,106 @@ describe('API Client', () => {
       const result = await getHealth();
       expect(mockFetch.mock.calls[0][0]).toBe('/health');
       expect(result.status).toBe('ok');
+    });
+  });
+
+  // ─── Discovery ────────────────────────────────────
+
+  describe('Discovery', () => {
+    it('getDiscoveredCertificates calls with params', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getDiscoveredCertificates({ status: 'Unmanaged' });
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/discovered-certificates');
+      expect(mockFetch.mock.calls[0][0]).toContain('status=Unmanaged');
+    });
+
+    it('getDiscoveredCertificate calls with id', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'dc-1', common_name: 'test.example.com' }));
+      const result = await getDiscoveredCertificate('dc-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/discovered-certificates/dc-1');
+      expect(result.common_name).toBe('test.example.com');
+    });
+
+    it('claimDiscoveredCertificate sends POST with managed cert id', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'claimed' }));
+      await claimDiscoveredCertificate('dc-1', 'mc-api-prod');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/discovered-certificates/dc-1/claim');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ managed_certificate_id: 'mc-api-prod' });
+    });
+
+    it('dismissDiscoveredCertificate sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'dismissed' }));
+      await dismissDiscoveredCertificate('dc-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/discovered-certificates/dc-1/dismiss');
+      expect(init.method).toBe('POST');
+    });
+
+    it('getDiscoveryScans calls endpoint', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getDiscoveryScans();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/discovery-scans');
+    });
+
+    it('getDiscoverySummary calls endpoint', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ Unmanaged: 5, Managed: 3, Dismissed: 1 }));
+      const result = await getDiscoverySummary();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/discovery-summary');
+      expect(result.Unmanaged).toBe(5);
+    });
+  });
+
+  // ─── Network Scan Targets ────────────────────────
+
+  describe('Network Scan Targets', () => {
+    it('getNetworkScanTargets calls endpoint', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getNetworkScanTargets();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/network-scan-targets');
+    });
+
+    it('getNetworkScanTarget calls with id', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'nst-1', name: 'DMZ' }));
+      const result = await getNetworkScanTarget('nst-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/network-scan-targets/nst-1');
+      expect(result.name).toBe('DMZ');
+    });
+
+    it('createNetworkScanTarget sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'nst-new', name: 'Production' }));
+      await createNetworkScanTarget({ name: 'Production', cidrs: ['10.0.0.0/24'], ports: [443] });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/network-scan-targets');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      expect(body.name).toBe('Production');
+      expect(body.cidrs).toEqual(['10.0.0.0/24']);
+    });
+
+    it('updateNetworkScanTarget sends PUT', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'nst-1', enabled: false }));
+      await updateNetworkScanTarget('nst-1', { enabled: false });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/network-scan-targets/nst-1');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('deleteNetworkScanTarget sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({}, 204));
+      await deleteNetworkScanTarget('nst-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/network-scan-targets/nst-1');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('triggerNetworkScan sends POST to scan endpoint', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'scan triggered' }));
+      await triggerNetworkScan('nst-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/network-scan-targets/nst-1/scan');
+      expect(init.method).toBe('POST');
     });
   });
 });

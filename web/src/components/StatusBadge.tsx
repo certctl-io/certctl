@@ -19,6 +19,10 @@ const statusStyles: Record<string, string> = {
   Online:              'badge-success',
   Offline:             'badge-danger',
   Stale:               'badge-warning',
+  // Discovery statuses
+  Unmanaged:           'badge-warning',
+  Managed:             'badge-success',
+  Dismissed:           'badge-neutral',
   // Notification statuses
   sent:                'badge-success',
   pending:             'badge-warning',

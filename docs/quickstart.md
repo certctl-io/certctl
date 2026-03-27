@@ -89,7 +89,7 @@ The dashboard comes pre-loaded with 15 demo certificates across multiple teams, 
 
 The main dashboard shows total certificates, how many are expiring soon, how many have expired, the renewal success rate, and four charts: an **expiration heatmap** (90-day weekly buckets), **renewal success rate trends** (30-day line chart), **certificate status distribution** (donut chart), and **issuance rate** (30-day bar chart).
 
-Explore the sidebar: Certificates, Agents, Policies, Jobs, Audit Trail, Notifications, Profiles, Teams, Owners, Agent Groups, Fleet Overview, Short-Lived Credentials, Discovery.
+Explore the sidebar: Certificates, Agents, Policies, Jobs, Audit Trail, Notifications, Profiles, Teams, Owners, Agent Groups, Fleet Overview, Short-Lived Credentials, Discovery, and Network Scans.
 
 ### Scenarios to walk through
 

@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget } from './types';
 
 const BASE = '/api/v1';
 
@@ -257,6 +257,53 @@ export const approveRenewal = (jobId: string) =>
 
 export const rejectRenewal = (jobId: string, reason: string) =>
   fetchJSON<{ message: string }>(`${BASE}/jobs/${jobId}/reject`, { method: 'POST', body: JSON.stringify({ reason }) });
+
+// Discovery
+export const getDiscoveredCertificates = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<DiscoveredCertificate>>(`${BASE}/discovered-certificates?${qs}`);
+};
+
+export const getDiscoveredCertificate = (id: string) =>
+  fetchJSON<DiscoveredCertificate>(`${BASE}/discovered-certificates/${id}`);
+
+export const claimDiscoveredCertificate = (id: string, managedCertificateId: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/discovered-certificates/${id}/claim`, {
+    method: 'POST',
+    body: JSON.stringify({ managed_certificate_id: managedCertificateId }),
+  });
+
+export const dismissDiscoveredCertificate = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/discovered-certificates/${id}/dismiss`, { method: 'POST' });
+
+export const getDiscoveryScans = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<DiscoveryScan>>(`${BASE}/discovery-scans?${qs}`);
+};
+
+export const getDiscoverySummary = () =>
+  fetchJSON<DiscoverySummary>(`${BASE}/discovery-summary`);
+
+// Network Scan Targets
+export const getNetworkScanTargets = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<NetworkScanTarget>>(`${BASE}/network-scan-targets?${qs}`);
+};
+
+export const getNetworkScanTarget = (id: string) =>
+  fetchJSON<NetworkScanTarget>(`${BASE}/network-scan-targets/${id}`);
+
+export const createNetworkScanTarget = (data: Partial<NetworkScanTarget>) =>
+  fetchJSON<NetworkScanTarget>(`${BASE}/network-scan-targets`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateNetworkScanTarget = (id: string, data: Partial<NetworkScanTarget>) =>
+  fetchJSON<NetworkScanTarget>(`${BASE}/network-scan-targets/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteNetworkScanTarget = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/network-scan-targets/${id}`, { method: 'DELETE' });
+
+export const triggerNetworkScan = (id: string) =>
+  fetchJSON<{ message: string }>(`${BASE}/network-scan-targets/${id}/scan`, { method: 'POST' });
 
 // Stats
 export const getDashboardSummary = () =>

@@ -901,6 +901,8 @@ curl -s -X POST $API/api/v1/jobs/JOB_ID/reject \
 
 **Why interactive approval:** Not every certificate renewal should be automatic. PCI-scoped certificates, certs with specific compliance requirements, or certificates being migrated between issuers benefit from a human checkpoint. The AwaitingApproval state creates that checkpoint without blocking the entire job pipeline.
 
+**In the dashboard:** Click "Jobs" in the sidebar, filter by status "AwaitingApproval", and you'll see a list of renewal jobs waiting for approval. Each job shows the certificate, issuer, and requested validity period. Click a job to open its detail view and see the Approve / Reject buttons with a reason text field. After approval or rejection, the job status updates in real-time and the audit trail records the decision.
+
 ---
 
 ## Part 13: Advanced Query Features
@@ -1100,6 +1102,28 @@ curl -s -X POST "$API/api/v1/discovered-certificates/$DISCOVERED_ID/dismiss" \
 ```
 
 **How it works:** Filesystem discovery: the agent scans `CERTCTL_DISCOVERY_DIRS` on startup and every 6 hours, extracts metadata (common name, SANs, issuer, expiration, key type, fingerprint) from all PEM and DER files, and POSTs findings to `POST /api/v1/agents/{id}/discoveries`. Network discovery: the server expands CIDR ranges (capped at /20 = 4096 IPs), connects to each IP:port via TLS, extracts the peer certificate chain, and stores results using `server-scanner` as a sentinel agent ID. Both sources deduplicate by fingerprint and store results with a status: **Unmanaged** (discovered, not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage). This gives you a triage workflow: discover → review → claim or dismiss.
+
+### Discovery & Network Scans in the Dashboard
+
+**Discovered Certificates Page:** Click "Discovery" in the sidebar to see a triage workflow. The page lists all discovered certificates grouped by status (Unmanaged, Managed, Dismissed). For each Unmanaged certificate, you see:
+- Common name and SANs
+- Issuer and subject DN
+- Expiration date
+- Fingerprint (helps dedup)
+- Source (agent ID or `server-scanner` for network scans)
+- Action buttons: Claim (manage this cert), Dismiss (ignore it)
+
+Click "Claim" to bring an unmanaged certificate under certctl's control. Click "Dismiss" to remove it from the triage queue.
+
+**Network Scans Page:** Click "Network Scans" in the sidebar to manage network scan targets. The page shows all configured scan targets with:
+- Target name and description
+- CIDR ranges and ports scanned
+- Enabled/disabled toggle
+- Scan interval and connection timeout
+- Last scan timestamp and result summary
+- Action buttons: Edit, Delete, Scan Now (immediate)
+
+Click "Scan Now" to trigger an immediate TLS probe of the target's IP ranges. Results appear within seconds in the Discovered Certificates page as entries with `agent_id=server-scanner`.
 
 **In the dashboard**, click "Discovered Certificates" in the sidebar to see what agents and network scans found — claim unmanaged certs to bring them under certctl's management, or dismiss them.
 

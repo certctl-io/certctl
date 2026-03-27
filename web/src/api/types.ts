@@ -244,6 +244,67 @@ export interface IssuanceRateDataPoint {
   issued_count: number;
 }
 
+// Discovery types
+export interface DiscoveredCertificate {
+  id: string;
+  fingerprint_sha256: string;
+  common_name: string;
+  sans: string[];
+  serial_number: string;
+  issuer_dn: string;
+  subject_dn: string;
+  not_before?: string;
+  not_after?: string;
+  key_algorithm: string;
+  key_size: number;
+  is_ca: boolean;
+  source_path: string;
+  source_format: string;
+  agent_id: string;
+  discovery_scan_id?: string;
+  managed_certificate_id?: string;
+  status: string;
+  first_seen_at: string;
+  last_seen_at: string;
+  dismissed_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface DiscoveryScan {
+  id: string;
+  agent_id: string;
+  directories: string[];
+  certificates_found: number;
+  certificates_new: number;
+  errors_count: number;
+  scan_duration_ms: number;
+  started_at: string;
+  completed_at?: string;
+}
+
+export interface DiscoverySummary {
+  Unmanaged: number;
+  Managed: number;
+  Dismissed: number;
+}
+
+// Network scan types
+export interface NetworkScanTarget {
+  id: string;
+  name: string;
+  cidrs: string[];
+  ports: number[];
+  enabled: boolean;
+  scan_interval_hours: number;
+  timeout_ms: number;
+  last_scan_at?: string;
+  last_scan_duration_ms?: number;
+  last_scan_certs_found?: number;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface MetricsResponse {
   gauge: {
     certificate_total: number;

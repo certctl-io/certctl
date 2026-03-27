@@ -24,7 +24,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
-![Version: v2.0.3](https://img.shields.io/badge/version-v2.0.3-brightgreen)
+![Version: v2.0.4](https://img.shields.io/badge/version-v2.0.4-brightgreen)
 
 ## Documentation
 
@@ -65,7 +65,7 @@ It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and 
 
 ## What It Does
 
-certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (95 endpoints under `/api/v1/` + `/.well-known/est/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents. The **EST server** (RFC 7030) enables device and WiFi certificate enrollment via industry-standard Enrollment over Secure Transport. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
+certctl gives you a single pane of glass for every TLS certificate in your organization. The **web dashboard** shows your full certificate inventory — what's healthy, what's expiring, what's already expired, and who owns each one. The **REST API** (95 endpoints under `/api/v1/` + `/.well-known/est/`) lets you automate everything. **Agents** deployed on your infrastructure generate private keys locally, discover existing certificates on disk, and submit CSRs — private keys never leave your servers. The **network scanner** discovers certificates on TLS endpoints across your infrastructure without requiring agents — a triage workflow in the GUI lets you claim discovered certificates into your inventory. The **EST server** (RFC 7030) enables device and WiFi certificate enrollment via industry-standard Enrollment over Secure Transport. Interactive **approval workflows** let you require human sign-off on renewals before deployment. The background scheduler watches expiration dates and triggers renewals automatically — when certificate lifespans drop to 47 days, certctl handles the constant rotation without human involvement.
 
 **Core capabilities:**
 
@@ -76,7 +76,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
 - **Policy engine** — 5 rule types with violation tracking and severity levels. Certificate profiles enforce allowed key types, maximum TTL, and crypto constraints at enrollment time.
 - **Immutable audit trail** — every action recorded to an append-only log. Every API call recorded with method, path, actor, SHA-256 body hash, response status, and latency. No update or delete on audit records.
-- **Operational dashboard** — Full React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, and real-time short-lived credential tracking.
+- **Operational dashboard** — Full React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, real-time short-lived credential tracking, discovery triage workflow, network scan management, and interactive approval/rejection flow.
 - **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
 - **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
 - **EST enrollment (RFC 7030)** — built-in Enrollment over Secure Transport server for device certificate enrollment. Supports WiFi/802.1X, MDM, and IoT use cases. PKCS#7 certs-only wire format, accepts PEM or base64-encoded DER CSRs, configurable issuer and profile binding.
@@ -589,10 +589,11 @@ All nine development milestones (M1–M9) are complete. The backend covers the f
 - **M21: Network Cert Discovery** ✅ — server-side active TLS scanning of CIDR ranges and ports, concurrent probing (50 goroutines), CIDR expansion with /20 safety cap, sentinel agent pattern for discovery pipeline reuse, CRUD API for scan targets, scheduler integration (6h default)
 - **M22: Prometheus Metrics** ✅ — `GET /api/v1/metrics/prometheus` returns Prometheus exposition format (`text/plain; version=0.0.4`), 11 metrics with `certctl_` prefix, compatible with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics
 - **M23: EST Server (RFC 7030)** ✅ — Enrollment over Secure Transport for device/WiFi certificate enrollment, 4 endpoints under /.well-known/est/, PKCS#7 certs-only wire format, base64-encoded DER CSR input, configurable issuer + profile binding, audit trail, 28 new tests
+- **M24: Discovery, Network Scan & Approval GUI** ✅ — discovery triage page for claiming/dismissing discovered certificates, network scan target management (CRUD with schedule/interval config), interactive approval workflow (approve/reject buttons on Jobs page with reason modal), 13 new frontend tests
 - **Compliance Mapping** ✅ — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 capability mapping documentation
-- **M24: S/MIME Certificate Support** (Planned — v2.0.2) — wire profile EKU constraints through the issuance pipeline so certctl can issue S/MIME (emailProtection), code signing, and custom EKU certificates, not just TLS
-- **M25: Traefik + Caddy Targets** (Planned — v2.1.x) — Traefik (file provider, auto-reload on filesystem change) and Caddy (Admin API, hot-reload) deployment target connectors
-- **M26: Certificate Export** (Planned — v2.1.x) — single-certificate download in PFX/PKCS12, DER, and PEM formats with optional chain inclusion, GUI download button on certificate detail page
+- **M25: S/MIME Certificate Support** (Planned — v2.0.2) — wire profile EKU constraints through the issuance pipeline so certctl can issue S/MIME (emailProtection), code signing, and custom EKU certificates, not just TLS
+- **M26: Traefik + Caddy Targets** (Planned — v2.1.x) — Traefik (file provider, auto-reload on filesystem change) and Caddy (Admin API, hot-reload) deployment target connectors
+- **M27: Certificate Export** (Planned — v2.1.x) — single-certificate download in PFX/PKCS12, DER, and PEM formats with optional chain inclusion, GUI download button on certificate detail page
 
 ### V3: certctl Pro
 
