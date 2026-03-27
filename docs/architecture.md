@@ -1,5 +1,41 @@
 # Architecture Guide
 
+## Contents
+
+1. [Overview](#overview)
+2. [System Components](#system-components)
+   - [Control Plane (Server)](#control-plane-server)
+   - [Agents](#agents)
+   - [Web Dashboard](#web-dashboard)
+   - [PostgreSQL Database](#postgresql-database)
+3. [Data Flow: Certificate Lifecycle](#data-flow-certificate-lifecycle)
+   - [Create Managed Certificate](#1-create-managed-certificate)
+   - [Certificate Issuance](#2-certificate-issuance)
+   - [Deploy Certificate to Target](#3-deploy-certificate-to-target)
+   - [Revoke a Certificate](#35-revoke-a-certificate)
+   - [Automatic Renewal](#4-automatic-renewal)
+4. [Connector Architecture](#connector-architecture)
+   - [IssuerConnectorAdapter (Dependency Inversion)](#issuerconnectoradapter-dependency-inversion)
+   - [Issuer Connector](#issuer-connector)
+   - [Target Connector](#target-connector)
+   - [Notifier Connector](#notifier-connector)
+   - [EST Server (RFC 7030)](#est-server-rfc-7030)
+5. [Security Model](#security-model)
+   - [Private Key Management](#private-key-management)
+   - [Authentication](#authentication)
+   - [Audit Trail](#audit-trail)
+   - [API Audit Log](#api-audit-log)
+   - [Logging](#logging)
+6. [API Design](#api-design)
+7. [MCP Server](#mcp-server)
+8. [CLI Tool](#cli-tool)
+9. [Deployment Topologies](#deployment-topologies)
+   - [Docker Compose (Development / Small Deployments)](#docker-compose-development--small-deployments)
+   - [Production (Kubernetes)](#production-kubernetes)
+10. [Discovery Data Flow (M18b + M21)](#discovery-data-flow-m18b--m21)
+11. [Testing Strategy](#testing-strategy)
+12. [What's Next](#whats-next)
+
 ## Overview
 
 Certctl is a certificate management platform with a **decoupled control-plane and agent architecture**. The control plane orchestrates certificate issuance and renewal, while agents deployed across your infrastructure handle key generation, certificate deployment, and local validation — private keys never leave the infrastructure they were generated on.

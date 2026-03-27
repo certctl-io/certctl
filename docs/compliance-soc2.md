@@ -14,6 +14,28 @@ Each section includes:
 - **V2 vs V3 status** — whether feature is in the free community edition (V2) or paid Pro edition (V3)
 - **Operator responsibility** — aspects your organization must handle outside of certctl
 
+## Contents
+
+1. [How to Use This Guide](#how-to-use-this-guide)
+2. [CC6: Logical and Physical Access Controls](#cc6-logical-and-physical-access-controls)
+   - [CC6.1 — Logical Access Security](#cc61--logical-access-security)
+   - [CC6.2 — Prior to Issuing System Credentials](#cc62--prior-to-issuing-system-credentials)
+   - [CC6.3 — Authentication Policies](#cc63--authentication-policies)
+   - [CC6.7 — Information Transmission Protection](#cc67--information-transmission-protection)
+3. [CC7: System Operations](#cc7-system-operations)
+   - [CC7.1 — System Monitoring](#cc71--system-monitoring)
+   - [CC7.2 — Anomaly Detection](#cc72--anomaly-detection)
+   - [CC7.3 — Incident Response](#cc73--incident-response)
+   - [CC7.4 — Identify and Develop Risk Mitigation Activities](#cc74--identify-and-develop-risk-mitigation-activities)
+4. [A1: Availability](#a1-availability)
+   - [A1.1/A1.2 — Availability and Recovery](#a11a12--availability-and-recovery)
+5. [CC8: Change Management](#cc8-change-management)
+   - [CC8.1 — Change Control](#cc81--change-control)
+6. [Evidence Summary Table](#evidence-summary-table)
+7. [What Requires Operator Action](#what-requires-operator-action)
+8. [V3 Enhancements](#v3-enhancements)
+9. [Conclusion](#conclusion)
+
 ## CC6: Logical and Physical Access Controls
 
 ### CC6.1 — Logical Access Security

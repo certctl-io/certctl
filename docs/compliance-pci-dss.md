@@ -4,6 +4,34 @@ This guide maps certctl's existing capabilities to PCI-DSS 4.0 requirements rele
 
 Organizations subject to PCI-DSS typically need to demonstrate control over certificate issuance, renewal, rotation, revocation, and key management. Certctl automates the technical controls for certificate lifecycle; compliance depends on how you deploy, monitor, and audit it.
 
+## Contents
+
+1. [How to Use This Guide](#how-to-use-this-guide)
+2. [Requirement 4: Protect Data in Transit](#requirement-4-protect-data-in-transit)
+   - [4.2.1 — Strong Cryptography for Transmission](#421--strong-cryptography-for-transmission)
+   - [4.2.2 — Certificate Inventory and Validation](#422--certificate-inventory-and-validation)
+3. [Requirement 3: Protect Stored Cardholder Data (Key Management)](#requirement-3-protect-stored-cardholder-data-key-management)
+   - [3.6 — Cryptographic Key Documentation](#36--cryptographic-key-documentation)
+   - [3.7 — Key Lifecycle Procedures](#37--key-lifecycle-procedures)
+4. [Requirement 8: Identify and Authenticate](#requirement-8-identify-and-authenticate)
+   - [8.3 — Strong Authentication](#83--strong-authentication)
+   - [8.6 — Application Account Management](#86--application-account-management)
+5. [Requirement 10: Log and Monitor](#requirement-10-log-and-monitor)
+   - [10.2 — Implement Automated Audit Logging](#102--implement-automated-audit-logging)
+   - [10.3 — Protect Audit Trail](#103--protect-audit-trail)
+   - [10.4 — Promptly Review and Address Audit Trail Exceptions](#104--promptly-review-and-address-audit-trail-exceptions)
+   - [10.7 — Retain and Protect Audit Trail History](#107--retain-and-protect-audit-trail-history)
+6. [Requirement 6: Develop and Maintain Secure Systems and Applications](#requirement-6-develop-and-maintain-secure-systems-and-applications)
+   - [6.3.1 — Security Coding Practices](#631--security-coding-practices)
+   - [6.5.10 — Broken Authentication and Cryptography Prevention](#6510--broken-authentication-and-cryptography-prevention)
+7. [Requirement 7: Restrict Access by Business Need-to-Know](#requirement-7-restrict-access-by-business-need-to-know)
+   - [7.2 — Implement Access Control](#72--implement-access-control)
+8. [Evidence Summary Table](#evidence-summary-table)
+9. [Operator Responsibilities](#operator-responsibilities)
+10. [V3 Enhancements for PCI-DSS](#v3-enhancements-for-pci-dss)
+11. [Next Steps for Compliance](#next-steps-for-compliance)
+12. [Questions?](#questions)
+
 ## How to Use This Guide
 
 Your QSA will request evidence that your certificate and key management systems meet specific PCI-DSS 4.0 requirements. For each applicable requirement, this guide identifies:

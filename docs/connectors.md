@@ -2,6 +2,49 @@
 
 Connectors extend certctl to integrate with external systems for certificate issuance, deployment, and notifications. This guide covers the connector interfaces, built-in implementations, and how to build your own.
 
+## Contents
+
+1. [Overview](#overview)
+2. [Issuer Connector](#issuer-connector)
+   - [Interface](#interface)
+   - [Built-in: Local CA](#built-in-local-ca)
+   - [Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)](#built-in-acme-v2-lets-encrypt-sectigo-zerossl)
+   - [Built-in: step-ca (Smallstep Private CA)](#built-in-step-ca-smallstep-private-ca)
+   - [OpenSSL / Custom CA](#openssl--custom-ca)
+   - [Revocation Across Issuers](#revocation-across-issuers)
+   - [EST Integration (GetCACertPEM)](#est-integration-getcacertpem)
+   - [Planned Issuers](#planned-issuers)
+   - [Building a Custom Issuer](#building-a-custom-issuer)
+3. [Target Connector](#target-connector)
+   - [Interface](#interface-1)
+   - [Built-in: NGINX](#built-in-nginx)
+   - [Built-in: Apache httpd](#built-in-apache-httpd)
+   - [Built-in: HAProxy](#built-in-haproxy)
+   - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
+   - [IIS (Interface Only, Dual-Mode)](#iis-interface-only-dual-mode)
+4. [Notifier Connector](#notifier-connector)
+   - [Interface](#interface-2)
+5. [Registering a Connector](#registering-a-connector)
+   - [IssuerConnectorAdapter](#issuerconnectoradapter)
+   - [Notifier Registration](#notifier-registration)
+6. [Testing Connectors](#testing-connectors)
+   - [Unit Tests](#unit-tests)
+   - [Integration Tests](#integration-tests)
+7. [Best Practices](#best-practices)
+8. [Agent Discovery Scanner](#agent-discovery-scanner)
+   - [Configuration](#configuration)
+   - [How It Works](#how-it-works)
+   - [API Endpoints](#api-endpoints)
+   - [Use Cases](#use-cases)
+9. [Network Certificate Scanner (M21)](#network-certificate-scanner-m21)
+   - [Configuration](#configuration-1)
+   - [Creating Scan Targets](#creating-scan-targets)
+   - [How It Works](#how-it-works-1)
+   - [API Endpoints](#api-endpoints-1)
+   - [Scheduler Integration](#scheduler-integration)
+   - [Use Cases](#use-cases-1)
+10. [What's Next](#whats-next)
+
 ## Overview
 
 Three types of connectors:

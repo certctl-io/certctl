@@ -6,6 +6,30 @@ This guide gets you running in 5 minutes and walks you through everything certct
 
 New to certificates? Read the [Concepts Guide](concepts.md) first — it explains TLS, CAs, and private keys in plain language.
 
+## Contents
+
+1. [Prerequisites](#prerequisites)
+2. [Start Everything](#start-everything)
+3. [Open the Dashboard](#open-the-dashboard)
+4. [Explore the API](#explore-the-api)
+   - [Core operations](#core-operations)
+   - [Sorting, filtering, and pagination](#sorting-filtering-and-pagination)
+   - [Stats and metrics](#stats-and-metrics)
+5. [Create Your First Certificate](#create-your-first-certificate)
+   - [Revoke a certificate](#revoke-a-certificate)
+   - [Interactive approval workflow](#interactive-approval-workflow)
+6. [Certificate Discovery](#certificate-discovery)
+   - [Filesystem discovery (agent-based)](#filesystem-discovery-agent-based)
+   - [Network discovery (agentless)](#network-discovery-agentless)
+   - [Triage discovered certificates](#triage-discovered-certificates)
+7. [CLI Tool](#cli-tool)
+8. [MCP Server (AI Integration)](#mcp-server-ai-integration)
+9. [Demo Data Reference](#demo-data-reference)
+10. [Dashboard Demo Mode](#dashboard-demo-mode)
+11. [Presenting to Stakeholders](#presenting-to-stakeholders)
+12. [Tear Down](#tear-down)
+13. [What's Next](#whats-next)
+
 ## Prerequisites
 
 You need **Docker** and **Docker Compose** installed. That's it.

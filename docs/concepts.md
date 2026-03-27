@@ -2,6 +2,41 @@
 
 If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why the industry's move toward shorter certificate lifespans — down to 47 days by 2029 — makes automated lifecycle management essential.
 
+## Contents
+
+1. [What Is a TLS Certificate?](#what-is-a-tls-certificate)
+2. [Why Do Certificates Expire?](#why-do-certificates-expire)
+3. [The Cast of Characters](#the-cast-of-characters)
+   - [Certificate Authority (CA)](#certificate-authority-ca)
+   - [ACME Protocol](#acme-protocol)
+   - [EST Protocol (Enrollment over Secure Transport)](#est-protocol-enrollment-over-secure-transport)
+   - [Private Key](#private-key)
+   - [Subject Alternative Names (SANs)](#subject-alternative-names-sans)
+   - [Certificate Chain](#certificate-chain)
+4. [How certctl Works](#how-certctl-works)
+   - [The Control Plane (Server)](#the-control-plane-server)
+   - [Agents](#agents)
+   - [Deployment Targets](#deployment-targets)
+5. [The Certificate Lifecycle](#the-certificate-lifecycle)
+6. [Why Not Just Use Certbot?](#why-not-just-use-certbot)
+7. [Key Concepts in certctl](#key-concepts-in-certctl)
+   - [Teams and Owners](#teams-and-owners)
+   - [Agent Groups](#agent-groups)
+   - [Certificate Profiles](#certificate-profiles)
+   - [Interactive Renewal Approval](#interactive-renewal-approval)
+   - [Certificate Revocation](#certificate-revocation)
+   - [Short-Lived Certificates](#short-lived-certificates)
+   - [Policies](#policies)
+   - [Jobs](#jobs)
+   - [Audit Trail](#audit-trail)
+   - [Notifications](#notifications)
+   - [CLI](#cli)
+   - [MCP Server (AI Integration)](#mcp-server-ai-integration)
+   - [EST Enrollment (Device Certificates)](#est-enrollment-device-certificates)
+   - [Certificate Discovery](#certificate-discovery)
+   - [Observability](#observability)
+8. [What's Next](#whats-next)
+
 ## What Is a TLS Certificate?
 
 When you visit `https://yourbank.com`, your browser checks a digital document called a **TLS certificate** before sending any data. That certificate proves two things: (1) you're really talking to yourbank.com and not an imposter, and (2) everything sent between you and the server is encrypted.

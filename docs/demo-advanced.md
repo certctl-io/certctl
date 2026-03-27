@@ -5,6 +5,40 @@ This demo goes beyond browsing pre-loaded data. You'll create a team, register a
 **Time**: 15-20 minutes
 **Prerequisites**: certctl running via Docker Compose (see [Quick Start](quickstart.md))
 
+## Contents
+
+1. [Setup](#setup)
+2. [How the pieces fit together](#how-the-pieces-fit-together)
+3. [Alternative Issuers Reference](#alternative-issuers-reference)
+   - [Sub-CA Mode](#sub-ca-mode-local-ca-chained-to-enterprise-root)
+   - [ACME with DNS-01 Challenges](#acme-with-dns-01-challenges-wildcard-certificates)
+   - [ACME with DNS-PERSIST-01](#acme-with-dns-persist-01-zero-touch-renewals)
+   - [step-ca (Smallstep Private CA)](#step-ca-smallstep-private-ca)
+   - [OpenSSL / Custom CA](#openssl--custom-ca-script-based)
+4. [Part 1: Build the Organization Structure](#part-1-build-the-organization-structure)
+5. [Part 2: Verify the Issuer](#part-2-verify-the-issuer)
+6. [Part 3: Create a Managed Certificate](#part-3-create-a-managed-certificate)
+7. [Part 4: Trigger Certificate Renewal](#part-4-trigger-certificate-renewal)
+8. [Part 4.5: Manage Deployment Targets](#part-45-manage-deployment-targets)
+9. [Part 5: Deploy the Certificate](#part-5-deploy-the-certificate)
+10. [Part 6: View the Audit Trail](#part-6-view-the-audit-trail-immutable-api-audit-log)
+11. [Part 7: Check Notifications](#part-7-check-notifications)
+12. [Part 8: Create a Second Certificate and Compare](#part-8-create-a-second-certificate-and-compare)
+13. [Part 8.5: Revoke a Certificate](#part-85-revoke-a-certificate)
+14. [Part 9: Policy Violations](#part-9-policy-violations)
+15. [Part 9.5: Dashboard Stats and Metrics](#part-95-dashboard-stats-and-metrics)
+16. [Part 10: Certificate Profiles](#part-10-certificate-profiles)
+17. [Part 11: Agent Groups](#part-11-agent-groups)
+18. [Part 12: Interactive Approval Workflow](#part-12-interactive-approval-workflow)
+19. [Part 13: Advanced Query Features](#part-13-advanced-query-features)
+20. [Part 14: CLI Tool](#part-14-cli-tool-m16b)
+21. [Part 15: MCP Server for AI Integration](#part-15-mcp-server-for-ai-integration-m18a)
+22. [Part 16: Certificate Discovery](#part-16-certificate-discovery-m18b--m21)
+23. [End-to-End Architecture Summary](#end-to-end-architecture-summary)
+24. [Full Automated Script](#full-automated-script)
+25. [What to Show Stakeholders](#what-to-show-stakeholders)
+26. [Teardown](#teardown)
+
 ## Setup
 
 Make sure certctl is running:

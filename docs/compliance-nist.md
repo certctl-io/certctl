@@ -2,6 +2,24 @@
 
 NIST SP 800-57 Part 1 Rev 5 (May 2020) is the authoritative US government guidance on cryptographic key management. This document maps certctl's implementation to its recommendations. certctl follows NIST guidance where applicable; this guide documents the alignment and identifies gaps for future roadmap planning.
 
+## Contents
+
+1. [Key Generation (Section 6.1)](#key-generation-section-61)
+2. [Key Storage and Protection (Sections 6.3, 6.4)](#key-storage-and-protection-sections-63-64)
+3. [Cryptoperiods (Section 5.3, Table 1)](#cryptoperiods-section-53-table-1)
+4. [Key States and Transitions (Section 5.2)](#key-states-and-transitions-section-52)
+5. [Algorithm Recommendations (Section 5.1, SP 800-131A)](#algorithm-recommendations-section-51-sp-800-131a)
+6. [Key Distribution and Transport (Section 6.2)](#key-distribution-and-transport-section-62)
+7. [Revocation and Compromise (NIST SP 800-57 Part 3)](#revocation-and-compromise-nist-sp-800-57-part-3)
+8. [Alignment Summary Table](#alignment-summary-table)
+9. [Gaps and Remediation Roadmap](#gaps-and-remediation-roadmap)
+   - [V2 (Current)](#v2-current)
+   - [V3 (Planned: 2026)](#v3-planned-2026)
+   - [V5 (Planned: 2027+)](#v5-planned-2027)
+   - [Post-Quantum (2027+)](#post-quantum-2027)
+10. [References](#references)
+11. [Questions or Corrections?](#questions-or-corrections)
+
 ## Key Generation (Section 6.1)
 
 certctl generates certificate keys on agent infrastructure using Go's `crypto/rand` for entropy, backed by `/dev/urandom` on Linux and `CryptGenRandom` on Windows. Key generation happens as follows:

@@ -2,6 +2,37 @@
 
 Comprehensive manual testing playbook. Every test has a concrete command, an explanation of what it validates and why it matters, exact expected output, and an unambiguous pass/fail criterion.
 
+## Contents
+
+- [Prerequisites](#prerequisites)
+- [Part 1: Infrastructure & Deployment](#part-1-infrastructure--deployment)
+- [Part 2: Authentication & Security](#part-2-authentication--security)
+- [Part 3: Certificate Lifecycle (CRUD)](#part-3-certificate-lifecycle-crud)
+- [Part 4: Renewal Workflow](#part-4-renewal-workflow)
+- [Part 5: Revocation](#part-5-revocation)
+- [Part 6: Issuer Connectors](#part-6-issuer-connectors)
+- [Part 7: Target Connectors & Deployment](#part-7-target-connectors--deployment)
+- [Part 8: Agent Operations](#part-8-agent-operations)
+- [Part 9: Job System](#part-9-job-system)
+- [Part 10: Policies & Profiles](#part-10-policies--profiles)
+- [Part 11: Ownership, Teams & Agent Groups](#part-11-ownership-teams--agent-groups)
+- [Part 12: Notifications](#part-12-notifications)
+- [Part 13: Observability](#part-13-observability)
+- [Part 14: Audit Trail](#part-14-audit-trail)
+- [Part 15: Certificate Discovery (Filesystem + Network)](#part-15-certificate-discovery-filesystem--network)
+- [Part 16: Enhanced Query API](#part-16-enhanced-query-api)
+- [Part 17: CLI Tool](#part-17-cli-tool)
+- [Part 18: MCP Server](#part-18-mcp-server)
+- [Part 19: GUI Testing](#part-19-gui-testing)
+- [Part 20: Background Scheduler](#part-20-background-scheduler)
+- [Part 21: Error Handling](#part-21-error-handling)
+- [Part 22: Performance Spot Checks](#part-22-performance-spot-checks)
+- [Part 23: Structured Logging Verification](#part-23-structured-logging-verification)
+- [Part 24: Documentation Verification](#part-24-documentation-verification)
+- [Part 25: Regression Tests](#part-25-regression-tests)
+- [Part 26: EST Server (RFC 7030)](#part-26-est-server-rfc-7030)
+- [Release Sign-Off](#release-sign-off)
+
 ---
 
 ## Prerequisites
