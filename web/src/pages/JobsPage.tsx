@@ -35,20 +35,20 @@ export default function JobsPage() {
       label: 'Job',
       render: (j) => (
         <div>
-          <div className="font-mono text-xs text-slate-200">{j.id}</div>
-          <div className="text-xs text-slate-500">{j.type}</div>
+          <div className="font-mono text-xs text-ink">{j.id}</div>
+          <div className="text-xs text-ink-faint">{j.type}</div>
         </div>
       ),
     },
     { key: 'status', label: 'Status', render: (j) => <StatusBadge status={j.status} /> },
-    { key: 'cert', label: 'Certificate', render: (j) => <span className="text-xs text-slate-400 font-mono">{j.certificate_id}</span> },
+    { key: 'cert', label: 'Certificate', render: (j) => <span className="text-xs text-ink-muted font-mono">{j.certificate_id}</span> },
     {
       key: 'attempts',
       label: 'Attempts',
-      render: (j) => <span className="text-slate-300">{j.attempts}/{j.max_attempts}</span>,
+      render: (j) => <span className="text-ink-muted">{j.attempts}/{j.max_attempts}</span>,
     },
-    { key: 'scheduled', label: 'Scheduled', render: (j) => <span className="text-xs text-slate-400">{formatDateTime(j.scheduled_at)}</span> },
-    { key: 'completed', label: 'Completed', render: (j) => <span className="text-xs text-slate-400">{formatDateTime(j.completed_at)}</span> },
+    { key: 'scheduled', label: 'Scheduled', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.scheduled_at)}</span> },
+    { key: 'completed', label: 'Completed', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.completed_at)}</span> },
     {
       key: 'actions',
       label: '',
@@ -68,11 +68,11 @@ export default function JobsPage() {
   return (
     <>
       <PageHeader title="Jobs" subtitle={data ? `${data.total} jobs` : undefined} />
-      <div className="px-6 py-3 flex gap-3 border-b border-slate-700/50">
+      <div className="px-6 py-3 flex gap-3 border-b border-surface-border/50">
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-300"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All statuses</option>
           <option value="Pending">Pending</option>
@@ -84,7 +84,7 @@ export default function JobsPage() {
         <select
           value={typeFilter}
           onChange={e => setTypeFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-300"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All types</option>
           <option value="Renewal">Renewal</option>

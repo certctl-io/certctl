@@ -15,10 +15,10 @@ const severityStyles: Record<string, string> = {
 };
 
 const severityDots: Record<string, string> = {
-  low: 'bg-blue-400',
-  medium: 'bg-amber-400',
-  high: 'bg-orange-400',
-  critical: 'bg-red-400',
+  low: 'bg-emerald-500',
+  medium: 'bg-amber-500',
+  high: 'bg-orange-500',
+  critical: 'bg-red-500',
 };
 
 export default function PoliciesPage() {
@@ -52,12 +52,12 @@ export default function PoliciesPage() {
       label: 'Rule',
       render: (p) => (
         <div>
-          <div className="font-medium text-slate-200">{p.name}</div>
-          <div className="text-xs text-slate-500">{p.id}</div>
+          <div className="font-medium text-ink">{p.name}</div>
+          <div className="text-xs text-ink-faint">{p.id}</div>
         </div>
       ),
     },
-    { key: 'type', label: 'Type', render: (p) => <span className="text-sm text-slate-300">{p.type.replace(/_/g, ' ')}</span> },
+    { key: 'type', label: 'Type', render: (p) => <span className="text-sm text-ink">{p.type.replace(/_/g, ' ')}</span> },
     {
       key: 'severity',
       label: 'Severity',
@@ -67,9 +67,9 @@ export default function PoliciesPage() {
       key: 'config',
       label: 'Config',
       render: (p) => {
-        if (!p.config || Object.keys(p.config).length === 0) return <span className="text-slate-500">&mdash;</span>;
+        if (!p.config || Object.keys(p.config).length === 0) return <span className="text-ink-faint">&mdash;</span>;
         return (
-          <span className="text-xs text-slate-400 font-mono truncate max-w-xs block">
+          <span className="text-xs text-ink-muted font-mono truncate max-w-xs block">
             {JSON.stringify(p.config).slice(0, 50)}
           </span>
         );
@@ -81,20 +81,20 @@ export default function PoliciesPage() {
       render: (p) => (
         <button
           onClick={(e) => { e.stopPropagation(); toggleMutation.mutate({ id: p.id, enabled: !p.enabled }); }}
-          className={`text-xs font-medium transition-colors ${p.enabled ? 'text-emerald-400 hover:text-emerald-300' : 'text-slate-500 hover:text-slate-300'}`}
+          className={`text-xs font-medium transition-colors ${p.enabled ? 'text-emerald-600 hover:text-emerald-700' : 'text-ink-faint hover:text-ink-muted'}`}
         >
           {p.enabled ? 'Enabled' : 'Disabled'}
         </button>
       ),
     },
-    { key: 'created', label: 'Created', render: (p) => <span className="text-xs text-slate-400">{formatDateTime(p.created_at)}</span> },
+    { key: 'created', label: 'Created', render: (p) => <span className="text-xs text-ink-muted">{formatDateTime(p.created_at)}</span> },
     {
       key: 'actions',
       label: '',
       render: (p) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete policy ${p.name}?`)) deleteMutation.mutate(p.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>
@@ -106,18 +106,18 @@ export default function PoliciesPage() {
     <>
       <PageHeader title="Policies" subtitle={data ? `${data.total} rules` : undefined} />
       {policies.length > 0 && (
-        <div className="px-4 py-3 flex flex-wrap gap-4 border-b border-slate-700/50">
+        <div className="px-4 py-3 flex flex-wrap gap-4 border-b border-surface-border/50">
           <div className="flex items-center gap-2">
-            <span className="text-xs text-slate-400">Enabled:</span>
-            <span className="text-xs font-medium text-emerald-400">{enabledCount}</span>
-            <span className="text-xs text-slate-600">/</span>
-            <span className="text-xs text-slate-400">{policies.length}</span>
+            <span className="text-xs text-ink-muted">Enabled:</span>
+            <span className="text-xs font-medium text-emerald-600">{enabledCount}</span>
+            <span className="text-xs text-ink-faint">/</span>
+            <span className="text-xs text-ink-muted">{policies.length}</span>
           </div>
           {Object.entries(bySeverity).map(([sev, count]) => (
             <div key={sev} className="flex items-center gap-1.5">
               <div className={`w-2 h-2 rounded-full ${severityDots[sev] || 'bg-slate-400'}`} />
-              <span className="text-xs text-slate-300 capitalize">{sev}</span>
-              <span className="text-xs text-slate-500">{count}</span>
+              <span className="text-xs text-ink capitalize">{sev}</span>
+              <span className="text-xs text-ink-faint">{count}</span>
             </div>
           ))}
         </div>

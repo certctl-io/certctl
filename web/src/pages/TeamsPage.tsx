@@ -27,8 +27,8 @@ export default function TeamsPage() {
       label: 'Team',
       render: (t) => (
         <div>
-          <div className="font-medium text-slate-200">{t.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{t.id}</div>
+          <div className="font-medium text-ink">{t.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{t.id}</div>
         </div>
       ),
     },
@@ -36,13 +36,13 @@ export default function TeamsPage() {
       key: 'description',
       label: 'Description',
       render: (t) => (
-        <span className="text-slate-300 text-sm max-w-sm truncate block">{t.description || '\u2014'}</span>
+        <span className="text-ink text-sm max-w-sm truncate block">{t.description || '\u2014'}</span>
       ),
     },
     {
       key: 'created',
       label: 'Created',
-      render: (t) => <span className="text-xs text-slate-400">{formatDateTime(t.created_at)}</span>,
+      render: (t) => <span className="text-xs text-ink-muted">{formatDateTime(t.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -50,7 +50,7 @@ export default function TeamsPage() {
       render: (t) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete team ${t.name}?`)) deleteMutation.mutate(t.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>

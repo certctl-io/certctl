@@ -1,5 +1,6 @@
 import { NavLink, Outlet } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
+import logo from '../assets/certctl-logo.png';
 
 const nav = [
   { to: '/',              label: 'Dashboard',     icon: 'M3 12l2-2m0 0l7-7 7 7M5 10v10a1 1 0 001 1h3m10-11l2 2m-2-2v10a1 1 0 01-1 1h-3m-4 0h4' },
@@ -21,7 +22,7 @@ const nav = [
 
 function Icon({ d }: { d: string }) {
   return (
-    <svg className="w-5 h-5 shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+    <svg className="w-[18px] h-[18px] shrink-0" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
       <path strokeLinecap="round" strokeLinejoin="round" d={d} />
     </svg>
   );
@@ -32,23 +33,30 @@ export default function Layout() {
 
   return (
     <div className="flex h-screen overflow-hidden">
-      {/* Sidebar */}
-      <aside className="w-64 bg-slate-800 border-r border-slate-700 flex flex-col">
-        <div className="p-6 border-b border-slate-700">
-          <h1 className="text-xl font-bold text-blue-400">certctl</h1>
-          <p className="text-xs text-slate-400 uppercase tracking-wider mt-1">Certificate Control Plane</p>
+      {/* Sidebar — deep teal from logo */}
+      <aside className="w-60 bg-sidebar flex flex-col shadow-xl">
+        {/* Logo — large and prominent */}
+        <div className="px-4 pt-5 pb-4 flex flex-col items-center gap-2">
+          <div className="bg-white rounded-xl p-2 shadow-lg">
+            <img src={logo} alt="certctl" className="h-16 w-16" />
+          </div>
+          <div className="text-center">
+            <h1 className="text-lg font-bold text-white tracking-tight">certctl</h1>
+            <p className="text-[10px] text-brand-300 uppercase tracking-[0.2em]">Control Plane</p>
+          </div>
         </div>
-        <nav className="flex-1 p-4 space-y-1 overflow-y-auto">
+
+        <nav className="flex-1 py-2 px-3 space-y-0.5 overflow-y-auto">
           {nav.map(item => (
             <NavLink
               key={item.to}
               to={item.to}
               end={item.to === '/'}
               className={({ isActive }) =>
-                `flex items-center gap-3 px-3 py-2.5 rounded-lg text-sm transition-colors ${
+                `flex items-center gap-3 px-3 py-2 text-[13px] rounded transition-all duration-150 ${
                   isActive
-                    ? 'bg-blue-600 text-white'
-                    : 'text-slate-400 hover:bg-slate-700 hover:text-slate-200'
+                    ? 'bg-white/15 text-white font-semibold shadow-sm'
+                    : 'text-sidebar-text hover:text-white hover:bg-white/10'
                 }`
               }
             >
@@ -57,12 +65,13 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
-        <div className="p-4 border-t border-slate-700 flex items-center justify-between">
-          <span className="text-xs text-slate-500">certctl v1.0-dev</span>
+
+        <div className="px-5 py-3 border-t border-white/10 flex items-center justify-between">
+          <span className="text-[10px] text-brand-300/60 font-mono">v2.0.2</span>
           {authRequired && (
             <button
               onClick={logout}
-              className="text-xs text-slate-500 hover:text-slate-300 transition-colors"
+              className="text-xs text-sidebar-text hover:text-white transition-colors"
               title="Sign out"
             >
               <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
@@ -73,8 +82,8 @@ export default function Layout() {
         </div>
       </aside>
 
-      {/* Main content */}
-      <main className="flex-1 flex flex-col overflow-hidden">
+      {/* Main content — light background */}
+      <main className="flex-1 flex flex-col overflow-hidden bg-page">
         <Outlet />
       </main>
     </div>

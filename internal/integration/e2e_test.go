@@ -937,6 +937,61 @@ func generateE2ECSRBase64DER(t *testing.T, cn string, sans []string) string {
 	return base64.StdEncoding.EncodeToString(csrDER)
 }
 
+// TestPrometheusMetrics exercises the Prometheus metrics endpoint (M22).
+func TestPrometheusMetrics(t *testing.T) {
+	server, _, _, _ := setupTestServer(t)
+
+	t.Run("GetPrometheusMetrics_Success", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/api/v1/metrics/prometheus")
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusOK {
+			bodyBytes, _ := io.ReadAll(resp.Body)
+			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
+		}
+
+		// Verify Content-Type contains text/plain
+		contentType := resp.Header.Get("Content-Type")
+		if !strings.Contains(contentType, "text/plain") {
+			t.Errorf("expected Content-Type containing 'text/plain', got %s", contentType)
+		}
+
+		// Read and verify Prometheus format
+		body, _ := io.ReadAll(resp.Body)
+		bodyStr := string(body)
+
+		// Should contain HELP and TYPE lines for metrics
+		if !strings.Contains(bodyStr, "# HELP") {
+			t.Error("expected HELP line in Prometheus response")
+		}
+		if !strings.Contains(bodyStr, "# TYPE") {
+			t.Error("expected TYPE line in Prometheus response")
+		}
+
+		// Should contain metric lines (gauge, counter, uptime)
+		if !strings.Contains(bodyStr, "certctl_") {
+			t.Error("expected certctl_ prefixed metrics in response")
+		}
+
+		t.Logf("Prometheus metrics endpoint working, body size: %d bytes", len(bodyStr))
+	})
+
+	t.Run("GetPrometheusMetrics_MethodNotAllowed", func(t *testing.T) {
+		resp, err := http.Post(server.URL+"/api/v1/metrics/prometheus", "application/json", nil)
+		if err != nil {
+			t.Fatalf("request failed: %v", err)
+		}
+		defer resp.Body.Close()
+
+		if resp.StatusCode != http.StatusMethodNotAllowed {
+			t.Errorf("expected 405, got %d", resp.StatusCode)
+		}
+	})
+}
+
 // TestESTEndpoints exercises the EST (RFC 7030) enrollment endpoints end-to-end (M23).
 func TestESTEndpoints(t *testing.T) {
 	server, _, _, _ := setupTestServer(t)

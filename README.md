@@ -36,7 +36,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [Manual Testing Guide](docs/testing-guide.md) | 284 tests across 25 areas — full V2 QA runbook with exact commands and pass/fail criteria |
+| [Manual Testing Guide](docs/testing-guide.md) | Extensively tested — full V2 QA runbook with exact commands and pass/fail criteria |
 
 ## Contents
 
@@ -87,29 +87,29 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 
 <table>
 <tr>
-<td><a href="docs/screenshots/v2/dashboard.png"><img src="docs/screenshots/v2/dashboard.png" width="270" alt="Dashboard"></a><br><b>Dashboard</b><br><sub>Stats, expiration heatmap, renewal trends</sub></td>
-<td><a href="docs/screenshots/v2/certificates.png"><img src="docs/screenshots/v2/certificates.png" width="270" alt="Certificates"></a><br><b>Certificates</b><br><sub>Inventory with status, owner, team filters</sub></td>
-<td><a href="docs/screenshots/v2/agents.png"><img src="docs/screenshots/v2/agents.png" width="270" alt="Agents"></a><br><b>Agents</b><br><sub>Fleet health, OS/arch, IP, version</sub></td>
+<td><a href="docs/screenshots/v2-dashboard.png"><img src="docs/screenshots/v2-dashboard.png" width="270" alt="Dashboard"></a><br><b>Dashboard</b><br><sub>Stats, expiration heatmap, renewal trends</sub></td>
+<td><a href="docs/screenshots/v2-certificates.png"><img src="docs/screenshots/v2-certificates.png" width="270" alt="Certificates"></a><br><b>Certificates</b><br><sub>Inventory with status, owner, team filters</sub></td>
+<td><a href="docs/screenshots/v2-agents.png"><img src="docs/screenshots/v2-agents.png" width="270" alt="Agents"></a><br><b>Agents</b><br><sub>Fleet health, OS/arch, IP, version</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2/fleet-overview.png"><img src="docs/screenshots/v2/fleet-overview.png" width="270" alt="Fleet Overview"></a><br><b>Fleet Overview</b><br><sub>OS distribution, status breakdown</sub></td>
-<td><a href="docs/screenshots/v2/jobs.png"><img src="docs/screenshots/v2/jobs.png" width="270" alt="Jobs"></a><br><b>Jobs</b><br><sub>Issuance, renewal, deployment queue</sub></td>
-<td><a href="docs/screenshots/v2/notifications.png"><img src="docs/screenshots/v2/notifications.png" width="270" alt="Notifications"></a><br><b>Notifications</b><br><sub>Expiration warnings, renewal results</sub></td>
+<td><a href="docs/screenshots/v2-fleet.png"><img src="docs/screenshots/v2-fleet.png" width="270" alt="Fleet Overview"></a><br><b>Fleet Overview</b><br><sub>OS distribution, status breakdown</sub></td>
+<td><a href="docs/screenshots/v2-jobs.png"><img src="docs/screenshots/v2-jobs.png" width="270" alt="Jobs"></a><br><b>Jobs</b><br><sub>Issuance, renewal, deployment queue</sub></td>
+<td><a href="docs/screenshots/v2-notifications.png"><img src="docs/screenshots/v2-notifications.png" width="270" alt="Notifications"></a><br><b>Notifications</b><br><sub>Expiration warnings, renewal results</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2/policies.png"><img src="docs/screenshots/v2/policies.png" width="270" alt="Policies"></a><br><b>Policies</b><br><sub>Ownership, lifetime, renewal rules</sub></td>
-<td><a href="docs/screenshots/v2/profiles.png"><img src="docs/screenshots/v2/profiles.png" width="270" alt="Profiles"></a><br><b>Profiles</b><br><sub>Key types, max TTL, crypto constraints</sub></td>
-<td><a href="docs/screenshots/v2/issuers.png"><img src="docs/screenshots/v2/issuers.png" width="270" alt="Issuers"></a><br><b>Issuers</b><br><sub>Local CA, ACME, step-ca connectors</sub></td>
+<td><a href="docs/screenshots/v2-policies.png"><img src="docs/screenshots/v2-policies.png" width="270" alt="Policies"></a><br><b>Policies</b><br><sub>Ownership, lifetime, renewal rules</sub></td>
+<td><a href="docs/screenshots/v2-profiles.png"><img src="docs/screenshots/v2-profiles.png" width="270" alt="Profiles"></a><br><b>Profiles</b><br><sub>Key types, max TTL, crypto constraints</sub></td>
+<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="270" alt="Issuers"></a><br><b>Issuers</b><br><sub>Local CA, ACME, step-ca connectors</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2/targets.png"><img src="docs/screenshots/v2/targets.png" width="270" alt="Targets"></a><br><b>Targets</b><br><sub>NGINX, Apache, HAProxy deployment</sub></td>
-<td><a href="docs/screenshots/v2/owners.png"><img src="docs/screenshots/v2/owners.png" width="270" alt="Owners"></a><br><b>Owners</b><br><sub>Cert ownership with team assignment</sub></td>
-<td><a href="docs/screenshots/v2/teams.png"><img src="docs/screenshots/v2/teams.png" width="270" alt="Teams"></a><br><b>Teams</b><br><sub>Org grouping for notification routing</sub></td>
+<td><a href="docs/screenshots/v2-targets.png"><img src="docs/screenshots/v2-targets.png" width="270" alt="Targets"></a><br><b>Targets</b><br><sub>NGINX, Apache, HAProxy deployment</sub></td>
+<td><a href="docs/screenshots/v2-owners.png"><img src="docs/screenshots/v2-owners.png" width="270" alt="Owners"></a><br><b>Owners</b><br><sub>Cert ownership with team assignment</sub></td>
+<td><a href="docs/screenshots/v2-teams.png"><img src="docs/screenshots/v2-teams.png" width="270" alt="Teams"></a><br><b>Teams</b><br><sub>Org grouping for notification routing</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2/agent-groups.png"><img src="docs/screenshots/v2/agent-groups.png" width="270" alt="Agent Groups"></a><br><b>Agent Groups</b><br><sub>Dynamic grouping by OS, arch, CIDR</sub></td>
-<td><a href="docs/screenshots/v2/audit-trail.png"><img src="docs/screenshots/v2/audit-trail.png" width="270" alt="Audit Trail"></a><br><b>Audit Trail</b><br><sub>Immutable log, CSV/JSON export</sub></td>
-<td><a href="docs/screenshots/v2/short-lived.png"><img src="docs/screenshots/v2/short-lived.png" width="270" alt="Short-Lived"></a><br><b>Short-Lived Creds</b><br><sub>Ephemeral certs with live TTL countdown</sub></td>
+<td><a href="docs/screenshots/v2-agent-groups.png"><img src="docs/screenshots/v2-agent-groups.png" width="270" alt="Agent Groups"></a><br><b>Agent Groups</b><br><sub>Dynamic grouping by OS, arch, CIDR</sub></td>
+<td><a href="docs/screenshots/v2-audit-trail.png"><img src="docs/screenshots/v2-audit-trail.png" width="270" alt="Audit Trail"></a><br><b>Audit Trail</b><br><sub>Immutable log, CSV/JSON export</sub></td>
+<td><a href="docs/screenshots/v2-short-lived.png"><img src="docs/screenshots/v2-short-lived.png" width="270" alt="Short-Lived"></a><br><b>Short-Lived Creds</b><br><sub>Ephemeral certs with live TTL countdown</sub></td>
 </tr>
 </table>
 

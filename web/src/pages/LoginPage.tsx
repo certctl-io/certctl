@@ -24,16 +24,16 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-900 flex items-center justify-center px-4">
+    <div className="min-h-screen bg-page flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
         <div className="text-center mb-8">
-          <h1 className="text-3xl font-bold text-blue-400 mb-2">certctl</h1>
-          <p className="text-sm text-slate-400 uppercase tracking-wider">Certificate Control Plane</p>
+          <h1 className="text-4xl font-bold text-brand-400 mb-2">certctl</h1>
+          <p className="text-sm text-ink-muted uppercase tracking-wider">Certificate Control Plane</p>
         </div>
 
-        <form onSubmit={handleSubmit} className="card p-6 space-y-4">
+        <form onSubmit={handleSubmit} className="bg-surface border border-surface-border rounded p-6 space-y-4 shadow-sm">
           <div>
-            <label htmlFor="api-key" className="block text-sm font-medium text-slate-300 mb-1.5">
+            <label htmlFor="api-key" className="block text-sm font-medium text-ink-muted mb-1.5">
               API Key
             </label>
             <input
@@ -43,12 +43,12 @@ export default function LoginPage() {
               onChange={(e) => setKey(e.target.value)}
               placeholder="Enter your API key"
               autoFocus
-              className="w-full bg-slate-700 border border-slate-600 rounded-lg px-3 py-2.5 text-sm text-slate-200 placeholder-slate-500 focus:outline-none focus:border-blue-500 focus:ring-1 focus:ring-blue-500"
+              className="w-full bg-white border border-surface-border rounded px-3 py-2.5 text-sm text-ink placeholder-ink-faint focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
             />
           </div>
 
           {error && (
-            <div className="bg-red-500/10 border border-red-500/30 rounded-lg px-3 py-2 text-sm text-red-400">
+            <div className="bg-red-50 border border-red-200 rounded px-3 py-2 text-sm text-red-700">
               {error}
             </div>
           )}
@@ -56,13 +56,13 @@ export default function LoginPage() {
           <button
             type="submit"
             disabled={submitting || !key.trim()}
-            className="w-full btn-primary py-2.5 text-sm font-medium rounded-lg disabled:opacity-50 disabled:cursor-not-allowed"
+            className="w-full bg-brand-400 hover:bg-brand-500 text-white py-2.5 text-sm font-medium rounded transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
           >
             {submitting ? 'Verifying...' : 'Sign In'}
           </button>
 
-          <p className="text-xs text-slate-500 text-center">
-            The API key is set via <code className="text-slate-400">CERTCTL_AUTH_SECRET</code> on the server.
+          <p className="text-xs text-ink-muted text-center">
+            The API key is set via <code className="text-ink-faint bg-page px-1 py-0.5 rounded">CERTCTL_AUTH_SECRET</code> on the server.
           </p>
         </form>
       </div>

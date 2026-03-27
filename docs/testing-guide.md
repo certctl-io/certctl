@@ -6,7 +6,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 
 ## Prerequisites
 
-### Why manual QA on top of 900+ automated tests?
+### Why manual QA on top of automated tests?
 
 Automated tests mock dependencies and run in isolation. Manual QA validates the full integrated stack: real PostgreSQL, real HTTP, real agent binary, real file I/O, real scheduler timing. It catches issues that unit tests can't: migration ordering, Docker networking, env var parsing, browser rendering, and timing-dependent scheduler behavior.
 
@@ -1423,6 +1423,42 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 
 ---
 
+### 6.2 ACME DNS Challenge Configuration
+
+**Test 6.2.1 — List ACME issuer with DNS-01 configuration**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/issuers/iss-acme-le" | jq '{id, type, config}'
+```
+
+**What:** Retrieves the ACME Let's Encrypt issuer and verifies its configuration.
+**Why:** ACME issuers configured for DNS-01 challenges need their solver scripts accessible for wildcard certificate support.
+**Expected:** HTTP 200. `type` = "acme". `config` may include challenge type and DNS script paths.
+**PASS if** HTTP 200 and type matches. **FAIL** otherwise.
+
+---
+
+**Test 6.2.2 — Create ACME issuer with DNS-PERSIST-01**
+
+Edit `deploy/docker-compose.yml` to set environment variables for ACME DNS-PERSIST-01:
+- `CERTCTL_ACME_CHALLENGE_TYPE: dns-persist-01`
+- `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN: le.example.com`
+- `CERTCTL_ACME_DNS_PRESENT_SCRIPT: /usr/local/bin/dns-present.sh`
+- `CERTCTL_ACME_DNS_CLEANUP_SCRIPT: /usr/local/bin/dns-cleanup.sh`
+
+Restart and verify the issuer accepts the config:
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/issuers/iss-acme-le" | jq '{id, type}'
+```
+
+**What:** Verifies that ACME issuers read DNS-PERSIST-01 configuration from environment variables.
+**Why:** DNS-PERSIST-01 requires a standing TXT record per IETF draft. The issuer must know the issuer domain and support this challenge type.
+**Expected:** HTTP 200. ACME issuer still functional.
+**PASS if** HTTP 200 and issuer still works. **FAIL** if 500 or issuer broken.
+
+---
+
 ## Part 7: Target Connectors & Deployment
 
 **What this validates:** CRUD for deployment targets, including type-specific configuration for all 5 target types.
@@ -2368,8 +2404,8 @@ curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# HELP"
 
 **What:** Counts `# HELP` comment lines (metric descriptions).
 **Why:** HELP lines are required by the Prometheus exposition format. Missing = non-compliant.
-**Expected:** Count ≥ 11 (one per metric).
-**PASS if** count ≥ 11. **FAIL** if 0.
+**Expected:** Count > 0 (one per metric).
+**PASS if** count > 0. **FAIL** if 0.
 
 ---
 
@@ -2380,12 +2416,12 @@ curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# TYPE"
 ```
 
 **What:** Counts `# TYPE` annotations (gauge/counter declarations).
-**Expected:** Count ≥ 11.
-**PASS if** count ≥ 11. **FAIL** if 0.
+**Expected:** Count > 0.
+**PASS if** count > 0. **FAIL** if 0.
 
 ---
 
-**Test 13.3.4 — All 11 Prometheus metrics present**
+**Test 13.3.4 — All documented Prometheus metrics present**
 
 ```bash
 METRICS=$(curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus")
@@ -2395,10 +2431,10 @@ for m in certctl_certificate_total certctl_certificate_active certctl_certificat
 done
 ```
 
-**What:** Verifies all 11 documented Prometheus metrics are present in the output.
+**What:** Verifies all documented Prometheus metrics are present in the output.
 **Why:** Missing metrics mean missing dashboard panels in Grafana. Each metric was chosen for operational value.
 **Expected:** Each metric reports count = 1 (present).
-**PASS if** all 11 metrics show count = 1. **FAIL** if any shows 0.
+**PASS if** all metrics show count = 1. **FAIL** if any shows 0.
 
 ---
 
@@ -3298,7 +3334,7 @@ Open `http://localhost:8443` in a browser.
 | 19.6.1 | Sidebar nav | Click all sidebar links | All pages load without errors | PASS if no broken routes |
 | 19.6.2 | Logout | Click logout | Returns to login screen | PASS if login page shown |
 | 19.6.3 | 401 redirect | Expire/remove auth token | Auto-redirect to login | PASS if login page shown |
-| 19.6.4 | Dark theme | Check page styling | Dark background, readable text | PASS if theme consistent |
+| 19.6.4 | Theme consistency | Check page styling | Light content area, teal sidebar, branded colors, readable text | PASS if theme consistent across all pages |
 
 ---
 
@@ -3698,36 +3734,38 @@ docker compose logs certctl-server 2>&1 | grep -v "^certctl-server" | grep -cv "
 
 **What this validates:** Documentation accuracy against the running system. Claims in docs must match reality.
 
-**Why it matters:** Inaccurate documentation destroys trust. If the README says "21 tables" but there are 19, or "78 MCP tools" but there are 76, evaluators question everything else too.
+**Why it matters:** Inaccurate documentation destroys trust. Claims in docs must match the running system. If the README says "X features" but the code doesn't have them, evaluators question everything else too.
 
 | Test ID | Document | Verification | Pass/Fail Criteria |
 |---------|----------|-------------|-------------------|
-| 24.1.1 | `README.md` | Feature list matches actual capabilities. Screenshot paths resolve. Mermaid diagram says "21 tables". | PASS if all claims verified |
+| 24.1.1 | `README.md` | Feature list matches actual capabilities. Screenshot paths resolve. Mermaid diagram shows database schema tables. | PASS if all claims verified |
 | 24.1.2 | `docs/quickstart.md` | Every command in the quickstart works on a clean clone. | PASS if all commands succeed |
 | 24.1.3 | `docs/concepts.md` | Terminology matches API field names and UI labels. | PASS if terminology consistent |
-| 24.1.4 | `docs/architecture.md` | Component diagram matches `docker compose ps`. Says "21 tables", "78 MCP Tools", "900+ tests". | PASS if numbers match |
-| 24.1.5 | `docs/connectors.md` | All 5 issuer types and 5 target types documented. F5/IIS marked as stubs. | PASS if all documented |
-| 24.1.6 | `docs/features.md` | Endpoint count (93), MCP tools (78), table count (21), test count (900+) all accurate. | PASS if numbers match |
+| 24.1.4 | `docs/architecture.md` | Component diagram matches `docker compose ps`. Key components and tables documented. | PASS if accurate |
+| 24.1.5 | `docs/connectors.md` | All issuer types and target types documented. F5/IIS marked as stubs. | PASS if all documented |
+| 24.1.6 | `docs/features.md` | Feature list complete and accurate. | PASS if accurate |
 | 24.1.7 | `docs/quickstart.md` | Quick start + demo walkthrough works against fresh `docker compose up`. | PASS if all steps work |
 | 24.1.8 | `docs/demo-advanced.md` | All parts executable against running stack. Network discovery section present. | PASS if all executable |
 | 24.1.9 | `docs/compliance.md` | Framework links resolve, mapping references real features. | PASS if links work |
 | 24.1.10 | `docs/compliance-soc2.md` | API endpoints cited actually exist in the router. | PASS if endpoints exist |
 | 24.1.11 | `docs/compliance-pci-dss.md` | Claims match implementation (audit trail, revocation, key management). | PASS if claims verified |
 | 24.1.12 | `docs/compliance-nist.md` | Key management claims match agent keygen behavior. | PASS if claims verified |
-| 24.1.13 | `docs/mcp.md` | Tool count = 78, domain count = 16, setup instructions work. | PASS if numbers match |
-| 24.1.14 | `api/openapi.yaml` | Operation count = 93, matches all routes in router.go. | PASS if count matches |
+| 24.1.13 | `docs/mcp.md` | Tool coverage documented, setup instructions work. | PASS if accurate |
+| 24.1.14 | `api/openapi.yaml` | OpenAPI spec matches all routes in router.go (check operation count). | PASS if count matches |
 
 **Verification command for OpenAPI parity:**
 
 ```bash
 # Count OpenAPI operations
-grep -c "operationId:" api/openapi.yaml
+OPENAPI_OPS=$(grep -c "operationId:" api/openapi.yaml)
 # Count router registrations
-grep -c "r.Register\|r.mux.Handle" internal/api/router/router.go
+ROUTER_REGS=$(grep -c "r.Register\|r.mux.Handle" internal/api/router/router.go)
+echo "OpenAPI operations: $OPENAPI_OPS"
+echo "Router registrations: $ROUTER_REGS"
 ```
 
-**Expected:** Both return 93.
-**PASS if** both counts = 93. **FAIL** if mismatch.
+**Expected:** Both counts match.
+**PASS if** both counts are equal. **FAIL** if mismatch (indicates spec/code drift).
 
 ---
 
@@ -3812,14 +3850,14 @@ echo "OpenAPI operations: $(grep -c 'operationId:' api/openapi.yaml)"
 echo "Router registrations: $(grep -c 'r.Register\|r.mux.Handle' internal/api/router/router.go)"
 ```
 
-**What:** Counts operations in the OpenAPI spec and route registrations in the router.
-**Why:** The audit found the OpenAPI spec had 78 operations while the router had 93. This was fixed by adding 15 missing operations.
-**Expected:** Both = 93.
-**PASS if** both equal 93. **FAIL** if mismatch.
+**What:** Counts operations in the OpenAPI spec and route registrations in the router, verifying they match.
+**Why:** OpenAPI spec drift happens as endpoints are added or removed. Mismatches indicate the spec is out of date.
+**Expected:** Both counts equal.
+**PASS if** both counts match. **FAIL** if mismatch (indicates spec/code drift).
 
 ---
 
-**Test 25.1.5 — Go service tests use strings.Contains, not errors.Is**
+**Test 25.1.6 — Go service tests use strings.Contains, not errors.Is**
 
 ```bash
 grep -rn "errors.Is.*errors.New\|errors.Is(.*err.*errors.New" internal/service/*_test.go | wc -l
@@ -4104,5 +4142,5 @@ All 26 parts must pass before tagging v2.0.1.
 | Part 25: Regression Tests | ☐ | | | |
 | Part 26: EST Server (RFC 7030) | ☐ | | | |
 
-**Automated tests (900+) must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
+**Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

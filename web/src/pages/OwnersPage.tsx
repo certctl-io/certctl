@@ -35,15 +35,15 @@ export default function OwnersPage() {
       label: 'Owner',
       render: (o) => (
         <div>
-          <div className="font-medium text-slate-200">{o.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{o.id}</div>
+          <div className="font-medium text-ink">{o.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{o.id}</div>
         </div>
       ),
     },
     {
       key: 'email',
       label: 'Email',
-      render: (o) => <span className="text-slate-300">{o.email || '\u2014'}</span>,
+      render: (o) => <span className="text-ink">{o.email || '\u2014'}</span>,
     },
     {
       key: 'team',
@@ -51,14 +51,14 @@ export default function OwnersPage() {
       render: (o) => {
         const team = teamMap.get(o.team_id);
         return team
-          ? <span className="text-blue-400">{team.name}</span>
-          : <span className="text-slate-500 font-mono text-xs">{o.team_id || '\u2014'}</span>;
+          ? <span className="text-brand-400">{team.name}</span>
+          : <span className="text-ink-faint font-mono text-xs">{o.team_id || '\u2014'}</span>;
       },
     },
     {
       key: 'created',
       label: 'Created',
-      render: (o) => <span className="text-xs text-slate-400">{formatDateTime(o.created_at)}</span>,
+      render: (o) => <span className="text-xs text-ink-muted">{formatDateTime(o.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -66,7 +66,7 @@ export default function OwnersPage() {
       render: (o) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete owner ${o.name}?`)) deleteMutation.mutate(o.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>

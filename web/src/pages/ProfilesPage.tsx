@@ -35,10 +35,10 @@ export default function ProfilesPage() {
       label: 'Profile',
       render: (p) => (
         <div>
-          <div className="font-medium text-slate-200">{p.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{p.id}</div>
+          <div className="font-medium text-ink">{p.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{p.id}</div>
           {p.description && (
-            <div className="text-xs text-slate-400 mt-0.5 max-w-xs truncate">{p.description}</div>
+            <div className="text-xs text-ink-muted mt-0.5 max-w-xs truncate">{p.description}</div>
           )}
         </div>
       ),
@@ -61,9 +61,9 @@ export default function ProfilesPage() {
       label: 'Max TTL',
       render: (p) => (
         <div>
-          <span className="text-slate-200">{formatTTL(p.max_ttl_seconds)}</span>
+          <span className="text-ink">{formatTTL(p.max_ttl_seconds)}</span>
           {p.allow_short_lived && (
-            <span className="ml-2 text-xs text-amber-400 bg-amber-400/10 px-1.5 py-0.5 rounded">
+            <span className="ml-2 text-xs text-amber-700 bg-amber-100 px-1.5 py-0.5 rounded">
               short-lived
             </span>
           )}
@@ -76,7 +76,7 @@ export default function ProfilesPage() {
       render: (p) => (
         <div className="flex flex-wrap gap-1">
           {(p.allowed_ekus || []).map((eku, i) => (
-            <span key={i} className="text-xs text-slate-400">{eku}</span>
+            <span key={i} className="text-xs text-ink-muted">{eku}</span>
           ))}
         </div>
       ),
@@ -86,8 +86,8 @@ export default function ProfilesPage() {
       label: 'SPIFFE',
       render: (p) => (
         p.spiffe_uri_pattern
-          ? <span className="text-xs text-blue-400 font-mono">{p.spiffe_uri_pattern}</span>
-          : <span className="text-slate-500">&mdash;</span>
+          ? <span className="text-xs text-brand-400 font-mono">{p.spiffe_uri_pattern}</span>
+          : <span className="text-ink-faint">&mdash;</span>
       ),
     },
     {
@@ -98,7 +98,7 @@ export default function ProfilesPage() {
     {
       key: 'created',
       label: 'Created',
-      render: (p) => <span className="text-xs text-slate-400">{formatDateTime(p.created_at)}</span>,
+      render: (p) => <span className="text-xs text-ink-muted">{formatDateTime(p.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -106,7 +106,7 @@ export default function ProfilesPage() {
       render: (p) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete profile ${p.name}?`)) deleteMutation.mutate(p.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>

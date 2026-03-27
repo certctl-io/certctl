@@ -60,7 +60,7 @@ export default function NotificationsPage() {
     return (
       <>
         <PageHeader title="Notifications" />
-        <div className="flex items-center justify-center flex-1 text-slate-400">Loading...</div>
+        <div className="flex items-center justify-center flex-1 text-ink-muted">Loading...</div>
       </>
     );
   }
@@ -80,17 +80,17 @@ export default function NotificationsPage() {
         title="Notifications"
         subtitle={`${filtered.length} notifications${unreadCount ? ` (${unreadCount} unread)` : ''}`}
       />
-      <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b border-slate-700/50">
-        <div className="flex rounded overflow-hidden border border-slate-600">
+      <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b border-surface-border/50">
+        <div className="flex rounded overflow-hidden border border-surface-border">
           <button
             onClick={() => setViewMode('grouped')}
-            className={`px-3 py-1.5 text-xs transition-colors ${viewMode === 'grouped' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${viewMode === 'grouped' ? 'bg-brand-400 text-white' : 'bg-surface text-ink-muted hover:text-ink'}`}
           >
             Grouped
           </button>
           <button
             onClick={() => setViewMode('list')}
-            className={`px-3 py-1.5 text-xs transition-colors ${viewMode === 'list' ? 'bg-blue-600 text-white' : 'bg-slate-800 text-slate-400 hover:text-slate-200'}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${viewMode === 'list' ? 'bg-brand-400 text-white' : 'bg-surface text-ink-muted hover:text-ink'}`}
           >
             List
           </button>
@@ -98,7 +98,7 @@ export default function NotificationsPage() {
         <select
           value={typeFilter}
           onChange={(e) => setTypeFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+          className="bg-surface border border-surface-border rounded px-3 py-1.5 text-xs text-ink focus:outline-none focus:border-brand-400"
         >
           <option value="">All types</option>
           {types.map(t => <option key={t} value={t}>{t.replace(/([A-Z])/g, ' $1').trim()}</option>)}
@@ -106,7 +106,7 @@ export default function NotificationsPage() {
         <select
           value={statusFilter}
           onChange={(e) => setStatusFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded px-3 py-1.5 text-xs text-slate-300 focus:outline-none focus:border-blue-500"
+          className="bg-surface border border-surface-border rounded px-3 py-1.5 text-xs text-ink focus:outline-none focus:border-brand-400"
         >
           <option value="">All statuses</option>
           {statuses.map(s => <option key={s} value={s}>{s}</option>)}
@@ -114,7 +114,7 @@ export default function NotificationsPage() {
         {(typeFilter || statusFilter) && (
           <button
             onClick={() => { setTypeFilter(''); setStatusFilter(''); }}
-            className="text-xs text-slate-400 hover:text-slate-200 transition-colors"
+            className="text-xs text-ink-muted hover:text-ink transition-colors"
           >
             Clear filters
           </button>
@@ -123,15 +123,15 @@ export default function NotificationsPage() {
       <div className="flex-1 overflow-y-auto p-4 space-y-3">
         {viewMode === 'grouped' ? (
           grouped.length === 0 ? (
-            <div className="text-center py-16 text-slate-500">No notifications</div>
+            <div className="text-center py-16 text-ink-faint">No notifications</div>
           ) : (
             grouped.map(([certId, items]) => (
               <div key={certId} className="card p-4">
                 <div className="flex items-center justify-between mb-3">
-                  <span className="text-xs font-mono text-slate-400">
+                  <span className="text-xs font-mono text-ink-muted">
                     {certId === 'general' ? 'General' : certId}
                   </span>
-                  <span className="text-xs text-slate-500">{items.length} notification{items.length !== 1 ? 's' : ''}</span>
+                  <span className="text-xs text-ink-faint">{items.length} notification{items.length !== 1 ? 's' : ''}</span>
                 </div>
                 <div className="space-y-2">
                   {items.map((n) => (
@@ -143,7 +143,7 @@ export default function NotificationsPage() {
           )
         ) : (
           filtered.length === 0 ? (
-            <div className="text-center py-16 text-slate-500">No notifications</div>
+            <div className="text-center py-16 text-ink-faint">No notifications</div>
           ) : (
             <div className="space-y-2">
               {filtered.map((n) => (
@@ -160,23 +160,23 @@ export default function NotificationsPage() {
 function NotificationRow({ notification: n, onMarkRead }: { notification: Notification; onMarkRead: () => void }) {
   const isUnread = n.status === 'Pending' || n.status === 'pending';
   return (
-    <div className={`flex items-start justify-between py-2 px-3 rounded-lg transition-colors ${isUnread ? 'bg-slate-700/30 border-l-2 border-blue-500' : 'hover:bg-slate-700/20'}`}>
+    <div className={`flex items-start justify-between py-2 px-3 rounded transition-colors ${isUnread ? 'bg-surface-muted border-l-2 border-brand-400' : 'hover:bg-surface-muted'}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
-          <span className="text-sm text-slate-200">{n.type.replace(/([A-Z])/g, ' $1').trim()}</span>
+          <span className="text-sm text-ink">{n.type.replace(/([A-Z])/g, ' $1').trim()}</span>
           <StatusBadge status={n.status} />
-          <span className="text-xs text-slate-500">{n.channel}</span>
+          <span className="text-xs text-ink-faint">{n.channel}</span>
         </div>
-        <p className="text-xs text-slate-400 truncate">{n.message || n.subject}</p>
+        <p className="text-xs text-ink-muted truncate">{n.message || n.subject}</p>
         <div className="flex items-center gap-3 mt-1">
-          <span className="text-xs text-slate-500">{n.recipient}</span>
-          <span className="text-xs text-slate-600">{timeAgo(n.created_at)}</span>
+          <span className="text-xs text-ink-faint">{n.recipient}</span>
+          <span className="text-xs text-ink-faint">{timeAgo(n.created_at)}</span>
         </div>
       </div>
       {isUnread && (
         <button
           onClick={(e) => { e.stopPropagation(); onMarkRead(); }}
-          className="ml-3 text-xs text-blue-400 hover:text-blue-300 transition-colors whitespace-nowrap"
+          className="ml-3 text-xs text-brand-400 hover:text-brand-500 transition-colors whitespace-nowrap"
         >
           Mark read
         </button>

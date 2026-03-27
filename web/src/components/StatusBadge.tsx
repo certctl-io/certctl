@@ -1,4 +1,5 @@
 const statusStyles: Record<string, string> = {
+  // Certificate statuses
   Active:              'badge-success',
   Expiring:            'badge-warning',
   Expired:             'badge-danger',
@@ -8,6 +9,8 @@ const statusStyles: Record<string, string> = {
   Revoked:             'badge-danger',
   // Job statuses
   Pending:             'badge-info',
+  AwaitingCSR:         'badge-info',
+  AwaitingApproval:    'badge-info',
   Running:             'badge-warning',
   Completed:           'badge-success',
   Failed:              'badge-danger',

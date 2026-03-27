@@ -30,57 +30,57 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
   });
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-slate-200 mb-4">New Certificate</h2>
-        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-4">{error}</div>}
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-6 w-full max-w-lg shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">New Certificate</h2>
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-4">{error}</div>}
         <div className="space-y-3">
           <div>
-            <label className="text-xs text-slate-400 block mb-1">ID (optional)</label>
+            <label className="text-xs text-ink-muted block mb-1">ID (optional)</label>
             <input value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))}
-              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
               placeholder="mc-api-prod (auto-generated if empty)" />
           </div>
           <div>
-            <label className="text-xs text-slate-400 block mb-1">Common Name *</label>
+            <label className="text-xs text-ink-muted block mb-1">Common Name *</label>
             <input value={form.common_name} onChange={e => setForm(f => ({ ...f, common_name: e.target.value }))}
-              className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
               placeholder="api.example.com" />
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Environment</label>
+              <label className="text-xs text-ink-muted block mb-1">Environment</label>
               <select value={form.environment} onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200">
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink">
                 <option value="production">Production</option>
                 <option value="staging">Staging</option>
                 <option value="development">Development</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Issuer ID *</label>
+              <label className="text-xs text-ink-muted block mb-1">Issuer ID *</label>
               <input value={form.issuer_id} onChange={e => setForm(f => ({ ...f, issuer_id: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
                 placeholder="iss-local" />
             </div>
           </div>
           <div className="grid grid-cols-3 gap-3">
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Owner ID</label>
+              <label className="text-xs text-ink-muted block mb-1">Owner ID</label>
               <input value={form.owner_id} onChange={e => setForm(f => ({ ...f, owner_id: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
                 placeholder="o-alice" />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Team ID</label>
+              <label className="text-xs text-ink-muted block mb-1">Team ID</label>
               <input value={form.team_id} onChange={e => setForm(f => ({ ...f, team_id: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
                 placeholder="t-platform" />
             </div>
             <div>
-              <label className="text-xs text-slate-400 block mb-1">Policy ID</label>
+              <label className="text-xs text-ink-muted block mb-1">Policy ID</label>
               <input value={form.renewal_policy_id} onChange={e => setForm(f => ({ ...f, renewal_policy_id: e.target.value }))}
-                className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
                 placeholder="rp-standard" />
             </div>
           </div>
@@ -124,27 +124,27 @@ function BulkRevokeModal({ ids, onClose, onSuccess }: { ids: string[]; onClose: 
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-red-400 mb-2">Bulk Revoke</h2>
-        <p className="text-sm text-slate-400 mb-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-red-700 mb-2">Bulk Revoke</h2>
+        <p className="text-sm text-ink-muted mb-4">
           Revoke {ids.length} certificate{ids.length > 1 ? 's' : ''}. This cannot be undone.
         </p>
-        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">{error}</div>}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-3">{error}</div>}
         {running && (
           <div className="mb-3">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
+            <div className="flex justify-between text-xs text-ink-muted mb-1">
               <span>Progress</span>
               <span>{progress}/{ids.length}</span>
             </div>
-            <div className="w-full bg-slate-700 rounded-full h-2">
+            <div className="w-full bg-surface-border rounded-full h-2">
               <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
             </div>
           </div>
         )}
-        <label className="text-xs text-slate-400 block mb-2">Revocation Reason (RFC 5280)</label>
+        <label className="text-xs text-ink-muted block mb-2">Revocation Reason (RFC 5280)</label>
         <select value={reason} onChange={e => setReason(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+          className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink mb-4"
           disabled={running}
         >
           {REVOCATION_REASONS.map(r => (
@@ -193,27 +193,27 @@ function BulkReassignModal({ ids, onClose, onSuccess }: { ids: string[]; onClose
   };
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-md shadow-2xl" onClick={e => e.stopPropagation()}>
-        <h2 className="text-lg font-semibold text-slate-200 mb-2">Reassign Owner</h2>
-        <p className="text-sm text-slate-400 mb-4">
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-2">Reassign Owner</h2>
+        <p className="text-sm text-ink-muted mb-4">
           Reassign {ids.length} certificate{ids.length > 1 ? 's' : ''} to a new owner.
         </p>
-        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-3">{error}</div>}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-3">{error}</div>}
         {running && (
           <div className="mb-3">
-            <div className="flex justify-between text-xs text-slate-400 mb-1">
+            <div className="flex justify-between text-xs text-ink-muted mb-1">
               <span>Progress</span>
               <span>{progress}/{ids.length}</span>
             </div>
-            <div className="w-full bg-slate-700 rounded-full h-2">
-              <div className="bg-blue-500 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
+            <div className="w-full bg-surface-border rounded-full h-2">
+              <div className="bg-brand-400 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
             </div>
           </div>
         )}
-        <label className="text-xs text-slate-400 block mb-2">New Owner</label>
+        <label className="text-xs text-ink-muted block mb-2">New Owner</label>
         <select value={ownerId} onChange={e => setOwnerId(e.target.value)}
-          className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 mb-4"
+          className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink mb-4"
           disabled={running}
         >
           <option value="">Select owner...</option>
@@ -276,8 +276,8 @@ export default function CertificatesPage() {
       label: 'Certificate',
       render: (c) => (
         <div>
-          <div className="font-medium text-slate-200">{c.common_name}</div>
-          <div className="text-xs text-slate-500 mt-0.5">{c.id}</div>
+          <div className="font-medium text-ink">{c.common_name}</div>
+          <div className="text-xs text-ink-faint mt-0.5">{c.id}</div>
         </div>
       ),
     },
@@ -290,14 +290,14 @@ export default function CertificatesPage() {
         return (
           <div>
             <div className={expiryColor(days)}>{formatDate(c.expires_at)}</div>
-            <div className="text-xs text-slate-500">{days <= 0 ? 'Expired' : `${days} days`}</div>
+            <div className="text-xs text-ink-faint">{days <= 0 ? 'Expired' : `${days} days`}</div>
           </div>
         );
       },
     },
-    { key: 'env', label: 'Environment', render: (c) => <span className="text-slate-300">{c.environment || '—'}</span> },
-    { key: 'issuer', label: 'Issuer', render: (c) => <span className="text-slate-400 text-xs">{c.issuer_id}</span> },
-    { key: 'owner', label: 'Owner', render: (c) => <span className="text-slate-400 text-xs">{c.owner_id}</span> },
+    { key: 'env', label: 'Environment', render: (c) => <span className="text-ink-muted">{c.environment || '—'}</span> },
+    { key: 'issuer', label: 'Issuer', render: (c) => <span className="text-ink-muted text-xs">{c.issuer_id}</span> },
+    { key: 'owner', label: 'Owner', render: (c) => <span className="text-ink-muted text-xs">{c.owner_id}</span> },
   ];
 
   const selectedArray = Array.from(selectedIds);
@@ -317,8 +317,8 @@ export default function CertificatesPage() {
 
       {/* Bulk Action Bar */}
       {hasSelection && (
-        <div className="px-6 py-3 bg-blue-500/10 border-b border-blue-500/20 flex items-center justify-between">
-          <span className="text-sm text-blue-400 font-medium">{selectedArray.length} selected</span>
+        <div className="px-6 py-3 bg-brand-50 border-b border-brand-200 flex items-center justify-between">
+          <span className="text-sm text-brand-600 font-medium">{selectedArray.length} selected</span>
           <div className="flex gap-2">
             <button onClick={handleBulkRenewal} disabled={bulkRenewProgress?.running}
               className="btn btn-primary text-xs disabled:opacity-50">
@@ -331,11 +331,11 @@ export default function CertificatesPage() {
               Revoke
             </button>
             <button onClick={() => setShowBulkReassign(true)}
-              className="btn btn-ghost text-xs text-blue-400 hover:text-blue-300 border border-blue-600/50">
+              className="btn btn-ghost text-xs text-brand-400 hover:text-brand-300 border border-brand-600/50">
               Reassign Owner
             </button>
             <button onClick={() => setSelectedIds(new Set())}
-              className="btn btn-ghost text-xs text-slate-400">
+              className="btn btn-ghost text-xs text-ink-muted">
               Clear
             </button>
           </div>
@@ -344,18 +344,18 @@ export default function CertificatesPage() {
 
       {/* Bulk Renewal Success */}
       {bulkRenewProgress && !bulkRenewProgress.running && (
-        <div className="px-6 py-2 bg-emerald-500/10 border-b border-emerald-500/20">
-          <span className="text-sm text-emerald-400">
+        <div className="px-6 py-2 bg-emerald-50 border-b border-emerald-200">
+          <span className="text-sm text-emerald-700">
             Triggered renewal for {bulkRenewProgress.done} certificate{bulkRenewProgress.done > 1 ? 's' : ''}.
           </span>
         </div>
       )}
 
-      <div className="px-6 py-3 flex gap-3 border-b border-slate-700/50">
+      <div className="px-6 py-3 flex gap-3 border-b border-surface-border/50">
         <select
           value={statusFilter}
           onChange={e => setStatusFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-300"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All statuses</option>
           <option value="Active">Active</option>
@@ -368,7 +368,7 @@ export default function CertificatesPage() {
         <select
           value={envFilter}
           onChange={e => setEnvFilter(e.target.value)}
-          className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-1.5 text-sm text-slate-300"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All environments</option>
           <option value="production">Production</option>

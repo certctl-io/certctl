@@ -804,4 +804,3 @@ func TestRevocationEndpoints(t *testing.T) {
 	})
 }
 
-// mockNetworkScanService is defined in lifecycle_test.go (same package)

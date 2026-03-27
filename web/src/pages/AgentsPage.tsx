@@ -31,8 +31,8 @@ export default function AgentsPage() {
       label: 'Agent',
       render: (a) => (
         <div>
-          <div className="font-medium text-slate-200">{a.name}</div>
-          <div className="text-xs text-slate-500">{a.id}</div>
+          <div className="font-medium text-ink">{a.name}</div>
+          <div className="text-xs text-ink-faint">{a.id}</div>
         </div>
       ),
     },
@@ -41,14 +41,14 @@ export default function AgentsPage() {
       label: 'Health',
       render: (a) => <StatusBadge status={a.status || heartbeatStatus(a.last_heartbeat)} />,
     },
-    { key: 'hostname', label: 'Hostname', render: (a) => <span className="text-slate-300 font-mono text-xs">{a.hostname || '—'}</span> },
-    { key: 'os', label: 'OS / Arch', render: (a) => <span className="text-slate-400 text-xs">{a.os && a.architecture ? `${a.os}/${a.architecture}` : a.os || '—'}</span> },
-    { key: 'ip', label: 'IP Address', render: (a) => <span className="text-slate-400 font-mono text-xs">{a.ip_address || '—'}</span> },
-    { key: 'version', label: 'Version', render: (a) => <span className="text-slate-400 text-xs">{a.version || '—'}</span> },
+    { key: 'hostname', label: 'Hostname', render: (a) => <span className="text-ink-muted font-mono text-xs">{a.hostname || '—'}</span> },
+    { key: 'os', label: 'OS / Arch', render: (a) => <span className="text-ink-muted text-xs">{a.os && a.architecture ? `${a.os}/${a.architecture}` : a.os || '—'}</span> },
+    { key: 'ip', label: 'IP Address', render: (a) => <span className="text-ink-muted font-mono text-xs">{a.ip_address || '—'}</span> },
+    { key: 'version', label: 'Version', render: (a) => <span className="text-ink-muted text-xs">{a.version || '—'}</span> },
     {
       key: 'heartbeat',
       label: 'Last Heartbeat',
-      render: (a) => <span className="text-slate-400 text-xs">{timeAgo(a.last_heartbeat)}</span>,
+      render: (a) => <span className="text-ink-muted text-xs">{timeAgo(a.last_heartbeat)}</span>,
     },
   ];
 

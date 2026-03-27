@@ -1,30 +1,53 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
 @layer base {
   body {
-    @apply bg-slate-900 text-slate-100 antialiased;
+    @apply bg-page text-ink antialiased;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
   }
 }
 
 @layer components {
+  /* Badges */
   .badge {
-    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium;
+    @apply inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold tracking-wide;
   }
-  .badge-success { @apply bg-emerald-500/10 text-emerald-400 border border-emerald-500/20; }
-  .badge-warning { @apply bg-amber-500/10 text-amber-400 border border-amber-500/20; }
-  .badge-danger  { @apply bg-red-500/10 text-red-400 border border-red-500/20; }
-  .badge-info    { @apply bg-blue-500/10 text-blue-400 border border-blue-500/20; }
-  .badge-neutral { @apply bg-slate-500/10 text-slate-400 border border-slate-500/20; }
+  .badge-success { @apply bg-emerald-100 text-emerald-700; }
+  .badge-warning { @apply bg-amber-100 text-amber-700; }
+  .badge-danger  { @apply bg-red-100 text-red-700; }
+  .badge-info    { @apply bg-brand-100 text-brand-700; }
+  .badge-neutral { @apply bg-slate-100 text-slate-600; }
 
+  /* Cards */
   .card {
-    @apply bg-slate-800 border border-slate-700 rounded-lg;
+    @apply bg-surface border border-surface-border rounded-md shadow-sm;
   }
 
+  /* Buttons */
   .btn {
-    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors;
+    @apply inline-flex items-center justify-center gap-2 px-4 py-2 rounded text-sm font-semibold transition-all duration-150;
   }
-  .btn-primary { @apply bg-blue-600 hover:bg-blue-500 text-white; }
-  .btn-ghost   { @apply hover:bg-slate-700 text-slate-300; }
+  .btn-primary { @apply bg-brand-500 hover:bg-brand-600 text-white shadow-sm; }
+  .btn-danger  { @apply bg-red-500 hover:bg-red-600 text-white shadow-sm; }
+  .btn-ghost   { @apply text-ink-muted hover:text-ink hover:bg-surface-muted; }
+  .btn-outline { @apply border border-surface-border text-ink-muted hover:text-ink hover:bg-surface-muted; }
+
+  /* Form inputs */
+  .input {
+    @apply bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink placeholder:text-ink-faint focus:border-brand-500 focus:ring-2 focus:ring-brand-500/20 outline-none transition-colors;
+  }
+
+  /* Monospace data values */
+  .mono {
+    @apply font-mono text-xs;
+  }
+
+  /* Stat cards with colored top borders */
+  .stat-card {
+    @apply bg-surface border border-surface-border rounded-md shadow-sm p-5 border-t-4;
+  }
 }

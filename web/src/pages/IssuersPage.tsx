@@ -42,8 +42,8 @@ export default function IssuersPage() {
       label: 'Issuer',
       render: (i) => (
         <div>
-          <div className="font-medium text-slate-200">{i.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{i.id}</div>
+          <div className="font-medium text-ink">{i.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{i.id}</div>
         </div>
       ),
     },
@@ -63,9 +63,9 @@ export default function IssuersPage() {
       key: 'config',
       label: 'Config',
       render: (i) => {
-        if (!i.config || Object.keys(i.config).length === 0) return <span className="text-slate-500">&mdash;</span>;
+        if (!i.config || Object.keys(i.config).length === 0) return <span className="text-ink-faint">&mdash;</span>;
         return (
-          <span className="text-xs text-slate-400 font-mono truncate max-w-xs block">
+          <span className="text-xs text-ink-muted font-mono truncate max-w-xs block">
             {JSON.stringify(i.config).slice(0, 60)}
           </span>
         );
@@ -74,7 +74,7 @@ export default function IssuersPage() {
     {
       key: 'created',
       label: 'Created',
-      render: (i) => <span className="text-xs text-slate-400">{formatDateTime(i.created_at)}</span>,
+      render: (i) => <span className="text-xs text-ink-muted">{formatDateTime(i.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -84,13 +84,13 @@ export default function IssuersPage() {
           <button
             onClick={(e) => { e.stopPropagation(); testMutation.mutate(i.id); }}
             disabled={testMutation.isPending}
-            className="text-xs text-blue-400 hover:text-blue-300 transition-colors"
+            className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
           >
             Test
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); if (confirm(`Delete issuer ${i.name}?`)) deleteMutation.mutate(i.id); }}
-            className="text-xs text-red-400 hover:text-red-300 transition-colors"
+            className="text-xs text-red-600 hover:text-red-700 transition-colors"
           >
             Delete
           </button>
@@ -103,7 +103,7 @@ export default function IssuersPage() {
     <>
       <PageHeader title="Issuers" subtitle={data ? `${data.total} issuers` : undefined} />
       {testResult && (
-        <div className={`mx-6 mt-3 rounded-lg px-4 py-3 text-sm ${testResult.ok ? 'bg-emerald-500/10 border border-emerald-500/20 text-emerald-400' : 'bg-red-500/10 border border-red-500/20 text-red-400'}`}>
+        <div className={`mx-6 mt-3 rounded px-4 py-3 text-sm ${testResult.ok ? 'bg-emerald-100 border border-emerald-200 text-emerald-700' : 'bg-red-50 border border-red-200 text-red-700'}`}>
           {testResult.id}: {testResult.msg}
           <button onClick={() => setTestResult(null)} className="ml-3 text-xs opacity-60 hover:opacity-100">dismiss</button>
         </div>

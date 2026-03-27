@@ -8,7 +8,7 @@ import type { Agent } from '../api/types';
 
 const OS_COLORS: Record<string, string> = {
   linux: '#f97316',
-  darwin: '#3b82f6',
+  darwin: '#2ea88f',
   windows: '#8b5cf6',
   unknown: '#64748b',
 };
@@ -53,9 +53,9 @@ function groupAgents(agents: Agent[]): GroupedAgents[] {
 const CustomTooltip = ({ active, payload }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-lg">
+    <div className="bg-surface border border-surface-border rounded px-3 py-2 text-xs shadow-lg">
       {payload.map((entry: any, i: number) => (
-        <p key={i} style={{ color: entry.payload?.fill || entry.color }}>
+        <p key={i} style={{ color: entry.payload?.fill || entry.color }} className="font-medium">
           {entry.name}: {entry.value}
         </p>
       ))}
@@ -113,25 +113,25 @@ export default function AgentFleetPage() {
       <div className="flex-1 overflow-y-auto p-6 space-y-6">
         {/* Summary Cards */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="card p-5 text-center">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Agents</p>
-            <p className="text-3xl font-bold mt-2 text-blue-400">{totalAgents}</p>
+          <div className="bg-surface border border-surface-border border-t-4 border-t-brand-400 rounded p-5 text-center shadow-sm">
+            <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Total Agents</p>
+            <p className="text-3xl font-bold mt-2 text-brand-500">{totalAgents}</p>
           </div>
-          <div className="card p-5 text-center">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Online</p>
-            <p className="text-3xl font-bold mt-2 text-emerald-400">{onlineAgents}</p>
+          <div className="bg-surface border border-surface-border border-t-4 border-t-emerald-500 rounded p-5 text-center shadow-sm">
+            <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Online</p>
+            <p className="text-3xl font-bold mt-2 text-emerald-600">{onlineAgents}</p>
           </div>
-          <div className="card p-5 text-center">
-            <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Offline</p>
-            <p className="text-3xl font-bold mt-2 text-red-400">{offlineAgents}</p>
+          <div className="bg-surface border border-surface-border border-t-4 border-t-red-500 rounded p-5 text-center shadow-sm">
+            <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">Offline</p>
+            <p className="text-3xl font-bold mt-2 text-red-600">{offlineAgents}</p>
           </div>
         </div>
 
         {/* Charts */}
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
           {/* OS Distribution */}
-          <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">OS Distribution</h3>
+          <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+            <h3 className="text-sm font-semibold text-ink-muted mb-4">OS Distribution</h3>
             <div className="h-48">
               {osPieData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -145,14 +145,14 @@ export default function AgentFleetPage() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-sm text-slate-500">No data</div>
+                <div className="h-full flex items-center justify-center text-sm text-ink-faint">No data</div>
               )}
             </div>
           </div>
 
           {/* Status Distribution */}
-          <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">Status Distribution</h3>
+          <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+            <h3 className="text-sm font-semibold text-ink-muted mb-4">Status Distribution</h3>
             <div className="h-48">
               {statusPieData.length > 0 ? (
                 <ResponsiveContainer width="100%" height="100%">
@@ -166,33 +166,33 @@ export default function AgentFleetPage() {
                   </PieChart>
                 </ResponsiveContainer>
               ) : (
-                <div className="h-full flex items-center justify-center text-sm text-slate-500">No data</div>
+                <div className="h-full flex items-center justify-center text-sm text-ink-faint">No data</div>
               )}
             </div>
           </div>
 
           {/* Version Breakdown */}
-          <div className="card p-5">
-            <h3 className="text-sm font-semibold text-slate-300 mb-4">Agent Versions</h3>
+          <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+            <h3 className="text-sm font-semibold text-ink-muted mb-4">Agent Versions</h3>
             <div className="space-y-3">
               {Object.entries(versionCounts)
                 .sort(([, a], [, b]) => b - a)
                 .map(([version, count]) => (
                   <div key={version} className="flex items-center justify-between">
-                    <span className="text-sm text-slate-300 font-mono">{version}</span>
+                    <span className="text-sm text-ink font-mono">{version}</span>
                     <div className="flex items-center gap-2">
-                      <div className="w-24 bg-slate-700 rounded-full h-2">
+                      <div className="w-24 bg-surface-border rounded-full h-2">
                         <div
-                          className="bg-blue-500 h-2 rounded-full"
+                          className="bg-brand-400 h-2 rounded-full"
                           style={{ width: `${(count / totalAgents) * 100}%` }}
                         />
                       </div>
-                      <span className="text-xs text-slate-400 w-8 text-right">{count}</span>
+                      <span className="text-xs text-ink-muted w-8 text-right">{count}</span>
                     </div>
                   </div>
                 ))}
               {Object.keys(versionCounts).length === 0 && (
-                <p className="text-sm text-slate-500">No version data</p>
+                <p className="text-sm text-ink-faint">No version data</p>
               )}
             </div>
           </div>
@@ -200,50 +200,50 @@ export default function AgentFleetPage() {
 
         {/* Environment Groups */}
         <div>
-          <h3 className="text-sm font-semibold text-slate-300 mb-4">Fleet by Platform</h3>
+          <h3 className="text-sm font-semibold text-ink-muted mb-4">Fleet by Platform</h3>
           {isLoading ? (
-            <p className="text-sm text-slate-500">Loading fleet data...</p>
+            <p className="text-sm text-ink-faint">Loading fleet data...</p>
           ) : groups.length === 0 ? (
-            <p className="text-sm text-slate-500">No agents registered</p>
+            <p className="text-sm text-ink-faint">No agents registered</p>
           ) : (
             <div className="space-y-4">
               {groups.map(group => (
-                <div key={`${group.os}/${group.arch}`} className="card">
-                  <div className="px-5 py-4 border-b border-slate-700 flex items-center justify-between">
+                <div key={`${group.os}/${group.arch}`} className="bg-surface border border-surface-border rounded overflow-hidden shadow-sm">
+                  <div className="px-5 py-4 border-b border-surface-border flex items-center justify-between">
                     <div className="flex items-center gap-3">
                       <div
                         className="w-3 h-3 rounded-full"
                         style={{ backgroundColor: OS_COLORS[group.os.toLowerCase()] || '#64748b' }}
                       />
-                      <h4 className="text-sm font-medium text-slate-200">
+                      <h4 className="text-sm font-medium text-ink">
                         {group.os} / {group.arch}
                       </h4>
-                      <span className="text-xs text-slate-500">
+                      <span className="text-xs text-ink-faint">
                         {group.agents.length} agent{group.agents.length !== 1 ? 's' : ''}
                       </span>
                     </div>
                     <div className="flex items-center gap-3 text-xs">
-                      <span className="text-emerald-400">{group.online} online</span>
-                      {group.offline > 0 && <span className="text-red-400">{group.offline} offline</span>}
+                      <span className="text-emerald-600">{group.online} online</span>
+                      {group.offline > 0 && <span className="text-red-600">{group.offline} offline</span>}
                     </div>
                   </div>
-                  <div className="divide-y divide-slate-700/50">
+                  <div className="divide-y divide-surface-border/50">
                     {group.agents.map(agent => (
                       <div
                         key={agent.id}
                         onClick={() => navigate(`/agents/${agent.id}`)}
-                        className="px-5 py-3 flex items-center justify-between hover:bg-slate-700/30 cursor-pointer transition-colors"
+                        className="px-5 py-3 flex items-center justify-between hover:bg-surface-muted cursor-pointer transition-colors"
                       >
                         <div className="flex items-center gap-3">
-                          <div className={`w-2 h-2 rounded-full ${agent.status === 'Online' ? 'bg-emerald-400' : 'bg-red-400'}`} />
+                          <div className={`w-2 h-2 rounded-full ${agent.status === 'Online' ? 'bg-emerald-500' : 'bg-red-500'}`} />
                           <div>
-                            <div className="text-sm text-slate-200">{agent.name || agent.hostname}</div>
-                            <div className="text-xs text-slate-500">{agent.ip_address || agent.id}</div>
+                            <div className="text-sm text-ink">{agent.name || agent.hostname}</div>
+                            <div className="text-xs text-ink-faint">{agent.ip_address || agent.id}</div>
                           </div>
                         </div>
                         <div className="flex items-center gap-4">
                           {agent.version && (
-                            <span className="text-xs text-slate-500 font-mono">{agent.version}</span>
+                            <span className="text-xs text-ink-muted font-mono">{agent.version}</span>
                           )}
                           <StatusBadge status={agent.status} />
                         </div>

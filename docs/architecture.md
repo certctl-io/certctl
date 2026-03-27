@@ -99,7 +99,7 @@ The dashboard includes an **ErrorBoundary component** for graceful error recover
 **Tech decisions**:
 - Vite for fast builds and HMR during development
 - TanStack Query over manual fetch/useEffect for automatic cache invalidation and refetching
-- Dark theme default (ops teams live in dark mode)
+- Light content area with branded dark teal sidebar, Inter + JetBrains Mono typography
 - SSE/WebSocket planned for real-time job status updates
 
 ### PostgreSQL Database

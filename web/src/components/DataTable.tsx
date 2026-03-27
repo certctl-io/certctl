@@ -20,7 +20,7 @@ interface DataTableProps<T> {
 export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange }: DataTableProps<T>) {
   if (isLoading) {
     return (
-      <div className="flex items-center justify-center py-16 text-slate-400">
+      <div className="flex items-center justify-center py-16 text-ink-muted">
         <svg className="animate-spin h-5 w-5 mr-3" viewBox="0 0 24 24">
           <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" fill="none" />
           <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
@@ -32,7 +32,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
 
   if (!data.length) {
     return (
-      <div className="flex items-center justify-center py-16 text-slate-500">
+      <div className="flex items-center justify-center py-16 text-ink-faint">
         {emptyMessage || 'No data found'}
       </div>
     );
@@ -62,19 +62,19 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
     <div className="overflow-x-auto">
       <table className="w-full text-sm">
         <thead>
-          <tr className="border-b-2 border-slate-700">
+          <tr className="border-b-2 border-surface-border bg-surface-muted">
             {selectable && (
               <th className="px-3 py-3 w-10">
                 <input
                   type="checkbox"
                   checked={allSelected || false}
                   onChange={toggleAll}
-                  className="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                  className="rounded border-surface-border bg-white text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
                 />
               </th>
             )}
             {columns.map(col => (
-              <th key={col.key} className={`px-4 py-3 text-left text-xs font-semibold text-slate-400 uppercase tracking-wider ${col.className || ''}`}>
+              <th key={col.key} className={`px-4 py-3 text-left text-xs font-semibold text-ink-muted uppercase tracking-wider ${col.className || ''}`}>
                 {col.label}
               </th>
             ))}
@@ -88,7 +88,7 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
               <tr
                 key={rowKey}
                 onClick={() => onRowClick?.(item)}
-                className={`border-b border-slate-700/50 transition-colors hover:bg-blue-500/5 ${onRowClick ? 'cursor-pointer' : ''} ${isSelected ? 'bg-blue-500/10' : ''}`}
+                className={`border-b border-surface-border/50 transition-colors hover:bg-surface-muted ${onRowClick ? 'cursor-pointer' : ''} ${isSelected ? 'bg-brand-50' : ''}`}
               >
                 {selectable && (
                   <td className="px-3 py-3 w-10">
@@ -97,12 +97,12 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
                       checked={isSelected || false}
                       onChange={(e) => { e.stopPropagation(); toggleOne(rowKey); }}
                       onClick={(e) => e.stopPropagation()}
-                      className="rounded border-slate-600 bg-slate-900 text-blue-600 focus:ring-blue-500 focus:ring-offset-0 cursor-pointer"
+                      className="rounded border-surface-border bg-white text-brand-500 focus:ring-brand-500 focus:ring-offset-0 cursor-pointer"
                     />
                   </td>
                 )}
                 {columns.map(col => (
-                  <td key={col.key} className={`px-4 py-3 ${col.className || ''}`}>
+                  <td key={col.key} className={`px-4 py-3 text-ink ${col.className || ''}`}>
                     {col.render(item)}
                   </td>
                 ))}

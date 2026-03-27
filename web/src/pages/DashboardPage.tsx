@@ -19,28 +19,29 @@ const STATUS_COLORS: Record<string, string> = {
   Expired: '#ef4444',
   Revoked: '#8b5cf6',
   Pending: '#6366f1',
-  RenewalInProgress: '#3b82f6',
+  RenewalInProgress: '#2ea88f',
   Failed: '#f43f5e',
   Archived: '#64748b',
 };
 
 function StatCard({ label, value, icon, color }: { label: string; value: string | number; icon: string; color: string }) {
-  const colorMap: Record<string, string> = {
-    success: 'bg-emerald-500/10 text-emerald-400',
-    warning: 'bg-amber-500/10 text-amber-400',
-    danger:  'bg-red-500/10 text-red-400',
-    info:    'bg-blue-500/10 text-blue-400',
+  const colorMap: Record<string, { bg: string; border: string; text: string }> = {
+    success: { bg: 'bg-emerald-50', border: 'border-t-emerald-500', text: 'text-emerald-700' },
+    warning: { bg: 'bg-amber-50', border: 'border-t-amber-500', text: 'text-amber-700' },
+    danger:  { bg: 'bg-red-50', border: 'border-t-red-500', text: 'text-red-700' },
+    info:    { bg: 'bg-blue-50', border: 'border-t-brand-400', text: 'text-brand-500' },
   };
+  const config = colorMap[color] || colorMap.info;
   return (
-    <div className="card p-5 flex items-start gap-4 hover:border-blue-500/30 transition-colors">
-      <div className={`w-10 h-10 rounded-lg flex items-center justify-center shrink-0 ${colorMap[color] || colorMap.info}`}>
+    <div className={`bg-surface border border-surface-border border-t-4 ${config.border} rounded p-5 flex items-start gap-4 hover:bg-surface-muted transition-colors shadow-sm`}>
+      <div className={`w-10 h-10 rounded flex items-center justify-center shrink-0 ${config.bg} ${config.text}`}>
         <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
           <path strokeLinecap="round" strokeLinejoin="round" d={icon} />
         </svg>
       </div>
       <div>
-        <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">{label}</p>
-        <p className="text-2xl font-bold mt-1">{value}</p>
+        <p className="text-xs font-semibold text-ink-muted uppercase tracking-wider">{label}</p>
+        <p className="text-2xl font-bold mt-1 text-ink">{value}</p>
       </div>
     </div>
   );
@@ -48,8 +49,8 @@ function StatCard({ label, value, icon, color }: { label: string; value: string 
 
 function ChartCard({ title, children }: { title: string; children: React.ReactNode }) {
   return (
-    <div className="card p-5">
-      <h3 className="text-sm font-semibold text-slate-300 mb-4">{title}</h3>
+    <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+      <h3 className="text-sm font-semibold text-ink-muted mb-4">{title}</h3>
       <div className="h-64">
         {children}
       </div>
@@ -60,8 +61,8 @@ function ChartCard({ title, children }: { title: string; children: React.ReactNo
 const CustomTooltip = ({ active, payload, label }: any) => {
   if (!active || !payload?.length) return null;
   return (
-    <div className="bg-slate-800 border border-slate-600 rounded-lg px-3 py-2 text-xs shadow-lg">
-      <p className="text-slate-300 mb-1">{label}</p>
+    <div className="bg-surface border border-surface-border rounded px-3 py-2 text-xs shadow-lg">
+      <p className="text-ink mb-1">{label}</p>
       {payload.map((entry: any, i: number) => (
         <p key={i} style={{ color: entry.color }}>
           {entry.name}: {typeof entry.value === 'number' && entry.name?.includes('rate') ? `${entry.value.toFixed(1)}%` : entry.value}
@@ -159,12 +160,12 @@ export default function DashboardPage() {
                   <Legend
                     verticalAlign="bottom"
                     height={36}
-                    formatter={(value: string) => <span className="text-xs text-slate-400">{value}</span>}
+                    formatter={(value: string) => <span className="text-xs text-ink-muted">{value}</span>}
                   />
                 </PieChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-slate-500">No certificate data</div>
+              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No certificate data</div>
             )}
           </ChartCard>
 
@@ -173,15 +174,15 @@ export default function DashboardPage() {
             {weeklyExpiration.length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={weeklyExpiration}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="week" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="week" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                   <Tooltip content={<CustomTooltip />} />
                   <Bar dataKey="count" name="Expiring certs" fill="#f59e0b" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-slate-500">No expiration data</div>
+              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No expiration data</div>
             )}
           </ChartCard>
         </div>
@@ -193,17 +194,17 @@ export default function DashboardPage() {
             {(jobTrends || []).length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <LineChart data={jobTrends}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Legend formatter={(value: string) => <span className="text-xs text-slate-400">{value}</span>} />
+                  <Legend formatter={(value: string) => <span className="text-xs text-ink-muted">{value}</span>} />
                   <Line type="monotone" dataKey="completed_count" name="Completed" stroke="#10b981" strokeWidth={2} dot={false} />
                   <Line type="monotone" dataKey="failed_count" name="Failed" stroke="#ef4444" strokeWidth={2} dot={false} />
                 </LineChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-slate-500">No job trend data</div>
+              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No job trend data</div>
             )}
           </ChartCard>
 
@@ -212,28 +213,28 @@ export default function DashboardPage() {
             {(issuanceRate || []).length > 0 ? (
               <ResponsiveContainer width="100%" height="100%">
                 <BarChart data={issuanceRate}>
-                  <CartesianGrid strokeDasharray="3 3" stroke="#334155" />
-                  <XAxis dataKey="date" tick={{ fill: '#94a3b8', fontSize: 11 }} tickFormatter={formatShortDate} />
-                  <YAxis tick={{ fill: '#94a3b8', fontSize: 11 }} allowDecimals={false} />
+                  <CartesianGrid strokeDasharray="3 3" stroke="#e2e8f0" />
+                  <XAxis dataKey="date" tick={{ fill: '#64748b', fontSize: 11 }} tickFormatter={formatShortDate} />
+                  <YAxis tick={{ fill: '#64748b', fontSize: 11 }} allowDecimals={false} />
                   <Tooltip content={<CustomTooltip />} />
-                  <Bar dataKey="issued_count" name="Issued" fill="#3b82f6" radius={[4, 4, 0, 0]} />
+                  <Bar dataKey="issued_count" name="Issued" fill="#2ea88f" radius={[4, 4, 0, 0]} />
                 </BarChart>
               </ResponsiveContainer>
             ) : (
-              <div className="h-full flex items-center justify-center text-sm text-slate-500">No issuance data</div>
+              <div className="h-full flex items-center justify-center text-sm text-ink-faint">No issuance data</div>
             )}
           </ChartCard>
         </div>
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Expiring Certificates */}
-          <div className="card p-5">
+          <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-300">Certificates Expiring Soon</h3>
-              <button onClick={() => navigate('/certificates')} className="text-xs text-blue-400 hover:text-blue-300">View all</button>
+              <h3 className="text-sm font-semibold text-ink-muted">Certificates Expiring Soon</h3>
+              <button onClick={() => navigate('/certificates')} className="text-xs text-brand-400 hover:text-brand-500">View all</button>
             </div>
             {!certs?.data?.length ? (
-              <p className="text-sm text-slate-500">No certificates</p>
+              <p className="text-sm text-ink-faint">No certificates</p>
             ) : (
               <div className="space-y-2">
                 {certs.data
@@ -246,17 +247,17 @@ export default function DashboardPage() {
                       <div
                         key={c.id}
                         onClick={() => navigate(`/certificates/${c.id}`)}
-                        className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-700/50 cursor-pointer transition-colors"
+                        className="flex items-center justify-between py-2 px-3 rounded hover:bg-surface-muted cursor-pointer transition-colors"
                       >
                         <div>
-                          <div className="text-sm text-slate-200">{c.common_name}</div>
-                          <div className="text-xs text-slate-500">{c.environment || 'no env'}</div>
+                          <div className="text-sm text-ink">{c.common_name}</div>
+                          <div className="text-xs text-ink-faint">{c.environment || 'no env'}</div>
                         </div>
                         <div className="text-right">
                           <div className={`text-sm ${expiryColor(days)}`}>
                             {days <= 0 ? 'Expired' : `${days} days`}
                           </div>
-                          <div className="text-xs text-slate-500">{formatDate(c.expires_at)}</div>
+                          <div className="text-xs text-ink-faint">{formatDate(c.expires_at)}</div>
                         </div>
                       </div>
                     );
@@ -266,20 +267,20 @@ export default function DashboardPage() {
           </div>
 
           {/* Recent Jobs */}
-          <div className="card p-5">
+          <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
             <div className="flex items-center justify-between mb-4">
-              <h3 className="text-sm font-semibold text-slate-300">Recent Jobs</h3>
-              <button onClick={() => navigate('/jobs')} className="text-xs text-blue-400 hover:text-blue-300">View all</button>
+              <h3 className="text-sm font-semibold text-ink-muted">Recent Jobs</h3>
+              <button onClick={() => navigate('/jobs')} className="text-xs text-brand-400 hover:text-brand-500">View all</button>
             </div>
             {!jobs?.data?.length ? (
-              <p className="text-sm text-slate-500">No jobs</p>
+              <p className="text-sm text-ink-faint">No jobs</p>
             ) : (
               <div className="space-y-2">
                 {jobs.data.slice(0, 5).map(j => (
-                  <div key={j.id} className="flex items-center justify-between py-2 px-3 rounded-lg hover:bg-slate-700/50 transition-colors">
+                  <div key={j.id} className="flex items-center justify-between py-2 px-3 rounded hover:bg-surface-muted transition-colors">
                     <div>
-                      <div className="text-sm text-slate-200">{j.type}</div>
-                      <div className="text-xs text-slate-500 font-mono">{j.certificate_id}</div>
+                      <div className="text-sm text-ink">{j.type}</div>
+                      <div className="text-xs text-ink-faint font-mono">{j.certificate_id}</div>
                     </div>
                     <StatusBadge status={j.status} />
                   </div>
@@ -291,10 +292,10 @@ export default function DashboardPage() {
 
         {/* Pending Jobs Banner */}
         {pendingJobs > 0 && (
-          <div className="bg-blue-500/10 border border-blue-500/20 rounded-lg px-5 py-4 flex items-center justify-between">
+          <div className="bg-brand-50 border border-brand-200 rounded px-5 py-4 flex items-center justify-between">
             <div>
-              <p className="text-sm font-medium text-blue-400">{pendingJobs} pending job{pendingJobs > 1 ? 's' : ''}</p>
-              <p className="text-xs text-slate-400 mt-0.5">Jobs are waiting to be processed</p>
+              <p className="text-sm font-medium text-brand-600">{pendingJobs} pending job{pendingJobs > 1 ? 's' : ''}</p>
+              <p className="text-xs text-brand-600/70 mt-0.5">Jobs are waiting to be processed</p>
             </div>
             <button onClick={() => navigate('/jobs')} className="btn btn-primary text-xs">View Jobs</button>
           </div>

@@ -19,10 +19,10 @@ function formatTTL(seconds: number): string {
 function ttlRemaining(expiresAt: string): { text: string; color: string; seconds: number } {
   const diff = new Date(expiresAt).getTime() - Date.now();
   const secs = Math.floor(diff / 1000);
-  if (secs <= 0) return { text: 'Expired', color: 'text-red-400', seconds: 0 };
-  if (secs < 300) return { text: `${secs}s`, color: 'text-red-400', seconds: secs };
-  if (secs < 1800) return { text: `${Math.round(secs / 60)}m`, color: 'text-amber-400', seconds: secs };
-  return { text: formatTTL(secs), color: 'text-emerald-400', seconds: secs };
+  if (secs <= 0) return { text: 'Expired', color: 'text-red-600', seconds: 0 };
+  if (secs < 300) return { text: `${secs}s`, color: 'text-red-600', seconds: secs };
+  if (secs < 1800) return { text: `${Math.round(secs / 60)}m`, color: 'text-amber-600', seconds: secs };
+  return { text: formatTTL(secs), color: 'text-emerald-600', seconds: secs };
 }
 
 export default function ShortLivedPage() {
@@ -75,8 +75,8 @@ export default function ShortLivedPage() {
       label: 'Certificate',
       render: (c) => (
         <div>
-          <div className="font-medium text-slate-200">{c.common_name}</div>
-          <div className="text-xs text-slate-500 mt-0.5">{c.id}</div>
+          <div className="font-medium text-ink">{c.common_name}</div>
+          <div className="text-xs text-ink-faint mt-0.5">{c.id}</div>
         </div>
       ),
     },
@@ -103,15 +103,15 @@ export default function ShortLivedPage() {
         const profile = profileMap.get(c.certificate_profile_id);
         return (
           <div>
-            <div className="text-sm text-slate-300">{profile?.name || c.certificate_profile_id || '—'}</div>
-            {profile && <div className="text-xs text-slate-500">Max TTL: {formatTTL(profile.max_ttl_seconds)}</div>}
+            <div className="text-sm text-ink">{profile?.name || c.certificate_profile_id || '—'}</div>
+            {profile && <div className="text-xs text-ink-faint">Max TTL: {formatTTL(profile.max_ttl_seconds)}</div>}
           </div>
         );
       },
     },
-    { key: 'env', label: 'Environment', render: (c) => <span className="text-slate-300">{c.environment || '—'}</span> },
-    { key: 'issuer', label: 'Issuer', render: (c) => <span className="text-slate-400 text-xs">{c.issuer_id}</span> },
-    { key: 'expires', label: 'Expires At', render: (c) => <span className="text-xs text-slate-400">{formatDateTime(c.expires_at)}</span> },
+    { key: 'env', label: 'Environment', render: (c) => <span className="text-ink">{c.environment || '—'}</span> },
+    { key: 'issuer', label: 'Issuer', render: (c) => <span className="text-ink-muted text-xs">{c.issuer_id}</span> },
+    { key: 'expires', label: 'Expires At', render: (c) => <span className="text-xs text-ink-muted">{formatDateTime(c.expires_at)}</span> },
   ];
 
   return (
@@ -121,21 +121,21 @@ export default function ShortLivedPage() {
         subtitle={`${shortLivedCerts.length} active ephemeral certificates`}
       />
       {/* Stats bar */}
-      <div className="px-6 py-3 flex gap-6 border-b border-slate-700/50">
+      <div className="px-6 py-3 flex gap-6 border-b border-surface-border/50">
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-emerald-400" />
-          <span className="text-xs text-slate-400">Active:</span>
-          <span className="text-xs font-medium text-emerald-400">{active}</span>
+          <div className="w-2 h-2 rounded-full bg-emerald-500" />
+          <span className="text-xs text-ink-muted">Active:</span>
+          <span className="text-xs font-medium text-emerald-600">{active}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-red-400" />
-          <span className="text-xs text-slate-400">Expired:</span>
-          <span className="text-xs font-medium text-red-400">{expired}</span>
+          <div className="w-2 h-2 rounded-full bg-red-500" />
+          <span className="text-xs text-ink-muted">Expired:</span>
+          <span className="text-xs font-medium text-red-600">{expired}</span>
         </div>
         <div className="flex items-center gap-2">
-          <div className="w-2 h-2 rounded-full bg-blue-400" />
-          <span className="text-xs text-slate-400">Profiles:</span>
-          <span className="text-xs font-medium text-blue-400">{profiles.size}</span>
+          <div className="w-2 h-2 rounded-full bg-brand-400" />
+          <span className="text-xs text-ink-muted">Profiles:</span>
+          <span className="text-xs font-medium text-brand-400">{profiles.size}</span>
         </div>
       </div>
       <div className="flex-1 overflow-y-auto">

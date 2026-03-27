@@ -27,10 +27,10 @@ export default function AgentGroupsPage() {
       label: 'Group',
       render: (g) => (
         <div>
-          <div className="font-medium text-slate-200">{g.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{g.id}</div>
+          <div className="font-medium text-ink">{g.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{g.id}</div>
           {g.description && (
-            <div className="text-xs text-slate-400 mt-0.5 max-w-xs truncate">{g.description}</div>
+            <div className="text-xs text-ink-muted mt-0.5 max-w-xs truncate">{g.description}</div>
           )}
         </div>
       ),
@@ -51,7 +51,7 @@ export default function AgentGroupsPage() {
             ))}
           </div>
         ) : (
-          <span className="text-slate-500 text-xs">Manual only</span>
+          <span className="text-ink-faint text-xs">Manual only</span>
         );
       },
     },
@@ -63,7 +63,7 @@ export default function AgentGroupsPage() {
     {
       key: 'created',
       label: 'Created',
-      render: (g) => <span className="text-xs text-slate-400">{formatDateTime(g.created_at)}</span>,
+      render: (g) => <span className="text-xs text-ink-muted">{formatDateTime(g.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -71,7 +71,7 @@ export default function AgentGroupsPage() {
       render: (g) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete group ${g.name}?`)) deleteMutation.mutate(g.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>

@@ -81,8 +81,8 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
   const canProceedToReview = name && targetType && fields.filter(f => f.required).every(f => config[f.key]);
 
   return (
-    <div className="fixed inset-0 bg-black/60 flex items-center justify-center z-50" onClick={onClose}>
-      <div className="bg-slate-800 border border-slate-600 rounded-xl p-6 w-full max-w-lg shadow-2xl" onClick={e => e.stopPropagation()}>
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-lg shadow-xl" onClick={e => e.stopPropagation()}>
         {/* Step indicators */}
         <div className="flex items-center gap-3 mb-6">
           {['Select Type', 'Configure', 'Review'].map((label, i) => {
@@ -93,36 +93,36 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
             return (
               <div key={label} className="flex items-center gap-2">
                 <div className={`w-6 h-6 rounded-full flex items-center justify-center text-xs font-medium ${
-                  isDone ? 'bg-emerald-500 text-white' : isActive ? 'bg-blue-500 text-white' : 'bg-slate-700 text-slate-400'
+                  isDone ? 'bg-emerald-600 text-white' : isActive ? 'bg-brand-400 text-white' : 'bg-surface-border text-ink-muted'
                 }`}>
                   {isDone ? '✓' : i + 1}
                 </div>
-                <span className={`text-xs ${isActive ? 'text-slate-200' : 'text-slate-500'}`}>{label}</span>
-                {i < 2 && <div className="w-8 h-px bg-slate-700" />}
+                <span className={`text-xs ${isActive ? 'text-ink' : 'text-ink-faint'}`}>{label}</span>
+                {i < 2 && <div className="w-8 h-px bg-surface-border" />}
               </div>
             );
           })}
         </div>
 
-        {error && <div className="bg-red-500/10 border border-red-500/20 text-red-400 rounded-lg px-3 py-2 text-sm mb-4">{error}</div>}
+        {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-4">{error}</div>}
 
         {/* Step 1: Select Type */}
         {step === 'type' && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-200 mb-4">Select Target Type</h2>
+            <h2 className="text-lg font-semibold text-ink mb-4">Select Target Type</h2>
             <div className="space-y-2">
               {TARGET_TYPES.map(t => (
                 <button
                   key={t.value}
                   onClick={() => { setTargetType(t.value); setConfig({}); }}
-                  className={`w-full text-left px-4 py-3 rounded-lg border transition-colors ${
+                  className={`w-full text-left px-4 py-3 rounded border transition-colors ${
                     targetType === t.value
-                      ? 'border-blue-500 bg-blue-500/10'
-                      : 'border-slate-600 hover:border-slate-500 bg-slate-900'
+                      ? 'border-brand-400 bg-brand-50'
+                      : 'border-surface-border hover:border-surface-border bg-white'
                   }`}
                 >
-                  <div className="text-sm font-medium text-slate-200">{t.label}</div>
-                  <div className="text-xs text-slate-400 mt-0.5">{t.description}</div>
+                  <div className="text-sm font-medium text-ink">{t.label}</div>
+                  <div className="text-xs text-ink-muted mt-0.5">{t.description}</div>
                 </button>
               ))}
             </div>
@@ -137,35 +137,35 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
         {/* Step 2: Configure */}
         {step === 'config' && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-200 mb-4">
+            <h2 className="text-lg font-semibold text-ink mb-4">
               Configure {typeLabels[targetType] || targetType} Target
             </h2>
             <div className="space-y-3">
               <div>
-                <label className="text-xs text-slate-400 block mb-1">Target Name *</label>
+                <label className="text-xs text-ink-muted block mb-1">Target Name *</label>
                 <input value={name} onChange={e => setName(e.target.value)}
-                  className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                  className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
                   placeholder="web-server-1" />
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Hostname</label>
+                  <label className="text-xs text-ink-muted block mb-1">Hostname</label>
                   <input value={hostname} onChange={e => setHostname(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
                     placeholder="web1.example.com" />
                 </div>
                 <div>
-                  <label className="text-xs text-slate-400 block mb-1">Agent ID</label>
+                  <label className="text-xs text-ink-muted block mb-1">Agent ID</label>
                   <input value={agentId} onChange={e => setAgentId(e.target.value)}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
                     placeholder="agent-web1" />
                 </div>
               </div>
               {fields.map(f => (
                 <div key={f.key}>
-                  <label className="text-xs text-slate-400 block mb-1">{f.label} {f.required ? '*' : ''}</label>
+                  <label className="text-xs text-ink-muted block mb-1">{f.label} {f.required ? '*' : ''}</label>
                   <input value={config[f.key] || ''} onChange={e => setConfig(c => ({ ...c, [f.key]: e.target.value }))}
-                    className="w-full bg-slate-900 border border-slate-600 rounded-lg px-3 py-2 text-sm text-slate-200 focus:outline-none focus:border-blue-500"
+                    className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
                     placeholder={f.placeholder} />
                 </div>
               ))}
@@ -184,32 +184,32 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
         {/* Step 3: Review */}
         {step === 'review' && (
           <div>
-            <h2 className="text-lg font-semibold text-slate-200 mb-4">Review Target</h2>
-            <div className="bg-slate-900 rounded-lg p-4 space-y-2 text-sm">
+            <h2 className="text-lg font-semibold text-ink mb-4">Review Target</h2>
+            <div className="bg-page rounded p-4 space-y-2 text-sm">
               <div className="flex justify-between">
-                <span className="text-slate-400">Name</span>
-                <span className="text-slate-200">{name}</span>
+                <span className="text-ink-muted">Name</span>
+                <span className="text-ink">{name}</span>
               </div>
               <div className="flex justify-between">
-                <span className="text-slate-400">Type</span>
-                <span className="text-slate-200">{typeLabels[targetType] || targetType}</span>
+                <span className="text-ink-muted">Type</span>
+                <span className="text-ink">{typeLabels[targetType] || targetType}</span>
               </div>
               {hostname && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Hostname</span>
-                  <span className="text-slate-200 font-mono text-xs">{hostname}</span>
+                  <span className="text-ink-muted">Hostname</span>
+                  <span className="text-ink font-mono text-xs">{hostname}</span>
                 </div>
               )}
               {agentId && (
                 <div className="flex justify-between">
-                  <span className="text-slate-400">Agent</span>
-                  <span className="text-slate-200 font-mono text-xs">{agentId}</span>
+                  <span className="text-ink-muted">Agent</span>
+                  <span className="text-ink font-mono text-xs">{agentId}</span>
                 </div>
               )}
               {Object.entries(config).filter(([, v]) => v).map(([k, v]) => (
                 <div key={k} className="flex justify-between">
-                  <span className="text-slate-400">{k.replace(/_/g, ' ')}</span>
-                  <span className="text-slate-200 font-mono text-xs truncate max-w-xs">{v}</span>
+                  <span className="text-ink-muted">{k.replace(/_/g, ' ')}</span>
+                  <span className="text-ink font-mono text-xs truncate max-w-xs">{v}</span>
                 </div>
               ))}
             </div>
@@ -250,8 +250,8 @@ export default function TargetsPage() {
       label: 'Target',
       render: (t) => (
         <div>
-          <div className="font-medium text-slate-200">{t.name}</div>
-          <div className="text-xs text-slate-500 font-mono">{t.id}</div>
+          <div className="font-medium text-ink">{t.name}</div>
+          <div className="text-xs text-ink-faint font-mono">{t.id}</div>
         </div>
       ),
     },
@@ -265,12 +265,12 @@ export default function TargetsPage() {
     {
       key: 'hostname',
       label: 'Hostname',
-      render: (t) => <span className="text-slate-300 font-mono text-xs">{t.hostname || '\u2014'}</span>,
+      render: (t) => <span className="text-ink font-mono text-xs">{t.hostname || '\u2014'}</span>,
     },
     {
       key: 'agent',
       label: 'Agent',
-      render: (t) => <span className="text-xs text-slate-400 font-mono">{t.agent_id || '\u2014'}</span>,
+      render: (t) => <span className="text-xs text-ink-muted font-mono">{t.agent_id || '\u2014'}</span>,
     },
     {
       key: 'status',
@@ -280,7 +280,7 @@ export default function TargetsPage() {
     {
       key: 'created',
       label: 'Created',
-      render: (t) => <span className="text-xs text-slate-400">{formatDateTime(t.created_at)}</span>,
+      render: (t) => <span className="text-xs text-ink-muted">{formatDateTime(t.created_at)}</span>,
     },
     {
       key: 'actions',
@@ -288,7 +288,7 @@ export default function TargetsPage() {
       render: (t) => (
         <button
           onClick={(e) => { e.stopPropagation(); if (confirm(`Delete target ${t.name}?`)) deleteMutation.mutate(t.id); }}
-          className="text-xs text-red-400 hover:text-red-300 transition-colors"
+          className="text-xs text-red-600 hover:text-red-700 transition-colors"
         >
           Delete
         </button>
