@@ -246,9 +246,11 @@ Certificate discovery is the process of automatically finding existing certifica
 **How it works:** There are two discovery modes. *Filesystem discovery* — agents scan configured directories (configured via `CERTCTL_DISCOVERY_DIRS`) for certificate files. On startup and every 6 hours, the agent walks directories recursively, parses PEM and DER files, extracts metadata, and reports findings to the control plane. *Network discovery* — the control plane itself probes TLS endpoints across configured CIDR ranges and ports (enabled via `CERTCTL_NETWORK_SCAN_ENABLED=true`). It connects to each endpoint, extracts certificates from the TLS handshake, and feeds results into the same discovery pipeline. This finds certificates on services you may not have agents on. In both cases, the server deduplicates by fingerprint and stores discovered certs with a status: **Unmanaged** (discovered but not yet managed), **Managed** (linked to a control plane cert), or **Dismissed** (operator decided not to manage it).
 
 This gives you a three-step triage workflow:
-1. **Discover** — Agents find all existing certs on your infrastructure
-2. **Triage** — Operators review discoveries and decide: claim it (enroll for management), or dismiss it (not worth managing)
+1. **Discover** — Agents scan filesystems and the server probes network endpoints to find all existing certs
+2. **Triage** — Operators review discoveries in the **Discovery** dashboard page and decide: claim it (link to a managed certificate) or dismiss it (not worth managing). The dashboard shows a summary stats bar (Unmanaged/Managed/Dismissed counts), filters by status and agent, and provides one-click claim and dismiss actions.
 3. **Baseline** — Once triaged, you have a complete baseline of what's deployed, what you're managing, and what's unmanaged
+
+Network scan targets are managed from the **Network Scans** dashboard page — create CIDR ranges and ports to probe, enable/disable targets, trigger on-demand scans, and view results. Discovered certificates from network scans appear in the same Discovery triage page alongside filesystem discoveries.
 
 This is a prerequisite for multi-CA migration, compliance audits, and building confidence that you've found all the certificates that matter.
 

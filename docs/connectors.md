@@ -716,7 +716,7 @@ The agent scans these directories on startup and every 6 hours, looking for cert
 1. **Scan**: Agent recursively walks directories, extracts certificates
 2. **Deduplicate**: Control plane deduplicates by SHA-256 fingerprint (same cert in multiple locations is one discovery)
 3. **Store**: Discovered certificates stored with metadata (agent ID, file path, found date, fingerprint)
-4. **Triage**: Operators query discovered certs via API, claim to link to managed certificates, or dismiss false positives
+4. **Triage**: Operators review discovered certs in the **Discovery** dashboard page (or via API) — claim to link to managed certificates, or dismiss false positives. The dashboard shows summary stats, filters by status and agent, and provides one-click claim/dismiss actions.
 
 ### API Endpoints
 
@@ -764,10 +764,10 @@ export CERTCTL_NETWORK_SCAN_INTERVAL=6h  # default
 
 ### Creating Scan Targets
 
-Network scan targets define which CIDR ranges and ports to probe:
+Network scan targets can be managed from the **Network Scans** dashboard page (create, edit, enable/disable, trigger on-demand scans) or via the API. Targets define which CIDR ranges and ports to probe:
 
 ```bash
-# Create a scan target for your internal network
+# Create a scan target for your internal network (or use the dashboard's "+ New Target" button)
 curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
   -H "Content-Type: application/json" \
   -d '{
@@ -787,7 +787,7 @@ curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
 3. **Extract**: Certificate metadata extracted from TLS handshake (CN, SANs, serial, issuer, key info, fingerprint)
 4. **Pipeline**: Results fed into the same `DiscoveryService.ProcessDiscoveryReport()` as filesystem discovery
 5. **Deduplicate**: Sentinel agent ID (`server-scanner`) with source_path as `ip:port` ensures proper dedup
-6. **Triage**: Discovered certs appear in `GET /api/v1/discovered-certificates` with `agent_id=server-scanner`
+6. **Triage**: Discovered certs appear in the **Discovery** dashboard page (and via `GET /api/v1/discovered-certificates`) with `agent_id=server-scanner`
 
 ### API Endpoints
 
