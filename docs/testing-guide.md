@@ -3366,26 +3366,61 @@ Open `http://localhost:8443` in a browser.
 | 19.4.5 | Inline policy editor | Click edit on policy section | Dropdown selectors appear, save/cancel buttons | PASS if edit mode works |
 | 19.4.6 | Revoke button | Click revoke | Reason modal, status updates after | PASS if revocation completes |
 
-### 19.5 Other Pages
-
-| Test ID | Test | Page | Expected | Pass/Fail Criteria |
-|---------|------|------|----------|-------------------|
-| 19.5.1 | Target wizard | Targets → New Target | 3-step wizard (type → config → review) | PASS if all 3 steps work |
-| 19.5.2 | Audit filters | Audit | Time, actor, action filters work | PASS if filters change results |
-| 19.5.3 | Audit export | Audit → Export | CSV/JSON file downloads | PASS if file downloads |
-| 19.5.4 | Short-lived creds | Short-Lived | Certs with TTL < 1h, countdown timers | PASS if timers count down |
-| 19.5.5 | Agent list | Agents | OS/Arch column visible | PASS if metadata shown |
-| 19.5.6 | Agent detail | Click agent | System Information card | PASS if OS, arch, IP shown |
-| 19.5.7 | Fleet overview | Fleet Overview | OS/arch grouping charts | PASS if pie charts render |
-
-### 19.6 Cross-Cutting
+### 19.5 Jobs Page — Approval Workflow
 
 | Test ID | Test | Action | Expected | Pass/Fail Criteria |
 |---------|------|--------|----------|-------------------|
-| 19.6.1 | Sidebar nav | Click all sidebar links | All pages load without errors | PASS if no broken routes |
-| 19.6.2 | Logout | Click logout | Returns to login screen | PASS if login page shown |
-| 19.6.3 | 401 redirect | Expire/remove auth token | Auto-redirect to login | PASS if login page shown |
-| 19.6.4 | Theme consistency | Check page styling | Light content area, teal sidebar, branded colors, readable text | PASS if theme consistent across all pages |
+| 19.5.1 | Approval banner | Navigate to Jobs with AwaitingApproval jobs | Amber banner shows count of pending approvals | PASS if banner visible with correct count |
+| 19.5.2 | Approve button | Find AwaitingApproval job, click Approve | Job status changes to Running/Completed | PASS if status transitions |
+| 19.5.3 | Reject button | Find AwaitingApproval job, click Reject | Modal opens with reason input | PASS if modal appears |
+| 19.5.4 | Reject with reason | Enter reason, submit rejection | Job status changes, modal closes | PASS if job rejected |
+| 19.5.5 | Status filter | Select "Awaiting Approval" from status dropdown | Only AwaitingApproval jobs shown | PASS if filter works |
+| 19.5.6 | AwaitingCSR filter | Select "Awaiting CSR" from status dropdown | Only AwaitingCSR jobs shown | PASS if filter works |
+
+### 19.6 Discovery Triage Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.6.1 | Summary stats | Navigate to Discovery | Stats bar shows Unmanaged/Managed/Dismissed counts | PASS if all 3 counts visible |
+| 19.6.2 | Table loads | View Discovery page | Table populated with discovered certificates | PASS if certs listed |
+| 19.6.3 | Status filter | Select "Unmanaged" from status dropdown | Only Unmanaged certs shown | PASS if filter works |
+| 19.6.4 | Agent filter | Select agent from dropdown | Certs filtered by agent | PASS if filter works |
+| 19.6.5 | Claim button | Click Claim on Unmanaged cert | Modal opens with managed cert ID input | PASS if modal appears |
+| 19.6.6 | Claim submit | Enter cert ID, submit claim | Cert status changes to Managed, modal closes | PASS if status updates |
+| 19.6.7 | Dismiss button | Click Dismiss on Unmanaged cert | Cert status changes to Dismissed | PASS if status updates |
+| 19.6.8 | Scan history | Click "Show Scan History" | Collapsible panel shows scan records with agent, directories, counts | PASS if scan history visible |
+
+### 19.7 Network Scan Management Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.7.1 | Table loads | Navigate to Network Scans | Table with seed scan targets | PASS if targets listed |
+| 19.7.2 | New Target button | Click "+ New Target" | Create modal opens | PASS if modal visible |
+| 19.7.3 | Create target | Fill name, CIDRs, ports, submit | New target appears in table | PASS if target created |
+| 19.7.4 | Enable toggle | Click toggle on a target | Enabled state flips | PASS if toggle works |
+| 19.7.5 | Scan Now | Click Scan Now on a target | Scan triggered (check last_scan_at updates) | PASS if scan initiated |
+| 19.7.6 | Delete target | Click Delete on a target | Target removed from table | PASS if target gone |
+
+### 19.8 Other Pages
+
+| Test ID | Test | Page | Expected | Pass/Fail Criteria |
+|---------|------|------|----------|-------------------|
+| 19.8.1 | Target wizard | Targets → New Target | 3-step wizard (type → config → review) | PASS if all 3 steps work |
+| 19.8.2 | Audit filters | Audit | Time, actor, action filters work | PASS if filters change results |
+| 19.8.3 | Audit export | Audit → Export | CSV/JSON file downloads | PASS if file downloads |
+| 19.8.4 | Short-lived creds | Short-Lived | Certs with TTL < 1h, countdown timers | PASS if timers count down |
+| 19.8.5 | Agent list | Agents | OS/Arch column visible | PASS if metadata shown |
+| 19.8.6 | Agent detail | Click agent | System Information card | PASS if OS, arch, IP shown |
+| 19.8.7 | Fleet overview | Fleet Overview | OS/arch grouping charts | PASS if pie charts render |
+
+### 19.9 Cross-Cutting
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.9.1 | Sidebar nav | Click all sidebar links | All 21 pages load without errors | PASS if no broken routes |
+| 19.9.2 | Logout | Click logout | Returns to login screen | PASS if login page shown |
+| 19.9.3 | 401 redirect | Expire/remove auth token | Auto-redirect to login | PASS if login page shown |
+| 19.9.4 | Theme consistency | Check page styling | Light content area, teal sidebar, branded colors, readable text | PASS if theme consistent across all pages |
 
 ---
 
