@@ -70,7 +70,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 **Core capabilities:**
 
 - **Full lifecycle automation** — issuance, renewal, deployment, and revocation with zero human intervention. Configurable renewal policies trigger jobs automatically based on expiration thresholds.
-- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01, DNS-01, and DNS-PERSIST-01 challenges (Let's Encrypt, Sectigo, any ACME-compatible CA), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
+- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01, DNS-01, and DNS-PERSIST-01 challenges (Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, any ACME-compatible CA), External Account Binding (EAB) for CAs that require it (auto-fetched for ZeroSSL), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
 - **Agent-side key generation** — agents generate ECDSA P-256 keys locally, store them with 0600 permissions, and submit only the CSR. Private keys never touch the control plane. This is the default mode, not an opt-in feature.
 - **Certificate discovery** — agents scan filesystems for existing PEM/DER certificates and report findings for triage. The network scanner probes TLS endpoints across CIDR ranges to find certificates you didn't know existed.
 - **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
@@ -220,6 +220,8 @@ All server environment variables use the `CERTCTL_` prefix:
 | `CERTCTL_KEYGEN_MODE` | `agent` | Key generation mode: `agent` (production) or `server` (demo only) |
 | `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt staging) |
 | `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
+| `CERTCTL_ACME_EAB_KID` | — | External Account Binding Key ID (required by ZeroSSL, Google Trust Services, SSL.com) |
+| `CERTCTL_ACME_EAB_HMAC` | — | External Account Binding HMAC key (base64url-encoded) |
 | `CERTCTL_ACME_CHALLENGE_TYPE` | — | ACME challenge type: `http-01` (default), `dns-01`, or `dns-persist-01` |
 | `CERTCTL_CA_CERT_PATH` | — | Path to CA certificate for sub-CA mode |
 | `CERTCTL_CA_KEY_PATH` | — | Path to CA private key for sub-CA mode |

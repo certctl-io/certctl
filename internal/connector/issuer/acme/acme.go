@@ -6,12 +6,16 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
+	"strings"
 	"sync"
 	"time"
 
@@ -201,6 +205,33 @@ func (c *Connector) ensureClient(ctx context.Context) error {
 	acct := &acme.Account{
 		Contact: []string{"mailto:" + c.config.Email},
 	}
+
+	// Auto-fetch EAB credentials from ZeroSSL if directory URL is ZeroSSL and no EAB provided.
+	// ZeroSSL offers a public endpoint that returns EAB credentials given an email address,
+	// so users don't need to visit the ZeroSSL dashboard manually.
+	if c.config.EABKid == "" && c.config.EABHmac == "" && isZeroSSL(c.config.DirectoryURL) {
+		kid, hmac, eabErr := fetchZeroSSLEAB(ctx, c.config.Email)
+		if eabErr != nil {
+			return fmt.Errorf("failed to auto-fetch ZeroSSL EAB credentials: %w", eabErr)
+		}
+		c.config.EABKid = kid
+		c.config.EABHmac = hmac
+		c.logger.Info("auto-fetched EAB credentials from ZeroSSL", "eab_kid", kid)
+	}
+
+	// External Account Binding (required by ZeroSSL, Google Trust Services, SSL.com, etc.)
+	if c.config.EABKid != "" && c.config.EABHmac != "" {
+		hmacKey, decodeErr := base64.RawURLEncoding.DecodeString(c.config.EABHmac)
+		if decodeErr != nil {
+			return fmt.Errorf("failed to decode EAB HMAC key (expected base64url): %w", decodeErr)
+		}
+		acct.ExternalAccountBinding = &acme.ExternalAccountBinding{
+			KID: c.config.EABKid,
+			Key: hmacKey,
+		}
+		c.logger.Info("using External Account Binding for ACME registration", "eab_kid", c.config.EABKid)
+	}
+
 	_, err = c.client.Register(ctx, acct, acme.AcceptTOS)
 	if err != nil {
 		// Account may already exist, try to get it
@@ -214,6 +245,67 @@ func (c *Connector) ensureClient(ctx context.Context) error {
 	}
 
 	return nil
+}
+
+// zeroSSLEABEndpoint is the ZeroSSL API endpoint for auto-generating EAB credentials.
+// Variable (not const) to allow test overrides.
+var zeroSSLEABEndpoint = "https://api.zerossl.com/acme/eab-credentials-email"
+
+// isZeroSSL returns true if the ACME directory URL points to ZeroSSL.
+func isZeroSSL(directoryURL string) bool {
+	return strings.Contains(strings.ToLower(directoryURL), "zerossl.com")
+}
+
+// fetchZeroSSLEAB retrieves EAB credentials from ZeroSSL's public API endpoint.
+// ZeroSSL provides this so users don't need to visit the dashboard manually.
+// Returns (kid, hmac_key, error). The HMAC key is already base64url-encoded.
+func fetchZeroSSLEAB(ctx context.Context, email string) (string, string, error) {
+	if email == "" {
+		return "", "", fmt.Errorf("email is required for ZeroSSL EAB auto-fetch")
+	}
+
+	form := url.Values{"email": {email}}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, zeroSSLEABEndpoint, strings.NewReader(form.Encode()))
+	if err != nil {
+		return "", "", fmt.Errorf("create request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+
+	client := &http.Client{Timeout: 15 * time.Second}
+	resp, err := client.Do(req)
+	if err != nil {
+		return "", "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return "", "", fmt.Errorf("read response: %w", err)
+	}
+
+	if resp.StatusCode != http.StatusOK {
+		return "", "", fmt.Errorf("ZeroSSL API returned status %d: %s", resp.StatusCode, string(body))
+	}
+
+	var result struct {
+		Success  bool   `json:"success"`
+		EABKid   string `json:"eab_kid"`
+		EABHmac  string `json:"eab_hmac_key"`
+		ErrorMsg string `json:"error"`
+	}
+	if err := json.Unmarshal(body, &result); err != nil {
+		return "", "", fmt.Errorf("parse response: %w", err)
+	}
+
+	if !result.Success || result.EABKid == "" || result.EABHmac == "" {
+		errDetail := result.ErrorMsg
+		if errDetail == "" {
+			errDetail = string(body)
+		}
+		return "", "", fmt.Errorf("ZeroSSL EAB generation failed: %s", errDetail)
+	}
+
+	return result.EABKid, result.EABHmac, nil
 }
 
 // IssueCertificate submits a certificate issuance request to the ACME CA.

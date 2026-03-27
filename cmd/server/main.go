@@ -97,11 +97,14 @@ func main() {
 	localCA := local.New(localCAConfig, logger)
 	logger.Info("initialized Local CA issuer connector")
 
-	// Initialize ACME issuer connector (for Let's Encrypt, Sectigo, etc.)
+	// Initialize ACME issuer connector (for Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, etc.)
 	// Supports HTTP-01 (default), DNS-01 (for wildcards), and DNS-PERSIST-01 (standing record) challenge types.
+	// EAB (External Account Binding) required by ZeroSSL, Google Trust Services, SSL.com.
 	acmeConnector := acmeissuer.New(&acmeissuer.Config{
 		DirectoryURL:           os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
 		Email:                  os.Getenv("CERTCTL_ACME_EMAIL"),
+		EABKid:                 os.Getenv("CERTCTL_ACME_EAB_KID"),
+		EABHmac:                os.Getenv("CERTCTL_ACME_EAB_HMAC"),
 		ChallengeType:          os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
 		DNSPresentScript:       os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
 		DNSCleanUpScript:       os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),

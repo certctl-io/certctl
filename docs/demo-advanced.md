@@ -11,6 +11,7 @@ This demo goes beyond browsing pre-loaded data. You'll create a team, register a
 2. [How the pieces fit together](#how-the-pieces-fit-together)
 3. [Alternative Issuers Reference](#alternative-issuers-reference)
    - [Sub-CA Mode](#sub-ca-mode-local-ca-chained-to-enterprise-root)
+   - [ACME with ZeroSSL](#acme-with-zerossl-auto-eab)
    - [ACME with DNS-01 Challenges](#acme-with-dns-01-challenges-wildcard-certificates)
    - [ACME with DNS-PERSIST-01](#acme-with-dns-persist-01-zero-touch-renewals)
    - [step-ca (Smallstep Private CA)](#step-ca-smallstep-private-ca)
@@ -95,6 +96,27 @@ docker compose -f deploy/docker-compose.yml restart server
 ```
 
 The CA key can be RSA, ECDSA, or PKCS#8 format. The connector validates that the certificate has `IsCA=true` and `KeyUsageCertSign`.
+
+### ACME with ZeroSSL (Auto-EAB)
+
+ZeroSSL is a free ACME CA that requires External Account Binding (EAB) for account registration. certctl auto-fetches EAB credentials from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — you just need an email address:
+
+```bash
+# Minimal config — certctl auto-fetches EAB credentials from ZeroSSL
+export CERTCTL_ACME_DIRECTORY_URL="https://acme.zerossl.com/v2/DV90"
+export CERTCTL_ACME_EMAIL="ops@example.com"
+```
+
+No dashboard visit, no manual EAB credential copy-paste. certctl calls `api.zerossl.com/acme/eab-credentials-email` with your email, gets back a KID + HMAC key, and uses them for ACME account registration automatically.
+
+If you already have EAB credentials (e.g., from the ZeroSSL dashboard or for other CAs like Google Trust Services or SSL.com), you can provide them explicitly:
+
+```bash
+export CERTCTL_ACME_DIRECTORY_URL="https://acme.zerossl.com/v2/DV90"
+export CERTCTL_ACME_EMAIL="ops@example.com"
+export CERTCTL_ACME_EAB_KID="your-key-id"
+export CERTCTL_ACME_EAB_HMAC="your-base64url-hmac-key"
+```
 
 ### ACME with DNS-01 Challenges (Wildcard Certificates)
 

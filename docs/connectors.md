@@ -202,11 +202,35 @@ DNS-PERSIST-01 configuration:
 
 The present script creates a TXT record at `_validation-persist.<domain>` with the value `letsencrypt.org; accounturi=https://acme-v02.api.letsencrypt.org/acme/acct/<your-id>`. This record is permanent — no cleanup script is needed.
 
+ZeroSSL configuration (requires External Account Binding):
+```json
+{
+  "directory_url": "https://acme.zerossl.com/v2/DV90",
+  "email": "admin@example.com",
+  "eab_kid": "your-zerossl-eab-kid",
+  "eab_hmac": "your-zerossl-eab-hmac-base64url"
+}
+```
+
+ZeroSSL, Google Trust Services, and SSL.com require External Account Binding (EAB) for ACME account registration. For most CAs, get your EAB credentials from the CA's dashboard and provide them via `eab_kid` and `eab_hmac`. The HMAC key must be base64url-encoded (no padding). CAs that don't require EAB (Let's Encrypt, Buypass) ignore these fields.
+
+**ZeroSSL auto-EAB:** When the directory URL points to ZeroSSL and no EAB credentials are provided, certctl automatically fetches them from ZeroSSL's public API (`api.zerossl.com/acme/eab-credentials-email`) using your configured email address. No dashboard visit required — just set the directory URL and email, and it works. This is the same approach used by Caddy and acme.sh.
+
+Minimal ZeroSSL configuration (auto-EAB):
+```json
+{
+  "directory_url": "https://acme.zerossl.com/v2/DV90",
+  "email": "admin@example.com"
+}
+```
+
 DNS hook scripts receive these environment variables: `CERTCTL_DNS_DOMAIN` (domain being validated), `CERTCTL_DNS_FQDN` (full record name — `_acme-challenge.<domain>` for dns-01, `_validation-persist.<domain>` for dns-persist-01), `CERTCTL_DNS_VALUE` (TXT record value), `CERTCTL_DNS_TOKEN` (ACME challenge token). The present script must create the TXT record and exit 0; the cleanup script removes it (dns-01 only).
 
 Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DIRECTORY_URL` — ACME directory URL
 - `CERTCTL_ACME_EMAIL` — Contact email for account registration
+- `CERTCTL_ACME_EAB_KID` — External Account Binding Key ID (required by ZeroSSL, Google Trust Services, SSL.com)
+- `CERTCTL_ACME_EAB_HMAC` — External Account Binding HMAC key (base64url-encoded)
 - `CERTCTL_ACME_CHALLENGE_TYPE` — `http-01` (default), `dns-01`, or `dns-persist-01`
 - `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 and dns-persist-01)
 - `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only, not used by dns-persist-01)

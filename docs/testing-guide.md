@@ -1490,6 +1490,26 @@ curl -s -H "$AUTH" "$SERVER/api/v1/issuers/iss-acme-le" | jq '{id, type}'
 
 ---
 
+**Test 6.2.3 — Configure ACME with External Account Binding (ZeroSSL)**
+
+Edit `deploy/docker-compose.yml` to set EAB environment variables:
+- `CERTCTL_ACME_DIRECTORY_URL: https://acme.zerossl.com/v2/DV90`
+- `CERTCTL_ACME_EAB_KID: your-zerossl-kid`
+- `CERTCTL_ACME_EAB_HMAC: your-base64url-hmac-key`
+
+Restart and verify the issuer accepts the config:
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/issuers/iss-acme-prod" | jq '{id, type}'
+```
+
+**What:** Verifies that ACME issuers read External Account Binding credentials from environment variables.
+**Why:** ZeroSSL, Google Trust Services, and SSL.com require EAB for ACME account registration. Without EAB, account creation fails and no certificates can be issued from these CAs.
+**Expected:** HTTP 200. ACME issuer functional with EAB credentials loaded.
+**PASS if** HTTP 200 and issuer responds. **FAIL** if 500 or startup errors related to EAB.
+
+---
+
 ## Part 7: Target Connectors & Deployment
 
 **What this validates:** CRUD for deployment targets, including type-specific configuration for all 5 target types.
