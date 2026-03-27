@@ -876,14 +876,14 @@ curl -s -X POST $API/api/v1/agent-groups \
 
 ## Part 12: Interactive Approval Workflow
 
-For high-value certificates, you may want human oversight before renewal proceeds. Create a policy that requires approval:
+For high-value certificates, you may want human oversight before renewal proceeds. The demo includes 2 pre-seeded `AwaitingApproval` renewal jobs (for `auth-production` and `payments-production`). Open **Jobs** in the sidebar — you'll see the amber "Pending Approval" banner and Approve/Reject buttons immediately.
 
 ```bash
-# Check jobs that need approval
+# Check jobs that need approval (demo includes 2)
 curl -s "$API/api/v1/jobs?status=AwaitingApproval" | jq '.data[] | {id, type, certificate_id, status}'
 ```
 
-If there are jobs awaiting approval, approve or reject them:
+Approve or reject them:
 
 ```bash
 # Approve a job
@@ -1029,6 +1029,8 @@ The MCP server is perfect for:
 
 certctl discovers existing certificates two ways: **filesystem scanning** (agents scan local directories) and **network scanning** (the server probes TLS endpoints). Both feed into the same triage pipeline.
 
+**The demo comes pre-loaded with discovery data:** 9 discovered certificates (3 Unmanaged from filesystem scans, 3 Unmanaged from network scans, 2 Managed, 1 Dismissed), 3 discovery scans, and 3 network scan targets with recent scan results. Open **Discovery** in the sidebar to see the triage workflow immediately. The steps below show how to configure discovery from scratch.
+
 ### Filesystem Discovery (Agent-Side)
 
 Configure the demo agent to scan for certificates. In the Docker Compose setup, agents have a `/tmp/certs` directory (created by the seed script). Restart the agent with discovery enabled:
@@ -1049,7 +1051,7 @@ certctl-agent --agent-id a-demo-1 --key-dir /tmp/keys --discovery-dirs /tmp/cert
 
 ### Network Discovery (Server-Side)
 
-The server can also discover certificates by actively probing TLS endpoints — no agent required. Create a scan target and trigger a scan:
+The server can also discover certificates by actively probing TLS endpoints — no agent required. Network scanning is enabled by default in the Docker Compose demo (`CERTCTL_NETWORK_SCAN_ENABLED=true`), with 3 pre-configured scan targets. You can create additional targets:
 
 ```bash
 # Create a network scan target

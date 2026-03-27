@@ -123,7 +123,7 @@ func TestNetworkScanService_CreateTarget(t *testing.T) {
 	target, err := svc.CreateTarget(context.Background(), &domain.NetworkScanTarget{
 		Name:  "Test Network",
 		CIDRs: []string{"10.0.0.0/24"},
-		Ports: []int{443, 8443},
+		Ports: []int64{443, 8443},
 	})
 	if err != nil {
 		t.Fatalf("CreateTarget failed: %v", err)
@@ -221,7 +221,7 @@ func TestNetworkScanService_ListTargets(t *testing.T) {
 
 func TestExpandEndpoints(t *testing.T) {
 	svc := &NetworkScanService{}
-	endpoints := svc.expandEndpoints([]string{"192.168.1.1"}, []int{443, 8443})
+	endpoints := svc.expandEndpoints([]string{"192.168.1.1"}, []int64{443, 8443})
 	if len(endpoints) != 2 {
 		t.Errorf("expected 2 endpoints, got %d: %v", len(endpoints), endpoints)
 	}

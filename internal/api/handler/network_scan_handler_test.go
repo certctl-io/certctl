@@ -77,8 +77,8 @@ func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID strin
 func TestListNetworkScanTargets(t *testing.T) {
 	svc := &mockNetworkScanService{
 		targets: []*domain.NetworkScanTarget{
-			{ID: "nst-1", Name: "target1", CIDRs: []string{"10.0.0.0/24"}, Ports: []int{443}},
-			{ID: "nst-2", Name: "target2", CIDRs: []string{"192.168.0.0/16"}, Ports: []int{443, 8443}},
+			{ID: "nst-1", Name: "target1", CIDRs: []string{"10.0.0.0/24"}, Ports: []int64{443}},
+			{ID: "nst-2", Name: "target2", CIDRs: []string{"192.168.0.0/16"}, Ports: []int64{443, 8443}},
 		},
 	}
 	h := NewNetworkScanHandler(svc)
@@ -118,7 +118,7 @@ func TestCreateNetworkScanTarget(t *testing.T) {
 	body, _ := json.Marshal(map[string]interface{}{
 		"name":  "Production",
 		"cidrs": []string{"10.0.0.0/24"},
-		"ports": []int{443},
+		"ports": []int64{443},
 	})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/network-scan-targets", bytes.NewReader(body))

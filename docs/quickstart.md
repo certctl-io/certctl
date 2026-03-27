@@ -101,7 +101,9 @@ Explore the sidebar: Certificates, Agents, Policies, Jobs, Audit Trail, Notifica
 
 **"Can I revoke a compromised cert?"** — Click any active certificate, then "Revoke." A modal with RFC 5280 reason codes (Key Compromise, Superseded, Cessation of Operation). After revocation, CRL and OCSP are served automatically — clients stop trusting the cert immediately.
 
-**"What about certificates already in production?"** — Click "Discovered Certificates." Agents scan local filesystems for existing certs. The server probes TLS endpoints on configured CIDR ranges. Both feed into a triage workflow: claim unmanaged certs to bring them under automation, or dismiss them.
+**"What about certificates already in production?"** — Click "Discovery" in the sidebar. The demo comes pre-loaded with 9 discovered certificates — some found by agents scanning filesystems, some found by the server probing TLS endpoints on the network. You'll see Unmanaged certs waiting for triage (including an expired printer cert and an expiring switch management cert), certs already linked to managed inventory, and one that was dismissed. Claim unmanaged certs to bring them under automation, or dismiss them. Click "Network Scans" to see the 3 configured scan targets with recent scan results.
+
+**"I need to approve a renewal before it proceeds"** — Click "Jobs" in the sidebar. You'll see an amber banner: "2 jobs awaiting approval." These are renewal jobs for `auth-production` and `payments-production` that require human sign-off before proceeding. Click Approve or Reject with a reason — the decision is recorded in the audit trail.
 
 **"Show me the agent fleet"** — Click "Agents." Four agents online, one offline. Click "Fleet Overview" for OS/architecture grouping, version distribution, and per-platform listing. Agents generate ECDSA P-256 keys locally — private keys never leave your infrastructure.
 
@@ -254,9 +256,12 @@ curl -s http://localhost:8443/api/v1/crl | jq .
 
 ### Interactive approval workflow
 
-For high-value certificates where you want human oversight:
+For high-value certificates where you want human oversight. The demo includes 2 pre-seeded jobs in `AwaitingApproval` status (for `auth-production` and `payments-production`). Open **Jobs** in the sidebar and you'll see the amber "Pending Approval" banner immediately.
 
 ```bash
+# List jobs awaiting approval (demo includes 2)
+curl -s "http://localhost:8443/api/v1/jobs?status=AwaitingApproval" | jq '.data[] | {id, certificate_id, status}'
+
 # Approve a pending job
 curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/approve \
   -H "Content-Type: application/json" \
@@ -271,6 +276,8 @@ curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/reject \
 ## Certificate Discovery
 
 Find certificates already running in your infrastructure — ones you didn't issue through certctl.
+
+The demo environment comes pre-loaded with 9 discovered certificates (from agent filesystem scans and server-side network scans), 3 network scan targets, and recent scan history. Open **Discovery** and **Network Scans** in the sidebar to see the triage workflow immediately.
 
 ### Filesystem discovery (agent-based)
 
@@ -355,11 +362,15 @@ Exposes 78 MCP tools covering the REST API via stdio transport. Ask Claude: "Wha
 | Teams | 5 | Platform, Security, Payments, Frontend, Data |
 | Owners | 5 | Alice, Bob, Carol, Dave, Eve |
 | Issuers | 4 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, DigiCert (disabled) |
-| Agents | 5 | ag-web-prod, ag-web-staging, ag-lb-prod, ag-iis-prod, ag-data-prod |
+| Agents | 6 | ag-web-prod, ag-web-staging, ag-lb-prod, ag-iis-prod, ag-data-prod, server-scanner (network discovery) |
 | Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
 | Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
+| Discovered Certs | 9 | 5 Unmanaged (filesystem + network), 2 Managed (linked), 1 Dismissed, network-discovered expired printer cert |
+| Discovery Scans | 3 | Agent filesystem scans + network TLS scan |
+| Network Scan Targets | 3 | DC1 Web Servers, DC2 Application Tier, DMZ Public Endpoints |
+| Jobs (Approval) | 2 | AwaitingApproval renewal jobs for auth-prod and payments-prod |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |
-| Profiles | 3 | Default TLS, Short-Lived, High-Security |
+| Profiles | 4 | Standard TLS, Internal mTLS, Short-Lived, High Security |
 | Agent Groups | 5 | Linux agents, ARM agents, Production subnet, etc. |
 
 ## Dashboard Demo Mode

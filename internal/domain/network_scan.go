@@ -7,7 +7,7 @@ type NetworkScanTarget struct {
 	ID                 string    `json:"id"`
 	Name               string    `json:"name"`
 	CIDRs              []string  `json:"cidrs"`
-	Ports              []int     `json:"ports"`
+	Ports              []int64   `json:"ports"`
 	Enabled            bool      `json:"enabled"`
 	ScanIntervalHours  int       `json:"scan_interval_hours"`
 	TimeoutMs          int       `json:"timeout_ms"`

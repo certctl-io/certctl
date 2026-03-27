@@ -76,7 +76,7 @@ func (s *NetworkScanService) CreateTarget(ctx context.Context, target *domain.Ne
 		}
 	}
 	if len(target.Ports) == 0 {
-		target.Ports = []int{443}
+		target.Ports = []int64{443}
 	}
 	if target.ScanIntervalHours == 0 {
 		target.ScanIntervalHours = 6
@@ -276,7 +276,7 @@ func (s *NetworkScanService) scanTarget(ctx context.Context, target *domain.Netw
 }
 
 // expandEndpoints converts CIDR ranges and ports into a list of "ip:port" endpoints.
-func (s *NetworkScanService) expandEndpoints(cidrs []string, ports []int) []string {
+func (s *NetworkScanService) expandEndpoints(cidrs []string, ports []int64) []string {
 	var endpoints []string
 
 	for _, cidr := range cidrs {

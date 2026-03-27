@@ -12,8 +12,14 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ../migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/001_schema.sql
-      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/002_seed.sql
-      - ../migrations/seed_demo.sql:/docker-entrypoint-initdb.d/003_seed_demo.sql
+      - ../migrations/000002_agent_metadata.up.sql:/docker-entrypoint-initdb.d/002_agent_metadata.sql
+      - ../migrations/000003_certificate_profiles.up.sql:/docker-entrypoint-initdb.d/003_certificate_profiles.sql
+      - ../migrations/000004_agent_groups.up.sql:/docker-entrypoint-initdb.d/004_agent_groups.sql
+      - ../migrations/000005_revocation.up.sql:/docker-entrypoint-initdb.d/005_revocation.sql
+      - ../migrations/000006_discovery.up.sql:/docker-entrypoint-initdb.d/006_discovery.sql
+      - ../migrations/000007_network_discovery.up.sql:/docker-entrypoint-initdb.d/007_network_discovery.sql
+      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/010_seed.sql
+      - ../migrations/seed_demo.sql:/docker-entrypoint-initdb.d/011_seed_demo.sql
     networks:
       - certctl-network
     healthcheck:
@@ -39,6 +45,7 @@ services:
       CERTCTL_LOG_LEVEL: info
       CERTCTL_AUTH_TYPE: none
       CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
+      CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI with seeded demo targets
     ports:
       - "8443:8443"
     networks:

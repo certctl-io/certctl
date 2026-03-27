@@ -13,6 +13,9 @@ import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import { daysUntil, expiryColor, formatDate } from '../api/utils';
 
+// Convert PascalCase status like "RenewalInProgress" to "Renewal In Progress"
+const formatStatus = (s: string) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
+
 const STATUS_COLORS: Record<string, string> = {
   Active: '#10b981',
   Expiring: '#f59e0b',
@@ -149,7 +152,7 @@ export default function DashboardPage() {
                     outerRadius={90}
                     paddingAngle={2}
                     dataKey="value"
-                    label={({ name, value }) => `${name}: ${value}`}
+                    label={({ name, value }) => `${formatStatus(name || '')}: ${value}`}
                     labelLine={false}
                   >
                     {pieData.map((entry, index) => (
@@ -160,7 +163,7 @@ export default function DashboardPage() {
                   <Legend
                     verticalAlign="bottom"
                     height={36}
-                    formatter={(value: string) => <span className="text-xs text-ink-muted">{value}</span>}
+                    formatter={(value: string) => <span className="text-xs text-ink-muted">{formatStatus(value)}</span>}
                   />
                 </PieChart>
               </ResponsiveContainer>

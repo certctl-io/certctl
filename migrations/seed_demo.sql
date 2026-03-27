@@ -214,3 +214,113 @@ INSERT INTO agent_group_members (agent_group_id, agent_id, membership_type, crea
   ('ag-manual', 'ag-web-staging', 'include', NOW()),
   ('ag-manual', 'ag-iis-prod',    'exclude', NOW())
 ON CONFLICT (agent_group_id, agent_id) DO NOTHING;
+
+-- Sentinel agent for network-discovered certificates (created by server on startup, seed for demo)
+INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
+  ('server-scanner', 'Network Scanner (Server-Side)', 'certctl-server', 'online', NOW(), NOW() - INTERVAL '30 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.0.5')
+ON CONFLICT (id) DO NOTHING;
+
+-- Discovery Scans — show recent scan activity from agents
+INSERT INTO discovery_scans (id, agent_id, directories, certificates_found, certificates_new, errors_count, scan_duration_ms, started_at, completed_at) VALUES
+  ('ds-web-prod-01',    'ag-web-prod',    '{/etc/nginx/ssl,/etc/pki/tls/certs}', 4, 2, 0, 1250, NOW() - INTERVAL '3 hours', NOW() - INTERVAL '3 hours' + INTERVAL '1 second'),
+  ('ds-data-prod-01',   'ag-data-prod',   '{/etc/nginx/ssl,/opt/certs}',         3, 1, 0, 980,  NOW() - INTERVAL '2 hours', NOW() - INTERVAL '2 hours' + INTERVAL '1 second'),
+  ('ds-network-scan-01','server-scanner', '{network-scan}',                       3, 3, 0, 4500, NOW() - INTERVAL '1 hour',  NOW() - INTERVAL '1 hour' + INTERVAL '5 seconds')
+ON CONFLICT (id) DO NOTHING;
+
+-- Discovered Certificates — populate discovery triage page with realistic mix
+INSERT INTO discovered_certificates (id, fingerprint_sha256, common_name, sans, serial_number, issuer_dn, subject_dn, not_before, not_after, key_algorithm, key_size, is_ca, pem_data, source_path, source_format, agent_id, discovery_scan_id, managed_certificate_id, status, first_seen_at, last_seen_at) VALUES
+  -- Unmanaged: found on filesystem, not yet claimed
+  ('dc-unmanaged-01', 'sha256:f1a2b3c4d5e6f7a8b9c0d1e2f3a4b5c6d7e8f9a0',
+   'internal-service.example.com', ARRAY['internal-service.example.com', 'internal-svc.local'],
+   '1A:2B:3C:4D:5E:6F:00:11', 'CN=Example Internal CA,O=Example Corp',
+   'CN=internal-service.example.com,O=Example Corp', NOW() - INTERVAL '200 days', NOW() + INTERVAL '20 days',
+   'RSA', 2048, false, '', '/etc/pki/tls/certs/internal-svc.pem', 'PEM',
+   'ag-web-prod', 'ds-web-prod-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '7 days', NOW() - INTERVAL '3 hours'),
+
+  ('dc-unmanaged-02', 'sha256:a9b8c7d6e5f4a3b2c1d0e9f8a7b6c5d4e3f2a1b0',
+   'monitoring.internal.example.com', ARRAY['monitoring.internal.example.com', 'prometheus.internal.example.com'],
+   '2B:3C:4D:5E:6F:7A:00:22', 'CN=Let''s Encrypt Authority X3,O=Let''s Encrypt',
+   'CN=monitoring.internal.example.com', NOW() - INTERVAL '60 days', NOW() + INTERVAL '30 days',
+   'ECDSA', 256, false, '', '/opt/certs/monitoring.pem', 'PEM',
+   'ag-data-prod', 'ds-data-prod-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '5 days', NOW() - INTERVAL '2 hours'),
+
+  ('dc-unmanaged-03', 'sha256:1122334455667788990011223344556677889900',
+   'db-replication.example.com', ARRAY['db-replication.example.com'],
+   '3C:4D:5E:6F:7A:8B:00:33', 'CN=Example Internal CA,O=Example Corp',
+   'CN=db-replication.example.com,O=Example Corp', NOW() - INTERVAL '300 days', NOW() - INTERVAL '10 days',
+   'RSA', 4096, false, '', '/etc/pki/tls/certs/db-repl.pem', 'PEM',
+   'ag-web-prod', 'ds-web-prod-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '7 days', NOW() - INTERVAL '3 hours'),
+
+  -- Managed: already linked to managed certificates
+  ('dc-managed-01', 'sha256:ab12cd34ef56ab12cd34ef56ab12cd34ef56ab12',
+   'api.example.com', ARRAY['api.example.com', 'api-v2.example.com'],
+   '0A:1B:2C:3D:4E:5F:00:01', 'CN=CertCtl Demo CA',
+   'CN=api.example.com', NOW() - INTERVAL '15 days', NOW() + INTERVAL '75 days',
+   'ECDSA', 256, false, '', '/etc/nginx/ssl/cert.pem', 'PEM',
+   'ag-web-prod', 'ds-web-prod-01', 'mc-api-prod', 'Managed',
+   NOW() - INTERVAL '15 days', NOW() - INTERVAL '3 hours'),
+
+  ('dc-managed-02', 'sha256:cd34ef56ab12cd34ef56ab12cd34ef56ab12cd34',
+   'data.example.com', ARRAY['data.example.com', 'analytics.example.com'],
+   '0A:1B:2C:3D:4E:5F:00:06', 'CN=CertCtl Demo CA',
+   'CN=data.example.com', NOW() - INTERVAL '35 days', NOW() + INTERVAL '55 days',
+   'ECDSA', 256, false, '', '/etc/nginx/ssl/cert.pem', 'PEM',
+   'ag-data-prod', 'ds-data-prod-01', 'mc-data-prod', 'Managed',
+   NOW() - INTERVAL '35 days', NOW() - INTERVAL '2 hours'),
+
+  -- Dismissed: triaged and explicitly ignored
+  ('dc-dismissed-01', 'sha256:9988776655443322110099887766554433221100',
+   'test-selfsigned.local', ARRAY['test-selfsigned.local', 'localhost'],
+   '00:00:00:00:00:00:FF:01', 'CN=test-selfsigned.local',
+   'CN=test-selfsigned.local', NOW() - INTERVAL '365 days', NOW() + INTERVAL '365 days',
+   'RSA', 2048, false, '', '/etc/pki/tls/certs/test.pem', 'PEM',
+   'ag-web-prod', 'ds-web-prod-01', NULL, 'Dismissed',
+   NOW() - INTERVAL '7 days', NOW() - INTERVAL '3 hours'),
+
+  -- Network-discovered certs (from server-scanner sentinel agent)
+  ('dc-network-01', 'sha256:net1aabbccdd11223344556677889900aabbccdd',
+   'switch-mgmt.example.com', ARRAY['switch-mgmt.example.com'],
+   '5E:6F:7A:8B:9C:0D:00:44', 'CN=Example Network CA,O=Example Corp',
+   'CN=switch-mgmt.example.com,O=Example Corp', NOW() - INTERVAL '180 days', NOW() + INTERVAL '5 days',
+   'RSA', 2048, false, '', '10.0.1.50:443', 'TLS',
+   'server-scanner', 'ds-network-scan-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour'),
+
+  ('dc-network-02', 'sha256:net2eeff00112233445566778899aabbccddeeff',
+   'printer.example.com', ARRAY['printer.example.com'],
+   '6F:7A:8B:9C:0D:1E:00:55', 'CN=printer.example.com',
+   'CN=printer.example.com', NOW() - INTERVAL '400 days', NOW() - INTERVAL '30 days',
+   'RSA', 1024, false, '', '10.0.2.100:443', 'TLS',
+   'server-scanner', 'ds-network-scan-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour'),
+
+  ('dc-network-03', 'sha256:net3001122334455667788990011223344556677',
+   'vpn-appliance.example.com', ARRAY['vpn-appliance.example.com', '10.0.1.1'],
+   '7A:8B:9C:0D:1E:2F:00:66', 'CN=Fortinet CA,O=Fortinet',
+   'CN=vpn-appliance.example.com', NOW() - INTERVAL '90 days', NOW() + INTERVAL '275 days',
+   'RSA', 2048, false, '', '10.0.1.1:443', 'TLS',
+   'server-scanner', 'ds-network-scan-01', NULL, 'Unmanaged',
+   NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour')
+ON CONFLICT (id) DO NOTHING;
+
+-- Jobs — add AwaitingApproval jobs for approval workflow demo
+INSERT INTO jobs (id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts, last_error, scheduled_at, created_at) VALUES
+  ('job-approval-01', 'renewal', 'mc-auth-prod', NULL, 'ag-web-prod', 'AwaitingApproval', 0, 3, NULL, NOW() - INTERVAL '1 hour', NOW() - INTERVAL '1 hour'),
+  ('job-approval-02', 'renewal', 'mc-pay-prod',  NULL, 'ag-web-prod', 'AwaitingApproval', 0, 3, NULL, NOW() - INTERVAL '30 minutes', NOW() - INTERVAL '30 minutes')
+ON CONFLICT (id) DO NOTHING;
+
+-- Update network scan targets with last_scan data so GUI shows recent activity
+UPDATE network_scan_targets SET
+  last_scan_at = NOW() - INTERVAL '1 hour',
+  last_scan_duration_ms = 4500,
+  last_scan_certs_found = 3
+WHERE id = 'nst-dc1-web';
+
+UPDATE network_scan_targets SET
+  last_scan_at = NOW() - INTERVAL '2 hours',
+  last_scan_duration_ms = 8200,
+  last_scan_certs_found = 0
+WHERE id = 'nst-dc2-apps';
