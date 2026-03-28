@@ -1,0 +1,36 @@
+run:
+  timeout: 5m
+
+linters:
+  enable:
+    - errcheck
+    - govet
+    - staticcheck
+    - unused
+    - gosimple
+    - ineffassign
+    - typecheck
+    - gocritic
+    - gosec
+    - bodyclose
+    - noctx
+  disable:
+    - structcheck  # deprecated
+    - deadcode     # deprecated
+    - varcheck     # deprecated
+
+linters-settings:
+  errcheck:
+    check-type-assertions: true
+  gocritic:
+    enabled-tags:
+      - diagnostic
+      - performance
+  gosec:
+    excludes:
+      - G104  # Audit errors not checked (we have intentional fire-and-forget patterns)
+      - G304  # File inclusion via variable (needed for config-driven file paths)
+
+issues:
+  max-issues-per-linter: 50
+  max-same-issues: 5

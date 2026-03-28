@@ -31,6 +31,22 @@ jobs:
       - name: Go Vet
         run: go vet ./...
 
+      - name: Install golangci-lint
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/golangci/golangci-lint/master/install.sh | sh -s -- -b $(go env GOPATH)/bin v1.62.2
+
+      - name: Run golangci-lint
+        run: golangci-lint run ./... --timeout 5m
+
+      - name: Install govulncheck
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck
+        run: govulncheck ./...
+
+      - name: Race Detection
+        run: go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... -count=1 -timeout 300s
+
       - name: Go Test with Coverage
         run: |
           go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/mcp/... ./internal/cli/... -count=1 -cover -coverprofile=coverage.out
@@ -41,7 +57,7 @@ jobs:
           echo "=== Coverage Report ==="
           go tool cover -func=coverage.out | tail -1
 
-          # Check service layer coverage (target: 70%+)
+          # Check service layer coverage (target: 60%+)
           SERVICE_COV=$(go tool cover -func=coverage.out | grep 'internal/service' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
           echo "Service layer coverage: ${SERVICE_COV}%"
 
@@ -49,13 +65,29 @@ jobs:
           HANDLER_COV=$(go tool cover -func=coverage.out | grep 'internal/api/handler' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
           echo "Handler layer coverage: ${HANDLER_COV}%"
 
+          # Check domain layer coverage (target: 40%+)
+          DOMAIN_COV=$(go tool cover -func=coverage.out | grep 'internal/domain' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "Domain layer coverage: ${DOMAIN_COV}%"
+
+          # Check middleware layer coverage (target: 50%+)
+          MIDDLEWARE_COV=$(go tool cover -func=coverage.out | grep 'internal/api/middleware' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "Middleware layer coverage: ${MIDDLEWARE_COV}%"
+
           # Fail if thresholds not met
-          if [ "$(echo "$SERVICE_COV < 30" | bc -l)" -eq 1 ]; then
-            echo "::error::Service layer coverage ${SERVICE_COV}% is below 30% threshold"
+          if [ "$(echo "$SERVICE_COV < 60" | bc -l)" -eq 1 ]; then
+            echo "::error::Service layer coverage ${SERVICE_COV}% is below 60% threshold"
             exit 1
           fi
-          if [ "$(echo "$HANDLER_COV < 50" | bc -l)" -eq 1 ]; then
-            echo "::error::Handler layer coverage ${HANDLER_COV}% is below 50% threshold"
+          if [ "$(echo "$HANDLER_COV < 60" | bc -l)" -eq 1 ]; then
+            echo "::error::Handler layer coverage ${HANDLER_COV}% is below 60% threshold"
+            exit 1
+          fi
+          if [ "$(echo "$DOMAIN_COV < 40" | bc -l)" -eq 1 ]; then
+            echo "::error::Domain layer coverage ${DOMAIN_COV}% is below 40% threshold"
+            exit 1
+          fi
+          if [ "$(echo "$MIDDLEWARE_COV < 50" | bc -l)" -eq 1 ]; then
+            echo "::error::Middleware layer coverage ${MIDDLEWARE_COV}% is below 50% threshold"
             exit 1
           fi
           echo "Coverage thresholds passed!"
