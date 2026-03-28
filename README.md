@@ -39,23 +39,6 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
 
-## Contents
-
-- [Why certctl Exists](#why-certctl-exists)
-- [What It Does](#what-it-does)
-- [Screenshots](#screenshots)
-- [Quick Start](#quick-start)
-- [Architecture](#architecture)
-- [Configuration](#configuration)
-- [MCP Server](#mcp-server-ai-integration)
-- [CLI](#cli)
-- [API Overview](#api-overview)
-- [Integrations](#supported-integrations)
-- [Development](#development)
-- [Security](#security)
-- [Roadmap](#roadmap)
-- [License](#license)
-
 ## Why certctl Exists
 
 Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
@@ -78,21 +61,7 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **Approval workflows** — require human sign-off on renewals before deployment
 - **Background scheduler** — watches expiration dates and triggers renewals automatically, handling constant rotation at 47-day lifespans without human involvement
 
-**Core capabilities:**
-
-- **Full lifecycle automation** — issuance, renewal, deployment, and revocation with zero human intervention. Configurable renewal policies trigger jobs automatically based on expiration thresholds.
-- **CA-agnostic issuer connectors** — Local CA (self-signed + sub-CA for enterprise root chains), ACME v2 with HTTP-01, DNS-01, and DNS-PERSIST-01 challenges (Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, any ACME-compatible CA), External Account Binding (EAB) for CAs that require it (auto-fetched for ZeroSSL), Smallstep step-ca (native /sign API), and OpenSSL/Custom CA (delegate to any shell script). Pluggable interface — add your own CA in one file.
-- **Agent-side key generation** — agents generate ECDSA P-256 keys locally, store them with 0600 permissions, and submit only the CSR. Private keys never touch the control plane. This is the default mode, not an opt-in feature.
-- **Certificate discovery** — agents scan filesystems for existing PEM/DER certificates and report findings for triage. The network scanner probes TLS endpoints across CIDR ranges to find certificates you didn't know existed.
-- **Revocation infrastructure** — RFC 5280 revocation with all standard reason codes, DER-encoded X.509 CRL per issuer, embedded OCSP responder, and short-lived certificate exemption (certs under 1 hour skip CRL/OCSP).
-- **Policy engine** — 5 rule types with violation tracking and severity levels. Certificate profiles enforce allowed key types, maximum TTL, and crypto constraints at enrollment time.
-- **Immutable audit trail** — every action recorded to an append-only log. Every API call recorded with method, path, actor, SHA-256 body hash, response status, and latency. No update or delete on audit records.
-- **Operational dashboard** — Full React GUI with certificate inventory, bulk operations (multi-select renew/revoke/reassign), deployment timeline visualization, inline policy editing, agent fleet overview, expiration heatmaps, real-time short-lived credential tracking, discovery triage workflow, network scan management, and interactive approval/rejection flow.
-- **Observability** — JSON and Prometheus metrics endpoints, 5 stats API endpoints for dashboards, structured slog logging with request ID propagation. Compatible with Prometheus, Grafana Agent, Datadog Agent, and Victoria Metrics.
-- **Notifications** — threshold-based alerting with deduplication. Routes to email, webhooks, Slack, Microsoft Teams, PagerDuty, and OpsGenie.
-- **EST enrollment (RFC 7030)** — built-in Enrollment over Secure Transport server for device certificate enrollment. Supports WiFi/802.1X, MDM, and IoT use cases. PKCS#7 certs-only wire format, accepts PEM or base64-encoded DER CSRs, configurable issuer and profile binding.
-- **Multi-purpose certificates** — certificate profiles support arbitrary EKU (Extended Key Usage) constraints. TLS (serverAuth/clientAuth) today, with S/MIME (emailProtection) and code signing support coming in v2.0.2.
-- **AI and CLI access** — MCP server exposes all 78 API operations as tools for Claude, Cursor, and any MCP-compatible client. CLI tool with 12 subcommands for terminal workflows and scripting.
+For the full capability breakdown — issuer connectors, revocation infrastructure, policy engine, observability, EST enrollment, and more — see the [Feature Inventory](docs/features.md).
 
 ### Screenshots
 
@@ -188,31 +157,7 @@ export CERTCTL_AGENT_ID=agent-local-01
 - **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
 - **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
 
-### Database Schema
-
-| Table | Purpose |
-|-------|---------|
-| `managed_certificates` | Certificate records with metadata, status, expiry, tags |
-| `certificate_versions` | Historical versions with PEM chains and CSRs |
-| `renewal_policies` | Renewal window, auto-renew settings, retry config, alert thresholds |
-| `issuers` | CA configurations (Local CA, ACME, etc.) |
-| `deployment_targets` | Target systems (NGINX, F5, IIS) with agent assignments |
-| `agents` | Registered agents with heartbeat tracking, OS/arch/IP metadata |
-| `jobs` | Issuance, renewal, deployment, and validation jobs |
-| `teams` | Organizational groups for certificate ownership |
-| `owners` | Individual owners with email for notifications |
-| `policy_rules` | Enforcement rules (allowed issuers, environments, metadata) |
-| `policy_violations` | Flagged non-compliance with severity levels |
-| `audit_events` | Immutable action log (append-only, no update/delete) |
-| `notification_events` | Email and webhook notification records |
-| `certificate_target_mappings` | Many-to-many cert ↔ target relationships |
-| `certificate_profiles` | Named enrollment profiles with allowed key types, max TTL, crypto constraints |
-| `agent_groups` | Dynamic device grouping by OS, architecture, IP CIDR, version |
-| `agent_group_members` | Manual include/exclude membership for agent groups |
-| `certificate_revocations` | Revocation records with RFC 5280 reason codes, serial numbers, issuer notification status |
-| `discovered_certificates` | Filesystem and network-discovered certificates with fingerprint deduplication |
-| `discovery_scans` | Discovery scan history with timestamps and agent attribution |
-| `network_scan_targets` | Network scan target definitions with CIDRs, ports, schedule, and scan metrics |
+PostgreSQL 16 with 21 tables covering certificates, versions, policies, issuers, targets, agents, jobs, teams, owners, profiles, agent groups, revocations, discovery, network scans, and audit events. See the [Architecture Guide](docs/architecture.md) for the full schema.
 
 ## Configuration
 

@@ -115,26 +115,6 @@ If your organization has the budget for Venafi or Keyfactor, they're comprehensi
 
 certctl targets the organizations that need 60% of those capabilities at 1% of the cost. Self-hosted, no per-certificate pricing, no vendor lock-in. The trade-off: no SSO/RBAC (yet — coming in certctl Pro), no F5/IIS target connectors (yet), no SLA-backed support.
 
-## Feature Summary
-
-What ships free in certctl V2 (community edition):
-
-- **Issuance & renewal**: ACME (HTTP-01, DNS-01, DNS-PERSIST-01, EAB), step-ca, Local CA (self-signed or sub-CA), OpenSSL/custom scripts
-- **EST enrollment**: RFC 7030 device certificate enrollment for WiFi, MDM, IoT
-- **Deployment targets**: NGINX, Apache httpd, HAProxy (Traefik and Caddy coming in v2.1)
-- **Agent architecture**: Pull-based, agent-side ECDSA P-256 key generation, private keys never leave the agent
-- **Post-deployment verification** *(coming v2.0.6)*: TLS fingerprint matching confirms the target is serving the correct certificate
-- **Network discovery**: Active TLS scanning of CIDR ranges finds unmanaged certificates
-- **Filesystem discovery**: Agent-side directory scanning finds existing PEM/DER certificates
-- **Policy engine**: 5 rule types, violation tracking, severity levels
-- **Audit trail**: Immutable, append-only, records every API call with method, path, actor, body hash, status, latency
-- **Revocation**: Full RFC 5280 reason codes, DER-encoded CRL (CA-signed, 24h validity), embedded OCSP responder
-- **Observability**: Dashboard charts, Prometheus metrics, JSON metrics, structured logging
-- **Notifications**: Slack, Microsoft Teams, PagerDuty, OpsGenie, email, webhook
-- **API**: 95+ REST endpoints, OpenAPI 3.1 spec, cursor pagination, sparse fields, sort/filter
-- **MCP server**: 78 tools for AI-assisted certificate management (Claude, Cursor, etc.)
-- **CLI**: 10 subcommands with JSON/table output, bulk PEM import
-
 ## Getting Started
 
 ```bash
