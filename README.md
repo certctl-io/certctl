@@ -39,6 +39,8 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
 
+> **Next release:** v2.1.0 will be tagged after the full V2 feature suite passes manual QA across all 34 sections of the [testing guide](docs/testing-guide.md). Automated CI (1,471 Go tests + 193 frontend tests) gates every commit; the manual playbook covers integration, deployment, and UX verification that unit tests can't reach.
+
 ## Why certctl Exists
 
 Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.

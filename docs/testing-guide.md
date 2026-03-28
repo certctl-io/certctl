@@ -5071,7 +5071,7 @@ openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
 
 ## Release Sign-Off
 
-All 34 parts must pass before tagging v2.0.7.
+All 34 parts must pass before tagging v2.1.0.
 
 | Section | Pass? | Tester | Date | Notes |
 |---------|-------|--------|------|-------|
