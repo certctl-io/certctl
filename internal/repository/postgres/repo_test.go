@@ -1188,10 +1188,11 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 	}
 
 	// ListDiscovered
-	_, total, err := repo.ListDiscovered(ctx, &repository.DiscoveryFilter{Page: 1, PerPage: 10})
+	certs, total, err := repo.ListDiscovered(ctx, &repository.DiscoveryFilter{Page: 1, PerPage: 10})
 	if err != nil {
 		t.Fatalf("ListDiscovered failed: %v", err)
 	}
+	_ = certs // used in subsequent calls
 	if total != 1 {
 		t.Errorf("total = %d, want 1", total)
 	}
