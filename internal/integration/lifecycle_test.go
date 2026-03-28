@@ -81,6 +81,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	healthHandler := handler.NewHealthHandler("none")
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
+	verificationHandler := handler.NewVerificationHandler(&mockVerificationService{})
 
 	// EST handler — uses real Local CA issuer via ESTService
 	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
@@ -106,6 +107,7 @@ func TestCertificateLifecycle(t *testing.T) {
 		healthHandler,
 		discoveryHandler,
 		networkScanHandler,
+		verificationHandler,
 	)
 	r.RegisterESTHandlers(estHandler)
 
@@ -1207,4 +1209,15 @@ func (m *mockNetworkScanService) DeleteTarget(ctx context.Context, id string) er
 
 func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID string) (*domain.DiscoveryScan, error) {
 	return nil, nil
+}
+
+// mockVerificationService implements handler.VerificationService for integration tests.
+type mockVerificationService struct{}
+
+func (m *mockVerificationService) RecordVerificationResult(ctx interface{}, result *domain.VerificationResult) error {
+	return nil
+}
+
+func (m *mockVerificationService) GetVerificationResult(ctx interface{}, jobID string) (*domain.VerificationResult, error) {
+	return nil, fmt.Errorf("not found")
 }

@@ -253,6 +253,8 @@ func main() {
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
 	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
 	networkScanHandler := handler.NewNetworkScanHandler(networkScanService)
+	verificationService := service.NewVerificationService(jobRepo, auditService, logger)
+	verificationHandler := handler.NewVerificationHandler(verificationService)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -305,6 +307,7 @@ func main() {
 		healthHandler,
 		discoveryHandler,
 		networkScanHandler,
+		verificationHandler,
 	)
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

@@ -75,9 +75,11 @@ const (
 type TargetType string
 
 const (
-	TargetTypeNGINX   TargetType = "NGINX"
-	TargetTypeApache  TargetType = "Apache"
-	TargetTypeHAProxy TargetType = "HAProxy"
-	TargetTypeF5      TargetType = "F5"
-	TargetTypeIIS     TargetType = "IIS"
+	TargetTypeNGINX    TargetType = "NGINX"
+	TargetTypeApache   TargetType = "Apache"
+	TargetTypeHAProxy  TargetType = "HAProxy"
+	TargetTypeF5       TargetType = "F5"
+	TargetTypeIIS      TargetType = "IIS"
+	TargetTypeTraefik  TargetType = "Traefik"
+	TargetTypeCaddy    TargetType = "Caddy"
 )

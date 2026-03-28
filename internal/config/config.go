@@ -23,6 +23,7 @@ type Config struct {
 	Notifiers    NotifierConfig
 	NetworkScan  NetworkScanConfig
 	EST          ESTConfig
+	Verification VerificationConfig
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -95,6 +96,13 @@ type ESTConfig struct {
 type NetworkScanConfig struct {
 	Enabled      bool          // Enable network scanning (default false)
 	ScanInterval time.Duration // How often to run network scans (default 6h)
+}
+
+// VerificationConfig controls post-deployment TLS verification behavior.
+type VerificationConfig struct {
+	Enabled bool          // Enable verification (default true)
+	Timeout time.Duration // Timeout for TLS probe (default 10s)
+	Delay   time.Duration // Wait before verification after deployment (default 2s)
 }
 
 // ServerConfig contains HTTP server configuration.
@@ -203,6 +211,11 @@ func Load() (*Config, error) {
 			Enabled:   getEnvBool("CERTCTL_EST_ENABLED", false),
 			IssuerID:  getEnv("CERTCTL_EST_ISSUER_ID", "iss-local"),
 			ProfileID: getEnv("CERTCTL_EST_PROFILE_ID", ""),
+		},
+		Verification: VerificationConfig{
+			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
+			Timeout: getEnvDuration("CERTCTL_VERIFY_TIMEOUT", 10*time.Second),
+			Delay:   getEnvDuration("CERTCTL_VERIFY_DELAY", 2*time.Second),
 		},
 	}
 

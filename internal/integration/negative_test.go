@@ -74,6 +74,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	healthHandler := handler.NewHealthHandler("none")
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
+	verificationHandler := handler.NewVerificationHandler(&mockVerificationService{})
 
 	// EST handler — uses real Local CA issuer via ESTService
 	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
@@ -98,6 +99,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		healthHandler,
 		discoveryHandler,
 		networkScanHandler,
+		verificationHandler,
 	)
 	r.RegisterESTHandlers(estHandler)
 

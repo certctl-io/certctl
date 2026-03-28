@@ -28,10 +28,12 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/target"
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
+	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/nginx"
+	"github.com/shankar0123/certctl/internal/connector/target/traefik"
 )
 
 // AgentConfig represents the agent-side configuration.
@@ -508,6 +510,16 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 			"target_type", job.TargetType,
 			"success", result.Success,
 			"message", result.Message)
+
+		// If verification is enabled, verify the deployment by probing the live TLS endpoint
+		targetHost, targetPort, err := extractTargetHostAndPort(job.TargetConfig)
+		if err != nil {
+			a.logger.Warn("could not extract target host/port for verification",
+				"job_id", job.ID,
+				"error", err)
+		} else {
+			a.verifyAndReportDeployment(ctx, job, targetHost, targetPort, certOnly)
+		}
 	} else {
 		a.logger.Info("no target type specified, skipping connector invocation",
 			"job_id", job.ID)
@@ -569,6 +581,24 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return iis.New(&cfg, a.logger), nil
+
+	case "Traefik":
+		var cfg traefik.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Traefik config: %w", err)
+			}
+		}
+		return traefik.New(&cfg, a.logger), nil
+
+	case "Caddy":
+		var cfg caddy.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Caddy config: %w", err)
+			}
+		}
+		return caddy.New(&cfg, a.logger), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

@@ -39,11 +39,11 @@ certctl works with any certificate authority, not just ACME providers:
 
 Every issuer connector implements the same interface. Switching CAs or running multiple CAs in parallel requires zero code changes — just configuration.
 
-### 3. Post-Deployment Verification (coming in v2.0.6)
+### 3. Post-Deployment Verification
 
-Every other tool in this space stops at "the deployment command succeeded." certctl is adding a step nobody else has: after deploying a certificate to a target, the agent connects back to the target's TLS endpoint and verifies the served certificate matches what was deployed, using SHA-256 fingerprint comparison.
+Every other tool in this space stops at "the deployment command succeeded." certctl goes further: after deploying a certificate to a target, the agent connects back to the target's TLS endpoint and verifies the served certificate matches what was deployed, using SHA-256 fingerprint comparison.
 
-A reload command can exit 0 while the certificate doesn't take effect — wrong virtual host, stale cache, config that validates but doesn't apply. certctl will catch this.
+A reload command can exit 0 while the certificate doesn't take effect — wrong virtual host, stale cache, config that validates but doesn't apply. certctl catches this.
 
 ## How certctl Compares
 

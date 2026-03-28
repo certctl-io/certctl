@@ -62,6 +62,7 @@ func (r *Router) RegisterHandlers(
 	health handler.HealthHandler,
 	discovery handler.DiscoveryHandler,
 	networkScan handler.NetworkScanHandler,
+	verification handler.VerificationHandler,
 ) {
 	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
@@ -207,6 +208,10 @@ func (r *Router) RegisterHandlers(
 	r.Register("PUT /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.UpdateNetworkScanTarget))
 	r.Register("DELETE /api/v1/network-scan-targets/{id}", http.HandlerFunc(networkScan.DeleteNetworkScanTarget))
 	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(networkScan.TriggerNetworkScan))
+
+	// Verification routes: /api/v1/jobs/{id}/verify and /api/v1/jobs/{id}/verification
+	r.Register("POST /api/v1/jobs/{id}/verify", http.HandlerFunc(verification.VerifyDeployment))
+	r.Register("GET /api/v1/jobs/{id}/verification", http.HandlerFunc(verification.GetVerificationStatus))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.

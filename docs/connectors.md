@@ -20,6 +20,8 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: NGINX](#built-in-nginx)
    - [Built-in: Apache httpd](#built-in-apache-httpd)
    - [Built-in: HAProxy](#built-in-haproxy)
+   - [Built-in: Traefik](#built-in-traefik)
+   - [Built-in: Caddy](#built-in-caddy)
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
    - [IIS (Interface Only, Dual-Mode)](#iis-interface-only-dual-mode)
 4. [Notifier Connector](#notifier-connector)
@@ -50,7 +52,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
@@ -500,6 +502,46 @@ Configuration:
 The combined PEM is built in this order: server certificate, intermediate/chain certificates, private key. The `validate_command` is optional — if omitted, the connector skips config validation and goes straight to reload.
 
 Location: `internal/connector/target/haproxy/haproxy.go`
+
+### Built-in: Traefik
+
+The Traefik connector uses Traefik's file provider — it writes certificate and key files to a watched directory, and Traefik automatically picks up the changes without any explicit reload command. This is the simplest deployment model: write the files, and Traefik does the rest.
+
+Configuration:
+```json
+{
+  "cert_dir": "/etc/traefik/certs",
+  "cert_file": "site.crt",
+  "key_file": "site.key"
+}
+```
+
+The `cert_dir` is the directory Traefik is configured to watch via its file provider (e.g., `providers.file.directory` in Traefik's static config). The connector writes `cert_file` and `key_file` into this directory with appropriate permissions. Traefik's file watcher detects the change and reloads the TLS configuration automatically.
+
+Location: `internal/connector/target/traefik/traefik.go`
+
+### Built-in: Caddy
+
+The Caddy connector supports two deployment modes — choose based on your Caddy setup:
+
+**API mode (recommended):** Posts the certificate directly to Caddy's admin API (`POST /load` or certificate-specific endpoints) for zero-downtime hot reload. Requires Caddy's admin API to be enabled and accessible from the agent.
+
+**File mode (fallback):** Writes cert and key files to disk, relying on Caddy's built-in file watcher or a manual reload. Use this when the admin API isn't available or when Caddy is configured to read certificates from disk.
+
+Configuration:
+```json
+{
+  "mode": "api",
+  "admin_api": "http://localhost:2019",
+  "cert_dir": "/etc/caddy/certs",
+  "cert_file": "site.crt",
+  "key_file": "site.key"
+}
+```
+
+When `mode` is `"api"`, the connector posts the certificate to the admin API endpoint. When `mode` is `"file"`, it writes files to `cert_dir` (same pattern as Traefik). The `admin_api` field is ignored in file mode.
+
+Location: `internal/connector/target/caddy/caddy.go`
 
 ### F5 BIG-IP (Interface Only)
 

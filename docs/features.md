@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **95 endpoints** across 20 resource domains under `/api/v1/` + `/.well-known/est/`
+- **97 endpoints** across 21 resource domains under `/api/v1/` + `/.well-known/est/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -94,6 +94,7 @@ curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z
 | **Notifications** | 3 | List, get, mark as read |
 | **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
 | **Metrics** | 2 | JSON metrics (gauges, counters, uptime), Prometheus exposition format |
+| **Verification** | 2 | Submit verification result, get verification status |
 | **EST (RFC 7030)** | 4 | CA certs (PKCS#7), simple enrollment, re-enrollment, CSR attributes |
 | **Health** | 4 | Health check, readiness check, auth info, auth check |
 
@@ -143,6 +144,32 @@ curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod/deploy 
 # Check deployment job status
 curl -H "$AUTH" "$SERVER/api/v1/certificates/mc-api-prod/deployments" | jq '.data[] | {id, name, type}'
 ```
+
+### Post-Deployment TLS Verification (M25)
+
+After deploying a certificate, the agent connects back to the target's live TLS endpoint and verifies the served certificate matches what was deployed — using SHA-256 fingerprint comparison. This catches failures that deployment commands can't: wrong virtual host, stale cache, config that validates but doesn't apply.
+
+```bash
+# Agent submits verification result after probing the live endpoint
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/j-deploy-123/verify -d '{
+  "target_id": "tgt-nginx-prod",
+  "expected_fingerprint": "sha256:a1b2c3...",
+  "actual_fingerprint": "sha256:a1b2c3...",
+  "verified": true
+}'
+
+# Check verification status for a job
+curl -H "$AUTH" $SERVER/api/v1/jobs/j-deploy-123/verification | jq .
+```
+
+| Feature | Details |
+|---------|---------|
+| **Verification Method** | `crypto/tls.DialWithDialer` with `InsecureSkipVerify=true` to handle self-signed and internal CA certs |
+| **Fingerprint Comparison** | SHA-256 of raw certificate DER bytes |
+| **Best-Effort** | Verification failures are recorded but don't block or rollback deployments |
+| **Job Fields** | `verification_status` (pending/success/failed/skipped), `verified_at`, `verification_fingerprint`, `verification_error` |
+| **Audit Trail** | `job_verification_success` and `job_verification_failed` events recorded |
+| **Configuration** | `CERTCTL_VERIFY_DEPLOYMENT` (enable/disable), `CERTCTL_VERIFY_TIMEOUT` (TLS dial timeout), `CERTCTL_VERIFY_DELAY` (wait after deploy before probing) |
 
 ---
 
@@ -311,7 +338,7 @@ curl -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations"
 
 ---
 
-## Target Connectors (3 Implemented + 2 Stubs)
+## Target Connectors (5 Implemented + 2 Stubs)
 
 ### NGINX
 - **Deployment** — Separate cert, chain, and key files
@@ -333,6 +360,19 @@ curl -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations"
 - **Reload** — Process signal or socket-based reload (configurable)
 - **Target Config** — Combined PEM path, optional reload command
 - **Status** — Fully implemented (M10)
+
+### Traefik
+- **Deployment** — File provider: writes cert and key to Traefik's watched certificate directory
+- **Auto-Reload** — Traefik's file provider watches the directory for changes; no explicit reload needed
+- **Target Config** — Certificate directory, cert filename, key filename
+- **Status** — Fully implemented (M26)
+
+### Caddy
+- **Dual-Mode Deployment** — Admin API (hot-reload via `POST /load`) or file-based (write cert+key, Caddy watches)
+- **API Mode** — Posts certificate to Caddy's admin API endpoint for zero-downtime reload
+- **File Mode** — Writes cert and key files to configured directory (fallback when admin API is unavailable)
+- **Target Config** — Admin API URL, certificate directory, cert filename, key filename, mode (api/file)
+- **Status** — Fully implemented (M26)
 
 ### F5 BIG-IP (Stub)
 - **Protocol** — iControl REST API via proxy agent
@@ -480,7 +520,7 @@ curl -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-linux-dc1/members" | jq '.items[
 ### Agent Capabilities
 Agents report to `/api/v1/agents/{id}/work` with supported target types and issuers.
 
-- **Target Deployment** — NGINX, Apache httpd, HAProxy, F5 BIG-IP (proxy), IIS (proxy)
+- **Target Deployment** — NGINX, Apache httpd, HAProxy, Traefik, Caddy, F5 BIG-IP (proxy), IIS (proxy)
 - **Key Management** — ECDSA P-256 keygen, key storage at `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`), 0600 file permissions
 - **CSR Submission** — `POST /api/v1/agents/{id}/csr` for AwaitingCSR jobs
 
@@ -798,7 +838,8 @@ curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/j-abc123/approve -d '{"reas
 5. **CSR received** → Server signs; Job transitioned to `Running`
 6. **Deployment scheduled** → New Deployment job created in `Pending`
 7. **Agent deploys** → Deployment job → `Running` → `Completed`
-8. **Status reported** → `POST /api/v1/agents/{id}/jobs/{job_id}/status`
+8. **Post-deployment verification** → Agent probes live TLS endpoint, compares SHA-256 fingerprint
+9. **Status reported** → `POST /api/v1/agents/{id}/jobs/{job_id}/status`
 
 ### Approval Flow (Interactive)
 1. **Renewal job created** in `AwaitingApproval` state (if policy requires)
@@ -867,7 +908,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Save/Cancel** — API mutations with optimistic updates via TanStack Query
 
 #### Target Configuration Wizard
-- **Step 1: Select Type** — Radio or dropdown (NGINX, Apache, HAProxy, F5, IIS)
+- **Step 1: Select Type** — Radio or dropdown (NGINX, Apache, HAProxy, Traefik, Caddy, F5, IIS)
 - **Step 2: Configure** — Type-specific fields (cert path, chain path, key path, etc.)
 - **Step 3: Review** — Summary of config; confirm create
 - **Validation** — Real-time field validation; show errors; disable Create if invalid
@@ -958,7 +999,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 
 ### OpenAPI 3.1 Specification
 - **File** — `api/openapi.yaml`
-- **Scope** — 97 operations (95 API + /health + /ready), all request/response schemas, enums, pagination
+- **Scope** — 99 operations (97 API + /health + /ready), all request/response schemas, enums, pagination
 - **Schemas** — Complete domain models with examples
 - **Enums** — Job types, states, policy rule types, notification types
 - **Pagination** — Standard envelope (data, total, page, per_page)

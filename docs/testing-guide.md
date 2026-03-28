@@ -31,6 +31,8 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 24: Documentation Verification](#part-24-documentation-verification)
 - [Part 25: Regression Tests](#part-25-regression-tests)
 - [Part 26: EST Server (RFC 7030)](#part-26-est-server-rfc-7030)
+- [Part 27: Post-Deployment TLS Verification](#part-27-post-deployment-tls-verification)
+- [Part 28: Traefik & Caddy Target Connectors](#part-28-traefik--caddy-target-connectors)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -4195,9 +4197,179 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 
 ---
 
+## Part 27: Post-Deployment TLS Verification
+
+### Why test this?
+
+Post-deployment verification is the final confidence check: after a certificate is deployed to a target, the agent probes the live TLS endpoint and confirms the served certificate matches what was deployed. This catches silent failures where a reload command exits 0 but the certificate doesn't take effect.
+
+### 27.1: Submit Verification Result (Success)
+
+```bash
+# Create a deployment job first (or use an existing completed deployment job ID)
+JOB_ID="j-deploy-001"
+
+# Submit a successful verification result
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "target_id": "tgt-nginx-prod",
+  "expected_fingerprint": "sha256:abc123def456",
+  "actual_fingerprint": "sha256:abc123def456",
+  "verified": true
+}'
+```
+
+**Expected:** 200 OK with `{"job_id": "j-deploy-001", "verified": true, "verified_at": "..."}`.
+**PASS if** response contains `verified: true` and a valid `verified_at` timestamp.
+
+### 27.2: Submit Verification Result (Failure — Fingerprint Mismatch)
+
+```bash
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "target_id": "tgt-nginx-prod",
+  "expected_fingerprint": "sha256:abc123def456",
+  "actual_fingerprint": "sha256:zzz999different",
+  "verified": false,
+  "error": "fingerprint mismatch"
+}'
+```
+
+**Expected:** 200 OK with `verified: false`.
+**PASS if** verification failure recorded without error status code (verification is best-effort).
+
+### 27.3: Get Verification Status
+
+```bash
+curl -H "$AUTH" $SERVER/api/v1/jobs/$JOB_ID/verification | jq .
+```
+
+**Expected:** Returns the verification result previously submitted.
+**PASS if** response includes `job_id`, `verified`, `verified_at`, and `actual_fingerprint`.
+
+### 27.4: Missing Required Fields
+
+```bash
+# Missing target_id
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "expected_fingerprint": "sha256:abc",
+  "actual_fingerprint": "sha256:abc",
+  "verified": true
+}'
+```
+
+**Expected:** 400 Bad Request with message about missing `target_id`.
+**PASS if** status code is 400.
+
+### 27.5: Audit Trail
+
+```bash
+curl -H "$AUTH" "$SERVER/api/v1/audit?action=job_verification_success" | jq '.data[0]'
+```
+
+**Expected:** Audit event recorded with verification details (job_id, target_id, fingerprints).
+**PASS if** audit event exists with expected action and details.
+
+### 27.6: Database Schema Verification
+
+```bash
+docker compose exec postgres psql -U certctl -d certctl -c \
+  "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='jobs' AND column_name LIKE 'verification%';"
+```
+
+**Expected:** Four columns: `verification_status`, `verified_at`, `verification_fingerprint`, `verification_error`.
+**PASS if** all four columns exist with correct types.
+
+---
+
+## Part 28: Traefik & Caddy Target Connectors
+
+### Why test this?
+
+Traefik and Caddy are increasingly popular reverse proxies. Testing ensures cert deployment works with their specific file-watching and admin API patterns.
+
+### 28.1: Traefik File Provider Deployment
+
+**Setup:** Configure a target with type `Traefik` pointing to a test directory.
+
+```bash
+# Create a Traefik target
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Traefik Test",
+  "type": "Traefik",
+  "agent_id": "a-test-agent",
+  "config": {
+    "cert_dir": "/tmp/traefik-certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created with target details.
+**PASS if** target created with type `Traefik` and config fields preserved.
+
+### 28.2: Caddy API Mode Deployment
+
+```bash
+# Create a Caddy target in API mode
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Caddy API Test",
+  "type": "Caddy",
+  "agent_id": "a-test-agent",
+  "config": {
+    "mode": "api",
+    "admin_api": "http://localhost:2019",
+    "cert_dir": "/etc/caddy/certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created.
+**PASS if** target created with mode `api` and `admin_api` URL preserved.
+
+### 28.3: Caddy File Mode Deployment
+
+```bash
+# Create a Caddy target in file mode
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Caddy File Test",
+  "type": "Caddy",
+  "agent_id": "a-test-agent",
+  "config": {
+    "mode": "file",
+    "cert_dir": "/etc/caddy/certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created.
+**PASS if** target created with mode `file`.
+
+### 28.4: Agent Connector Dispatch
+
+Verify the agent binary recognizes Traefik and Caddy target types from the work endpoint response. This requires a running agent with deployment jobs assigned to Traefik/Caddy targets.
+
+**Expected:** Agent logs show connector instantiation for the target type (e.g., "deploying to Traefik target" or "deploying to Caddy target").
+**PASS if** agent does not error with "unknown target type" for Traefik or Caddy.
+
+### 28.5: Connector Unit Tests
+
+```bash
+go test ./internal/connector/target/traefik/... -v
+go test ./internal/connector/target/caddy/... -v
+```
+
+**Expected:** All tests pass.
+**PASS if** exit code 0 for both test suites.
+
+---
+
 ## Release Sign-Off
 
-All 26 parts must pass before tagging v2.0.1.
+All 28 parts must pass before tagging v2.0.7.
 
 | Section | Pass? | Tester | Date | Notes |
 |---------|-------|--------|------|-------|
@@ -4227,6 +4399,8 @@ All 26 parts must pass before tagging v2.0.1.
 | Part 24: Documentation Verification | ☐ | | | |
 | Part 25: Regression Tests | ☐ | | | |
 | Part 26: EST Server (RFC 7030) | ☐ | | | |
+| Part 27: Post-Deployment TLS Verification | ☐ | | | |
+| Part 28: Traefik & Caddy Target Connectors | ☐ | | | |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 
