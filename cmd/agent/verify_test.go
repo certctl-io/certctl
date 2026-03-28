@@ -1,9 +1,7 @@
 package main
 
 import (
-	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -368,34 +366,35 @@ func TestVerifyDeployment_FingerprintComparison(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Extract host and port from server URL
-	listener := server.Listener.(*tls.Listener)
-	if listener == nil {
-		t.Skip("unable to get TLS listener")
+	// Get the server's TLS certificate from TLS config
+	if len(server.TLS.Certificates) == 0 {
+		t.Skip("no TLS certificates configured on test server")
 	}
 
-	// Get cert from server and use it for testing
-	serverCert := server.Certificate
-	if serverCert == nil {
-		t.Skip("unable to get server certificate")
+	// Parse the leaf certificate from the DER bytes
+	leafDER := server.TLS.Certificates[0].Certificate[0]
+	leafCert, err := x509.ParseCertificate(leafDER)
+	if err != nil {
+		t.Fatalf("failed to parse test server certificate: %v", err)
 	}
 
 	certPEM := string(pem.EncodeToMemory(&pem.Block{
 		Type:  "CERTIFICATE",
-		Bytes: serverCert.Raw,
+		Bytes: leafCert.Raw,
 	}))
 
-	// Parse the server URL to get host/port
-	parts := bytes.Split([]byte(server.URL), []byte("://"))
-	if len(parts) != 2 {
-		t.Skip("unable to parse server URL")
+	// Get host and port from the listener address
+	addr := server.Listener.Addr().String()
+	host, portStr, err := net.SplitHostPort(addr)
+	if err != nil {
+		t.Fatalf("failed to parse server address: %v", err)
 	}
+	port := 0
+	fmt.Sscanf(portStr, "%d", &port)
 
-	hostPort := string(parts[1])
-
-	// Verify deployment should succeed with matching cert
+	// Verify deployment against the live TLS server
 	ctx := context.Background()
-	result, err := verifyDeployment(ctx, string(hostPort[:len(hostPort)-1]), 443, certPEM, 0, 5*time.Second, nil)
+	result, _ := verifyDeployment(ctx, host, port, certPEM, 0, 5*time.Second, nil)
 
 	// This test may fail in some environments due to TLS setup complexity
 	// The key is testing the fingerprint comparison logic

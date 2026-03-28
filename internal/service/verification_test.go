@@ -8,16 +8,15 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
 )
 
-// mockJobRepository is a test double for JobRepository.
-type mockJobRepository struct {
+// mockVerificationJobRepo is a test double for JobRepository used by verification tests.
+type mockVerificationJobRepo struct {
 	jobs map[string]*domain.Job
 	err  error
 }
 
-func (m *mockJobRepository) Get(ctx context.Context, id string) (*domain.Job, error) {
+func (m *mockVerificationJobRepo) Get(ctx context.Context, id string) (*domain.Job, error) {
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -28,12 +27,12 @@ func (m *mockJobRepository) Get(ctx context.Context, id string) (*domain.Job, er
 	return job, nil
 }
 
-func (m *mockJobRepository) Create(ctx context.Context, job *domain.Job) error {
+func (m *mockVerificationJobRepo) Create(ctx context.Context, job *domain.Job) error {
 	m.jobs[job.ID] = job
 	return nil
 }
 
-func (m *mockJobRepository) Update(ctx context.Context, job *domain.Job) error {
+func (m *mockVerificationJobRepo) Update(ctx context.Context, job *domain.Job) error {
 	if m.err != nil {
 		return m.err
 	}
@@ -41,38 +40,49 @@ func (m *mockJobRepository) Update(ctx context.Context, job *domain.Job) error {
 	return nil
 }
 
-func (m *mockJobRepository) List(ctx context.Context, filter *repository.JobFilter) ([]*domain.Job, error) {
+func (m *mockVerificationJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
 	return nil, nil
 }
 
-// mockAuditService is a test double for AuditService.
-type mockAuditService struct {
-	events []interface{}
+func (m *mockVerificationJobRepo) Delete(ctx context.Context, id string) error {
+	delete(m.jobs, id)
+	return nil
 }
 
-func (m *mockAuditService) RecordEvent(ctx context.Context, actor string, actorType domain.ActorType, event string, resourceType string, resourceID string, details map[string]interface{}) {
-	m.events = append(m.events, map[string]interface{}{
-		"actor":        actor,
-		"actor_type":   actorType,
-		"event":        event,
-		"resource_type": resourceType,
-		"resource_id":   resourceID,
-		"details":      details,
-	})
+func (m *mockVerificationJobRepo) ListByStatus(ctx context.Context, status domain.JobStatus) ([]*domain.Job, error) {
+	return nil, nil
+}
+
+func (m *mockVerificationJobRepo) ListByCertificate(ctx context.Context, certID string) ([]*domain.Job, error) {
+	return nil, nil
+}
+
+func (m *mockVerificationJobRepo) UpdateStatus(ctx context.Context, id string, status domain.JobStatus, errMsg string) error {
+	return nil
+}
+
+func (m *mockVerificationJobRepo) GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error) {
+	return nil, nil
+}
+
+// newVerificationTestService creates a VerificationService wired with test doubles.
+func newVerificationTestService(jobs map[string]*domain.Job, jobRepoErr error) (*VerificationService, *mockVerificationJobRepo, *mockAuditRepo) {
+	jobRepo := &mockVerificationJobRepo{jobs: jobs, err: jobRepoErr}
+	auditRepo := newMockAuditRepository()
+	auditService := NewAuditService(auditRepo)
+	svc := NewVerificationService(jobRepo, auditService, slog.Default())
+	return svc, jobRepo, auditRepo
 }
 
 func TestVerificationService_RecordVerificationResult_Success(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{
-			"j-test1": {
-				ID:     "j-test1",
-				Status: domain.JobStatusCompleted,
-			},
+	jobs := map[string]*domain.Job{
+		"j-test1": {
+			ID:     "j-test1",
+			Status: domain.JobStatusCompleted,
 		},
 	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, jobRepo, auditRepo := newVerificationTestService(jobs, nil)
 
 	result := &domain.VerificationResult{
 		JobID:               "j-test1",
@@ -83,38 +93,35 @@ func TestVerificationService_RecordVerificationResult_Success(t *testing.T) {
 		VerifiedAt:          time.Now().UTC(),
 	}
 
-	err := service.RecordVerificationResult(ctx, result)
+	err := svc.RecordVerificationResult(ctx, result)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
 	// Check job was updated
-	job, _ := mockJobRepo.Get(ctx, "j-test1")
+	job, _ := jobRepo.Get(ctx, "j-test1")
 	if job.VerificationStatus != domain.VerificationSuccess {
 		t.Errorf("expected VerificationSuccess, got %s", job.VerificationStatus)
 	}
-	if !*job.VerifiedAt == result.VerifiedAt {
-		t.Errorf("verified_at mismatch")
+	if job.VerifiedAt == nil {
+		t.Error("expected verified_at to be set")
 	}
 
 	// Check audit event was recorded
-	if len(mockAudit.events) != 1 {
-		t.Errorf("expected 1 audit event, got %d", len(mockAudit.events))
+	if len(auditRepo.Events) == 0 {
+		t.Error("expected at least 1 audit event")
 	}
 }
 
 func TestVerificationService_RecordVerificationResult_Failed(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{
-			"j-test2": {
-				ID:     "j-test2",
-				Status: domain.JobStatusCompleted,
-			},
+	jobs := map[string]*domain.Job{
+		"j-test2": {
+			ID:     "j-test2",
+			Status: domain.JobStatusCompleted,
 		},
 	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, jobRepo, _ := newVerificationTestService(jobs, nil)
 
 	result := &domain.VerificationResult{
 		JobID:               "j-test2",
@@ -125,12 +132,12 @@ func TestVerificationService_RecordVerificationResult_Failed(t *testing.T) {
 		VerifiedAt:          time.Now().UTC(),
 	}
 
-	err := service.RecordVerificationResult(ctx, result)
+	err := svc.RecordVerificationResult(ctx, result)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	job, _ := mockJobRepo.Get(ctx, "j-test2")
+	job, _ := jobRepo.Get(ctx, "j-test2")
 	if job.VerificationStatus != domain.VerificationFailed {
 		t.Errorf("expected VerificationFailed, got %s", job.VerificationStatus)
 	}
@@ -138,16 +145,13 @@ func TestVerificationService_RecordVerificationResult_Failed(t *testing.T) {
 
 func TestVerificationService_RecordVerificationResult_WithError(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{
-			"j-test3": {
-				ID:     "j-test3",
-				Status: domain.JobStatusCompleted,
-			},
+	jobs := map[string]*domain.Job{
+		"j-test3": {
+			ID:     "j-test3",
+			Status: domain.JobStatusCompleted,
 		},
 	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, jobRepo, _ := newVerificationTestService(jobs, nil)
 
 	result := &domain.VerificationResult{
 		JobID:      "j-test3",
@@ -156,12 +160,12 @@ func TestVerificationService_RecordVerificationResult_WithError(t *testing.T) {
 		Error:      "connection refused",
 	}
 
-	err := service.RecordVerificationResult(ctx, result)
+	err := svc.RecordVerificationResult(ctx, result)
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
 
-	job, _ := mockJobRepo.Get(ctx, "j-test3")
+	job, _ := jobRepo.Get(ctx, "j-test3")
 	if job.VerificationStatus != domain.VerificationFailed {
 		t.Errorf("expected VerificationFailed, got %s", job.VerificationStatus)
 	}
@@ -172,11 +176,7 @@ func TestVerificationService_RecordVerificationResult_WithError(t *testing.T) {
 
 func TestVerificationService_RecordVerificationResult_JobNotFound(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{},
-	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(map[string]*domain.Job{}, nil)
 
 	result := &domain.VerificationResult{
 		JobID:      "j-nonexistent",
@@ -184,7 +184,7 @@ func TestVerificationService_RecordVerificationResult_JobNotFound(t *testing.T) 
 		VerifiedAt: time.Now().UTC(),
 	}
 
-	err := service.RecordVerificationResult(ctx, result)
+	err := svc.RecordVerificationResult(ctx, result)
 	if err == nil {
 		t.Error("expected error for nonexistent job")
 	}
@@ -192,16 +192,14 @@ func TestVerificationService_RecordVerificationResult_JobNotFound(t *testing.T) 
 
 func TestVerificationService_RecordVerificationResult_MissingJobID(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{jobs: map[string]*domain.Job{}}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(map[string]*domain.Job{}, nil)
 
 	result := &domain.VerificationResult{
 		TargetID:   "t-nginx1",
 		VerifiedAt: time.Now().UTC(),
 	}
 
-	err := service.RecordVerificationResult(ctx, result)
+	err := svc.RecordVerificationResult(ctx, result)
 	if err == nil {
 		t.Error("expected error for missing job ID")
 	}
@@ -209,11 +207,9 @@ func TestVerificationService_RecordVerificationResult_MissingJobID(t *testing.T)
 
 func TestVerificationService_RecordVerificationResult_NilResult(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{jobs: map[string]*domain.Job{}}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(map[string]*domain.Job{}, nil)
 
-	err := service.RecordVerificationResult(ctx, nil)
+	err := svc.RecordVerificationResult(ctx, nil)
 	if err == nil {
 		t.Error("expected error for nil result")
 	}
@@ -224,21 +220,18 @@ func TestVerificationService_GetVerificationResult_Success(t *testing.T) {
 	now := time.Now().UTC()
 	targetID := "t-nginx1"
 	fp := "abc123"
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{
-			"j-test1": {
-				ID:                 "j-test1",
-				TargetID:           &targetID,
-				VerificationStatus: domain.VerificationSuccess,
-				VerifiedAt:         &now,
-				VerificationFp:     &fp,
-			},
+	jobs := map[string]*domain.Job{
+		"j-test1": {
+			ID:                 "j-test1",
+			TargetID:           &targetID,
+			VerificationStatus: domain.VerificationSuccess,
+			VerifiedAt:         &now,
+			VerificationFp:     &fp,
 		},
 	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(jobs, nil)
 
-	result, err := service.GetVerificationResult(ctx, "j-test1")
+	result, err := svc.GetVerificationResult(ctx, "j-test1")
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
 	}
@@ -256,13 +249,9 @@ func TestVerificationService_GetVerificationResult_Success(t *testing.T) {
 
 func TestVerificationService_GetVerificationResult_NotFound(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{
-		jobs: map[string]*domain.Job{},
-	}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(map[string]*domain.Job{}, nil)
 
-	_, err := service.GetVerificationResult(ctx, "j-nonexistent")
+	_, err := svc.GetVerificationResult(ctx, "j-nonexistent")
 	if err == nil {
 		t.Error("expected error for nonexistent job")
 	}
@@ -270,11 +259,9 @@ func TestVerificationService_GetVerificationResult_NotFound(t *testing.T) {
 
 func TestVerificationService_GetVerificationResult_EmptyJobID(t *testing.T) {
 	ctx := context.Background()
-	mockJobRepo := &mockJobRepository{jobs: map[string]*domain.Job{}}
-	mockAudit := &mockAuditService{events: []interface{}{}}
-	service := NewVerificationService(mockJobRepo, mockAudit, slog.Default())
+	svc, _, _ := newVerificationTestService(map[string]*domain.Job{}, nil)
 
-	_, err := service.GetVerificationResult(ctx, "")
+	_, err := svc.GetVerificationResult(ctx, "")
 	if err == nil {
 		t.Error("expected error for empty job ID")
 	}

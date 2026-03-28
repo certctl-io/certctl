@@ -59,9 +59,11 @@ func verifyDeployment(
 
 	// Connect to the target's TLS endpoint
 	address := fmt.Sprintf("%s:%d", targetHost, targetPort)
-	logger.Debug("probing TLS endpoint for verification",
-		"address", address,
-		"expected_fingerprint", expectedFp)
+	if logger != nil {
+		logger.Debug("probing TLS endpoint for verification",
+			"address", address,
+			"expected_fingerprint", expectedFp)
+	}
 
 	dialer := &net.Dialer{Timeout: timeout}
 	conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
@@ -82,22 +84,26 @@ func verifyDeployment(
 	leafCert := state.PeerCertificates[0]
 	actualFp := fmt.Sprintf("%x", sha256.Sum256(leafCert.Raw))
 
-	logger.Debug("received certificate from endpoint",
-		"address", address,
-		"cn", leafCert.Subject.CommonName,
-		"actual_fingerprint", actualFp)
+	if logger != nil {
+		logger.Debug("received certificate from endpoint",
+			"address", address,
+			"cn", leafCert.Subject.CommonName,
+			"actual_fingerprint", actualFp)
+	}
 
 	// Compare fingerprints
 	verified := actualFp == expectedFp
-	if !verified {
-		logger.Warn("certificate fingerprint mismatch at endpoint",
-			"address", address,
-			"expected_fingerprint", expectedFp,
-			"actual_fingerprint", actualFp)
-	} else {
-		logger.Info("certificate verification succeeded",
-			"address", address,
-			"fingerprint", actualFp)
+	if logger != nil {
+		if !verified {
+			logger.Warn("certificate fingerprint mismatch at endpoint",
+				"address", address,
+				"expected_fingerprint", expectedFp,
+				"actual_fingerprint", actualFp)
+		} else {
+			logger.Info("certificate verification succeeded",
+				"address", address,
+				"fingerprint", actualFp)
+		}
 	}
 
 	return &VerificationResult{
@@ -181,9 +187,11 @@ func (a *Agent) reportVerificationResult(
 		return fmt.Errorf("verification reporting failed with status %d: %s", resp.StatusCode, string(bodyBytes))
 	}
 
-	a.logger.Debug("verification result reported to control plane",
-		"job_id", jobID,
-		"verified", result.Verified)
+	if a.logger != nil {
+		a.logger.Debug("verification result reported to control plane",
+			"job_id", jobID,
+			"verified", result.Verified)
+	}
 
 	return nil
 }
@@ -236,11 +244,13 @@ func (a *Agent) verifyAndReportDeployment(
 		a.logger)
 
 	if err != nil {
-		a.logger.Warn("verification probe failed",
-			"job_id", job.ID,
-			"target_host", targetHost,
-			"target_port", targetPort,
-			"error", err)
+		if a.logger != nil {
+			a.logger.Warn("verification probe failed",
+				"job_id", job.ID,
+				"target_host", targetHost,
+				"target_port", targetPort,
+				"error", err)
+		}
 		// Probe failure: report error but continue
 		result = &VerificationResult{
 			Error: err.Error(),
@@ -250,14 +260,18 @@ func (a *Agent) verifyAndReportDeployment(
 
 	// Report result to control plane
 	if job.TargetID == nil {
-		a.logger.Warn("cannot report verification: target_id is nil", "job_id", job.ID)
+		if a.logger != nil {
+			a.logger.Warn("cannot report verification: target_id is nil", "job_id", job.ID)
+		}
 		return
 	}
 
 	if err := a.reportVerificationResult(ctx, job.ID, *job.TargetID, result); err != nil {
-		a.logger.Warn("failed to report verification result",
-			"job_id", job.ID,
-			"error", err)
+		if a.logger != nil {
+			a.logger.Warn("failed to report verification result",
+				"job_id", job.ID,
+				"error", err)
+		}
 		// Non-blocking: continue even if report fails
 	}
 }
