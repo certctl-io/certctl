@@ -47,7 +47,7 @@ certctl fills that gap. It's **CA-agnostic** — the issuer connector interface 
 
 It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and HAProxy today, with Traefik and Caddy support coming next — all using the same pluggable connector model for any server that accepts cert files. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
-For a detailed comparison with CertKit, CertWarden, Certimate, CZERTAINLY, KeyTalk, cert-manager, and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
+For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venafi, Keyfactor), see [Why certctl?](docs/why-certctl.md)
 
 ## What It Does
 
