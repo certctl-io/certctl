@@ -2,10 +2,15 @@ package main
 
 import (
 	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
 	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
+	"math/big"
 	"net"
 	"net/http"
 	"net/http/httptest"
@@ -163,10 +168,29 @@ func TestVerifyDeployment_InvalidCertPEM(t *testing.T) {
 
 // Helper function to generate a test certificate for testing
 func generateTestCert() (*x509.Certificate, error) {
-	// Return nil for basic testing; in real scenarios would generate proper cert
-	return &x509.Certificate{
-		Raw: []byte("test"),
-	}, nil
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return nil, err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature,
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"test.example.com"},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return nil, err
+	}
+
+	return x509.ParseCertificate(certDER)
 }
 
 func TestReportVerificationResult_Success(t *testing.T) {
