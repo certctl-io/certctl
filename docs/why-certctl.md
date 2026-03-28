@@ -57,7 +57,7 @@ Commercial (proprietary) PKI platform from a Dutch company — on-prem appliance
 
 ### vs. Enterprise Platforms (Venafi, Keyfactor)
 
-Comprehensive solutions with decades of features — at $75K-$250K+/yr. certctl targets organizations that need 60% of those capabilities at 1% of the cost. The trade-off: no SSO/RBAC yet (coming in certctl Pro), no F5/IIS target connectors yet, no SLA-backed support.
+Comprehensive solutions with decades of features — at $75K-$250K+/yr. certctl targets organizations that need 80% of those capabilities at 1% of the cost. The trade-off: no SSO/RBAC yet (coming in certctl Pro), no F5/IIS target connectors yet, no SLA-backed support.
 
 ## Getting Started
 
