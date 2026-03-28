@@ -1,5 +1,6 @@
+import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getPolicies, updatePolicy, deletePolicy } from '../api/client';
+import { getPolicies, updatePolicy, deletePolicy, createPolicy } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -21,8 +22,128 @@ const severityDots: Record<string, string> = {
   critical: 'bg-red-500',
 };
 
+interface CreatePolicyModalProps {
+  isOpen: boolean;
+  onClose: () => void;
+  onSuccess: () => void;
+  isLoading: boolean;
+  error: string | null;
+}
+
+function CreatePolicyModal({ isOpen, onClose, onSuccess, isLoading, error }: CreatePolicyModalProps) {
+  const [name, setName] = useState('');
+  const [type, setType] = useState('key_algorithm');
+  const [severity, setSeverity] = useState('medium');
+  const [configStr, setConfigStr] = useState('{}');
+  const [enabled, setEnabled] = useState(true);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    try {
+      const config = JSON.parse(configStr);
+      await createPolicy({ name: name.trim(), type, severity, config, enabled });
+      setName('');
+      setType('key_algorithm');
+      setSeverity('medium');
+      setConfigStr('{}');
+      setEnabled(true);
+      onSuccess();
+    } catch (err) {
+      console.error('Create policy error:', err);
+    }
+  };
+
+  if (!isOpen) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Create Policy</h2>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Name *</label>
+            <input
+              value={name}
+              onChange={e => setName(e.target.value)}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
+              placeholder="e.g., Key Length Enforcement"
+              required
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Type *</label>
+            <select
+              value={type}
+              onChange={e => setType(e.target.value)}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
+            >
+              <option value="key_algorithm">Key Algorithm</option>
+              <option value="cert_lifetime">Certificate Lifetime</option>
+              <option value="san_pattern">SAN Pattern</option>
+              <option value="key_usage">Key Usage</option>
+              <option value="revocation_check">Revocation Check</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Severity *</label>
+            <select
+              value={severity}
+              onChange={e => setSeverity(e.target.value)}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
+            >
+              <option value="low">Low</option>
+              <option value="medium">Medium</option>
+              <option value="high">High</option>
+              <option value="critical">Critical</option>
+            </select>
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Config (JSON)</label>
+            <textarea
+              value={configStr}
+              onChange={e => setConfigStr(e.target.value)}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink font-mono focus:outline-none focus:border-brand-400"
+              placeholder='{"key": "value"}'
+              rows={3}
+            />
+          </div>
+          <div className="flex items-center gap-2">
+            <input
+              type="checkbox"
+              id="enabled"
+              checked={enabled}
+              onChange={e => setEnabled(e.target.checked)}
+              className="w-4 h-4"
+            />
+            <label htmlFor="enabled" className="text-sm text-ink">Enabled</label>
+          </div>
+          <div className="flex gap-2 pt-4">
+            <button
+              type="submit"
+              disabled={isLoading}
+              className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {isLoading ? 'Creating...' : 'Create Policy'}
+            </button>
+            <button
+              type="button"
+              onClick={onClose}
+              className="flex-1 btn btn-ghost"
+            >
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function PoliciesPage() {
   const queryClient = useQueryClient();
+  const [showCreate, setShowCreate] = useState(false);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['policies'],
@@ -37,6 +158,14 @@ export default function PoliciesPage() {
   const deleteMutation = useMutation({
     mutationFn: deletePolicy,
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
+  });
+
+  const createMutation = useMutation({
+    mutationFn: createPolicy,
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['policies'] });
+      setShowCreate(false);
+    },
   });
 
   const policies = data?.data || [];
@@ -104,7 +233,15 @@ export default function PoliciesPage() {
 
   return (
     <>
-      <PageHeader title="Policies" subtitle={data ? `${data.total} rules` : undefined} />
+      <PageHeader
+        title="Policies"
+        subtitle={data ? `${data.total} rules` : undefined}
+        action={
+          <button onClick={() => setShowCreate(true)} className="btn btn-primary">
+            + New Policy
+          </button>
+        }
+      />
       {policies.length > 0 && (
         <div className="px-4 py-3 flex flex-wrap gap-4 border-b border-surface-border/50">
           <div className="flex items-center gap-2">
@@ -129,6 +266,13 @@ export default function PoliciesPage() {
           <DataTable columns={columns} data={policies} isLoading={isLoading} emptyMessage="No policy rules" />
         )}
       </div>
+      <CreatePolicyModal
+        isOpen={showCreate}
+        onClose={() => setShowCreate(false)}
+        onSuccess={() => {}}
+        isLoading={createMutation.isPending}
+        error={createMutation.error ? (createMutation.error as Error).message : null}
+      />
     </>
   );
 }
