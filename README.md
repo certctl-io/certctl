@@ -41,9 +41,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 
 ## Contents
 
-- [Why certctl Exists](#why-certctl-exists) · [What It Does](#what-it-does) · [Screenshots](#screenshots) · [Quick Start](#quick-start) · [Architecture](#architecture)
-- [Configuration](#configuration) · [MCP Server](#mcp-server-ai-integration) · [CLI](#cli) · [API Overview](#api-overview) · [Integrations](#supported-integrations)
-- [Development](#development) · [Security](#security) · [Roadmap](#roadmap) · [License](#license)
+[Why certctl Exists](#why-certctl-exists) · [What It Does](#what-it-does) · [Screenshots](#screenshots) · [Quick Start](#quick-start) · [Architecture](#architecture) · [Configuration](#configuration) · [MCP Server](#mcp-server-ai-integration) · [CLI](#cli) · [API Overview](#api-overview) · [Integrations](#supported-integrations) · [Development](#development) · [Security](#security) · [Roadmap](#roadmap) · [License](#license)
 
 ## Why certctl Exists
 
