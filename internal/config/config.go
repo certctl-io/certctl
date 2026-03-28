@@ -29,21 +29,51 @@ type Config struct {
 // NotifierConfig contains configuration for notification connectors.
 // Each notifier is enabled by setting its required env var (webhook URL or API key).
 type NotifierConfig struct {
-	SlackWebhookURL      string
-	SlackChannel         string
-	SlackUsername         string
-	TeamsWebhookURL      string
-	PagerDutyRoutingKey  string
-	PagerDutySeverity    string
-	OpsGenieAPIKey       string
-	OpsGeniePriority     string
+	// SlackWebhookURL is the incoming webhook URL for Slack notifications.
+	// Format: https://hooks.slack.com/services/T00000000/B00000000/XXXXXXXXXXXXXXXXXXXXXXXX
+	// Optional: leave empty to disable Slack notifications.
+	SlackWebhookURL string
+
+	// SlackChannel optionally overrides the default channel in the Slack webhook.
+	// Example: "#alerts" or "@user". Leave empty to use webhook's default channel.
+	SlackChannel string
+
+	// SlackUsername sets the display name for Slack bot messages.
+	// Default: "certctl". Used in webhook message formatting.
+	SlackUsername string
+
+	// TeamsWebhookURL is the incoming webhook URL for Microsoft Teams notifications.
+	// Format: https://outlook.webhook.office.com/webhookb2/...
+	// Optional: leave empty to disable Teams notifications.
+	TeamsWebhookURL string
+
+	// PagerDutyRoutingKey is the integration key for PagerDuty Events API v2.
+	// Obtain from PagerDuty integration settings.
+	// Optional: leave empty to disable PagerDuty notifications.
+	PagerDutyRoutingKey string
+
+	// PagerDutySeverity sets the default severity level for PagerDuty events.
+	// Valid values: "info", "warning", "error", "critical". Default: "warning".
+	PagerDutySeverity string
+
+	// OpsGenieAPIKey is the API key for OpsGenie Alert API v2.
+	// Obtain from OpsGenie organization settings.
+	// Optional: leave empty to disable OpsGenie notifications.
+	OpsGenieAPIKey string
+
+	// OpsGeniePriority sets the default priority for OpsGenie alerts.
+	// Valid values: "P1", "P2", "P3", "P4", "P5". Default: "P3".
+	OpsGeniePriority string
 }
 
 // KeygenConfig controls where private keys are generated.
 type KeygenConfig struct {
-	// Mode: "agent" (default, production) or "server" (demo only, Local CA).
-	// In "agent" mode, renewal/issuance jobs enter AwaitingCSR state and agents generate keys locally.
-	// In "server" mode, the control plane generates keys (private keys touch the server — demo only).
+	// Mode determines where certificate private keys are generated.
+	// Valid values: "agent" (default, production) or "server" (demo only).
+	// In "agent" mode, renewal/issuance jobs enter AwaitingCSR state and agents
+	// generate ECDSA P-256 keys locally. Private keys never leave agent infrastructure.
+	// In "server" mode, the control plane generates RSA keys — demo only, not for production
+	// as private keys touch the server. Requires explicit opt-in.
 	Mode string
 }
 
@@ -51,44 +81,110 @@ type KeygenConfig struct {
 type CAConfig struct {
 	// CertPath is the path to a PEM-encoded CA certificate for sub-CA mode.
 	// When set with KeyPath, the Local CA loads this cert instead of generating a self-signed root.
+	// Required: sub-CA mode must have both CertPath and KeyPath set.
+	// Optional: leave empty for self-signed mode (development/demo). Path must be absolute.
 	CertPath string
 
 	// KeyPath is the path to a PEM-encoded CA private key for sub-CA mode.
 	// Supports RSA, ECDSA, and PKCS#8 encoded keys.
+	// Required: must be set together with CertPath for sub-CA mode.
+	// Optional: leave empty for self-signed mode (development/demo). Path must be absolute.
 	KeyPath string
 }
 
 // StepCAConfig contains step-ca issuer connector configuration.
 type StepCAConfig struct {
-	URL                 string
-	ProvisionerName     string
-	ProvisionerKeyPath  string
+	// URL is the base URL of the step-ca server.
+	// Example: "https://ca.example.com:9000". Required for step-ca integration.
+	URL string
+
+	// ProvisionerName is the name of the JWK provisioner configured in step-ca.
+	// Used to select which provisioner signs the certificate requests.
+	ProvisionerName string
+
+	// ProvisionerKeyPath is the path to the PEM-encoded JWK provisioner private key.
+	// Authenticates with the step-ca /sign API. Must be absolute path.
+	ProvisionerKeyPath string
+
+	// ProvisionerPassword is the optional password for the provisioner private key.
+	// Leave empty if the key file is not encrypted.
 	ProvisionerPassword string
 }
 
 // ACMEConfig contains ACME issuer connector configuration.
 type ACMEConfig struct {
-	DirectoryURL           string
-	Email                  string
-	ChallengeType          string // "http-01" (default), "dns-01", or "dns-persist-01"
-	DNSPresentScript       string
-	DNSCleanUpScript       string
-	DNSPersistIssuerDomain string // Required for dns-persist-01 (e.g., "letsencrypt.org")
+	// DirectoryURL is the ACME directory URL for certificate issuance.
+	// Examples: "https://acme-v02.api.letsencrypt.org/directory" (Let's Encrypt),
+	// "https://acme.zerossl.com/v2/DV90" (ZeroSSL), or custom CA directory.
+	DirectoryURL string
+
+	// Email is the email address for ACME account registration.
+	// Used for certificate expiration notices and account recovery by ACME CA.
+	Email string
+
+	// ChallengeType selects the ACME challenge mechanism for domain validation.
+	// Valid values: "http-01" (default, requires public HTTP endpoint),
+	// "dns-01" (DNS TXT record per renewal), or "dns-persist-01" (standing DNS record).
+	// Default: "http-01".
+	ChallengeType string
+
+	// DNSPresentScript is the path to a shell script that creates DNS TXT records.
+	// Required for dns-01 and dns-persist-01 challenge types.
+	// Script receives: DOMAIN_NAME, VALIDATION_TOKEN, RECORD_NAME as env vars.
+	// Example: /opt/dns-scripts/add-record.sh
+	DNSPresentScript string
+
+	// DNSCleanUpScript is the path to a shell script that removes DNS TXT records.
+	// Used only for dns-01 challenges to clean up temporary validation records.
+	// Script receives: DOMAIN_NAME, RECORD_NAME as env vars.
+	// Leave empty if cleanup is not needed (e.g., dns-persist-01).
+	DNSCleanUpScript string
+
+	// DNSPersistIssuerDomain is the issuer domain for dns-persist-01 standing records.
+	// Example: "letsencrypt.org" or "zerossl.com". Only used if ChallengeType is "dns-persist-01".
+	// The record value becomes: "<issuer_domain>; accounturi=<acme_account_uri>"
+	DNSPersistIssuerDomain string
 }
 
 // OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
 type OpenSSLConfig struct {
-	SignScript     string
-	RevokeScript   string
-	CRLScript      string
+	// SignScript is the path to a shell script that signs certificate requests.
+	// Script receives: CSR_PATH, COMMON_NAME, OUTPUT_CERT_PATH as env vars.
+	// Must output the signed certificate PEM to OUTPUT_CERT_PATH.
+	// Example: /opt/ca-scripts/sign.sh
+	SignScript string
+
+	// RevokeScript is the path to a shell script that revokes certificates.
+	// Script receives: SERIAL_NUMBER, REASON_CODE as env vars.
+	// Best-effort: script failures do not block revocation recording.
+	// Leave empty if revocation is not supported by the custom CA.
+	RevokeScript string
+
+	// CRLScript is the path to a shell script that generates CRL (Certificate Revocation List).
+	// Script should output the DER-encoded CRL to stdout.
+	// Leave empty if CRL generation is not supported by the custom CA.
+	CRLScript string
+
+	// TimeoutSeconds is the maximum execution time for any shell script invocation.
+	// Default: 30 seconds. Prevents hung processes from blocking certificate operations.
 	TimeoutSeconds int
 }
 
 // ESTConfig controls the RFC 7030 Enrollment over Secure Transport server.
 type ESTConfig struct {
-	Enabled  bool   // Enable EST endpoints (default false)
-	IssuerID string // Which issuer connector to use for EST enrollment (e.g., "iss-local")
+	// Enabled controls whether EST endpoints are available for device enrollment.
+	// Default: false (EST disabled). Set to true to enable RFC 7030 endpoints
+	// under /.well-known/est/ (cacerts, simpleenroll, simplereenroll, csrattrs).
+	Enabled bool
+
+	// IssuerID selects which issuer connector processes EST certificate requests.
+	// Valid values: "iss-local" (default), "iss-acme", "iss-stepca", "iss-openssl".
+	// Default: "iss-local". Must reference a configured issuer.
+	IssuerID string
+
 	// ProfileID optionally constrains EST enrollments to a specific certificate profile.
+	// When set, all EST enrollments must match the profile's crypto constraints.
+	// Leave empty to allow EST to use any configured issuer's defaults.
 	ProfileID string
 }
 
@@ -120,29 +216,74 @@ type DatabaseConfig struct {
 
 // SchedulerConfig contains scheduler timing configuration.
 type SchedulerConfig struct {
-	RenewalCheckInterval        time.Duration
-	JobProcessorInterval        time.Duration
-	AgentHealthCheckInterval    time.Duration
+	// RenewalCheckInterval is how often the renewal scheduler checks for expiring certs.
+	// Default: 1 hour. Minimum: 1 minute. Certs are flagged for renewal at configured thresholds.
+	// Setting: CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL environment variable.
+	RenewalCheckInterval time.Duration
+
+	// JobProcessorInterval is how often the job scheduler processes pending jobs.
+	// Default: 30 seconds. Minimum: 1 second. Controls issuance, renewal, and deployment latency.
+	// Setting: CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL environment variable.
+	JobProcessorInterval time.Duration
+
+	// AgentHealthCheckInterval is how often the scheduler checks agent heartbeats.
+	// Default: 2 minutes. Minimum: 1 second. Marks agents offline if no recent heartbeat.
+	// Setting: CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL environment variable.
+	AgentHealthCheckInterval time.Duration
+
+	// NotificationProcessInterval is how often the scheduler processes pending notifications.
+	// Default: 1 minute. Minimum: 1 second. Sends notifications to Slack, Teams, PagerDuty, etc.
+	// Setting: CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL environment variable.
 	NotificationProcessInterval time.Duration
 }
 
 // LogConfig contains logging configuration.
 type LogConfig struct {
-	Level  string // "debug", "info", "warn", "error"
-	Format string // "json" or "text"
+	// Level sets the minimum log level for output.
+	// Valid values: "debug" (verbose), "info" (default), "warn" (warnings), "error" (errors only).
+	// Setting: CERTCTL_LOG_LEVEL environment variable. Default: "info".
+	Level string
+
+	// Format sets the output format for logs.
+	// Valid values: "json" (structured, for parsing), "text" (human-readable).
+	// Setting: CERTCTL_LOG_FORMAT environment variable. Default: "json".
+	Format string
 }
 
 // AuthConfig contains authentication configuration.
 type AuthConfig struct {
-	Type   string // "api-key", "jwt", "none"
-	Secret string // Secret key for signing (if applicable)
+	// Type sets the authentication mechanism for the REST API.
+	// Valid values: "api-key" (default, production), "jwt", "none" (development only).
+	// When "api-key", clients must provide Authorization: Bearer <key> header.
+	// "none" requires explicit opt-in via CERTCTL_AUTH_TYPE env var with warning logged.
+	// Setting: CERTCTL_AUTH_TYPE environment variable. Default: "api-key".
+	Type string
+
+	// Secret is the authentication secret (API key hash, JWT signing key, etc.).
+	// For "api-key": the base64-encoded API key to validate against.
+	// For "jwt": the secret used to verify JWT token signatures.
+	// For "none": ignored.
+	// Setting: CERTCTL_AUTH_SECRET environment variable. Required for "api-key" and "jwt".
+	Secret string
 }
 
 // RateLimitConfig contains rate limiting configuration.
 type RateLimitConfig struct {
-	Enabled   bool
-	RPS       float64 // Requests per second
-	BurstSize int     // Maximum burst size
+	// Enabled controls whether rate limiting is enforced on API endpoints.
+	// Default: true. Set to false to disable rate limits (not recommended for production).
+	// Setting: CERTCTL_RATE_LIMIT_ENABLED environment variable.
+	Enabled bool
+
+	// RPS is the target requests per second allowed per client (token bucket rate).
+	// Default: 50. Higher values allow burst throughput; lower values restrict load.
+	// Setting: CERTCTL_RATE_LIMIT_RPS environment variable.
+	RPS float64
+
+	// BurstSize is the maximum number of requests allowed in a single burst.
+	// Default: 100. Allows clients to exceed RPS briefly when BurstSize tokens available.
+	// Must be at least as large as RPS. Higher = more lenient burst handling.
+	// Setting: CERTCTL_RATE_LIMIT_BURST environment variable.
+	BurstSize int
 }
 
 // CORSConfig contains CORS configuration.

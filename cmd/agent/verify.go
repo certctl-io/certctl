@@ -67,7 +67,15 @@ func verifyDeployment(
 
 	dialer := &net.Dialer{Timeout: timeout}
 	conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
-		InsecureSkipVerify: true, // We accept any cert (expired, self-signed, etc.)
+		// SECURITY NOTE: InsecureSkipVerify is intentionally set to true here.
+		// Post-deployment verification must probe the live endpoint to extract and
+		// compare the served certificate fingerprint, regardless of its validity
+		// state (expired, self-signed, internal CA, etc.). This setting is scoped
+		// to verification probing only — it is NEVER used for control-plane API
+		// calls, issuer connector communication, or any operation that trusts the
+		// certificate. The verification result compares SHA-256 fingerprints only.
+		// See TICKET-016 for full security audit rationale.
+		InsecureSkipVerify: true,
 		ServerName:        targetHost, // For SNI
 	})
 	if err != nil {

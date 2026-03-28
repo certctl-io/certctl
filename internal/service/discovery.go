@@ -151,7 +151,7 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 	// Verify the discovered cert exists
 	disc, err := s.discoveryRepo.GetDiscovered(ctx, id)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to get discovered certificate: %w", err)
 	}
 
 	// Verify the managed cert exists
@@ -160,7 +160,7 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 	}
 
 	if err := s.discoveryRepo.UpdateDiscoveredStatus(ctx, id, domain.DiscoveryStatusManaged, managedCertID); err != nil {
-		return err
+		return fmt.Errorf("failed to update discovered certificate status: %w", err)
 	}
 
 	// Audit trail
@@ -180,7 +180,7 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 // DismissDiscovered marks a discovered certificate as dismissed.
 func (s *DiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
 	if err := s.discoveryRepo.UpdateDiscoveredStatus(ctx, id, domain.DiscoveryStatusDismissed, ""); err != nil {
-		return err
+		return fmt.Errorf("failed to dismiss discovered certificate: %w", err)
 	}
 
 	// Audit trail

@@ -147,7 +147,7 @@ func (s *NetworkScanService) UpdateTarget(ctx context.Context, id string, target
 // DeleteTarget removes a network scan target.
 func (s *NetworkScanService) DeleteTarget(ctx context.Context, id string) error {
 	if err := s.networkScanRepo.Delete(ctx, id); err != nil {
-		return err
+		return fmt.Errorf("failed to delete network scan target: %w", err)
 	}
 
 	s.auditService.RecordEvent(ctx, "operator", domain.ActorTypeUser,
@@ -418,7 +418,14 @@ func (s *NetworkScanService) probeTLS(ctx context.Context, address string, timeo
 
 	dialer := &net.Dialer{Timeout: timeout}
 	conn, err := tls.DialWithDialer(dialer, "tcp", address, &tls.Config{
-		InsecureSkipVerify: true, // We want to discover ALL certs, including self-signed
+		// SECURITY NOTE: InsecureSkipVerify is intentionally set to true here.
+		// The network scanner must discover ALL certificates including self-signed,
+		// expired, and internal CA certificates. This setting is scoped to discovery
+		// probing only — it is NEVER used for control-plane API calls, issuer
+		// connector communication, or any operation that trusts the certificate.
+		// The endpoint's certificate chain is extracted and analyzed, not validated.
+		// See TICKET-016 for full security audit rationale.
+		InsecureSkipVerify: true,
 	})
 	if err != nil {
 		result.Error = err.Error()
