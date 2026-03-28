@@ -232,15 +232,25 @@ make install-tools
 # Run tests
 make test
 
+# Run tests with race detection (same as CI)
+go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/...
+
 # Run with coverage
 make test-coverage
 
-# Lint
+# Lint (runs golangci-lint with project config)
 make lint
+
+# Vulnerability scan
+govulncheck ./...
 
 # Format
 make fmt
 ```
+
+### CI Pipeline
+
+Every push and PR runs: `go vet`, `go test -race` (race detection), `golangci-lint` (11 linters including gosec and bodyclose), `govulncheck` (dependency CVE scanning), and per-layer coverage thresholds (service 60%, handler 60%, domain 40%, middleware 50%). Frontend CI runs TypeScript type checking, Vitest tests, and Vite production build. See `.github/workflows/ci.yml` for details.
 
 ### Docker Compose
 
@@ -262,6 +272,18 @@ make docker-clean       # Stop + remove volumes
 - Agent-to-server: API key (registered at agent creation)
 - API key and JWT auth types supported; `none` for demo/development
 - Auth type and secret configured via `CERTCTL_AUTH_TYPE` and `CERTCTL_AUTH_SECRET`
+
+### CORS
+- **Deny-by-default**: Empty `CERTCTL_CORS_ORIGINS` blocks all cross-origin requests. Operators must explicitly list allowed origins (comma-separated) or set `*` for development.
+
+### Input Validation
+- Shell command injection prevention on all connector scripts (strict character whitelist, no metacharacters)
+- RFC 1123 domain name validation, base64url ACME token validation
+- SSRF protection in network scanner (loopback, link-local, multicast, broadcast ranges filtered)
+
+### Concurrency Safety
+- Scheduler loops protected by `sync/atomic.Bool` idempotency guards — duplicate ticks are skipped
+- Graceful shutdown waits up to 30 seconds for in-flight work before database close
 
 ### Audit Trail
 - Immutable append-only log in PostgreSQL (`audit_events` table)
@@ -378,7 +400,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 ### V2: Operational Maturity
 
-18 milestones complete, 950+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
+18 milestones complete, 1050+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
 
 **What shipped (all ✅):**
 

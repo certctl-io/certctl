@@ -43,8 +43,9 @@ Protects the control plane from being overwhelmed by a single client — whether
 
 Required for the web dashboard to communicate with the API when served from a different origin (e.g., during development on `localhost:3000` while the API runs on `localhost:8443`). Without CORS headers, browsers block the requests silently.
 
-- **Configurable Per-Origin Allowlist** — `CERTCTL_CORS_ORIGINS` (comma-separated or wildcard)
-- **Preflight Caching** — Standard CORS headers
+- **Deny-by-Default** — Empty `CERTCTL_CORS_ORIGINS` blocks all cross-origin requests (secure default)
+- **Configurable Per-Origin Allowlist** — `CERTCTL_CORS_ORIGINS` (comma-separated or `*` for wildcard)
+- **Preflight Caching** — Standard CORS headers with `Access-Control-Max-Age`
 
 ### Query Features (M20)
 
