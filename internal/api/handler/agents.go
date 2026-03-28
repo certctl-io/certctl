@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,16 +13,16 @@ import (
 
 // AgentService defines the service interface for agent operations.
 type AgentService interface {
-	ListAgents(page, perPage int) ([]domain.Agent, int64, error)
-	GetAgent(id string) (*domain.Agent, error)
-	RegisterAgent(agent domain.Agent) (*domain.Agent, error)
-	Heartbeat(agentID string, metadata *domain.AgentMetadata) error
-	CSRSubmit(agentID string, csrPEM string) (string, error)
-	CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error)
-	CertificatePickup(agentID, certID string) (string, error)
-	GetWork(agentID string) ([]domain.Job, error)
-	GetWorkWithTargets(agentID string) ([]domain.WorkItem, error)
-	UpdateJobStatus(agentID string, jobID string, status string, errMsg string) error
+	ListAgents(ctx context.Context, page, perPage int) ([]domain.Agent, int64, error)
+	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
+	RegisterAgent(ctx context.Context, agent domain.Agent) (*domain.Agent, error)
+	Heartbeat(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error
+	CSRSubmit(ctx context.Context, agentID string, csrPEM string) (string, error)
+	CSRSubmitForCert(ctx context.Context, agentID string, certID string, csrPEM string) (string, error)
+	CertificatePickup(ctx context.Context, agentID, certID string) (string, error)
+	GetWork(ctx context.Context, agentID string) ([]domain.Job, error)
+	GetWorkWithTargets(ctx context.Context, agentID string) ([]domain.WorkItem, error)
+	UpdateJobStatus(ctx context.Context, agentID string, jobID string, status string, errMsg string) error
 }
 
 // AgentHandler handles HTTP requests for agent operations.
@@ -58,7 +59,7 @@ func (h AgentHandler) ListAgents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	agents, total, err := h.svc.ListAgents(page, perPage)
+	agents, total, err := h.svc.ListAgents(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list agents", requestID)
 		return
@@ -92,7 +93,7 @@ func (h AgentHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	agent, err := h.svc.GetAgent(id)
+	agent, err := h.svc.GetAgent(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 		return
@@ -131,7 +132,7 @@ func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.RegisterAgent(agent)
+	created, err := h.svc.RegisterAgent(r.Context(), agent)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to register agent", requestID)
 		return
@@ -182,7 +183,7 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.svc.Heartbeat(agentID, metadata); err != nil {
+	if err := h.svc.Heartbeat(r.Context(), agentID, metadata); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to record heartbeat", requestID)
 		return
 	}
@@ -234,9 +235,9 @@ func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 
 	// If certificate_id is provided, sign the CSR for that specific certificate
 	if req.CertificateID != "" {
-		status, err = h.svc.CSRSubmitForCert(agentID, req.CertificateID, req.CSRPEM)
+		status, err = h.svc.CSRSubmitForCert(r.Context(), agentID, req.CertificateID, req.CSRPEM)
 	} else {
-		status, err = h.svc.CSRSubmit(agentID, req.CSRPEM)
+		status, err = h.svc.CSRSubmit(r.Context(), agentID, req.CSRPEM)
 	}
 
 	if err != nil {
@@ -271,7 +272,7 @@ func (h AgentHandler) AgentCertificatePickup(w http.ResponseWriter, r *http.Requ
 	agentID := parts[0]
 	certID := parts[2]
 
-	certPEM, err := h.svc.CertificatePickup(agentID, certID)
+	certPEM, err := h.svc.CertificatePickup(r.Context(), agentID, certID)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found or not ready", requestID)
 		return
@@ -303,7 +304,7 @@ func (h AgentHandler) AgentGetWork(w http.ResponseWriter, r *http.Request) {
 	}
 	agentID := parts[0]
 
-	workItems, err := h.svc.GetWorkWithTargets(agentID)
+	workItems, err := h.svc.GetWorkWithTargets(r.Context(), agentID)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to get pending work", requestID)
 		return
@@ -353,7 +354,7 @@ func (h AgentHandler) AgentReportJobStatus(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
-	if err := h.svc.UpdateJobStatus(agentID, jobID, req.Status, req.Error); err != nil {
+	if err := h.svc.UpdateJobStatus(r.Context(), agentID, jobID, req.Status, req.Error); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update job status", requestID)
 		return
 	}

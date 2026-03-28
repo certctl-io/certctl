@@ -6,6 +6,8 @@ import (
 	"log/slog"
 	"os/exec"
 	"time"
+
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // DNSSolver defines the interface for DNS-01 challenge provisioning.
@@ -55,6 +57,16 @@ func (s *ScriptDNSSolver) Present(ctx context.Context, domain, token, keyAuth st
 		return fmt.Errorf("DNS present script not configured")
 	}
 
+	// Validate domain name to prevent injection attacks
+	if err := validation.ValidateDomainName(domain); err != nil {
+		return fmt.Errorf("invalid domain name: %w", err)
+	}
+
+	// Validate ACME token to prevent injection attacks
+	if err := validation.ValidateACMEToken(token); err != nil {
+		return fmt.Errorf("invalid ACME token: %w", err)
+	}
+
 	fqdn := "_acme-challenge." + domain
 
 	s.Logger.Info("creating DNS TXT record via script",
@@ -70,6 +82,16 @@ func (s *ScriptDNSSolver) CleanUp(ctx context.Context, domain, token, keyAuth st
 	if s.CleanUpScript == "" {
 		s.Logger.Warn("DNS cleanup script not configured, skipping cleanup", "domain", domain)
 		return nil
+	}
+
+	// Validate domain name to prevent injection attacks
+	if err := validation.ValidateDomainName(domain); err != nil {
+		return fmt.Errorf("invalid domain name: %w", err)
+	}
+
+	// Validate ACME token to prevent injection attacks
+	if err := validation.ValidateACMEToken(token); err != nil {
+		return fmt.Errorf("invalid ACME token: %w", err)
 	}
 
 	fqdn := "_acme-challenge." + domain
@@ -88,6 +110,16 @@ func (s *ScriptDNSSolver) CleanUp(ctx context.Context, domain, token, keyAuth st
 func (s *ScriptDNSSolver) PresentPersist(ctx context.Context, domain, token, recordValue string) error {
 	if s.PresentScript == "" {
 		return fmt.Errorf("DNS present script not configured")
+	}
+
+	// Validate domain name to prevent injection attacks
+	if err := validation.ValidateDomainName(domain); err != nil {
+		return fmt.Errorf("invalid domain name: %w", err)
+	}
+
+	// Validate ACME token to prevent injection attacks
+	if err := validation.ValidateACMEToken(token); err != nil {
+		return fmt.Errorf("invalid ACME token: %w", err)
 	}
 
 	fqdn := "_validation-persist." + domain

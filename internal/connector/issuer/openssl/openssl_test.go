@@ -556,3 +556,68 @@ func generateMockCertPEM() string {
 		Bytes: certBytes,
 	}))
 }
+
+// Security tests for script path validation
+
+func TestOpenSSLConnector_ValidateConfig_RejectNonRegularFile(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	// Try to use a directory as a script path
+	tmpDir := t.TempDir()
+
+	config := &openssl.Config{
+		SignScript: tmpDir, // This is a directory, not a regular file
+	}
+	connector := openssl.New(config, logger)
+
+	rawConfig, _ := json.Marshal(config)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("Expected error when sign_script is not a regular file")
+	}
+}
+
+func TestOpenSSLConnector_ValidateConfig_ValidateRevokeScriptPath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	signScript := filepath.Join(tmpDir, "sign.sh")
+	os.WriteFile(signScript, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	// Try to use a nonexistent file as revoke_script
+	config := &openssl.Config{
+		SignScript:   signScript,
+		RevokeScript: "/nonexistent/revoke.sh",
+	}
+	connector := openssl.New(config, logger)
+
+	rawConfig, _ := json.Marshal(config)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("Expected error when revoke_script is nonexistent")
+	}
+}
+
+func TestOpenSSLConnector_ValidateConfig_ValidateCRLScriptPath(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	signScript := filepath.Join(tmpDir, "sign.sh")
+	os.WriteFile(signScript, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	// Try to use a directory as crl_script
+	config := &openssl.Config{
+		SignScript: signScript,
+		CRLScript:  tmpDir, // This is a directory, not a regular file
+	}
+	connector := openssl.New(config, logger)
+
+	rawConfig, _ := json.Marshal(config)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("Expected error when crl_script is not a regular file")
+	}
+}

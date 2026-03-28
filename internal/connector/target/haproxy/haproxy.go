@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the HAProxy deployment target configuration.
@@ -53,12 +54,22 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("HAProxy reload_command is required")
 	}
 
+	// Validate commands to prevent injection attacks
+	if err := validation.ValidateShellCommand(cfg.ReloadCommand); err != nil {
+		return fmt.Errorf("invalid reload_command: %w", err)
+	}
+	if cfg.ValidateCommand != "" {
+		if err := validation.ValidateShellCommand(cfg.ValidateCommand); err != nil {
+			return fmt.Errorf("invalid validate_command: %w", err)
+		}
+	}
+
 	c.logger.Info("validating HAProxy configuration",
 		"pem_path", cfg.PEMPath)
 
 	// Verify validate command works if provided
 	if cfg.ValidateCommand != "" {
-		cmd := exec.CommandContext(ctx, "sh", "-c", cfg.ValidateCommand)
+		cmd := exec.CommandContext(ctx, cfg.ValidateCommand)
 		if err := cmd.Run(); err != nil {
 			c.logger.Warn("HAProxy config validation failed during config check",
 				"error", err,
@@ -114,7 +125,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	// Validate HAProxy configuration if validate command is configured
 	if c.config.ValidateCommand != "" {
 		c.logger.Debug("validating HAProxy configuration", "validate_command", c.config.ValidateCommand)
-		validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+		validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 		if output, err := validateCmd.CombinedOutput(); err != nil {
 			errMsg := fmt.Sprintf("HAProxy config validation failed: %v (output: %s)", err, string(output))
 			c.logger.Error("HAProxy validation failed", "error", err, "output", string(output))
@@ -129,7 +140,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Reload HAProxy
 	c.logger.Debug("reloading HAProxy", "reload_command", c.config.ReloadCommand)
-	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
+	reloadCmd := exec.CommandContext(ctx, c.config.ReloadCommand)
 	if output, err := reloadCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("HAProxy reload failed: %v (output: %s)", err, string(output))
 		c.logger.Error("HAProxy reload failed", "error", err, "output", string(output))
@@ -169,7 +180,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 
 	// Validate HAProxy configuration if command provided
 	if c.config.ValidateCommand != "" {
-		validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+		validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 		if output, err := validateCmd.CombinedOutput(); err != nil {
 			errMsg := fmt.Sprintf("HAProxy config validation failed: %v (output: %s)", err, string(output))
 			c.logger.Error("validation failed", "error", err)

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,12 +13,12 @@ import (
 
 // AgentGroupService defines the service interface for agent group operations.
 type AgentGroupService interface {
-	ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error)
-	GetAgentGroup(id string) (*domain.AgentGroup, error)
-	CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error)
-	UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error)
-	DeleteAgentGroup(id string) error
-	ListMembers(id string) ([]domain.Agent, int64, error)
+	ListAgentGroups(ctx context.Context, page, perPage int) ([]domain.AgentGroup, int64, error)
+	GetAgentGroup(ctx context.Context, id string) (*domain.AgentGroup, error)
+	CreateAgentGroup(ctx context.Context, group domain.AgentGroup) (*domain.AgentGroup, error)
+	UpdateAgentGroup(ctx context.Context, id string, group domain.AgentGroup) (*domain.AgentGroup, error)
+	DeleteAgentGroup(ctx context.Context, id string) error
+	ListMembers(ctx context.Context, id string) ([]domain.Agent, int64, error)
 }
 
 // AgentGroupHandler handles HTTP requests for agent group operations.
@@ -54,7 +55,7 @@ func (h AgentGroupHandler) ListAgentGroups(w http.ResponseWriter, r *http.Reques
 		}
 	}
 
-	groups, total, err := h.svc.ListAgentGroups(page, perPage)
+	groups, total, err := h.svc.ListAgentGroups(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list agent groups", requestID)
 		return
@@ -86,7 +87,7 @@ func (h AgentGroupHandler) GetAgentGroup(w http.ResponseWriter, r *http.Request)
 		return
 	}
 
-	group, err := h.svc.GetAgentGroup(id)
+	group, err := h.svc.GetAgentGroup(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
 		return
@@ -120,7 +121,7 @@ func (h AgentGroupHandler) CreateAgentGroup(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	created, err := h.svc.CreateAgentGroup(group)
+	created, err := h.svc.CreateAgentGroup(r.Context(), group)
 	if err != nil {
 		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") {
 			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
@@ -157,7 +158,7 @@ func (h AgentGroupHandler) UpdateAgentGroup(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	updated, err := h.svc.UpdateAgentGroup(id, group)
+	updated, err := h.svc.UpdateAgentGroup(r.Context(), id, group)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
@@ -186,7 +187,7 @@ func (h AgentGroupHandler) DeleteAgentGroup(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.svc.DeleteAgentGroup(id); err != nil {
+	if err := h.svc.DeleteAgentGroup(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
 			return
@@ -217,7 +218,7 @@ func (h AgentGroupHandler) ListAgentGroupMembers(w http.ResponseWriter, r *http.
 	}
 	id := parts[0]
 
-	members, total, err := h.svc.ListMembers(id)
+	members, total, err := h.svc.ListMembers(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list group members", requestID)
 		return

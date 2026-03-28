@@ -97,22 +97,28 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("sign_script is required")
 	}
 
-	// Verify sign_script exists and is executable
-	if _, err := os.Stat(cfg.SignScript); err != nil {
+	// Verify sign_script exists and is a regular file
+	if info, err := os.Stat(cfg.SignScript); err != nil {
 		return fmt.Errorf("sign_script not accessible: %w", err)
+	} else if !info.Mode().IsRegular() {
+		return fmt.Errorf("sign_script must be a regular file, got %s", info.Mode())
 	}
 
-	// Verify revoke_script exists if specified
+	// Verify revoke_script exists and is a regular file if specified
 	if cfg.RevokeScript != "" {
-		if _, err := os.Stat(cfg.RevokeScript); err != nil {
+		if info, err := os.Stat(cfg.RevokeScript); err != nil {
 			return fmt.Errorf("revoke_script not accessible: %w", err)
+		} else if !info.Mode().IsRegular() {
+			return fmt.Errorf("revoke_script must be a regular file, got %s", info.Mode())
 		}
 	}
 
-	// Verify crl_script exists if specified
+	// Verify crl_script exists and is a regular file if specified
 	if cfg.CRLScript != "" {
-		if _, err := os.Stat(cfg.CRLScript); err != nil {
+		if info, err := os.Stat(cfg.CRLScript); err != nil {
 			return fmt.Errorf("crl_script not accessible: %w", err)
+		} else if !info.Mode().IsRegular() {
+			return fmt.Errorf("crl_script must be a regular file, got %s", info.Mode())
 		}
 	}
 

@@ -193,3 +193,136 @@ echo "FQDN=$CERTCTL_DNS_FQDN" > ` + outputFile + `
 		}
 	})
 }
+
+// Security tests for DNS injection prevention
+
+func TestScriptDNSSolver_Present_RejectInvalidDomain(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "present.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	tests := []struct {
+		name   string
+		domain string
+	}{
+		{
+			name:   "domain with command injection semicolon",
+			domain: "example.com; rm -rf /",
+		},
+		{
+			name:   "domain with backtick injection",
+			domain: "example.com`whoami`",
+		},
+		{
+			name:   "domain with command substitution",
+			domain: "example.com$(whoami)",
+		},
+		{
+			name:   "domain with pipe injection",
+			domain: "example.com | cat /etc/passwd",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+			err := solver.Present(ctx, tt.domain, "test-token", "test-key-auth")
+			if err == nil {
+				t.Fatalf("expected error for invalid domain: %s", tt.domain)
+			}
+		})
+	}
+}
+
+func TestScriptDNSSolver_Present_RejectInvalidToken(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "present.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	tests := []struct {
+		name  string
+		token string
+	}{
+		{
+			name:  "token with command injection",
+			token: "token$(whoami)",
+		},
+		{
+			name:  "token with backtick injection",
+			token: "token`id`",
+		},
+		{
+			name:  "token with semicolon",
+			token: "token;malicious",
+		},
+		{
+			name:  "token with pipe",
+			token: "token|cat",
+		},
+		{
+			name:  "token with space",
+			token: "token value",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+			err := solver.Present(ctx, "example.com", tt.token, "test-key-auth")
+			if err == nil {
+				t.Fatalf("expected error for invalid token: %s", tt.token)
+			}
+		})
+	}
+}
+
+func TestScriptDNSSolver_CleanUp_RejectInvalidDomain(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "cleanup.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	solver := acmeissuer.NewScriptDNSSolver("", scriptPath, logger)
+	err := solver.CleanUp(ctx, "example.com; rm -rf /", "test-token", "test-key-auth")
+	if err == nil {
+		t.Fatal("expected error for command injection in domain")
+	}
+}
+
+func TestScriptDNSSolver_PresentPersist_RejectInvalidDomain(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "present.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+	err := solver.PresentPersist(ctx, "example.com`whoami`", "test-token", "letsencrypt.org; accounturi=https://example.com/acct/1")
+	if err == nil {
+		t.Fatal("expected error for command injection in domain")
+	}
+}
+
+func TestScriptDNSSolver_PresentPersist_RejectInvalidToken(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	scriptPath := filepath.Join(tmpDir, "present.sh")
+	os.WriteFile(scriptPath, []byte("#!/bin/sh\nexit 0"), 0755)
+
+	solver := acmeissuer.NewScriptDNSSolver(scriptPath, "", logger)
+	err := solver.PresentPersist(ctx, "example.com", "token$(whoami)", "letsencrypt.org; accounturi=https://example.com/acct/1")
+	if err == nil {
+		t.Fatal("expected error for command injection in token")
+	}
+}

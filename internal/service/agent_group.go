@@ -28,7 +28,7 @@ func NewAgentGroupService(
 }
 
 // ListAgentGroups returns paginated agent groups (handler interface method).
-func (s *AgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error) {
+func (s *AgentGroupService) ListAgentGroups(ctx context.Context, page, perPage int) ([]domain.AgentGroup, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -36,7 +36,7 @@ func (s *AgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGr
 		perPage = 50
 	}
 
-	groups, err := s.groupRepo.List(context.Background())
+	groups, err := s.groupRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list agent groups: %w", err)
 	}
@@ -53,12 +53,12 @@ func (s *AgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGr
 }
 
 // GetAgentGroup returns a single agent group (handler interface method).
-func (s *AgentGroupService) GetAgentGroup(id string) (*domain.AgentGroup, error) {
-	return s.groupRepo.Get(context.Background(), id)
+func (s *AgentGroupService) GetAgentGroup(ctx context.Context, id string) (*domain.AgentGroup, error) {
+	return s.groupRepo.Get(ctx, id)
 }
 
 // CreateAgentGroup creates a new agent group with validation (handler interface method).
-func (s *AgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (s *AgentGroupService) CreateAgentGroup(ctx context.Context, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	if err := validateAgentGroup(&group); err != nil {
 		return nil, err
 	}
@@ -74,12 +74,12 @@ func (s *AgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.A
 		group.UpdatedAt = now
 	}
 
-	if err := s.groupRepo.Create(context.Background(), &group); err != nil {
+	if err := s.groupRepo.Create(ctx, &group); err != nil {
 		return nil, fmt.Errorf("failed to create agent group: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
 			"create_agent_group", "agent_group", group.ID, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
@@ -89,18 +89,18 @@ func (s *AgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.A
 }
 
 // UpdateAgentGroup modifies an existing agent group (handler interface method).
-func (s *AgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (s *AgentGroupService) UpdateAgentGroup(ctx context.Context, id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	if err := validateAgentGroup(&group); err != nil {
 		return nil, err
 	}
 
 	group.ID = id
-	if err := s.groupRepo.Update(context.Background(), &group); err != nil {
+	if err := s.groupRepo.Update(ctx, &group); err != nil {
 		return nil, fmt.Errorf("failed to update agent group: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
 			"update_agent_group", "agent_group", id, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
@@ -110,13 +110,13 @@ func (s *AgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup)
 }
 
 // DeleteAgentGroup removes an agent group (handler interface method).
-func (s *AgentGroupService) DeleteAgentGroup(id string) error {
-	if err := s.groupRepo.Delete(context.Background(), id); err != nil {
+func (s *AgentGroupService) DeleteAgentGroup(ctx context.Context, id string) error {
+	if err := s.groupRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete agent group: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
 			"delete_agent_group", "agent_group", id, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
@@ -126,8 +126,8 @@ func (s *AgentGroupService) DeleteAgentGroup(id string) error {
 }
 
 // ListMembers returns agents in a group.
-func (s *AgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
-	agents, err := s.groupRepo.ListMembers(context.Background(), id)
+func (s *AgentGroupService) ListMembers(ctx context.Context, id string) ([]domain.Agent, int64, error) {
+	agents, err := s.groupRepo.ListMembers(ctx, id)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list group members: %w", err)
 	}

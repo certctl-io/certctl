@@ -142,7 +142,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Validate Apache configuration before reload
 	c.logger.Debug("validating Apache configuration", "validate_command", c.config.ValidateCommand)
-	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 	if output, err := validateCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("Apache config validation failed: %v (output: %s)", err, string(output))
 		c.logger.Error("Apache validation failed", "error", err, "output", string(output))
@@ -156,7 +156,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Graceful reload
 	c.logger.Debug("reloading Apache", "reload_command", c.config.ReloadCommand)
-	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
+	reloadCmd := exec.CommandContext(ctx, c.config.ReloadCommand)
 	if output, err := reloadCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("Apache reload failed: %v (output: %s)", err, string(output))
 		c.logger.Error("Apache reload failed", "error", err, "output", string(output))
@@ -196,7 +196,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 	startTime := time.Now()
 
 	// Validate Apache configuration
-	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 	if output, err := validateCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("Apache config validation failed: %v (output: %s)", err, string(output))
 		c.logger.Error("validation failed", "error", err)

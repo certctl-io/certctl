@@ -105,8 +105,9 @@ func (s *AgentService) HeartbeatWithContext(ctx context.Context, agentID string,
 }
 
 // Heartbeat updates agent heartbeat (handler interface method).
-func (s *AgentService) Heartbeat(agentID string, metadata *domain.AgentMetadata) error {
-	return s.HeartbeatWithContext(context.Background(), agentID, metadata)
+// Note: This method is called from handlers which have a context; callers should prefer HeartbeatWithContext.
+func (s *AgentService) Heartbeat(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error {
+	return s.HeartbeatWithContext(ctx, agentID, metadata)
 }
 
 // SubmitCSR validates and processes a Certificate Signing Request from an agent.
@@ -326,7 +327,7 @@ func (s *AgentService) GetAgentByAPIKey(ctx context.Context, apiKey string) (*do
 }
 
 // ListAgents returns paginated agents (handler interface method).
-func (s *AgentService) ListAgents(page, perPage int) ([]domain.Agent, int64, error) {
+func (s *AgentService) ListAgents(ctx context.Context, page, perPage int) ([]domain.Agent, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -334,7 +335,7 @@ func (s *AgentService) ListAgents(page, perPage int) ([]domain.Agent, int64, err
 		perPage = 50
 	}
 
-	agents, err := s.agentRepo.List(context.Background())
+	agents, err := s.agentRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list agents: %w", err)
 	}
@@ -360,12 +361,12 @@ func (s *AgentService) ListAgents(page, perPage int) ([]domain.Agent, int64, err
 }
 
 // GetAgent returns a single agent (handler interface method).
-func (s *AgentService) GetAgent(id string) (*domain.Agent, error) {
-	return s.agentRepo.Get(context.Background(), id)
+func (s *AgentService) GetAgent(ctx context.Context, id string) (*domain.Agent, error) {
+	return s.agentRepo.Get(ctx, id)
 }
 
 // RegisterAgent creates and registers a new agent (handler interface method).
-func (s *AgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) {
+func (s *AgentService) RegisterAgent(ctx context.Context, agent domain.Agent) (*domain.Agent, error) {
 	agent.ID = generateID("agent")
 	apiKey := generateAPIKey()
 	agent.APIKeyHash = hashAPIKey(apiKey)
@@ -374,7 +375,7 @@ func (s *AgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) 
 	agent.RegisteredAt = now
 	agent.LastHeartbeatAt = &now
 
-	if err := s.agentRepo.Create(context.Background(), &agent); err != nil {
+	if err := s.agentRepo.Create(ctx, &agent); err != nil {
 		return nil, fmt.Errorf("failed to register agent: %w", err)
 	}
 	return &agent, nil
@@ -382,8 +383,8 @@ func (s *AgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) 
 
 // CSRSubmit processes a CSR submission from an agent (handler interface method).
 // The csrPEM parameter contains "certID:csrPEM" or just the CSR PEM.
-func (s *AgentService) CSRSubmit(agentID string, csrPEM string) (string, error) {
-	err := s.SubmitCSR(context.Background(), agentID, "", []byte(csrPEM))
+func (s *AgentService) CSRSubmit(ctx context.Context, agentID string, csrPEM string) (string, error) {
+	err := s.SubmitCSR(ctx, agentID, "", []byte(csrPEM))
 	if err != nil {
 		return "", err
 	}
@@ -391,8 +392,8 @@ func (s *AgentService) CSRSubmit(agentID string, csrPEM string) (string, error) 
 }
 
 // CSRSubmitForCert processes a CSR submission for a specific certificate (handler interface method).
-func (s *AgentService) CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error) {
-	err := s.SubmitCSR(context.Background(), agentID, certID, []byte(csrPEM))
+func (s *AgentService) CSRSubmitForCert(ctx context.Context, agentID string, certID string, csrPEM string) (string, error) {
+	err := s.SubmitCSR(ctx, agentID, certID, []byte(csrPEM))
 	if err != nil {
 		return "", err
 	}
@@ -400,8 +401,8 @@ func (s *AgentService) CSRSubmitForCert(agentID string, certID string, csrPEM st
 }
 
 // GetWork returns pending deployment jobs for an agent (handler interface method).
-func (s *AgentService) GetWork(agentID string) ([]domain.Job, error) {
-	jobs, err := s.GetPendingWork(context.Background(), agentID)
+func (s *AgentService) GetWork(ctx context.Context, agentID string) ([]domain.Job, error) {
+	jobs, err := s.GetPendingWork(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -417,8 +418,8 @@ func (s *AgentService) GetWork(agentID string) ([]domain.Job, error) {
 // GetWorkWithTargets returns actionable jobs enriched with target/certificate details.
 // Deployment jobs include target type + config. AwaitingCSR jobs include common name + SANs
 // so the agent knows what CSR to generate.
-func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, error) {
-	jobs, err := s.GetPendingWork(context.Background(), agentID)
+func (s *AgentService) GetWorkWithTargets(ctx context.Context, agentID string) ([]domain.WorkItem, error) {
+	jobs, err := s.GetPendingWork(ctx, agentID)
 	if err != nil {
 		return nil, err
 	}
@@ -438,7 +439,7 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 
 		// Enrich with target details for deployment jobs
 		if j.TargetID != nil && *j.TargetID != "" {
-			target, err := s.targetRepo.Get(context.Background(), *j.TargetID)
+			target, err := s.targetRepo.Get(ctx, *j.TargetID)
 			if err == nil && target != nil {
 				item.TargetType = string(target.Type)
 				item.TargetConfig = target.Config
@@ -447,7 +448,7 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 
 		// Enrich with certificate details for AwaitingCSR jobs (agent needs CN + SANs for CSR)
 		if j.Status == domain.JobStatusAwaitingCSR {
-			cert, err := s.certRepo.Get(context.Background(), j.CertificateID)
+			cert, err := s.certRepo.Get(ctx, j.CertificateID)
 			if err == nil && cert != nil {
 				item.CommonName = cert.CommonName
 				item.SANs = cert.SANs
@@ -461,13 +462,13 @@ func (s *AgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, er
 }
 
 // UpdateJobStatus reports a job's status from an agent (handler interface method).
-func (s *AgentService) UpdateJobStatus(agentID string, jobID string, status string, errMsg string) error {
-	return s.ReportJobStatus(context.Background(), agentID, jobID, domain.JobStatus(status), errMsg)
+func (s *AgentService) UpdateJobStatus(ctx context.Context, agentID string, jobID string, status string, errMsg string) error {
+	return s.ReportJobStatus(ctx, agentID, jobID, domain.JobStatus(status), errMsg)
 }
 
 // CertificatePickup retrieves a certificate for an agent (handler interface method).
-func (s *AgentService) CertificatePickup(agentID, certID string) (string, error) {
-	certPEM, err := s.GetCertificateForAgent(context.Background(), agentID, certID)
+func (s *AgentService) CertificatePickup(ctx context.Context, agentID, certID string) (string, error) {
+	certPEM, err := s.GetCertificateForAgent(ctx, agentID, certID)
 	if err != nil {
 		return "", err
 	}

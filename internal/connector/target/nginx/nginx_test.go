@@ -377,3 +377,85 @@ func TestNginxConnector_ValidateDeployment_ValidateCommandFails(t *testing.T) {
 		t.Fatal("expected invalid result")
 	}
 }
+
+// Security tests for command injection prevention
+
+func TestNginxConnector_ValidateConfig_RejectCommandInjectionSemicolon(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	cfg := nginx.Config{
+		CertPath:        filepath.Join(tmpDir, "cert.pem"),
+		ChainPath:       filepath.Join(tmpDir, "chain.pem"),
+		ReloadCommand:   "nginx; rm -rf /", // Command injection attempt
+		ValidateCommand: "true",
+	}
+
+	connector := nginx.New(&cfg, logger)
+	rawConfig, _ := json.Marshal(cfg)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("expected error for command injection in reload_command")
+	}
+}
+
+func TestNginxConnector_ValidateConfig_RejectCommandInjectionPipe(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	cfg := nginx.Config{
+		CertPath:        filepath.Join(tmpDir, "cert.pem"),
+		ChainPath:       filepath.Join(tmpDir, "chain.pem"),
+		ReloadCommand:   "true",
+		ValidateCommand: "nginx -t | cat /etc/passwd", // Command injection attempt
+	}
+
+	connector := nginx.New(&cfg, logger)
+	rawConfig, _ := json.Marshal(cfg)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("expected error for command injection in validate_command")
+	}
+}
+
+func TestNginxConnector_ValidateConfig_RejectCommandSubstitution(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	cfg := nginx.Config{
+		CertPath:        filepath.Join(tmpDir, "cert.pem"),
+		ChainPath:       filepath.Join(tmpDir, "chain.pem"),
+		ReloadCommand:   "echo $(whoami)",
+		ValidateCommand: "true",
+	}
+
+	connector := nginx.New(&cfg, logger)
+	rawConfig, _ := json.Marshal(cfg)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("expected error for command substitution in reload_command")
+	}
+}
+
+func TestNginxConnector_ValidateConfig_RejectBackticks(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	tmpDir := t.TempDir()
+	cfg := nginx.Config{
+		CertPath:        filepath.Join(tmpDir, "cert.pem"),
+		ChainPath:       filepath.Join(tmpDir, "chain.pem"),
+		ReloadCommand:   "true",
+		ValidateCommand: "nginx -t `whoami`",
+	}
+
+	connector := nginx.New(&cfg, logger)
+	rawConfig, _ := json.Marshal(cfg)
+	err := connector.ValidateConfig(ctx, rawConfig)
+	if err == nil {
+		t.Fatal("expected error for backtick injection in validate_command")
+	}
+}
