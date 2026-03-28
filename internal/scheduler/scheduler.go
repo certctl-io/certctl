@@ -126,21 +126,25 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 	go func() {
 		s.logger.Info("scheduler starting")
 
-		// Signal that the scheduler has started all loops
-		go func() {
-			<-time.After(100 * time.Millisecond)
-			close(startedChan)
-		}()
-
-		// Start all scheduler loops concurrently
-		go s.renewalCheckLoop(ctx)
-		go s.jobProcessorLoop(ctx)
-		go s.agentHealthCheckLoop(ctx)
-		go s.notificationProcessLoop(ctx)
-		go s.shortLivedExpiryCheckLoop(ctx)
+		// Track all loop goroutines in the WaitGroup so WaitForCompletion
+		// blocks until they've fully exited (prevents test races).
+		loopCount := 5
 		if s.networkScanService != nil {
-			go s.networkScanLoop(ctx)
+			loopCount = 6
 		}
+		s.wg.Add(loopCount)
+
+		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.jobProcessorLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.agentHealthCheckLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.notificationProcessLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.shortLivedExpiryCheckLoop(ctx) }()
+		if s.networkScanService != nil {
+			go func() { defer s.wg.Done(); s.networkScanLoop(ctx) }()
+		}
+
+		// Signal that all loops are launched
+		close(startedChan)
 
 		// Wait for context cancellation
 		<-ctx.Done()

@@ -16,13 +16,21 @@ type mockRenewalService struct {
 	callTimes   []time.Time
 	slowDelay   time.Duration
 	shouldError bool
+	blockCh     chan struct{} // if non-nil, blocks until closed (ignores context)
 }
 
 func (m *mockRenewalService) CheckExpiringCertificates(ctx context.Context) error {
 	m.mu.Lock()
 	m.callCount++
 	m.callTimes = append(m.callTimes, time.Now())
+	blockCh := m.blockCh
 	m.mu.Unlock()
+
+	// If blockCh is set, block until it's closed (ignores context — for timeout tests)
+	if blockCh != nil {
+		<-blockCh
+		return nil
+	}
 
 	if m.slowDelay > 0 {
 		select {
@@ -274,8 +282,9 @@ func TestWaitForCompletionTimeout(t *testing.T) {
 	// Use a channel-blocked mock that ignores context cancellation,
 	// ensuring work is still in-flight when WaitForCompletion is called.
 	blockCh := make(chan struct{})
-	renewalMock := &mockRenewalService{}
-	renewalMock.slowDelay = 0 // We override behavior below
+	renewalMock := &mockRenewalService{
+		blockCh: blockCh, // blocks until closed, ignores ctx
+	}
 
 	jobMock := &mockJobService{}
 	agentMock := &mockAgentService{}
@@ -290,31 +299,23 @@ func TestWaitForCompletionTimeout(t *testing.T) {
 	defer cancel()
 	defer close(blockCh) // Unblock the mock after test completes
 
-	// Override the renewal mock to block on a channel (ignores context cancel)
-	renewalMock.slowDelay = 30 * time.Second // Long enough to outlast the test
-
 	// Start scheduler
 	startedChan := sched.Start(ctx)
 	<-startedChan
 
-	// Let it run briefly so a job starts
-	time.Sleep(150 * time.Millisecond)
+	// Let it run briefly so the initial job starts and blocks
+	time.Sleep(50 * time.Millisecond)
 
-	// Stop scheduler — but the in-flight job won't finish (blocked)
+	// Stop scheduler — but the in-flight work goroutine won't finish (blocked on channel)
 	cancel()
 
-	// Wait with very short timeout (much shorter than the blocked job)
+	// Wait with very short timeout (work is stuck on blockCh)
 	start := time.Now()
 	err := sched.WaitForCompletion(200 * time.Millisecond)
 	elapsed := time.Since(start)
 
-	if err == nil {
-		t.Logf("WaitForCompletion completed in %v (job may have been cancelled by context)", elapsed)
-		t.Skip("flaky: job completed before timeout — context cancellation propagated faster than expected")
-	}
-
 	if err != ErrSchedulerShutdownTimeout {
-		t.Fatalf("expected ErrSchedulerShutdownTimeout, got %v", err)
+		t.Fatalf("expected ErrSchedulerShutdownTimeout, got %v (elapsed: %v)", err, elapsed)
 	}
 
 	t.Logf("WaitForCompletion correctly timed out after %v", elapsed)
