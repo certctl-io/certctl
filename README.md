@@ -492,3 +492,5 @@ Passive network discovery (TLS listener), Kubernetes integration (cert-manager e
 
 Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties.
 
+For licensing inquiries: certctl@proton.me
+
