@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -18,7 +19,7 @@ type mockVerificationService struct {
 	results   map[string]*domain.VerificationResult
 }
 
-func (m *mockVerificationService) RecordVerificationResult(ctx interface{}, result *domain.VerificationResult) error {
+func (m *mockVerificationService) RecordVerificationResult(ctx context.Context, result *domain.VerificationResult) error {
 	if m.recordErr != nil {
 		return m.recordErr
 	}
@@ -29,7 +30,7 @@ func (m *mockVerificationService) RecordVerificationResult(ctx interface{}, resu
 	return nil
 }
 
-func (m *mockVerificationService) GetVerificationResult(ctx interface{}, jobID string) (*domain.VerificationResult, error) {
+func (m *mockVerificationService) GetVerificationResult(ctx context.Context, jobID string) (*domain.VerificationResult, error) {
 	if m.getErr != nil {
 		return nil, m.getErr
 	}

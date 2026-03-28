@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -13,10 +14,10 @@ import (
 // VerificationService defines the service interface for verification operations.
 type VerificationService interface {
 	// RecordVerificationResult records the outcome of TLS endpoint verification.
-	RecordVerificationResult(ctx interface{}, result *domain.VerificationResult) error
+	RecordVerificationResult(ctx context.Context, result *domain.VerificationResult) error
 
 	// GetVerificationResult retrieves the verification status for a job.
-	GetVerificationResult(ctx interface{}, jobID string) (*domain.VerificationResult, error)
+	GetVerificationResult(ctx context.Context, jobID string) (*domain.VerificationResult, error)
 }
 
 // VerificationHandler handles HTTP requests for certificate deployment verification.

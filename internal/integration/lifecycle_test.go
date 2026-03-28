@@ -1214,10 +1214,10 @@ func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID strin
 // mockVerificationService implements handler.VerificationService for integration tests.
 type mockVerificationService struct{}
 
-func (m *mockVerificationService) RecordVerificationResult(ctx interface{}, result *domain.VerificationResult) error {
+func (m *mockVerificationService) RecordVerificationResult(ctx context.Context, result *domain.VerificationResult) error {
 	return nil
 }
 
-func (m *mockVerificationService) GetVerificationResult(ctx interface{}, jobID string) (*domain.VerificationResult, error) {
+func (m *mockVerificationService) GetVerificationResult(ctx context.Context, jobID string) (*domain.VerificationResult, error) {
 	return nil, fmt.Errorf("not found")
 }
