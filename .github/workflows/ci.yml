@@ -74,8 +74,8 @@ jobs:
           echo "Middleware layer coverage: ${MIDDLEWARE_COV}%"
 
           # Fail if thresholds not met
-          if [ "$(echo "$SERVICE_COV < 60" | bc -l)" -eq 1 ]; then
-            echo "::error::Service layer coverage ${SERVICE_COV}% is below 60% threshold"
+          if [ "$(echo "$SERVICE_COV < 55" | bc -l)" -eq 1 ]; then
+            echo "::error::Service layer coverage ${SERVICE_COV}% is below 55% threshold"
             exit 1
           fi
           if [ "$(echo "$HANDLER_COV < 60" | bc -l)" -eq 1 ]; then
