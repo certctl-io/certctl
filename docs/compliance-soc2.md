@@ -49,6 +49,7 @@ Each section includes:
 - **Configurable CORS** — API restricts cross-origin requests via `CERTCTL_CORS_ORIGINS` allowlist or wildcard. Preflight caching prevents chatty browser auth flows.
 - **Token Bucket Rate Limiting** — Per-IP rate limiting (configurable via `CERTCTL_RATE_LIMIT_RPS` / `CERTCTL_RATE_LIMIT_BURST`) returns 429 Too Many Requests with Retry-After header. Prevents credential stuffing and brute-force attacks.
 - **No Password Storage** — certctl does not store user passwords. API keys are the sole authentication mechanism. Your API key generation, distribution, and rotation policies are your responsibility (see "Operator Responsibility" below).
+- **Zero-Downtime Key Rotation** — `CERTCTL_AUTH_SECRET` accepts comma-separated keys (e.g., `new-key,old-key`). All listed keys are validated with constant-time comparison. Operators can add a new key, migrate clients, then remove the old key — no service restart required for the client migration phase. A single-key warning is logged at startup to encourage rotation configuration.
 
 **Evidence Locations**:
 
@@ -232,7 +233,7 @@ Each section includes:
 
 **certctl Implementation** (V2):
 
-- **Immutable API Audit Trail** (M19) — Every API call is recorded to `audit_events` table (append-only, no update/delete). Recorded: HTTP method, path, query parameters, actor (user/agent ID), SHA-256 hash of request body (truncated 16 chars for brevity), response status code, latency in milliseconds. Excluded paths (health, ready) are configurable. Audit records are async (non-blocking) and include a timestamp.
+- **Immutable API Audit Trail** (M19) — Every API call is recorded to `audit_events` table (append-only, no update/delete). Recorded: HTTP method, URL path (query parameters intentionally excluded — see security note), actor (user/agent ID), SHA-256 hash of request body (truncated 16 chars for brevity), response status code, latency in milliseconds. Excluded paths (health, ready) are configurable. Audit records are async (non-blocking) and include a timestamp. **Security: Query parameters are excluded from the audit path** because they may contain cursor tokens, API keys, or sensitive filter values; since the audit trail is append-only with no deletion, any sensitive data recorded would persist permanently.
 - **Audit Trail API** — `GET /api/v1/audit?actor=...&action=...&resource_id=...&created_after=...&created_before=...` allows searching for anomalous patterns (e.g., "who accessed certificate XYZ and when?", "did anyone revoke certs at 2 AM?").
 - **Expiration Threshold Alerting** — Certificate renewal policies define alert thresholds (days before expiry): default `[30, 14, 7, 0]`. When a certificate approaches a threshold, a notification is enqueued. Deduplication prevents duplicate alerts for the same cert at the same threshold. Auto status transition: cert moves to `Expiring` status at 30 days, `Expired` at 0 days.
 - **Certificate Status Auto-Transitions** — When a cert is issued, it's `Active`. As expiry approaches, status auto-transitions to `Expiring` (at 30d threshold). At expiry, status becomes `Expired`. Revoked certs move to `Revoked`. These transitions are recorded in the audit trail.

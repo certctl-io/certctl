@@ -32,9 +32,12 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the OpenSSL/Custom CA issuer connector configuration.
@@ -258,6 +261,36 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 	return result, nil
 }
 
+// hexSerialRegex validates that a serial number contains only hexadecimal characters.
+// Certificate serial numbers are integers represented in hex (RFC 5280).
+var hexSerialRegex = regexp.MustCompile(`^[0-9a-fA-F]+$`)
+
+// validateSerial validates a certificate serial number for safe use in shell commands.
+// Serial numbers must be non-empty, hex-only strings with no shell metacharacters.
+func validateSerial(serial string) error {
+	if serial == "" {
+		return fmt.Errorf("serial number cannot be empty")
+	}
+	if !hexSerialRegex.MatchString(serial) {
+		return fmt.Errorf("serial number %q contains non-hex characters (expected ^[0-9a-fA-F]+$)", serial)
+	}
+	if err := validation.ValidateShellCommand(serial); err != nil {
+		return fmt.Errorf("serial number failed shell safety validation: %w", err)
+	}
+	return nil
+}
+
+// validateRevocationReason validates a revocation reason against RFC 5280 reason codes.
+func validateRevocationReason(reason string) error {
+	if !domain.IsValidRevocationReason(reason) {
+		return fmt.Errorf("invalid revocation reason %q (must be a valid RFC 5280 reason code)", reason)
+	}
+	if err := validation.ValidateShellCommand(reason); err != nil {
+		return fmt.Errorf("revocation reason failed shell safety validation: %w", err)
+	}
+	return nil
+}
+
 // RevokeCertificate revokes a certificate by calling the revoke script if configured.
 func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.RevocationRequest) error {
 	if c.config.RevokeScript == "" {
@@ -268,6 +301,14 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	reason := "unspecified"
 	if request.Reason != nil {
 		reason = *request.Reason
+	}
+
+	// Validate serial number (hex-only) and reason code (RFC 5280) before shell execution
+	if err := validateSerial(request.Serial); err != nil {
+		return fmt.Errorf("revocation input validation failed: %w", err)
+	}
+	if err := validateRevocationReason(reason); err != nil {
+		return fmt.Errorf("revocation input validation failed: %w", err)
 	}
 
 	c.logger.Info("revoking certificate via revoke script",

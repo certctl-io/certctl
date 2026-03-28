@@ -78,7 +78,12 @@ func NewAuditLog(recorder AuditRecorder, cfg AuditConfig) func(http.Handler) htt
 
 			latency := time.Since(start).Milliseconds()
 
-			// Record audit event asynchronously (best-effort, don't block response)
+			// Record audit event asynchronously (best-effort, don't block response).
+			// SECURITY: We intentionally use r.URL.Path (not r.URL.String() or r.RequestURI)
+			// to prevent query parameters from being recorded in the immutable audit trail.
+			// Query strings may contain cursor tokens, API keys passed as params, or other
+			// sensitive filter values. Since the audit trail is append-only with no deletion
+			// capability, any sensitive data recorded would persist permanently.
 			go func() {
 				if err := recorder.RecordAPICall(
 					context.Background(),

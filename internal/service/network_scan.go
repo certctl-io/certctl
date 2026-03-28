@@ -58,6 +58,36 @@ func (s *NetworkScanService) GetTarget(ctx context.Context, id string) (*domain.
 	return s.networkScanRepo.Get(ctx, id)
 }
 
+// maxCIDRHostBits is the maximum number of host bits allowed in a CIDR range.
+// A /20 network has 12 host bits = 4096 IPs max. This prevents operators from
+// accidentally creating scan targets that would exhaust server resources.
+const maxCIDRHostBits = 12
+
+// validateCIDRs validates a list of CIDRs for syntax correctness and size limits.
+// Each CIDR must be a valid CIDR notation or plain IP address, and no single CIDR
+// may be larger than /20 (4096 IPs). This validation runs at API request time so
+// operators get an immediate 400 error instead of a silent truncation at scan time.
+func validateCIDRs(cidrs []string) error {
+	for _, cidr := range cidrs {
+		_, ipNet, err := net.ParseCIDR(cidr)
+		if err != nil {
+			// Try parsing as plain IP (single host)
+			if ip := net.ParseIP(cidr); ip == nil {
+				return fmt.Errorf("invalid CIDR or IP: %s", cidr)
+			}
+			continue // Single IPs are always valid size
+		}
+		// Enforce /20 size cap at API level
+		ones, bits := ipNet.Mask.Size()
+		hostBits := bits - ones
+		if hostBits > maxCIDRHostBits {
+			return fmt.Errorf("CIDR %s is too large (/%d has %d host bits, max /%d with %d host bits = 4096 IPs)",
+				cidr, ones, hostBits, bits-maxCIDRHostBits, maxCIDRHostBits)
+		}
+	}
+	return nil
+}
+
 // CreateTarget creates a new network scan target.
 func (s *NetworkScanService) CreateTarget(ctx context.Context, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
 	if target.Name == "" {
@@ -66,14 +96,9 @@ func (s *NetworkScanService) CreateTarget(ctx context.Context, target *domain.Ne
 	if len(target.CIDRs) == 0 {
 		return nil, fmt.Errorf("at least one CIDR is required")
 	}
-	// Validate CIDRs
-	for _, cidr := range target.CIDRs {
-		if _, _, err := net.ParseCIDR(cidr); err != nil {
-			// Try parsing as plain IP
-			if ip := net.ParseIP(cidr); ip == nil {
-				return nil, fmt.Errorf("invalid CIDR or IP: %s", cidr)
-			}
-		}
+	// Validate CIDRs (syntax + /20 size cap)
+	if err := validateCIDRs(target.CIDRs); err != nil {
+		return nil, err
 	}
 	if len(target.Ports) == 0 {
 		target.Ports = []int64{443}
@@ -115,13 +140,9 @@ func (s *NetworkScanService) UpdateTarget(ctx context.Context, id string, target
 		existing.Name = target.Name
 	}
 	if len(target.CIDRs) > 0 {
-		// Validate new CIDRs
-		for _, cidr := range target.CIDRs {
-			if _, _, err := net.ParseCIDR(cidr); err != nil {
-				if ip := net.ParseIP(cidr); ip == nil {
-					return nil, fmt.Errorf("invalid CIDR or IP: %s", cidr)
-				}
-			}
+		// Validate new CIDRs (syntax + /20 size cap)
+		if err := validateCIDRs(target.CIDRs); err != nil {
+			return nil, err
 		}
 		existing.CIDRs = target.CIDRs
 	}

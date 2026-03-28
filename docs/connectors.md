@@ -284,7 +284,7 @@ Script-based issuer connector for organizations with existing CA tooling. Delega
 | `CERTCTL_OPENSSL_CRL_SCRIPT` | No | Script that outputs DER-encoded CRL on stdout |
 | `CERTCTL_OPENSSL_TIMEOUT_SECONDS` | No | Script execution timeout (default: 30s) |
 
-The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information.
+The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information. Before shell execution, serial numbers are validated as hex-only (`^[0-9a-fA-F]+$`) and revocation reason codes are validated against the RFC 5280 specification to prevent command injection.
 
 ### Revocation Across Issuers
 

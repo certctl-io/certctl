@@ -84,6 +84,8 @@ curl http://localhost:8443/health
 Open **http://localhost:8443** in your browser.
 
 > **Note:** The Docker Compose demo runs with authentication disabled (`CERTCTL_AUTH_TYPE=none`) so you can explore immediately. For production, set `CERTCTL_AUTH_TYPE=api-key` and `CERTCTL_AUTH_SECRET=<your-secret>` in your environment, then pass `Authorization: Bearer <your-secret>` on all API requests. The dashboard will prompt for your API key on first load.
+>
+> **Key rotation:** `CERTCTL_AUTH_SECRET` accepts comma-separated keys (e.g., `CERTCTL_AUTH_SECRET=new-key,old-key`). Both keys are valid simultaneously, enabling zero-downtime rotation: add the new key, roll clients over, then remove the old key.
 
 The dashboard comes pre-loaded with 15 demo certificates across multiple teams, environments, and statuses — expiring certs, expired certs, active certs, failed renewals. A realistic snapshot of what certificate management looks like in a real organization.
 

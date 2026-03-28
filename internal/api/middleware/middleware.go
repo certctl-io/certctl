@@ -8,6 +8,7 @@ import (
 	"log"
 	"log/slog"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -100,12 +101,17 @@ func HashAPIKey(key string) string {
 // AuthConfig holds configuration for the Auth middleware.
 type AuthConfig struct {
 	Type   string // "api-key", "jwt", "none"
-	Secret string // The raw API key (server compares against this)
+	Secret string // The raw API key or comma-separated list of valid API keys
 }
 
 // NewAuth creates an authentication middleware based on config.
 // When Type is "none", all requests pass through (demo/development mode).
 // When Type is "api-key", requests must include a valid Bearer token.
+// The Secret field supports a comma-separated list of valid API keys for
+// zero-downtime key rotation. Rotation workflow:
+//  1. Add new key to comma-separated list, restart server
+//  2. Update all agents/clients to use new key
+//  3. Remove old key from list, restart server
 func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 	if cfg.Type == "none" {
 		return func(next http.Handler) http.Handler {
@@ -113,8 +119,21 @@ func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 		}
 	}
 
-	// Pre-compute hash of the expected key for constant-time comparison
-	expectedHash := HashAPIKey(cfg.Secret)
+	// Pre-compute hashes of all valid keys for constant-time comparison.
+	// Supports comma-separated list for zero-downtime key rotation.
+	keys := strings.Split(cfg.Secret, ",")
+	var expectedHashes []string
+	for _, k := range keys {
+		k = strings.TrimSpace(k)
+		if k != "" {
+			expectedHashes = append(expectedHashes, HashAPIKey(k))
+		}
+	}
+
+	// Warn if only one key is configured in production mode
+	if len(expectedHashes) == 1 {
+		slog.Warn("only one API key configured — consider adding a rotation key via comma-separated CERTCTL_AUTH_SECRET for zero-downtime rotation")
+	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -136,8 +155,16 @@ func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 			token := authHeader[7:]
 			tokenHash := HashAPIKey(token)
 
-			// Constant-time comparison to prevent timing attacks
-			if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(expectedHash)) != 1 {
+			// Check against all valid keys using constant-time comparison
+			authorized := false
+			for _, expectedHash := range expectedHashes {
+				if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(expectedHash)) == 1 {
+					authorized = true
+					break
+				}
+			}
+
+			if !authorized {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				http.Error(w, `{"error":"Invalid API key"}`, http.StatusUnauthorized)
 				return

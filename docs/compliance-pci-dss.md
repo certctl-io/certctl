@@ -393,7 +393,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 
 **Operator Responsibility**:
 - **Issue API keys to users/systems** requiring API access (outside certctl; you maintain key registry).
-- **Rotate API keys periodically** (recommendation: annually, or when personnel changes).
+- **Rotate API keys using zero-downtime rotation** — `CERTCTL_AUTH_SECRET` supports comma-separated keys (e.g., `new-key,old-key`). Add the new key, migrate clients, then remove the old key. Recommendation: rotate at least annually, or immediately when personnel changes.
 - **Revoke API keys immediately** when user leaves or token is compromised (set `enabled=false` in API key management — not yet implemented in v1, owner must track manually).
 - **Enforce strong TLS** on control plane: TLS 1.2+, modern ciphers (configure on reverse proxy or `CERTCTL_TLS_*` env vars if operator-controlled).
 - **Protect `.env` and credential files** where API key is defined (restrict file system access, no version control).
@@ -452,7 +452,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 - **Immutable API Audit Log** (M19) — Middleware captures every API call:
   - `audit_events` table (append-only, no UPDATE/DELETE):
     - `method`: HTTP method (GET, POST, PUT, DELETE)
-    - `path`: API endpoint path (e.g., `/api/v1/certificates`)
+    - `path`: API endpoint path only, excluding query parameters (e.g., `/api/v1/certificates` — query strings intentionally omitted to prevent sensitive data persistence in the append-only audit trail)
     - `actor`: authenticated user/service (extracted from API key or context)
     - `body_hash`: SHA-256 hash of request body (truncated to 16 chars, first 8 chars shown in logs)
     - `status_code`: HTTP response status (200, 201, 400, 401, 404, 500, etc.)

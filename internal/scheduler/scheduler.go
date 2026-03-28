@@ -356,6 +356,15 @@ func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.shortLivedExpiryCheckInterval)
 	defer ticker.Stop()
 
+	// Run immediately on start (with idempotency guard)
+	s.shortLivedExpiryCheckRunning.Store(true)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.shortLivedExpiryCheckRunning.Store(false)
+		s.runShortLivedExpiryCheck(ctx)
+	}()
+
 	for {
 		select {
 		case <-ctx.Done():

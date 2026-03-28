@@ -391,6 +391,92 @@ func TestExpandCIDR_AllowsPrivateRanges(t *testing.T) {
 	}
 }
 
+// AUDIT-003: CIDR size validation at API level
+
+func TestValidateCIDRs_AcceptsValidSizes(t *testing.T) {
+	tests := []struct {
+		name  string
+		cidrs []string
+	}{
+		{"single IP", []string{"192.168.1.1"}},
+		{"/24 network", []string{"10.0.0.0/24"}},
+		{"/20 network (max)", []string{"10.0.0.0/20"}},
+		{"/30 tiny network", []string{"10.0.0.0/30"}},
+		{"multiple valid", []string{"10.0.0.0/24", "192.168.1.0/24"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCIDRs(tt.cidrs)
+			if err != nil {
+				t.Errorf("expected valid CIDRs to be accepted, got error: %v", err)
+			}
+		})
+	}
+}
+
+func TestValidateCIDRs_RejectsOversized(t *testing.T) {
+	tests := []struct {
+		name  string
+		cidrs []string
+	}{
+		{"/19 too large", []string{"10.0.0.0/19"}},
+		{"/16 way too large", []string{"10.0.0.0/16"}},
+		{"/8 massive", []string{"10.0.0.0/8"}},
+		{"/0 everything", []string{"0.0.0.0/0"}},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateCIDRs(tt.cidrs)
+			if err == nil {
+				t.Errorf("expected oversized CIDR %v to be rejected", tt.cidrs)
+			}
+		})
+	}
+}
+
+func TestValidateCIDRs_RejectsInvalid(t *testing.T) {
+	err := validateCIDRs([]string{"not-a-cidr"})
+	if err == nil {
+		t.Error("expected invalid CIDR to be rejected")
+	}
+}
+
+func TestNetworkScanService_CreateTarget_RejectsOversizedCIDR(t *testing.T) {
+	repo := &mockNetworkScanRepo{}
+	auditRepo := newMockAuditRepository()
+	auditService := NewAuditService(auditRepo)
+	svc := NewNetworkScanService(repo, nil, auditService, nil)
+
+	_, err := svc.CreateTarget(context.Background(), &domain.NetworkScanTarget{
+		Name:  "Test",
+		CIDRs: []string{"10.0.0.0/8"},
+	})
+	if err == nil {
+		t.Fatal("expected CreateTarget to reject /8 CIDR")
+	}
+}
+
+func TestNetworkScanService_UpdateTarget_RejectsOversizedCIDR(t *testing.T) {
+	repo := &mockNetworkScanRepo{
+		targets: []*domain.NetworkScanTarget{
+			{ID: "nst-1", Name: "Original", CIDRs: []string{"10.0.0.0/24"}, Enabled: true},
+		},
+	}
+	auditRepo := newMockAuditRepository()
+	auditService := NewAuditService(auditRepo)
+	svc := NewNetworkScanService(repo, nil, auditService, nil)
+
+	// Try to update from /24 to /8 — should be rejected
+	_, err := svc.UpdateTarget(context.Background(), "nst-1", &domain.NetworkScanTarget{
+		CIDRs: []string{"10.0.0.0/8"},
+	})
+	if err == nil {
+		t.Fatal("expected UpdateTarget to reject /8 CIDR update (bypass attempt)")
+	}
+}
+
 func TestExpandCIDR_SingleLoopbackIP(t *testing.T) {
 	ips := expandCIDR("127.0.0.1")
 	if len(ips) != 0 {

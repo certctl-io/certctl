@@ -478,7 +478,9 @@ flowchart LR
 | Agent health check | 2 minutes | 1 minute | Marks agents as offline if heartbeat is stale |
 | Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
 | Short-lived expiry | 30 seconds | 30 seconds | Marks expired short-lived certificates (profile TTL < 1 hour) |
-| Network scanner | 6 hours | 30 minutes | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21, opt-in via `CERTCTL_NETWORK_SCAN_ENABLED`) |
+| Network scanner | 6 hours | 30 minutes | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21, opt-in via `CERTCTL_NETWORK_SCAN_ENABLED`). CIDR size validated at API level — max /20 (4096 IPs) per range. |
+
+Each loop uses `sync/atomic.Bool` idempotency guards to prevent concurrent tick execution — if a loop iteration is still running when the next tick fires, the tick is skipped with a warning log. All loops (including short-lived expiry check) run immediately on startup before entering their ticker interval, ensuring no gap between scheduler start and first execution. Graceful shutdown uses `sync.WaitGroup` with `WaitForCompletion()` to drain all in-flight work before process exit.
 
 Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
@@ -709,7 +711,9 @@ Audit events cannot be modified or deleted. They support filtering by actor, act
 
 ### API Audit Log
 
-In addition to application-level audit events, certctl records every HTTP API call via middleware. The audit middleware captures method, path, actor (extracted from auth context), SHA-256 request body hash (truncated to 16 characters), response status code, and request latency. Health and readiness probes are excluded to avoid noise.
+In addition to application-level audit events, certctl records every HTTP API call via middleware. The audit middleware captures method, URL path (excluding query parameters — see security note below), actor (extracted from auth context), SHA-256 request body hash (truncated to 16 characters), response status code, and request latency. Health and readiness probes are excluded to avoid noise.
+
+**Security: Query Parameter Exclusion** — The audit middleware intentionally records `r.URL.Path` only (not `r.URL.String()` or `r.RequestURI`). Query strings may contain cursor tokens, API keys passed as params, or other sensitive filter values. Since the audit trail is append-only with no deletion capability, any sensitive data recorded would persist permanently.
 
 Audit recording is async (via goroutine) so it never blocks the HTTP response. If audit persistence fails, the error is logged immediately — the API call still succeeds. The middleware sits after the auth middleware in the stack so the actor identity is available from context.
 

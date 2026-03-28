@@ -289,7 +289,7 @@ func TestOpenSSLConnector(t *testing.T) {
 		}
 
 		revokeReq := issuer.RevocationRequest{
-			Serial: "test-serial-12345",
+			Serial: "ABCDEF1234567890",
 		}
 
 		// Should return nil (no-op) when revoke script not configured
@@ -324,13 +324,148 @@ func TestOpenSSLConnector(t *testing.T) {
 			t.Fatalf("ValidateConfig failed: %v", err)
 		}
 
+		reason := "keyCompromise"
 		revokeReq := issuer.RevocationRequest{
-			Serial: "test-serial-12345",
+			Serial: "ABCDEF1234567890",
+			Reason: &reason,
 		}
 
 		err := connector.RevokeCertificate(ctx, revokeReq)
 		if err != nil {
 			t.Fatalf("RevokeCertificate failed: %v", err)
+		}
+	})
+
+	// Test 15: RevokeCertificate rejects injection payloads in serial number
+	t.Run("RevokeCertificate_InjectionSerial", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		signScript := filepath.Join(tmpDir, "sign.sh")
+		if err := os.WriteFile(signScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create sign script: %v", err)
+		}
+		revokeScript := filepath.Join(tmpDir, "revoke.sh")
+		if err := os.WriteFile(revokeScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create revoke script: %v", err)
+		}
+
+		config := &openssl.Config{
+			SignScript:   signScript,
+			RevokeScript: revokeScript,
+		}
+		connector := openssl.New(config, logger)
+		rawConfig, _ := json.Marshal(config)
+		if err := connector.ValidateConfig(ctx, rawConfig); err != nil {
+			t.Fatalf("ValidateConfig failed: %v", err)
+		}
+
+		injectionPayloads := []string{
+			"1234;rm -rf /",
+			"1234|cat /etc/passwd",
+			"1234&whoami",
+			"$(id)",
+			"`id`",
+			"1234\nid",
+			"../../../etc/passwd",
+			"test-serial-12345", // hyphens not allowed (not hex)
+		}
+
+		for _, payload := range injectionPayloads {
+			t.Run(payload, func(t *testing.T) {
+				req := issuer.RevocationRequest{Serial: payload}
+				err := connector.RevokeCertificate(ctx, req)
+				if err == nil {
+					t.Errorf("Expected injection payload %q to be rejected, but it was accepted", payload)
+				}
+			})
+		}
+	})
+
+	// Test 16: RevokeCertificate rejects invalid reason codes
+	t.Run("RevokeCertificate_InvalidReason", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		signScript := filepath.Join(tmpDir, "sign.sh")
+		if err := os.WriteFile(signScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create sign script: %v", err)
+		}
+		revokeScript := filepath.Join(tmpDir, "revoke.sh")
+		if err := os.WriteFile(revokeScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create revoke script: %v", err)
+		}
+
+		config := &openssl.Config{
+			SignScript:   signScript,
+			RevokeScript: revokeScript,
+		}
+		connector := openssl.New(config, logger)
+		rawConfig, _ := json.Marshal(config)
+		if err := connector.ValidateConfig(ctx, rawConfig); err != nil {
+			t.Fatalf("ValidateConfig failed: %v", err)
+		}
+
+		invalidReasons := []string{
+			"notARealReason",
+			"keyCompromise;rm -rf /",
+			"$(whoami)",
+			"`id`",
+		}
+
+		for _, reason := range invalidReasons {
+			t.Run(reason, func(t *testing.T) {
+				r := reason
+				req := issuer.RevocationRequest{
+					Serial: "ABCDEF1234567890",
+					Reason: &r,
+				}
+				err := connector.RevokeCertificate(ctx, req)
+				if err == nil {
+					t.Errorf("Expected invalid reason %q to be rejected, but it was accepted", reason)
+				}
+			})
+		}
+	})
+
+	// Test 17: RevokeCertificate accepts all valid RFC 5280 reason codes
+	t.Run("RevokeCertificate_ValidReasons", func(t *testing.T) {
+		tmpDir := t.TempDir()
+
+		signScript := filepath.Join(tmpDir, "sign.sh")
+		if err := os.WriteFile(signScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create sign script: %v", err)
+		}
+		revokeScript := filepath.Join(tmpDir, "revoke.sh")
+		if err := os.WriteFile(revokeScript, []byte("#!/bin/sh\nexit 0"), 0755); err != nil {
+			t.Fatalf("Failed to create revoke script: %v", err)
+		}
+
+		config := &openssl.Config{
+			SignScript:   signScript,
+			RevokeScript: revokeScript,
+		}
+		connector := openssl.New(config, logger)
+		rawConfig, _ := json.Marshal(config)
+		if err := connector.ValidateConfig(ctx, rawConfig); err != nil {
+			t.Fatalf("ValidateConfig failed: %v", err)
+		}
+
+		validReasons := []string{
+			"unspecified", "keyCompromise", "caCompromise", "affiliationChanged",
+			"superseded", "cessationOfOperation", "certificateHold", "privilegeWithdrawn",
+		}
+
+		for _, reason := range validReasons {
+			t.Run(reason, func(t *testing.T) {
+				r := reason
+				req := issuer.RevocationRequest{
+					Serial: "ABCDEF1234567890",
+					Reason: &r,
+				}
+				err := connector.RevokeCertificate(ctx, req)
+				if err != nil {
+					t.Errorf("Expected valid reason %q to be accepted, got error: %v", reason, err)
+				}
+			})
 		}
 	})
 

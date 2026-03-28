@@ -328,6 +328,46 @@ func TestAuditLog_CapturesLatency(t *testing.T) {
 	}
 }
 
+func TestAuditLog_ExcludesQueryParamsFromPath(t *testing.T) {
+	recorder := newWaitableAuditRecorder()
+	mw := NewAuditLog(recorder, AuditConfig{})
+
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+
+	// Send a request with sensitive query parameters
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates?api_key=secret123&cursor=abc&status=active", nil)
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+
+	if !recorder.Wait(1 * time.Second) {
+		t.Fatal("timeout waiting for audit record")
+	}
+
+	calls := recorder.getCalls()
+	if len(calls) != 1 {
+		t.Fatalf("expected 1 audit call, got %d", len(calls))
+	}
+
+	// Path should contain ONLY the path, no query parameters
+	if calls[0].Path != "/api/v1/certificates" {
+		t.Errorf("expected path /api/v1/certificates (no query params), got %s", calls[0].Path)
+	}
+	if strings.Contains(calls[0].Path, "api_key") {
+		t.Error("audit path contains 'api_key' — query parameters leaked into audit trail")
+	}
+	if strings.Contains(calls[0].Path, "secret123") {
+		t.Error("audit path contains sensitive value 'secret123' — query parameters leaked into audit trail")
+	}
+	if strings.Contains(calls[0].Path, "cursor") {
+		t.Error("audit path contains 'cursor' — query parameters leaked into audit trail")
+	}
+	if strings.Contains(calls[0].Path, "?") {
+		t.Error("audit path contains '?' — query string leaked into audit trail")
+	}
+}
+
 func TestAuditServiceAdapter_TranslatesCallToEvent(t *testing.T) {
 	var capturedActor, capturedActorType, capturedAction, capturedResourceType, capturedResourceID string
 	var capturedDetails map[string]interface{}
