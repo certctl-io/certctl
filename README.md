@@ -53,13 +53,16 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venaf
 
 certctl gives you a single pane of glass for every TLS certificate in your organization:
 
-- **Web dashboard** — full certificate inventory with status, ownership, expiration heatmaps, and bulk operations
-- **REST API** — 95 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation
-- **Agents** — generate private keys locally, discover existing certs on disk, submit CSRs (private keys never leave your servers)
-- **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents
+- **Web dashboard** — 22 operational pages: certificate inventory, deployment timeline with TLS verification, bulk operations (renew/revoke/reassign), discovery triage, network scan management, approval workflows, audit trail with CSV/JSON export, agent fleet overview with OS/arch grouping, short-lived credential monitoring
+- **REST API** — 95 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation, with sparse fields, sort, cursor pagination, and time-range filters
+- **Agents** — generate private keys locally (ECDSA P-256), discover existing certs on disk (PEM/DER), submit CSRs only (private keys never leave your servers)
+- **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents, concurrent scanning with configurable timeouts
+- **Certificate export** — PEM (JSON or file download) and PKCS#12 formats, with audit trail; private keys never included
+- **S/MIME + EKU support** — issue certificates with emailProtection, codeSigning, timeStamping, clientAuth EKUs; email SAN routing for S/MIME
 - **EST server** (RFC 7030) — device and WiFi certificate enrollment via industry-standard protocol
+- **Post-deployment verification** — agent-side TLS probe confirms the target serves the correct certificate by SHA-256 fingerprint match
 - **Approval workflows** — require human sign-off on renewals before deployment
-- **Background scheduler** — watches expiration dates and triggers renewals automatically, handling constant rotation at 47-day lifespans without human involvement
+- **Background scheduler** — 6 automated loops: renewal checks, job processing, agent health, notifications, short-lived cert expiry, and network scanning
 
 For the full capability breakdown — revocation infrastructure, policy engine, observability, EST enrollment, and more — see the [Feature Inventory](docs/features.md).
 
@@ -130,6 +133,8 @@ All connectors are pluggable — build your own by implementing the [connector i
 <td><a href="docs/screenshots/v2-short-lived.png"><img src="docs/screenshots/v2-short-lived.png" width="270" alt="Short-Lived"></a><br><b>Short-Lived Creds</b><br><sub>Ephemeral certs with live TTL countdown</sub></td>
 </tr>
 </table>
+
+> **22 operational GUI pages** covering the full certificate lifecycle: dashboard, certificates (list + detail with EKU badges, deployment timeline, TLS verification status), agents, fleet overview, jobs (with approval workflow), notifications, policies, profiles, issuers, targets (wizard with NGINX/Apache/HAProxy/Traefik/Caddy/F5/IIS), owners, teams, agent groups, audit trail, short-lived credentials, discovery triage, and network scan management.
 
 ## Quick Start
 
@@ -476,10 +481,10 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **API Enhancements** — sparse fields, sort, time-range filters, cursor pagination, immutable API audit logging
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides
 
-- **Post-Deployment TLS Verification** — agent-side TLS probe confirms the target is serving the correct certificate by SHA-256 fingerprint match
-- **Traefik + Caddy Targets** — Traefik (file provider, auto-reload) and Caddy (Admin API hot-reload or file-based)
-- **Certificate Export** — PEM (JSON or file download) and PKCS#12 formats, private keys never included (agent-side only), audit trail
-- **S/MIME Support** — EKU-aware issuance (emailProtection, codeSigning, timeStamping), adaptive KeyUsage flags, email SAN routing
+- **Post-Deployment TLS Verification** — agent-side TLS probe confirms the target is serving the correct certificate by SHA-256 fingerprint match, verification status visible in deployment timeline
+- **Traefik + Caddy Targets** — Traefik (file provider, auto-reload) and Caddy (Admin API hot-reload or file-based), both in target wizard GUI
+- **Certificate Export** — PEM (JSON or file download) and PKCS#12 formats, private keys never included (agent-side only), audit trail, GUI export buttons
+- **S/MIME Support** — EKU-aware issuance (emailProtection, codeSigning, timeStamping), adaptive KeyUsage flags, email SAN routing, EKU badges in GUI
 
 ### V3: certctl Pro
 

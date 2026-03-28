@@ -11,16 +11,20 @@ import type { Target } from '../api/types';
 
 const typeLabels: Record<string, string> = {
   nginx: 'NGINX',
-  f5_bigip: 'F5 BIG-IP',
-  iis: 'IIS',
   apache: 'Apache',
   haproxy: 'HAProxy',
+  traefik: 'Traefik',
+  caddy: 'Caddy',
+  f5_bigip: 'F5 BIG-IP',
+  iis: 'IIS',
 };
 
 const TARGET_TYPES = [
   { value: 'nginx', label: 'NGINX', description: 'Deploy to NGINX web server via file write + config validation + reload' },
   { value: 'apache', label: 'Apache httpd', description: 'Separate cert/chain/key files, apachectl configtest, graceful reload' },
   { value: 'haproxy', label: 'HAProxy', description: 'Combined PEM file (cert+chain+key), optional validate, reload' },
+  { value: 'traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
+  { value: 'caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
   { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST via proxy agent (V3 implementation)' },
   { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or proxy WinRM (V3 implementation)' },
 ];
@@ -42,6 +46,18 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'pem_path', label: 'Combined PEM Path', placeholder: '/etc/haproxy/certs/combined.pem', required: true },
     { key: 'reload_cmd', label: 'Reload Command', placeholder: 'systemctl reload haproxy' },
     { key: 'validate_cmd', label: 'Validate Command (optional)', placeholder: 'haproxy -c -f /etc/haproxy/haproxy.cfg' },
+  ],
+  traefik: [
+    { key: 'cert_dir', label: 'Certificate Directory', placeholder: '/etc/traefik/certs', required: true },
+    { key: 'cert_file', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
+    { key: 'key_file', label: 'Key Filename', placeholder: 'key.pem (default)' },
+  ],
+  caddy: [
+    { key: 'mode', label: 'Deployment Mode', placeholder: 'api (default) or file', required: true },
+    { key: 'admin_api', label: 'Admin API URL', placeholder: 'http://localhost:2019 (default)' },
+    { key: 'cert_dir', label: 'Certificate Directory (file mode)', placeholder: '/etc/caddy/certs' },
+    { key: 'cert_file', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
+    { key: 'key_file', label: 'Key Filename', placeholder: 'key.pem (default)' },
   ],
   f5_bigip: [
     { key: 'management_ip', label: 'Management IP', placeholder: '192.168.1.100', required: true },

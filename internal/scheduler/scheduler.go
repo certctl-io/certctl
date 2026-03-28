@@ -118,6 +118,11 @@ func (s *Scheduler) SetNetworkScanInterval(d time.Duration) {
 	s.networkScanInterval = d
 }
 
+// SetShortLivedExpiryCheckInterval configures the interval for short-lived certificate expiry checks.
+func (s *Scheduler) SetShortLivedExpiryCheckInterval(d time.Duration) {
+	s.shortLivedExpiryCheckInterval = d
+}
+
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {

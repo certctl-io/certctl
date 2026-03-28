@@ -11,12 +11,14 @@ import (
 
 // mockRenewalService is a mock implementation for testing.
 type mockRenewalService struct {
-	mu          sync.Mutex
-	callCount   int
-	callTimes   []time.Time
-	slowDelay   time.Duration
-	shouldError bool
-	blockCh     chan struct{} // if non-nil, blocks until closed (ignores context)
+	mu                 sync.Mutex
+	callCount          int
+	callTimes          []time.Time
+	expireCallCount    int
+	expireCallTimes    []time.Time
+	slowDelay          time.Duration
+	shouldError        bool
+	blockCh            chan struct{} // if non-nil, blocks until closed (ignores context)
 }
 
 func (m *mockRenewalService) CheckExpiringCertificates(ctx context.Context) error {
@@ -47,6 +49,11 @@ func (m *mockRenewalService) CheckExpiringCertificates(ctx context.Context) erro
 }
 
 func (m *mockRenewalService) ExpireShortLivedCertificates(ctx context.Context) error {
+	m.mu.Lock()
+	m.expireCallCount++
+	m.expireCallTimes = append(m.expireCallTimes, time.Now())
+	m.mu.Unlock()
+
 	if m.slowDelay > 0 {
 		select {
 		case <-time.After(m.slowDelay):
@@ -459,4 +466,271 @@ func TestSchedulerGracefulShutdown(t *testing.T) {
 		t.Error("job service was never called")
 	}
 	jobMock.mu.Unlock()
+}
+
+// TestSchedulerRenewalLoopCallsService verifies that the renewal loop executes the renewal service.
+func TestSchedulerRenewalLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(50 * time.Millisecond)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	renewalMock.mu.Lock()
+	count := renewalMock.callCount
+	renewalMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected renewal service to be called at least once, got %d", count)
+	}
+	t.Logf("renewal loop called %d times", count)
+}
+
+// TestSchedulerJobProcessorLoopCallsService verifies that the job processor loop executes the job service.
+func TestSchedulerJobProcessorLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(50 * time.Millisecond)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	jobMock.mu.Lock()
+	count := jobMock.callCount
+	jobMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected job service to be called at least once, got %d", count)
+	}
+	t.Logf("job processor loop called %d times", count)
+}
+
+// TestSchedulerAgentHealthCheckLoopCallsService verifies that the agent health check loop executes the agent service.
+func TestSchedulerAgentHealthCheckLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(50 * time.Millisecond)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	agentMock.mu.Lock()
+	count := agentMock.callCount
+	agentMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected agent service to be called at least once, got %d", count)
+	}
+	t.Logf("agent health check loop called %d times", count)
+}
+
+// TestSchedulerNotificationLoopCallsService verifies that the notification loop executes the notification service.
+func TestSchedulerNotificationLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(50 * time.Millisecond)
+	sched.SetNetworkScanInterval(10 * time.Second)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	notificationMock.mu.Lock()
+	count := notificationMock.callCount
+	notificationMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected notification service to be called at least once, got %d", count)
+	}
+	t.Logf("notification loop called %d times", count)
+}
+
+// TestSchedulerNetworkScanLoopCallsService verifies that the network scan loop executes the network scan service.
+func TestSchedulerNetworkScanLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	networkMock.mu.Lock()
+	count := networkMock.callCount
+	networkMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected network scan service to be called at least once, got %d", count)
+	}
+	t.Logf("network scan loop called %d times", count)
+}
+
+// TestSchedulerShortLivedExpiryLoopCallsService verifies that the short-lived expiry loop executes the renewal service.
+func TestSchedulerShortLivedExpiryLoopCallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetShortLivedExpiryCheckInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	sched.WaitForCompletion(2 * time.Second)
+
+	renewalMock.mu.Lock()
+	count := renewalMock.expireCallCount
+	renewalMock.mu.Unlock()
+	if count < 1 {
+		t.Fatalf("expected short-lived expiry to be called at least once, got %d", count)
+	}
+	t.Logf("short-lived expiry loop called %d times", count)
+}
+
+// TestSchedulerLoopErrorRecovery verifies that scheduler loops continue executing after errors.
+func TestSchedulerLoopErrorRecovery(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{shouldError: true}
+	jobMock := &mockJobService{shouldError: true}
+	agentMock := &mockAgentService{shouldError: true}
+	notificationMock := &mockNotificationService{shouldError: true}
+	networkMock := &mockNetworkScanService{shouldError: true}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(50 * time.Millisecond)
+	sched.SetJobProcessorInterval(50 * time.Millisecond)
+	sched.SetAgentHealthCheckInterval(50 * time.Millisecond)
+	sched.SetNotificationProcessInterval(50 * time.Millisecond)
+	sched.SetNetworkScanInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	time.Sleep(300 * time.Millisecond)
+	cancel()
+	err := sched.WaitForCompletion(2 * time.Second)
+	if err != nil {
+		t.Fatalf("WaitForCompletion should not error even with service errors: %v", err)
+	}
+
+	renewalMock.mu.Lock()
+	renewalCount := renewalMock.callCount
+	renewalMock.mu.Unlock()
+	if renewalCount < 2 {
+		t.Fatalf("expected renewal service to be called at least twice (error recovery), got %d", renewalCount)
+	}
+
+	jobMock.mu.Lock()
+	jobCount := jobMock.callCount
+	jobMock.mu.Unlock()
+	if jobCount < 2 {
+		t.Fatalf("expected job service to be called at least twice (error recovery), got %d", jobCount)
+	}
+
+	t.Logf("scheduler recovered from errors: renewal %d calls, job %d calls", renewalCount, jobCount)
+}
+
+// TestSchedulerLoopContextCancellation verifies graceful shutdown when context is cancelled immediately.
+func TestSchedulerLoopContextCancellation(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	startedChan := sched.Start(ctx)
+	<-startedChan
+	cancel()
+	err := sched.WaitForCompletion(2 * time.Second)
+	if err != nil {
+		t.Fatalf("WaitForCompletion should succeed even with immediate cancellation: %v", err)
+	}
+
+	t.Logf("scheduler shut down gracefully on context cancellation")
 }

@@ -316,3 +316,115 @@ func TestGetPrometheusMetrics_ZeroValues(t *testing.T) {
 func containsLine(text, substr string) bool {
 	return strings.Contains(text, substr)
 }
+
+// Test GetCertificatesByStatus - method not allowed
+func TestGetCertificatesByStatus_MethodNotAllowed(t *testing.T) {
+	mock := &MockStatsService{}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stats/certificates-by-status", nil)
+	w := httptest.NewRecorder()
+	h.GetCertificatesByStatus(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// Test GetCertificatesByStatus - service error
+func TestGetCertificatesByStatus_ServiceError(t *testing.T) {
+	mock := &MockStatsService{
+		GetCertificatesByStatusFn: func(ctx context.Context) (interface{}, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/certificates-by-status", nil)
+	w := httptest.NewRecorder()
+	h.GetCertificatesByStatus(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+// Test GetExpirationTimeline - method not allowed
+func TestGetExpirationTimeline_MethodNotAllowed(t *testing.T) {
+	mock := &MockStatsService{}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stats/expiration-timeline", nil)
+	w := httptest.NewRecorder()
+	h.GetExpirationTimeline(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// Test GetExpirationTimeline - service error
+func TestGetExpirationTimeline_ServiceError(t *testing.T) {
+	mock := &MockStatsService{
+		GetExpirationTimelineFn: func(ctx context.Context, days int) (interface{}, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/expiration-timeline?days=30", nil)
+	w := httptest.NewRecorder()
+	h.GetExpirationTimeline(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+// Test GetJobTrends - method not allowed
+func TestGetJobTrends_MethodNotAllowed(t *testing.T) {
+	mock := &MockStatsService{}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stats/job-trends", nil)
+	w := httptest.NewRecorder()
+	h.GetJobTrends(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// Test GetJobTrends - service error
+func TestGetJobTrends_ServiceError(t *testing.T) {
+	mock := &MockStatsService{
+		GetJobStatsFn: func(ctx context.Context, days int) (interface{}, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/job-trends?days=14", nil)
+	w := httptest.NewRecorder()
+	h.GetJobTrends(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+// Test GetIssuanceRate - method not allowed
+func TestGetIssuanceRate_MethodNotAllowed(t *testing.T) {
+	mock := &MockStatsService{}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/stats/issuance-rate", nil)
+	w := httptest.NewRecorder()
+	h.GetIssuanceRate(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405, got %d", w.Code)
+	}
+}
+
+// Test GetIssuanceRate - service error
+func TestGetIssuanceRate_ServiceError(t *testing.T) {
+	mock := &MockStatsService{
+		GetIssuanceRateFn: func(ctx context.Context, days int) (interface{}, error) {
+			return nil, fmt.Errorf("db error")
+		},
+	}
+	h := NewStatsHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/stats/issuance-rate?days=7", nil)
+	w := httptest.NewRecorder()
+	h.GetIssuanceRate(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}

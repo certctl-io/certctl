@@ -12,6 +12,8 @@ import (
 	"github.com/shankar0123/certctl/internal/service"
 )
 
+// Add context import was already there — verify import is present above
+
 // MockExportService is a mock implementation of ExportService interface.
 type MockExportService struct {
 	ExportPEMFn    func(ctx context.Context, certID string) (*service.ExportPEMResult, error)
@@ -278,5 +280,40 @@ func TestExtractCertIDFromExportPath(t *testing.T) {
 		if got != tt.expected {
 			t.Errorf("extractCertIDFromExportPath(%q) = %q, want %q", tt.path, got, tt.expected)
 		}
+	}
+}
+
+func TestExportPKCS12_InvalidJSON(t *testing.T) {
+	mockSvc := &MockExportService{
+		ExportPKCS12Fn: func(_ context.Context, _ string, password string) ([]byte, error) {
+			// Invalid JSON is silently ignored, defaults to empty password
+			if password != "" {
+				t.Errorf("expected empty password (invalid JSON ignored), got %s", password)
+			}
+			return []byte{0x30}, nil
+		},
+	}
+	h := NewExportHandler(mockSvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-test-1/export/pkcs12", strings.NewReader(`{"invalid json`))
+	w := httptest.NewRecorder()
+
+	h.ExportPKCS12(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 (invalid JSON ignored), got %d", w.Code)
+	}
+}
+
+func TestExportPEM_MethodNotAllowedDelete(t *testing.T) {
+	h := NewExportHandler(&MockExportService{})
+
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/certificates/mc-test-1/export/pem", nil)
+	w := httptest.NewRecorder()
+
+	h.ExportPEM(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected 405, got %d", w.Code)
 	}
 }

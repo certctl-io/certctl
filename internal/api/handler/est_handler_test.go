@@ -396,3 +396,49 @@ func TestASN1EncodeLength(t *testing.T) {
 		}
 	}
 }
+
+func TestESTCSRAttrs_ServiceError(t *testing.T) {
+	svc := &mockESTService{
+		CSRAttrsErr: errors.New("service error"),
+	}
+	h := NewESTHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/est/csrattrs", nil)
+	w := httptest.NewRecorder()
+	h.CSRAttrs(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestESTSimpleReEnroll_ServiceError(t *testing.T) {
+	csrPEM := generateTestCSRPEM(t)
+	svc := &mockESTService{
+		EnrollErr: errors.New("renewal failed"),
+	}
+	h := NewESTHandler(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simplereenroll", strings.NewReader(csrPEM))
+	w := httptest.NewRecorder()
+	h.SimpleReEnroll(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}
+
+func TestESTCACerts_UnableToGetCerts(t *testing.T) {
+	svc := &mockESTService{
+		CACertErr: errors.New("CA unavailable"),
+	}
+	h := NewESTHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/est/cacerts", nil)
+	w := httptest.NewRecorder()
+	h.CACerts(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500, got %d", w.Code)
+	}
+}

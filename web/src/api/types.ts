@@ -78,6 +78,10 @@ export interface Job {
   started_at: string;
   completed_at: string;
   created_at: string;
+  verification_status?: string;
+  verified_at?: string;
+  verification_fingerprint?: string;
+  verification_error?: string;
 }
 
 export interface Notification {

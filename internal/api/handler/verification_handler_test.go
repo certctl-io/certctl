@@ -249,6 +249,58 @@ func TestVerifyDeployment_ServiceError(t *testing.T) {
 	}
 }
 
+func TestVerifyDeployment_EmptyBody(t *testing.T) {
+	mockSvc := &mockVerificationService{}
+	handler := NewVerificationHandler(mockSvc)
+
+	httpReq := httptest.NewRequest("POST", "/api/v1/jobs/j-test10/verify", bytes.NewBufferString(""))
+	w := httptest.NewRecorder()
+
+	handler.VerifyDeployment(w, httpReq)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestGetVerificationStatus_ServiceError(t *testing.T) {
+	mockSvc := &mockVerificationService{
+		getErr: ErrServiceUnavailable,
+	}
+	handler := NewVerificationHandler(mockSvc)
+
+	httpReq := httptest.NewRequest("GET", "/api/v1/jobs/j-test11/verification", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetVerificationStatus(w, httpReq)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status 500, got %d", w.Code)
+	}
+}
+
+func TestGetVerificationStatus_NotFound(t *testing.T) {
+	mockSvc := &mockVerificationService{
+		results: make(map[string]*domain.VerificationResult),
+	}
+	handler := NewVerificationHandler(mockSvc)
+
+	httpReq := httptest.NewRequest("GET", "/api/v1/jobs/j-nonexistent/verification", nil)
+	w := httptest.NewRecorder()
+
+	handler.GetVerificationStatus(w, httpReq)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("expected status 200, got %d", w.Code)
+	}
+
+	var result *domain.VerificationResult
+	json.NewDecoder(w.Body).Decode(&result)
+	if result != nil {
+		t.Error("expected nil result for nonexistent job")
+	}
+}
+
 var ErrServiceUnavailable = NewServiceError("service unavailable")
 
 func NewServiceError(msg string) error {

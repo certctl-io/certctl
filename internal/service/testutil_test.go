@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"sync"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -117,6 +118,7 @@ func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 
 // mockJobRepo is a test implementation of JobRepository
 type mockJobRepo struct {
+	mu              sync.Mutex
 	Jobs            map[string]*domain.Job
 	StatusUpdates   map[string]domain.JobStatus
 	CreateErr       error
@@ -129,6 +131,8 @@ type mockJobRepo struct {
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
@@ -140,6 +144,8 @@ func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
 }
 
 func (m *mockJobRepo) Get(ctx context.Context, id string) (*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.GetErr != nil {
 		return nil, m.GetErr
 	}
@@ -151,6 +157,8 @@ func (m *mockJobRepo) Get(ctx context.Context, id string) (*domain.Job, error) {
 }
 
 func (m *mockJobRepo) Create(ctx context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
 	}
@@ -159,6 +167,8 @@ func (m *mockJobRepo) Create(ctx context.Context, job *domain.Job) error {
 }
 
 func (m *mockJobRepo) Update(ctx context.Context, job *domain.Job) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return m.UpdateErr
 	}
@@ -167,6 +177,8 @@ func (m *mockJobRepo) Update(ctx context.Context, job *domain.Job) error {
 }
 
 func (m *mockJobRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.DeleteErr != nil {
 		return m.DeleteErr
 	}
@@ -175,6 +187,8 @@ func (m *mockJobRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (m *mockJobRepo) ListByStatus(ctx context.Context, status domain.JobStatus) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListByStatusErr != nil {
 		return nil, m.ListByStatusErr
 	}
@@ -188,6 +202,8 @@ func (m *mockJobRepo) ListByStatus(ctx context.Context, status domain.JobStatus)
 }
 
 func (m *mockJobRepo) ListByCertificate(ctx context.Context, certID string) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var jobs []*domain.Job
 	for _, j := range m.Jobs {
 		if j.CertificateID == certID {
@@ -198,6 +214,8 @@ func (m *mockJobRepo) ListByCertificate(ctx context.Context, certID string) ([]*
 }
 
 func (m *mockJobRepo) UpdateStatus(ctx context.Context, id string, status domain.JobStatus, errMsg string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateStatusErr != nil {
 		return m.UpdateStatusErr
 	}
@@ -214,6 +232,8 @@ func (m *mockJobRepo) UpdateStatus(ctx context.Context, id string, status domain
 }
 
 func (m *mockJobRepo) GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	var jobs []*domain.Job
 	for _, j := range m.Jobs {
 		if j.Type == jobType && j.Status == domain.JobStatusPending {
@@ -224,11 +244,14 @@ func (m *mockJobRepo) GetPendingJobs(ctx context.Context, jobType domain.JobType
 }
 
 func (m *mockJobRepo) AddJob(job *domain.Job) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Jobs[job.ID] = job
 }
 
 // mockNotifRepo is a test implementation of NotificationRepository
 type mockNotifRepo struct {
+	mu            sync.Mutex
 	Notifications []*domain.NotificationEvent
 	CreateErr     error
 	ListErr       error
@@ -236,6 +259,8 @@ type mockNotifRepo struct {
 }
 
 func (m *mockNotifRepo) Create(ctx context.Context, notif *domain.NotificationEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
 	}
@@ -244,6 +269,8 @@ func (m *mockNotifRepo) Create(ctx context.Context, notif *domain.NotificationEv
 }
 
 func (m *mockNotifRepo) List(ctx context.Context, filter *repository.NotificationFilter) ([]*domain.NotificationEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
@@ -251,6 +278,8 @@ func (m *mockNotifRepo) List(ctx context.Context, filter *repository.Notificatio
 }
 
 func (m *mockNotifRepo) UpdateStatus(ctx context.Context, id string, status string, sentAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return m.UpdateErr
 	}
@@ -264,17 +293,22 @@ func (m *mockNotifRepo) UpdateStatus(ctx context.Context, id string, status stri
 }
 
 func (m *mockNotifRepo) AddNotification(notif *domain.NotificationEvent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Notifications = append(m.Notifications, notif)
 }
 
 // mockAuditRepo is a test implementation of AuditRepository
 type mockAuditRepo struct {
+	mu        sync.Mutex
 	Events    []*domain.AuditEvent
 	CreateErr error
 	ListErr   error
 }
 
 func (m *mockAuditRepo) Create(ctx context.Context, event *domain.AuditEvent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
 	}
@@ -283,6 +317,8 @@ func (m *mockAuditRepo) Create(ctx context.Context, event *domain.AuditEvent) er
 }
 
 func (m *mockAuditRepo) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
@@ -312,6 +348,8 @@ func (m *mockAuditRepo) List(ctx context.Context, filter *repository.AuditFilter
 }
 
 func (m *mockAuditRepo) AddEvent(event *domain.AuditEvent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Events = append(m.Events, event)
 }
 
@@ -428,6 +466,7 @@ func (m *mockRenewalPolicyRepo) AddPolicy(policy *domain.RenewalPolicy) {
 
 // mockAgentRepo is a test implementation of AgentRepository
 type mockAgentRepo struct {
+	mu                 sync.Mutex
 	Agents             map[string]*domain.Agent
 	HeartbeatUpdates   map[string]time.Time
 	CreateErr          error
@@ -440,6 +479,8 @@ type mockAgentRepo struct {
 }
 
 func (m *mockAgentRepo) List(ctx context.Context) ([]*domain.Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
@@ -451,6 +492,8 @@ func (m *mockAgentRepo) List(ctx context.Context) ([]*domain.Agent, error) {
 }
 
 func (m *mockAgentRepo) Get(ctx context.Context, id string) (*domain.Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.GetErr != nil {
 		return nil, m.GetErr
 	}
@@ -462,6 +505,8 @@ func (m *mockAgentRepo) Get(ctx context.Context, id string) (*domain.Agent, erro
 }
 
 func (m *mockAgentRepo) Create(ctx context.Context, agent *domain.Agent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
 	}
@@ -470,6 +515,8 @@ func (m *mockAgentRepo) Create(ctx context.Context, agent *domain.Agent) error {
 }
 
 func (m *mockAgentRepo) Update(ctx context.Context, agent *domain.Agent) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return m.UpdateErr
 	}
@@ -478,6 +525,8 @@ func (m *mockAgentRepo) Update(ctx context.Context, agent *domain.Agent) error {
 }
 
 func (m *mockAgentRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.DeleteErr != nil {
 		return m.DeleteErr
 	}
@@ -486,6 +535,8 @@ func (m *mockAgentRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateHeartbeatErr != nil {
 		return m.UpdateHeartbeatErr
 	}
@@ -500,6 +551,8 @@ func (m *mockAgentRepo) UpdateHeartbeat(ctx context.Context, id string, metadata
 }
 
 func (m *mockAgentRepo) GetByAPIKey(ctx context.Context, keyHash string) (*domain.Agent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.GetByAPIKeyErr != nil {
 		return nil, m.GetByAPIKeyErr
 	}
@@ -512,11 +565,14 @@ func (m *mockAgentRepo) GetByAPIKey(ctx context.Context, keyHash string) (*domai
 }
 
 func (m *mockAgentRepo) AddAgent(agent *domain.Agent) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Agents[agent.ID] = agent
 }
 
 // mockTargetRepo is a test implementation of TargetRepository
 type mockTargetRepo struct {
+	mu            sync.Mutex
 	Targets       map[string]*domain.DeploymentTarget
 	CreateErr     error
 	UpdateErr     error
@@ -527,6 +583,8 @@ type mockTargetRepo struct {
 }
 
 func (m *mockTargetRepo) List(ctx context.Context) ([]*domain.DeploymentTarget, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
@@ -538,6 +596,8 @@ func (m *mockTargetRepo) List(ctx context.Context) ([]*domain.DeploymentTarget, 
 }
 
 func (m *mockTargetRepo) Get(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.GetErr != nil {
 		return nil, m.GetErr
 	}
@@ -549,6 +609,8 @@ func (m *mockTargetRepo) Get(ctx context.Context, id string) (*domain.Deployment
 }
 
 func (m *mockTargetRepo) Create(ctx context.Context, target *domain.DeploymentTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.CreateErr != nil {
 		return m.CreateErr
 	}
@@ -557,6 +619,8 @@ func (m *mockTargetRepo) Create(ctx context.Context, target *domain.DeploymentTa
 }
 
 func (m *mockTargetRepo) Update(ctx context.Context, target *domain.DeploymentTarget) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return m.UpdateErr
 	}
@@ -565,6 +629,8 @@ func (m *mockTargetRepo) Update(ctx context.Context, target *domain.DeploymentTa
 }
 
 func (m *mockTargetRepo) Delete(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.DeleteErr != nil {
 		return m.DeleteErr
 	}
@@ -573,13 +639,22 @@ func (m *mockTargetRepo) Delete(ctx context.Context, id string) error {
 }
 
 func (m *mockTargetRepo) ListByCertificate(ctx context.Context, certID string) ([]*domain.DeploymentTarget, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.ListByCertErr != nil {
 		return nil, m.ListByCertErr
 	}
-	return m.List(ctx)
+	// Don't call List again to avoid double-locking
+	var targets []*domain.DeploymentTarget
+	for _, t := range m.Targets {
+		targets = append(targets, t)
+	}
+	return targets, nil
 }
 
 func (m *mockTargetRepo) AddTarget(target *domain.DeploymentTarget) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	m.Targets[target.ID] = target
 }
 
@@ -820,6 +895,7 @@ func newMockRevocationRepository() *mockRevocationRepo {
 
 // mockNotifier is a simple notifier for testing
 type mockNotifier struct {
+	mu       sync.Mutex
 	messages []*mockNotifierMessage
 	SendErr  error
 }
@@ -837,6 +913,8 @@ func newMockNotifier() *mockNotifier {
 }
 
 func (m *mockNotifier) Send(ctx context.Context, recipient string, subject string, body string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	if m.SendErr != nil {
 		return m.SendErr
 	}
@@ -853,6 +931,8 @@ func (m *mockNotifier) Channel() string {
 }
 
 func (m *mockNotifier) getSentCount() int {
+	m.mu.Lock()
+	defer m.mu.Unlock()
 	return len(m.messages)
 }
 

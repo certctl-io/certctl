@@ -878,4 +878,92 @@ describe('API Client', () => {
       expect(body.password).toBe('');
     });
   });
+
+  // ─── Profile (EKU / S/MIME) ─────────────────────────────
+
+  describe('Profile for EKU Display', () => {
+    it('getProfile fetches profile by ID with EKU data', async () => {
+      const profileData = {
+        id: 'prof-smime',
+        name: 'S/MIME Email',
+        allowed_ekus: ['emailProtection'],
+        max_ttl_seconds: 31536000,
+        enabled: true,
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(profileData));
+      const result = await getProfile('prof-smime');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/profiles/prof-smime');
+      expect(result.allowed_ekus).toEqual(['emailProtection']);
+    });
+
+    it('getProfile returns profile with multiple EKUs', async () => {
+      const profileData = {
+        id: 'prof-tls',
+        name: 'TLS Server',
+        allowed_ekus: ['serverAuth', 'clientAuth'],
+        max_ttl_seconds: 7776000,
+        enabled: true,
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(profileData));
+      const result = await getProfile('prof-tls');
+      expect(result.allowed_ekus).toHaveLength(2);
+      expect(result.allowed_ekus).toContain('serverAuth');
+      expect(result.allowed_ekus).toContain('clientAuth');
+    });
+  });
+
+  // ─── Job Verification Fields ─────────────────────────────
+
+  describe('Job Verification', () => {
+    it('getJobs returns jobs with verification fields', async () => {
+      const jobData = {
+        data: [{
+          id: 'job-1',
+          certificate_id: 'mc-1',
+          type: 'Deployment',
+          status: 'Completed',
+          verification_status: 'success',
+          verified_at: '2026-03-28T12:00:00Z',
+          verification_fingerprint: 'abc123',
+          verification_error: '',
+          attempts: 1,
+          max_attempts: 3,
+          scheduled_at: '2026-03-28T11:00:00Z',
+          completed_at: '2026-03-28T11:05:00Z',
+          created_at: '2026-03-28T11:00:00Z',
+        }],
+        total: 1,
+        page: 1,
+        per_page: 50,
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(jobData));
+      const result = await getJobs({ certificate_id: 'mc-1' });
+      expect(result.data[0].verification_status).toBe('success');
+      expect(result.data[0].verified_at).toBe('2026-03-28T12:00:00Z');
+      expect(result.data[0].verification_fingerprint).toBe('abc123');
+    });
+
+    it('getJobs handles jobs without verification data', async () => {
+      const jobData = {
+        data: [{
+          id: 'job-2',
+          certificate_id: 'mc-2',
+          type: 'Issuance',
+          status: 'Completed',
+          attempts: 1,
+          max_attempts: 3,
+          scheduled_at: '2026-03-28T11:00:00Z',
+          completed_at: '2026-03-28T11:05:00Z',
+          created_at: '2026-03-28T11:00:00Z',
+        }],
+        total: 1,
+        page: 1,
+        per_page: 50,
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(jobData));
+      const result = await getJobs({});
+      expect(result.data[0].verification_status).toBeUndefined();
+      expect(result.data[0].verified_at).toBeUndefined();
+    });
+  });
 });

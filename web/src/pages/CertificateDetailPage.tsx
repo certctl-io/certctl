@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -102,6 +102,28 @@ function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certI
     return undefined;
   };
 
+  // Verification step (M25: post-deployment TLS verification)
+  const getVerifiedStatus = () => {
+    if (!latestDeploy || latestDeploy.status !== 'Completed') return 'pending' as const;
+    if (latestDeploy.verification_status === 'success') return 'completed' as const;
+    if (latestDeploy.verification_status === 'failed') return 'failed' as const;
+    if (latestDeploy.verification_status === 'skipped') return 'completed' as const;
+    if (latestDeploy.verification_status === 'pending') return 'active' as const;
+    return 'pending' as const;
+  };
+  const getVerifiedTime = () => {
+    if (!latestDeploy || latestDeploy.status !== 'Completed') return undefined;
+    if (latestDeploy.verification_status === 'success' && latestDeploy.verified_at) {
+      return `Verified ${formatDateTime(latestDeploy.verified_at)}`;
+    }
+    if (latestDeploy.verification_status === 'failed') {
+      return latestDeploy.verification_error || 'Verification failed';
+    }
+    if (latestDeploy.verification_status === 'skipped') return 'Skipped (best-effort)';
+    if (latestDeploy.verification_status === 'pending') return 'Awaiting verification';
+    return undefined;
+  };
+
   const getActiveStatus = () => {
     if (certStatus === 'Active') return 'completed' as const;
     if (certStatus === 'Revoked') return 'failed' as const;
@@ -116,6 +138,9 @@ function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certI
     return undefined;
   };
 
+  // Only show verification step if deployment has completed and verification data exists
+  const showVerificationStep = latestDeploy?.status === 'Completed' && latestDeploy?.verification_status;
+
   return (
     <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
       <h3 className="text-sm font-semibold text-ink-muted mb-4">Lifecycle Timeline</h3>
@@ -123,6 +148,9 @@ function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certI
         <TimelineStep label="Requested" status={getRequestedStatus()} time={getRequestedTime()} />
         <TimelineStep label="Issued" status={getIssuedStatus()} time={getIssuedTime()} />
         <TimelineStep label="Deploying" status={getDeployStatus()} time={getDeployTime()} />
+        {showVerificationStep && (
+          <TimelineStep label="Verified" status={getVerifiedStatus()} time={getVerifiedTime()} />
+        )}
         <TimelineStep label={certStatus === 'Revoked' ? 'Revoked' : certStatus === 'Expired' ? 'Expired' : 'Active'}
           status={getActiveStatus()} time={getActiveTime()} isLast />
       </div>
@@ -246,6 +274,13 @@ export default function CertificateDetailPage() {
     queryKey: ['targets'],
     queryFn: () => getTargets(),
     enabled: showDeploy,
+  });
+
+  // Fetch profile for EKU display (S/MIME, code signing badges)
+  const { data: profile } = useQuery({
+    queryKey: ['profile', cert?.certificate_profile_id],
+    queryFn: () => getProfile(cert!.certificate_profile_id),
+    enabled: !!cert?.certificate_profile_id,
   });
 
   const renewMutation = useMutation({
@@ -465,13 +500,57 @@ export default function CertificateDetailPage() {
             <h3 className="text-sm font-semibold text-ink-muted mb-4">Certificate Details</h3>
             <InfoRow label="Status" value={<StatusBadge status={cert.status} />} />
             <InfoRow label="Common Name" value={cert.common_name} />
-            <InfoRow label="SANs" value={cert.sans?.length ? cert.sans.join(', ') : '—'} />
+            <InfoRow label="SANs" value={cert.sans?.length ? (
+              <span className="text-sm">
+                {cert.sans.map((san, i) => {
+                  const isEmail = san.includes('@');
+                  return (
+                    <span key={san}>
+                      {i > 0 && ', '}
+                      {isEmail ? (
+                        <span className="inline-flex items-center gap-1">
+                          <span className="text-xs text-purple-600 bg-purple-50 px-1 rounded">email</span>
+                          <span>{san}</span>
+                        </span>
+                      ) : san}
+                    </span>
+                  );
+                })}
+              </span>
+            ) : '—'} />
             <InfoRow label="Serial Number" value={cert.serial_number || '—'} />
             <InfoRow label="Fingerprint" value={
               cert.fingerprint ? <span className="font-mono text-xs">{cert.fingerprint.slice(0, 24)}...</span> : '—'
             } />
             <InfoRow label="Key Algorithm" value={cert.key_algorithm || '—'} />
             <InfoRow label="Key Size" value={cert.key_size ? `${cert.key_size} bits` : '—'} />
+            {profile?.allowed_ekus && profile.allowed_ekus.length > 0 && (
+              <InfoRow label="Extended Key Usage" value={
+                <div className="flex flex-wrap gap-1">
+                  {profile.allowed_ekus.map(eku => {
+                    const ekuStyles: Record<string, string> = {
+                      serverAuth: 'bg-blue-50 text-blue-700',
+                      clientAuth: 'bg-green-50 text-green-700',
+                      emailProtection: 'bg-purple-50 text-purple-700',
+                      codeSigning: 'bg-amber-50 text-amber-700',
+                      timeStamping: 'bg-teal-50 text-teal-700',
+                    };
+                    const ekuLabels: Record<string, string> = {
+                      serverAuth: 'TLS Server',
+                      clientAuth: 'TLS Client',
+                      emailProtection: 'S/MIME',
+                      codeSigning: 'Code Signing',
+                      timeStamping: 'Timestamping',
+                    };
+                    return (
+                      <span key={eku} className={`text-xs px-1.5 py-0.5 rounded font-medium ${ekuStyles[eku] || 'bg-gray-50 text-gray-700'}`}>
+                        {ekuLabels[eku] || eku}
+                      </span>
+                    );
+                  })}
+                </div>
+              } />
+            )}
           </div>
 
           {/* Lifecycle */}

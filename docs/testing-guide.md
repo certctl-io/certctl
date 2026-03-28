@@ -33,6 +33,12 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 26: EST Server (RFC 7030)](#part-26-est-server-rfc-7030)
 - [Part 27: Post-Deployment TLS Verification](#part-27-post-deployment-tls-verification)
 - [Part 28: Traefik & Caddy Target Connectors](#part-28-traefik--caddy-target-connectors)
+- [Part 29: Certificate Export (PEM & PKCS#12)](#part-29-certificate-export-pem--pkcs12)
+- [Part 30: S/MIME & EKU Support](#part-30-smime--eku-support)
+- [Part 31: OCSP Responder & DER CRL](#part-31-ocsp-responder--der-crl)
+- [Part 32: Request Body Size Limits](#part-32-request-body-size-limits)
+- [Part 33: Apache & HAProxy Target Connectors](#part-33-apache--haproxy-target-connectors)
+- [Part 34: Sub-CA Mode](#part-34-sub-ca-mode)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -1985,8 +1991,8 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 curl -s -H "$AUTH" "$SERVER/api/v1/profiles" | jq '{total, ids: [.items[].id]}'
 ```
 
-**Expected:** `total` = 4 (seed profiles).
-**PASS if** total = 4. **FAIL** otherwise.
+**Expected:** `total` = 5 (seed profiles: prof-standard-tls, prof-internal-mtls, prof-short-lived, prof-wildcard, prof-smime).
+**PASS if** total = 5. **FAIL** otherwise.
 
 ---
 
@@ -4367,9 +4373,705 @@ go test ./internal/connector/target/caddy/... -v
 
 ---
 
+## Part 29: Certificate Export (PEM & PKCS#12)
+
+**What:** certctl lets operators export managed certificates in two formats — PEM (JSON or file download) and PKCS#12 (.p12 bundle). Private keys are **never** included in exports since they live exclusively on agents. This section verifies both export paths, the audit trail they produce, and the GUI integration.
+
+**Why:** Certificate export is a daily operational task — feeding certs into load balancers that lack agent support, importing into Java trust stores, or handing off to external teams. If export silently produces malformed output or fails to audit, operators lose trust in the platform.
+
+### 29.1: Export PEM (JSON Response)
+
+**What:** `GET /api/v1/certificates/{id}/export/pem` returns a JSON object with the leaf certificate PEM, the CA chain PEM, and the full concatenated PEM. This is the default response format when no `?download=true` query parameter is present.
+
+**Why:** The JSON format lets automation scripts programmatically extract the leaf cert separately from the chain — a common need for split-file deployments (Apache, custom TLS termination).
+
+```bash
+# Use an existing certificate ID from seed data
+CERT_ID="mc-api-prod"
+
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/export/pem" | jq .
+```
+
+**Expected:** 200 OK with JSON body containing `cert_pem` (leaf), `chain_pem` (CA certs), and `full_pem` (concatenated).
+
+**PASS if:**
+- Response Content-Type is `application/json`
+- `cert_pem` contains exactly one `-----BEGIN CERTIFICATE-----` block
+- `full_pem` starts with the same block as `cert_pem` (leaf is first in chain)
+- `chain_pem` is empty for self-signed CA or contains the issuing CA cert
+
+**FAIL if:** Response is non-JSON, fields are missing, or `full_pem` doesn't equal `cert_pem` + `chain_pem`.
+
+### 29.2: Export PEM (File Download)
+
+**What:** Adding `?download=true` to the PEM export endpoint returns the raw PEM file with `Content-Type: application/x-pem-file` and a `Content-Disposition: attachment` header, suitable for browser "Save As" workflows.
+
+**Why:** The GUI uses this mode when operators click the "Export PEM" button — the browser should trigger a file download, not show JSON in the tab.
+
+```bash
+curl -s -D - -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/export/pem?download=true" \
+  -o /tmp/exported.pem
+
+# Verify the downloaded file is valid PEM
+openssl x509 -in /tmp/exported.pem -noout -subject
+```
+
+**Expected:** 200 OK, headers include `Content-Type: application/x-pem-file` and `Content-Disposition: attachment; filename="certificate.pem"`.
+
+**PASS if:**
+- The response headers match the expected Content-Type and Content-Disposition
+- The saved file parses successfully with `openssl x509`
+- The subject CN matches the certificate's common name
+
+**FAIL if:** Headers are wrong (JSON Content-Type), file is empty, or `openssl` rejects the PEM.
+
+### 29.3: Export PEM — Not Found
+
+**What:** Requesting export for a nonexistent certificate ID returns 404.
+
+```bash
+curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-nonexistent/export/pem"
+```
+
+**Expected:** 404 Not Found with error message.
+**PASS if** status code is 404 and body contains "not found".
+
+### 29.4: Export PKCS#12
+
+**What:** `POST /api/v1/certificates/{id}/export/pkcs12` returns a binary PKCS#12 (.p12) file containing the certificate chain (no private key). An optional `password` field in the JSON body encrypts the bundle.
+
+**Why:** PKCS#12 is the standard format for importing certificates into Java keystores (`keytool`), Windows certificate stores, and many commercial load balancers. The cert-only bundle (no private key) is safe to share with teams that only need trust anchors.
+
+```bash
+# Export with a password
+curl -s -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"password": "export-test-2024"}' \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/export/pkcs12" \
+  -o /tmp/exported.p12
+
+# Verify the PKCS#12 file (openssl should parse it)
+openssl pkcs12 -in /tmp/exported.p12 -nokeys -passin pass:export-test-2024 -info
+```
+
+**Expected:** 200 OK, Content-Type `application/x-pkcs12`, Content-Disposition `attachment; filename="certificate.p12"`.
+
+**PASS if:**
+- Binary .p12 file is returned (non-empty)
+- `openssl pkcs12` successfully parses the file with the correct password
+- No private key is present in the output (cert-only trust store)
+
+**FAIL if:** Response is JSON instead of binary, file is empty, or `openssl` rejects the PKCS#12 format.
+
+### 29.5: Export PKCS#12 — Empty Password
+
+**What:** The password field is optional. Omitting it (or sending an empty body) should still produce a valid PKCS#12 bundle encrypted with an empty password.
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  -X POST \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/export/pkcs12" \
+  -o /tmp/exported-nopass.p12
+
+openssl pkcs12 -in /tmp/exported-nopass.p12 -nokeys -passin pass: -info
+```
+
+**Expected:** 200 OK with valid PKCS#12.
+**PASS if** `openssl pkcs12` parses with an empty password.
+
+### 29.6: Export Audit Trail
+
+**What:** Both PEM and PKCS#12 exports record audit events (`export_pem` and `export_pkcs12`) with the certificate's serial number.
+
+**Why:** Export operations are security-sensitive — knowing who exported what and when is critical for incident response and compliance (SOC 2 CC7, PCI-DSS Req 10).
+
+```bash
+# Export a cert (triggers audit event)
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/export/pem" > /dev/null
+
+# Check audit trail for the export event
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/audit?resource_type=certificate&action=export_pem" | jq '.items[-1]'
+```
+
+**Expected:** Audit event with action `export_pem`, resource_type `certificate`, resource_id matching the cert ID.
+**PASS if** the audit event exists with serial number in metadata.
+**FAIL if** no audit event is recorded for the export.
+
+### 29.7: Export Unit Tests
+
+```bash
+go test ./internal/service/ -run TestExport -v
+go test ./internal/api/handler/ -run TestExport -v
+```
+
+**Expected:** All export service tests (9 tests) and handler tests (11 tests) pass.
+**PASS if** exit code 0 for both.
+
+### 29.8: GUI Export Buttons
+
+**What:** The certificate detail page shows "Export PEM" and "Export PKCS#12" buttons. PEM triggers a file download. PKCS#12 opens a password modal, then triggers a binary download.
+
+**How to test (manual browser test):**
+1. Navigate to a certificate detail page (e.g., `/certificates/mc-api-prod`)
+2. Click "Export PEM" — browser should download `certificate.pem`
+3. Click "Export PKCS#12" — password modal appears
+4. Enter a password and confirm — browser should download `certificate.p12`
+
+**PASS if** both downloads complete with non-empty files.
+**FAIL if** buttons are missing, modal doesn't appear, or downloads fail.
+
+---
+
+## Part 30: S/MIME & EKU Support
+
+**What:** Certificate profiles can specify Extended Key Usage (EKU) constraints — `serverAuth`, `clientAuth`, `codeSigning`, `emailProtection`, `timeStamping`. The Local CA respects these EKUs during issuance, adapting the X.509 `KeyUsage` flags accordingly (TLS uses `DigitalSignature|KeyEncipherment`; S/MIME uses `DigitalSignature|ContentCommitment`). A demo `prof-smime` profile ships in seed data.
+
+**Why:** S/MIME certificates protect email with digital signatures and encryption. They require the `emailProtection` EKU and `ContentCommitment` (formerly NonRepudiation) key usage flag. If the platform treats all certs as TLS certs, S/MIME certs will be rejected by mail clients.
+
+### 30.1: S/MIME Profile Exists in Seed Data
+
+**What:** The demo seed creates 5 profiles including `prof-smime` with `emailProtection` EKU.
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/profiles/prof-smime" | jq '{name, allowed_ekus}'
+```
+
+**Expected:** 200 OK. Profile name is "S/MIME Email" and `allowed_ekus` contains `["emailProtection"]`.
+**PASS if** the profile exists and EKUs match.
+**FAIL if** 404 or EKUs are wrong/missing.
+
+### 30.2: All Five Profiles Present
+
+**What:** The seed data creates 5 profiles total. Previous versions of this guide referenced 4 — the `prof-smime` profile was added in M27.
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/profiles" | jq '.total'
+```
+
+**Expected:** `total` is 5 (prof-standard-tls, prof-internal-mtls, prof-short-lived, prof-wildcard, prof-smime).
+**PASS if** count is 5.
+**FAIL if** count is 4 or fewer (missing prof-smime).
+
+### 30.3: EKU Strings in Profile API
+
+**What:** The profile API accepts and returns EKU names as human-readable strings rather than OID numbers. The supported values are: `serverAuth`, `clientAuth`, `codeSigning`, `emailProtection`, `timeStamping`.
+
+```bash
+# Create a profile with codeSigning EKU
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "prof-test-codesign",
+    "name": "Code Signing Test",
+    "description": "Test profile for code signing",
+    "allowed_key_algorithms": [{"algorithm": "ECDSA", "min_size": 256}],
+    "max_ttl_seconds": 7776000,
+    "allowed_ekus": ["codeSigning"]
+  }' \
+  "http://localhost:8443/api/v1/profiles" | jq '{id, allowed_ekus}'
+```
+
+**Expected:** 201 Created with `allowed_ekus: ["codeSigning"]`.
+**PASS if** the EKU round-trips correctly through create/get.
+
+### 30.4: Agent CSR SAN Splitting (Email vs DNS)
+
+**What:** When generating CSRs for S/MIME certificates, the agent splits SANs by type: values containing `@` are placed in `EmailAddresses` (not `DNSNames`). This prevents mail clients from rejecting the cert due to incorrect SAN encoding.
+
+**Why:** An email SAN like `alice@example.com` must appear in the X.509 `rfc822Name` SAN field, not the `dNSName` field. Incorrect encoding causes S/MIME validation failures.
+
+This is tested via unit tests:
+
+```bash
+go test ./cmd/agent/ -run TestSAN -v
+```
+
+**Expected:** Tests pass showing email-type SANs are routed to `EmailAddresses`.
+**PASS if** exit code 0.
+
+### 30.5: EKU Service-Layer Tests
+
+```bash
+go test ./internal/service/ -run TestEKU -v
+go test ./internal/service/ -run TestCSRRenewal -v
+```
+
+**Expected:** Tests covering EKU resolution from profiles and issuance with non-default EKUs pass.
+**PASS if** exit code 0.
+
+---
+
+## Part 31: OCSP Responder & DER CRL
+
+**What:** certctl includes an embedded OCSP responder and a DER-encoded CRL generator, both operating per-issuer. These are the standard online (OCSP) and offline (CRL) methods for checking certificate revocation status. Short-lived certificates (profile TTL < 1 hour) are exempt from both — their natural expiry is sufficient revocation.
+
+**Why:** TLS clients need to verify that certificates haven't been revoked. Without OCSP/CRL, a compromised certificate remains trusted until it expires. The short-lived exemption avoids bloating the CRL with certs that expire before distribution.
+
+### 31.1: DER-Encoded CRL
+
+**What:** `GET /api/v1/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA. Content-Type is `application/pkix-crl`. The CRL has 24-hour validity.
+
+**Why:** This is the standard CRL format that browsers, TLS libraries, and LDAP directories consume. The existing JSON CRL at `GET /api/v1/crl` is certctl-specific; the DER CRL is interoperable.
+
+```bash
+# Request DER CRL for the local issuer
+curl -s -D - -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/crl/iss-local" \
+  -o /tmp/crl.der
+
+# Verify it's valid DER CRL with openssl
+openssl crl -in /tmp/crl.der -inform DER -noout -text
+```
+
+**Expected:** 200 OK, Content-Type `application/pkix-crl`, Cache-Control `public, max-age=3600`.
+
+**PASS if:**
+- `openssl crl` parses the DER file successfully
+- Issuer field shows the Local CA's common name
+- Validity period is present (thisUpdate / nextUpdate)
+- If any certs have been revoked, they appear in the revocation list with serial + reason
+
+**FAIL if:** Response is JSON (wrong endpoint), `openssl` rejects the DER format, or headers are wrong.
+
+### 31.2: DER CRL — Nonexistent Issuer
+
+```bash
+curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/crl/iss-nonexistent"
+```
+
+**Expected:** 404 Not Found.
+**PASS if** status code is 404 and body contains "not found".
+
+### 31.3: OCSP Responder — Good Status
+
+**What:** `GET /api/v1/ocsp/{issuer_id}/{serial}` returns a signed OCSP response. For a non-revoked certificate, the status is "good".
+
+**Why:** OCSP is the real-time revocation check that TLS clients perform during the handshake. A "good" response tells the client the cert is still valid.
+
+```bash
+# First, get a certificate's serial number
+SERIAL=$(curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-api-prod" | jq -r '.latest_version.serial_number // empty')
+
+# If serial is available, query OCSP
+if [ -n "$SERIAL" ]; then
+  curl -s -D - -H "Authorization: Bearer $API_KEY" \
+    "http://localhost:8443/api/v1/ocsp/iss-local/$SERIAL" \
+    -o /tmp/ocsp.der
+
+  # Parse OCSP response
+  openssl ocsp -respin /tmp/ocsp.der -text -noverify
+fi
+```
+
+**Expected:** 200 OK, Content-Type `application/ocsp-response`. OCSP response shows `Cert Status: good`.
+
+**PASS if:**
+- OCSP response parses successfully
+- Certificate status is "good" for a non-revoked cert
+- Response is signed (producedAt timestamp present)
+
+**FAIL if:** Response is JSON, OCSP status is wrong, or `openssl` rejects the response.
+
+### 31.4: OCSP Responder — Revoked Status
+
+**What:** After revoking a certificate, the OCSP responder should return "revoked" with the revocation reason and timestamp.
+
+```bash
+# Revoke a certificate first (see Part 5 for revocation)
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"reason": "keyCompromise"}' \
+  "http://localhost:8443/api/v1/certificates/$CERT_ID/revoke"
+
+# Then query OCSP
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/ocsp/iss-local/$SERIAL" \
+  -o /tmp/ocsp-revoked.der
+
+openssl ocsp -respin /tmp/ocsp-revoked.der -text -noverify
+```
+
+**Expected:** OCSP response shows `Cert Status: revoked`, revocation time, and reason code (1 = keyCompromise).
+**PASS if** status is "revoked" with correct reason.
+**FAIL if** status is still "good" after revocation.
+
+### 31.5: OCSP — Unknown Certificate
+
+**What:** Querying a serial number that doesn't exist in the inventory returns an "unknown" OCSP status (not an error — this is the correct OCSP behavior per RFC 6960).
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/ocsp/iss-local/DEADBEEF" \
+  -o /tmp/ocsp-unknown.der
+
+openssl ocsp -respin /tmp/ocsp-unknown.der -text -noverify
+```
+
+**Expected:** OCSP response with `Cert Status: unknown`.
+**PASS if** status is "unknown" (not a 404 HTTP error).
+
+### 31.6: Short-Lived Certificate CRL Exemption
+
+**What:** Certificates issued under a profile with TTL < 1 hour are excluded from both CRL and OCSP responses. Their natural expiry is considered sufficient revocation.
+
+**Why:** Short-lived certs (used in mTLS, CI/CD pipelines) would bloat the CRL with entries that expire within minutes. The crypto community consensus (per Google's Certificate Transparency policy) is that short-lived certs don't need revocation infrastructure.
+
+To test: revoke a cert that was issued under the `prof-short-lived` profile, then check the DER CRL. The revoked short-lived cert should NOT appear.
+
+```bash
+# After revoking a short-lived cert (serial SHORT_SERIAL):
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/crl.der
+
+openssl crl -in /tmp/crl.der -inform DER -text | grep -i "$SHORT_SERIAL"
+```
+
+**Expected:** The short-lived cert's serial does NOT appear in the CRL.
+**PASS if** short-lived cert is absent from CRL despite being revoked.
+
+### 31.7: OCSP / CRL Unit Tests
+
+```bash
+go test ./internal/service/ -run "TestGenerateDERCRL|TestGetOCSPResponse" -v
+go test ./internal/api/handler/ -run "TestDERCRL|TestOCSP" -v
+go test ./internal/connector/issuer/local/ -run "TestGenerateCRL|TestSignOCSP" -v
+```
+
+**Expected:** All tests pass (8 service tests, handler tests, connector tests).
+**PASS if** exit code 0 for all three test suites.
+
+---
+
+## Part 32: Request Body Size Limits
+
+**What:** The `NewBodyLimit` middleware wraps request bodies with `http.MaxBytesReader`, enforcing a configurable maximum payload size (default 1MB). Oversized requests receive a 413 Request Entity Too Large response. This protects against memory exhaustion and denial of service (CWE-400).
+
+**Why:** Without body limits, an attacker could send a multi-gigabyte POST to exhaust server memory. The 1MB default is generous for certificate API payloads (a typical CSR is ~1KB, a PKCS#12 export request is <100 bytes) while blocking abuse.
+
+### 32.1: Default 1MB Limit
+
+**What:** With default configuration (`CERTCTL_MAX_BODY_SIZE` unset), the server rejects request bodies larger than 1MB.
+
+```bash
+# Generate a payload slightly over 1MB
+dd if=/dev/urandom bs=1024 count=1025 2>/dev/null | base64 > /tmp/big-payload.txt
+
+curl -s -w "\n%{http_code}" -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d "{\"name\": \"$(cat /tmp/big-payload.txt)\"}" \
+  "http://localhost:8443/api/v1/certificates"
+```
+
+**Expected:** The server returns an error (likely 400 or 413) when the body exceeds 1MB.
+**PASS if** the request is rejected and does not cause server memory issues.
+**FAIL if** the server accepts the oversized payload or crashes.
+
+### 32.2: Normal-Sized Requests Work
+
+**What:** Standard API requests well under the limit work normally.
+
+```bash
+curl -s -w "\n%{http_code}" -X POST \
+  -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "mc-test-bodylimit", "common_name": "bodylimit.test.local", "issuer_id": "iss-local"}' \
+  "http://localhost:8443/api/v1/certificates"
+```
+
+**Expected:** 201 Created — normal payloads are unaffected by the body limit.
+**PASS if** status code is 201.
+
+### 32.3: Custom Body Size via Environment Variable
+
+**What:** Set `CERTCTL_MAX_BODY_SIZE` to a custom value (e.g., `2097152` for 2MB) and verify the new limit is respected.
+
+**How:** Restart the server with the env var set, then repeat test 32.1. A 1.1MB payload should now be accepted; a 2.1MB payload should be rejected.
+
+**PASS if** the configured limit is enforced instead of the 1MB default.
+
+### 32.4: Requests Without Bodies Are Unaffected
+
+**What:** GET requests and other methods without request bodies pass through the body limit middleware without interference.
+
+```bash
+curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates" | tail -1
+```
+
+**Expected:** 200 OK — body limit middleware only applies to requests with bodies.
+**PASS if** GET requests are unaffected.
+
+---
+
+## Part 33: Apache & HAProxy Target Connectors
+
+**What:** certctl ships two additional target connectors beyond NGINX: Apache httpd (separate cert/chain/key files, `apachectl configtest` + graceful reload) and HAProxy (combined PEM file with cert+chain+key, config validation, reload). Both run on the agent side and follow the same pattern as the NGINX connector.
+
+**Why:** Apache and HAProxy are the second and third most common reverse proxies in enterprise environments. Supporting them out of the box removes a common adoption blocker.
+
+### 33.1: Create Apache Target
+
+**What:** Create a deployment target of type `apache` with the required configuration fields.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-apache",
+    "name": "Test Apache Server",
+    "type": "apache",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "cert_path": "/etc/apache2/ssl/cert.pem",
+      "key_path": "/etc/apache2/ssl/key.pem",
+      "chain_path": "/etc/apache2/ssl/chain.pem",
+      "reload_command": "apachectl graceful",
+      "validate_command": "apachectl configtest"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
+```
+
+**Expected:** 201 Created with type `apache`.
+
+**PASS if:**
+- Target is created successfully
+- Type is `apache`
+- Config fields are persisted (verify via GET)
+
+**FAIL if** type is rejected or config fields are missing in the response.
+
+### 33.2: Apache Config — Separate Files
+
+**What:** Apache uses three separate files (cert, chain, key) unlike NGINX's dual-file or HAProxy's combined PEM. Verify that `cert_path`, `chain_path`, and `key_path` are all required.
+
+```bash
+# Missing chain_path should fail validation
+curl -s -w "\n%{http_code}" -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-apache-bad",
+    "name": "Bad Apache",
+    "type": "apache",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "cert_path": "/etc/apache2/ssl/cert.pem",
+      "reload_command": "apachectl graceful",
+      "validate_command": "apachectl configtest"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets"
+```
+
+**Expected:** The target is created (config validation happens at deploy time on the agent), but when the agent attempts to deploy, it will fail if required fields are missing.
+**PASS if** the validation behavior matches the connector's `ValidateConfig` — `cert_path` and `chain_path` are both required.
+
+### 33.3: Create HAProxy Target
+
+**What:** Create a deployment target of type `haproxy`. HAProxy uses a single combined PEM file (cert + chain + key concatenated), not separate files.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-haproxy",
+    "name": "Test HAProxy",
+    "type": "haproxy",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "pem_path": "/etc/haproxy/certs/site.pem",
+      "reload_command": "systemctl reload haproxy",
+      "validate_command": "haproxy -c -f /etc/haproxy/haproxy.cfg"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
+```
+
+**Expected:** 201 Created with type `haproxy`.
+**PASS if** target created with correct type and config persisted.
+
+### 33.4: HAProxy Combined PEM Requirement
+
+**What:** HAProxy's `pem_path` is the single file where cert+chain+key are concatenated. The `pem_path` field is required; `reload_command` is also required.
+
+**Why:** HAProxy's `bind ssl crt` directive expects one file per certificate. The combined PEM format eliminates the need for multiple `SSLCertificate*` directives.
+
+This is verified in the connector's `ValidateConfig`:
+
+```bash
+go test ./internal/connector/target/haproxy/... -v
+```
+
+**Expected:** Tests validate that missing `pem_path` and missing `reload_command` both produce errors.
+**PASS if** all haproxy connector tests pass.
+
+### 33.5: Shell Command Injection Prevention
+
+**What:** Both Apache and HAProxy connectors validate `reload_command` and `validate_command` against the shell injection prevention logic in `internal/validation/command.go`. Commands containing shell metacharacters (`;`, `|`, `&`, `$()`, backticks) are rejected.
+
+**Why:** An attacker who controls target configuration could inject arbitrary commands if the reload/validate commands aren't sanitized. This was remediated in the security hardening pass (TICKET-001).
+
+```bash
+go test ./internal/validation/ -run TestValidateShellCommand -v
+```
+
+**Expected:** All 80+ adversarial test cases pass — commands with injection attempts are rejected, safe commands are accepted.
+**PASS if** exit code 0.
+
+### 33.6: Connector Unit Tests
+
+```bash
+go test ./internal/connector/target/apache/... -v
+go test ./internal/connector/target/haproxy/... -v
+```
+
+**Expected:** All Apache and HAProxy connector tests pass (config validation, deployment logic).
+**PASS if** exit code 0 for both.
+
+---
+
+## Part 34: Sub-CA Mode
+
+**What:** The Local CA issuer connector can operate in two modes: self-signed root (default) or sub-CA. In sub-CA mode, set `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` to point at a pre-signed CA certificate and its private key. The CA cert must have `IsCA=true` and `KeyUsageCertSign`. All issued certificates then chain to the upstream root (e.g., Active Directory Certificate Services). Supports RSA, ECDSA, and PKCS#8 key formats.
+
+**Why:** Enterprise environments already have a root CA (ADCS, Vault, etc.). Sub-CA mode lets certctl operate as a subordinate CA without replacing the existing trust hierarchy. Users' browsers and devices already trust the enterprise root, so certctl-issued certs are automatically trusted.
+
+### 34.1: Self-Signed Mode (Default)
+
+**What:** Without `CERTCTL_CA_CERT_PATH` / `CERTCTL_CA_KEY_PATH`, the Local CA generates its own self-signed root on startup. This is the default for development and demos.
+
+```bash
+# Verify the CA cert is self-signed (issuer == subject)
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-api-prod/export/pem?download=true" \
+  -o /tmp/chain.pem
+
+# Extract the last cert in the chain (the CA cert)
+csplit -f /tmp/cert- -z /tmp/chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' 2>/dev/null
+LAST_CERT=$(ls /tmp/cert-* | tail -1)
+openssl x509 -in "$LAST_CERT" -noout -subject -issuer
+```
+
+**Expected:** For self-signed mode, the CA cert's Subject and Issuer are identical.
+**PASS if** Subject == Issuer (self-signed root).
+
+### 34.2: Sub-CA Mode — Configuration
+
+**What:** Setting `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` environment variables switches the Local CA to sub-CA mode. The server logs the mode at startup.
+
+**How to test:**
+1. Generate a test CA hierarchy (root CA + sub-CA):
+```bash
+# Generate root CA
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/root-key.pem -out /tmp/root-cert.pem \
+  -days 3650 -nodes -subj "/CN=Test Root CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign"
+
+# Generate sub-CA key and CSR
+openssl req -newkey rsa:2048 -keyout /tmp/subca-key.pem -out /tmp/subca-csr.pem \
+  -nodes -subj "/CN=CertCtl Sub-CA"
+
+# Sign sub-CA cert with root
+openssl x509 -req -in /tmp/subca-csr.pem -CA /tmp/root-cert.pem -CAkey /tmp/root-key.pem \
+  -CAcreateserial -out /tmp/subca-cert.pem -days 1825 \
+  -extfile <(echo -e "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign")
+```
+
+2. Start the server with sub-CA config:
+```bash
+CERTCTL_CA_CERT_PATH=/tmp/subca-cert.pem \
+CERTCTL_CA_KEY_PATH=/tmp/subca-key.pem \
+./certctl-server
+```
+
+3. Check startup logs for sub-CA mode indication.
+
+**PASS if** the server starts successfully and logs indicate sub-CA mode with the loaded cert path.
+**FAIL if** the server fails to start or falls back to self-signed mode.
+
+### 34.3: Sub-CA Chain Construction
+
+**What:** In sub-CA mode, issued certificates should chain to the sub-CA, which chains to the root. The PEM chain in certificate versions should include the leaf, the sub-CA cert, and optionally the root.
+
+```bash
+# Issue a certificate (after starting in sub-CA mode)
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "mc-subca-test", "common_name": "subca.test.local", "issuer_id": "iss-local"}' \
+  "http://localhost:8443/api/v1/certificates"
+
+# Export and verify chain
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-subca-test/export/pem" | jq -r '.full_pem' > /tmp/subca-chain.pem
+
+openssl verify -CAfile /tmp/root-cert.pem -untrusted /tmp/subca-cert.pem /tmp/subca-chain.pem
+```
+
+**Expected:** Certificate chain validates against the root CA. The leaf cert's Issuer matches the sub-CA's Subject.
+**PASS if** `openssl verify` returns "OK".
+**FAIL if** chain is broken or leaf is signed by self-signed root instead of sub-CA.
+
+### 34.4: Sub-CA Validation — Non-CA Cert Rejected
+
+**What:** If `CERTCTL_CA_CERT_PATH` points to a certificate without `IsCA=true` or `KeyUsageCertSign`, the server should reject it at startup.
+
+```bash
+# Generate a non-CA cert (leaf cert, not a CA)
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/leaf-key.pem -out /tmp/leaf-cert.pem \
+  -days 365 -nodes -subj "/CN=Not A CA"
+
+# Try to start server with non-CA cert — should fail
+CERTCTL_CA_CERT_PATH=/tmp/leaf-cert.pem \
+CERTCTL_CA_KEY_PATH=/tmp/leaf-key.pem \
+./certctl-server
+```
+
+**Expected:** Server fails to start (or logs a fatal error) because the loaded cert is not a CA.
+**PASS if** server rejects the non-CA certificate.
+**FAIL if** server starts and silently uses the non-CA cert for signing.
+
+### 34.5: Sub-CA Key Format Support
+
+**What:** The sub-CA key can be RSA, ECDSA, or PKCS#8 encoded. All three formats should load successfully.
+
+```bash
+go test ./internal/connector/issuer/local/ -run "TestSubCA" -v
+```
+
+**Expected:** All 7 sub-CA tests pass (RSA, ECDSA, config validation, invalid cert, non-CA cert, renewal, chain construction).
+**PASS if** exit code 0.
+
+### 34.6: CRL Signing in Sub-CA Mode
+
+**What:** In sub-CA mode, the DER CRL (Part 31.1) should be signed by the sub-CA key, not a self-signed root.
+
+```bash
+# After starting in sub-CA mode and revoking a cert:
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/subca-crl.der
+
+openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
+```
+
+**Expected:** CRL issuer matches the sub-CA's subject (not the self-signed CA).
+**PASS if** issuer is the sub-CA distinguished name.
+
+---
+
 ## Release Sign-Off
 
-All 28 parts must pass before tagging v2.0.7.
+All 34 parts must pass before tagging v2.0.7.
 
 | Section | Pass? | Tester | Date | Notes |
 |---------|-------|--------|------|-------|
@@ -4401,6 +5103,12 @@ All 28 parts must pass before tagging v2.0.7.
 | Part 26: EST Server (RFC 7030) | ☐ | | | |
 | Part 27: Post-Deployment TLS Verification | ☐ | | | |
 | Part 28: Traefik & Caddy Target Connectors | ☐ | | | |
+| Part 29: Certificate Export (PEM & PKCS#12) | ☐ | | | |
+| Part 30: S/MIME & EKU Support | ☐ | | | |
+| Part 31: OCSP Responder & DER CRL | ☐ | | | |
+| Part 32: Request Body Size Limits | ☐ | | | |
+| Part 33: Apache & HAProxy Target Connectors | ☐ | | | |
+| Part 34: Sub-CA Mode | ☐ | | | |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

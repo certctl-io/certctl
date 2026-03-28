@@ -610,3 +610,122 @@ func TestGetDiscoverySummary_MethodNotAllowed(t *testing.T) {
 		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
 	}
 }
+
+// Test DismissDiscovered - service error
+func TestDismissDiscovered_ServiceError(t *testing.T) {
+	mock := &MockDiscoveryService{
+		DismissDiscoveredFn: func(ctx context.Context, id string) error {
+			return fmt.Errorf("database error")
+		},
+	}
+
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/discovered-certificates/dcert-1/dismiss", nil)
+	req = req.WithContext(discoveryContextWithRequestID())
+	req.SetPathValue("id", "dcert-1")
+	w := httptest.NewRecorder()
+
+	handler.DismissDiscovered(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// Test ClaimDiscovered - invalid body (malformed JSON)
+func TestClaimDiscovered_InvalidJSON(t *testing.T) {
+	mock := &MockDiscoveryService{}
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/discovered-certificates/dcert-1/claim", bytes.NewReader([]byte("invalid json")))
+	req = req.WithContext(discoveryContextWithRequestID())
+	req.SetPathValue("id", "dcert-1")
+	w := httptest.NewRecorder()
+
+	handler.ClaimDiscovered(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("expected status %d, got %d", http.StatusBadRequest, w.Code)
+	}
+}
+
+// Test ClaimDiscovered - method not allowed
+func TestClaimDiscovered_MethodNotAllowed(t *testing.T) {
+	mock := &MockDiscoveryService{}
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/discovered-certificates/dcert-1/claim", nil)
+	req = req.WithContext(discoveryContextWithRequestID())
+	req.SetPathValue("id", "dcert-1")
+	w := httptest.NewRecorder()
+
+	handler.ClaimDiscovered(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
+	}
+}
+
+// Test ListDiscovered - service error
+func TestListDiscovered_ServiceError(t *testing.T) {
+	mock := &MockDiscoveryService{
+		ListDiscoveredFn: func(ctx context.Context, agentID, status string, page, perPage int) ([]*domain.DiscoveredCertificate, int, error) {
+			return nil, 0, fmt.Errorf("database error")
+		},
+	}
+
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/discovered-certificates", nil)
+	req = req.WithContext(discoveryContextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.ListDiscovered(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// Test ListScans - service error
+func TestListScans_ServiceError(t *testing.T) {
+	mock := &MockDiscoveryService{
+		ListScansFn: func(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error) {
+			return nil, 0, fmt.Errorf("database error")
+		},
+	}
+
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/discovery-scans", nil)
+	req = req.WithContext(discoveryContextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.ListScans(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// Test GetDiscoverySummary - service error
+func TestGetDiscoverySummary_ServiceError(t *testing.T) {
+	mock := &MockDiscoveryService{
+		GetDiscoverySummaryFn: func(ctx context.Context) (map[string]int, error) {
+			return nil, fmt.Errorf("database error")
+		},
+	}
+
+	handler := NewDiscoveryHandler(mock)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/discovery-summary", nil)
+	req = req.WithContext(discoveryContextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.GetDiscoverySummary(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
