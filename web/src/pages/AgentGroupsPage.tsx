@@ -29,8 +29,7 @@ function CreateAgentGroupModal({ isOpen, onClose, onSuccess, isLoading, error }:
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    try {
-      await createAgentGroup({
+    await createAgentGroup({
         name: name.trim(),
         description: description.trim(),
         match_os: matchOs.trim() || undefined,
@@ -45,11 +44,8 @@ function CreateAgentGroupModal({ isOpen, onClose, onSuccess, isLoading, error }:
       setMatchArch('');
       setMatchIpCidr('');
       setMatchVersion('');
-      setEnabled(true);
-      onSuccess();
-    } catch (err) {
-      console.error('Create agent group error:', err);
-    }
+    setEnabled(true);
+    onSuccess();
   };
 
   if (!isOpen) return null;
@@ -249,7 +245,10 @@ export default function AgentGroupsPage() {
       <CreateAgentGroupModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={() => {}}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['agent-groups'] });
+          setShowCreate(false);
+        }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
       />

@@ -23,17 +23,13 @@ function CreateTeamModal({ isOpen, onClose, onSuccess, isLoading, error }: Creat
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    try {
-      await createTeam({
-        name: name.trim(),
-        description: description.trim(),
-      });
-      setName('');
-      setDescription('');
-      onSuccess();
-    } catch (err) {
-      console.error('Create team error:', err);
-    }
+    await createTeam({
+      name: name.trim(),
+      description: description.trim(),
+    });
+    setName('');
+    setDescription('');
+    onSuccess();
   };
 
   if (!isOpen) return null;
@@ -167,7 +163,10 @@ export default function TeamsPage() {
       <CreateTeamModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={() => {}}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['teams'] });
+          setShowCreate(false);
+        }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
       />

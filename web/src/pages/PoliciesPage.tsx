@@ -40,18 +40,14 @@ function CreatePolicyModal({ isOpen, onClose, onSuccess, isLoading, error }: Cre
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    try {
-      const config = JSON.parse(configStr);
-      await createPolicy({ name: name.trim(), type, severity, config, enabled });
-      setName('');
-      setType('key_algorithm');
-      setSeverity('medium');
-      setConfigStr('{}');
-      setEnabled(true);
-      onSuccess();
-    } catch (err) {
-      console.error('Create policy error:', err);
-    }
+    const config = JSON.parse(configStr);
+    await createPolicy({ name: name.trim(), type, severity, config, enabled });
+    setName('');
+    setType('key_algorithm');
+    setSeverity('medium');
+    setConfigStr('{}');
+    setEnabled(true);
+    onSuccess();
   };
 
   if (!isOpen) return null;
@@ -269,7 +265,10 @@ export default function PoliciesPage() {
       <CreatePolicyModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={() => {}}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['policies'] });
+          setShowCreate(false);
+        }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
       />

@@ -34,22 +34,18 @@ function CreateProfileModal({ isOpen, onClose, onSuccess, isLoading, error }: Cr
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim()) return;
-    try {
-      await createProfile({
-        name: name.trim(),
-        description: description.trim(),
-        max_ttl_seconds: parseInt(ttl) || 86400,
-        allow_short_lived: shortLived,
-        enabled: true,
-      });
-      setName('');
-      setDescription('');
-      setTtl('86400');
-      setShortLived(false);
-      onSuccess();
-    } catch (err) {
-      console.error('Create profile error:', err);
-    }
+    await createProfile({
+      name: name.trim(),
+      description: description.trim(),
+      max_ttl_seconds: parseInt(ttl) || 86400,
+      allow_short_lived: shortLived,
+      enabled: true,
+    });
+    setName('');
+    setDescription('');
+    setTtl('86400');
+    setShortLived(false);
+    onSuccess();
   };
 
   if (!isOpen) return null;
@@ -89,14 +85,26 @@ function CreateProfileModal({ isOpen, onClose, onSuccess, isLoading, error }: Cr
               className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
               placeholder="86400"
             />
-            <p className="text-xs text-ink-muted mt-1">e.g. 86400 = 1 day, 2592000 = 30 days</p>
+            <p className="text-xs text-ink-muted mt-1">
+              {shortLived
+                ? 'Short-lived certs require TTL under 3600 (1 hour). e.g. 300 = 5m, 1800 = 30m'
+                : 'e.g. 86400 = 1 day, 2592000 = 30 days'}
+            </p>
+            {shortLived && parseInt(ttl) >= 3600 && (
+              <p className="text-xs text-amber-600 mt-1">TTL must be under 3600 for short-lived certs</p>
+            )}
           </div>
           <div className="flex items-center gap-2">
             <input
               type="checkbox"
               id="shortLived"
               checked={shortLived}
-              onChange={e => setShortLived(e.target.checked)}
+              onChange={e => {
+                setShortLived(e.target.checked);
+                if (e.target.checked && parseInt(ttl) >= 3600) {
+                  setTtl('300');
+                }
+              }}
               className="w-4 h-4"
             />
             <label htmlFor="shortLived" className="text-sm text-ink">Allow short-lived certs</label>
@@ -251,7 +259,10 @@ export default function ProfilesPage() {
       <CreateProfileModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={() => {}}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['profiles'] });
+          setShowCreate(false);
+        }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
       />

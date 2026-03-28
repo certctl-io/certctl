@@ -25,19 +25,15 @@ function CreateOwnerModal({ isOpen, onClose, onSuccess, isLoading, error, teamsD
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!name.trim() || !email.trim()) return;
-    try {
-      await createOwner({
-        name: name.trim(),
-        email: email.trim(),
-        team_id: teamId || undefined,
-      });
-      setName('');
-      setEmail('');
-      setTeamId('');
-      onSuccess();
-    } catch (err) {
-      console.error('Create owner error:', err);
-    }
+    await createOwner({
+      name: name.trim(),
+      email: email.trim(),
+      team_id: teamId || undefined,
+    });
+    setName('');
+    setEmail('');
+    setTeamId('');
+    onSuccess();
   };
 
   if (!isOpen) return null;
@@ -203,7 +199,10 @@ export default function OwnersPage() {
       <CreateOwnerModal
         isOpen={showCreate}
         onClose={() => setShowCreate(false)}
-        onSuccess={() => {}}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['owners'] });
+          setShowCreate(false);
+        }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
         teamsData={teamsData}
