@@ -25,6 +25,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
 [![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
 [![GitHub Release](https://img.shields.io/github/v/release/shankar0123/certctl)](https://github.com/shankar0123/certctl/releases)
+[![Docker Pulls](https://img.shields.io/docker/pulls/shankar0123/certctl-server)](https://hub.docker.com/r/shankar0123/certctl-server)
 
 ## Documentation
 
