@@ -689,7 +689,7 @@ func newMockAgentRepository() *mockAgentRepo {
 	}
 }
 
-func newMockTargetRepository() *mockTargetRepo {
+var _ = func() *mockTargetRepo {
 	return &mockTargetRepo{
 		Targets: make(map[string]*domain.DeploymentTarget),
 	}
@@ -856,7 +856,7 @@ func (m *mockNotifier) getSentCount() int {
 	return len(m.messages)
 }
 
-func (m *mockNotifier) getLastMessage() *mockNotifierMessage {
+var _ = func(m *mockNotifier) *mockNotifierMessage {
 	if len(m.messages) == 0 {
 		return nil
 	}

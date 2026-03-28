@@ -178,19 +178,5 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 	}, nil
 }
 
-// executePowerShellCommand is a helper to run PowerShell commands on Windows.
-// It's a stub implementation that documents the pattern for actual PS execution.
-func (c *Connector) executePowerShellCommand(ctx context.Context, psCommand string) (string, error) {
-	if runtime.GOOS != "windows" {
-		return "", fmt.Errorf("PowerShell commands only work on Windows")
-	}
-
-	// TODO: Implement actual PowerShell execution
-	// In production:
-	//   cmd := exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", psCommand)
-	//   output, err := cmd.CombinedOutput()
-	//   return string(output), err
-
-	c.logger.Debug("executing PowerShell command", "command", psCommand)
-	return "", nil
-}
+// executePowerShellCommand will be implemented in V3 when IIS target connector ships.
+// Pattern: exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", psCommand)

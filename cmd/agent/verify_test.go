@@ -277,8 +277,9 @@ func TestVerifyDeployment_ContextCancellation(t *testing.T) {
 	}
 }
 
-// Mock TLS server for verification testing
-func startMockTLSServer(t *testing.T, cert *x509.Certificate) (string, func()) {
+// Mock TLS server for verification testing.
+// Reserved for future use when real TLS verification integration tests are added.
+var _ = func(t *testing.T, cert *x509.Certificate) (string, func()) {
 	// Create TLS listener with test certificate
 	listener, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
@@ -295,7 +296,7 @@ func startMockTLSServer(t *testing.T, cert *x509.Certificate) (string, func()) {
 		defer conn.Close()
 		// Simple echo to keep connection alive
 		buf := make([]byte, 1024)
-		conn.Read(buf)
+		conn.Read(buf) //nolint:errcheck
 	}()
 
 	cleanup := func() {

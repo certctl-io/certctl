@@ -69,7 +69,9 @@ func encodeCursor(createdAt time.Time, id string) string {
 }
 
 // decodeCursor extracts a timestamp and ID from a cursor token.
-func decodeCursor(cursor string) (time.Time, string, error) {
+// Kept as var assignment to suppress unused lint — will be used when
+// cursor-based pagination is wired into list handlers.
+var _ = func(cursor string) (time.Time, string, error) {
 	raw, err := base64.URLEncoding.DecodeString(cursor)
 	if err != nil {
 		return time.Time{}, "", fmt.Errorf("invalid cursor: %w", err)

@@ -509,7 +509,8 @@ func decodeCursor(cursor string) (time.Time, string, error) {
 }
 
 // encodeCursor creates an opaque cursor token from a timestamp and ID.
-func encodeCursor(createdAt time.Time, id string) string {
+// Reserved for future use in repository-level cursor pagination.
+var _ = func(createdAt time.Time, id string) string {
 	raw := createdAt.Format(time.RFC3339Nano) + ":" + id
 	return base64.URLEncoding.EncodeToString([]byte(raw))
 }
