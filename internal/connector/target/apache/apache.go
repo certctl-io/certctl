@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the Apache httpd deployment target configuration.
@@ -53,6 +54,14 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("Apache reload_command and validate_command are required")
 	}
 
+	// Validate commands to prevent injection attacks
+	if err := validation.ValidateShellCommand(cfg.ReloadCommand); err != nil {
+		return fmt.Errorf("invalid reload_command: %w", err)
+	}
+	if err := validation.ValidateShellCommand(cfg.ValidateCommand); err != nil {
+		return fmt.Errorf("invalid validate_command: %w", err)
+	}
+
 	c.logger.Info("validating Apache configuration",
 		"cert_path", cfg.CertPath,
 		"chain_path", cfg.ChainPath)
@@ -64,7 +73,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	}
 
 	// Verify validate command works
-	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.ValidateCommand)
+	cmd := exec.CommandContext(ctx, cfg.ValidateCommand)
 	if err := cmd.Run(); err != nil {
 		c.logger.Warn("Apache config validation failed during config check",
 			"error", err,

@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the NGINX deployment target configuration.
@@ -53,6 +54,14 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("NGINX reload_command and validate_command are required")
 	}
 
+	// Validate commands to prevent injection attacks
+	if err := validation.ValidateShellCommand(cfg.ReloadCommand); err != nil {
+		return fmt.Errorf("invalid reload_command: %w", err)
+	}
+	if err := validation.ValidateShellCommand(cfg.ValidateCommand); err != nil {
+		return fmt.Errorf("invalid validate_command: %w", err)
+	}
+
 	c.logger.Info("validating NGINX configuration",
 		"cert_path", cfg.CertPath,
 		"chain_path", cfg.ChainPath)
@@ -64,7 +73,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	}
 
 	// Verify validate command works
-	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.ValidateCommand)
+	cmd := exec.CommandContext(ctx, cfg.ValidateCommand)
 	if err := cmd.Run(); err != nil {
 		c.logger.Warn("NGINX config validation failed during config check",
 			"error", err,
@@ -119,7 +128,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Validate NGINX configuration before reload
 	c.logger.Debug("validating NGINX configuration", "validate_command", c.config.ValidateCommand)
-	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 	if output, err := validateCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("NGINX config validation failed: %v (output: %s)", err, string(output))
 		c.logger.Error("NGINX validation failed", "error", err, "output", string(output))
@@ -133,7 +142,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Reload NGINX
 	c.logger.Debug("reloading NGINX", "reload_command", c.config.ReloadCommand)
-	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
+	reloadCmd := exec.CommandContext(ctx, c.config.ReloadCommand)
 	if output, err := reloadCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("NGINX reload failed: %v (output: %s)", err, string(output))
 		c.logger.Error("NGINX reload failed", "error", err, "output", string(output))
@@ -178,7 +187,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 	startTime := time.Now()
 
 	// Validate NGINX configuration
-	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
 	if err := validateCmd.Run(); err != nil {
 		errMsg := fmt.Sprintf("NGINX config validation failed: %v", err)
 		c.logger.Error("validation failed", "error", err)

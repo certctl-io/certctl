@@ -214,8 +214,10 @@ type CORSConfig struct {
 }
 
 // NewCORS creates a CORS middleware with configurable allowed origins.
-// If no origins are configured, same-origin requests are allowed by default.
-// If ["*"] is configured, all origins are allowed (development/demo mode).
+// Security default: If no origins are configured, CORS headers are NOT set,
+// denying all cross-origin requests (same-origin only).
+// If ["*"] is configured, all origins are allowed (development/demo mode only).
+// If specific origins are configured, only requests matching those origins receive CORS headers.
 func NewCORS(cfg CORSConfig) func(http.Handler) http.Handler {
 	allowAll := false
 	originSet := make(map[string]bool)
@@ -228,19 +230,31 @@ func NewCORS(cfg CORSConfig) func(http.Handler) http.Handler {
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			// Security default: deny CORS when no origins are configured.
+			// This prevents CSRF attacks from arbitrary origins.
+			if len(cfg.AllowedOrigins) == 0 {
+				// No CORS headers set — only same-origin requests can read response
+				if r.Method == http.MethodOptions {
+					w.WriteHeader(http.StatusNoContent)
+					return
+				}
+				next.ServeHTTP(w, r)
+				return
+			}
+
 			origin := r.Header.Get("Origin")
 
 			if allowAll {
+				// Wildcard allows all origins (development/demo only)
 				w.Header().Set("Access-Control-Allow-Origin", "*")
 			} else if origin != "" && originSet[origin] {
-				w.Header().Set("Access-Control-Allow-Origin", origin)
-				w.Header().Set("Vary", "Origin")
-			} else if len(cfg.AllowedOrigins) == 0 && origin != "" {
-				// No config = permissive same-origin default for single-host deployments
+				// Exact match found in allowed origins list
 				w.Header().Set("Access-Control-Allow-Origin", origin)
 				w.Header().Set("Vary", "Origin")
 			}
+			// If origin is empty or not in allowlist, no CORS headers are set
 
+			// CORS preflight response headers (only meaningful if Access-Control-Allow-Origin was set)
 			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")
 			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization, X-Request-ID")
 			w.Header().Set("Access-Control-Max-Age", "86400")

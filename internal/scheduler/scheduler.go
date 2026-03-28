@@ -2,7 +2,10 @@ package scheduler
 
 import (
 	"context"
+	"errors"
 	"log/slog"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/service"
@@ -26,6 +29,17 @@ type Scheduler struct {
 	notificationProcessInterval     time.Duration
 	shortLivedExpiryCheckInterval   time.Duration
 	networkScanInterval             time.Duration
+
+	// Idempotency guards: prevent duplicate execution of slow jobs
+	renewalCheckRunning           atomic.Bool
+	jobProcessorRunning           atomic.Bool
+	agentHealthCheckRunning       atomic.Bool
+	notificationProcessRunning    atomic.Bool
+	shortLivedExpiryCheckRunning  atomic.Bool
+	networkScanRunning            atomic.Bool
+
+	// Graceful shutdown: wait for in-flight work to complete
+	wg sync.WaitGroup
 }
 
 // NewScheduler creates a new scheduler with configurable intervals.
@@ -114,19 +128,33 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 
 // renewalCheckLoop runs every renewalCheckInterval and checks for expiring certificates.
 // If an error occurs, it logs the error but continues running.
+// Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) renewalCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.renewalCheckInterval)
 	defer ticker.Stop()
 
 	// Run immediately on start
-	s.runRenewalCheck(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runRenewalCheck(ctx)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runRenewalCheck(ctx)
+			if !s.renewalCheckRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("renewal check still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.renewalCheckRunning.Store(false)
+				s.runRenewalCheck(ctx)
+			}()
 		}
 	}
 }
@@ -147,19 +175,33 @@ func (s *Scheduler) runRenewalCheck(ctx context.Context) {
 // jobProcessorLoop runs every jobProcessorInterval and processes pending jobs.
 // It picks up pending jobs, executes them, and handles the results.
 // If an error occurs, it logs the error but continues running.
+// Uses atomic.Bool to prevent duplicate execution if the previous job is still running.
 func (s *Scheduler) jobProcessorLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.jobProcessorInterval)
 	defer ticker.Stop()
 
 	// Run immediately on start
-	s.runJobProcessor(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runJobProcessor(ctx)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runJobProcessor(ctx)
+			if !s.jobProcessorRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("job processor still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.jobProcessorRunning.Store(false)
+				s.runJobProcessor(ctx)
+			}()
 		}
 	}
 }
@@ -180,19 +222,33 @@ func (s *Scheduler) runJobProcessor(ctx context.Context) {
 // agentHealthCheckLoop runs every agentHealthCheckInterval and marks stale agents as offline.
 // An agent is considered stale if it hasn't sent a heartbeat within the health check interval.
 // If an error occurs, it logs the error but continues running.
+// Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) agentHealthCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.agentHealthCheckInterval)
 	defer ticker.Stop()
 
 	// Run immediately on start
-	s.runAgentHealthCheck(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runAgentHealthCheck(ctx)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runAgentHealthCheck(ctx)
+			if !s.agentHealthCheckRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("agent health check still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.agentHealthCheckRunning.Store(false)
+				s.runAgentHealthCheck(ctx)
+			}()
 		}
 	}
 }
@@ -212,19 +268,33 @@ func (s *Scheduler) runAgentHealthCheck(ctx context.Context) {
 
 // notificationProcessLoop runs every notificationProcessInterval and processes pending notifications.
 // If an error occurs, it logs the error but continues running.
+// Uses atomic.Bool to prevent duplicate execution if the previous process is still running.
 func (s *Scheduler) notificationProcessLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.notificationProcessInterval)
 	defer ticker.Stop()
 
 	// Run immediately on start
-	s.runNotificationProcess(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runNotificationProcess(ctx)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runNotificationProcess(ctx)
+			if !s.notificationProcessRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("notification processor still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.notificationProcessRunning.Store(false)
+				s.runNotificationProcess(ctx)
+			}()
 		}
 	}
 }
@@ -245,6 +315,7 @@ func (s *Scheduler) runNotificationProcess(ctx context.Context) {
 // shortLivedExpiryCheckLoop runs every shortLivedExpiryCheckInterval and marks expired
 // short-lived certificates. For certs with TTL < 1 hour, expiry IS revocation —
 // no CRL/OCSP needed.
+// Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
 func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.shortLivedExpiryCheckInterval)
 	defer ticker.Stop()
@@ -254,7 +325,16 @@ func (s *Scheduler) shortLivedExpiryCheckLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runShortLivedExpiryCheck(ctx)
+			if !s.shortLivedExpiryCheckRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("short-lived expiry check still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.shortLivedExpiryCheckRunning.Store(false)
+				s.runShortLivedExpiryCheck(ctx)
+			}()
 		}
 	}
 }
@@ -274,19 +354,33 @@ func (s *Scheduler) runShortLivedExpiryCheck(ctx context.Context) {
 
 // networkScanLoop runs every networkScanInterval and performs active TLS scanning
 // of configured network targets.
+// Uses atomic.Bool to prevent duplicate execution if the previous scan is still running.
 func (s *Scheduler) networkScanLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.networkScanInterval)
 	defer ticker.Stop()
 
 	// Run immediately on start
-	s.runNetworkScan(ctx)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		s.runNetworkScan(ctx)
+	}()
 
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			s.runNetworkScan(ctx)
+			if !s.networkScanRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("network scan still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.networkScanRunning.Store(false)
+				s.runNetworkScan(ctx)
+			}()
 		}
 	}
 }
@@ -303,3 +397,26 @@ func (s *Scheduler) runNetworkScan(ctx context.Context) {
 		s.logger.Debug("network scan completed")
 	}
 }
+
+// WaitForCompletion waits for all in-flight scheduler work to complete.
+// It respects the provided timeout and returns an error if work is still in progress after timeout.
+// Call this after the scheduler context has been cancelled to ensure graceful shutdown.
+func (s *Scheduler) WaitForCompletion(timeout time.Duration) error {
+	done := make(chan struct{})
+	go func() {
+		s.wg.Wait()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		s.logger.Info("all scheduler work completed")
+		return nil
+	case <-time.After(timeout):
+		s.logger.Warn("scheduler work did not complete within timeout", "timeout", timeout.String())
+		return ErrSchedulerShutdownTimeout
+	}
+}
+
+// ErrSchedulerShutdownTimeout is returned when scheduler graceful shutdown times out.
+var ErrSchedulerShutdownTimeout = errors.New("scheduler graceful shutdown timeout")

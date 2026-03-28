@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestOpsGenie_Channel(t *testing.T) {
@@ -111,6 +112,17 @@ func TestOpsGenie_SendConnectionError(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "request failed") {
 		t.Errorf("expected 'request failed' in error, got %v", err)
+	}
+}
+
+func TestOpsGenie_ClientHasTimeout(t *testing.T) {
+	n := New(Config{APIKey: "test-key"})
+	if n.httpClient.Timeout == 0 {
+		t.Fatal("expected HTTP client timeout to be set, got 0")
+	}
+	expectedTimeout := 10 * time.Second
+	if n.httpClient.Timeout != expectedTimeout {
+		t.Errorf("expected timeout %v, got %v", expectedTimeout, n.httpClient.Timeout)
 	}
 }
 

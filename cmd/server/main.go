@@ -458,6 +458,12 @@ func main() {
 
 	cancel() // Stop scheduler
 
+	// Wait for in-flight scheduler work to complete (up to 30 seconds)
+	logger.Info("waiting for scheduler to complete in-flight work")
+	if err := sched.WaitForCompletion(30 * time.Second); err != nil {
+		logger.Warn("scheduler work did not complete in time", "error", err)
+	}
+
 	logger.Info("shutting down HTTP server")
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)

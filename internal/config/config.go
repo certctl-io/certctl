@@ -147,7 +147,11 @@ type RateLimitConfig struct {
 
 // CORSConfig contains CORS configuration.
 type CORSConfig struct {
-	AllowedOrigins []string // Allowed origins; empty = same-origin only; ["*"] = all
+	// AllowedOrigins is a list of allowed origins for CORS requests.
+	// Security default: empty list denies all CORS requests (same-origin only).
+	// ["*"] allows all origins (development/demo mode only, security risk).
+	// Specific origins (e.g., ["https://app.example.com"]) whitelist only those origins.
+	AllowedOrigins []string
 }
 
 // Load reads configuration from environment variables and returns a Config.
