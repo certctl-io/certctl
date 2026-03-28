@@ -20,7 +20,7 @@ func TestHAProxyConnector_ValidateConfig(t *testing.T) {
 	t.Run("valid config", func(t *testing.T) {
 		cfg := haproxy.Config{
 			PEMPath:       "/tmp/haproxy/cert.pem",
-			ReloadCommand: "echo reload",
+			ReloadCommand: "true",
 		}
 
 		connector := haproxy.New(&cfg, logger)
@@ -33,7 +33,7 @@ func TestHAProxyConnector_ValidateConfig(t *testing.T) {
 
 	t.Run("missing pem_path", func(t *testing.T) {
 		cfg := haproxy.Config{
-			ReloadCommand: "echo reload",
+			ReloadCommand: "true",
 		}
 
 		connector := haproxy.New(&cfg, logger)
@@ -76,7 +76,7 @@ func TestHAProxyConnector_DeployCertificate(t *testing.T) {
 
 		cfg := &haproxy.Config{
 			PEMPath:       pemPath,
-			ReloadCommand: "echo reload",
+			ReloadCommand: "true",
 		}
 
 		connector := haproxy.New(cfg, logger)
@@ -163,8 +163,8 @@ func TestHAProxyConnector_ValidateDeployment(t *testing.T) {
 
 		cfg := &haproxy.Config{
 			PEMPath:         pemPath,
-			ReloadCommand:   "echo reload",
-			ValidateCommand: "echo ok",
+			ReloadCommand:   "true",
+			ValidateCommand: "true",
 		}
 
 		connector := haproxy.New(cfg, logger)
@@ -184,7 +184,7 @@ func TestHAProxyConnector_ValidateDeployment(t *testing.T) {
 	t.Run("missing PEM file", func(t *testing.T) {
 		cfg := &haproxy.Config{
 			PEMPath:       "/nonexistent/combined.pem",
-			ReloadCommand: "echo reload",
+			ReloadCommand: "true",
 		}
 
 		connector := haproxy.New(cfg, logger)

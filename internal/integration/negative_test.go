@@ -47,10 +47,14 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
 
-	// Wire revocation dependencies
-	certificateService.SetRevocationRepo(revocationRepo)
-	certificateService.SetNotificationService(notificationService)
-	certificateService.SetIssuerRegistry(issuerRegistry)
+	// Wire decomposed sub-services (TICKET-007)
+	revocationSvc := service.NewRevocationSvc(certRepo, revocationRepo, auditService)
+	revocationSvc.SetNotificationService(notificationService)
+	revocationSvc.SetIssuerRegistry(issuerRegistry)
+	caOperationsSvc := service.NewCAOperationsSvc(revocationRepo, certRepo, nil)
+	caOperationsSvc.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetRevocationSvc(revocationSvc)
+	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)

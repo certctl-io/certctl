@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -25,70 +26,70 @@ type MockAgentService struct {
 	UpdateJobStatusFn    func(agentID string, jobID string, status string, errMsg string) error
 }
 
-func (m *MockAgentService) ListAgents(page, perPage int) ([]domain.Agent, int64, error) {
+func (m *MockAgentService) ListAgents(_ context.Context, page, perPage int) ([]domain.Agent, int64, error) {
 	if m.ListAgentsFn != nil {
 		return m.ListAgentsFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockAgentService) GetAgent(id string) (*domain.Agent, error) {
+func (m *MockAgentService) GetAgent(_ context.Context, id string) (*domain.Agent, error) {
 	if m.GetAgentFn != nil {
 		return m.GetAgentFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockAgentService) RegisterAgent(agent domain.Agent) (*domain.Agent, error) {
+func (m *MockAgentService) RegisterAgent(_ context.Context, agent domain.Agent) (*domain.Agent, error) {
 	if m.RegisterAgentFn != nil {
 		return m.RegisterAgentFn(agent)
 	}
 	return nil, nil
 }
 
-func (m *MockAgentService) Heartbeat(agentID string, metadata *domain.AgentMetadata) error {
+func (m *MockAgentService) Heartbeat(_ context.Context, agentID string, metadata *domain.AgentMetadata) error {
 	if m.HeartbeatFn != nil {
 		return m.HeartbeatFn(agentID, metadata)
 	}
 	return nil
 }
 
-func (m *MockAgentService) CSRSubmit(agentID string, csrPEM string) (string, error) {
+func (m *MockAgentService) CSRSubmit(_ context.Context, agentID string, csrPEM string) (string, error) {
 	if m.CSRSubmitFn != nil {
 		return m.CSRSubmitFn(agentID, csrPEM)
 	}
 	return "", nil
 }
 
-func (m *MockAgentService) CSRSubmitForCert(agentID string, certID string, csrPEM string) (string, error) {
+func (m *MockAgentService) CSRSubmitForCert(_ context.Context, agentID string, certID string, csrPEM string) (string, error) {
 	if m.CSRSubmitForCertFn != nil {
 		return m.CSRSubmitForCertFn(agentID, certID, csrPEM)
 	}
 	return "", nil
 }
 
-func (m *MockAgentService) CertificatePickup(agentID, certID string) (string, error) {
+func (m *MockAgentService) CertificatePickup(_ context.Context, agentID, certID string) (string, error) {
 	if m.CertificatePickupFn != nil {
 		return m.CertificatePickupFn(agentID, certID)
 	}
 	return "", nil
 }
 
-func (m *MockAgentService) GetWork(agentID string) ([]domain.Job, error) {
+func (m *MockAgentService) GetWork(_ context.Context, agentID string) ([]domain.Job, error) {
 	if m.GetWorkFn != nil {
 		return m.GetWorkFn(agentID)
 	}
 	return nil, nil
 }
 
-func (m *MockAgentService) GetWorkWithTargets(agentID string) ([]domain.WorkItem, error) {
+func (m *MockAgentService) GetWorkWithTargets(_ context.Context, agentID string) ([]domain.WorkItem, error) {
 	if m.GetWorkWithTargetsFn != nil {
 		return m.GetWorkWithTargetsFn(agentID)
 	}
 	return nil, nil
 }
 
-func (m *MockAgentService) UpdateJobStatus(agentID string, jobID string, status string, errMsg string) error {
+func (m *MockAgentService) UpdateJobStatus(_ context.Context, agentID string, jobID string, status string, errMsg string) error {
 	if m.UpdateJobStatusFn != nil {
 		return m.UpdateJobStatusFn(agentID, jobID, status, errMsg)
 	}

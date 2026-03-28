@@ -453,7 +453,7 @@ func TestListAgents(t *testing.T) {
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
-	agents, total, err := agentService.ListAgents(1, 50)
+	agents, total, err := agentService.ListAgents(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("ListAgents failed: %v", err)
 	}

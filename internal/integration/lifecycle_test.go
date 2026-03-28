@@ -53,9 +53,15 @@ func TestCertificateLifecycle(t *testing.T) {
 	certificateService := service.NewCertificateService(certRepo, policyService, auditService)
 	notificationService := service.NewNotificationService(notifRepo, make(map[string]service.Notifier))
 	revocationRepo := newMockRevocationRepository()
-	certificateService.SetRevocationRepo(revocationRepo)
-	certificateService.SetNotificationService(notificationService)
-	certificateService.SetIssuerRegistry(issuerRegistry)
+
+	// Wire decomposed sub-services (TICKET-007)
+	revocationSvc := service.NewRevocationSvc(certRepo, revocationRepo, auditService)
+	revocationSvc.SetNotificationService(notificationService)
+	revocationSvc.SetIssuerRegistry(issuerRegistry)
+	caOperationsSvc := service.NewCAOperationsSvc(revocationRepo, certRepo, nil)
+	caOperationsSvc.SetIssuerRegistry(issuerRegistry)
+	certificateService.SetRevocationSvc(revocationSvc)
+	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	certificateService.SetTargetRepo(targetRepo)
 	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
@@ -1052,28 +1058,28 @@ func (m *mockProfileService) DeleteProfile(id string) error {
 
 type mockAgentGroupService struct{}
 
-func (m *mockAgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error) {
+func (m *mockAgentGroupService) ListAgentGroups(_ context.Context, page, perPage int) ([]domain.AgentGroup, int64, error) {
 	return []domain.AgentGroup{}, 0, nil
 }
 
-func (m *mockAgentGroupService) GetAgentGroup(id string) (*domain.AgentGroup, error) {
+func (m *mockAgentGroupService) GetAgentGroup(_ context.Context, id string) (*domain.AgentGroup, error) {
 	return nil, fmt.Errorf("agent group not found")
 }
 
-func (m *mockAgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (m *mockAgentGroupService) CreateAgentGroup(_ context.Context, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	return &group, nil
 }
 
-func (m *mockAgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (m *mockAgentGroupService) UpdateAgentGroup(_ context.Context, id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	group.ID = id
 	return &group, nil
 }
 
-func (m *mockAgentGroupService) DeleteAgentGroup(id string) error {
+func (m *mockAgentGroupService) DeleteAgentGroup(_ context.Context, id string) error {
 	return nil
 }
 
-func (m *mockAgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
+func (m *mockAgentGroupService) ListMembers(_ context.Context, id string) ([]domain.Agent, int64, error) {
 	return []domain.Agent{}, 0, nil
 }
 

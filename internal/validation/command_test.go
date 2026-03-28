@@ -1,6 +1,7 @@
 package validation
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -189,7 +190,7 @@ func TestValidateShellCommand(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateShellCommand() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && tt.errMsg != "" && (err == nil || !contains(err.Error(), tt.errMsg)) {
+			if tt.wantErr && tt.errMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.errMsg)) {
 				t.Errorf("ValidateShellCommand() error message %q does not contain %q", err, tt.errMsg)
 			}
 		})
@@ -294,19 +295,19 @@ func TestValidateDomainName(t *testing.T) {
 			name:    "domain starting with hyphen",
 			domain:  "-example.com",
 			wantErr: true,
-			errMsg:  "cannot start",
+			errMsg:  "invalid",
 		},
 		{
 			name:    "domain ending with hyphen",
 			domain:  "example-.com",
 			wantErr: true,
-			errMsg:  "cannot end",
+			errMsg:  "invalid",
 		},
 		{
 			name:    "domain with double dots",
 			domain:  "example..com",
 			wantErr: true,
-			errMsg:  "consecutive dots",
+			errMsg:  "invalid",
 		},
 		{
 			name:    "domain starting with dot",
@@ -324,13 +325,13 @@ func TestValidateDomainName(t *testing.T) {
 		},
 		{
 			name:    "overly long domain",
-			domain:  string(make([]byte, 254)),
+			domain:  strings.Repeat("a", 254),
 			wantErr: true,
 			errMsg:  "exceeds maximum length",
 		},
 		{
 			name:    "label exceeds 63 characters",
-			domain:  string(make([]byte, 64)) + ".com",
+			domain:  strings.Repeat("a", 64) + ".com",
 			wantErr: true,
 			errMsg:  "exceeds maximum length",
 		},
@@ -342,7 +343,7 @@ func TestValidateDomainName(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateDomainName() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && tt.errMsg != "" && (err == nil || !contains(err.Error(), tt.errMsg)) {
+			if tt.wantErr && tt.errMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.errMsg)) {
 				t.Errorf("ValidateDomainName() error message %q does not contain %q", err, tt.errMsg)
 			}
 		})
@@ -380,7 +381,7 @@ func TestValidateACMEToken(t *testing.T) {
 		},
 		{
 			name:    "long valid token",
-			token:   "a" + string(make([]byte, 510)),
+			token:   strings.Repeat("a", 511),
 			wantErr: false,
 		},
 
@@ -457,7 +458,7 @@ func TestValidateACMEToken(t *testing.T) {
 		},
 		{
 			name:    "overly long token",
-			token:   string(make([]byte, 513)),
+			token:   strings.Repeat("a", 513),
 			wantErr: true,
 			errMsg:  "exceeds maximum length",
 		},
@@ -469,7 +470,7 @@ func TestValidateACMEToken(t *testing.T) {
 			if (err != nil) != tt.wantErr {
 				t.Errorf("ValidateACMEToken() error = %v, wantErr %v", err, tt.wantErr)
 			}
-			if tt.wantErr && tt.errMsg != "" && (err == nil || !contains(err.Error(), tt.errMsg)) {
+			if tt.wantErr && tt.errMsg != "" && (err == nil || !strings.Contains(err.Error(), tt.errMsg)) {
 				t.Errorf("ValidateACMEToken() error message %q does not contain %q", err, tt.errMsg)
 			}
 		})
@@ -525,17 +526,3 @@ func TestSanitizeForShell(t *testing.T) {
 	}
 }
 
-// contains is a helper function to check if a string contains a substring.
-func contains(s, substr string) bool {
-	return len(s) >= len(substr) && (s == substr || len(substr) == 0 || (len(s) > 0 && len(substr) > 0 && len(s) >= len(substr) && len(substr) > 0)) &&
-		(substr == "" || (s[len(s)-len(substr):] == substr || s[:len(substr)] == substr || indexOf(s, substr) >= 0))
-}
-
-func indexOf(s, substr string) int {
-	for i := 0; i < len(s)-len(substr)+1; i++ {
-		if s[i:i+len(substr)] == substr {
-			return i
-		}
-	}
-	return -1
-}

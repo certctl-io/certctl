@@ -22,8 +22,8 @@ func TestApacheConnector_ValidateConfig(t *testing.T) {
 			CertPath:        filepath.Join(tmpDir, "cert.pem"),
 			KeyPath:         filepath.Join(tmpDir, "key.pem"),
 			ChainPath:       filepath.Join(tmpDir, "chain.pem"),
-			ReloadCommand:   "echo reload",
-			ValidateCommand: "echo ok",
+			ReloadCommand:   "true",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(&cfg, logger)
@@ -37,8 +37,8 @@ func TestApacheConnector_ValidateConfig(t *testing.T) {
 	t.Run("missing cert_path", func(t *testing.T) {
 		cfg := apache.Config{
 			ChainPath:       "/tmp/chain.pem",
-			ReloadCommand:   "echo reload",
-			ValidateCommand: "echo ok",
+			ReloadCommand:   "true",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(&cfg, logger)
@@ -53,7 +53,7 @@ func TestApacheConnector_ValidateConfig(t *testing.T) {
 		cfg := apache.Config{
 			CertPath:        "/tmp/cert.pem",
 			ChainPath:       "/tmp/chain.pem",
-			ValidateCommand: "echo ok",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(&cfg, logger)
@@ -83,8 +83,8 @@ func TestApacheConnector_DeployCertificate(t *testing.T) {
 			CertPath:        filepath.Join(tmpDir, "cert.pem"),
 			KeyPath:         filepath.Join(tmpDir, "key.pem"),
 			ChainPath:       filepath.Join(tmpDir, "chain.pem"),
-			ReloadCommand:   "echo reload",
-			ValidateCommand: "echo ok",
+			ReloadCommand:   "true",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(cfg, logger)
@@ -129,7 +129,7 @@ func TestApacheConnector_DeployCertificate(t *testing.T) {
 			CertPath:        filepath.Join(tmpDir, "cert.pem"),
 			KeyPath:         filepath.Join(tmpDir, "key.pem"),
 			ChainPath:       filepath.Join(tmpDir, "chain.pem"),
-			ReloadCommand:   "echo reload",
+			ReloadCommand:   "true",
 			ValidateCommand: "false", // always fails
 		}
 
@@ -161,7 +161,7 @@ func TestApacheConnector_ValidateDeployment(t *testing.T) {
 
 		cfg := &apache.Config{
 			CertPath:        certPath,
-			ValidateCommand: "echo ok",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(cfg, logger)
@@ -181,7 +181,7 @@ func TestApacheConnector_ValidateDeployment(t *testing.T) {
 	t.Run("missing cert file", func(t *testing.T) {
 		cfg := &apache.Config{
 			CertPath:        "/nonexistent/cert.pem",
-			ValidateCommand: "echo ok",
+			ValidateCommand: "true",
 		}
 
 		connector := apache.New(cfg, logger)

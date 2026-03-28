@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,28 +22,28 @@ type MockAgentGroupService struct {
 	ListMembersFn      func(id string) ([]domain.Agent, int64, error)
 }
 
-func (m *MockAgentGroupService) ListAgentGroups(page, perPage int) ([]domain.AgentGroup, int64, error) {
+func (m *MockAgentGroupService) ListAgentGroups(_ context.Context, page, perPage int) ([]domain.AgentGroup, int64, error) {
 	if m.ListAgentGroupsFn != nil {
 		return m.ListAgentGroupsFn(page, perPage)
 	}
 	return []domain.AgentGroup{}, 0, nil
 }
 
-func (m *MockAgentGroupService) GetAgentGroup(id string) (*domain.AgentGroup, error) {
+func (m *MockAgentGroupService) GetAgentGroup(_ context.Context, id string) (*domain.AgentGroup, error) {
 	if m.GetAgentGroupFn != nil {
 		return m.GetAgentGroupFn(id)
 	}
 	return nil, fmt.Errorf("not found")
 }
 
-func (m *MockAgentGroupService) CreateAgentGroup(group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (m *MockAgentGroupService) CreateAgentGroup(_ context.Context, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	if m.CreateAgentGroupFn != nil {
 		return m.CreateAgentGroupFn(group)
 	}
 	return &group, nil
 }
 
-func (m *MockAgentGroupService) UpdateAgentGroup(id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
+func (m *MockAgentGroupService) UpdateAgentGroup(_ context.Context, id string, group domain.AgentGroup) (*domain.AgentGroup, error) {
 	if m.UpdateAgentGroupFn != nil {
 		return m.UpdateAgentGroupFn(id, group)
 	}
@@ -50,14 +51,14 @@ func (m *MockAgentGroupService) UpdateAgentGroup(id string, group domain.AgentGr
 	return &group, nil
 }
 
-func (m *MockAgentGroupService) DeleteAgentGroup(id string) error {
+func (m *MockAgentGroupService) DeleteAgentGroup(_ context.Context, id string) error {
 	if m.DeleteAgentGroupFn != nil {
 		return m.DeleteAgentGroupFn(id)
 	}
 	return nil
 }
 
-func (m *MockAgentGroupService) ListMembers(id string) ([]domain.Agent, int64, error) {
+func (m *MockAgentGroupService) ListMembers(_ context.Context, id string) ([]domain.Agent, int64, error) {
 	if m.ListMembersFn != nil {
 		return m.ListMembersFn(id)
 	}

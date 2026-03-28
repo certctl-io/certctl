@@ -72,6 +72,9 @@ func setupTestDB(t *testing.T) *testDB {
 		t.Fatalf("failed to open database: %v", err)
 	}
 
+	// Limit to 1 connection so SET search_path persists across all queries.
+	db.SetMaxOpenConns(1)
+
 	if err := db.Ping(); err != nil {
 		t.Fatalf("failed to ping database: %v", err)
 	}

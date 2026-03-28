@@ -7,19 +7,43 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
-
-	"github.com/shankar0123/certctl/internal/service"
 )
+
+// RenewalServicer defines the interface for renewal operations used by the scheduler.
+type RenewalServicer interface {
+	CheckExpiringCertificates(ctx context.Context) error
+	ExpireShortLivedCertificates(ctx context.Context) error
+}
+
+// JobServicer defines the interface for job processing used by the scheduler.
+type JobServicer interface {
+	ProcessPendingJobs(ctx context.Context) error
+}
+
+// AgentServicer defines the interface for agent health checks used by the scheduler.
+type AgentServicer interface {
+	MarkStaleAgentsOffline(ctx context.Context, interval time.Duration) error
+}
+
+// NotificationServicer defines the interface for notification processing used by the scheduler.
+type NotificationServicer interface {
+	ProcessPendingNotifications(ctx context.Context) error
+}
+
+// NetworkScanServicer defines the interface for network scanning used by the scheduler.
+type NetworkScanServicer interface {
+	ScanAllTargets(ctx context.Context) error
+}
 
 // Scheduler manages background jobs and periodic tasks for the certificate control plane.
 // It runs multiple concurrent loops for renewal checks, job processing, agent health checks,
 // and notification processing.
 type Scheduler struct {
-	renewalService      *service.RenewalService
-	jobService          *service.JobService
-	agentService        *service.AgentService
-	notificationService *service.NotificationService
-	networkScanService  *service.NetworkScanService
+	renewalService      RenewalServicer
+	jobService          JobServicer
+	agentService        AgentServicer
+	notificationService NotificationServicer
+	networkScanService  NetworkScanServicer
 	logger              *slog.Logger
 
 	// Configurable tick intervals
@@ -44,11 +68,11 @@ type Scheduler struct {
 
 // NewScheduler creates a new scheduler with configurable intervals.
 func NewScheduler(
-	renewalService *service.RenewalService,
-	jobService *service.JobService,
-	agentService *service.AgentService,
-	notificationService *service.NotificationService,
-	networkScanService *service.NetworkScanService,
+	renewalService RenewalServicer,
+	jobService JobServicer,
+	agentService AgentServicer,
+	notificationService NotificationServicer,
+	networkScanService NetworkScanServicer,
 	logger *slog.Logger,
 ) *Scheduler {
 	return &Scheduler{

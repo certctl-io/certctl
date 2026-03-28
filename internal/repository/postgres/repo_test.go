@@ -5,6 +5,7 @@ package postgres_test
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"testing"
 	"time"
@@ -40,6 +41,47 @@ func getTestDB(t *testing.T) *testDB {
 	return sharedDB
 }
 
+// insertCertPrereqsRaw creates prerequisite FK records using raw SQL on the *sql.DB.
+func insertCertPrereqsRaw(t *testing.T, db *sql.DB, ctx context.Context, suffix string) (ownerID, teamID, issuerID, policyID string) {
+	t.Helper()
+	teamID = "team-" + suffix
+	ownerID = "o-" + suffix
+	issuerID = "iss-" + suffix
+	policyID = "pol-" + suffix
+
+	now := time.Now().Truncate(time.Microsecond)
+
+	// Create team
+	_, err := db.ExecContext(ctx, `INSERT INTO teams (id, name, created_at, updated_at) VALUES ($1, $2, $3, $4)`,
+		teamID, "Team "+suffix, now, now)
+	if err != nil {
+		t.Fatalf("insertCertPrereqs: create team failed: %v", err)
+	}
+
+	// Create owner (requires team)
+	_, err = db.ExecContext(ctx, `INSERT INTO owners (id, name, email, team_id, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		ownerID, "Owner "+suffix, suffix+"@example.com", teamID, now, now)
+	if err != nil {
+		t.Fatalf("insertCertPrereqs: create owner failed: %v", err)
+	}
+
+	// Create issuer
+	_, err = db.ExecContext(ctx, `INSERT INTO issuers (id, name, type, enabled, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
+		issuerID, "Issuer "+suffix, "generic-ca", true, now, now)
+	if err != nil {
+		t.Fatalf("insertCertPrereqs: create issuer failed: %v", err)
+	}
+
+	// Create renewal policy
+	_, err = db.ExecContext(ctx, `INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_minutes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+		policyID, "Policy "+suffix, 30, true, 3, 60, now, now)
+	if err != nil {
+		t.Fatalf("insertCertPrereqs: create renewal_policy failed: %v", err)
+	}
+
+	return
+}
+
 // ============================================================
 // Certificate Repository Tests
 // ============================================================
@@ -53,18 +95,23 @@ func TestCertificateRepository_CRUD(t *testing.T) {
 	now := time.Now().Truncate(time.Microsecond)
 	expires := now.Add(90 * 24 * time.Hour)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "crud")
+
 	cert := &domain.ManagedCertificate{
-		ID:          "mc-test-crud",
-		Name:        "test-cert",
-		CommonName:  "test.example.com",
-		SANs:        []string{"test.example.com", "www.test.example.com"},
-		Environment: "production",
-		IssuerID:    "iss-local",
-		Status:      domain.CertificateStatusActive,
-		ExpiresAt:   expires,
-		Tags:        map[string]string{"team": "platform"},
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		ID:              "mc-test-crud",
+		Name:            "test-cert",
+		CommonName:      "test.example.com",
+		SANs:            []string{"test.example.com", "www.test.example.com"},
+		Environment:     "production",
+		OwnerID:         ownerID,
+		TeamID:          teamID,
+		IssuerID:        issuerID,
+		RenewalPolicyID: policyID,
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       expires,
+		Tags:            map[string]string{"team": "platform"},
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	// Create
@@ -119,6 +166,8 @@ func TestCertificateRepository_List_Filtering(t *testing.T) {
 
 	now := time.Now().Truncate(time.Microsecond)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "listfilt")
+
 	// Create test certs in different states
 	for _, tc := range []struct {
 		id     string
@@ -130,17 +179,20 @@ func TestCertificateRepository_List_Filtering(t *testing.T) {
 		{"mc-list-3", domain.CertificateStatusExpired, "production"},
 	} {
 		cert := &domain.ManagedCertificate{
-			ID:          tc.id,
-			Name:        tc.id,
-			CommonName:  tc.id + ".example.com",
-			SANs:        []string{},
-			Environment: tc.env,
-			IssuerID:    "iss-local",
-			Status:      tc.status,
-			ExpiresAt:   now.Add(30 * 24 * time.Hour),
-			Tags:        map[string]string{},
-			CreatedAt:   now,
-			UpdatedAt:   now,
+			ID:              tc.id,
+			Name:            tc.id,
+			CommonName:      tc.id + ".example.com",
+			SANs:            []string{},
+			Environment:     tc.env,
+			OwnerID:         ownerID,
+			TeamID:          teamID,
+			IssuerID:        issuerID,
+			RenewalPolicyID: policyID,
+			Status:          tc.status,
+			ExpiresAt:       now.Add(30 * 24 * time.Hour),
+			Tags:            map[string]string{},
+			CreatedAt:       now,
+			UpdatedAt:       now,
 		}
 		if err := repo.Create(ctx, cert); err != nil {
 			t.Fatalf("Create %s failed: %v", tc.id, err)
@@ -186,10 +238,13 @@ func TestCertificateRepository_Versions(t *testing.T) {
 
 	now := time.Now().Truncate(time.Microsecond)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "ver")
+
 	// Create parent cert
 	cert := &domain.ManagedCertificate{
 		ID: "mc-ver-test", Name: "ver-test", CommonName: "ver.example.com",
-		SANs: []string{}, IssuerID: "iss-local", Status: domain.CertificateStatusActive,
+		SANs: []string{}, OwnerID: ownerID, TeamID: teamID, IssuerID: issuerID,
+		RenewalPolicyID: policyID, Status: domain.CertificateStatusActive,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -245,6 +300,8 @@ func TestCertificateRepository_GetExpiringCertificates(t *testing.T) {
 
 	now := time.Now().Truncate(time.Microsecond)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "exp")
+
 	// One expiring soon, one far out
 	for _, tc := range []struct {
 		id      string
@@ -255,11 +312,15 @@ func TestCertificateRepository_GetExpiringCertificates(t *testing.T) {
 	} {
 		cert := &domain.ManagedCertificate{
 			ID: tc.id, Name: tc.id, CommonName: tc.id + ".example.com",
-			SANs: []string{}, IssuerID: "iss-local", Status: domain.CertificateStatusActive,
+			SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
+			IssuerID: issuerID, RenewalPolicyID: policyID,
+			Status: domain.CertificateStatusActive,
 			ExpiresAt: tc.expires, Tags: map[string]string{},
 			CreatedAt: now, UpdatedAt: now,
 		}
-		repo.Create(ctx, cert)
+		if err := repo.Create(ctx, cert); err != nil {
+			t.Fatalf("Create %s failed: %v", tc.id, err)
+		}
 	}
 
 	expiring, err := repo.GetExpiringCertificates(ctx, now.Add(30*24*time.Hour))
@@ -520,14 +581,20 @@ func TestJobRepository_CRUD(t *testing.T) {
 
 	now := time.Now().Truncate(time.Microsecond)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "job")
+
 	// Create prerequisite cert
 	cert := &domain.ManagedCertificate{
 		ID: "mc-job-test", Name: "job-test", CommonName: "job.example.com",
-		SANs: []string{}, IssuerID: "iss-local", Status: domain.CertificateStatusActive,
+		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
+		IssuerID: issuerID, RenewalPolicyID: policyID,
+		Status: domain.CertificateStatusActive,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
-	certRepo.Create(ctx, cert)
+	if err := certRepo.Create(ctx, cert); err != nil {
+		t.Fatalf("Create cert failed: %v", err)
+	}
 
 	job := &domain.Job{
 		ID: "job-test-1", Type: domain.JobTypeRenewal, CertificateID: "mc-job-test",
@@ -605,19 +672,25 @@ func TestRevocationRepository_CRUD(t *testing.T) {
 
 	now := time.Now().Truncate(time.Microsecond)
 
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "rev")
+
 	// Create prerequisite cert
 	cert := &domain.ManagedCertificate{
 		ID: "mc-rev-test", Name: "rev-test", CommonName: "rev.example.com",
-		SANs: []string{}, IssuerID: "iss-local", Status: domain.CertificateStatusRevoked,
+		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
+		IssuerID: issuerID, RenewalPolicyID: policyID,
+		Status: domain.CertificateStatusRevoked,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
-	certRepo.Create(ctx, cert)
+	if err := certRepo.Create(ctx, cert); err != nil {
+		t.Fatalf("Create cert failed: %v", err)
+	}
 
 	revocation := &domain.CertificateRevocation{
 		ID: "rev-test-1", CertificateID: "mc-rev-test", SerialNumber: "DEADBEEF01",
 		Reason: "keyCompromise", RevokedBy: "admin", RevokedAt: now,
-		IssuerID: "iss-local", CreatedAt: now,
+		IssuerID: issuerID, CreatedAt: now,
 	}
 
 	// Create
@@ -834,7 +907,7 @@ func TestAuditRepository_CreateAndList(t *testing.T) {
 	event := &domain.AuditEvent{
 		ID: "audit-test-1", Actor: "admin", ActorType: "User",
 		Action: "certificate_created", ResourceType: "certificate",
-		ResourceID: "mc-test", Details: `{"cn":"test.example.com"}`,
+		ResourceID: "mc-test", Details: json.RawMessage(`{"cn":"test.example.com"}`),
 		Timestamp: now,
 	}
 
@@ -925,9 +998,26 @@ func TestNotificationRepository_CRUD(t *testing.T) {
 	tdb := getTestDB(t)
 	db := tdb.freshSchema(t)
 	repo := postgres.NewNotificationRepository(db)
+	certRepo := postgres.NewCertificateRepository(db)
 	ctx := context.Background()
 
 	now := time.Now().Truncate(time.Microsecond)
+
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "notif")
+
+	// Create prerequisite cert (notification references it via FK)
+	cert := &domain.ManagedCertificate{
+		ID: "mc-notif-test", Name: "notif-test", CommonName: "notif.example.com",
+		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
+		IssuerID: issuerID, RenewalPolicyID: policyID,
+		Status: domain.CertificateStatusActive,
+		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := certRepo.Create(ctx, cert); err != nil {
+		t.Fatalf("Create cert failed: %v", err)
+	}
+
 	certID := "mc-notif-test"
 
 	notif := &domain.NotificationEvent{
@@ -1026,6 +1116,7 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 	db := tdb.freshSchema(t)
 	repo := postgres.NewDiscoveryRepository(db)
 	agentRepo := postgres.NewAgentRepository(db)
+	certRepo := postgres.NewCertificateRepository(db)
 	ctx := context.Background()
 
 	now := time.Now().Truncate(time.Microsecond)
@@ -1038,6 +1129,20 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 		Status: domain.AgentStatusOnline, RegisteredAt: now, APIKeyHash: "dcerthash",
 	}
 	agentRepo.Create(ctx, agent)
+
+	// Create a managed cert for the "claim" test (FK on managed_certificate_id)
+	ownerID, teamID, issuerID, policyID := insertCertPrereqsRaw(t, db, ctx, "dcert")
+	linkedCert := &domain.ManagedCertificate{
+		ID: "mc-linked-cert", Name: "linked-cert", CommonName: "linked.example.com",
+		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
+		IssuerID: issuerID, RenewalPolicyID: policyID,
+		Status: domain.CertificateStatusActive,
+		ExpiresAt: now.Add(90 * 24 * time.Hour), Tags: map[string]string{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := certRepo.Create(ctx, linkedCert); err != nil {
+		t.Fatalf("Create linked cert failed: %v", err)
+	}
 
 	cert := &domain.DiscoveredCertificate{
 		ID: "dc-test-1", FingerprintSHA256: "abcdef1234567890",

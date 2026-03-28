@@ -143,7 +143,7 @@ func TestAgentGroupService_ListAgentGroups(t *testing.T) {
 	repo.AddGroup(group1)
 	repo.AddGroup(group2)
 
-	groups, total, err := svc.ListAgentGroups(1, 50)
+	groups, total, err := svc.ListAgentGroups(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -169,7 +169,7 @@ func TestAgentGroupService_ListAgentGroups_DefaultPagination(t *testing.T) {
 	repo.AddGroup(group)
 
 	// page < 1 should default to 1, perPage < 1 should default to 50
-	groups, total, err := svc.ListAgentGroups(-1, 0)
+	groups, total, err := svc.ListAgentGroups(context.Background(), -1, 0)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -189,7 +189,7 @@ func TestAgentGroupService_ListAgentGroups_RepositoryError(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	_, _, err := svc.ListAgentGroups(1, 50)
+	_, _, err := svc.ListAgentGroups(context.Background(), 1, 50)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -205,7 +205,7 @@ func TestAgentGroupService_ListAgentGroups_EmptyResult(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	groups, total, err := svc.ListAgentGroups(1, 50)
+	groups, total, err := svc.ListAgentGroups(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -230,7 +230,7 @@ func TestAgentGroupService_GetAgentGroup(t *testing.T) {
 	}
 	repo.AddGroup(group)
 
-	retrieved, err := svc.GetAgentGroup("ag-test-1")
+	retrieved, err := svc.GetAgentGroup(context.Background(), "ag-test-1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -252,7 +252,7 @@ func TestAgentGroupService_GetAgentGroup_NotFound(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	_, err := svc.GetAgentGroup("ag-nonexistent")
+	_, err := svc.GetAgentGroup(context.Background(), "ag-nonexistent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -273,7 +273,7 @@ func TestAgentGroupService_CreateAgentGroup(t *testing.T) {
 	}
 	before := time.Now()
 
-	created, err := svc.CreateAgentGroup(group)
+	created, err := svc.CreateAgentGroup(context.Background(), group)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -329,7 +329,7 @@ func TestAgentGroupService_CreateAgentGroup_EmptyName(t *testing.T) {
 		Name: "",
 	}
 
-	_, err := svc.CreateAgentGroup(group)
+	_, err := svc.CreateAgentGroup(context.Background(), group)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -349,7 +349,7 @@ func TestAgentGroupService_CreateAgentGroup_NameTooLong(t *testing.T) {
 		Name: strings.Repeat("a", 256),
 	}
 
-	_, err := svc.CreateAgentGroup(group)
+	_, err := svc.CreateAgentGroup(context.Background(), group)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -370,7 +370,7 @@ func TestAgentGroupService_CreateAgentGroup_WithExistingID(t *testing.T) {
 		Name: "Test Group",
 	}
 
-	created, err := svc.CreateAgentGroup(group)
+	created, err := svc.CreateAgentGroup(context.Background(), group)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -392,7 +392,7 @@ func TestAgentGroupService_CreateAgentGroup_WithDynamicCriteria(t *testing.T) {
 		MatchArchitecture: "amd64",
 	}
 
-	created, err := svc.CreateAgentGroup(group)
+	created, err := svc.CreateAgentGroup(context.Background(), group)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -416,7 +416,7 @@ func TestAgentGroupService_CreateAgentGroup_RepositoryError(t *testing.T) {
 		Name: "Test Group",
 	}
 
-	_, err := svc.CreateAgentGroup(group)
+	_, err := svc.CreateAgentGroup(context.Background(), group)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -442,7 +442,7 @@ func TestAgentGroupService_UpdateAgentGroup(t *testing.T) {
 		Name: "New Name",
 	}
 
-	result, err := svc.UpdateAgentGroup("ag-test-1", updated)
+	result, err := svc.UpdateAgentGroup(context.Background(), "ag-test-1", updated)
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -473,7 +473,7 @@ func TestAgentGroupService_UpdateAgentGroup_EmptyName(t *testing.T) {
 		Name: "",
 	}
 
-	_, err := svc.UpdateAgentGroup("ag-test-1", updated)
+	_, err := svc.UpdateAgentGroup(context.Background(), "ag-test-1", updated)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -494,7 +494,7 @@ func TestAgentGroupService_UpdateAgentGroup_RepositoryError(t *testing.T) {
 		Name: "Valid Name",
 	}
 
-	_, err := svc.UpdateAgentGroup("ag-test-1", updated)
+	_, err := svc.UpdateAgentGroup(context.Background(), "ag-test-1", updated)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -516,7 +516,7 @@ func TestAgentGroupService_DeleteAgentGroup(t *testing.T) {
 	}
 	repo.AddGroup(group)
 
-	err := svc.DeleteAgentGroup("ag-test-1")
+	err := svc.DeleteAgentGroup(context.Background(), "ag-test-1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -544,7 +544,7 @@ func TestAgentGroupService_DeleteAgentGroup_RepositoryError(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	err := svc.DeleteAgentGroup("ag-test-1")
+	err := svc.DeleteAgentGroup(context.Background(), "ag-test-1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -572,7 +572,7 @@ func TestAgentGroupService_ListMembers(t *testing.T) {
 	}
 	repo.AddGroupMembers("ag-test-1", agents)
 
-	result, total, err := svc.ListMembers("ag-test-1")
+	result, total, err := svc.ListMembers(context.Background(), "ag-test-1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -594,7 +594,7 @@ func TestAgentGroupService_ListMembers_Empty(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	result, total, err := svc.ListMembers("ag-test-1")
+	result, total, err := svc.ListMembers(context.Background(), "ag-test-1")
 	if err != nil {
 		t.Fatalf("expected no error, got %v", err)
 	}
@@ -614,7 +614,7 @@ func TestAgentGroupService_ListMembers_RepositoryError(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewAgentGroupService(repo, auditSvc)
 
-	_, _, err := svc.ListMembers("ag-test-1")
+	_, _, err := svc.ListMembers(context.Background(), "ag-test-1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
