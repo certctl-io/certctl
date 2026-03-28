@@ -11,6 +11,9 @@ import {
   updateCertificate,
   archiveCertificate,
   revokeCertificate,
+  exportCertificatePEM,
+  downloadCertificatePEM,
+  exportCertificatePKCS12,
   getAgents,
   getAgent,
   registerAgent,
@@ -796,6 +799,83 @@ describe('API Client', () => {
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe('/api/v1/network-scan-targets/nst-1/scan');
       expect(init.method).toBe('POST');
+    });
+  });
+
+  // ─── Certificate Export ────────────────────────────────
+
+  describe('Certificate Export', () => {
+    it('exportCertificatePEM fetches PEM data as JSON', async () => {
+      const pemResult = { cert_pem: 'CERT', chain_pem: 'CHAIN', full_pem: 'FULL' };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(pemResult));
+      const result = await exportCertificatePEM('mc-1');
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates/mc-1/export/pem');
+      expect(result.cert_pem).toBe('CERT');
+      expect(result.full_pem).toBe('FULL');
+    });
+
+    it('downloadCertificatePEM fetches blob with download=true', async () => {
+      const mockBlob = new Blob(['pem-data'], { type: 'application/x-pem-file' });
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: () => Promise.resolve(mockBlob),
+        } as Response)
+      );
+      const blob = await downloadCertificatePEM('mc-1');
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates/mc-1/export/pem?download=true');
+      expect(blob).toBeInstanceOf(Blob);
+    });
+
+    it('downloadCertificatePEM includes auth header', async () => {
+      setApiKey('export-key');
+      const mockBlob = new Blob(['data']);
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: () => Promise.resolve(mockBlob),
+        } as Response)
+      );
+      await downloadCertificatePEM('mc-1');
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init.headers['Authorization']).toBe('Bearer export-key');
+    });
+
+    it('exportCertificatePKCS12 sends POST with password', async () => {
+      const mockBlob = new Blob([new Uint8Array([0x30])], { type: 'application/x-pkcs12' });
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: () => Promise.resolve(mockBlob),
+        } as Response)
+      );
+      const blob = await exportCertificatePKCS12('mc-1', 'mypass');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates/mc-1/export/pkcs12');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      expect(body.password).toBe('mypass');
+      expect(blob).toBeInstanceOf(Blob);
+    });
+
+    it('exportCertificatePKCS12 uses empty password by default', async () => {
+      const mockBlob = new Blob([new Uint8Array([0x30])]);
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          blob: () => Promise.resolve(mockBlob),
+        } as Response)
+      );
+      await exportCertificatePKCS12('mc-1');
+      const [, init] = mockFetch.mock.calls[0];
+      const body = JSON.parse(init.body);
+      expect(body.password).toBe('');
     });
   });
 });

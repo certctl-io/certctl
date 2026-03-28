@@ -54,7 +54,7 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venaf
 certctl gives you a single pane of glass for every TLS certificate in your organization:
 
 - **Web dashboard** — full certificate inventory with status, ownership, expiration heatmaps, and bulk operations
-- **REST API** — 93 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation
+- **REST API** — 95 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation
 - **Agents** — generate private keys locally, discover existing certs on disk, submit CSRs (private keys never leave your servers)
 - **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents
 - **EST server** (RFC 7030) — device and WiFi certificate enrollment via industry-standard protocol
@@ -350,7 +350,7 @@ make docker-clean       # Stop + remove volumes
 
 ## API Overview
 
-93 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
+95 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Key Endpoints
 ```
@@ -358,6 +358,8 @@ make docker-clean       # Stop + remove volumes
 GET    /api/v1/certificates              List (filter, sort, cursor, sparse fields)
 POST   /api/v1/certificates/{id}/renew   Trigger renewal → 202 Accepted
 POST   /api/v1/certificates/{id}/revoke  Revoke with RFC 5280 reason code
+GET    /api/v1/certificates/{id}/export/pem    Export PEM (JSON or file download)
+POST   /api/v1/certificates/{id}/export/pkcs12 Export PKCS#12 bundle (no private key)
 GET    /api/v1/crl/{issuer_id}           DER-encoded X.509 CRL
 GET    /api/v1/ocsp/{issuer_id}/{serial} OCSP responder (good/revoked/unknown)
 
@@ -457,7 +459,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 ### V2: Operational Maturity
 
-18 milestones complete, 1100+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
+21 milestones complete, 1100+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
 
 **What shipped (all ✅):**
 
@@ -476,11 +478,8 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 - **Post-Deployment TLS Verification** — agent-side TLS probe confirms the target is serving the correct certificate by SHA-256 fingerprint match
 - **Traefik + Caddy Targets** — Traefik (file provider, auto-reload) and Caddy (Admin API hot-reload or file-based)
-
-**Coming next:**
-
-- **Certificate Export** (v2.1.x) — single-cert download in PFX/PKCS12, DER, and PEM formats
-- **S/MIME Support** (v2.2.x) — profile EKU constraints for S/MIME (emailProtection), code signing, and custom EKUs
+- **Certificate Export** — PEM (JSON or file download) and PKCS#12 formats, private keys never included (agent-side only), audit trail
+- **S/MIME Support** — EKU-aware issuance (emailProtection, codeSigning, timeStamping), adaptive KeyUsage flags, email SAN routing
 
 ### V3: certctl Pro
 

@@ -12,6 +12,8 @@ import (
 	"fmt"
 	"log/slog"
 	"math/big"
+	"strings"
+	"sync/atomic"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -35,9 +37,9 @@ type RenewalService struct {
 // inversion. Use IssuerConnectorAdapter to bridge between the two.
 type IssuerConnector interface {
 	// IssueCertificate issues a new certificate using the provided CSR PEM.
-	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error)
+	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error)
 	// RenewCertificate renews a certificate using the provided CSR PEM.
-	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error)
+	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error)
 	// RevokeCertificate revokes a certificate by serial number with an optional reason.
 	RevokeCertificate(ctx context.Context, serial string, reason string) error
 	// GenerateCRL generates a DER-encoded X.509 CRL from the given revocation entries.
@@ -348,11 +350,23 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		return fmt.Errorf("failed to generate private key: %w", err)
 	}
 
+	// Split SANs into DNS names and email addresses for proper CSR encoding
+	var csrDNSNames []string
+	var csrEmailAddresses []string
+	for _, san := range cert.SANs {
+		if strings.Contains(san, "@") {
+			csrEmailAddresses = append(csrEmailAddresses, san)
+		} else {
+			csrDNSNames = append(csrDNSNames, san)
+		}
+	}
+
 	csrTemplate := &x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName: cert.CommonName,
 		},
-		DNSNames: cert.SANs,
+		DNSNames:       csrDNSNames,
+		EmailAddresses: csrEmailAddresses,
 	}
 
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privKey)
@@ -372,8 +386,16 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		Bytes: x509.MarshalPKCS1PrivateKey(privKey),
 	}))
 
+	// Resolve EKUs from the certificate profile
+	var ekus []string
+	if cert.CertificateProfileID != "" && s.profileRepo != nil {
+		if profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && profile != nil {
+			ekus = profile.AllowedEKUs
+		}
+	}
+
 	// Call issuer connector to renew
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer renewal failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
@@ -480,8 +502,14 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
+	// Resolve EKUs from the certificate profile (for S/MIME, email certs, etc.)
+	var ekus []string
+	if profile != nil && len(profile.AllowedEKUs) > 0 {
+		ekus = profile.AllowedEKUs
+	}
+
 	// Sign the agent-submitted CSR via issuer
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer signing failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
@@ -708,6 +736,9 @@ func (s *RenewalService) ExpireShortLivedCertificates(ctx context.Context) error
 }
 
 // generateID is a helper to generate unique IDs. In production, use a proper ID generator.
+var idCounter atomic.Int64
+
 func generateID(prefix string) string {
-	return fmt.Sprintf("%s-%d", prefix, time.Now().UnixNano())
+	counter := idCounter.Add(1)
+	return fmt.Sprintf("%s-%d-%d", prefix, time.Now().UnixNano(), counter)
 }

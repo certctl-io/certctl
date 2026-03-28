@@ -42,6 +42,7 @@ type IssuanceRequest struct {
 	CommonName string   `json:"common_name"`
 	SANs       []string `json:"sans"`
 	CSRPEM     string   `json:"csr_pem"`
+	EKUs       []string `json:"ekus,omitempty"` // e.g., "serverAuth", "clientAuth", "emailProtection"
 }
 
 // IssuanceResult contains the result of a successful certificate issuance.
@@ -59,6 +60,7 @@ type RenewalRequest struct {
 	CommonName string   `json:"common_name"`
 	SANs       []string `json:"sans"`
 	CSRPEM     string   `json:"csr_pem"`
+	EKUs       []string `json:"ekus,omitempty"` // e.g., "serverAuth", "clientAuth", "emailProtection"
 	OrderID    *string  `json:"order_id,omitempty"`
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -226,6 +226,9 @@ export default function CertificateDetailPage() {
   const [deployTargetId, setDeployTargetId] = useState('');
   const [showRevoke, setShowRevoke] = useState(false);
   const [revokeReason, setRevokeReason] = useState('unspecified');
+  const [showExport, setShowExport] = useState(false);
+  const [pkcs12Password, setPkcs12Password] = useState('');
+  const [exporting, setExporting] = useState(false);
 
   const { data: cert, isLoading, error, refetch } = useQuery({
     queryKey: ['certificate', id],
@@ -280,6 +283,42 @@ export default function CertificateDetailPage() {
     },
   });
 
+  const handleExportPEM = async () => {
+    setExporting(true);
+    try {
+      const blob = await downloadCertificatePEM(id!);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cert?.common_name || id}.pem`;
+      a.click();
+      URL.revokeObjectURL(url);
+    } catch (err) {
+      alert(`Export failed: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
+  const handleExportPKCS12 = async () => {
+    setExporting(true);
+    try {
+      const blob = await exportCertificatePKCS12(id!, pkcs12Password);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement('a');
+      a.href = url;
+      a.download = `${cert?.common_name || id}.p12`;
+      a.click();
+      URL.revokeObjectURL(url);
+      setShowExport(false);
+      setPkcs12Password('');
+    } catch (err) {
+      alert(`Export failed: ${err instanceof Error ? err.message : err}`);
+    } finally {
+      setExporting(false);
+    }
+  };
+
   if (isLoading) {
     return (
       <>
@@ -312,6 +351,19 @@ export default function CertificateDetailPage() {
           <div className="flex gap-2">
             <button onClick={() => navigate('/certificates')} className="btn btn-ghost text-xs">
               Back
+            </button>
+            <button
+              onClick={handleExportPEM}
+              disabled={exporting}
+              className="btn btn-ghost text-xs border border-surface-border disabled:opacity-50"
+            >
+              {exporting ? 'Exporting...' : 'Export PEM'}
+            </button>
+            <button
+              onClick={() => setShowExport(true)}
+              className="btn btn-ghost text-xs border border-surface-border"
+            >
+              Export PKCS#12
             </button>
             <button
               onClick={() => setShowDeploy(true)}
@@ -540,6 +592,38 @@ export default function CertificateDetailPage() {
                 className="btn btn-primary text-sm disabled:opacity-50"
               >
                 {deployMutation.isPending ? 'Deploying...' : 'Deploy'}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* PKCS#12 Export Modal */}
+      {showExport && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setShowExport(false)}>
+          <div className="bg-surface border border-surface-border rounded p-6 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-ink mb-2">Export PKCS#12</h2>
+            <p className="text-sm text-ink-muted mb-4">
+              Downloads a .p12 file containing the certificate chain. Private keys are not included (they remain on the agent).
+            </p>
+            <label className="text-xs text-ink-muted block mb-2">Password (optional)</label>
+            <input
+              type="password"
+              value={pkcs12Password}
+              onChange={e => setPkcs12Password(e.target.value)}
+              placeholder="Leave empty for no encryption"
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink mb-4 focus:outline-none focus:border-brand-400"
+            />
+            <div className="flex justify-end gap-3">
+              <button onClick={() => { setShowExport(false); setPkcs12Password(''); }} className="btn btn-ghost text-sm">
+                Cancel
+              </button>
+              <button
+                onClick={handleExportPKCS12}
+                disabled={exporting}
+                className="btn btn-primary text-sm disabled:opacity-50"
+              >
+                {exporting ? 'Exporting...' : 'Download .p12'}
               </button>
             </div>
           </div>

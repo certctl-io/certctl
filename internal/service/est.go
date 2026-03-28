@@ -116,7 +116,8 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 		"issuer", s.issuerID)
 
 	// Issue the certificate via the configured issuer connector
-	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM)
+	// EST enrollments use default EKUs (nil = serverAuth + clientAuth fallback in connector)
+	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, nil)
 	if err != nil {
 		s.logger.Error("EST enrollment failed",
 			"action", auditAction,

@@ -19,6 +19,7 @@ type AgentService struct {
 	certRepo       repository.CertificateRepository
 	jobRepo        repository.JobRepository
 	targetRepo     repository.TargetRepository
+	profileRepo    repository.CertificateProfileRepository
 	auditService   *AuditService
 	issuerRegistry map[string]IssuerConnector
 	renewalService *RenewalService
@@ -43,6 +44,11 @@ func NewAgentService(
 		issuerRegistry: issuerRegistry,
 		renewalService: renewalService,
 	}
+}
+
+// SetProfileRepo sets the profile repository for EKU resolution during CSR signing.
+func (s *AgentService) SetProfileRepo(repo repository.CertificateProfileRepository) {
+	s.profileRepo = repo
 }
 
 // Register creates a new agent and returns its API key (only once).
@@ -159,7 +165,14 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 		// Fallback: direct issuer signing (no AwaitingCSR job — ad-hoc CSR submission)
 		connector, ok := s.issuerRegistry[cert.IssuerID]
 		if ok {
-			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM))
+			// Resolve EKUs from the certificate profile if available
+			var ekus []string
+			if cert.CertificateProfileID != "" && s.profileRepo != nil {
+				if profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && profile != nil {
+					ekus = profile.AllowedEKUs
+				}
+			}
+			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM), ekus)
 			if err != nil {
 				return fmt.Errorf("issuer signing failed: %w", err)
 			}

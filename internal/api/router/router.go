@@ -63,6 +63,7 @@ type HandlerRegistry struct {
 	Discovery     handler.DiscoveryHandler
 	NetworkScan   handler.NetworkScanHandler
 	Verification  handler.VerificationHandler
+	Export        handler.ExportHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -98,6 +99,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/certificates/{id}/renew", http.HandlerFunc(reg.Certificates.TriggerRenewal))
 	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(reg.Certificates.TriggerDeployment))
 	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(reg.Certificates.RevokeCertificate))
+
+	// Export endpoints: /api/v1/certificates/{id}/export/{format}
+	r.Register("GET /api/v1/certificates/{id}/export/pem", http.HandlerFunc(reg.Export.ExportPEM))
+	r.Register("POST /api/v1/certificates/{id}/export/pkcs12", http.HandlerFunc(reg.Export.ExportPKCS12))
 
 	// CRL endpoints: /api/v1/crl (JSON) and /api/v1/crl/{issuer_id} (DER)
 	r.Register("GET /api/v1/crl", http.HandlerFunc(reg.Certificates.GetCRL))

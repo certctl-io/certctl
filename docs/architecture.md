@@ -778,6 +778,8 @@ Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST
 
 Certificate revocation: `POST /api/v1/certificates/{id}/revoke` with optional `{"reason": "keyCompromise"}`. Supports RFC 5280 reason codes (unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn). Returns the updated certificate status. Best-effort issuer notification — the revocation succeeds even if the issuer connector is unavailable. A JSON-formatted CRL is available at `GET /api/v1/crl`, and a DER-encoded X.509 CRL signed by the issuing CA at `GET /api/v1/crl/{issuer_id}`. An embedded OCSP responder serves signed responses at `GET /api/v1/ocsp/{issuer_id}/{serial}`. Short-lived certificates (profile TTL < 1 hour) are exempt from CRL/OCSP — expiry is sufficient revocation.
 
+Certificate export (M27): `GET /api/v1/certificates/{id}/export/pem` returns PEM-encoded certificate and chain, and `POST /api/v1/certificates/{id}/export/pkcs12` returns a PKCS#12 bundle (binary). Private keys are never exported — they remain on agents. All exports are audited with actor, timestamp, and format.
+
 Health checks live outside the API prefix: `GET /health` and `GET /ready`.
 
 ## MCP Server

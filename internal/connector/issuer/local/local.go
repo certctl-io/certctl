@@ -184,8 +184,8 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
-	// Generate certificate
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs)
+	// Generate certificate with EKUs from request
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -242,8 +242,8 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
-	// Generate certificate
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs)
+	// Generate certificate with EKUs from request
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -467,7 +467,8 @@ func parsePrivateKey(block *pem.Block) (crypto.Signer, error) {
 
 // generateCertificate creates an X.509 certificate signed by the local CA.
 // It uses the CSR subject and adds any additional SANs from the request.
-func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string) (*x509.Certificate, string, string, error) {
+// If ekus is non-empty, those EKUs are used instead of the default serverAuth+clientAuth.
+func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string, ekus []string) (*x509.Certificate, string, string, error) {
 	// Generate random serial number
 	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 159))
 	if err != nil {
@@ -506,18 +507,18 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 		}
 	}
 
+	// Resolve EKUs: use provided list or fall back to default TLS EKUs
+	resolvedEKUs, keyUsage := resolveEKUsAndKeyUsage(ekus)
+
 	// Create certificate template
 	now := time.Now()
 	template := &x509.Certificate{
-		SerialNumber: serialNum,
-		Subject:      csr.Subject,
-		NotBefore:    now,
-		NotAfter:     now.AddDate(0, 0, c.config.ValidityDays),
-		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
-		ExtKeyUsage: []x509.ExtKeyUsage{
-			x509.ExtKeyUsageServerAuth,
-			x509.ExtKeyUsageClientAuth,
-		},
+		SerialNumber:   serialNum,
+		Subject:        csr.Subject,
+		NotBefore:      now,
+		NotAfter:       now.AddDate(0, 0, c.config.ValidityDays),
+		KeyUsage:       keyUsage,
+		ExtKeyUsage:    resolvedEKUs,
 		DNSNames:       dnsNames,
 		EmailAddresses: emails,
 		SubjectKeyId:   hashPublicKey(csr.PublicKey),
@@ -578,6 +579,67 @@ func isEmail(s string) bool {
 		}
 	}
 	return false
+}
+
+// ekuNameToX509 maps EKU string names (from domain.ValidEKUs) to x509.ExtKeyUsage constants.
+var ekuNameToX509 = map[string]x509.ExtKeyUsage{
+	"serverAuth":      x509.ExtKeyUsageServerAuth,
+	"clientAuth":      x509.ExtKeyUsageClientAuth,
+	"codeSigning":     x509.ExtKeyUsageCodeSigning,
+	"emailProtection": x509.ExtKeyUsageEmailProtection,
+	"timeStamping":    x509.ExtKeyUsageTimeStamping,
+}
+
+// resolveEKUsAndKeyUsage maps EKU string names to x509.ExtKeyUsage constants and computes
+// appropriate KeyUsage flags. If ekus is empty/nil, falls back to default TLS EKUs.
+//
+// Key usage selection:
+//   - TLS (serverAuth/clientAuth): DigitalSignature | KeyEncipherment
+//   - S/MIME (emailProtection): DigitalSignature | ContentCommitment (for non-repudiation)
+//   - Mixed: union of both
+func resolveEKUsAndKeyUsage(ekus []string) ([]x509.ExtKeyUsage, x509.KeyUsage) {
+	if len(ekus) == 0 {
+		// Default: TLS server + client
+		return []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		}, x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	}
+
+	var resolved []x509.ExtKeyUsage
+	hasEmail := false
+	hasTLS := false
+
+	for _, name := range ekus {
+		if eku, ok := ekuNameToX509[name]; ok {
+			resolved = append(resolved, eku)
+			if name == "emailProtection" {
+				hasEmail = true
+			}
+			if name == "serverAuth" || name == "clientAuth" {
+				hasTLS = true
+			}
+		}
+	}
+
+	// If no valid EKUs were resolved, fall back to default
+	if len(resolved) == 0 {
+		return []x509.ExtKeyUsage{
+			x509.ExtKeyUsageServerAuth,
+			x509.ExtKeyUsageClientAuth,
+		}, x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment
+	}
+
+	// Compute KeyUsage based on EKU mix
+	keyUsage := x509.KeyUsageDigitalSignature
+	if hasTLS {
+		keyUsage |= x509.KeyUsageKeyEncipherment
+	}
+	if hasEmail {
+		keyUsage |= x509.KeyUsageContentCommitment // non-repudiation for S/MIME
+	}
+
+	return resolved, keyUsage
 }
 
 // hashPublicKey generates a subject key identifier from a public key.

@@ -78,7 +78,7 @@ curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z
 
 | Domain | Endpoints | Key Operations |
 |--------|-----------|-----------------|
-| **Certificates** | 11 | List, create, get, update (archive), versions, deployments, trigger renewal, trigger deployment, revoke |
+| **Certificates** | 13 | List, create, get, update (archive), versions, deployments, trigger renewal, trigger deployment, revoke, export (PEM/PKCS#12) |
 | **CRL & OCSP** | 3 | JSON CRL, DER CRL per issuer, OCSP responder |
 | **Issuers** | 6 | List, create, get, update, delete, test connection |
 | **Targets** | 5 | List, create, get, update, delete |
@@ -218,34 +218,86 @@ curl $SERVER/api/v1/ocsp/iss-local/ABC123DEF456
 
 ---
 
+## Certificate Export
+
+Operators need to export certificates for use in third-party systems or for compliance audits. certctl provides two export formats: PEM (cert + chain, JSON or file download) and PKCS#12 (cert + chain in a passwordless bundle for compatibility with systems like Java keystores and Windows certificate stores).
+
+**Important:** Private keys are never exported — they remain on agents where they were generated. This is a core security property. Exports only bundle the public certificate material (cert + chain).
+
+```bash
+# Export as PEM (returns JSON with base64-encoded data + chain)
+curl -H "$AUTH" "$SERVER/api/v1/certificates/mc-api-prod/export/pem"
+# {"certificate_pem":"-----BEGIN CERTIFICATE-----\n...", "chain_pem":"-----BEGIN CERTIFICATE-----\n..."}
+
+# Export as PKCS#12 file (binary download, no password)
+curl -H "$AUTH" "$SERVER/api/v1/certificates/mc-api-prod/export/pkcs12" > cert.p12
+
+# Via CLI
+certctl-cli certs export mc-api-prod --format pem --out cert.pem
+certctl-cli certs export mc-api-prod --format pkcs12 --out cert.p12
+```
+
+| Field | Details |
+|-------|---------|
+| **Formats** | PEM (text, cert + chain), PKCS#12 (binary, cert + chain, passwordless) |
+| **Private Key Inclusion** | Never — private keys remain on agents |
+| **Audit Trail** | All exports recorded with actor, timestamp, export format |
+| **API Endpoints** | `GET /api/v1/certificates/{id}/export/pem`, `POST /api/v1/certificates/{id}/export/pkcs12` |
+| **GUI** | Export PEM and Export PKCS#12 buttons on certificate detail page |
+
+---
+
 ## Certificate Profiles
 
 ### Profile Model
-Named enrollment profiles defining certificate issuance constraints. Profiles prevent drift — without them, different teams might issue certs with inconsistent key sizes, TTLs, or key algorithms. A profile says "all certs in this category must use ECDSA P-256, max 90-day TTL, serverAuth EKU only."
+Named enrollment profiles defining certificate issuance constraints. Profiles prevent drift — without them, different teams might issue certs with inconsistent key sizes, TTLs, or key algorithms. A profile says "all certs in this category must use ECDSA P-256, max 90-day TTL, serverAuth and clientAuth EKUs only."
+
+Profiles also support **Extended Key Usage (EKU)** constraints, enabling S/MIME and device certificates. Common EKUs:
+- `serverAuth` — TLS server certificates (HTTPS, mail servers)
+- `clientAuth` — TLS client certificates (mutual TLS, device auth)
+- `emailProtection` — S/MIME signing and encryption
+- `codeSigning` — Code signing and software updates
+- `timeStamping` — Trusted timestamps
 
 ```bash
-# Create a profile enforcing short-lived certs with ECDSA keys
+# Create a TLS profile
 curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles -d '{
-  "name": "Short-Lived Service Mesh",
+  "name": "Standard TLS",
   "allowed_key_algorithms": ["ECDSA"],
-  "max_ttl_hours": 1,
+  "max_ttl_hours": 2160,
+  "allowed_ekus": ["serverAuth"]
+}'
+
+# Create an S/MIME profile
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles -d '{
+  "name": "S/MIME Email",
+  "allowed_key_algorithms": ["RSA", "ECDSA"],
+  "max_ttl_hours": 8760,
+  "allowed_ekus": ["emailProtection"]
+}'
+
+# Create a multi-purpose profile
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles -d '{
+  "name": "Multi-Purpose",
+  "allowed_key_algorithms": ["ECDSA"],
+  "max_ttl_hours": 2160,
   "allowed_ekus": ["serverAuth", "clientAuth"]
 }'
 
 # Assign profile to a certificate
 curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/certificates/mc-api-prod -d '{
-  "profile_id": "prof-short-lived"
+  "profile_id": "prof-standard-tls"
 }'
 
 # List all profiles
-curl -H "$AUTH" "$SERVER/api/v1/profiles" | jq '.data[] | {id, name, max_ttl_hours, allowed_key_algorithms}'
+curl -H "$AUTH" "$SERVER/api/v1/profiles" | jq '.data[] | {id, name, max_ttl_hours, allowed_key_algorithms, allowed_ekus}'
 
 # Get profile details
 curl -H "$AUTH" "$SERVER/api/v1/profiles/prof-standard-tls" | jq .
 
 # Update profile constraints
 curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles/prof-standard-tls -d '{
-  "name": "Standard TLS", "max_ttl_hours": 2160, "allowed_key_algorithms": ["RSA", "ECDSA"]
+  "name": "Standard TLS", "max_ttl_hours": 2160, "allowed_key_algorithms": ["RSA", "ECDSA"], "allowed_ekus": ["serverAuth"]
 }'
 ```
 
@@ -255,14 +307,22 @@ curl -X PUT -H "$AUTH" -H "$CT" $SERVER/api/v1/profiles/prof-standard-tls -d '{
 | **Name** | Human-readable profile name |
 | **Allowed Key Algorithms** | RSA, ECDSA, Ed25519 with minimum key sizes (e.g., RSA 2048+, ECDSA P-256+) |
 | **Max TTL** | Maximum certificate lifetime (days or duration) |
-| **Allowed EKUs** | Extended key usage OIDs (serverAuth, clientAuth, etc.) |
+| **Allowed EKUs** | Extended key usage OIDs (serverAuth, clientAuth, emailProtection, codeSigning, timeStamping) |
 | **Required SANs** | Mandatory Subject Alternative Names (patterns or fixed values) |
 | **Short-Lived Support** | TTL < 1 hour triggers CRL/OCSP exemption |
 
 ### GUI Management
 - Full CRUD page with profile details
-- Crypto constraint badges visible in list view
+- EKU constraint badges visible in list view (serverAuth, clientAuth, emailProtection, etc.)
 - Profile assignment dropdown on certificate detail
+- S/MIME profile creation wizard with email SAN configuration
+
+### S/MIME Support
+When a profile specifies `emailProtection` EKU, certctl adapts the issuance flow for email certificates:
+- **SAN handling** — email addresses in SANs are formatted as `rfc822Name` (not DNS names)
+- **Key usage** — S/MIME certs use `DigitalSignature | ContentCommitment` instead of the TLS default `DigitalSignature | KeyEncipherment`
+- **Agent CSR generation** — agents correctly distinguish DNS SANs from email SANs based on profile EKU
+- **Issuer constraints** — Local CA and other issuers thread EKUs through the signing pipeline
 
 ---
 

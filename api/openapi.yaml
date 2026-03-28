@@ -367,6 +367,84 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ─── Certificate Export ──────────────────────────────────────────────
+  /api/v1/certificates/{id}/export/pem:
+    get:
+      tags: [Certificates]
+      summary: Export certificate as PEM
+      description: |
+        Returns the certificate and its chain in PEM format. By default returns JSON
+        with cert_pem, chain_pem, and full_pem fields. Add ?download=true to get the
+        full PEM chain as a file download with Content-Disposition headers.
+      operationId: exportCertificatePEM
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - name: download
+          in: query
+          schema:
+            type: string
+            enum: ["true"]
+          description: Set to "true" to get a file download instead of JSON.
+      responses:
+        "200":
+          description: PEM export
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cert_pem:
+                    type: string
+                    description: Leaf certificate PEM
+                  chain_pem:
+                    type: string
+                    description: Intermediate/root chain PEM
+                  full_pem:
+                    type: string
+                    description: Full PEM chain (cert + intermediates)
+            application/x-pem-file:
+              schema:
+                type: string
+                format: binary
+                description: Full PEM file (when download=true)
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/{id}/export/pkcs12:
+    post:
+      tags: [Certificates]
+      summary: Export certificate as PKCS#12
+      description: |
+        Returns a PKCS#12 (.p12) bundle containing the certificate and chain.
+        Private keys are NOT included — they live on agents and never touch the control plane.
+        The bundle is encrypted with the provided password (or empty password if omitted).
+      operationId: exportCertificatePKCS12
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                password:
+                  type: string
+                  description: Password to encrypt the PKCS#12 bundle (can be empty)
+      responses:
+        "200":
+          description: PKCS#12 binary
+          content:
+            application/x-pkcs12:
+              schema:
+                type: string
+                format: binary
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ─── CRL & OCSP ─────────────────────────────────────────────────────
   /api/v1/crl:
     get:
@@ -2712,8 +2790,15 @@ components:
           type: integer
         allowed_ekus:
           type: array
+          description: Extended Key Usages to include in issued certificates
           items:
             type: string
+            enum:
+              - serverAuth
+              - clientAuth
+              - codeSigning
+              - emailProtection
+              - timeStamping
         required_san_patterns:
           type: array
           items:

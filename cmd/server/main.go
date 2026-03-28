@@ -209,6 +209,7 @@ func main() {
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
+	agentService.SetProfileRepo(profileRepo)
 	issuerService := service.NewIssuerService(issuerRepo, auditService)
 	targetService := service.NewTargetService(targetRepo, auditService)
 	profileService := service.NewProfileService(profileRepo, auditService)
@@ -262,6 +263,8 @@ func main() {
 	networkScanHandler := handler.NewNetworkScanHandler(networkScanService)
 	verificationService := service.NewVerificationService(jobRepo, auditService, logger)
 	verificationHandler := handler.NewVerificationHandler(verificationService)
+	exportService := service.NewExportService(certificateRepo, auditService)
+	exportHandler := handler.NewExportHandler(exportService)
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -315,6 +318,7 @@ func main() {
 		Discovery:     discoveryHandler,
 		NetworkScan:   networkScanHandler,
 		Verification:  verificationHandler,
+		Export:        exportHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

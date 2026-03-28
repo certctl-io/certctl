@@ -95,6 +95,33 @@ export const revokeCertificate = (id: string, reason: string) =>
     body: JSON.stringify({ reason }),
   });
 
+// Certificate Export
+export const exportCertificatePEM = (id: string) =>
+  fetchJSON<{ cert_pem: string; chain_pem: string; full_pem: string }>(`${BASE}/certificates/${id}/export/pem`);
+
+export const downloadCertificatePEM = (id: string) => {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return fetch(`${BASE}/certificates/${id}/export/pem?download=true`, { headers })
+    .then(r => {
+      if (!r.ok) throw new Error('Export failed');
+      return r.blob();
+    });
+};
+
+export const exportCertificatePKCS12 = (id: string, password: string = '') => {
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return fetch(`${BASE}/certificates/${id}/export/pkcs12`, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify({ password }),
+  }).then(r => {
+    if (!r.ok) throw new Error('Export failed');
+    return r.blob();
+  });
+};
+
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();

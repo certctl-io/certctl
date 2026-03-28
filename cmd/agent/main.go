@@ -344,11 +344,23 @@ func (a *Agent) executeCSRJob(ctx context.Context, job JobItem) {
 	}
 
 	// Step 3: Create CSR with common name and SANs
+	// Split SANs into DNS names and email addresses for proper CSR encoding
+	var dnsNames []string
+	var emailAddresses []string
+	for _, san := range job.SANs {
+		if strings.Contains(san, "@") {
+			emailAddresses = append(emailAddresses, san)
+		} else {
+			dnsNames = append(dnsNames, san)
+		}
+	}
+
 	csrTemplate := &x509.CertificateRequest{
 		Subject: pkix.Name{
 			CommonName: job.CommonName,
 		},
-		DNSNames: job.SANs,
+		DNSNames:       dnsNames,
+		EmailAddresses: emailAddresses,
 	}
 
 	csrDER, err := x509.CreateCertificateRequest(rand.Reader, csrTemplate, privKey)

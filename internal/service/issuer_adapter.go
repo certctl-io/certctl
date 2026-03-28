@@ -20,11 +20,12 @@ func NewIssuerConnectorAdapter(c issuer.Connector) IssuerConnector {
 
 // IssueCertificate delegates to the underlying connector's IssueCertificate method,
 // translating between service-layer and connector-layer types.
-func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error) {
+func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error) {
 	result, err := a.connector.IssueCertificate(ctx, issuer.IssuanceRequest{
 		CommonName: commonName,
 		SANs:       sans,
 		CSRPEM:     csrPEM,
+		EKUs:       ekus,
 	})
 	if err != nil {
 		return nil, err
@@ -40,11 +41,12 @@ func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonNam
 
 // RenewCertificate delegates to the underlying connector's RenewCertificate method,
 // translating between service-layer and connector-layer types.
-func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string) (*IssuanceResult, error) {
+func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error) {
 	result, err := a.connector.RenewCertificate(ctx, issuer.RenewalRequest{
 		CommonName: commonName,
 		SANs:       sans,
 		CSRPEM:     csrPEM,
+		EKUs:       ekus,
 	})
 	if err != nil {
 		return nil, err

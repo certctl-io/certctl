@@ -87,6 +87,14 @@ INSERT INTO certificate_profiles (id, name, description, allowed_key_algorithms,
    4060800, -- 47 days (Ballot SC-081v3 target)
    '["serverAuth"]'::jsonb,
    '[".*\\.example\\.com$"]'::jsonb,
+   '', false, true, NOW(), NOW()),
+
+  ('prof-smime', 'S/MIME Email',
+   'S/MIME certificate profile for email signing and encryption. Requires emailProtection EKU.',
+   '[{"algorithm": "ECDSA", "min_size": 256}, {"algorithm": "RSA", "min_size": 2048}]'::jsonb,
+   31536000, -- 365 days
+   '["emailProtection"]'::jsonb,
+   '[]'::jsonb,
    '', false, true, NOW(), NOW())
 ON CONFLICT (id) DO NOTHING;
 
