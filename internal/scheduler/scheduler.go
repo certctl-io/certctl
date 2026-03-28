@@ -157,10 +157,12 @@ func (s *Scheduler) renewalCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.renewalCheckInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Run immediately on start (with idempotency guard)
+	s.renewalCheckRunning.Store(true)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer s.renewalCheckRunning.Store(false)
 		s.runRenewalCheck(ctx)
 	}()
 
@@ -204,10 +206,12 @@ func (s *Scheduler) jobProcessorLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.jobProcessorInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Run immediately on start (with idempotency guard)
+	s.jobProcessorRunning.Store(true)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer s.jobProcessorRunning.Store(false)
 		s.runJobProcessor(ctx)
 	}()
 
@@ -251,10 +255,12 @@ func (s *Scheduler) agentHealthCheckLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.agentHealthCheckInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Run immediately on start (with idempotency guard)
+	s.agentHealthCheckRunning.Store(true)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer s.agentHealthCheckRunning.Store(false)
 		s.runAgentHealthCheck(ctx)
 	}()
 
@@ -297,10 +303,12 @@ func (s *Scheduler) notificationProcessLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.notificationProcessInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Run immediately on start (with idempotency guard)
+	s.notificationProcessRunning.Store(true)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer s.notificationProcessRunning.Store(false)
 		s.runNotificationProcess(ctx)
 	}()
 
@@ -383,10 +391,12 @@ func (s *Scheduler) networkScanLoop(ctx context.Context) {
 	ticker := time.NewTicker(s.networkScanInterval)
 	defer ticker.Stop()
 
-	// Run immediately on start
+	// Run immediately on start (with idempotency guard)
+	s.networkScanRunning.Store(true)
 	s.wg.Add(1)
 	go func() {
 		defer s.wg.Done()
+		defer s.networkScanRunning.Store(false)
 		s.runNetworkScan(ctx)
 	}()
 
