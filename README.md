@@ -64,25 +64,7 @@ certctl fills that gap. It's **CA-agnostic** — the issuer connector interface 
 
 It's also **target-agnostic**. Agents deploy certificates to NGINX, Apache, and HAProxy today, with Traefik and Caddy support coming next — all using the same pluggable connector model for any server that accepts cert files. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
-### How It Compares
-
-| | **certctl** | **CertKit** | **CertWarden** | **Certimate** | **CZERTAINLY** | **KeyTalk** | **cert-manager** |
-|---|---|---|---|---|---|---|---|
-| **License** | BSL 1.1 → Apache 2.0 | Proprietary (agent OSS) | MIT | MIT | MIT + commercial | Proprietary | Apache 2.0 |
-| **Self-hosted** | Yes | No (SaaS) | Yes | Yes | Yes (K8s required) | On-prem or cloud | Yes (K8s only) |
-| **CA support** | ACME, step-ca, Local CA, OpenSSL, EST | ACME only | ACME only | ACME (5+ CAs) | Multi-CA (connectors) | Multi-CA | ACME, Venafi, Vault |
-| **Agent deployment** | Yes (default) | Yes | No (API pull) | No | Via connectors | Yes | N/A (K8s) |
-| **Private key isolation** | Yes (agent-side) | Yes (Keystore, paid) | No | No | Varies | Yes | K8s Secrets |
-| **Server targets** | NGINX, Apache, HAProxy | NGINX, Apache, HAProxy, IIS + more | None | 110+ (cloud/CDN-focused) | Via connectors | Undocumented | K8s-native |
-| **Policy engine** | Yes (5 rule types) | No | No | No | RA profiles | Undocumented | No |
-| **Certificate discovery** | Yes (filesystem + network) | No | No | No | Yes (connectors) | Undocumented | No |
-| **Audit trail** | Yes (immutable, every API call) | Planned | No | No | Yes | Yes | No |
-| **CRL / OCSP** | Yes | No | No | No | Yes | Undocumented | No |
-| **API coverage** | 95 endpoints | REST API | Minimal | REST API | REST API | REST API | K8s CRDs |
-| **AI integration (MCP)** | Yes (78 tools) | No | No | No | No | No | No |
-| **Free tier** | Unlimited | 3 certificates | Unlimited | Unlimited | Unlimited | None | Unlimited |
-
-certctl occupies a distinct position: full lifecycle automation with agent-based key isolation, multi-CA support, network discovery, and revocation infrastructure — self-hosted on any Linux server, no Kubernetes required. Enterprise platforms (Venafi, Keyfactor, Sectigo) offer broader ecosystems at $75K-$250K+/yr. For a detailed comparison, see [Why certctl?](docs/why-certctl.md)
+For a detailed comparison with CertKit, CertWarden, Certimate, CZERTAINLY, KeyTalk, cert-manager, and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
 
 ## What It Does
 

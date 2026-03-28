@@ -101,25 +101,6 @@ KeyTalk is a commercial (proprietary) PKI Certificate Key Management System from
 - **Pricing**: KeyTalk is commercial with no public pricing or free tier. certctl's V2 community edition is free with no certificate limit.
 - **Best fit**: KeyTalk is positioned for enterprises that want a vendor-supported PKI platform covering multiple certificate types (TLS, S/MIME, device) and are willing to pay for proprietary software. certctl is a better fit for teams that want source-available software they can self-host, audit, and extend without vendor dependency.
 
-### Comparison Summary
-
-| | **certctl** | **CertWarden** | **Certimate** | **CertKit** | **CZERTAINLY** | **KeyTalk** | **cert-manager** |
-|---|---|---|---|---|---|---|---|
-| **License** | BSL 1.1 → Apache 2.0 | MIT | MIT | Proprietary (agent OSS) | MIT + commercial | Proprietary | Apache 2.0 |
-| **Self-hosted** | Yes | Yes | Yes | No (SaaS) | Yes (K8s required) | On-prem or cloud | Yes (K8s only) |
-| **CA support** | ACME, step-ca, Local CA, OpenSSL, EST | ACME only | ACME (5+ CAs) | ACME only | Multi-CA (connectors) | Multi-CA | ACME, Venafi, Vault |
-| **Agent deployment** | Yes (default) | No (API pull) | No | Yes | Via connectors | Yes | N/A (K8s) |
-| **Private key isolation** | Yes (agent-side) | No | No | Yes (Keystore, paid) | Varies | Yes | K8s Secrets |
-| **Server targets** | NGINX, Apache, HAProxy | None | 110+ (cloud/CDN-focused) | NGINX, Apache, HAProxy, IIS + more | Via connectors | Undocumented | K8s-native |
-| **Policy engine** | Yes (5 rule types) | No | No | No | RA profiles | Undocumented | No |
-| **Certificate discovery** | Yes (filesystem + network) | No | No | No | Yes (connectors) | Undocumented | No |
-| **Audit trail** | Yes (immutable, every API call) | No | No | Planned | Yes | Yes | No |
-| **CRL / OCSP** | Yes | No | No | No | Yes | Undocumented | No |
-| **Approval workflows** | Yes | No | No | No | No | Undocumented | No |
-| **API coverage** | 95 endpoints | Minimal | REST API | REST API | REST API | REST API | K8s CRDs |
-| **AI integration (MCP)** | Yes (78 tools) | No | No | No | No | No | No |
-| **Free tier** | Unlimited | Unlimited | Unlimited | 3 certificates | Unlimited | None | Unlimited |
-
 ### vs. Kubernetes cert-manager
 
 cert-manager is the right choice if your entire infrastructure is Kubernetes. It's mature, well-maintained, and deeply integrated with the Kubernetes ecosystem.
