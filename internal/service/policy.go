@@ -299,7 +299,7 @@ func (s *PolicyService) DeletePolicy(id string) error {
 	return s.policyRepo.DeleteRule(context.Background(), id)
 }
 
-// ListViolationsHandler returns policy violations with pagination (handler interface method).
+// ListViolations returns policy violations with pagination (handler interface method).
 func (s *PolicyService) ListViolations(policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error) {
 	if page < 1 {
 		page = 1

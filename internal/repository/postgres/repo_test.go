@@ -212,7 +212,7 @@ func TestCertificateRepository_List_Filtering(t *testing.T) {
 	}
 
 	// Filter by environment
-	certs, total, err = repo.List(ctx, &repository.CertificateFilter{Environment: "production"})
+	_, total, err = repo.List(ctx, &repository.CertificateFilter{Environment: "production"})
 	if err != nil {
 		t.Fatalf("List with env filter failed: %v", err)
 	}
@@ -1102,7 +1102,7 @@ func TestDiscoveryRepository_ScanCRUD(t *testing.T) {
 	}
 
 	// ListScans with empty agent (all)
-	scans, total, err = repo.ListScans(ctx, "", 1, 10)
+	_, total, err = repo.ListScans(ctx, "", 1, 10)
 	if err != nil {
 		t.Fatalf("ListScans all failed: %v", err)
 	}
@@ -1188,7 +1188,7 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 	}
 
 	// ListDiscovered
-	certs, total, err := repo.ListDiscovered(ctx, &repository.DiscoveryFilter{Page: 1, PerPage: 10})
+	_, total, err := repo.ListDiscovered(ctx, &repository.DiscoveryFilter{Page: 1, PerPage: 10})
 	if err != nil {
 		t.Fatalf("ListDiscovered failed: %v", err)
 	}

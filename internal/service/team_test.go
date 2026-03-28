@@ -136,7 +136,7 @@ func TestTeamService_List_DefaultPagination(t *testing.T) {
 	}
 
 	// Test perPage < 1 defaults to 50
-	teams, total, err = teamService.List(ctx, 1, 0)
+	teams, _, err = teamService.List(ctx, 1, 0)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

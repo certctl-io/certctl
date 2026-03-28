@@ -66,7 +66,7 @@ func TestVerifyDeployment_Success(t *testing.T) {
 	// Verify result was recorded
 	result := mockSvc.results["j-test1"]
 	if result == nil {
-		t.Error("expected verification result to be recorded")
+		t.Fatal("expected verification result to be recorded")
 	}
 	if !result.Verified {
 		t.Error("expected Verified to be true")
@@ -98,7 +98,7 @@ func TestVerifyDeployment_FingerPrintMismatch(t *testing.T) {
 
 	result := mockSvc.results["j-test2"]
 	if result == nil {
-		t.Error("expected verification result to be recorded")
+		t.Fatal("expected verification result to be recorded")
 	}
 	if result.Verified {
 		t.Error("expected Verified to be false")
