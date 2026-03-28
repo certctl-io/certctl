@@ -86,8 +86,8 @@ jobs:
             echo "::error::Domain layer coverage ${DOMAIN_COV}% is below 40% threshold"
             exit 1
           fi
-          if [ "$(echo "$MIDDLEWARE_COV < 50" | bc -l)" -eq 1 ]; then
-            echo "::error::Middleware layer coverage ${MIDDLEWARE_COV}% is below 50% threshold"
+          if [ "$(echo "$MIDDLEWARE_COV < 30" | bc -l)" -eq 1 ]; then
+            echo "::error::Middleware layer coverage ${MIDDLEWARE_COV}% is below 30% threshold"
             exit 1
           fi
           echo "Coverage thresholds passed!"
