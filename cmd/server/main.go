@@ -44,7 +44,7 @@ func main() {
 	}))
 
 	logger.Info("certctl server starting",
-		"version", "2.0.7",
+		"version", "2.0.8",
 		"server_host", cfg.Server.Host,
 		"server_port", cfg.Server.Port)
 

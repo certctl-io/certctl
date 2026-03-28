@@ -69,7 +69,7 @@ export default function Layout() {
         </nav>
 
         <div className="px-5 py-3 border-t border-white/10 flex items-center justify-between">
-          <span className="text-[10px] text-brand-300/60 font-mono">v2.0.7</span>
+          <span className="text-[10px] text-brand-300/60 font-mono">v2.0.8</span>
           {authRequired && (
             <button
               onClick={logout}
