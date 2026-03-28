@@ -289,26 +289,26 @@ func main() {
 
 	// Build the API router with all handlers
 	apiRouter := router.New()
-	apiRouter.RegisterHandlers(
-		certificateHandler,
-		issuerHandler,
-		targetHandler,
-		agentHandler,
-		jobHandler,
-		policyHandler,
-		profileHandler,
-		teamHandler,
-		ownerHandler,
-		agentGroupHandler,
-		auditHandler,
-		notificationHandler,
-		statsHandler,
-		metricsHandler,
-		healthHandler,
-		discoveryHandler,
-		networkScanHandler,
-		verificationHandler,
-	)
+	apiRouter.RegisterHandlers(router.HandlerRegistry{
+		Certificates:  certificateHandler,
+		Issuers:       issuerHandler,
+		Targets:       targetHandler,
+		Agents:        agentHandler,
+		Jobs:          jobHandler,
+		Policies:      policyHandler,
+		Profiles:      profileHandler,
+		Teams:         teamHandler,
+		Owners:        ownerHandler,
+		AgentGroups:   agentGroupHandler,
+		Audit:         auditHandler,
+		Notifications: notificationHandler,
+		Stats:         statsHandler,
+		Metrics:       metricsHandler,
+		Health:        healthHandler,
+		Discovery:     discoveryHandler,
+		NetworkScan:   networkScanHandler,
+		Verification:  verificationHandler,
+	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {
 		issuerConn, ok := issuerRegistry[cfg.EST.IssuerID]

@@ -89,26 +89,26 @@ func TestCertificateLifecycle(t *testing.T) {
 
 	// Create router and register handlers
 	r := router.New()
-	r.RegisterHandlers(
-		certificateHandler,
-		issuerHandler,
-		targetHandler,
-		agentHandler,
-		jobHandler,
-		policyHandler,
-		profileHandler,
-		teamHandler,
-		ownerHandler,
-		agentGroupHandler,
-		auditHandler,
-		notificationHandler,
-		statsHandler,
-		metricsHandler,
-		healthHandler,
-		discoveryHandler,
-		networkScanHandler,
-		verificationHandler,
-	)
+	r.RegisterHandlers(router.HandlerRegistry{
+		Certificates:  certificateHandler,
+		Issuers:       issuerHandler,
+		Targets:       targetHandler,
+		Agents:        agentHandler,
+		Jobs:          jobHandler,
+		Policies:      policyHandler,
+		Profiles:      profileHandler,
+		Teams:         teamHandler,
+		Owners:        ownerHandler,
+		AgentGroups:   agentGroupHandler,
+		Audit:         auditHandler,
+		Notifications: notificationHandler,
+		Stats:         statsHandler,
+		Metrics:       metricsHandler,
+		Health:        healthHandler,
+		Discovery:     discoveryHandler,
+		NetworkScan:   networkScanHandler,
+		Verification:  verificationHandler,
+	})
 	r.RegisterESTHandlers(estHandler)
 
 	// Create test server
