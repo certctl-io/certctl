@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"net"
 	"testing"
 	"time"
 
@@ -230,5 +231,176 @@ func TestExpandEndpoints(t *testing.T) {
 	}
 	if endpoints[1] != "192.168.1.1:8443" {
 		t.Errorf("expected 192.168.1.1:8443, got %s", endpoints[1])
+	}
+}
+
+// SSRF Protection Tests
+
+func TestIsReservedIP_Loopback(t *testing.T) {
+	tests := []struct {
+		ip       string
+		expected bool
+	}{
+		{"127.0.0.1", true},
+		{"127.255.255.255", true},
+		{"127.0.0.0", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			result := isReservedIP(net.ParseIP(tt.ip))
+			if result != tt.expected {
+				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsReservedIP_LinkLocal(t *testing.T) {
+	tests := []struct {
+		ip       string
+		expected bool
+	}{
+		{"169.254.0.1", true},
+		{"169.254.169.254", true}, // AWS cloud metadata
+		{"169.254.255.255", true},
+		{"169.254.0.0", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			result := isReservedIP(net.ParseIP(tt.ip))
+			if result != tt.expected {
+				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsReservedIP_Multicast(t *testing.T) {
+	tests := []struct {
+		ip       string
+		expected bool
+	}{
+		{"224.0.0.1", true},
+		{"239.255.255.255", true},
+		{"224.0.0.0", true},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			result := isReservedIP(net.ParseIP(tt.ip))
+			if result != tt.expected {
+				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsReservedIP_Broadcast(t *testing.T) {
+	result := isReservedIP(net.ParseIP("255.255.255.255"))
+	if !result {
+		t.Errorf("isReservedIP(255.255.255.255) = %v, expected true", result)
+	}
+}
+
+func TestIsReservedIP_AllowsPrivateRanges(t *testing.T) {
+	tests := []struct {
+		ip       string
+		expected bool
+		desc     string
+	}{
+		{"10.0.0.1", false, "RFC1918 10/8"},
+		{"10.255.255.255", false, "RFC1918 10/8 end"},
+		{"172.16.0.1", false, "RFC1918 172.16/12"},
+		{"172.31.255.255", false, "RFC1918 172.16/12 end"},
+		{"192.168.1.1", false, "RFC1918 192.168/16"},
+		{"192.168.255.255", false, "RFC1918 192.168/16 end"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.desc, func(t *testing.T) {
+			result := isReservedIP(net.ParseIP(tt.ip))
+			if result != tt.expected {
+				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestIsReservedIP_AllowsPublic(t *testing.T) {
+	tests := []struct {
+		ip       string
+		expected bool
+	}{
+		{"8.8.8.8", false},
+		{"1.1.1.1", false},
+		{"208.67.222.222", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.ip, func(t *testing.T) {
+			result := isReservedIP(net.ParseIP(tt.ip))
+			if result != tt.expected {
+				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+			}
+		})
+	}
+}
+
+func TestExpandCIDR_FiltersLoopback(t *testing.T) {
+	ips := expandCIDR("127.0.0.0/8")
+	if len(ips) != 0 {
+		t.Errorf("expected empty for loopback CIDR, got %d IPs", len(ips))
+	}
+}
+
+func TestExpandCIDR_FiltersLinkLocal(t *testing.T) {
+	ips := expandCIDR("169.254.0.0/16")
+	if len(ips) != 0 {
+		t.Errorf("expected empty for link-local CIDR, got %d IPs", len(ips))
+	}
+}
+
+func TestExpandCIDR_FiltersMulticast(t *testing.T) {
+	ips := expandCIDR("224.0.0.0/4")
+	if len(ips) != 0 {
+		t.Errorf("expected empty for multicast CIDR, got %d IPs", len(ips))
+	}
+}
+
+func TestExpandCIDR_AllowsPrivateRanges(t *testing.T) {
+	// Should NOT filter RFC1918 ranges
+	tests := []struct {
+		name string
+		cidr string
+		min  int
+	}{
+		{"10/8 sample", "10.0.0.0/30", 2},         // 2 usable (after removing network/broadcast)
+		{"172.16/12 sample", "172.16.0.0/30", 2}, // 2 usable
+		{"192.168/16 sample", "192.168.1.1/32", 1}, // Single IP
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			ips := expandCIDR(tt.cidr)
+			if len(ips) < tt.min {
+				t.Errorf("expected at least %d IPs for %s, got %d", tt.min, tt.cidr, len(ips))
+			}
+		})
+	}
+}
+
+func TestExpandCIDR_SingleLoopbackIP(t *testing.T) {
+	ips := expandCIDR("127.0.0.1")
+	if len(ips) != 0 {
+		t.Errorf("expected empty for loopback IP, got %v", ips)
+	}
+}
+
+func TestExpandCIDR_SingleLinkLocalIP(t *testing.T) {
+	ips := expandCIDR("169.254.169.254")
+	if len(ips) != 0 {
+		t.Errorf("expected empty for cloud metadata IP, got %v", ips)
 	}
 }
