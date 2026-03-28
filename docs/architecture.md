@@ -717,9 +717,26 @@ Audit recording is async (via goroutine) so it never blocks the HTTP response. I
 
 All shell-facing inputs (connector scripts, domain names, ACME tokens) are validated through `internal/validation/command.go` before reaching shell execution. `ValidateShellCommand()` denies all shell metacharacters. `ValidateDomainName()` enforces RFC 1123. `ValidateACMEToken()` restricts to base64url characters. The network scanner filters reserved IP ranges (loopback, link-local including cloud metadata 169.254.169.254, multicast, broadcast) to prevent SSRF, while preserving RFC 1918 private ranges for legitimate internal scanning.
 
+### Request Body Size Limits
+
+All incoming HTTP request bodies are capped by `http.MaxBytesReader` middleware (default 1MB, configurable via `CERTCTL_MAX_BODY_SIZE`). Requests exceeding the limit receive a 413 Request Entity Too Large response. The middleware is positioned before authentication in the chain so oversized payloads are rejected early, before any auth processing or database work occurs. Requests without bodies (GET, HEAD, nil body) skip the limit check.
+
 ### CORS
 
 CORS uses a **deny-by-default** posture: when `CERTCTL_CORS_ORIGINS` is empty, no CORS headers are set and only same-origin requests can read responses. Operators must explicitly configure allowed origins. This prevents accidental exposure of the API to cross-origin requests in production.
+
+### Middleware Chain Order
+
+The HTTP middleware stack processes requests in the following order (see `cmd/server/main.go`):
+
+1. **RequestID** - assigns unique request ID for correlation
+2. **Logging** - structured slog middleware with request ID propagation
+3. **Recovery** - panic recovery (catches panics in downstream middleware/handlers)
+4. **BodyLimit** - request body size cap via `http.MaxBytesReader`
+5. **RateLimiter** - token bucket rate limiting (optional, when enabled)
+6. **CORS** - cross-origin request handling (deny-by-default)
+7. **Auth** - API key or JWT validation
+8. **AuditLog** - records every API call to the audit trail (requires auth context for actor)
 
 ### Concurrency Safety
 

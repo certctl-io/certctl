@@ -54,7 +54,7 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venaf
 certctl gives you a single pane of glass for every TLS certificate in your organization:
 
 - **Web dashboard** — full certificate inventory with status, ownership, expiration heatmaps, and bulk operations
-- **REST API** — 97 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation
+- **REST API** — 93 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation
 - **Agents** — generate private keys locally, discover existing certs on disk, submit CSRs (private keys never leave your servers)
 - **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents
 - **EST server** (RFC 7030) — device and WiFi certificate enrollment via industry-standard protocol
@@ -199,29 +199,86 @@ PostgreSQL 16 with 21 tables covering certificates, versions, policies, issuers,
 
 ## Configuration
 
-All environment variables use the `CERTCTL_` prefix. Key settings:
+All environment variables use the `CERTCTL_` prefix. Full reference below (39 variables across server, agent, and connector config).
+
+### Server — Core
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `CERTCTL_DATABASE_URL` | `postgres://localhost/certctl` | PostgreSQL connection string |
-| `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `jwt`, or `none` |
-| `CERTCTL_AUTH_SECRET` | — | Required for `api-key` and `jwt` auth types |
-| `CERTCTL_KEYGEN_MODE` | `agent` | Key generation: `agent` (production) or `server` (demo only) |
-| `CERTCTL_SERVER_PORT` | `8080` | Server listen port |
-| `CERTCTL_ACME_DIRECTORY_URL` | — | ACME directory URL (e.g., Let's Encrypt) |
-| `CERTCTL_ACME_EMAIL` | — | Contact email for ACME account registration |
+| `CERTCTL_SERVER_HOST` | `127.0.0.1` | Server bind address |
+| `CERTCTL_SERVER_PORT` | `8080` | Server listen port (1–65535) |
+| `CERTCTL_DATABASE_URL` | `postgres://localhost/certctl` | PostgreSQL connection string (required) |
+| `CERTCTL_DATABASE_MAX_CONNS` | `25` | PostgreSQL connection pool size (min 1) |
+| `CERTCTL_DATABASE_MIGRATIONS_PATH` | `./migrations` | Path to migration SQL files |
+| `CERTCTL_MAX_BODY_SIZE` | `1048576` | Max HTTP request body in bytes (default 1MB) |
+| `CERTCTL_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
+| `CERTCTL_LOG_FORMAT` | `json` | Log format: `json` (structured) or `text` (human-readable) |
 
-Agent settings:
+### Server — Auth, CORS, Rate Limiting
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `jwt`, or `none` (demo only) |
+| `CERTCTL_AUTH_SECRET` | — | Required for `api-key` and `jwt` auth types |
+| `CERTCTL_CORS_ORIGINS` | *(empty = deny all)* | Comma-separated allowed origins, or `*` for dev |
+| `CERTCTL_RATE_LIMIT_ENABLED` | `true` | Enable token bucket rate limiting |
+| `CERTCTL_RATE_LIMIT_RPS` | `50` | Requests per second per client |
+| `CERTCTL_RATE_LIMIT_BURST` | `100` | Max burst size |
+| `CERTCTL_KEYGEN_MODE` | `agent` | Key generation: `agent` (production) or `server` (demo only) |
+
+### Server — Scheduler
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | `1h` | How often to check expiring certs (min 1m) |
+| `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | `30s` | How often to process pending jobs (min 1s) |
+| `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | `2m` | Agent heartbeat check frequency (min 1s) |
+| `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | `1m` | Notification send frequency (min 1s) |
+
+### Server — Sub-CA Mode
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_CA_CERT_PATH` | — | PEM-encoded CA certificate for sub-CA mode |
+| `CERTCTL_CA_KEY_PATH` | — | PEM-encoded CA private key (RSA, ECDSA, PKCS#8) |
+
+### Server — Feature Flags
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_EST_ENABLED` | `false` | Enable RFC 7030 EST enrollment endpoints |
+| `CERTCTL_EST_ISSUER_ID` | `iss-local` | Which issuer processes EST enrollments |
+| `CERTCTL_EST_PROFILE_ID` | — | Constrain EST to a specific certificate profile |
+| `CERTCTL_NETWORK_SCAN_ENABLED` | `false` | Enable server-side TLS network scanning |
+| `CERTCTL_NETWORK_SCAN_INTERVAL` | `6h` | How often scheduled scans run |
+| `CERTCTL_VERIFY_DEPLOYMENT` | `true` | TLS verification after certificate deployment |
+| `CERTCTL_VERIFY_TIMEOUT` | `10s` | TLS probe timeout |
+| `CERTCTL_VERIFY_DELAY` | `2s` | Delay before verification probe |
+
+### Server — Notification Connectors
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_SLACK_WEBHOOK_URL` | — | Slack incoming webhook URL (enables Slack) |
+| `CERTCTL_SLACK_CHANNEL` | — | Override default webhook channel |
+| `CERTCTL_SLACK_USERNAME` | `certctl` | Bot display name |
+| `CERTCTL_TEAMS_WEBHOOK_URL` | — | Microsoft Teams webhook URL (enables Teams) |
+| `CERTCTL_PAGERDUTY_ROUTING_KEY` | — | PagerDuty Events API v2 key (enables PagerDuty) |
+| `CERTCTL_PAGERDUTY_SEVERITY` | `warning` | Event severity: `info`, `warning`, `error`, `critical` |
+| `CERTCTL_OPSGENIE_API_KEY` | — | OpsGenie Alert API key (enables OpsGenie) |
+| `CERTCTL_OPSGENIE_PRIORITY` | `P3` | Alert priority: `P1`–`P5` |
+
+### Agent
 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `CERTCTL_SERVER_URL` | `http://localhost:8080` | Control plane URL |
-| `CERTCTL_API_KEY` | — | Agent API key |
+| `CERTCTL_API_KEY` | — | Agent API key for authentication |
 | `CERTCTL_AGENT_ID` | — | Registered agent ID (required) |
-| `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Private key storage directory |
+| `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Private key storage directory (0600 perms) |
 | `CERTCTL_DISCOVERY_DIRS` | — | Directories to scan for existing certs (comma-separated) |
 
-For the full configuration reference — including ACME DNS challenges, sub-CA mode, step-ca, OpenSSL/Custom CA, EST enrollment, network scanning, notification connectors (Slack, Teams, PagerDuty, OpsGenie), scheduler intervals, CORS, and rate limiting — see the [Feature Inventory](docs/features.md). Docker Compose overrides for the demo stack are in `deploy/docker-compose.yml`.
+Docker Compose overrides for the demo stack are in `deploy/docker-compose.yml`.
 
 ## Development
 
@@ -233,7 +290,7 @@ make install-tools
 make test
 
 # Run tests with race detection (same as CI)
-go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/...
+go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... ./internal/domain/... ./internal/validation/...
 
 # Run with coverage
 make test-coverage
@@ -293,7 +350,7 @@ make docker-clean       # Stop + remove volumes
 
 ## API Overview
 
-97 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
+93 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Key Endpoints
 ```
@@ -400,7 +457,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 ### V2: Operational Maturity
 
-18 milestones complete, 1050+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
+18 milestones complete, 1100+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
 
 **What shipped (all ✅):**
 

@@ -203,8 +203,9 @@ type VerificationConfig struct {
 
 // ServerConfig contains HTTP server configuration.
 type ServerConfig struct {
-	Host string
-	Port int
+	Host        string // Server host (default: 127.0.0.1). Set via CERTCTL_SERVER_HOST.
+	Port        int    // Server port (default: 8080). Set via CERTCTL_SERVER_PORT.
+	MaxBodySize int64  // Maximum request body size in bytes (default: 1MB). Set via CERTCTL_MAX_BODY_SIZE.
 }
 
 // DatabaseConfig contains database connection configuration.
@@ -301,8 +302,9 @@ type CORSConfig struct {
 func Load() (*Config, error) {
 	cfg := &Config{
 		Server: ServerConfig{
-			Host: getEnv("CERTCTL_SERVER_HOST", "127.0.0.1"),
-			Port: getEnvInt("CERTCTL_SERVER_PORT", 8080),
+			Host:        getEnv("CERTCTL_SERVER_HOST", "127.0.0.1"),
+			Port:        getEnvInt("CERTCTL_SERVER_PORT", 8080),
+			MaxBodySize: getEnvInt64("CERTCTL_MAX_BODY_SIZE", 1024*1024), // 1MB default
 		},
 		Database: DatabaseConfig{
 			URL:            getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
@@ -463,6 +465,18 @@ func getEnv(key, defaultValue string) string {
 func getEnvInt(key string, defaultValue int) int {
 	if value := os.Getenv(key); value != "" {
 		intVal, err := strconv.Atoi(value)
+		if err != nil {
+			return defaultValue
+		}
+		return intVal
+	}
+	return defaultValue
+}
+
+// getEnvInt64 reads an int64 environment variable with the given key and default value.
+func getEnvInt64(key string, defaultValue int64) int64 {
+	if value := os.Getenv(key); value != "" {
+		intVal, err := strconv.ParseInt(value, 10, 64)
 		if err != nil {
 			return defaultValue
 		}

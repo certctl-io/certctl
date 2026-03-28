@@ -192,11 +192,18 @@ func main() {
 	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
 	notificationService.SetOwnerRepo(ownerRepo)
 
-	// Wire revocation dependencies into CertificateService
-	certificateService.SetRevocationRepo(revocationRepo)
-	certificateService.SetNotificationService(notificationService)
-	certificateService.SetIssuerRegistry(issuerRegistry)
-	certificateService.SetProfileRepo(profileRepo)
+	// Create RevocationSvc with its dependencies
+	revocationSvc := service.NewRevocationSvc(certificateRepo, revocationRepo, auditService)
+	revocationSvc.SetIssuerRegistry(issuerRegistry)
+	revocationSvc.SetNotificationService(notificationService)
+
+	// Create CAOperationsSvc with its dependencies
+	caOperationsSvc := service.NewCAOperationsSvc(revocationRepo, certificateRepo, profileRepo)
+	caOperationsSvc.SetIssuerRegistry(issuerRegistry)
+
+	// Wire sub-services into CertificateService
+	certificateService.SetRevocationSvc(revocationSvc)
+	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	certificateService.SetTargetRepo(targetRepo)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
@@ -341,6 +348,12 @@ func main() {
 
 	structuredLogger := middleware.NewLogging(logger)
 
+	// Request body size limit middleware — prevents memory exhaustion attacks (CWE-400)
+	bodyLimitMiddleware := middleware.NewBodyLimit(middleware.BodyLimitConfig{
+		MaxBytes: cfg.Server.MaxBodySize,
+	})
+	logger.Info("request body size limit enabled", "max_bytes", cfg.Server.MaxBodySize)
+
 	// API audit log middleware — records every API call to the audit trail
 	auditAdapter := middleware.NewAuditServiceAdapter(
 		func(ctx context.Context, actor string, actorType string, action string, resourceType string, resourceID string, details map[string]interface{}) error {
@@ -357,6 +370,7 @@ func main() {
 		middleware.RequestID,
 		structuredLogger,
 		middleware.Recovery,
+		bodyLimitMiddleware,
 		corsMiddleware,
 		authMiddleware,
 		auditMiddleware,
@@ -372,6 +386,7 @@ func main() {
 			middleware.RequestID,
 			structuredLogger,
 			middleware.Recovery,
+			bodyLimitMiddleware,
 			rateLimiter,
 			corsMiddleware,
 			authMiddleware,

@@ -60,6 +60,7 @@ certctl-cli
 
 # Private strategy docs
 roadmap.md
+SECURITY_REMEDIATION.md
 
 # OS
 .DS_Store

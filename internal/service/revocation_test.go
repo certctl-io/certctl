@@ -14,14 +14,26 @@ func newRevocationTestService() (*CertificateService, *mockCertRepo, *mockRevoca
 	auditRepo := newMockAuditRepository()
 	policyRepo := newMockPolicyRepository()
 	revocationRepo := newMockRevocationRepository()
+	profileRepo := newMockProfileRepository()
 
 	auditService := NewAuditService(auditRepo)
 	policyService := NewPolicyService(policyRepo, auditService)
-	certService := NewCertificateService(certRepo, policyService, auditService)
-	certService.SetRevocationRepo(revocationRepo)
-	certService.SetIssuerRegistry(map[string]IssuerConnector{
+
+	// Create RevocationSvc
+	revSvc := NewRevocationSvc(certRepo, revocationRepo, auditService)
+	revSvc.SetIssuerRegistry(map[string]IssuerConnector{
 		"iss-local": &mockIssuerConnector{},
 	})
+
+	// Create CAOperationsSvc
+	caSvc := NewCAOperationsSvc(revocationRepo, certRepo, profileRepo)
+	caSvc.SetIssuerRegistry(map[string]IssuerConnector{
+		"iss-local": &mockIssuerConnector{},
+	})
+
+	certService := NewCertificateService(certRepo, policyService, auditService)
+	certService.SetRevocationSvc(revSvc)
+	certService.SetCAOperationsSvc(caSvc)
 
 	return certService, certRepo, revocationRepo, auditRepo
 }
@@ -229,9 +241,9 @@ func TestRevokeCertificate_NoVersion(t *testing.T) {
 func TestRevokeCertificate_WithIssuerNotification(t *testing.T) {
 	svc, certRepo, revocationRepo, _ := newRevocationTestService()
 
-	// Wire up issuer registry with mock
+	// Wire up issuer registry on RevocationSvc with mock
 	mockIssuer := &mockIssuerConnector{}
-	svc.SetIssuerRegistry(map[string]IssuerConnector{
+	svc.revSvc.SetIssuerRegistry(map[string]IssuerConnector{
 		"iss-local": mockIssuer,
 	})
 
@@ -264,10 +276,10 @@ func TestRevokeCertificate_WithIssuerNotification(t *testing.T) {
 func TestRevokeCertificate_WithNotificationService(t *testing.T) {
 	svc, certRepo, _, _ := newRevocationTestService()
 
-	// Wire up notification service
+	// Wire up notification service on RevocationSvc
 	notifRepo := newMockNotificationRepository()
 	notifService := NewNotificationService(notifRepo, make(map[string]Notifier))
-	svc.SetNotificationService(notifService)
+	svc.revSvc.SetNotificationService(notifService)
 
 	cert := &domain.ManagedCertificate{
 		ID:         "cert-8",

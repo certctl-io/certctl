@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"math/big"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -13,14 +12,12 @@ import (
 
 // CertificateService provides business logic for certificate management.
 type CertificateService struct {
-	certRepo        repository.CertificateRepository
-	targetRepo      repository.TargetRepository
-	revocationRepo  repository.RevocationRepository
-	profileRepo     repository.CertificateProfileRepository
-	policyService   *PolicyService
-	auditService    *AuditService
-	notificationSvc *NotificationService
-	issuerRegistry  map[string]IssuerConnector
+	certRepo       repository.CertificateRepository
+	targetRepo     repository.TargetRepository
+	policyService  *PolicyService
+	auditService   *AuditService
+	revSvc         *RevocationSvc
+	caSvc          *CAOperationsSvc
 }
 
 // NewCertificateService creates a new certificate service.
@@ -36,24 +33,14 @@ func NewCertificateService(
 	}
 }
 
-// SetRevocationRepo sets the revocation repository (called after construction to avoid init order issues).
-func (s *CertificateService) SetRevocationRepo(repo repository.RevocationRepository) {
-	s.revocationRepo = repo
+// SetRevocationSvc sets the revocation service.
+func (s *CertificateService) SetRevocationSvc(svc *RevocationSvc) {
+	s.revSvc = svc
 }
 
-// SetNotificationService sets the notification service for revocation alerts.
-func (s *CertificateService) SetNotificationService(svc *NotificationService) {
-	s.notificationSvc = svc
-}
-
-// SetIssuerRegistry sets the issuer registry for issuer-level revocation.
-func (s *CertificateService) SetIssuerRegistry(registry map[string]IssuerConnector) {
-	s.issuerRegistry = registry
-}
-
-// SetProfileRepo sets the profile repository for short-lived cert exemption in CRL/OCSP.
-func (s *CertificateService) SetProfileRepo(repo repository.CertificateProfileRepository) {
-	s.profileRepo = repo
+// SetCAOperationsSvc sets the CA operations service.
+func (s *CertificateService) SetCAOperationsSvc(svc *CAOperationsSvc) {
+	s.caSvc = svc
 }
 
 // SetTargetRepo sets the target repository for deployment queries.
@@ -381,243 +368,45 @@ func (s *CertificateService) TriggerDeployment(certID string, targetID string) e
 	return s.TriggerDeploymentWithActor(context.Background(), certID, "api")
 }
 
-// RevokeCertificate revokes a certificate with the given reason.
-// Steps:
-// 1. Validate the certificate exists and is revocable
-// 2. Get the latest certificate version (for serial number)
-// 3. Update certificate status to Revoked
-// 4. Record revocation in certificate_revocations table
-// 5. Notify the issuer connector (best-effort)
-// 6. Record audit event
-// 7. Send revocation notification
+// RevokeCertificate revokes a certificate with the given reason (handler interface method).
 func (s *CertificateService) RevokeCertificate(certID string, reason string) error {
 	return s.RevokeCertificateWithActor(context.Background(), certID, reason, "api")
 }
 
 // RevokeCertificateWithActor performs revocation with actor tracking.
+// Delegates to RevocationSvc.
 func (s *CertificateService) RevokeCertificateWithActor(ctx context.Context, certID string, reason string, actor string) error {
-	// 1. Validate certificate exists and is revocable
-	cert, err := s.certRepo.Get(ctx, certID)
-	if err != nil {
-		return fmt.Errorf("failed to fetch certificate: %w", err)
+	if s.revSvc == nil {
+		return fmt.Errorf("revocation service not configured")
 	}
-
-	if cert.Status == domain.CertificateStatusRevoked {
-		return fmt.Errorf("certificate is already revoked")
-	}
-	if cert.Status == domain.CertificateStatusArchived {
-		return fmt.Errorf("cannot revoke archived certificate")
-	}
-
-	// Validate reason code
-	if reason == "" {
-		reason = string(domain.RevocationReasonUnspecified)
-	}
-	if !domain.IsValidRevocationReason(reason) {
-		return fmt.Errorf("invalid revocation reason: %s", reason)
-	}
-
-	// 2. Get latest certificate version for serial number
-	version, err := s.certRepo.GetLatestVersion(ctx, certID)
-	if err != nil {
-		return fmt.Errorf("failed to get certificate version: %w", err)
-	}
-
-	// 3. Update certificate status to Revoked
-	now := time.Now()
-	cert.Status = domain.CertificateStatusRevoked
-	cert.RevokedAt = &now
-	cert.RevocationReason = reason
-	cert.UpdatedAt = now
-	if err := s.certRepo.Update(ctx, cert); err != nil {
-		return fmt.Errorf("failed to update certificate status: %w", err)
-	}
-
-	// 4. Record revocation in certificate_revocations table (for CRL generation)
-	if s.revocationRepo != nil {
-		revocation := &domain.CertificateRevocation{
-			ID:            generateID("rev"),
-			CertificateID: certID,
-			SerialNumber:  version.SerialNumber,
-			Reason:        reason,
-			RevokedBy:     actor,
-			RevokedAt:     now,
-			IssuerID:      cert.IssuerID,
-			CreatedAt:     now,
-		}
-		if err := s.revocationRepo.Create(ctx, revocation); err != nil {
-			slog.Error("failed to record revocation for CRL", "error", err, "certificate_id", certID)
-			// Don't fail the overall revocation — the cert status is already updated
-		}
-	}
-
-	// 5. Notify the issuer connector (best-effort)
-	if s.issuerRegistry != nil {
-		if issuerConn, ok := s.issuerRegistry[cert.IssuerID]; ok {
-			if err := issuerConn.RevokeCertificate(ctx, version.SerialNumber, reason); err != nil {
-				slog.Error("failed to notify issuer of revocation",
-					"error", err,
-					"issuer_id", cert.IssuerID,
-					"serial", version.SerialNumber)
-				// Best-effort — don't fail the overall revocation
-			} else if s.revocationRepo != nil {
-				// Mark issuer as notified
-				revocations, _ := s.revocationRepo.ListByCertificate(ctx, certID)
-				for _, rev := range revocations {
-					if rev.SerialNumber == version.SerialNumber {
-						_ = s.revocationRepo.MarkIssuerNotified(ctx, rev.ID)
-					}
-				}
-			}
-		}
-	}
-
-	// 6. Record audit event
-	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
-		"certificate_revoked", "certificate", certID,
-		map[string]interface{}{
-			"common_name": cert.CommonName,
-			"serial":      version.SerialNumber,
-			"reason":      reason,
-		}); err != nil {
-		slog.Error("failed to record audit event", "error", err)
-	}
-
-	// 7. Send revocation notification
-	if s.notificationSvc != nil {
-		if err := s.notificationSvc.SendRevocationNotification(ctx, cert, reason); err != nil {
-			slog.Error("failed to send revocation notification", "error", err, "certificate_id", certID)
-		}
-	}
-
-	return nil
+	return s.revSvc.RevokeCertificateWithActor(ctx, certID, reason, actor)
 }
 
 // GetRevokedCertificates returns all revoked certificate records (for CRL generation).
+// Delegates to RevocationSvc.
 func (s *CertificateService) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
-	if s.revocationRepo == nil {
-		return nil, fmt.Errorf("revocation repository not configured")
+	if s.revSvc == nil {
+		return nil, fmt.Errorf("revocation service not configured")
 	}
-	return s.revocationRepo.ListAll(context.Background())
+	return s.revSvc.GetRevokedCertificates()
 }
 
 // GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
-// Short-lived certificates (profile TTL < 1 hour) are excluded from the CRL.
+// Delegates to CAOperationsSvc.
 func (s *CertificateService) GenerateDERCRL(issuerID string) ([]byte, error) {
-	if s.revocationRepo == nil {
-		return nil, fmt.Errorf("revocation repository not configured")
+	if s.caSvc == nil {
+		return nil, fmt.Errorf("CA operations service not configured")
 	}
-	if s.issuerRegistry == nil {
-		return nil, fmt.Errorf("issuer registry not configured")
-	}
-
-	issuerConn, ok := s.issuerRegistry[issuerID]
-	if !ok {
-		return nil, fmt.Errorf("issuer not found: %s", issuerID)
-	}
-
-	revocations, err := s.revocationRepo.ListAll(context.Background())
-	if err != nil {
-		return nil, fmt.Errorf("failed to list revocations: %w", err)
-	}
-
-	// Filter to this issuer and convert to CRL entries.
-	// Short-lived certificates (profile TTL < 1 hour) are excluded — expiry is sufficient revocation.
-	var entries []CRLEntry
-	for _, rev := range revocations {
-		if rev.IssuerID != issuerID {
-			continue
-		}
-
-		// Check short-lived exemption: look up the cert's profile
-		if s.profileRepo != nil && s.certRepo != nil {
-			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
-			if err == nil && cert.CertificateProfileID != "" {
-				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
-				if err == nil && profile.IsShortLived() {
-					slog.Debug("skipping short-lived cert from CRL",
-						"certificate_id", rev.CertificateID,
-						"profile_id", cert.CertificateProfileID)
-					continue
-				}
-			}
-		}
-
-		// Parse serial number from hex string
-		serial := new(big.Int)
-		serial.SetString(rev.SerialNumber, 16)
-
-		entries = append(entries, CRLEntry{
-			SerialNumber: serial,
-			RevokedAt:    rev.RevokedAt,
-			ReasonCode:   domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
-		})
-	}
-
-	return issuerConn.GenerateCRL(context.Background(), entries)
+	return s.caSvc.GenerateDERCRL(issuerID)
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
+// Delegates to CAOperationsSvc.
 func (s *CertificateService) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
-	if s.revocationRepo == nil {
-		return nil, fmt.Errorf("revocation repository not configured")
+	if s.caSvc == nil {
+		return nil, fmt.Errorf("CA operations service not configured")
 	}
-	if s.issuerRegistry == nil {
-		return nil, fmt.Errorf("issuer registry not configured")
-	}
-
-	issuerConn, ok := s.issuerRegistry[issuerID]
-	if !ok {
-		return nil, fmt.Errorf("issuer not found: %s", issuerID)
-	}
-
-	serial := new(big.Int)
-	serial.SetString(serialHex, 16)
-
-	now := time.Now()
-
-	// Short-lived cert exemption: if the cert's profile has TTL < 1 hour,
-	// always return "good" — expiry is sufficient revocation for short-lived certs.
-	if s.profileRepo != nil && s.certRepo != nil {
-		// Look up cert by serial through revocation table
-		rev, _ := s.revocationRepo.GetBySerial(context.Background(), serialHex)
-		if rev != nil {
-			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
-			if err == nil && cert.CertificateProfileID != "" {
-				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
-				if err == nil && profile.IsShortLived() {
-					return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
-						CertSerial: serial,
-						CertStatus: 0, // good — short-lived exemption
-						ThisUpdate: now,
-						NextUpdate: now.Add(1 * time.Hour),
-					})
-				}
-			}
-		}
-	}
-
-	// Check if this serial is revoked
-	rev, err := s.revocationRepo.GetBySerial(context.Background(), serialHex)
-	if err != nil {
-		// Not revoked — return "good" status
-		return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
-			CertSerial: serial,
-			CertStatus: 0, // good
-			ThisUpdate: now,
-			NextUpdate: now.Add(1 * time.Hour),
-		})
-	}
-
-	// Revoked
-	return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
-		CertSerial:       serial,
-		CertStatus:       1, // revoked
-		RevokedAt:        rev.RevokedAt,
-		RevocationReason: domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
-		ThisUpdate:       now,
-		NextUpdate:       now.Add(1 * time.Hour),
-	})
+	return s.caSvc.GetOCSPResponse(issuerID, serialHex)
 }
 
 // GetCertificateDeployments returns all deployment targets for a certificate (M20).
