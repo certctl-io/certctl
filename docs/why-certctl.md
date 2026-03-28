@@ -49,71 +49,31 @@ A reload command can exit 0 while the certificate doesn't take effect — wrong 
 
 ### vs. ACME Clients (Certbot, Lego, CertWarden)
 
-ACME clients solve issuance. certctl solves the lifecycle. The difference: issuing a certificate is step 1 of 5. You also need to deploy it to the right server, verify it's being served, monitor expiration across your fleet, audit who renewed what and when, and enforce policy (minimum key sizes, maximum TTLs, approved algorithms).
-
-certctl does all of this. ACME clients do step 1.
-
-CertWarden is the most capable ACME client — it's centralized, has an API for clients to fetch certs, and handles renewals autonomously. But it's ACME-only (no private CAs, no step-ca, no EST enrollment), has no deployment automation (clients pull certs but must handle installation themselves), no policy engine, no audit trail, and no network discovery.
+ACME clients solve issuance. certctl solves the lifecycle — deployment, discovery, revocation, policy, audit. CertWarden is the most capable of the bunch (centralized API, autonomous renewals) but it's still ACME-only, no deployment automation, no policy engine, no audit trail, no discovery.
 
 ### vs. CertKit
 
-CertKit is the closest competitor in architecture: agent-based deployment, private key isolation (via their Keystore component), multi-platform support. The differences:
-
-- **Issuer coverage**: CertKit is ACME-only. certctl supports ACME, step-ca, Local CA (sub-CA mode), OpenSSL/custom scripts, and EST enrollment. If you have an internal CA or need device enrollment, CertKit can't help today — their private CA and audit log are still on their roadmap.
-- **PKI compliance**: certctl ships CRL endpoints (DER-encoded, CA-signed), an embedded OCSP responder, revocation with all RFC 5280 reason codes, and an immutable API audit trail that records every API call. CertKit doesn't have CRL, OCSP, or audit logging today.
-- **Policy engine**: certctl enforces 5 rule types with violation tracking and severity levels. CertKit has no policy engine.
-- **Network discovery**: certctl actively scans CIDR ranges for TLS certificates, finding unmanaged certs on your network. CertKit doesn't offer network scanning.
-- **Licensing**: certctl is source-available under BSL 1.1 (converts to Apache 2.0 in 2033). CertKit's platform is proprietary; only the agent source is available.
-- **Pricing**: certctl's V2 community edition is free with no certificate limit. CertKit's free tier is limited to 3 certificates.
-
-Where CertKit leads: their agent supports more deployment targets today (NGINX, Apache, HAProxy, LiteSpeed, IIS, with auto-detection), runs on Windows and Linux, and has Kubernetes support. CertKit also has a polished onboarding experience as a managed SaaS product.
+Closest competitor architecturally — agent-based, private key isolation (Keystore), multi-platform. certctl leads on issuer coverage (ACME + step-ca + Local CA + OpenSSL + EST vs. ACME-only), PKI compliance (CRL, OCSP, RFC 5280 revocation, immutable audit trail — all missing from CertKit today), policy engine (5 rule types vs. none), and network discovery (CIDR TLS scanning vs. none). certctl is source-available (BSL 1.1 → Apache 2.0) with no cert limit; CertKit is proprietary SaaS with a 3-cert free tier. Where CertKit leads: more deployment targets today (adds LiteSpeed, IIS, auto-detection), Windows support, Kubernetes, and polished SaaS onboarding.
 
 ### vs. Certimate
 
-Certimate is an open-source (MIT) lightweight certificate automation tool focused on ACME issuance and cloud deployment. It advertises 110+ deployment targets — but the bulk of those are cloud CDN, WAF, and load balancer integrations (Alibaba Cloud, Tencent Cloud, Huawei Cloud, Volcengine, etc.), not traditional server deployments like NGINX or Apache on your own infrastructure.
-
-- **Architecture**: Certimate is a centralized single-binary tool with no agent model. All operations run from the Certimate instance — it connects outbound to cloud APIs to deploy certificates. certctl uses a pull-based agent model where agents poll the control plane, keeping the server firewalled off and working across network zones.
-- **CA support**: Both support multiple ACME CAs. certctl also supports private CAs (step-ca, Local CA with sub-CA mode, OpenSSL/custom scripts) and EST enrollment — Certimate is ACME-only.
-- **Key isolation**: Certimate generates and stores keys centrally. certctl generates keys on the agent (ECDSA P-256) — private keys never touch the control plane.
-- **Lifecycle depth**: Certimate handles issuance, renewal, and deployment. certctl adds revocation (RFC 5280, CRL, OCSP), policy enforcement, an immutable audit trail, certificate discovery (filesystem + network), approval workflows, and observability (Prometheus metrics, dashboard charts).
-- **Best fit**: Certimate is a good choice for teams that primarily need ACME automation to cloud infrastructure (especially Chinese cloud providers). certctl is a better fit for mixed on-prem/cloud environments that need full lifecycle management, private CA support, and compliance tooling.
+Open-source (MIT) ACME automation tool. The 110+ deployment targets are mostly cloud CDN/WAF integrations (Alibaba Cloud, Tencent Cloud, Huawei Cloud) — not traditional server deployments. No agent model (centralized, outbound connections), no private CA support, no key isolation, no revocation/CRL/OCSP, no policy engine, no discovery, no audit trail. Good for ACME-to-cloud-CDN automation; certctl is for full lifecycle management across on-prem and cloud.
 
 ### vs. CZERTAINLY
 
-CZERTAINLY is an open-source (MIT + commercial support) cloud-native certificate and key lifecycle management platform built on a microservices architecture. It's the most architecturally ambitious open-source competitor.
-
-- **Architecture**: CZERTAINLY is designed for Kubernetes — it runs as a set of microservices (Core, Auth, Scheduler, plus connector containers). This gives it extensibility but makes deployment significantly heavier than certctl's single Go binary + PostgreSQL. If you don't run Kubernetes, CZERTAINLY isn't a practical option.
-- **Connector model**: Both tools use pluggable connectors. CZERTAINLY's connector system is more formally defined (separate containerized services with a connector API framework), while certctl's connectors are compiled-in Go interfaces. CZERTAINLY's approach is more extensible in theory; certctl's is simpler to deploy and operate.
-- **Discovery**: Both offer certificate discovery. CZERTAINLY uses pluggable discovery providers (IP discovery, EJBCA NG discovery). certctl has built-in filesystem scanning (agent-side) and network TLS scanning (CIDR ranges) — no additional connector deployment needed.
-- **Policy**: CZERTAINLY uses RA (Registration Authority) profiles for enrollment rules. certctl has a broader policy engine (5 rule types with violation tracking, severity levels, and interactive approval workflows).
-- **Revocation**: certctl ships DER-encoded CRL, embedded OCSP responder, and full RFC 5280 reason codes. CZERTAINLY supports revocation through its CA connectors but doesn't embed its own CRL/OCSP endpoints.
-- **Maturity**: CZERTAINLY has a broader vision (cryptographic key management, post-quantum readiness) but a smaller community. certctl has a narrower scope (certificate lifecycle specifically) with deeper implementation in that scope — 95 API endpoints, 950+ tests, 22 GUI pages.
-- **Best fit**: CZERTAINLY is a strong choice for Kubernetes-native organizations that want a modular, extensible platform and are willing to operate microservices. certctl is a better fit for teams that want full lifecycle management without the Kubernetes prerequisite.
+Open-source (MIT + commercial) cloud-native platform with the broadest architectural ambitions — microservices on Kubernetes, pluggable containerized connectors, post-quantum roadmap. The trade-off: requires Kubernetes, significantly heavier to deploy and operate than certctl's single binary + PostgreSQL. Both offer discovery and pluggable connectors. certctl has deeper lifecycle implementation (embedded CRL/OCSP, 5-rule policy engine with approval workflows, 95 API endpoints, 950+ tests). CZERTAINLY is better for K8s-native orgs wanting modular extensibility; certctl is better for teams wanting full lifecycle without the K8s prerequisite.
 
 ### vs. KeyTalk
 
-KeyTalk is a commercial (proprietary) PKI Certificate Key Management System from a Dutch company. It's sold as an on-premises appliance, cloud instance, or managed service.
+Commercial (proprietary) PKI platform from a Dutch company — on-prem appliance, cloud, or managed service. Broader cert type coverage (TLS, S/MIME, device auth, VPN) and DigiCert + SCEP integrations. No public documentation on policy engine, API surface, or audit capabilities. No free tier, no public pricing. certctl trades breadth of cert types for full transparency — source-available, public API spec, free community edition with no limits.
 
-- **Scope**: KeyTalk covers TLS/SSL, S/MIME email certificates, device authentication, and VPN certificates — broader certificate type coverage than certctl today (though certctl's S/MIME support is planned for v2.2.x).
-- **CA support**: Both support multiple CAs. KeyTalk integrates with DigiCert and supports ACME, SCEP, and native CA APIs. certctl supports ACME, step-ca, Local CA, OpenSSL/custom scripts, and EST enrollment.
-- **Agent model**: KeyTalk offers agent software for distributed deployment, similar to certctl's agent architecture.
-- **Transparency**: KeyTalk's detailed technical documentation (connector list, policy engine capabilities, API surface, audit trail depth) is not publicly available — it's behind enterprise sales. certctl's entire codebase, API spec (OpenAPI 3.1), and documentation are public.
-- **Pricing**: KeyTalk is commercial with no public pricing or free tier. certctl's V2 community edition is free with no certificate limit.
-- **Best fit**: KeyTalk is positioned for enterprises that want a vendor-supported PKI platform covering multiple certificate types (TLS, S/MIME, device) and are willing to pay for proprietary software. certctl is a better fit for teams that want source-available software they can self-host, audit, and extend without vendor dependency.
+### vs. cert-manager
 
-### vs. Kubernetes cert-manager
-
-cert-manager is the right choice if your entire infrastructure is Kubernetes. It's mature, well-maintained, and deeply integrated with the Kubernetes ecosystem.
-
-certctl is the right choice if your infrastructure extends beyond Kubernetes — bare-metal servers, VMs, network appliances, Docker hosts, or any mix. certctl deploys to NGINX, Apache, and HAProxy directly, with Traefik and Caddy support planned. The agent model means certctl can reach any server you can SSH into.
-
-certctl also provides features cert-manager doesn't: network certificate discovery (find all TLS certs on your network), a policy engine, an immutable audit trail, OCSP/CRL endpoints, and an MCP server for AI-assisted management.
+Right choice if your entire infrastructure is Kubernetes. certctl is the right choice if it extends beyond K8s — bare-metal, VMs, network appliances, Docker hosts. certctl adds network discovery, policy engine, immutable audit trail, OCSP/CRL, and MCP server that cert-manager doesn't offer.
 
 ### vs. Enterprise Platforms (Venafi, Keyfactor)
 
-If your organization has the budget for Venafi or Keyfactor, they're comprehensive solutions with decades of enterprise features.
-
-certctl targets the organizations that need 60% of those capabilities at 1% of the cost. Self-hosted, no per-certificate pricing, no vendor lock-in. The trade-off: no SSO/RBAC (yet — coming in certctl Pro), no F5/IIS target connectors (yet), no SLA-backed support.
+Comprehensive solutions with decades of features — at $75K-$250K+/yr. certctl targets organizations that need 60% of those capabilities at 1% of the cost. The trade-off: no SSO/RBAC yet (coming in certctl Pro), no F5/IIS target connectors yet, no SLA-backed support.
 
 ## Getting Started
 
