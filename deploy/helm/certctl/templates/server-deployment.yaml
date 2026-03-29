@@ -6,7 +6,7 @@ metadata:
     {{- include "certctl.labels" . | nindent 4 }}
     app.kubernetes.io/component: server
 spec:
-  {{- if ne .Values.server.replicas 1 }}
+  {{- if gt (int .Values.server.replicas) 1 }}
   replicas: {{ .Values.server.replicas }}
   {{- end }}
   selector:
