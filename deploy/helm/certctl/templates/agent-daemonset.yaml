@@ -1,0 +1,162 @@
+{{- if .Values.agent.enabled }}
+{{- if eq .Values.agent.kind "DaemonSet" }}
+apiVersion: apps/v1
+kind: DaemonSet
+metadata:
+  name: {{ include "certctl.fullname" . }}-agent
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  selector:
+    matchLabels:
+      {{- include "certctl.agentSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "certctl.agentSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.agent.securityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "certctl.agentImage" . }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          env:
+            - name: CERTCTL_SERVER_URL
+              value: {{ include "certctl.serverURL" . }}
+            - name: CERTCTL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: api-key
+            - name: CERTCTL_AGENT_NAME
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+            - name: CERTCTL_KEY_DIR
+              value: {{ .Values.agent.keyDir }}
+            {{- if .Values.agent.discoveryDirs }}
+            - name: CERTCTL_DISCOVERY_DIRS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-agent
+                  key: discovery-dirs
+            {{- end }}
+            {{- with .Values.agent.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - name: agent-keys
+              mountPath: {{ .Values.agent.keyDir }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: agent-keys
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir: {}
+{{- else if eq .Values.agent.kind "Deployment" }}
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "certctl.fullname" . }}-agent
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: agent
+spec:
+  replicas: {{ .Values.agent.replicas }}
+  selector:
+    matchLabels:
+      {{- include "certctl.agentSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "certctl.agentSelectorLabels" . | nindent 8 }}
+    spec:
+      serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.agent.securityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.nodeSelector }}
+      nodeSelector:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.tolerations }}
+      tolerations:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      {{- with .Values.agent.affinity }}
+      affinity:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: agent
+          image: {{ include "certctl.agentImage" . }}
+          imagePullPolicy: {{ .Values.agent.image.pullPolicy }}
+          env:
+            - name: CERTCTL_SERVER_URL
+              value: {{ include "certctl.serverURL" . }}
+            - name: CERTCTL_API_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: api-key
+            - name: CERTCTL_AGENT_NAME
+              {{- if .Values.agent.name }}
+              value: {{ .Values.agent.name | quote }}
+              {{- else }}
+              valueFrom:
+                fieldRef:
+                  fieldPath: metadata.name
+              {{- end }}
+            - name: CERTCTL_KEY_DIR
+              value: {{ .Values.agent.keyDir }}
+            {{- if .Values.agent.discoveryDirs }}
+            - name: CERTCTL_DISCOVERY_DIRS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-agent
+                  key: discovery-dirs
+            {{- end }}
+            {{- with .Values.agent.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          resources:
+            {{- toYaml .Values.agent.resources | nindent 12 }}
+          volumeMounts:
+            - name: agent-keys
+              mountPath: {{ .Values.agent.keyDir }}
+            - name: tmp
+              mountPath: /tmp
+      volumes:
+        - name: agent-keys
+          emptyDir:
+            sizeLimit: 1Gi
+        - name: tmp
+          emptyDir: {}
+{{- end }}
+{{- end }}

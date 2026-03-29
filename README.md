@@ -55,8 +55,8 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venaf
 
 certctl gives you a single pane of glass for every TLS certificate in your organization:
 
-- **Web dashboard** — 22 operational pages: certificate inventory, deployment timeline with TLS verification, bulk operations (renew/revoke/reassign), discovery triage, network scan management, approval workflows, audit trail with CSV/JSON export, agent fleet overview with OS/arch grouping, short-lived credential monitoring
-- **REST API** — 95 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation, with sparse fields, sort, cursor pagination, and time-range filters
+- **Web dashboard** — 22 operational pages: certificate inventory, deployment timeline with TLS verification, bulk operations (renew/revoke/reassign), discovery triage, network scan management, approval workflows, audit trail with CSV/JSON export, agent fleet overview with OS/arch grouping, short-lived credential monitoring, digest email preview
+- **REST API** — 99 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation, with sparse fields, sort, cursor pagination, and time-range filters
 - **Agents** — generate private keys locally (ECDSA P-256), discover existing certs on disk (PEM/DER), submit CSRs only (private keys never leave your servers)
 - **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents, concurrent scanning with configurable timeouts
 - **Certificate export** — PEM (JSON or file download) and PKCS#12 formats, with audit trail; private keys never included
@@ -64,7 +64,10 @@ certctl gives you a single pane of glass for every TLS certificate in your organ
 - **EST server** (RFC 7030) — device and WiFi certificate enrollment via industry-standard protocol
 - **Post-deployment verification** — agent-side TLS probe confirms the target serves the correct certificate by SHA-256 fingerprint match
 - **Approval workflows** — require human sign-off on renewals before deployment
-- **Background scheduler** — 6 automated loops: renewal checks, job processing, agent health, notifications, short-lived cert expiry, and network scanning
+- **Background scheduler** — 7 automated loops: renewal checks, job processing, agent health, notifications, short-lived cert expiry, network scanning, and scheduled certificate digest emails
+- **ACME Renewal Information (ARI, RFC 9702)** — CA-directed renewal timing; certctl asks the CA when to renew instead of using fixed thresholds
+- **Scheduled certificate digest emails** — HTML digest with certificate stats, expiration timeline, and job health; optional daily briefing via SMTP
+- **Helm chart** — Production-ready Kubernetes deployment with server, PostgreSQL, and agent DaemonSet
 
 For the full capability breakdown — revocation infrastructure, policy engine, observability, EST enrollment, and more — see the [Feature Inventory](docs/features.md).
 
@@ -357,7 +360,7 @@ make docker-clean       # Stop + remove volumes
 
 ## API Overview
 
-95 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
+99 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Key Endpoints
 ```
@@ -391,6 +394,10 @@ GET    /api/v1/jobs/{id}/verification    Get verification status
 # Observability
 GET    /api/v1/metrics/prometheus         Prometheus exposition format
 GET    /api/v1/stats/summary             Dashboard summary
+
+# Digest emails (scheduled briefing)
+GET    /api/v1/digest/preview            HTML email preview
+POST   /api/v1/digest/send               Send digest immediately
 
 # EST enrollment (RFC 7030)
 POST   /.well-known/est/simpleenroll     Device certificate enrollment
@@ -466,11 +473,11 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 ### V2: Operational Maturity
 
-21 milestones complete, 1100+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
+30 milestones complete, 1500+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
 
 **What shipped (all ✅):**
 
-- **Issuers** — Sub-CA mode (enterprise root chains), ACME DNS-01 + DNS-PERSIST-01 (wildcard certs, any DNS provider), step-ca (native /sign API), OpenSSL/Custom CA (script-based signing)
+- **Issuers** — Sub-CA mode (enterprise root chains), ACME DNS-01 + DNS-PERSIST-01 (wildcard certs, any DNS provider), step-ca (native /sign API), OpenSSL/Custom CA (script-based signing), ACME ARI (RFC 9702, CA-directed renewal timing)
 - **Revocation** — RFC 5280 reason codes, DER-encoded X.509 CRL, embedded OCSP responder, short-lived cert exemption
 - **Profiles + Ownership** — certificate profiles (key types, max TTL, crypto constraints), ownership tracking (owners + teams), dynamic agent groups, interactive renewal approval
 - **GUI Operations** — bulk renew/revoke/reassign, deployment timeline, inline policy editor, target wizard, audit export (CSV/JSON), short-lived credentials view
@@ -479,7 +486,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **EST Server** (RFC 7030) — device/WiFi certificate enrollment, PKCS#7 wire format, configurable issuer + profile binding
 - **MCP Server** — 78 API operations as AI tools for Claude, Cursor, and any MCP-compatible client
 - **CLI** — 12 subcommands (list/get/renew/revoke certs, agents, jobs, import, status), JSON/table output
-- **Notifications** — Slack, Microsoft Teams, PagerDuty, OpsGenie connectors
+- **Notifications** — Email (SMTP), Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie connectors
 - **API Enhancements** — sparse fields, sort, time-range filters, cursor pagination, immutable API audit logging
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides
 
@@ -487,6 +494,12 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **Traefik + Caddy Targets** — Traefik (file provider, auto-reload) and Caddy (Admin API hot-reload or file-based), both in target wizard GUI
 - **Certificate Export** — PEM (JSON or file download) and PKCS#12 formats, private keys never included (agent-side only), audit trail, GUI export buttons
 - **S/MIME Support** — EKU-aware issuance (emailProtection, codeSigning, timeStamping), adaptive KeyUsage flags, email SAN routing, EKU badges in GUI
+- **ACME ARI (RFC 9702)** — CA-directed renewal timing with graceful threshold fallback for non-ARI CAs, reduces unnecessary early renewals
+- **Scheduled Certificate Digest** — HTML email digests with certificate stats, expiration timeline, job trends, and agent health; optional daily/hourly/weekly briefings via SMTP
+- **Helm Chart** — Production-ready Kubernetes with server Deployment, PostgreSQL StatefulSet, Agent DaemonSet, security contexts, resource limits, optional Ingress, ServiceAccount
+- **ACME ARI (RFC 9702)** — CA-directed renewal timing: instead of renewing at fixed thresholds, the CA tells certctl the optimal renewal window, gracefully degrading to thresholds when ARI is unavailable
+- **Email Digest Service** — Scheduled HTML digest emails with certificate stats, expiration timeline (90d), job health, and active agent count; falls back to certificate owner emails if no recipients configured
+- **Helm Chart** — Production-ready Kubernetes deployment with server Deployment, PostgreSQL StatefulSet with PVC, Agent DaemonSet, optional Ingress, security contexts, and full values.yaml configuration
 
 ### V3: certctl Pro
 

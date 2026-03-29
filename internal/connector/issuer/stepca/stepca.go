@@ -472,5 +472,10 @@ func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("step-ca serves its own CA certificate at /root; use step-ca's endpoint directly")
 }
 
+// GetRenewalInfo returns nil, nil as step-ca does not support ACME Renewal Information (ARI).
+func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer.RenewalInfoResult, error) {
+	return nil, nil
+}
+
 // Ensure Connector implements the issuer.Connector interface.
 var _ issuer.Connector = (*Connector)(nil)

@@ -716,6 +716,17 @@ func (m *mockIssuerConnector) GetCACertPEM(ctx context.Context) (string, error) 
 	return "-----BEGIN CERTIFICATE-----\nmock-ca-cert\n-----END CERTIFICATE-----", nil
 }
 
+func (m *mockIssuerConnector) GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error) {
+	if m.Err != nil {
+		return nil, m.Err
+	}
+	now := time.Now()
+	return &RenewalInfoResult{
+		SuggestedWindowStart: now,
+		SuggestedWindowEnd:   now.Add(7 * 24 * time.Hour),
+	}, nil
+}
+
 // Constructor functions for mocks
 
 func newMockCertificateRepository() *mockCertRepo {

@@ -35,6 +35,18 @@ type Connector interface {
 	// GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
 	// Used by the EST /cacerts endpoint. Returns empty string if not available.
 	GetCACertPEM(ctx context.Context) (string, error)
+
+	// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9702 for a certificate.
+	// certPEM is the PEM-encoded certificate. Returns nil, nil if the CA does not support ARI.
+	GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error)
+}
+
+// RenewalInfoResult holds the ACME ARI response from a CA.
+type RenewalInfoResult struct {
+	SuggestedWindowStart time.Time
+	SuggestedWindowEnd   time.Time
+	RetryAfter           time.Time
+	ExplanationURL       string
 }
 
 // IssuanceRequest contains the parameters for issuing a new certificate.

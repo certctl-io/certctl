@@ -450,7 +450,7 @@ Short-lived certificates (those with profile TTL < 1 hour) return "good" from OC
 
 ### 4. Automatic Renewal
 
-The control plane runs a scheduler with six background loops:
+The control plane runs a scheduler with seven background loops:
 
 ```mermaid
 flowchart LR
@@ -461,6 +461,7 @@ flowchart LR
         N["Notification Processor\n⏱ every 1m"]
         SL["Short-Lived Expiry\n⏱ every 30s"]
         NS["Network Scanner\n⏱ every 6h"]
+        DG["Certificate Digest\n⏱ every 24h"]
     end
 
     R -->|"Find expiring certs\nCreate renewal jobs"| DB[("PostgreSQL")]
@@ -469,6 +470,7 @@ flowchart LR
     N -->|"Send pending notifications\nEmail / Webhook / Slack"| DB
     SL -->|"Expire short-lived certs\nMark as Expired"| DB
     NS -->|"Probe TLS endpoints\nStore discovered certs"| DB
+    DG -->|"Generate & send HTML digest\nEmail to recipients"| DB
 ```
 
 | Loop | Interval | Timeout | Purpose |
@@ -479,8 +481,9 @@ flowchart LR
 | Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
 | Short-lived expiry | 30 seconds | 30 seconds | Marks expired short-lived certificates (profile TTL < 1 hour) |
 | Network scanner | 6 hours | 30 minutes | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21, opt-in via `CERTCTL_NETWORK_SCAN_ENABLED`). CIDR size validated at API level — max /20 (4096 IPs) per range. |
+| Certificate digest | 24 hours | 5 minutes | Generates HTML email with certificate stats, expiration timeline, job health, agent count. Does NOT run on startup — waits for first scheduled tick. Configurable interval and recipients via `CERTCTL_DIGEST_INTERVAL` and `CERTCTL_DIGEST_RECIPIENTS`. Falls back to certificate owner emails if no explicit recipients configured. |
 
-Each loop uses `sync/atomic.Bool` idempotency guards to prevent concurrent tick execution — if a loop iteration is still running when the next tick fires, the tick is skipped with a warning log. All loops (including short-lived expiry check) run immediately on startup before entering their ticker interval, ensuring no gap between scheduler start and first execution. Graceful shutdown uses `sync.WaitGroup` with `WaitForCompletion()` to drain all in-flight work before process exit.
+Each loop uses `sync/atomic.Bool` idempotency guards to prevent concurrent tick execution — if a loop iteration is still running when the next tick fires, the tick is skipped with a warning log. All loops (including short-lived expiry check) run immediately on startup before entering their ticker interval, ensuring no gap between scheduler start and first execution. The certificate digest loop is the exception — it does NOT run on startup, only on scheduled ticks. Graceful shutdown uses `sync.WaitGroup` with `WaitForCompletion()` to drain all in-flight work before process exit.
 
 Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
@@ -567,7 +570,11 @@ type Connector interface {
 }
 ```
 
-Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), and **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required. The interface also includes `GetCACertPEM(ctx)` for CA chain distribution (used by the EST server's `/cacerts` endpoint).
+Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), and **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required.
+
+**ACME Renewal Information (ARI, RFC 9702):** The ACME connector supports CA-directed renewal timing via the `GetRenewalInfo()` method. Instead of using fixed thresholds (e.g., renew 30 days before expiry), the CA tells certctl when to renew by providing a `suggestedWindow` with start and end times. This is useful for distributing renewal load during maintenance windows and coordinating mass-revocation scenarios. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. Cert ID is computed as `base64url(SHA-256(DER cert))` per RFC 9702. If the CA doesn't support ARI (404 from the ARI endpoint), certctl automatically falls back to threshold-based renewal — no operator intervention required. Errors from the CA are logged as warnings.
+
+The interface also includes `GetCACertPEM(ctx)` for CA chain distribution (used by the EST server's `/cacerts` endpoint).
 
 ### Target Connector
 
@@ -763,7 +770,7 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications, discovered-certificates, discovery-scans, network-scan-targets, stats, metrics.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 97 endpoints across 20 resource domains (95 under `/api/v1/` + `/.well-known/est/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, Prometheus metrics from M22, and 4 EST enrollment endpoints from M23), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 99 endpoints across 23 resource domains (97 under `/api/v1/` + `/.well-known/est/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, Prometheus metrics from M22, 4 EST enrollment endpoints from M23, 2 digest endpoints from M29), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
@@ -835,7 +842,9 @@ flowchart TB
 **Credentials & Configuration:**
 Database and API credentials are managed via environment variables defined in a `.env` file. Copy `deploy/.env.example` to `deploy/.env` for local development and customize credentials for production. The agent key directory (`CERTCTL_KEY_DIR`) is persisted as a named Docker volume (`agent_keys`) at `/var/lib/certctl/keys` for reliable key storage across container restarts.
 
-### Production (Kubernetes)
+### Production (Kubernetes with Helm)
+
+A production-ready Helm chart is available under `deploy/helm/certctl/` with full support for multi-replica deployments, persistent PostgreSQL, agent DaemonSet, optional Ingress, and security best practices.
 
 ```mermaid
 flowchart TB
@@ -860,6 +869,21 @@ flowchart TB
     DEP --> CM & SEC
     DS --> DEP
 ```
+
+**Helm Installation:**
+
+```bash
+# Add the chart (if published) or install from local directory
+helm install certctl deploy/helm/certctl/ \
+  --set server.auth.apiKey="your-secure-key" \
+  --set postgresql.auth.password="your-db-password" \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host="certctl.example.com"
+```
+
+The Helm chart includes: server Deployment with configurable replicas, liveness/readiness probes, security context (non-root, read-only rootfs), PostgreSQL StatefulSet with persistent volumes, optional Ingress with TLS, ServiceAccount with configurable RBAC, and agent DaemonSet running one agent per node. All certctl configuration options are exposed in `values.yaml` — issuers, targets, notifiers, scheduler intervals, discovery settings, and SMTP for digest emails.
+
+See `deploy/helm/certctl/values.yaml` for the full configuration reference and `deploy/helm/certctl/Chart.yaml` for version and appVersion details.
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
 

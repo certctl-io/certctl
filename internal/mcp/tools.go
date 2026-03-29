@@ -27,6 +27,7 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	registerNotificationTools(s, client)
 	registerStatsTools(s, client)
 	registerMetricsTools(s, client)
+	registerDigestTools(s, client)
 	registerHealthTools(s, client)
 }
 
@@ -995,6 +996,32 @@ func registerStatsTools(s *gomcp.Server, c *Client) {
 			q.Set("days", strconv.Itoa(input.Days))
 		}
 		data, err := c.Get("/api/v1/stats/issuance-rate", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Digest ──────────────────────────────────────────────────────────
+
+func registerDigestTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_preview_digest",
+		Description: "Preview the scheduled certificate digest email in HTML format. Shows summary of certificate status, pending jobs, and expiring certificates.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/digest/preview", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_send_digest",
+		Description: "Trigger immediate sending of the certificate digest email to configured recipients. If no explicit recipients are configured, sends to certificate owners.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/digest/send", nil)
 		if err != nil {
 			return errorResult(err)
 		}

@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **97 endpoints** across 21 resource domains under `/api/v1/` + `/.well-known/est/`
+- **99 endpoints** across 23 resource domains under `/api/v1/` + `/.well-known/est/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -96,6 +96,7 @@ curl -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2026-04-24T00:00:00Z
 | **Stats** | 5 | Dashboard summary, certificates by status, expiration timeline, job trends, issuance rate |
 | **Metrics** | 2 | JSON metrics (gauges, counters, uptime), Prometheus exposition format |
 | **Verification** | 2 | Submit verification result, get verification status |
+| **Digest** | 2 | Preview HTML digest, send digest immediately |
 | **EST (RFC 7030)** | 4 | CA certs (PKCS#7), simple enrollment, re-enrollment, CSR attributes |
 | **Health** | 4 | Health check, readiness check, auth info, auth check |
 
@@ -510,6 +511,148 @@ export CERTCTL_PAGERDUTY_SEVERITY="critical"
 - **Deployment Failed** — Target deployment error
 - **Revocation** — Certificate revoked with reason
 - **Policy Violation** — Certificate violates renewal policy
+
+---
+
+## ACME Renewal Information (ARI, RFC 9702)
+
+Instead of using fixed renewal thresholds (renew 30 days before expiry), ACME ARI lets the CA tell certctl exactly when to renew. This is useful for distributing renewal load across maintenance windows and coordinating mass-revocation scenarios.
+
+**How it works:**
+
+```bash
+# Enable ARI on your ACME issuer
+export CERTCTL_ACME_ARI_ENABLED=true
+
+# Certificates now query the ARI endpoint for suggested renewal windows
+# If the CA doesn't support ARI (404), certctl falls back to threshold-based renewal
+```
+
+| Field | Details |
+|-------|---------|
+| **Protocol** | ACME Renewal Information (RFC 9702) |
+| **Cert ID Computation** | base64url(SHA-256(DER cert)) |
+| **Suggested Window** | Start and end times provided by CA |
+| **Renewal Timing** — If current time is after window start, renew immediately. Otherwise, wait until start time. |
+| **Fallback** | 404 from ARI endpoint triggers automatic fallback to threshold-based renewal |
+| **Configuration** | `CERTCTL_ACME_ARI_ENABLED=true` on ACME issuer config |
+| **Supported CAs** | Let's Encrypt (v2.1.0+), Sectigo, others gradually adopting |
+
+**Benefits:**
+
+- **Load Distribution** — CA specifies renewal window to avoid thundering herd spikes
+- **Coordination** — Support for mass revocation scenarios where CA controls timing
+- **No Over-Renewal** — Avoid unnecessary early renewals that waste your CA's capacity
+
+---
+
+## Scheduled Certificate Digest Emails
+
+Scheduled HTML digest emails with certificate stats, expiration timeline, job health, and agent fleet overview. Useful for daily ops briefings and compliance reporting.
+
+```bash
+# Configure SMTP
+export CERTCTL_SMTP_HOST=smtp.example.com
+export CERTCTL_SMTP_PORT=587
+export CERTCTL_SMTP_USERNAME=admin@example.com
+export CERTCTL_SMTP_PASSWORD=your-app-password
+export CERTCTL_SMTP_FROM_ADDRESS=certctl@example.com
+
+# Enable digest
+export CERTCTL_DIGEST_ENABLED=true
+export CERTCTL_DIGEST_INTERVAL=24h
+export CERTCTL_DIGEST_RECIPIENTS=ops@example.com,security@example.com
+```
+
+| Feature | Details |
+|---------|---------|
+| **Scheduler Loop** | 7th background loop, default 24-hour interval (configurable: 12h, 7d, etc.) |
+| **Startup Behavior** | Does NOT run on startup; waits for first scheduled tick |
+| **Operation Timeout** | 5 minutes per digest generation + send |
+| **Idempotency** — `sync/atomic.Bool` guard prevents concurrent digest executions |
+| **HTML Template** | Responsive email with stats grid (total, expiring, expired, agents), jobs summary (30-day), expiring certs table with color-coded urgency (7/14/30 days) |
+| **Recipients** | Comma-separated email addresses. Falls back to certificate owner emails if none configured. |
+| **API Endpoints** — `GET /api/v1/digest/preview` (HTML preview), `POST /api/v1/digest/send` (trigger immediately) |
+| **Configuration** — `CERTCTL_DIGEST_ENABLED`, `CERTCTL_DIGEST_INTERVAL` (default 24h), `CERTCTL_DIGEST_RECIPIENTS` |
+
+**Digest Contents:**
+
+- **Certificate Stats** — Total, active, expiring soon, expired, revoked
+- **Job Health** — Completed, failed (last 30 days)
+- **Agent Fleet** — Total agents online, offline, version distribution
+- **Expiring Certificates** — Table with CN, SANs, days remaining, owner, status badges
+
+**Use Cases:**
+
+- Daily ops briefing for certificate inventory health
+- Compliance reporting (audit trail + digest archive)
+- Stakeholder visibility (automated newsletter)
+
+---
+
+## Helm Chart for Kubernetes
+
+Production-ready Helm chart for Kubernetes deployments with secure defaults and comprehensive configurability.
+
+### Chart Components
+
+| Component | Details |
+|-----------|---------|
+| **Server Deployment** | Configurable replicas (default 2), liveness/readiness probes, security context (non-root, read-only rootfs), resource limits, graceful shutdown |
+| **PostgreSQL StatefulSet** | Primary + replica, persistent volumes with configurable storage class/size (default 10Gi), automatic backup (via init container or sidecarsynchronous |
+| **Agent DaemonSet** | One agent per infrastructure node, key storage volume (agent_keys), server discovery via internal DNS |
+| **ConfigMap** | Issuer, target, and scheduler configuration; all certctl env vars exposed |
+| **Secret** — API key, database password, SMTP credentials (base64-encoded) |
+| **Ingress** — Optional with TLS, configurable hostname and certificate (via cert-manager or manual) |
+| **ServiceAccount** — RBAC with configurable annotations for Kubernetes audit logging |
+
+### Installation
+
+```bash
+# Install with custom values
+helm install certctl deploy/helm/certctl/ \
+  --namespace certctl --create-namespace \
+  --set server.auth.apiKey="your-secure-key" \
+  --set postgresql.auth.password="your-db-password" \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host="certctl.example.com" \
+  --set ingress.annotations."cert-manager\.io/cluster-issuer"="letsencrypt-prod"
+```
+
+### Key Values
+
+| Value | Default | Description |
+|-------|---------|-------------|
+| `server.replicaCount` | 2 | Number of server replicas |
+| `server.auth.apiKey` | — | (required) API key for authentication |
+| `postgresql.auth.password` | — | (required) PostgreSQL password |
+| `postgresql.storage.size` | 10Gi | Database volume size |
+| `ingress.enabled` | false | Enable Ingress for public access |
+| `ingress.hosts[0].host` | certctl.example.com | Primary hostname |
+| `ingress.tls.enabled` | true | TLS on Ingress (requires cert-manager) |
+| `agent.enabled` | true | Deploy agent DaemonSet |
+| `smtp.enabled` | false | Enable SMTP for digest emails |
+| `smtp.host` | — | SMTP server hostname |
+
+### Security Defaults
+
+- **Non-root containers** — Server and agent run as unprivileged user
+- **Read-only filesystem** — Root filesystem mounted read-only (except /tmp)
+- **Network policies** — Optional KubernetesNetworkPolicy to restrict traffic
+- **Secrets** — API keys and passwords stored in K8s Secrets, never in ConfigMaps or environment defaults
+- **RBAC** — ServiceAccount with minimal required permissions
+
+### Upgrade Path
+
+```bash
+# Upgrade to a new certctl release
+helm upgrade certctl deploy/helm/certctl/ \
+  --namespace certctl \
+  -f my-values.yaml
+
+# Rollback if needed
+helm rollback certctl [REVISION]
+```
 
 ---
 

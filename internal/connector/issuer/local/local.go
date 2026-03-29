@@ -735,3 +735,8 @@ func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
 	}
 	return c.caCertPEM, nil
 }
+
+// GetRenewalInfo returns nil, nil as the Local CA does not support ACME Renewal Information (ARI).
+func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer.RenewalInfoResult, error) {
+	return nil, nil
+}

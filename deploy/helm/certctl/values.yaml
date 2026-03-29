@@ -1,0 +1,434 @@
+# Default values for certctl Helm chart
+# This is a YAML-formatted file.
+# Declare variables to be passed into your templates.
+
+# Namespace override (optional)
+namespace: ""
+
+# Global configuration
+commonLabels: {}
+imagePullSecrets: []
+nameOverride: ""
+fullnameOverride: ""
+
+# ==============================================================================
+# Certctl Server Configuration
+# ==============================================================================
+server:
+  # Number of replicas (for HA deployments)
+  replicas: 1
+
+  # Image configuration
+  image:
+    repository: ghcr.io/shankar0123/certctl
+    tag: "" # defaults to Chart.appVersion
+    pullPolicy: IfNotPresent
+
+  # Server port
+  port: 8443
+
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Liveness and readiness probes
+  livenessProbe:
+    httpGet:
+      path: /health
+      port: http
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    httpGet:
+      path: /readyz
+      port: http
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+  # Service type (ClusterIP, LoadBalancer, NodePort)
+  service:
+    type: ClusterIP
+    port: 8443
+    annotations: {}
+
+  # Authentication configuration
+  auth:
+    type: api-key  # Options: api-key, none (for demo only)
+    apiKey: ""     # REQUIRED in production - set via --set or values override
+
+  # Logging configuration
+  logging:
+    level: info  # debug, info, warn, error
+    format: json  # json or text
+
+  # SMTP configuration for email notifications (optional)
+  smtp:
+    enabled: false
+    host: ""
+    port: 587
+    username: ""
+    password: ""
+    fromAddress: ""
+    useTLS: true
+
+  # Certificate digest digest (periodic email summary)
+  digest:
+    enabled: false
+    interval: "24h"
+    recipients: []
+    # Example:
+    # - admin@example.com
+    # - ops@example.com
+
+  # Enrollment over Secure Transport (EST) configuration
+  est:
+    enabled: false
+    issuerID: "iss-local"
+    profileID: ""
+
+  # Rate limiting configuration
+  rateLimiting:
+    rps: 100      # Requests per second
+    burst: 200    # Burst capacity
+
+  # Network scanning configuration
+  networkScan:
+    enabled: false
+    interval: "6h"
+
+  # Certificate key generation mode
+  keygen:
+    mode: agent   # Options: agent (production), server (demo with warning)
+
+  # CORS configuration
+  cors:
+    origins: ""   # Comma-separated list, empty means deny all cross-origin requests
+
+  # Issuer connectors configuration
+  issuer:
+    local:
+      enabled: true
+      # For sub-CA mode, provide these paths:
+      # caCertPath: /path/to/ca.crt
+      # caKeyPath: /path/to/ca.key
+
+    acme:
+      enabled: false
+      directoryURL: ""
+      email: ""
+      challengeType: "http-01"  # Options: http-01, dns-01, dns-persist-01
+      # DNS configuration (for dns-01 or dns-persist-01)
+      # dnsPresentScript: /path/to/dns-present.sh
+      # dnsCleanupScript: /path/to/dns-cleanup.sh
+      # dnsPropagationWait: "30s"
+      # dnsPersistIssuerDomain: "validation.example.com"
+      # EAB configuration (for ZeroSSL, Google Trust Services, etc.)
+      # eabKid: ""
+      # eabHmac: ""
+
+    stepca:
+      enabled: false
+      # rootCAPath: /path/to/root_ca.crt
+      # intermediateCAPath: /path/to/intermediate_ca.crt
+      # provisionerName: ""
+      # provisionerPassword: ""
+
+    openssl:
+      enabled: false
+      # signScript: /path/to/sign.sh
+      # revokeScript: /path/to/revoke.sh
+      # crlScript: /path/to/crl.sh
+      # timeoutSeconds: 30
+
+  # Notifier connectors configuration
+  notifiers:
+    slack:
+      enabled: false
+      # webhookUrl: ""
+      # channel: ""
+      # username: ""
+      # iconEmoji: ""
+
+    teams:
+      enabled: false
+      # webhookUrl: ""
+
+    pagerduty:
+      enabled: false
+      # routingKey: ""
+      # severity: warning
+
+    opsgenie:
+      enabled: false
+      # apiKey: ""
+      # priority: P3
+
+  # Additional environment variables
+  # Will be passed as-is to the server container
+  env: {}
+  # Example:
+  # CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL: "1h"
+  # CERTCTL_DATABASE_MAX_CONNS: "25"
+
+  # Additional volume mounts for custom configurations
+  # volumeMounts: []
+  # - name: ca-cert
+  #   mountPath: /etc/ssl/certs/ca.crt
+  #   subPath: ca.crt
+
+  # Additional volumes
+  # volumes: []
+  # - name: ca-cert
+  #   secret:
+  #     secretName: ca-cert
+
+# ==============================================================================
+# PostgreSQL Configuration
+# ==============================================================================
+postgresql:
+  # Enable/disable PostgreSQL (set to false if using external database)
+  enabled: true
+
+  # Image configuration
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  # Authentication
+  auth:
+    database: certctl
+    username: certctl
+    password: ""  # REQUIRED - set via --set or values override
+
+  # Storage configuration
+  storage:
+    size: 10Gi
+    storageClass: ""  # Uses default StorageClass if empty
+    # deleteOnTermination: false  # Keep data on Helm uninstall
+
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 100m
+      memory: 256Mi
+    limits:
+      cpu: 500m
+      memory: 512Mi
+
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+
+  # Liveness and readiness probes
+  livenessProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - pg_isready -U certctl -d certctl
+    initialDelaySeconds: 10
+    periodSeconds: 10
+    timeoutSeconds: 5
+    failureThreshold: 3
+
+  readinessProbe:
+    exec:
+      command:
+        - /bin/sh
+        - -c
+        - pg_isready -U certctl -d certctl
+    initialDelaySeconds: 5
+    periodSeconds: 5
+    timeoutSeconds: 3
+    failureThreshold: 2
+
+  # Service configuration
+  service:
+    type: ClusterIP
+    port: 5432
+
+  # PostgreSQL-specific settings
+  postgresqlConfig: {}
+  # Example:
+  # max_connections: "200"
+  # shared_buffers: "256MB"
+
+# ==============================================================================
+# Certctl Agent Configuration
+# ==============================================================================
+agent:
+  # Enable/disable agent deployment
+  enabled: true
+
+  # Deployment strategy: DaemonSet (recommended) or Deployment
+  kind: DaemonSet  # Options: DaemonSet, Deployment
+
+  # Image configuration
+  image:
+    repository: ghcr.io/shankar0123/certctl-agent
+    tag: ""  # defaults to Chart.appVersion
+    pullPolicy: IfNotPresent
+
+  # Number of replicas (for Deployment kind; ignored for DaemonSet)
+  replicas: 1
+
+  # Resource requests and limits
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  # Pod security context
+  securityContext:
+    runAsNonRoot: true
+    runAsUser: 1000
+    runAsGroup: 1000
+    fsGroup: 1000
+    readOnlyRootFilesystem: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
+
+  # Agent name (can be overridden per pod via StatefulSet ordinals)
+  name: ""  # If empty, uses release name
+
+  # Key storage directory
+  keyDir: /var/lib/certctl/keys
+
+  # Certificate discovery directories (comma-separated)
+  discoveryDirs: ""
+  # Example: "/etc/ssl/certs,/etc/pki/tls"
+
+  # Node selector for agent pods (for DaemonSet)
+  nodeSelector: {}
+  # Example:
+  # node-role.kubernetes.io/worker: "true"
+
+  # Tolerations for agent pods
+  tolerations: []
+  # Example:
+  # - key: node-role
+  #   operator: Equal
+  #   value: worker
+  #   effect: NoSchedule
+
+  # Affinity rules
+  affinity: {}
+
+  # Additional environment variables
+  env: {}
+
+# ==============================================================================
+# Ingress Configuration
+# ==============================================================================
+ingress:
+  enabled: false
+  className: ""
+  annotations: {}
+    # kubernetes.io/ingress.class: nginx
+    # cert-manager.io/cluster-issuer: letsencrypt-prod
+  hosts:
+    - host: certctl.local
+      paths:
+        - path: /
+          pathType: Prefix
+  tls: []
+    # - secretName: certctl-tls
+    #   hosts:
+    #     - certctl.local
+
+# ==============================================================================
+# Service Account Configuration
+# ==============================================================================
+serviceAccount:
+  create: true
+  annotations: {}
+  name: ""  # defaults to release name if empty
+
+# ==============================================================================
+# RBAC Configuration
+# ==============================================================================
+rbac:
+  create: true
+
+# ==============================================================================
+# Pod Disruption Budget (for HA deployments)
+# ==============================================================================
+podDisruptionBudget:
+  enabled: false
+  minAvailable: 1
+  # maxUnavailable: 1
+
+# ==============================================================================
+# Monitoring Configuration
+# ==============================================================================
+monitoring:
+  enabled: false
+  # Prometheus ServiceMonitor
+  serviceMonitor:
+    enabled: false
+    interval: 30s
+    scrapeTimeout: 10s
+    # labels: {}
+    # selector: {}
+
+# ==============================================================================
+# Advanced Configuration
+# ==============================================================================
+
+# Node affinity for server pods
+nodeAffinity: {}
+
+# Pod affinity for server pods
+podAffinity: {}
+
+# Pod anti-affinity for server pods (for HA)
+podAntiAffinity: {}
+# Example:
+# podAntiAffinity:
+#   preferredDuringSchedulingIgnoredDuringExecution:
+#     - weight: 100
+#       podAffinityTerm:
+#         labelSelector:
+#           matchExpressions:
+#             - key: app.kubernetes.io/name
+#               operator: In
+#               values:
+#                 - certctl
+#         topologyKey: kubernetes.io/hostname
+
+# Custom labels for all resources
+customLabels: {}
+
+# Custom annotations for all resources
+customAnnotations: {}

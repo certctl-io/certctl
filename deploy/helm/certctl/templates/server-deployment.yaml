@@ -1,0 +1,196 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: {{ include "certctl.fullname" . }}-server
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  {{- if ne .Values.server.replicas 1 }}
+  replicas: {{ .Values.server.replicas }}
+  {{- end }}
+  selector:
+    matchLabels:
+      {{- include "certctl.serverSelectorLabels" . | nindent 6 }}
+  template:
+    metadata:
+      labels:
+        {{- include "certctl.serverSelectorLabels" . | nindent 8 }}
+      annotations:
+        checksum/config: {{ include (print $.Template.BasePath "/server-configmap.yaml") . | sha256sum }}
+        checksum/secret: {{ include (print $.Template.BasePath "/server-secret.yaml") . | sha256sum }}
+    spec:
+      serviceAccountName: {{ include "certctl.serviceAccountName" . }}
+      securityContext:
+        {{- toYaml .Values.server.securityContext | nindent 8 }}
+      {{- with .Values.imagePullSecrets }}
+      imagePullSecrets:
+        {{- toYaml . | nindent 8 }}
+      {{- end }}
+      containers:
+        - name: server
+          image: {{ include "certctl.serverImage" . }}
+          imagePullPolicy: {{ .Values.server.image.pullPolicy }}
+          ports:
+            - name: http
+              containerPort: {{ .Values.server.port }}
+              protocol: TCP
+          env:
+            - name: CERTCTL_SERVER_HOST
+              value: "0.0.0.0"
+            - name: CERTCTL_SERVER_PORT
+              value: "{{ .Values.server.port }}"
+            - name: CERTCTL_DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: database-url
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-postgres
+                  key: password
+            - name: CERTCTL_LOG_LEVEL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: log-level
+            - name: CERTCTL_LOG_FORMAT
+              value: "json"
+            - name: CERTCTL_AUTH_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: auth-type
+            {{- if eq .Values.server.auth.type "api-key" }}
+            - name: CERTCTL_AUTH_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: api-key
+            {{- end }}
+            - name: CERTCTL_KEYGEN_MODE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: keygen-mode
+            - name: CERTCTL_RATE_LIMIT_RPS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: rate-limit-rps
+            - name: CERTCTL_RATE_LIMIT_BURST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: rate-limit-burst
+            {{- if .Values.server.cors.origins }}
+            - name: CERTCTL_CORS_ORIGINS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: cors-origins
+            {{- end }}
+            {{- if .Values.server.networkScan.enabled }}
+            - name: CERTCTL_NETWORK_SCAN_ENABLED
+              value: "true"
+            - name: CERTCTL_NETWORK_SCAN_INTERVAL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: network-scan-interval
+            {{- end }}
+            {{- if .Values.server.est.enabled }}
+            - name: CERTCTL_EST_ENABLED
+              value: "true"
+            - name: CERTCTL_EST_ISSUER_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: est-issuer-id
+            {{- if .Values.server.est.profileID }}
+            - name: CERTCTL_EST_PROFILE_ID
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: est-profile-id
+            {{- end }}
+            {{- end }}
+            {{- if .Values.server.smtp.enabled }}
+            - name: CERTCTL_SMTP_HOST
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: smtp-host
+            - name: CERTCTL_SMTP_PORT
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: smtp-port
+            - name: CERTCTL_SMTP_USERNAME
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: smtp-username
+            - name: CERTCTL_SMTP_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: smtp-password
+            - name: CERTCTL_SMTP_FROM_ADDRESS
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: smtp-from-address
+            {{- end }}
+            {{- if .Values.server.issuer.acme.enabled }}
+            - name: CERTCTL_ACME_DIRECTORY_URL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: acme-directory-url
+            - name: CERTCTL_ACME_EMAIL
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: acme-email
+            - name: CERTCTL_ACME_CHALLENGE_TYPE
+              valueFrom:
+                configMapKeyRef:
+                  name: {{ include "certctl.fullname" . }}-server
+                  key: acme-challenge-type
+            {{- end }}
+            {{- with .Values.server.env }}
+            {{- toYaml . | nindent 12 }}
+            {{- end }}
+          livenessProbe:
+            {{- toYaml .Values.server.livenessProbe | nindent 12 }}
+          readinessProbe:
+            {{- toYaml .Values.server.readinessProbe | nindent 12 }}
+          resources:
+            {{- toYaml .Values.server.resources | nindent 12 }}
+          volumeMounts:
+            - name: tmp
+              mountPath: /tmp
+            {{- if .Values.server.volumeMounts }}
+            {{- toYaml .Values.server.volumeMounts | nindent 12 }}
+            {{- end }}
+      volumes:
+        - name: tmp
+          emptyDir: {}
+        {{- if .Values.server.volumes }}
+        {{- toYaml .Values.server.volumes | nindent 8 }}
+        {{- end }}
+      {{- with .Values.nodeAffinity }}
+      affinity:
+        nodeAffinity:
+          {{- toYaml . | nindent 10 }}
+      {{- else if .Values.podAntiAffinity }}
+      affinity:
+        podAntiAffinity:
+          {{- toYaml . | nindent 10 }}
+      {{- else if .Values.podAffinity }}
+      affinity:
+        podAffinity:
+          {{- toYaml . | nindent 10 }}
+      {{- end }}

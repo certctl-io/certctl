@@ -13,16 +13,19 @@ import (
 
 // mockConnectorLayerIssuer is a test implementation of issuer.Connector
 type mockConnectorLayerIssuer struct {
-	issueResult   *issuer.IssuanceResult
-	issueErr      error
-	renewResult   *issuer.IssuanceResult
-	renewErr      error
-	lastIssueReq  *issuer.IssuanceRequest
-	lastRenewReq  *issuer.RenewalRequest
-	validateErr   error
-	revokeErr     error
-	orderStatusErr error
-	orderStatus   *issuer.OrderStatus
+	issueResult        *issuer.IssuanceResult
+	issueErr           error
+	renewResult        *issuer.IssuanceResult
+	renewErr           error
+	lastIssueReq       *issuer.IssuanceRequest
+	lastRenewReq       *issuer.RenewalRequest
+	validateErr        error
+	revokeErr          error
+	orderStatusErr     error
+	orderStatus        *issuer.OrderStatus
+	renewalInfoResult  *issuer.RenewalInfoResult
+	renewalInfoErr     error
+	renewalInfoNil     bool // flag to force nil result
 }
 
 func (m *mockConnectorLayerIssuer) ValidateConfig(ctx context.Context, config json.RawMessage) error {
@@ -98,6 +101,23 @@ func (m *mockConnectorLayerIssuer) SignOCSPResponse(ctx context.Context, req iss
 
 func (m *mockConnectorLayerIssuer) GetCACertPEM(ctx context.Context) (string, error) {
 	return "-----BEGIN CERTIFICATE-----\nmock-ca-cert\n-----END CERTIFICATE-----", nil
+}
+
+func (m *mockConnectorLayerIssuer) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer.RenewalInfoResult, error) {
+	if m.renewalInfoErr != nil {
+		return nil, m.renewalInfoErr
+	}
+	if m.renewalInfoNil {
+		return nil, nil
+	}
+	if m.renewalInfoResult != nil {
+		return m.renewalInfoResult, nil
+	}
+	now := time.Now()
+	return &issuer.RenewalInfoResult{
+		SuggestedWindowStart: now,
+		SuggestedWindowEnd:   now.Add(7 * 24 * time.Hour),
+	}, nil
 }
 
 // Tests for IssueCertificate
@@ -526,4 +546,103 @@ func TestIssuerConnectorAdapter_SignOCSPResponse_Unknown(t *testing.T) {
 	}
 
 	t.Log("OCSP response for unknown cert signed via adapter")
+}
+
+// Tests for GetRenewalInfo
+
+func TestIssuerConnectorAdapter_GetRenewalInfo_Success(t *testing.T) {
+	ctx := context.Background()
+
+	mock := &mockConnectorLayerIssuer{}
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	testCertPEM := "-----BEGIN CERTIFICATE-----\ntest-cert\n-----END CERTIFICATE-----"
+
+	result, err := adapter.GetRenewalInfo(ctx, testCertPEM)
+
+	if err != nil {
+		t.Fatalf("GetRenewalInfo failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if result.SuggestedWindowStart.IsZero() {
+		t.Error("SuggestedWindowStart should not be zero")
+	}
+
+	if result.SuggestedWindowEnd.IsZero() {
+		t.Error("SuggestedWindowEnd should not be zero")
+	}
+
+	if result.SuggestedWindowEnd.Before(result.SuggestedWindowStart) {
+		t.Error("SuggestedWindowEnd should be after SuggestedWindowStart")
+	}
+}
+
+func TestIssuerConnectorAdapter_GetRenewalInfo_Nil(t *testing.T) {
+	ctx := context.Background()
+
+	mock := &mockConnectorLayerIssuer{
+		renewalInfoNil: true,
+	}
+
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	result, err := adapter.GetRenewalInfo(ctx, "test-cert-pem")
+
+	if err != nil {
+		t.Fatalf("GetRenewalInfo failed: %v", err)
+	}
+
+	if result != nil {
+		t.Error("expected nil result when underlying connector returns nil")
+	}
+}
+
+func TestIssuerConnectorAdapter_GetRenewalInfo_ResultTranslation(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	windowStart := now
+	windowEnd := now.Add(24 * time.Hour)
+	retryAfter := now.Add(1 * time.Hour)
+	explanationURL := "https://example.com/renewal-info"
+
+	mock := &mockConnectorLayerIssuer{
+		renewalInfoResult: &issuer.RenewalInfoResult{
+			SuggestedWindowStart: windowStart,
+			SuggestedWindowEnd:   windowEnd,
+			RetryAfter:           retryAfter,
+			ExplanationURL:       explanationURL,
+		},
+	}
+
+	adapter := NewIssuerConnectorAdapter(mock)
+
+	result, err := adapter.GetRenewalInfo(ctx, "test-cert-pem")
+
+	if err != nil {
+		t.Fatalf("GetRenewalInfo failed: %v", err)
+	}
+
+	if result == nil {
+		t.Fatal("expected non-nil result")
+	}
+
+	if !result.SuggestedWindowStart.Equal(windowStart) {
+		t.Errorf("expected SuggestedWindowStart %v, got %v", windowStart, result.SuggestedWindowStart)
+	}
+
+	if !result.SuggestedWindowEnd.Equal(windowEnd) {
+		t.Errorf("expected SuggestedWindowEnd %v, got %v", windowEnd, result.SuggestedWindowEnd)
+	}
+
+	if !result.RetryAfter.Equal(retryAfter) {
+		t.Errorf("expected RetryAfter %v, got %v", retryAfter, result.RetryAfter)
+	}
+
+	if result.ExplanationURL != explanationURL {
+		t.Errorf("expected ExplanationURL %s, got %s", explanationURL, result.ExplanationURL)
+	}
 }

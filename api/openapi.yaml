@@ -62,6 +62,8 @@ tags:
     description: Certificate discovery — filesystem scanning by agents and network TLS probing
   - name: Network Scan
     description: Network scan target management for active TLS certificate discovery
+  - name: Digest
+    description: Scheduled certificate digest email notifications
 
 paths:
   # ─── Health & Auth ───────────────────────────────────────────────────
@@ -2369,6 +2371,56 @@ paths:
                 $ref: "#/components/schemas/StatusMessageResponse"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Digest ────────────────────────────────────────────────────────
+  /api/v1/digest/preview:
+    get:
+      tags: [Digest]
+      summary: Preview digest email
+      description: |
+        Returns an HTML preview of the scheduled certificate digest email.
+        This includes a summary of certificate status, pending jobs, and expiring certificates.
+      operationId: previewDigest
+      responses:
+        "200":
+          description: HTML digest email preview
+          content:
+            text/html:
+              schema:
+                type: string
+                example: "<html>...</html>"
+        "503":
+          description: Digest service not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/digest/send:
+    post:
+      tags: [Digest]
+      summary: Send digest email
+      description: |
+        Triggers immediate sending of the certificate digest email to configured recipients.
+        If no explicit recipients are configured, sends to certificate owners.
+      operationId: sendDigest
+      responses:
+        "200":
+          description: Digest sent successfully
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "503":
+          description: Digest service not configured
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 

@@ -410,6 +410,11 @@ func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
 	return "", fmt.Errorf("custom CA connector does not provide CA certificate access")
 }
 
+// GetRenewalInfo returns nil, nil as the custom CA connector does not support ACME Renewal Information (ARI).
+func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer.RenewalInfoResult, error) {
+	return nil, nil
+}
+
 // --- Helper Methods ---
 
 // writeTempFile writes data to a temporary file and returns its path.

@@ -1,0 +1,36 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "certctl.fullname" . }}-server
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+data:
+  log-level: {{ .Values.server.logging.level | quote }}
+  auth-type: {{ .Values.server.auth.type | quote }}
+  keygen-mode: {{ .Values.server.keygen.mode | quote }}
+  rate-limit-rps: {{ .Values.server.rateLimiting.rps | quote }}
+  rate-limit-burst: {{ .Values.server.rateLimiting.burst | quote }}
+  {{- if .Values.server.cors.origins }}
+  cors-origins: {{ .Values.server.cors.origins | quote }}
+  {{- end }}
+  {{- if .Values.server.networkScan.enabled }}
+  network-scan-interval: {{ .Values.server.networkScan.interval | quote }}
+  {{- end }}
+  {{- if .Values.server.est.enabled }}
+  est-issuer-id: {{ .Values.server.est.issuerID | quote }}
+  {{- if .Values.server.est.profileID }}
+  est-profile-id: {{ .Values.server.est.profileID | quote }}
+  {{- end }}
+  {{- end }}
+  {{- if .Values.server.smtp.enabled }}
+  smtp-host: {{ .Values.server.smtp.host | quote }}
+  smtp-port: {{ .Values.server.smtp.port | quote }}
+  smtp-username: {{ .Values.server.smtp.username | quote }}
+  smtp-from-address: {{ .Values.server.smtp.fromAddress | quote }}
+  {{- end }}
+  {{- if .Values.server.issuer.acme.enabled }}
+  acme-directory-url: {{ .Values.server.issuer.acme.directoryURL | quote }}
+  acme-email: {{ .Values.server.issuer.acme.email | quote }}
+  acme-challenge-type: {{ .Values.server.issuer.acme.challengeType | quote }}
+  {{- end }}

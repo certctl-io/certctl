@@ -195,6 +195,73 @@ func (c *Connector) sendEmail(ctx context.Context, to, subject, body string) err
 	return nil
 }
 
+// sendHTMLEmail sends an HTML email message using the configured SMTP server.
+// Used by the digest service for rich HTML digest emails.
+func (c *Connector) sendHTMLEmail(ctx context.Context, to, subject, htmlBody string) error {
+	addr := net.JoinHostPort(c.config.SMTPHost, strconv.Itoa(c.config.SMTPPort))
+
+	var auth smtp.Auth
+	if c.config.Username != "" && c.config.Password != "" {
+		auth = smtp.PlainAuth("", c.config.Username, c.config.Password, c.config.SMTPHost)
+	}
+
+	var conn net.Conn
+	var err error
+
+	if c.config.UseTLS {
+		tlsConfig := &tls.Config{
+			ServerName: c.config.SMTPHost,
+		}
+		conn, err = tls.Dial("tcp", addr, tlsConfig)
+		if err != nil {
+			return fmt.Errorf("failed to connect via TLS: %w", err)
+		}
+	} else {
+		conn, err = net.Dial("tcp", addr)
+		if err != nil {
+			return fmt.Errorf("failed to connect: %w", err)
+		}
+	}
+	defer conn.Close()
+
+	client, err := smtp.NewClient(conn, c.config.SMTPHost)
+	if err != nil {
+		return fmt.Errorf("failed to create SMTP client: %w", err)
+	}
+	defer client.Close()
+
+	if auth != nil {
+		if err := client.Auth(auth); err != nil {
+			return fmt.Errorf("SMTP authentication failed: %w", err)
+		}
+	}
+
+	if err := client.Mail(c.config.FromAddress); err != nil {
+		return fmt.Errorf("failed to set sender: %w", err)
+	}
+
+	if err := client.Rcpt(to); err != nil {
+		return fmt.Errorf("failed to set recipient: %w", err)
+	}
+
+	wc, err := client.Data()
+	if err != nil {
+		return fmt.Errorf("failed to get data writer: %w", err)
+	}
+	defer wc.Close()
+
+	message := c.formatHTMLEmailMessage(c.config.FromAddress, to, subject, htmlBody)
+	if _, err := wc.Write(message); err != nil {
+		return fmt.Errorf("failed to write message: %w", err)
+	}
+
+	if err := client.Quit(); err != nil {
+		return fmt.Errorf("failed to quit SMTP: %w", err)
+	}
+
+	return nil
+}
+
 // formatEmailMessage formats an email message with standard headers.
 func (c *Connector) formatEmailMessage(from, to, subject, body string) []byte {
 	message := fmt.Sprintf(
@@ -204,6 +271,19 @@ func (c *Connector) formatEmailMessage(from, to, subject, body string) []byte {
 		subject,
 		time.Now().Format(time.RFC1123Z),
 		body,
+	)
+	return []byte(message)
+}
+
+// formatHTMLEmailMessage formats an HTML email message with MIME headers.
+func (c *Connector) formatHTMLEmailMessage(from, to, subject, htmlBody string) []byte {
+	message := fmt.Sprintf(
+		"From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n%s",
+		from,
+		to,
+		subject,
+		time.Now().Format(time.RFC1123Z),
+		htmlBody,
 	)
 	return []byte(message)
 }

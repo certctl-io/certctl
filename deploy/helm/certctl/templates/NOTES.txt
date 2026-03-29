@@ -1,0 +1,68 @@
+1. Get the certctl Server URL by running:
+{{- if .Values.ingress.enabled }}
+  https://{{ index .Values.ingress.hosts 0 "host" }}
+{{- else if contains "NodePort" .Values.server.service.type }}
+  export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
+  export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "certctl.fullname" . }}-server)
+  echo http://$NODE_IP:$NODE_PORT
+{{- else if contains "LoadBalancer" .Values.server.service.type }}
+  export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-server --template "{.status.loadBalancer.ingress[0].ip}")
+  echo http://$SERVICE_IP:{{ .Values.server.service.port }}
+{{- else }}
+  export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=server" -o jsonpath="{.items[0].metadata.name}")
+  export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
+  echo "Visit http://127.0.0.1:8080 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+{{- end }}
+
+2. Get the default API key:
+  kubectl get secret --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-server -o jsonpath="{.data.api-key}" | base64 --decode; echo
+
+3. Get PostgreSQL connection details:
+  Host: {{ include "certctl.fullname" . }}-postgres.{{ .Release.Namespace }}.svc.cluster.local
+  Port: 5432
+  Database: {{ .Values.postgresql.auth.database }}
+  Username: {{ .Values.postgresql.auth.username }}
+  Password: $(kubectl get secret --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-postgres -o jsonpath="{.data.password}" | base64 --decode)
+
+4. Check deployment status:
+  kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
+
+5. View server logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/component=server -f
+
+{{- if .Values.agent.enabled }}
+
+6. View agent logs:
+  kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/component=agent -f
+
+{{- end }}
+
+IMPORTANT NOTES FOR PRODUCTION:
+
+1. Update the API key for security:
+   kubectl patch secret {{ include "certctl.fullname" . }}-server -n {{ .Release.Namespace }} \
+     -p '{"data":{"api-key":"'$(echo -n "YOUR_NEW_API_KEY" | base64)'"}}'
+
+2. Update PostgreSQL password:
+   kubectl patch secret {{ include "certctl.fullname" . }}-postgres -n {{ .Release.Namespace }} \
+     -p '{"data":{"password":"'$(echo -n "YOUR_NEW_PASSWORD" | base64)'"}}'
+
+3. Configure certificate issuers (ACME, step-ca, etc.) via values.yaml:
+   helm upgrade {{ .Release.Name }} certctl/certctl \
+     --set server.issuer.acme.enabled=true \
+     --set server.issuer.acme.directoryURL=https://acme-v02.api.letsencrypt.org/directory \
+     --set server.issuer.acme.email=admin@example.com
+
+4. For production with persistent databases and backups:
+   - Use an external PostgreSQL managed service (AWS RDS, Cloud SQL, etc.)
+   - Set postgresql.enabled=false and configure CERTCTL_DATABASE_URL in values
+
+5. Enable HTTPS/TLS using an Ingress with certificate management:
+   - Configure cert-manager for automatic TLS certificate renewal
+   - Update ingress values with your domain and certificate issuer
+
+6. Review security contexts and network policies:
+   - All containers run as non-root
+   - Implement network policies to restrict traffic between components
+   - Consider pod security policies or security standards for your cluster

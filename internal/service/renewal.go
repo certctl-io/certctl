@@ -48,6 +48,17 @@ type IssuerConnector interface {
 	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
 	// GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
 	GetCACertPEM(ctx context.Context) (string, error)
+	// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9702 for a certificate.
+	// certPEM is the PEM-encoded certificate. Returns nil, nil if the issuer does not support ARI.
+	GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error)
+}
+
+// RenewalInfoResult holds the ARI response from a CA.
+type RenewalInfoResult struct {
+	SuggestedWindowStart time.Time
+	SuggestedWindowEnd   time.Time
+	RetryAfter           time.Time
+	ExplanationURL       string
 }
 
 // IssuanceResult holds the result of a certificate issuance or renewal operation.

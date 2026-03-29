@@ -1,4 +1,5 @@
-import { useQuery } from '@tanstack/react-query';
+import { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -7,7 +8,7 @@ import {
 import {
   getCertificates, getAgents, getJobs, getNotifications, getHealth,
   getDashboardSummary, getCertificatesByStatus, getExpirationTimeline,
-  getJobTrends, getIssuanceRate,
+  getJobTrends, getIssuanceRate, previewDigest, sendDigest,
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -74,6 +75,89 @@ const CustomTooltip = ({ active, payload, label }: any) => {
     </div>
   );
 };
+
+function DigestCard() {
+  const [previewHtml, setPreviewHtml] = useState<string | null>(null);
+  const [showPreview, setShowPreview] = useState(false);
+
+  const previewMutation = useMutation({
+    mutationFn: previewDigest,
+    onSuccess: (html) => {
+      setPreviewHtml(html);
+      setShowPreview(true);
+    },
+  });
+
+  const sendMutation = useMutation({ mutationFn: sendDigest });
+
+  return (
+    <>
+      <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+        <div className="flex items-center justify-between">
+          <div>
+            <h3 className="text-sm font-semibold text-ink-muted">Certificate Digest</h3>
+            <p className="text-xs text-ink-faint mt-0.5">Send an email summary of certificate status to configured recipients</p>
+          </div>
+          <div className="flex gap-2">
+            <button
+              onClick={() => previewMutation.mutate()}
+              disabled={previewMutation.isPending}
+              className="btn btn-secondary text-xs"
+            >
+              {previewMutation.isPending ? 'Loading...' : 'Preview'}
+            </button>
+            <button
+              onClick={() => sendMutation.mutate()}
+              disabled={sendMutation.isPending}
+              className="btn btn-primary text-xs"
+            >
+              {sendMutation.isPending ? 'Sending...' : 'Send Now'}
+            </button>
+          </div>
+        </div>
+        {sendMutation.isSuccess && (
+          <div className="mt-3 text-xs text-emerald-600 bg-emerald-50 border border-emerald-200 rounded px-3 py-2">
+            Digest sent successfully.
+          </div>
+        )}
+        {sendMutation.isError && (
+          <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            Failed to send digest. Check SMTP configuration.
+          </div>
+        )}
+        {previewMutation.isError && (
+          <div className="mt-3 text-xs text-red-600 bg-red-50 border border-red-200 rounded px-3 py-2">
+            Digest not configured. Set CERTCTL_DIGEST_ENABLED=true and configure SMTP.
+          </div>
+        )}
+      </div>
+
+      {/* Preview Modal */}
+      {showPreview && previewHtml && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50" onClick={() => setShowPreview(false)}>
+          <div className="bg-white rounded-lg shadow-xl max-w-2xl w-full max-h-[80vh] overflow-hidden" onClick={e => e.stopPropagation()}>
+            <div className="flex items-center justify-between px-5 py-3 border-b border-gray-200">
+              <h3 className="text-sm font-semibold text-gray-700">Digest Email Preview</h3>
+              <button onClick={() => setShowPreview(false)} className="text-gray-400 hover:text-gray-600">
+                <svg className="w-5 h-5" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={1.5}>
+                  <path strokeLinecap="round" strokeLinejoin="round" d="M6 18L18 6M6 6l12 12" />
+                </svg>
+              </button>
+            </div>
+            <div className="overflow-y-auto max-h-[calc(80vh-52px)]">
+              <iframe
+                srcDoc={previewHtml}
+                title="Digest Preview"
+                className="w-full h-[600px] border-0"
+                sandbox=""
+              />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
 
 export default function DashboardPage() {
   const navigate = useNavigate();
@@ -292,6 +376,9 @@ export default function DashboardPage() {
             )}
           </div>
         </div>
+
+        {/* Certificate Digest */}
+        <DigestCard />
 
         {/* Pending Jobs Banner */}
         {pendingJobs > 0 && (

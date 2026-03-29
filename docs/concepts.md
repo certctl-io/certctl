@@ -183,6 +183,19 @@ Profiles are managed via the API (`/api/v1/profiles`) and the GUI, and can be as
 
 For policies with `auto_renew` disabled, renewal jobs enter an **AwaitingApproval** state instead of processing immediately. An operator must explicitly approve or reject the renewal via the API or GUI. Approved jobs transition to Pending and are picked up by the scheduler. Rejected jobs are cancelled with an optional reason. This is useful for high-value certificates where you want human oversight before renewal.
 
+### Renewal Timing: Thresholds vs. ARI (RFC 9702)
+
+**Traditional approach (thresholds):** By default, certctl uses static renewal thresholds — renew a certificate at a fixed number of days before expiry (default: 30 days). This simple, predictable model works for most use cases: it avoids unnecessary renewals near expiry and gives you a predictable window to catch failures.
+
+**Advanced approach (ACME ARI):** Some Certificate Authorities support ACME Renewal Information (RFC 9702), which allows the CA to tell certctl the optimal time to renew. Instead of guessing "renew 30 days before expiry," the CA responds with a precise `suggestedWindow` containing start and end times. This is useful when:
+- The CA is performing maintenance and wants to batch renewals in a specific window
+- The CA is coordinating a mass revocation (e.g., due to a compromise) and needs to control renewal timing
+- You want to avoid thundering herd renewal spikes by accepting the CA's suggested timing
+
+**How it works:** Enable with `CERTCTL_ACME_ARI_ENABLED=true` on your ACME issuer. When a certificate approaches expiry, certctl queries the ARI endpoint with the certificate's DER encoding. The CA responds with a suggested renewal window. If the current time is within the window or past the start time, certctl renews immediately. Otherwise, it waits until the window opens.
+
+**Graceful degradation:** If your CA doesn't support ARI (returns 404 from the ARI endpoint), certctl automatically falls back to the traditional threshold-based renewal. No configuration change needed — the fallback is transparent. Errors from the CA are logged as warnings and don't block the renewal process.
+
 ### Certificate Revocation
 
 When a private key is compromised, a certificate is superseded, or a service is decommissioned, you need to revoke the certificate immediately — not wait for it to expire. Revocation tells clients "stop trusting this certificate right now."

@@ -1,0 +1,77 @@
+# Certctl with ACME DNS-01 Challenge (Let's Encrypt)
+# Enables automatic certificate issuance from Let's Encrypt
+# using DNS-01 verification (wildcard-capable)
+
+server:
+  auth:
+    type: api-key
+    apiKey: "CHANGE_ME"
+
+  issuer:
+    local:
+      enabled: true
+
+    acme:
+      enabled: true
+      directoryURL: https://acme-v02.api.letsencrypt.org/directory
+      email: admin@example.com
+      challengeType: dns-01
+      dnsPresentScript: /scripts/dns-present.sh
+      dnsCleanupScript: /scripts/dns-cleanup.sh
+      dnsPropagationWait: 30s
+      # For DNS-PERSIST-01 (standing validation record, no per-renewal updates):
+      # challengeType: dns-persist-01
+      # dnsPersistIssuerDomain: validation.example.com
+
+  # Mount DNS scripts as ConfigMap
+  volumes:
+    - name: dns-scripts
+      configMap:
+        name: dns-scripts
+        defaultMode: 0755
+
+  volumeMounts:
+    - name: dns-scripts
+      mountPath: /scripts
+      readOnly: true
+
+postgresql:
+  enabled: true
+  storage:
+    size: 20Gi
+
+agent:
+  enabled: true
+  kind: DaemonSet
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: certctl.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+---
+# You'll need to create the DNS scripts ConfigMap separately:
+#
+# kubectl create configmap dns-scripts \
+#   --from-file=dns-present.sh=./scripts/dns-present.sh \
+#   --from-file=dns-cleanup.sh=./scripts/dns-cleanup.sh
+#
+# Example dns-present.sh (Cloudflare):
+#   #!/bin/bash
+#   DOMAIN=$1
+#   TOKEN=$2
+#
+#   curl -X POST "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records" \
+#     -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}" \
+#     -d "{\"type\":\"TXT\",\"name\":\"_acme-challenge.${DOMAIN}\",\"content\":\"${TOKEN}\"}"
+#
+# Example dns-cleanup.sh (Cloudflare):
+#   #!/bin/bash
+#   DOMAIN=$1
+#
+#   curl -X DELETE "https://api.cloudflare.com/client/v4/zones/{zone_id}/dns_records/{record_id}" \
+#     -H "Authorization: Bearer ${CLOUDFLARE_API_TOKEN}"

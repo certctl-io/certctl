@@ -24,6 +24,8 @@ type Config struct {
 	NetworkScan  NetworkScanConfig
 	EST          ESTConfig
 	Verification VerificationConfig
+	ACME         ACMEConfig
+	Digest       DigestConfig
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -64,6 +66,34 @@ type NotifierConfig struct {
 	// OpsGeniePriority sets the default priority for OpsGenie alerts.
 	// Valid values: "P1", "P2", "P3", "P4", "P5". Default: "P3".
 	OpsGeniePriority string
+
+	// SMTPHost is the SMTP server hostname for sending email notifications.
+	// Example: "smtp.gmail.com", "smtp.sendgrid.net". Required for email notifications.
+	// Setting: CERTCTL_SMTP_HOST environment variable.
+	SMTPHost string
+
+	// SMTPPort is the SMTP server port. Default: 587 (STARTTLS).
+	// Common values: 25 (plain), 465 (implicit TLS), 587 (STARTTLS).
+	// Setting: CERTCTL_SMTP_PORT environment variable.
+	SMTPPort int
+
+	// SMTPUsername is the SMTP authentication username.
+	// Setting: CERTCTL_SMTP_USERNAME environment variable.
+	SMTPUsername string
+
+	// SMTPPassword is the SMTP authentication password or app-specific password.
+	// Setting: CERTCTL_SMTP_PASSWORD environment variable.
+	SMTPPassword string
+
+	// SMTPFromAddress is the sender email address for outbound notifications.
+	// Example: "certctl@example.com", "noreply@company.com".
+	// Setting: CERTCTL_SMTP_FROM_ADDRESS environment variable.
+	SMTPFromAddress string
+
+	// SMTPUseTLS enables TLS for the SMTP connection.
+	// Default: true. Set to false for plain SMTP (not recommended).
+	// Setting: CERTCTL_SMTP_USE_TLS environment variable.
+	SMTPUseTLS bool
 }
 
 // KeygenConfig controls where private keys are generated.
@@ -111,6 +141,24 @@ type StepCAConfig struct {
 	ProvisionerPassword string
 }
 
+// DigestConfig controls the scheduled certificate digest email feature.
+type DigestConfig struct {
+	// Enabled controls whether periodic digest emails are generated and sent.
+	// Default: false. When enabled, requires SMTP to be configured.
+	// Setting: CERTCTL_DIGEST_ENABLED environment variable.
+	Enabled bool
+
+	// Interval is how often digest emails are generated and sent.
+	// Default: 24 hours. Minimum: 1 hour.
+	// Setting: CERTCTL_DIGEST_INTERVAL environment variable.
+	Interval time.Duration
+
+	// Recipients is a comma-separated list of email addresses to receive digest emails.
+	// If empty, digests are sent to all certificate owners.
+	// Setting: CERTCTL_DIGEST_RECIPIENTS environment variable.
+	Recipients []string
+}
+
 // ACMEConfig contains ACME issuer connector configuration.
 type ACMEConfig struct {
 	// DirectoryURL is the ACME directory URL for certificate issuance.
@@ -144,6 +192,13 @@ type ACMEConfig struct {
 	// Example: "letsencrypt.org" or "zerossl.com". Only used if ChallengeType is "dns-persist-01".
 	// The record value becomes: "<issuer_domain>; accounturi=<acme_account_uri>"
 	DNSPersistIssuerDomain string
+
+	// ARIEnabled enables ACME Renewal Information (RFC 9702) support.
+	// When enabled, the renewal scheduler queries the CA for suggested renewal windows
+	// instead of relying solely on static expiration thresholds.
+	// Default: false. Requires a CA that supports ARI (e.g., Let's Encrypt).
+	// Setting: CERTCTL_ACME_ARI_ENABLED environment variable.
+	ARIEnabled bool
 }
 
 // OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
@@ -349,6 +404,12 @@ func Load() (*Config, error) {
 			PagerDutySeverity:   getEnv("CERTCTL_PAGERDUTY_SEVERITY", "warning"),
 			OpsGenieAPIKey:      getEnv("CERTCTL_OPSGENIE_API_KEY", ""),
 			OpsGeniePriority:    getEnv("CERTCTL_OPSGENIE_PRIORITY", "P3"),
+			SMTPHost:            getEnv("CERTCTL_SMTP_HOST", ""),
+			SMTPPort:            getEnvInt("CERTCTL_SMTP_PORT", 587),
+			SMTPUsername:        getEnv("CERTCTL_SMTP_USERNAME", ""),
+			SMTPPassword:        getEnv("CERTCTL_SMTP_PASSWORD", ""),
+			SMTPFromAddress:     getEnv("CERTCTL_SMTP_FROM_ADDRESS", ""),
+			SMTPUseTLS:          getEnvBool("CERTCTL_SMTP_USE_TLS", true),
 		},
 		NetworkScan: NetworkScanConfig{
 			Enabled:      getEnvBool("CERTCTL_NETWORK_SCAN_ENABLED", false),
@@ -363,6 +424,20 @@ func Load() (*Config, error) {
 			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
 			Timeout: getEnvDuration("CERTCTL_VERIFY_TIMEOUT", 10*time.Second),
 			Delay:   getEnvDuration("CERTCTL_VERIFY_DELAY", 2*time.Second),
+		},
+		ACME: ACMEConfig{
+			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),
+			Email:                  getEnv("CERTCTL_ACME_EMAIL", ""),
+			ChallengeType:          getEnv("CERTCTL_ACME_CHALLENGE_TYPE", "http-01"),
+			DNSPresentScript:       getEnv("CERTCTL_ACME_DNS_PRESENT_SCRIPT", ""),
+			DNSCleanUpScript:       getEnv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT", ""),
+			DNSPersistIssuerDomain: getEnv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN", ""),
+			ARIEnabled:             getEnvBool("CERTCTL_ACME_ARI_ENABLED", false),
+		},
+		Digest: DigestConfig{
+			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),
+			Interval:   getEnvDuration("CERTCTL_DIGEST_INTERVAL", 24*time.Hour),
+			Recipients: getEnvList("CERTCTL_DIGEST_RECIPIENTS", nil),
 		},
 	}
 

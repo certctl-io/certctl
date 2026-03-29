@@ -1,0 +1,50 @@
+# Certctl with External PostgreSQL Database
+# Use this when PostgreSQL is managed externally:
+# - AWS RDS
+# - Cloud SQL (Google Cloud)
+# - Azure Database for PostgreSQL
+# - Self-managed PostgreSQL server
+
+server:
+  replicas: 2
+
+  auth:
+    type: api-key
+    apiKey: "CHANGE_ME"
+
+  issuer:
+    local:
+      enabled: true
+
+  # Pass external database URL via environment variable
+  env:
+    CERTCTL_DATABASE_URL: "postgres://certctl:CHANGE_ME@postgres.example.com:5432/certctl?sslmode=require"
+
+# Disable internal PostgreSQL
+postgresql:
+  enabled: false
+
+agent:
+  enabled: true
+  kind: DaemonSet
+
+ingress:
+  enabled: true
+  className: nginx
+  hosts:
+    - host: certctl.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+
+# For AWS RDS with IAM authentication:
+# env:
+#   CERTCTL_DATABASE_URL: "postgres://certctl:CHANGE_ME@mydb.123456789.us-east-1.rds.amazonaws.com:5432/certctl?sslmode=require"
+
+# For Google Cloud SQL:
+# env:
+#   CERTCTL_DATABASE_URL: "postgres://certctl:CHANGE_ME@/certctl?host=/cloudsql/PROJECT:REGION:INSTANCE&sslmode=require"
+
+# For Azure Database:
+# env:
+#   CERTCTL_DATABASE_URL: "postgres://certctl@servername:CHANGE_ME@servername.postgres.database.azure.com:5432/certctl?sslmode=require"

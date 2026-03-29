@@ -43,6 +43,8 @@ On Linux, follow the official Docker install guide for your distribution.
 
 ## Start Everything
 
+### Docker Compose (Quick Start)
+
 ```bash
 git clone https://github.com/shankar0123/certctl.git
 cd certctl
@@ -57,6 +59,22 @@ cp deploy/.env.example deploy/.env
 # Edit deploy/.env to set secure POSTGRES_PASSWORD and CERTCTL_API_KEY values
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+### Kubernetes with Helm
+
+For production deployments on Kubernetes, use the Helm chart:
+
+```bash
+helm install certctl deploy/helm/certctl/ \
+  --create-namespace --namespace certctl \
+  --set server.auth.apiKey="your-secure-api-key" \
+  --set postgresql.auth.password="your-db-password" \
+  --set ingress.enabled=true \
+  --set ingress.hosts[0].host="certctl.example.com" \
+  --set ingress.hosts[0].tls=true
+```
+
+The chart includes: server Deployment (with configurable replicas, health probes, security context), PostgreSQL StatefulSet with persistent volumes, agent DaemonSet (one agent per infrastructure node), optional Ingress with TLS, and ServiceAccount with RBAC. All certctl configuration options are exposed in `values.yaml` — customize issuer settings, target connectors, scheduler intervals, and notifier credentials there.
 
 Wait about 30 seconds for PostgreSQL to initialize, then verify:
 
@@ -345,6 +363,35 @@ export CERTCTL_API_KEY="test-key-123"
 ./certctl-cli import /path/to/certs.pem  # Bulk import
 ./certctl-cli status                   # Health + stats
 ```
+
+## Scheduled Certificate Digest Emails
+
+Enable automatic HTML digest emails with certificate stats, expiration timeline, and job health:
+
+```bash
+# Set SMTP configuration
+export CERTCTL_SMTP_HOST=smtp.gmail.com
+export CERTCTL_SMTP_PORT=587
+export CERTCTL_SMTP_USERNAME=admin@example.com
+export CERTCTL_SMTP_PASSWORD=your-app-password
+export CERTCTL_SMTP_FROM_ADDRESS=certctl@example.com
+export CERTCTL_SMTP_USE_TLS=true
+
+# Enable digest and set recipients
+export CERTCTL_DIGEST_ENABLED=true
+export CERTCTL_DIGEST_INTERVAL=24h
+export CERTCTL_DIGEST_RECIPIENTS=ops@example.com,security@example.com
+```
+
+Preview the digest HTML before enabling scheduled delivery:
+```bash
+curl http://localhost:8443/api/v1/digest/preview | jq '.html' | grep -o '<html>' # Shows HTML is ready
+
+# Trigger a digest send immediately (outside of schedule)
+curl -X POST http://localhost:8443/api/v1/digest/send
+```
+
+If no recipients are configured (`CERTCTL_DIGEST_RECIPIENTS` empty), the digest falls back to certificate owner emails. Digests include total certificates, expiring soon, expired, active agents, completed/failed jobs (30-day summary), and a table of expiring certs color-coded by urgency (7/14/30 days).
 
 ## MCP Server (AI Integration)
 

@@ -21,6 +21,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
 	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
 	notifyslack "github.com/shankar0123/certctl/internal/connector/notifier/slack"
@@ -189,6 +190,25 @@ func main() {
 		logger.Info("OpsGenie notifier enabled")
 	}
 
+	// Wire email notifier if SMTP is configured
+	var emailAdapter *notifyemail.NotifierAdapter
+	if cfg.Notifiers.SMTPHost != "" && cfg.Notifiers.SMTPFromAddress != "" {
+		emailConnector := notifyemail.New(&notifyemail.Config{
+			SMTPHost:    cfg.Notifiers.SMTPHost,
+			SMTPPort:    cfg.Notifiers.SMTPPort,
+			Username:    cfg.Notifiers.SMTPUsername,
+			Password:    cfg.Notifiers.SMTPPassword,
+			FromAddress: cfg.Notifiers.SMTPFromAddress,
+			UseTLS:      cfg.Notifiers.SMTPUseTLS,
+		}, logger)
+		emailAdapter = notifyemail.NewNotifierAdapter(emailConnector)
+		notifierRegistry["Email"] = emailAdapter
+		logger.Info("Email notifier enabled",
+			"smtp_host", cfg.Notifiers.SMTPHost,
+			"smtp_port", cfg.Notifiers.SMTPPort,
+			"from", cfg.Notifiers.SMTPFromAddress)
+	}
+
 	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
 	notificationService.SetOwnerRepo(ownerRepo)
 
@@ -265,6 +285,26 @@ func main() {
 	verificationHandler := handler.NewVerificationHandler(verificationService)
 	exportService := service.NewExportService(certificateRepo, auditService)
 	exportHandler := handler.NewExportHandler(exportService)
+
+	// Initialize digest service (requires email notifier)
+	var digestService *service.DigestService
+	var digestHandler *handler.DigestHandler
+	if cfg.Digest.Enabled && emailAdapter != nil {
+		digestService = service.NewDigestService(
+			statsService, certificateRepo, ownerRepo, emailAdapter, cfg.Digest.Recipients, logger,
+		)
+		digestHandler = handler.NewDigestHandler(digestService)
+		logger.Info("digest service enabled",
+			"interval", cfg.Digest.Interval.String(),
+			"recipients", len(cfg.Digest.Recipients))
+	} else {
+		// Create a no-op digest handler for route registration
+		digestHandler = handler.NewDigestHandler(nil)
+		if cfg.Digest.Enabled && emailAdapter == nil {
+			logger.Warn("digest enabled but SMTP not configured — digest emails will not be sent")
+		}
+	}
+
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -289,6 +329,11 @@ func main() {
 	if cfg.NetworkScan.Enabled {
 		sched.SetNetworkScanInterval(cfg.NetworkScan.ScanInterval)
 		logger.Info("network scanning enabled", "interval", cfg.NetworkScan.ScanInterval.String())
+	}
+	if digestService != nil {
+		sched.SetDigestService(digestService)
+		sched.SetDigestInterval(cfg.Digest.Interval)
+		logger.Info("digest scheduler enabled", "interval", cfg.Digest.Interval.String())
 	}
 
 	// Start scheduler
@@ -319,6 +364,7 @@ func main() {
 		NetworkScan:   networkScanHandler,
 		Verification:  verificationHandler,
 		Export:        exportHandler,
+		Digest:        *digestHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

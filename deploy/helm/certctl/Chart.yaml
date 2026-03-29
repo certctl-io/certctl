@@ -1,0 +1,20 @@
+apiVersion: v2
+name: certctl
+description: Self-hosted certificate lifecycle management platform
+type: application
+version: 0.1.0
+appVersion: "2.1.0"
+keywords:
+  - certificate
+  - tls
+  - ssl
+  - pki
+  - acme
+  - lifecycle
+  - kubernetes
+maintainers:
+  - name: certctl
+home: https://github.com/shankar0123/certctl
+sources:
+  - https://github.com/shankar0123/certctl
+license: BSL-1.1

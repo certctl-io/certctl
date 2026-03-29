@@ -54,6 +54,10 @@ type Config struct {
 	// Used to construct the TXT record value: "<issuer-domain>; accounturi=<account-uri>".
 	// Required when ChallengeType is "dns-persist-01". For Let's Encrypt, use "letsencrypt.org".
 	DNSPersistIssuerDomain string `json:"dns_persist_issuer_domain,omitempty"`
+
+	// ARIEnabled enables ACME Renewal Information (RFC 9702) support per CERTCTL_ACME_ARI_ENABLED.
+	// When enabled, the connector queries the CA's ARI endpoint to get CA-directed renewal timing.
+	ARIEnabled bool `json:"ari_enabled,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for ACME-compatible CAs

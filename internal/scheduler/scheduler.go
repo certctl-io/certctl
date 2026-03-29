@@ -35,6 +35,11 @@ type NetworkScanServicer interface {
 	ScanAllTargets(ctx context.Context) error
 }
 
+// DigestServicer defines the interface for digest email processing used by the scheduler.
+type DigestServicer interface {
+	ProcessDigest(ctx context.Context) error
+}
+
 // Scheduler manages background jobs and periodic tasks for the certificate control plane.
 // It runs multiple concurrent loops for renewal checks, job processing, agent health checks,
 // and notification processing.
@@ -44,6 +49,7 @@ type Scheduler struct {
 	agentService        AgentServicer
 	notificationService NotificationServicer
 	networkScanService  NetworkScanServicer
+	digestService       DigestServicer
 	logger              *slog.Logger
 
 	// Configurable tick intervals
@@ -53,6 +59,7 @@ type Scheduler struct {
 	notificationProcessInterval     time.Duration
 	shortLivedExpiryCheckInterval   time.Duration
 	networkScanInterval             time.Duration
+	digestInterval                  time.Duration
 
 	// Idempotency guards: prevent duplicate execution of slow jobs
 	renewalCheckRunning           atomic.Bool
@@ -61,6 +68,7 @@ type Scheduler struct {
 	notificationProcessRunning    atomic.Bool
 	shortLivedExpiryCheckRunning  atomic.Bool
 	networkScanRunning            atomic.Bool
+	digestRunning                 atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -90,7 +98,19 @@ func NewScheduler(
 		notificationProcessInterval:   1 * time.Minute,
 		shortLivedExpiryCheckInterval: 30 * time.Second,
 		networkScanInterval:           6 * time.Hour,
+		digestInterval:                24 * time.Hour,
 	}
+}
+
+// SetDigestService sets the digest service for the 7th scheduler loop.
+// Called after construction since digest is optional.
+func (s *Scheduler) SetDigestService(ds DigestServicer) {
+	s.digestService = ds
+}
+
+// SetDigestInterval configures the interval for digest email processing.
+func (s *Scheduler) SetDigestInterval(d time.Duration) {
+	s.digestInterval = d
 }
 
 // SetRenewalCheckInterval configures the interval for renewal checks.
@@ -135,7 +155,10 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		// blocks until they've fully exited (prevents test races).
 		loopCount := 5
 		if s.networkScanService != nil {
-			loopCount = 6
+			loopCount++
+		}
+		if s.digestService != nil {
+			loopCount++
 		}
 		s.wg.Add(loopCount)
 
@@ -146,6 +169,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go func() { defer s.wg.Done(); s.shortLivedExpiryCheckLoop(ctx) }()
 		if s.networkScanService != nil {
 			go func() { defer s.wg.Done(); s.networkScanLoop(ctx) }()
+		}
+		if s.digestService != nil {
+			go func() { defer s.wg.Done(); s.digestLoop(ctx) }()
 		}
 
 		// Signal that all loops are launched
@@ -447,6 +473,47 @@ func (s *Scheduler) runNetworkScan(ctx context.Context) {
 			"interval", s.networkScanInterval.String())
 	} else {
 		s.logger.Debug("network scan completed")
+	}
+}
+
+// digestLoop runs every digestInterval and generates/sends certificate digest emails.
+// Uses atomic.Bool to prevent duplicate execution if the previous digest is still running.
+func (s *Scheduler) digestLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.digestInterval)
+	defer ticker.Stop()
+
+	// Do NOT run immediately on start for digest — wait for the first tick.
+	// Digests are infrequent (24h default) and shouldn't fire on every restart.
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.digestRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("digest processor still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.digestRunning.Store(false)
+				s.runDigest(ctx)
+			}()
+		}
+	}
+}
+
+// runDigest executes a single digest processing cycle with error recovery.
+func (s *Scheduler) runDigest(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := s.digestService.ProcessDigest(opCtx); err != nil {
+		s.logger.Error("digest processor failed",
+			"error", err,
+			"interval", s.digestInterval.String())
+	} else {
+		s.logger.Debug("digest processor completed")
 	}
 }
 

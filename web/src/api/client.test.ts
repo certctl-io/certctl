@@ -76,6 +76,8 @@ import {
   updateNetworkScanTarget,
   deleteNetworkScanTarget,
   triggerNetworkScan,
+  previewDigest,
+  sendDigest,
 } from './client';
 
 // Mock global fetch
@@ -964,6 +966,44 @@ describe('API Client', () => {
       const result = await getJobs({});
       expect(result.data[0].verification_status).toBeUndefined();
       expect(result.data[0].verified_at).toBeUndefined();
+    });
+  });
+
+  // ─── Digest ─────────────────────────────
+
+  describe('Digest', () => {
+    it('previewDigest fetches HTML preview', async () => {
+      const html = '<html><body>Digest Preview</body></html>';
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(html),
+        } as Response)
+      );
+      const result = await previewDigest();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/digest/preview');
+      expect(result).toBe(html);
+    });
+
+    it('previewDigest throws on error', async () => {
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: false,
+          status: 503,
+          text: () => Promise.resolve('not configured'),
+        } as Response)
+      );
+      await expect(previewDigest()).rejects.toThrow('Digest preview failed: 503');
+    });
+
+    it('sendDigest sends POST request', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'digest sent' }));
+      const result = await sendDigest();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/digest/send');
+      expect(init.method).toBe('POST');
+      expect(result.message).toBe('digest sent');
     });
   });
 });

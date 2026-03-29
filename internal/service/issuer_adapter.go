@@ -102,3 +102,20 @@ func (a *IssuerConnectorAdapter) SignOCSPResponse(ctx context.Context, req OCSPS
 func (a *IssuerConnectorAdapter) GetCACertPEM(ctx context.Context) (string, error) {
 	return a.connector.GetCACertPEM(ctx)
 }
+
+// GetRenewalInfo delegates to the underlying connector, translating between service-layer and connector-layer types.
+func (a *IssuerConnectorAdapter) GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error) {
+	result, err := a.connector.GetRenewalInfo(ctx, certPEM)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil {
+		return nil, nil
+	}
+	return &RenewalInfoResult{
+		SuggestedWindowStart: result.SuggestedWindowStart,
+		SuggestedWindowEnd:   result.SuggestedWindowEnd,
+		RetryAfter:           result.RetryAfter,
+		ExplanationURL:       result.ExplanationURL,
+	}, nil
+}

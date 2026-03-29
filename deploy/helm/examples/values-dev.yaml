@@ -1,0 +1,99 @@
+# Certctl Development Configuration
+# Lightweight setup for development and testing
+# - Single server replica
+# - Small PostgreSQL storage
+# - Minimal resource limits
+# - No ingress or monitoring
+# - Demo auth mode (no API key required)
+
+server:
+  replicas: 1
+
+  image:
+    repository: ghcr.io/shankar0123/certctl
+    pullPolicy: IfNotPresent  # Use latest tag
+
+  port: 8443
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 64Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+  auth:
+    type: none  # Demo mode - no authentication
+
+  logging:
+    level: debug
+    format: json
+
+  service:
+    type: LoadBalancer  # Easy external access for dev
+
+  issuer:
+    local:
+      enabled: true
+
+  rateLimiting:
+    rps: 100
+    burst: 200
+
+postgresql:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  auth:
+    database: certctl
+    username: certctl
+    password: "dev-password-change-me"
+
+  storage:
+    size: 5Gi
+    storageClass: ""  # Use default storage class
+
+  resources:
+    requests:
+      cpu: 50m
+      memory: 128Mi
+    limits:
+      cpu: 200m
+      memory: 256Mi
+
+agent:
+  enabled: true
+  kind: Deployment
+  replicas: 1
+
+  image:
+    repository: ghcr.io/shankar0123/certctl-agent
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 25m
+      memory: 32Mi
+    limits:
+      cpu: 100m
+      memory: 128Mi
+
+ingress:
+  enabled: false
+
+serviceAccount:
+  create: true
+
+rbac:
+  create: true
+
+monitoring:
+  enabled: false
+
+customLabels:
+  environment: development

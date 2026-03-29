@@ -1,0 +1,159 @@
+# Certctl Production HA Configuration
+# High availability deployment with:
+# - 3 server replicas with pod anti-affinity
+# - Large PostgreSQL storage
+# - Resource limits for production
+# - Prometheus monitoring
+# - Network policies enforcement
+
+namespace: certctl
+
+server:
+  replicas: 3
+
+  image:
+    repository: ghcr.io/shankar0123/certctl
+    tag: "2.1.0"
+    pullPolicy: IfNotPresent
+
+  port: 8443
+
+  resources:
+    requests:
+      cpu: 250m
+      memory: 256Mi
+    limits:
+      cpu: 1000m
+      memory: 512Mi
+
+  auth:
+    type: api-key
+    apiKey: "CHANGE_ME_IN_PRODUCTION"  # Use --set or sealed-secrets
+
+  logging:
+    level: info
+    format: json
+
+  service:
+    type: ClusterIP
+    annotations:
+      prometheus.io/scrape: "true"
+      prometheus.io/port: "8443"
+      prometheus.io/path: "/api/v1/metrics/prometheus"
+
+  issuer:
+    local:
+      enabled: true
+    acme:
+      enabled: true
+      directoryURL: https://acme-v02.api.letsencrypt.org/directory
+      email: admin@example.com
+      challengeType: dns-01
+
+  rateLimiting:
+    rps: 500
+    burst: 1000
+
+postgresql:
+  enabled: true
+
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+
+  auth:
+    database: certctl
+    username: certctl
+    password: "CHANGE_ME_IN_PRODUCTION"  # Use --set or sealed-secrets
+
+  storage:
+    size: 100Gi
+    storageClass: "fast-ssd"  # Use your high-performance storage class
+
+  resources:
+    requests:
+      cpu: 500m
+      memory: 512Mi
+    limits:
+      cpu: 2000m
+      memory: 2Gi
+
+agent:
+  enabled: true
+  kind: DaemonSet
+
+  image:
+    repository: ghcr.io/shankar0123/certctl-agent
+    tag: "2.1.0"
+    pullPolicy: IfNotPresent
+
+  resources:
+    requests:
+      cpu: 100m
+      memory: 128Mi
+    limits:
+      cpu: 500m
+      memory: 256Mi
+
+  discoveryDirs: "/etc/ssl/certs,/etc/pki/tls,/etc/ssl"
+
+ingress:
+  enabled: true
+  className: nginx
+  annotations:
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+    nginx.ingress.kubernetes.io/ssl-redirect: "true"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+  hosts:
+    - host: certctl.example.com
+      paths:
+        - path: /
+          pathType: Prefix
+  tls:
+    - secretName: certctl-tls
+      hosts:
+        - certctl.example.com
+
+serviceAccount:
+  create: true
+  annotations:
+    eks.amazonaws.com/role-arn: arn:aws:iam::ACCOUNT:role/certctl-role  # For IRSA on AWS
+
+rbac:
+  create: true
+
+podDisruptionBudget:
+  enabled: true
+  minAvailable: 2
+
+monitoring:
+  enabled: true
+  serviceMonitor:
+    enabled: true
+    interval: 30s
+    scrapeTimeout: 10s
+
+# Pod anti-affinity for HA
+podAntiAffinity:
+  requiredDuringSchedulingIgnoredDuringExecution:
+    - labelSelector:
+        matchExpressions:
+          - key: app.kubernetes.io/name
+            operator: In
+            values:
+              - certctl
+          - key: app.kubernetes.io/component
+            operator: In
+            values:
+              - server
+      topologyKey: kubernetes.io/hostname
+
+customLabels:
+  environment: production
+  team: platform
+  cost-center: ops
+
+customAnnotations:
+  slack-alerts: "#ops"
+  backup-policy: daily

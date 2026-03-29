@@ -64,6 +64,7 @@ type HandlerRegistry struct {
 	NetworkScan   handler.NetworkScanHandler
 	Verification  handler.VerificationHandler
 	Export        handler.ExportHandler
+	Digest        handler.DigestHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -220,6 +221,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Verification routes: /api/v1/jobs/{id}/verify and /api/v1/jobs/{id}/verification
 	r.Register("POST /api/v1/jobs/{id}/verify", http.HandlerFunc(reg.Verification.VerifyDeployment))
 	r.Register("GET /api/v1/jobs/{id}/verification", http.HandlerFunc(reg.Verification.GetVerificationStatus))
+
+	// Digest routes: /api/v1/digest
+	r.Register("GET /api/v1/digest/preview", http.HandlerFunc(reg.Digest.PreviewDigest))
+	r.Register("POST /api/v1/digest/send", http.HandlerFunc(reg.Digest.SendDigest))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.

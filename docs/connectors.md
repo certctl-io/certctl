@@ -171,6 +171,8 @@ The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x
 
 **DNS-PERSIST-01 (standing record):** Creates a one-time persistent TXT record at `_validation-persist.<domain>` containing the CA's issuer domain and your ACME account URI. Once set, this record authorizes unlimited future certificate issuances without per-renewal DNS updates. Based on [draft-ietf-acme-dns-persist](https://datatracker.ietf.org/doc/draft-ietf-acme-dns-persist/) and CA/Browser Forum ballot SC-088v3. If the CA doesn't offer dns-persist-01 yet, the connector falls back to dns-01 automatically.
 
+**ACME Renewal Information (ARI, RFC 9702):** Instead of using fixed renewal thresholds (e.g., renew 30 days before expiry), certctl can ask the CA when it should renew. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. The ARI protocol lets the CA specify a `suggestedWindow` (start and end times) for when you should renew — useful for distributing load during maintenance windows or coordinating mass revocation scenarios. Cert ID is computed as `base64url(SHA-256(DER cert))`. If the CA doesn't support ARI (404 response), certctl automatically falls back to threshold-based renewal with no operator intervention required.
+
 HTTP-01 configuration:
 ```json
 {
@@ -622,11 +624,69 @@ type Connector interface {
 
 Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard webhook), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2).
 
+### Email (SMTP) Notifier
+
+The Email notifier sends transactional alerts and scheduled digests via SMTP. It bridges the connector-layer SMTP connector to the service-layer `Notifier` interface via the `NotifierAdapter`. Supports both plain text and HTML emails.
+
+Configuration:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_SMTP_HOST` | — | SMTP server hostname (required to enable) |
+| `CERTCTL_SMTP_PORT` | 587 | SMTP port (TLS) |
+| `CERTCTL_SMTP_USERNAME` | — | SMTP authentication username (optional) |
+| `CERTCTL_SMTP_PASSWORD` | — | SMTP authentication password (optional) |
+| `CERTCTL_SMTP_FROM_ADDRESS` | — | Email from address (required) |
+| `CERTCTL_SMTP_USE_TLS` | true | Enable TLS encryption |
+
+Example:
+```bash
+export CERTCTL_SMTP_HOST=smtp.gmail.com
+export CERTCTL_SMTP_PORT=587
+export CERTCTL_SMTP_USERNAME=admin@example.com
+export CERTCTL_SMTP_PASSWORD=app-password-123
+export CERTCTL_SMTP_FROM_ADDRESS=certctl@example.com
+```
+
+### Scheduled Certificate Digest
+
+The `DigestService` generates aggregated certificate digest emails and sends them on a configurable schedule. This is useful for periodic briefings on certificate inventory health — expiring certs, status summary, active agents, job trends.
+
+The digest HTML template includes:
+- Total certificates, expiring soon, expired, active agents (stats grid)
+- Jobs completed/failed summary (30 days)
+- Expiring certificates table (color-coded by urgency: 7d, 14d, 30d)
+- Auto-refresh and responsive email layout
+
+**Scheduler Integration:** The 7th scheduler loop runs on configurable interval (default 24 hours). It does NOT run on startup — waits for first scheduled tick. Operation timeout is 5 minutes. Each loop execution is guarded by `sync/atomic.Bool` idempotency.
+
+Configuration:
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_DIGEST_ENABLED` | false | Enable scheduled digest emails |
+| `CERTCTL_DIGEST_INTERVAL` | 24h | How often to send digest (any duration, e.g. 12h, 7d) |
+| `CERTCTL_DIGEST_RECIPIENTS` | — | Comma-separated email addresses. Falls back to certificate owner emails if empty |
+
+API Endpoints:
+
+- **`GET /api/v1/digest/preview`** — Render digest HTML for preview (no email sent)
+- **`POST /api/v1/digest/send`** — Trigger digest send immediately (outside of schedule)
+
+Example:
+```bash
+# Preview digest
+curl http://localhost:8443/api/v1/digest/preview | jq '.html'
+
+# Send digest immediately
+curl -X POST http://localhost:8443/api/v1/digest/send
+```
+
 Each notifier is enabled by its configuration env var:
 
 | Notifier | Env Var | Description |
 |----------|---------|-------------|
-| Email | `CERTCTL_EMAIL_SMTP_HOST`, `CERTCTL_EMAIL_SMTP_PORT`, `CERTCTL_EMAIL_FROM` | SMTP email delivery. Optional: `CERTCTL_EMAIL_SMTP_USERNAME`, `CERTCTL_EMAIL_SMTP_PASSWORD` |
+| Email | `CERTCTL_SMTP_HOST` | SMTP email delivery. See Email Notifier section above |
 | Webhook | `CERTCTL_WEBHOOK_URL` | HTTP POST to any endpoint. Optional: `CERTCTL_WEBHOOK_SECRET` for HMAC signing |
 | Slack | `CERTCTL_SLACK_WEBHOOK_URL` | Incoming webhook URL. Optional: `CERTCTL_SLACK_CHANNEL`, `CERTCTL_SLACK_USERNAME` |
 | Teams | `CERTCTL_TEAMS_WEBHOOK_URL` | Incoming webhook URL (MessageCard format) |

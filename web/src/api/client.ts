@@ -351,5 +351,19 @@ export const getIssuanceRate = (days = 30) =>
 export const getMetrics = () =>
   fetchJSON<MetricsResponse>(`${BASE}/metrics`);
 
+// Digest
+export const previewDigest = () => {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return fetch(`${BASE}/digest/preview`, { headers })
+    .then(r => {
+      if (!r.ok) throw new Error(`Digest preview failed: ${r.status}`);
+      return r.text();
+    });
+};
+
+export const sendDigest = () =>
+  fetchJSON<{ message: string }>(`${BASE}/digest/send`, { method: 'POST' });
+
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');
