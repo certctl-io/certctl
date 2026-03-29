@@ -178,13 +178,17 @@ type ACMEConfig struct {
 
 	// DNSPresentScript is the path to a shell script that creates DNS TXT records.
 	// Required for dns-01 and dns-persist-01 challenge types.
-	// Script receives: DOMAIN_NAME, VALIDATION_TOKEN, RECORD_NAME as env vars.
+	// Script receives these environment variables:
+	// - CERTCTL_DNS_DOMAIN: domain being validated (e.g., "example.com")
+	// - CERTCTL_DNS_FQDN: full record name (e.g., "_acme-challenge.example.com" or "_validation-persist.example.com")
+	// - CERTCTL_DNS_VALUE: TXT record value (key authorization digest for dns-01, or issuer domain info for dns-persist-01)
+	// - CERTCTL_DNS_TOKEN: ACME challenge token
 	// Example: /opt/dns-scripts/add-record.sh
 	DNSPresentScript string
 
 	// DNSCleanUpScript is the path to a shell script that removes DNS TXT records.
 	// Used only for dns-01 challenges to clean up temporary validation records.
-	// Script receives: DOMAIN_NAME, RECORD_NAME as env vars.
+	// Script receives the same environment variables as DNSPresentScript.
 	// Leave empty if cleanup is not needed (e.g., dns-persist-01).
 	DNSCleanUpScript string
 

@@ -3434,13 +3434,13 @@ Open `http://localhost:8443` in a browser.
 
 ## Part 20: Background Scheduler
 
-**What this validates:** The 6 background scheduler loops — renewal checks, job processing, agent health, notification processing, short-lived cert expiry, and network scanning.
+**What this validates:** The 7 background scheduler loops — renewal checks, job processing, agent health, notification processing, short-lived cert expiry, network scanning, and scheduled digest emailer.
 
 **Why it matters:** The scheduler is the automation engine. Without it, nothing happens automatically — certs expire unnoticed, jobs sit pending, agents go stale, notifications never fire.
 
 > **Tip:** Open a second terminal with `docker compose logs -f certctl-server` to watch scheduler log output in real time.
 
-**Test 20.1.1 — Scheduler startup: all 6 loops registered**
+**Test 20.1.1 — Scheduler startup: all 7 loops registered**
 
 ```bash
 docker compose logs certctl-server 2>&1 | grep -i "scheduler\|renewal check\|job processor\|health check\|notification\|short-lived\|network scan" | head -20

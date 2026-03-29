@@ -71,7 +71,7 @@ docker compose up -d
 open http://localhost:8443
 ```
 
-The demo seeds 15 certificates, 5 agents, 5 deployment targets, discovery data, network scan targets, and pending approval jobs so you can explore every feature immediately.
+The demo seeds 35 certificates across 5 issuers, 8 agents, 8 deployment targets, 90 days of job history, discovery scan data, network scan targets, and pending approval jobs so you can explore every feature immediately.
 
 See the [Quickstart Guide](quickstart.md) for a full walkthrough.
 

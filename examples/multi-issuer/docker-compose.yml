@@ -1,0 +1,150 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for certctl
+  postgres:
+    image: postgres:16-alpine
+    container_name: certctl-postgres-multi-issuer
+    environment:
+      POSTGRES_DB: certctl
+      POSTGRES_USER: certctl
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-certctl-dev-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U certctl -d certctl']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # certctl server (control plane)
+  # Configured with BOTH ACME (Let's Encrypt) and Local CA issuers
+  certctl-server:
+    image: ghcr.io/shankar0123/certctl-server:latest
+    container_name: certctl-server-multi-issuer
+    environment:
+      # Database
+      DATABASE_URL: postgres://certctl:${DB_PASSWORD:-certctl-dev-password}@postgres:5432/certctl?sslmode=disable
+
+      # Server settings
+      CERTCTL_SERVER_PORT: 8443
+      CERTCTL_SERVER_HOST: 0.0.0.0
+
+      # Auth (disabled for demo; production should use API keys)
+      CERTCTL_AUTH_TYPE: none
+
+      # CORS (allow agent communication)
+      CERTCTL_CORS_ORIGINS: '*'
+
+      # Key generation mode (agent-side in production, server-side for demo)
+      CERTCTL_KEYGEN_MODE: server
+
+      # ACME issuer (Let's Encrypt for public-facing services)
+      # Change CERTCTL_ACME_EMAIL to your email and CERTCTL_ACME_CHALLENGE_TYPE as needed
+      CERTCTL_ACME_DIRECTORY_URL: https://acme-v02.api.letsencrypt.org/directory
+      CERTCTL_ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+      CERTCTL_ACME_CHALLENGE_TYPE: http-01
+
+      # Local CA issuer (for internal services - self-signed or sub-CA)
+      # Set these paths if you have an existing CA cert+key for sub-CA mode
+      # Otherwise, leave empty for self-signed CA generation
+      CERTCTL_CA_CERT_PATH: ${CA_CERT_PATH:-}
+      CERTCTL_CA_KEY_PATH: ${CA_KEY_PATH:-}
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    ports:
+      - '${SERVER_PORT:-8443}:8443'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8443/api/v1/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # certctl agent (manages certificates on NGINX and application servers)
+  certctl-agent:
+    image: ghcr.io/shankar0123/certctl-agent:latest
+    container_name: certctl-agent-multi-issuer
+    environment:
+      # Control plane connection
+      CERTCTL_SERVER_URL: http://certctl-server:8443
+      CERTCTL_API_KEY: ${AGENT_API_KEY:-agent-demo-key}
+
+      # Key generation (agent-side keys, never sent to server)
+      CERTCTL_KEYGEN_MODE: server
+      CERTCTL_KEY_DIR: /var/lib/certctl/keys
+
+      # Discovery (scan existing certs to track what's already deployed)
+      CERTCTL_DISCOVERY_DIRS: /etc/nginx/ssl:/etc/app/ssl
+
+      # Heartbeat interval
+      CERTCTL_HEARTBEAT_INTERVAL: 30s
+
+      # Agent metadata
+      CERTCTL_AGENT_NAME: multi-issuer-agent-01
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    volumes:
+      # Mount NGINX cert directories
+      - nginx_certs:/etc/nginx/ssl
+      - nginx_conf:/etc/nginx/conf.d
+      # Mount application service cert directory
+      - app_certs:/etc/app/ssl
+      # Agent key storage (persisted across restarts)
+      - agent_keys:/var/lib/certctl/keys
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # NGINX reverse proxy / web server
+  # This is where public TLS certs (from ACME) will be deployed
+  nginx:
+    image: nginx:alpine
+    container_name: certctl-nginx-multi-issuer
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - nginx_conf:/etc/nginx/conf.d
+      - nginx_certs:/etc/nginx/ssl
+      # Default NGINX config
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - certctl-agent
+    networks:
+      - certctl-network
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --quiet --tries=1 --spider http://localhost/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  certctl-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  nginx_certs:
+    driver: local
+  nginx_conf:
+    driver: local
+  app_certs:
+    driver: local
+  agent_keys:
+    driver: local

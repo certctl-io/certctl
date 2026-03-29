@@ -105,7 +105,7 @@ Open **http://localhost:8443** in your browser.
 >
 > **Key rotation:** `CERTCTL_AUTH_SECRET` accepts comma-separated keys (e.g., `CERTCTL_AUTH_SECRET=new-key,old-key`). Both keys are valid simultaneously, enabling zero-downtime rotation: add the new key, roll clients over, then remove the old key.
 
-The dashboard comes pre-loaded with 15 demo certificates across multiple teams, environments, and statuses — expiring certs, expired certs, active certs, failed renewals. A realistic snapshot of what certificate management looks like in a real organization.
+The dashboard comes pre-loaded with 35 demo certificates across 5 issuers, 8 agents, and 90 days of job history — expiring certs, expired certs, active certs, failed renewals, revocations, discovery scans, and approval workflows. A realistic snapshot of what certificate management looks like in a real organization.
 
 ### What you're looking at
 
@@ -127,7 +127,7 @@ Explore the sidebar: Certificates, Agents, Policies, Jobs, Audit Trail, Notifica
 
 **"I need to approve a renewal before it proceeds"** — Click "Jobs" in the sidebar. You'll see an amber banner: "2 jobs awaiting approval." These are renewal jobs for `auth-production` and `payments-production` that require human sign-off before proceeding. Click Approve or Reject with a reason — the decision is recorded in the audit trail.
 
-**"Show me the agent fleet"** — Click "Agents." Four agents online, one offline. Click "Fleet Overview" for OS/architecture grouping, version distribution, and per-platform listing. Agents generate ECDSA P-256 keys locally — private keys never leave your infrastructure.
+**"Show me the agent fleet"** — Click "Agents." Eight agents across Linux, macOS, and Windows platforms—most online, showing OS, architecture, IP, and version metadata. A ninth entry (server-scanner) is the sentinel agent used for network certificate discovery. Click "Fleet Overview" for OS/architecture grouping, version distribution, and per-platform listing. Agents generate ECDSA P-256 keys locally — private keys never leave your infrastructure.
 
 **"What about bulk operations?"** — On the Certificates page, select multiple certificates with checkboxes. A bulk action bar appears: trigger renewal, revoke with reason codes, or reassign ownership — all with progress tracking. At 47-day lifespans with hundreds of certs, bulk operations aren't optional.
 
@@ -410,18 +410,19 @@ Exposes 78 MCP tools covering the REST API via stdio transport. Ask Claude: "Wha
 
 | Resource | Count | Examples |
 |----------|-------|---------|
-| Teams | 5 | Platform, Security, Payments, Frontend, Data |
-| Owners | 5 | Alice, Bob, Carol, Dave, Eve |
-| Issuers | 4 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, DigiCert (disabled) |
-| Agents | 6 | ag-web-prod, ag-web-staging, ag-lb-prod, ag-iis-prod, ag-data-prod, server-scanner (network discovery) |
-| Targets | 5 | NGINX (prod/staging/data), F5 LB, IIS |
-| Certificates | 15 | Various statuses: Active, Expiring, Expired, Failed, Wildcard |
-| Discovered Certs | 9 | 5 Unmanaged (filesystem + network), 2 Managed (linked), 1 Dismissed, network-discovered expired printer cert |
-| Discovery Scans | 3 | Agent filesystem scans + network TLS scan |
-| Network Scan Targets | 3 | DC1 Web Servers, DC2 Application Tier, DMZ Public Endpoints |
-| Jobs (Approval) | 2 | AwaitingApproval renewal jobs for auth-prod and payments-prod |
+| Teams | 6 | Platform, Security, Payments, Frontend, Data, DevOps |
+| Owners | 6 | Alice, Bob, Carol, Dave, Eve, Frank |
+| Issuers | 5 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, ZeroSSL (EAB), Custom OpenSSL CA |
+| Agents | 9 | 8 real agents (linux/darwin/windows, amd64/arm64) + server-scanner (network discovery) |
+| Targets | 8 | NGINX prod, NGINX staging, NGINX data, HAProxy, Apache, IIS, Traefik, Caddy |
+| Certificates | 35 | Active, Expiring, Expired, Failed, Revoked, RenewalInProgress, Wildcard, S/MIME |
+| Jobs | 50+ | 90 days of issuance, renewal, deployment jobs + 2 AwaitingApproval |
+| Discovered Certs | 12 | Unmanaged (filesystem + network), Managed (linked), Dismissed |
+| Discovery Scans | 8 | Historical + recent agent filesystem scans + network TLS scans |
+| Network Scan Targets | 4 | DC1 Web Servers, DC2 Application Tier, DMZ Public Endpoints, Edge Locations |
+| Audit Events | 55+ | 90 days of lifecycle events (issuance, renewal, deployment, revocation, discovery) |
 | Policies | 4 | Required owner, allowed environments, max lifetime, min renewal window |
-| Profiles | 4 | Standard TLS, Internal mTLS, Short-Lived, High Security |
+| Profiles | 5 | Standard TLS, Internal mTLS, Short-Lived, High Security, S/MIME Email |
 | Agent Groups | 5 | Linux agents, ARM agents, Production subnet, etc. |
 
 ## Dashboard Demo Mode

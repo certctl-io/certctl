@@ -1,0 +1,146 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for certctl
+  postgres:
+    image: postgres:16-alpine
+    container_name: certctl-postgres-acme-nginx
+    environment:
+      POSTGRES_DB: certctl
+      POSTGRES_USER: certctl
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-certctl-dev-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U certctl -d certctl']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # certctl server (control plane)
+  certctl-server:
+    image: ghcr.io/shankar0123/certctl-server:latest
+    container_name: certctl-server-acme-nginx
+    environment:
+      # Database
+      DATABASE_URL: postgres://certctl:${DB_PASSWORD:-certctl-dev-password}@postgres:5432/certctl?sslmode=disable
+
+      # Server settings
+      CERTCTL_SERVER_PORT: 8443
+      CERTCTL_SERVER_HOST: 0.0.0.0
+
+      # Auth (disabled for demo; production should use API keys)
+      CERTCTL_AUTH_TYPE: none
+
+      # CORS (allow agent communication)
+      CERTCTL_CORS_ORIGINS: '*'
+
+      # Key generation mode (agent-side in production, server-side for demo)
+      CERTCTL_KEYGEN_MODE: agent
+
+      # ACME issuer configuration
+      # This registers the Let's Encrypt ACME issuer
+      CERTCTL_ACME_DIRECTORY_URL: https://acme-v02.api.letsencrypt.org/directory
+      CERTCTL_ACME_EMAIL: ${ACME_EMAIL:-admin@example.com}
+      CERTCTL_ACME_CHALLENGE_TYPE: http-01
+
+      # Local CA as fallback for internal services (optional)
+      CERTCTL_CA_CERT_PATH: /etc/certctl/ca.crt
+      CERTCTL_CA_KEY_PATH: /etc/certctl/ca.key
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    ports:
+      - '${SERVER_PORT:-8443}:8443'
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8443/api/v1/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # certctl agent (runs on the target machine with NGINX)
+  # In this example, the agent is in the same compose file for simplicity.
+  # In production, the agent runs on each server that needs certificates.
+  certctl-agent:
+    image: ghcr.io/shankar0123/certctl-agent:latest
+    container_name: certctl-agent-acme-nginx
+    environment:
+      # Control plane connection
+      CERTCTL_SERVER_URL: http://certctl-server:8443
+      CERTCTL_API_KEY: ${AGENT_API_KEY:-agent-demo-key}
+
+      # Key generation (agent-side keys, never sent to server)
+      CERTCTL_KEYGEN_MODE: agent
+      CERTCTL_KEY_DIR: /var/lib/certctl/keys
+
+      # Discovery (scan existing certs so operator knows what's already deployed)
+      CERTCTL_DISCOVERY_DIRS: /etc/nginx/ssl
+
+      # Heartbeat interval
+      CERTCTL_HEARTBEAT_INTERVAL: 30s
+
+      # Agent metadata (self-reported)
+      CERTCTL_AGENT_NAME: nginx-agent-01
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    volumes:
+      # Mount NGINX config and cert directories
+      # In production, these would be the actual NGINX paths
+      - nginx_certs:/etc/nginx/ssl
+      - nginx_conf:/etc/nginx/conf.d
+      # Agent key storage (persisted across restarts)
+      - agent_keys:/var/lib/certctl/keys
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # NGINX reverse proxy / web server
+  # This is where certificates will be deployed
+  nginx:
+    image: nginx:alpine
+    container_name: certctl-nginx-acme-nginx
+    ports:
+      - '80:80'
+      - '443:443'
+    volumes:
+      - nginx_conf:/etc/nginx/conf.d
+      - nginx_certs:/etc/nginx/ssl
+      # Default NGINX config (if not provided by agent)
+      - ./nginx.conf:/etc/nginx/nginx.conf:ro
+    depends_on:
+      - certctl-agent
+    networks:
+      - certctl-network
+    healthcheck:
+      test: ['CMD-SHELL', 'wget --quiet --tries=1 --spider http://localhost/ || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  certctl-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  nginx_certs:
+    driver: local
+  nginx_conf:
+    driver: local
+  agent_keys:
+    driver: local

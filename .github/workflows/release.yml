@@ -7,9 +7,74 @@ on:
 
 env:
   REGISTRY: ghcr.io
+  GO_VERSION: '1.22'
 
 jobs:
-  build-and-push:
+  # Cross-compile agent and server binaries for multiple platforms
+  build-binaries:
+    name: Build Cross-Platform Binaries
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    strategy:
+      matrix:
+        include:
+          # Agent binaries (4 platforms)
+          - os: linux
+            arch: amd64
+            binary: agent
+          - os: linux
+            arch: arm64
+            binary: agent
+          - os: darwin
+            arch: amd64
+            binary: agent
+          - os: darwin
+            arch: arm64
+            binary: agent
+          # Server binaries (2 platforms)
+          - os: linux
+            arch: amd64
+            binary: server
+          - os: linux
+            arch: arm64
+            binary: server
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Build ${{ matrix.binary }} binary (${{ matrix.os }}-${{ matrix.arch }})
+        env:
+          GOOS: ${{ matrix.os }}
+          GOARCH: ${{ matrix.arch }}
+          CGO_ENABLED: 0
+        run: |
+          OUTPUT_NAME="certctl-${{ matrix.binary }}-${{ matrix.os }}-${{ matrix.arch }}"
+          go build -ldflags="-w -s -X main.Version=${{ steps.version.outputs.VERSION }}" \
+            -o "dist/${OUTPUT_NAME}" \
+            "./cmd/${{ matrix.binary }}"
+          ls -lh "dist/${OUTPUT_NAME}"
+
+      - name: Upload binaries to release
+        uses: softprops/action-gh-release@v2
+        if: startsWith(github.ref, 'refs/tags/')
+        with:
+          files: |
+            dist/certctl-agent-*
+            dist/certctl-server-*
+
+  # Build and push Docker images
+  build-and-push-docker:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
     permissions:
@@ -57,19 +122,67 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-      - name: Create GitHub Release
+  # Create release notes with all artifacts
+  create-release:
+    name: Create Release Notes
+    runs-on: ubuntu-latest
+    needs: [build-binaries, build-and-push-docker]
+    permissions:
+      contents: write
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Extract version from tag
+        id: version
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+
+      - name: Create release with notes
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           body: |
-            ## Docker Images
+            ## Installation
+
+            ### Quick Install (Linux/macOS)
 
             ```bash
-            docker pull shankar0123.docker.scarf.sh/certctl-server:${{ steps.version.outputs.VERSION }}
-            docker pull shankar0123.docker.scarf.sh/certctl-agent:${{ steps.version.outputs.VERSION }}
+            curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
             ```
 
-            ## Quick Start
+            ### Manual Binary Download
+
+            Download the appropriate binary for your OS and architecture:
+
+            - **Linux x86_64**: `certctl-agent-linux-amd64`
+            - **Linux ARM64**: `certctl-agent-linux-arm64`
+            - **macOS x86_64**: `certctl-agent-darwin-amd64`
+            - **macOS ARM64 (Apple Silicon)**: `certctl-agent-darwin-arm64`
+
+            Then make it executable and start the service:
+
+            ```bash
+            chmod +x certctl-agent-linux-amd64
+            sudo mv certctl-agent-linux-amd64 /usr/local/bin/certctl-agent
+            ```
+
+            ## Docker Images
+
+            Pull pre-built Docker images for server and agent:
+
+            ```bash
+            docker pull ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
+            docker pull ghcr.io/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
+            ```
+
+            Or use the latest tag:
+
+            ```bash
+            docker pull ghcr.io/shankar0123/certctl-server:latest
+            docker pull ghcr.io/shankar0123/certctl-agent:latest
+            ```
+
+            ## Docker Compose Quick Start
 
             ```bash
             git clone https://github.com/shankar0123/certctl.git
@@ -77,3 +190,22 @@ jobs:
             cp deploy/.env.example deploy/.env
             docker compose -f deploy/docker-compose.yml up -d
             ```
+
+            ## Server Binaries
+
+            Pre-compiled server binaries are also available for direct installation:
+
+            - **Linux x86_64**: `certctl-server-linux-amd64`
+            - **Linux ARM64**: `certctl-server-linux-arm64`
+
+            ## Helm Chart
+
+            Deploy certctl to Kubernetes using Helm:
+
+            ```bash
+            helm repo add certctl https://github.com/shankar0123/certctl/tree/master/deploy/helm
+            helm repo update
+            helm install certctl certctl/certctl
+            ```
+
+            See `deploy/helm/certctl/` for values customization.

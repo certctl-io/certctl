@@ -312,12 +312,12 @@ The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used b
 
 Note: EST (Enrollment over Secure Transport) is not a connector — it's a protocol handler (`internal/api/handler/est.go`) that delegates certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
 
-### Planned Issuers
+### Coming in V2.1
 
-The following issuer connectors are planned for future milestones:
+The following issuer connectors are planned for the v2.1.0 release:
 
-- **Vault PKI** — HashiCorp Vault's PKI secrets engine for organizations using Vault as their internal CA (planned for V4.0+).
-- **DigiCert** — Commercial CA integration via DigiCert's REST API (planned).
+- **Vault PKI** — HashiCorp Vault's PKI secrets engine (`/v1/{mount}/sign/{role}` API) for organizations using Vault as their internal CA. Token auth, configurable mount and role.
+- **DigiCert** — Commercial CA integration via DigiCert CertCentral REST API. Async order model (submit → poll for completion). OV/EV certificate support.
 
 Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 

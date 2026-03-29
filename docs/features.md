@@ -1051,7 +1051,7 @@ curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/j-abc123/approve -d '{"reas
 3. **Approve** → `POST /api/v1/jobs/{id}/approve` → Job → `Running`
 4. **Reject** → `POST /api/v1/jobs/{id}/reject` + reason → Job → `Cancelled`
 
-### Background Scheduler (6 loops)
+### Background Scheduler (7 loops)
 | Loop | Interval | Task |
 |------|----------|------|
 | **Renewal Checker** | 1 hour | Scan policies; trigger renewals if cert expires soon |
@@ -1060,6 +1060,7 @@ curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/j-abc123/approve -d '{"reas
 | **Notification Processor** | 1 minute | Send queued notifications (email, Slack, webhook, etc.) |
 | **Short-Lived Cleanup** | 30 seconds | Audit short-lived credential expirations |
 | **Network Scanner** | 6 hours | Scan enabled network targets; discover TLS certificates |
+| **Digest Emailer** | 24 hours | Send HTML certificate digest email to configured recipients |
 
 All loops have configurable intervals via environment variables (`CERTCTL_SCHEDULER_*_INTERVAL`).
 
@@ -1267,7 +1268,7 @@ The web dashboard is the primary operational interface for certctl. Built with *
 ### Docker Compose Deployment
 - **Services** — PostgreSQL 16, certctl server, agent
 - **Health Checks** — On all services (server health check, database readiness)
-- **Seed Data** — Demo dataset with 15 certs, 5 agents, 5 targets, policies, audit events
+- **Seed Data** — Demo dataset with 35 certs across 5 issuers, 8 agents, 8 targets, 90 days of job history, discovery data, network scans, policies, audit events
 - **Credentials** — Environment variables in `.env` file; app.key for API key
 
 ### PostgreSQL Schema
@@ -1468,8 +1469,8 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **Bulk revocation** | ✗ | ✓ | Planned V3 (paid) |
 | **Certificate health scores** | ✗ | ✓ | Planned V3 |
 | **Compliance scoring** | ✗ | ✓ | Planned V3 |
-| **DigiCert issuer** | ✗ | ✓ | Planned V3 |
-| **CT Log monitoring** | ✗ | ✓ | Planned V3 |
+| **DigiCert issuer** | ✗ | ✓ | Planned V2.1 (free) |
+| **Vault PKI issuer** | ✗ | ✓ | Planned V2.1 (free) |
 
 ---
 

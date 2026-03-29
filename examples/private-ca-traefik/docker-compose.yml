@@ -1,0 +1,182 @@
+version: '3.8'
+
+services:
+  # PostgreSQL database for certctl
+  postgres:
+    image: postgres:16-alpine
+    container_name: certctl-postgres-private-ca
+    environment:
+      POSTGRES_DB: certctl
+      POSTGRES_USER: certctl
+      POSTGRES_PASSWORD: ${DB_PASSWORD:-certctl-dev-password}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ['CMD-SHELL', 'pg_isready -U certctl -d certctl']
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # certctl server (control plane) with Local CA in sub-CA mode
+  certctl-server:
+    image: ghcr.io/shankar0123/certctl-server:latest
+    container_name: certctl-server-private-ca
+    environment:
+      # Database
+      DATABASE_URL: postgres://certctl:${DB_PASSWORD:-certctl-dev-password}@postgres:5432/certctl?sslmode=disable
+
+      # Server settings
+      CERTCTL_SERVER_PORT: 8443
+      CERTCTL_SERVER_HOST: 0.0.0.0
+
+      # Auth (disabled for demo; production should use API keys)
+      CERTCTL_AUTH_TYPE: none
+
+      # CORS (allow agent and Traefik communication)
+      CERTCTL_CORS_ORIGINS: '*'
+
+      # Key generation mode (agent-side in production, server-side for demo)
+      CERTCTL_KEYGEN_MODE: server
+
+      # Local CA configuration
+      # For self-signed CA (default, no paths set):
+      #   - CA generates a self-signed root certificate
+      #   - All issued certificates chain to this root
+      #
+      # For sub-CA mode (provide both paths):
+      #   - Load pre-signed CA certificate and key from these paths
+      #   - All issued certificates chain to your enterprise root CA
+      #   - Requires: CA cert must have IsCA=true and KeyUsageCertSign
+      #   - Supports: RSA, ECDSA, PKCS#8 key formats
+      #
+      # To use sub-CA mode:
+      #   1. Place your enterprise CA cert at ./ca-cert.pem
+      #   2. Place your enterprise CA key at ./ca-key.pem
+      #   3. Uncomment the two lines below
+      #   4. Restart the service
+      #
+      # CERTCTL_CA_CERT_PATH: /etc/certctl/ca-cert.pem
+      # CERTCTL_CA_KEY_PATH: /etc/certctl/ca-key.pem
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    ports:
+      - '${SERVER_PORT:-8443}:8443'
+    volumes:
+      # Mount directory for CA cert/key (for sub-CA mode)
+      # Copy your enterprise CA cert+key here:
+      #   cp /path/to/your/ca.pem ./ca-cert.pem
+      #   cp /path/to/your/ca-key.pem ./ca-key.pem
+      - ./ca-certs:/etc/certctl:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8443/api/v1/health || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+  # certctl agent (deploys certs to Traefik)
+  certctl-agent:
+    image: ghcr.io/shankar0123/certctl-agent:latest
+    container_name: certctl-agent-private-ca
+    environment:
+      # Control plane connection
+      CERTCTL_SERVER_URL: http://certctl-server:8443
+      CERTCTL_API_KEY: ${AGENT_API_KEY:-agent-demo-key}
+
+      # Key generation (agent-side keys, never sent to server)
+      CERTCTL_KEYGEN_MODE: server
+      CERTCTL_KEY_DIR: /var/lib/certctl/keys
+
+      # Discovery (scan for existing certs in Traefik's directory)
+      CERTCTL_DISCOVERY_DIRS: /etc/traefik/certs
+
+      # Heartbeat interval
+      CERTCTL_HEARTBEAT_INTERVAL: 30s
+
+      # Agent metadata (self-reported)
+      CERTCTL_AGENT_NAME: traefik-agent-01
+
+      # Logging
+      CERTCTL_LOG_LEVEL: info
+    volumes:
+      # Mount Traefik cert directory for deployment
+      - traefik_certs:/etc/traefik/certs
+      # Agent key storage (persisted across restarts)
+      - agent_keys:/var/lib/certctl/keys
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    networks:
+      - certctl-network
+    restart: unless-stopped
+
+  # Traefik reverse proxy / edge router
+  # Certificates deployed by certctl-agent are automatically loaded from the certs directory
+  traefik:
+    image: traefik:v3.0
+    container_name: certctl-traefik-private-ca
+    command:
+      # Enable dashboard and API
+      - '--api.insecure=true'
+      - '--api.dashboard=true'
+
+      # File provider: watch the certs directory for dynamic config updates
+      - '--providers.file.directory=/etc/traefik/dynamic'
+      - '--providers.file.watch=true'
+
+      # Entry points (HTTP and HTTPS)
+      - '--entrypoints.web.address=:80'
+      - '--entrypoints.websecure.address=:443'
+      - '--entrypoints.websecure.http.tls=true'
+
+      # Global TLS settings
+      - '--entryPoints.websecure.http.tls.certResolver=internal'
+
+      # Logging
+      - '--log.level=info'
+      - '--accesslog=true'
+    ports:
+      # HTTP
+      - '80:80'
+      # HTTPS
+      - '443:443'
+      # Dashboard (http://localhost:8080)
+      - '8080:8080'
+    volumes:
+      # Mount Traefik config directory
+      - ./traefik-config:/etc/traefik/dynamic:ro
+      # Mount cert directory (where certctl deploys certs)
+      - traefik_certs:/etc/traefik/certs:ro
+      # Allow Traefik to read Docker socket (optional, for container labeling)
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+    networks:
+      - certctl-network
+    depends_on:
+      - certctl-agent
+    healthcheck:
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8080/ping || exit 1']
+      interval: 10s
+      timeout: 5s
+      retries: 3
+    restart: unless-stopped
+
+networks:
+  certctl-network:
+    driver: bridge
+
+volumes:
+  postgres_data:
+    driver: local
+  traefik_certs:
+    driver: local
+  agent_keys:
+    driver: local

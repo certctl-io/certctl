@@ -61,7 +61,7 @@ flowchart TB
         API["REST API\n(Go net/http, :8443)"]
         SVC["Service Layer"]
         REPO["Repository Layer\n(database/sql + lib/pq)"]
-        SCHED["Background Scheduler\n6 loops"]
+        SCHED["Background Scheduler\n7 loops"]
         DASH["Web Dashboard\n(React SPA)"]
     end
 
@@ -751,7 +751,7 @@ The HTTP middleware stack processes requests in the following order (see `cmd/se
 
 ### Concurrency Safety
 
-The background scheduler uses `sync/atomic.Bool` idempotency guards on all 6 loops — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
+The background scheduler uses `sync/atomic.Bool` idempotency guards on all 7 loops — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
 
 ### Logging
 

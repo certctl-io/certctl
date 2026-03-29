@@ -38,6 +38,9 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 | [Feature Inventory](docs/features.md) | Complete reference of all V2 capabilities, API endpoints, and configuration |
 | [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
+| [Migrate from Certbot](docs/migrate-from-certbot.md) | Step-by-step migration from Certbot/Let's Encrypt cron jobs |
+| [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users with DNS-01 scripts |
+| [certctl for cert-manager Users](docs/certctl-for-cert-manager-users.md) | Using certctl alongside cert-manager for non-Kubernetes infrastructure |
 
 > **Next release:** v2.1.0 will be tagged after the full V2 feature suite passes manual QA across all 34 sections of the [testing guide](docs/testing-guide.md). Automated CI (1,471 Go tests + 193 frontend tests) gates every commit; the manual playbook covers integration, deployment, and UX verification that unit tests can't reach.
 
@@ -160,7 +163,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 Wait ~30 seconds, then open **http://localhost:8443** in your browser.
 
-The dashboard comes pre-loaded with 15 demo certificates, 5 agents, policy rules, audit events, and notifications — a realistic snapshot of a certificate inventory so you can explore immediately.
+The dashboard comes pre-loaded with 35 demo certificates across 5 issuers, 8 agents, 90 days of job history, discovery scan data, and network scan targets — a realistic snapshot of a certificate inventory that looks like it's been running for months.
 
 Verify the API:
 ```bash
@@ -168,13 +171,21 @@ curl http://localhost:8443/health
 # {"status":"healthy"}
 
 curl -s http://localhost:8443/api/v1/certificates | jq '.total'
-# 15
+# 35
 ```
+
+### Agent Install (One-Liner)
+
+```bash
+curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
+```
+
+Detects your OS and architecture, downloads the binary, configures systemd (Linux) or launchd (macOS), and starts the agent. See [install-agent.sh](install-agent.sh) for details.
 
 ### Manual Build
 
 ```bash
-# Prerequisites: Go 1.25+, PostgreSQL 16+
+# Prerequisites: Go 1.25+, PostgreSQL 16+, Docker (for testcontainers-go)
 go mod download
 make build
 
@@ -196,7 +207,7 @@ export CERTCTL_AGENT_ID=agent-local-01
 
 ## Architecture
 
-**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment). Background scheduler runs 6 loops: renewal checks (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
+**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment). Background scheduler runs 7 loops: renewal checks (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h), certificate digest (24h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
 
 ### Key Design Decisions
 
@@ -494,23 +505,44 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **Traefik + Caddy Targets** — Traefik (file provider, auto-reload) and Caddy (Admin API hot-reload or file-based), both in target wizard GUI
 - **Certificate Export** — PEM (JSON or file download) and PKCS#12 formats, private keys never included (agent-side only), audit trail, GUI export buttons
 - **S/MIME Support** — EKU-aware issuance (emailProtection, codeSigning, timeStamping), adaptive KeyUsage flags, email SAN routing, EKU badges in GUI
-- **ACME ARI (RFC 9702)** — CA-directed renewal timing with graceful threshold fallback for non-ARI CAs, reduces unnecessary early renewals
-- **Scheduled Certificate Digest** — HTML email digests with certificate stats, expiration timeline, job trends, and agent health; optional daily/hourly/weekly briefings via SMTP
-- **Helm Chart** — Production-ready Kubernetes with server Deployment, PostgreSQL StatefulSet, Agent DaemonSet, security contexts, resource limits, optional Ingress, ServiceAccount
-- **ACME ARI (RFC 9702)** — CA-directed renewal timing: instead of renewing at fixed thresholds, the CA tells certctl the optimal renewal window, gracefully degrading to thresholds when ARI is unavailable
-- **Email Digest Service** — Scheduled HTML digest emails with certificate stats, expiration timeline (90d), job health, and active agent count; falls back to certificate owner emails if no recipients configured
-- **Helm Chart** — Production-ready Kubernetes deployment with server Deployment, PostgreSQL StatefulSet with PVC, Agent DaemonSet, optional Ingress, security contexts, and full values.yaml configuration
+- **ACME ARI (RFC 9702)** — CA-directed renewal timing: the CA tells certctl the optimal renewal window, gracefully degrading to fixed thresholds when ARI is unavailable
+- **Scheduled Certificate Digest** — HTML email digests with certificate stats, expiration timeline, job trends, and agent health; configurable daily/hourly/weekly briefings via SMTP
+- **Helm Chart** — Production-ready Kubernetes with server Deployment, PostgreSQL StatefulSet with PVC, Agent DaemonSet, security contexts, resource limits, optional Ingress
+
+**Coming in v2.1.0:**
+- Vault PKI issuer connector (HashiCorp Vault /sign API)
+- DigiCert CertCentral issuer connector (enterprise CA)
+- Dynamic issuer and target configuration via GUI (no env var restarts)
+- Issuer catalog page (see all supported CAs, configure from dashboard)
+- First-run onboarding wizard
+- Turnkey deployment examples (ACME+NGINX, wildcard+DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer)
+- Migration guides (Certbot, acme.sh, cert-manager complement)
+- One-line agent install script with cross-compiled binaries
 
 ### V3: certctl Pro
 
-Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views, and premium CA integrations.
+Team access controls, identity provider integration, enterprise deployment targets, compliance and risk scoring, advanced fleet operations, event-driven architecture, advanced search, real-time operational views.
 
 ### V4+: Cloud, Scale & Passive Discovery
-Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Vault PKI, Google CAS, EJBCA), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
+Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Google CAS, EJBCA, Sectigo), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
+
+## Examples
+
+Turnkey Docker Compose configurations for common scenarios — pick the one closest to your setup and have it running in 2 minutes.
+
+| Example | Scenario |
+|---------|----------|
+| [`examples/acme-nginx/`](examples/acme-nginx/) | Let's Encrypt + NGINX, HTTP-01 challenges |
+| [`examples/acme-wildcard-dns01/`](examples/acme-wildcard-dns01/) | Wildcard certs via DNS-01 (Cloudflare hook included) |
+| [`examples/private-ca-traefik/`](examples/private-ca-traefik/) | Local CA (self-signed or sub-CA) + Traefik file provider |
+| [`examples/step-ca-haproxy/`](examples/step-ca-haproxy/) | Smallstep step-ca + HAProxy combined PEM |
+| [`examples/multi-issuer/`](examples/multi-issuer/) | ACME for public + Local CA for internal, one dashboard |
+
+Each directory contains a `docker-compose.yml` and a `README.md` explaining the scenario, prerequisites, and customization.
 
 ## License
 
-Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties.
+Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties. The BSL 1.1 license converts automatically to Apache 2.0 on March 1, 2033, providing perpetual freedom.
 
 For licensing inquiries: certctl@proton.me
 
