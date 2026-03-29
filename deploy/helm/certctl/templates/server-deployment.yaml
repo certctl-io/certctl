@@ -181,16 +181,16 @@ spec:
         {{- if .Values.server.volumes }}
         {{- toYaml .Values.server.volumes | nindent 8 }}
         {{- end }}
-      {{- with .Values.nodeAffinity }}
+      {{- if .Values.nodeAffinity }}
       affinity:
         nodeAffinity:
-          {{- toYaml . | nindent 10 }}
+          {{- toYaml .Values.nodeAffinity | nindent 10 }}
       {{- else if .Values.podAntiAffinity }}
       affinity:
         podAntiAffinity:
-          {{- toYaml . | nindent 10 }}
+          {{- toYaml .Values.podAntiAffinity | nindent 10 }}
       {{- else if .Values.podAffinity }}
       affinity:
         podAffinity:
-          {{- toYaml . | nindent 10 }}
+          {{- toYaml .Values.podAffinity | nindent 10 }}
       {{- end }}

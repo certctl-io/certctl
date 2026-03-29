@@ -43,6 +43,11 @@ vendor/
 tmp/
 temp/
 *.log
+*.bak
+
+# Private keys (agent-generated, never commit)
+cmd/agent/*.key
+cmd/agent/*.pem
 
 # Database
 *.db

@@ -122,10 +122,7 @@ func (s *DigestService) GenerateDigest(ctx context.Context) (*DigestData, error)
 		s.logger.Warn("failed to get status counts for digest", "error", err)
 	} else if counts, ok := statusRaw.([]CertificateStatusCount); ok {
 		for _, c := range counts {
-			digest.StatusCounts = append(digest.StatusCounts, DigestStatusCount{
-				Status: c.Status,
-				Count:  c.Count,
-			})
+			digest.StatusCounts = append(digest.StatusCounts, DigestStatusCount(c))
 		}
 	}
 
