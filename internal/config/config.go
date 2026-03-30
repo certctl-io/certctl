@@ -25,6 +25,8 @@ type Config struct {
 	EST          ESTConfig
 	Verification VerificationConfig
 	ACME         ACMEConfig
+	Vault        VaultConfig
+	DigiCert     DigiCertConfig
 	Digest       DigestConfig
 }
 
@@ -139,6 +141,57 @@ type StepCAConfig struct {
 	// ProvisionerPassword is the optional password for the provisioner private key.
 	// Leave empty if the key file is not encrypted.
 	ProvisionerPassword string
+}
+
+// VaultConfig contains HashiCorp Vault PKI issuer connector configuration.
+type VaultConfig struct {
+	// Addr is the Vault server address (e.g., "https://vault.example.com:8200").
+	// Required for Vault PKI integration.
+	// Setting: CERTCTL_VAULT_ADDR environment variable.
+	Addr string
+
+	// Token is the Vault token for authentication.
+	// Required for Vault PKI integration.
+	// Setting: CERTCTL_VAULT_TOKEN environment variable.
+	Token string
+
+	// Mount is the PKI secrets engine mount path.
+	// Default: "pki".
+	// Setting: CERTCTL_VAULT_MOUNT environment variable.
+	Mount string
+
+	// Role is the PKI role name used for signing certificates.
+	// Required for Vault PKI integration.
+	// Setting: CERTCTL_VAULT_ROLE environment variable.
+	Role string
+
+	// TTL is the requested certificate time-to-live.
+	// Default: "8760h" (1 year).
+	// Setting: CERTCTL_VAULT_TTL environment variable.
+	TTL string
+}
+
+// DigiCertConfig contains DigiCert CertCentral issuer connector configuration.
+type DigiCertConfig struct {
+	// APIKey is the CertCentral API key for authentication.
+	// Required for DigiCert integration.
+	// Setting: CERTCTL_DIGICERT_API_KEY environment variable.
+	APIKey string
+
+	// OrgID is the DigiCert organization ID for certificate orders.
+	// Required for DigiCert integration.
+	// Setting: CERTCTL_DIGICERT_ORG_ID environment variable.
+	OrgID string
+
+	// ProductType is the DigiCert product type for certificate orders.
+	// Default: "ssl_basic". Common values: "ssl_basic", "ssl_wildcard", "ssl_ev_basic".
+	// Setting: CERTCTL_DIGICERT_PRODUCT_TYPE environment variable.
+	ProductType string
+
+	// BaseURL is the DigiCert CertCentral API base URL.
+	// Default: "https://www.digicert.com/services/v2".
+	// Setting: CERTCTL_DIGICERT_BASE_URL environment variable.
+	BaseURL string
 }
 
 // DigestConfig controls the scheduled certificate digest email feature.
@@ -428,6 +481,19 @@ func Load() (*Config, error) {
 			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
 			Timeout: getEnvDuration("CERTCTL_VERIFY_TIMEOUT", 10*time.Second),
 			Delay:   getEnvDuration("CERTCTL_VERIFY_DELAY", 2*time.Second),
+		},
+		Vault: VaultConfig{
+			Addr:  getEnv("CERTCTL_VAULT_ADDR", ""),
+			Token: getEnv("CERTCTL_VAULT_TOKEN", ""),
+			Mount: getEnv("CERTCTL_VAULT_MOUNT", "pki"),
+			Role:  getEnv("CERTCTL_VAULT_ROLE", ""),
+			TTL:   getEnv("CERTCTL_VAULT_TTL", "8760h"),
+		},
+		DigiCert: DigiCertConfig{
+			APIKey:      getEnv("CERTCTL_DIGICERT_API_KEY", ""),
+			OrgID:       getEnv("CERTCTL_DIGICERT_ORG_ID", ""),
+			ProductType: getEnv("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
+			BaseURL:     getEnv("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
 		},
 		ACME: ACMEConfig{
 			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),

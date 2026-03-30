@@ -312,12 +312,55 @@ The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used b
 
 Note: EST (Enrollment over Secure Transport) is not a connector — it's a protocol handler (`internal/api/handler/est.go`) that delegates certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
 
-### Coming in V2.1
+### Built-in: Vault PKI
 
-The following issuer connectors are planned for the v2.1.0 release:
+The Vault PKI connector integrates with HashiCorp Vault's PKI secrets engine using its native `/sign` API with token-based authentication. This is ideal for organizations using Vault as their internal certificate authority — synchronous issuance without the complexity of ACME or challenge solving.
 
-- **Vault PKI** — HashiCorp Vault's PKI secrets engine (`/v1/{mount}/sign/{role}` API) for organizations using Vault as their internal CA. Token auth, configurable mount and role.
-- **DigiCert** — Commercial CA integration via DigiCert CertCentral REST API. Async order model (submit → poll for completion). OV/EV certificate support.
+**Configuration:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_VAULT_ADDR` | — | Vault server address (e.g., `https://vault.internal:8200`) |
+| `CERTCTL_VAULT_TOKEN` | — | Vault auth token with permissions on the PKI mount |
+| `CERTCTL_VAULT_MOUNT` | `pki` | PKI secrets engine mount path |
+| `CERTCTL_VAULT_ROLE` | — | PKI role name for certificate signing |
+| `CERTCTL_VAULT_TTL` | `8760h` | Certificate validity period (TTL) |
+
+The connector is registered in the issuer registry under `iss-vault`. Vault issues certificates synchronously via the `/v1/{mount}/sign/{role}` API with `X-Vault-Token` header authentication. The issued certificate is parsed to extract serial number, validity dates, and chain information.
+
+**Note:** CRL and OCSP are managed by Vault itself. Clients should validate certificate status against Vault's own CRL/OCSP endpoints (`GET /v1/{mount}/crl` and Vault's OCSP responder). certctl does not generate local CRL/OCSP for Vault-issued certificates. Revocation is recorded locally but Vault is the authoritative source.
+
+Location: `internal/connector/issuer/vault/vault.go`
+
+### Built-in: DigiCert CertCentral
+
+The DigiCert connector integrates with DigiCert's CertCentral REST API for ordering and managing certificates from DigiCert's commercial CA. It supports both Domain Validated (DV) and Organization/Extended Validated (OV/EV) certificates, with async order processing.
+
+**Configuration:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_DIGICERT_API_KEY` | — | DigiCert API key (X-DC-DEVKEY header) |
+| `CERTCTL_DIGICERT_ORG_ID` | — | DigiCert organization ID |
+| `CERTCTL_DIGICERT_PRODUCT_TYPE` | `ssl_basic` | Certificate product (e.g., `ssl_basic`, `ssl_plus`, `ssl_ev`) |
+| `CERTCTL_DIGICERT_BASE_URL` | `https://www.digicert.com/services/v2` | DigiCert API base URL |
+
+The connector submits certificate orders to DigiCert's `/order/certificate/create` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by DigiCert) and poll-based completion. The connector periodically checks order status via `/order/certificate/{order_id}` until the certificate is available.
+
+**Authentication:** API key passed via `X-DC-DEVKEY` header, with organization ID in request body.
+
+**Note:** CRL and OCSP are managed by DigiCert. Clients should validate certificate status against DigiCert's infrastructure. certctl records the revocation locally but does not notify DigiCert for revocation — use DigiCert's dashboard for revocation management.
+
+Location: `internal/connector/issuer/digicert/digicert.go`
+
+### Coming in V2.2+
+
+The following issuer connectors are planned for future releases:
+
+- **Entrust** — Enterprise CA via Entrust API
+- **Sectigo** — Commercial CA integration via Sectigo REST API
+- **Google CAS** — Google Cloud Certificate Authority Service
+- **AWS ACM Private CA** — AWS-managed private CA
 
 Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 

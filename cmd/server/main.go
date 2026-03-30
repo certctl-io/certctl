@@ -19,8 +19,10 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
+	digicertissuer "github.com/shankar0123/certctl/internal/connector/issuer/digicert"
 	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	vaultissuer "github.com/shankar0123/certctl/internal/connector/issuer/vault"
 	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
@@ -133,6 +135,27 @@ func main() {
 	}, logger)
 	logger.Info("initialized OpenSSL/Custom CA issuer connector")
 
+	// Initialize Vault PKI issuer connector (for HashiCorp Vault internal PKI).
+	// Uses the Vault HTTP API with token authentication.
+	vaultConnector := vaultissuer.New(&vaultissuer.Config{
+		Addr:  os.Getenv("CERTCTL_VAULT_ADDR"),
+		Token: os.Getenv("CERTCTL_VAULT_TOKEN"),
+		Mount: getEnvDefault("CERTCTL_VAULT_MOUNT", "pki"),
+		Role:  os.Getenv("CERTCTL_VAULT_ROLE"),
+		TTL:   getEnvDefault("CERTCTL_VAULT_TTL", "8760h"),
+	}, logger)
+	logger.Info("initialized Vault PKI issuer connector")
+
+	// Initialize DigiCert CertCentral issuer connector (for enterprise public CA).
+	// Uses the DigiCert REST API with async order model.
+	digicertConnector := digicertissuer.New(&digicertissuer.Config{
+		APIKey:      os.Getenv("CERTCTL_DIGICERT_API_KEY"),
+		OrgID:       os.Getenv("CERTCTL_DIGICERT_ORG_ID"),
+		ProductType: getEnvDefault("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
+		BaseURL:     getEnvDefault("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
+	}, logger)
+	logger.Info("initialized DigiCert CertCentral issuer connector")
+
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
@@ -145,6 +168,19 @@ func main() {
 		"iss-stepca":       service.NewIssuerConnectorAdapter(stepcaConnector),
 		"iss-openssl":      service.NewIssuerConnectorAdapter(opensslConnector),
 	}
+
+	// Conditionally register Vault PKI (only if CERTCTL_VAULT_ADDR is set)
+	if os.Getenv("CERTCTL_VAULT_ADDR") != "" {
+		issuerRegistry["iss-vault"] = service.NewIssuerConnectorAdapter(vaultConnector)
+		logger.Info("Vault PKI issuer registered", "id", "iss-vault")
+	}
+
+	// Conditionally register DigiCert (only if CERTCTL_DIGICERT_API_KEY is set)
+	if os.Getenv("CERTCTL_DIGICERT_API_KEY") != "" {
+		issuerRegistry["iss-digicert"] = service.NewIssuerConnectorAdapter(digicertConnector)
+		logger.Info("DigiCert CertCentral issuer registered", "id", "iss-digicert")
+	}
+
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
 
 	// Initialize revocation repository
@@ -542,6 +578,14 @@ func main() {
 	}
 
 	logger.Info("certctl server stopped")
+}
+
+// getEnvDefault reads an environment variable with a default fallback.
+func getEnvDefault(key, defaultVal string) string {
+	if val := os.Getenv(key); val != "" {
+		return val
+	}
+	return defaultVal
 }
 
 // getEnvIntDefault parses an integer from a string with a default fallback.

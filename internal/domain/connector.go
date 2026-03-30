@@ -69,6 +69,8 @@ const (
 	IssuerTypeGenericCA IssuerType = "GenericCA"
 	IssuerTypeStepCA    IssuerType = "StepCA"
 	IssuerTypeOpenSSL   IssuerType = "OpenSSL"
+	IssuerTypeVault     IssuerType = "VaultPKI"
+	IssuerTypeDigiCert  IssuerType = "DigiCert"
 )
 
 // TargetType represents the type of deployment target.

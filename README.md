@@ -85,8 +85,10 @@ For the full capability breakdown — revocation infrastructure, policy engine, 
 | ACME EAB (ZeroSSL, Google Trust) | Implemented (auto-fetch EAB from ZeroSSL) | `ACME` |
 | step-ca | Implemented | `StepCA` |
 | OpenSSL / Custom CA | Implemented | `OpenSSL` |
-| Vault PKI | Future | — |
-| DigiCert | Future | — |
+| Vault PKI | Beta | `VaultPKI` |
+| DigiCert CertCentral | Beta | `DigiCert` |
+
+**Vault PKI and DigiCert connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
 
 **Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
 
@@ -511,8 +513,6 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **Helm Chart** — Production-ready Kubernetes with server Deployment, PostgreSQL StatefulSet with PVC, Agent DaemonSet, security contexts, resource limits, optional Ingress
 
 **Coming in v2.1.0:**
-- Vault PKI issuer connector (HashiCorp Vault /sign API)
-- DigiCert CertCentral issuer connector (enterprise CA)
 - Dynamic issuer and target configuration via GUI (no env var restarts)
 - Issuer catalog page (see all supported CAs, configure from dashboard)
 - First-run onboarding wizard

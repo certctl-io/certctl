@@ -42,6 +42,8 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 35: ARI (RFC 9702) Scheduler Integration](#part-35-ari-rfc-9702-scheduler-integration)
 - [Part 36: Agent Work Routing (M31)](#part-36-agent-work-routing-m31)
 - [Part 37: GUI Completeness (Pre-2.1.0-E)](#part-37-gui-completeness-pre-210-e)
+- [Part 38: Vault PKI Connector (M32)](#part-38-vault-pki-connector-m32)
+- [Part 39: DigiCert Connector (M37)](#part-39-digicert-connector-m37)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5166,6 +5168,210 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 
 ---
 
+## Part 38: Vault PKI Connector (M32)
+
+### Prerequisites
+
+- Vault server running with PKI secrets engine enabled at `pki` mount
+- PKI role created with appropriate certificate generation policy
+- Vault token with read/sign permissions on the PKI path
+- Environment variables configured:
+  ```bash
+  export CERTCTL_VAULT_ADDR="https://vault.internal:8200"
+  export CERTCTL_VAULT_TOKEN="s.xxxxxxxxxxxxxxxx"
+  export CERTCTL_VAULT_MOUNT="pki"
+  export CERTCTL_VAULT_ROLE="certctl-role"
+  export CERTCTL_VAULT_TTL="8760h"
+  ```
+
+### 38.1 Register Vault PKI Issuer
+
+**Test:** Register a Vault PKI issuer via the API.
+
+```bash
+curl -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/issuers" \
+  -d '{
+    "id": "iss-vault-prod",
+    "name": "Vault PKI Production",
+    "type": "VaultPKI",
+    "config": {
+      "vault_addr": "'"$CERTCTL_VAULT_ADDR"'",
+      "vault_token": "'"$CERTCTL_VAULT_TOKEN"'",
+      "vault_mount": "'"$CERTCTL_VAULT_MOUNT"'",
+      "vault_role": "'"$CERTCTL_VAULT_ROLE"'",
+      "vault_ttl": "'"$CERTCTL_VAULT_TTL"'"
+    }
+  }' | jq '.id'
+```
+
+**Expected:** Returns issuer ID `iss-vault-prod`.
+**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
+
+### 38.2 Issue Certificate via Vault PKI
+
+**Test:** Create a certificate and issue it through Vault PKI.
+
+```bash
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "vault-test.example.com",
+    "issuer_id": "iss-vault-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq '.job_id'
+```
+
+**Expected:** Renewal job created and eventually moves to Completed status.
+**PASS if** certificate is issued by Vault with valid serial number and chain.
+
+### 38.3 Verify Certificate Serial and Subject
+
+**Test:** Check that the issued certificate has correct Vault metadata.
+
+```bash
+curl -s -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID" | jq '.versions[0] | {serial, subject_dn, not_before, not_after}'
+```
+
+**Expected:** Serial, DN, and validity dates from Vault PKI.
+**PASS if** certificate metadata is populated from Vault's response.
+
+### 38.4 Revocation Records Locally
+
+**Test:** Revoke the certificate and verify local recording.
+
+```bash
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
+  -d '{"reason": "superseded"}' | jq '.revoked_at'
+```
+
+**Expected:** Returns `revoked_at` timestamp.
+**PASS if** revocation is recorded locally in the audit trail but not propagated to Vault (Vault is authoritative for its own revocation).
+
+---
+
+## Part 39: DigiCert Connector (M37)
+
+### Prerequisites
+
+- DigiCert CertCentral account with API access
+- API key and organization ID from DigiCert
+- Environment variables configured:
+  ```bash
+  export CERTCTL_DIGICERT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
+  export CERTCTL_DIGICERT_ORG_ID="123456"
+  export CERTCTL_DIGICERT_PRODUCT_TYPE="ssl_basic"
+  export CERTCTL_DIGICERT_BASE_URL="https://www.digicert.com/services/v2"
+  ```
+
+### 39.1 Register DigiCert Issuer
+
+**Test:** Register a DigiCert CertCentral issuer via the API.
+
+```bash
+curl -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/issuers" \
+  -d '{
+    "id": "iss-digicert-prod",
+    "name": "DigiCert CertCentral",
+    "type": "DigiCert",
+    "config": {
+      "api_key": "'"$CERTCTL_DIGICERT_API_KEY"'",
+      "org_id": "'"$CERTCTL_DIGICERT_ORG_ID"'",
+      "product_type": "'"$CERTCTL_DIGICERT_PRODUCT_TYPE"'",
+      "base_url": "'"$CERTCTL_DIGICERT_BASE_URL"'"
+    }
+  }' | jq '.id'
+```
+
+**Expected:** Returns issuer ID `iss-digicert-prod`.
+**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
+
+### 39.2 Issue DV Certificate via DigiCert
+
+**Test:** Create a DV certificate order and track it to completion.
+
+```bash
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "dv-test.example.com",
+    "issuer_id": "iss-digicert-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+JOB_ID=$(curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
+
+# Poll for job completion (DV certs may issue immediately)
+for i in {1..30}; do
+  STATUS=$(curl -s -H "$AUTH" \
+    "$SERVER/api/v1/jobs/$JOB_ID" | jq -r '.status')
+  echo "Job status: $STATUS"
+  [ "$STATUS" = "Completed" ] && break
+  sleep 2
+done
+```
+
+**Expected:** Job eventually reaches Completed status with certificate issued.
+**PASS if** certificate has DigiCert serial number and chain.
+
+### 39.3 Verify Order ID Tracking
+
+**Test:** Check that the job record includes the DigiCert order ID for auditing.
+
+```bash
+curl -s -H "$AUTH" \
+  "$SERVER/api/v1/jobs/$JOB_ID" | jq '.metadata'
+```
+
+**Expected:** Metadata includes `order_id` from DigiCert for order tracking.
+**PASS if** audit trail shows the DigiCert order lifecycle.
+
+### 39.4 Async Poll Behavior
+
+**Test:** Verify the connector polls for certificate completion (OV certs take longer).
+
+```bash
+# Submit OV certificate order (requires validation)
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "ov-test.example.com",
+    "issuer_id": "iss-digicert-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+JOB_ID=$(curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
+
+# Check job status transitions
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '.status'
+```
+
+**Expected:** Job status transitions through pending states as DigiCert validates.
+**PASS if** polling mechanism works and job reaches completion once DigiCert issues the certificate.
+
+### 39.5 Revocation Records Locally
+
+**Test:** Revoke a DigiCert-issued certificate.
+
+```bash
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
+  -d '{"reason": "cessationOfOperation"}' | jq '.revoked_at'
+```
+
+**Expected:** Returns `revoked_at` timestamp.
+**PASS if** revocation is recorded locally; operator manages revocation in DigiCert CertCentral dashboard.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -5715,14 +5921,45 @@ These must be green before starting manual QA:
 | 37.16 | TargetsPage — target names clickable to /targets/:id | Manual | ☐ |  |  |
 | 37.17 | Sidebar — Digest and Observability nav items | Manual | ☐ |  |  |
 
+### Part 38: Vault PKI Connector (M32)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 38.s1 | Vault PKI issuer exists in seed data | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.1 |
+| 38.s2 | Vault issuer type is VaultPKI | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.2 |
+| 38.s3 | Vault issuer is enabled | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.3 |
+| 38.s4 | Vault connector passes go vet | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.4 |
+| 38.s5 | Vault connector tests pass | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.5 |
+| 38.s6 | OpenAPI spec includes VaultPKI type | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 38.6 |
+| 38.1 | Register Vault PKI issuer | Manual | ☐ |  | Requires live Vault server |
+| 38.2 | Issue certificate via Vault PKI | Manual | ☐ |  | Requires live Vault server |
+| 38.3 | Verify certificate serial and subject | Manual | ☐ |  | Requires live Vault server |
+| 38.4 | Revocation records locally | Manual | ☐ |  | Requires live Vault server |
+
+### Part 39: DigiCert Connector (M37)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 39.s1 | DigiCert issuer exists in seed data | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.1 |
+| 39.s2 | DigiCert issuer type is DigiCert | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.2 |
+| 39.s3 | DigiCert issuer is enabled | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.3 |
+| 39.s4 | DigiCert connector passes go vet | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.4 |
+| 39.s5 | DigiCert connector tests pass | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.5 |
+| 39.s6 | OpenAPI spec includes DigiCert type | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 39.6 |
+| 39.1 | Register DigiCert issuer | Manual | ☐ |  | Requires DigiCert sandbox |
+| 39.2 | Issue DV certificate via DigiCert | Manual | ☐ |  | Requires DigiCert sandbox |
+| 39.3 | Verify order ID tracking | Manual | ☐ |  | Requires DigiCert sandbox |
+| 39.4 | Async poll behavior | Manual | ☐ |  | Requires DigiCert sandbox |
+| 39.5 | Revocation records locally | Manual | ☐ |  | Requires DigiCert sandbox |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
-| ☑ Auto (passed in `qa-smoke-test.sh`) | 127 |
+| ☑ Auto (passed in `qa-smoke-test.sh`) | 136 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 217 |
-| **Total** | **349** |
+| ☐ Manual (requires hands-on verification) | 226 |
+| **Total** | **367** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

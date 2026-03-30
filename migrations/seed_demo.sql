@@ -43,7 +43,9 @@ INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VA
   ('iss-acme-le',  'Let''s Encrypt Staging', 'acme',        '{"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '150 days', NOW() - INTERVAL '150 days'),
   ('iss-stepca',   'step-ca Internal',       'stepca',      '{"ca_url": "https://ca.internal:9000", "provisioner_name": "certctl", "validity_days": 90}', true, NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days'),
   ('iss-acme-zs',  'ZeroSSL (EAB)',          'acme',        '{"directory_url": "https://acme.zerossl.com/v2/DV90", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '60 days', NOW() - INTERVAL '60 days'),
-  ('iss-openssl',  'Custom OpenSSL CA',      'openssl',     '{"sign_script": "/opt/ca/sign.sh", "timeout_seconds": 30}', false, NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days')
+  ('iss-openssl',  'Custom OpenSSL CA',      'openssl',     '{"sign_script": "/opt/ca/sign.sh", "timeout_seconds": 30}', false, NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days'),
+  ('iss-vault',    'HashiCorp Vault PKI',   'VaultPKI',    '{"addr": "https://vault.internal:8200", "mount": "pki", "role": "web-certs", "ttl": "8760h"}', true, NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days'),
+  ('iss-digicert', 'DigiCert CertCentral',  'DigiCert',    '{"base_url": "https://www.digicert.com/services/v2", "product_type": "ssl_basic"}', true, NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================

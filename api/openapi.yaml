@@ -2643,7 +2643,7 @@ components:
     # ─── Issuers ─────────────────────────────────────────────────────
     IssuerType:
       type: string
-      enum: [ACME, GenericCA, StepCA]
+      enum: [ACME, GenericCA, StepCA, VaultPKI, DigiCert]
 
     Issuer:
       type: object
