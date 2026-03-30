@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
 import { getTargets, createTarget, deleteTarget } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -266,7 +267,9 @@ export default function TargetsPage() {
       label: 'Target',
       render: (t) => (
         <div>
-          <div className="font-medium text-ink">{t.name}</div>
+          <Link to={`/targets/${t.id}`} className="font-medium text-accent hover:text-accent-bright" onClick={(e) => e.stopPropagation()}>
+            {t.name}
+          </Link>
           <div className="text-xs text-ink-faint font-mono">{t.id}</div>
         </div>
       ),

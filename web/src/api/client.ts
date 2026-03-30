@@ -365,5 +365,32 @@ export const previewDigest = () => {
 export const sendDigest = () =>
   fetchJSON<{ message: string }>(`${BASE}/digest/send`, { method: 'POST' });
 
+// Jobs (single)
+export const getJob = (id: string) =>
+  fetchJSON<Job>(`${BASE}/jobs/${id}`);
+
+// Job Verification
+export const getJobVerification = (id: string) =>
+  fetchJSON<{ job_id: string; target_id: string; verified: boolean; actual_fingerprint: string; expected_fingerprint: string; verified_at: string; error?: string }>(`${BASE}/jobs/${id}/verification`);
+
+// Issuers (single)
+export const getIssuer = (id: string) =>
+  fetchJSON<Issuer>(`${BASE}/issuers/${id}`);
+
+// Targets (single)
+export const getTarget = (id: string) =>
+  fetchJSON<Target>(`${BASE}/targets/${id}`);
+
+// Prometheus metrics (text format)
+export const getPrometheusMetrics = () => {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return fetch(`${BASE}/metrics/prometheus`, { headers })
+    .then(r => {
+      if (!r.ok) throw new Error(`Prometheus metrics failed: ${r.status}`);
+      return r.text();
+    });
+};
+
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');

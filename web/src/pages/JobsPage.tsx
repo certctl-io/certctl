@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getJobs, cancelJob, approveRenewal, rejectRenewal } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -47,6 +48,27 @@ function RejectModal({ job, onClose, onReject }: { job: Job; onClose: () => void
   );
 }
 
+function VerificationBadge({ status }: { status?: string }) {
+  if (!status) return <span className="text-xs text-ink-faint">—</span>;
+  const styles: Record<string, string> = {
+    success: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-red-100 text-red-700',
+    pending: 'bg-yellow-100 text-yellow-700',
+    skipped: 'bg-gray-100 text-gray-600',
+  };
+  const labels: Record<string, string> = {
+    success: 'Verified',
+    failed: 'Failed',
+    pending: 'Pending',
+    skipped: 'Skipped',
+  };
+  return (
+    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+      {labels[status] || status}
+    </span>
+  );
+}
+
 export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
@@ -89,7 +111,9 @@ export default function JobsPage() {
       label: 'Job',
       render: (j) => (
         <div>
-          <div className="font-mono text-xs text-ink">{j.id}</div>
+          <Link to={`/jobs/${j.id}`} className="font-mono text-xs text-accent hover:text-accent-bright" onClick={(e) => e.stopPropagation()}>
+            {j.id}
+          </Link>
           <div className="text-xs text-ink-faint">{j.type}</div>
         </div>
       ),
@@ -97,12 +121,28 @@ export default function JobsPage() {
     { key: 'status', label: 'Status', render: (j) => <StatusBadge status={j.status} /> },
     { key: 'cert', label: 'Certificate', render: (j) => <span className="text-xs text-ink-muted font-mono">{j.certificate_id}</span> },
     {
+      key: 'agent',
+      label: 'Agent',
+      render: (j) => j.agent_id ? (
+        <Link to={`/agents/${j.agent_id}`} className="text-xs text-accent hover:text-accent-bright font-mono" onClick={(e) => e.stopPropagation()}>
+          {j.agent_id}
+        </Link>
+      ) : (
+        <span className="text-xs text-ink-faint">—</span>
+      ),
+    },
+    {
       key: 'attempts',
       label: 'Attempts',
       render: (j) => <span className="text-ink-muted">{j.attempts}/{j.max_attempts}</span>,
     },
     { key: 'scheduled', label: 'Scheduled', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.scheduled_at)}</span> },
     { key: 'completed', label: 'Completed', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.completed_at)}</span> },
+    {
+      key: 'verification',
+      label: 'Verification',
+      render: (j) => j.type === 'Deployment' ? <VerificationBadge status={j.verification_status} /> : <span className="text-xs text-ink-faint">—</span>,
+    },
     {
       key: 'actions',
       label: '',

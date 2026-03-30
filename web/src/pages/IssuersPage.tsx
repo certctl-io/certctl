@@ -1,4 +1,5 @@
 import { useState } from 'react';
+import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getIssuers, testIssuerConnection, deleteIssuer, createIssuer } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -120,7 +121,9 @@ export default function IssuersPage() {
       label: 'Issuer',
       render: (i) => (
         <div>
-          <div className="font-medium text-ink">{i.name}</div>
+          <Link to={`/issuers/${i.id}`} className="font-medium text-accent hover:text-accent-bright" onClick={(e) => e.stopPropagation()}>
+            {i.name}
+          </Link>
           <div className="text-xs text-ink-faint font-mono">{i.id}</div>
         </div>
       ),

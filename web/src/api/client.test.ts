@@ -78,6 +78,11 @@ import {
   triggerNetworkScan,
   previewDigest,
   sendDigest,
+  getJob,
+  getJobVerification,
+  getIssuer,
+  getTarget,
+  getPrometheusMetrics,
 } from './client';
 
 // Mock global fetch
@@ -1004,6 +1009,101 @@ describe('API Client', () => {
       expect(url).toBe('/api/v1/digest/send');
       expect(init.method).toBe('POST');
       expect(result.message).toBe('digest sent');
+    });
+  });
+
+  // ─── Job Detail ────────────────────────────
+
+  describe('Job Detail', () => {
+    it('getJob fetches single job by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'job-1', type: 'Deployment', status: 'Completed' }));
+      const result = await getJob('job-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/jobs/job-1');
+      expect(result.id).toBe('job-1');
+      expect(result.type).toBe('Deployment');
+    });
+
+    it('getJobVerification fetches verification result', async () => {
+      const verificationData = {
+        job_id: 'job-1',
+        target_id: 't-nginx1',
+        verified: true,
+        actual_fingerprint: 'abc123',
+        expected_fingerprint: 'abc123',
+        verified_at: '2026-03-28T12:00:00Z',
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse(verificationData));
+      const result = await getJobVerification('job-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/jobs/job-1/verification');
+      expect(result.verified).toBe(true);
+      expect(result.actual_fingerprint).toBe('abc123');
+    });
+  });
+
+  // ─── Issuer Detail ─────────────────────────
+
+  describe('Issuer Detail', () => {
+    it('getIssuer fetches single issuer by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-local', name: 'Local CA', type: 'local_ca', status: 'active' }));
+      const result = await getIssuer('iss-local');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/issuers/iss-local');
+      expect(result.name).toBe('Local CA');
+      expect(result.type).toBe('local_ca');
+    });
+  });
+
+  // ─── Target Detail ─────────────────────────
+
+  describe('Target Detail', () => {
+    it('getTarget fetches single target by ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 't-nginx1', name: 'Web Server', type: 'nginx', hostname: 'web1.example.com' }));
+      const result = await getTarget('t-nginx1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/targets/t-nginx1');
+      expect(result.name).toBe('Web Server');
+      expect(result.type).toBe('nginx');
+    });
+  });
+
+  // ─── Prometheus Metrics ────────────────────
+
+  describe('Prometheus Metrics', () => {
+    it('getPrometheusMetrics fetches text format', async () => {
+      const metricsText = '# HELP certctl_certificate_total Total certificates\ncertctl_certificate_total 10';
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve(metricsText),
+        } as Response)
+      );
+      const result = await getPrometheusMetrics();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/metrics/prometheus');
+      expect(result).toContain('certctl_certificate_total');
+    });
+
+    it('getPrometheusMetrics throws on error', async () => {
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: false,
+          status: 500,
+          text: () => Promise.resolve('error'),
+        } as Response)
+      );
+      await expect(getPrometheusMetrics()).rejects.toThrow('Prometheus metrics failed: 500');
+    });
+
+    it('getPrometheusMetrics includes auth header', async () => {
+      setApiKey('prom-key');
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          text: () => Promise.resolve('metrics'),
+        } as Response)
+      );
+      await getPrometheusMetrics();
+      const [, init] = mockFetch.mock.calls[0];
+      expect(init.headers['Authorization']).toBe('Bearer prom-key');
     });
   });
 });

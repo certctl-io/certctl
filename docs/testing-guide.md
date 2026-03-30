@@ -40,6 +40,8 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 33: Apache & HAProxy Target Connectors](#part-33-apache--haproxy-target-connectors)
 - [Part 34: Sub-CA Mode](#part-34-sub-ca-mode)
 - [Part 35: ARI (RFC 9702) Scheduler Integration](#part-35-ari-rfc-9702-scheduler-integration)
+- [Part 36: Agent Work Routing (M31)](#part-36-agent-work-routing-m31)
+- [Part 37: GUI Completeness (Pre-2.1.0-E)](#part-37-gui-completeness-pre-210-e)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5116,6 +5118,54 @@ docker logs certctl-server 2>&1 | grep "ARI check failed, falling back"
 
 ---
 
+## Part 36: Agent Work Routing (M31)
+
+Tests that `GetPendingWork()` returns only jobs scoped to the requesting agent, and that deployment jobs have `agent_id` populated at creation time.
+
+### 36.1 Multi-Agent Routing
+
+**Prerequisite:** Two agents registered (`agent-web-01`, `agent-lb-01`), two targets (one per agent), one certificate mapped to both targets. Trigger renewal to create deployment jobs.
+
+```bash
+# Poll as agent-web-01 — should only see its deployment job
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-web-01/work" | jq '.[] | .target_id'
+
+# Poll as agent-lb-01 — should only see its deployment job
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-lb-01/work" | jq '.[] | .target_id'
+```
+
+**Expected:** Each agent receives only the deployment job for its assigned target. Agent-web-01 does NOT see agent-lb-01's job and vice versa.
+**PASS if** each agent's work response contains only jobs for targets it owns.
+
+### 36.2 Agent With No Targets Gets Empty Work
+
+**Prerequisite:** Register a new agent with no target assignments.
+
+```bash
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-no-targets/work" | jq 'length'
+```
+
+**Expected:** Empty array (0 jobs).
+**PASS if** the response is an empty list.
+
+### 36.3 Deployment Jobs Have agent_id Populated
+
+**Prerequisite:** Deployment jobs created via renewal or manual trigger.
+
+```bash
+# Check that deployment jobs in the system have agent_id set
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/jobs" | jq '[.data[] | select(.type == "Deployment") | .agent_id] | map(select(. != null)) | length'
+```
+
+**Expected:** All deployment jobs for targets with agent assignments have `agent_id` populated.
+**PASS if** deployment jobs have non-null `agent_id` values.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -5632,14 +5682,47 @@ These must be green before starting manual QA:
 | 35.2 | ARI triggers renewal when CA says "now" (requires ACME+ARI) | Manual | ☐ |  |  |
 | 35.3 | ARI fallback on error — threshold-based (requires ACME+ARI) | Manual | ☐ |  |  |
 
+### Part 36: Agent Work Routing (M31)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 36.a1 | Agent receives only its deployment jobs | Auto | ☐ |  |  |
+| 36.a2 | Agent with no targets gets empty work list | Auto | ☐ |  |  |
+| 36.a3 | Deployment jobs have agent_id populated | Auto | ☐ |  |  |
+| 36.1 | Multi-agent routing with 2 agents, 2 targets | Manual | ☐ |  |  |
+| 36.2 | Agent with no assigned targets gets empty work | Manual | ☐ |  |  |
+| 36.3 | Database agent_id populated on deployment jobs | Manual | ☐ |  |  |
+
+### Part 37: GUI Completeness (Pre-2.1.0-E)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 37.1 | DigestPage renders preview iframe | Manual | ☐ |  |  |
+| 37.2 | DigestPage send button with confirmation modal | Manual | ☐ |  |  |
+| 37.3 | ObservabilityPage shows metrics gauges | Manual | ☐ |  |  |
+| 37.4 | ObservabilityPage Prometheus config block | Manual | ☐ |  |  |
+| 37.5 | ObservabilityPage live Prometheus output | Manual | ☐ |  |  |
+| 37.6 | JobDetailPage displays job info and timeline | Manual | ☐ |  |  |
+| 37.7 | JobDetailPage verification section for deployment jobs | Manual | ☐ |  |  |
+| 37.8 | IssuerDetailPage shows redacted config | Manual | ☐ |  |  |
+| 37.9 | IssuerDetailPage test connection button | Manual | ☐ |  |  |
+| 37.10 | IssuerDetailPage issued certificates list | Manual | ☐ |  |  |
+| 37.11 | TargetDetailPage shows config and agent link | Manual | ☐ |  |  |
+| 37.12 | TargetDetailPage deployment history table | Manual | ☐ |  |  |
+| 37.13 | JobsPage — job IDs clickable to /jobs/:id | Manual | ☐ |  |  |
+| 37.14 | JobsPage — verification column for deployment jobs | Manual | ☐ |  |  |
+| 37.15 | IssuersPage — issuer names clickable to /issuers/:id | Manual | ☐ |  |  |
+| 37.16 | TargetsPage — target names clickable to /targets/:id | Manual | ☐ |  |  |
+| 37.17 | Sidebar — Digest and Observability nav items | Manual | ☐ |  |  |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
-| ☑ Auto (passed in `qa-smoke-test.sh`) | 124 |
+| ☑ Auto (passed in `qa-smoke-test.sh`) | 127 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 197 |
-| **Total** | **326** |
+| ☐ Manual (requires hands-on verification) | 217 |
+| **Total** | **349** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

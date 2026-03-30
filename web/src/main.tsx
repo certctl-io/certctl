@@ -25,6 +25,11 @@ import ShortLivedPage from './pages/ShortLivedPage';
 import AgentFleetPage from './pages/AgentFleetPage';
 import DiscoveryPage from './pages/DiscoveryPage';
 import NetworkScanPage from './pages/NetworkScanPage';
+import DigestPage from './pages/DigestPage';
+import ObservabilityPage from './pages/ObservabilityPage';
+import JobDetailPage from './pages/JobDetailPage';
+import IssuerDetailPage from './pages/IssuerDetailPage';
+import TargetDetailPage from './pages/TargetDetailPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -53,11 +58,14 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="agents/:id" element={<AgentDetailPage />} />
                   <Route path="fleet" element={<AgentFleetPage />} />
                   <Route path="jobs" element={<JobsPage />} />
+                  <Route path="jobs/:id" element={<JobDetailPage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="policies" element={<PoliciesPage />} />
                   <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="issuers" element={<IssuersPage />} />
+                  <Route path="issuers/:id" element={<IssuerDetailPage />} />
                   <Route path="targets" element={<TargetsPage />} />
+                  <Route path="targets/:id" element={<TargetDetailPage />} />
                   <Route path="owners" element={<OwnersPage />} />
                   <Route path="teams" element={<TeamsPage />} />
                   <Route path="agent-groups" element={<AgentGroupsPage />} />
@@ -65,6 +73,8 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="short-lived" element={<ShortLivedPage />} />
                   <Route path="discovery" element={<DiscoveryPage />} />
                   <Route path="network-scans" element={<NetworkScanPage />} />
+                  <Route path="digest" element={<DigestPage />} />
+                  <Route path="observability" element={<ObservabilityPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>
