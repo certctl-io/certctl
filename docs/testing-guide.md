@@ -44,6 +44,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 37: GUI Completeness (Pre-2.1.0-E)](#part-37-gui-completeness-pre-210-e)
 - [Part 38: Vault PKI Connector (M32)](#part-38-vault-pki-connector-m32)
 - [Part 39: DigiCert Connector (M37)](#part-39-digicert-connector-m37)
+- [Part 40: Issuer Catalog Page (M33)](#part-40-issuer-catalog-page-m33)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5372,6 +5373,88 @@ curl -s -X POST -H "$AUTH" \
 
 ---
 
+## Part 40: Issuer Catalog Page (M33)
+
+Frontend-only milestone. No backend changes. All tests are automated via `qa-smoke-test.sh` and `vitest`.
+
+### 40.1 Shared Issuer Type Config
+
+**Test:** Verify shared config file exists with all 6 supported types + 2 coming soon stubs.
+
+```bash
+test -f web/src/config/issuerTypes.ts
+grep -c 'VaultPKI' web/src/config/issuerTypes.ts    # >= 1
+grep -c 'DigiCert' web/src/config/issuerTypes.ts     # >= 1
+grep -cE 'eab_kid|eab_hmac' web/src/config/issuerTypes.ts  # >= 1
+grep -c 'sensitive' web/src/config/issuerTypes.ts     # >= 1
+```
+
+**PASS if** file exists, all types present, EAB fields and sensitive flags included.
+
+### 40.2 Composable Wizard Components
+
+**Test:** Verify reusable components exist.
+
+```bash
+test -f web/src/components/issuer/TypeSelector.tsx
+test -f web/src/components/issuer/ConfigForm.tsx
+test -f web/src/components/issuer/ConfigDetailModal.tsx
+```
+
+**PASS if** all 3 component files exist.
+
+### 40.3 Frontend Build
+
+**Test:** Verify frontend builds with zero errors.
+
+```bash
+cd web && npm run build 2>&1 | tail -1 | grep -q 'built in'
+```
+
+**PASS if** build succeeds.
+
+### 40.4 Frontend Tests
+
+**Test:** Verify all Vitest tests pass including new VaultPKI/DigiCert create tests.
+
+```bash
+cd web && npx vitest run 2>&1 | grep -qE 'Tests.*passed'
+```
+
+**PASS if** all tests pass.
+
+### 40.5 (Manual) Create VaultPKI Issuer via Wizard
+
+**Test:** Open Issuers page, click "Configure" on Vault PKI card, fill in form (addr, token, mount, role, ttl), submit.
+**PASS if** issuer appears in configured issuers table.
+
+### 40.6 (Manual) Create DigiCert Issuer via Wizard
+
+**Test:** Open Issuers page, click "Configure" on DigiCert card, fill in form (api_key, org_id, product_type), submit.
+**PASS if** issuer appears in configured issuers table.
+
+### 40.7 (Manual) Create ACME Issuer with EAB Fields
+
+**Test:** Open create wizard, select ACME, verify EAB Key ID and EAB HMAC Key fields are visible.
+**PASS if** EAB fields render and accept input.
+
+### 40.8 (Manual) Catalog Cards Show Correct Status
+
+**Test:** Verify catalog cards show "Connected" (green, count) for types with configured issuers, "Available" (blue) for unconfigured types, and "Coming Soon" (grey) for Sectigo/Entrust.
+**PASS if** all 8 cards render with correct status.
+
+### 40.9 (Manual) Config Detail Modal Shows Full Redacted Config
+
+**Test:** Click "View Config" on a configured issuer row. Verify modal shows full config JSON with sensitive fields (token, key, hmac, password, private, secret) redacted as `********`.
+**PASS if** modal opens, full config visible, sensitive fields redacted.
+
+### 40.10 (Manual) Issuer Type Filter Works
+
+**Test:** Use the type filter dropdown above the configured issuers table. Select a specific type.
+**PASS if** table filters to show only issuers of the selected type.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -5952,14 +6035,33 @@ These must be green before starting manual QA:
 | 39.4 | Async poll behavior | Manual | ☐ |  | Requires DigiCert sandbox |
 | 39.5 | Revocation records locally | Manual | ☐ |  | Requires DigiCert sandbox |
 
+### Part 40: Issuer Catalog Page (M33)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 40.s1 | Shared issuerTypes config exists | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.1 |
+| 40.s2 | VaultPKI in issuerTypes config | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.2 |
+| 40.s3 | DigiCert in issuerTypes config | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.3 |
+| 40.s4 | ACME EAB fields in config | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.4 |
+| 40.s5 | Sensitive field flag in config | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.5 |
+| 40.s6 | ConfigDetailModal component exists | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.6 |
+| 40.s7 | Frontend build succeeds | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.7 |
+| 40.s8 | Frontend tests pass | Auto | ☑ | 2026-03-30 | qa-smoke-test.sh 40.8 |
+| 40.m1 | Create VaultPKI issuer via wizard | Manual | ☐ |  | |
+| 40.m2 | Create DigiCert issuer via wizard | Manual | ☐ |  | |
+| 40.m3 | Create ACME issuer with EAB fields | Manual | ☐ |  | |
+| 40.m4 | Catalog cards show correct status | Manual | ☐ |  | |
+| 40.m5 | Config detail modal shows full redacted config | Manual | ☐ |  | |
+| 40.m6 | Issuer type filter works | Manual | ☐ |  | |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
-| ☑ Auto (passed in `qa-smoke-test.sh`) | 136 |
+| ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 226 |
-| **Total** | **367** |
+| ☐ Manual (requires hands-on verification) | 232 |
+| **Total** | **381** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

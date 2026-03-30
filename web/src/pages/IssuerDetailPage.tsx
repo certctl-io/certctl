@@ -1,4 +1,4 @@
-import { useParams } from 'react-router-dom';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation } from '@tanstack/react-query';
 import { getIssuer, testIssuerConnection, getCertificates } from '../api/client';
 import PageHeader from '../components/PageHeader';
@@ -7,15 +7,8 @@ import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
-import type { Certificate } from '../api/types';
-
-const typeLabels: Record<string, string> = {
-  local_ca: 'Local CA',
-  acme: 'ACME (Let\'s Encrypt)',
-  step_ca: 'step-ca',
-  openssl: 'OpenSSL / Custom',
-  vault: 'Vault PKI',
-};
+import type { Certificate, Issuer } from '../api/types';
+import { typeLabels, redactConfig } from '../config/issuerTypes';
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   return (
@@ -26,8 +19,17 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+/** Derive display status from backend enabled boolean */
+function issuerStatus(issuer: Issuer): string {
+  if (issuer.enabled !== undefined) {
+    return issuer.enabled ? 'Enabled' : 'Disabled';
+  }
+  return issuer.status || 'Unknown';
+}
+
 export default function IssuerDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const navigate = useNavigate();
 
   const { data: issuer, isLoading, error, refetch } = useQuery({
     queryKey: ['issuer', id],
@@ -65,13 +67,7 @@ export default function IssuerDetailPage() {
     );
   }
 
-  // Redact sensitive config fields
-  const safeConfig = issuer.config ? Object.fromEntries(
-    Object.entries(issuer.config).map(([k, v]) => {
-      const sensitive = ['password', 'secret', 'token', 'key', 'hmac', 'private'].some(s => k.toLowerCase().includes(s));
-      return [k, sensitive ? '********' : v];
-    })
-  ) : {};
+  const safeConfig = issuer.config ? redactConfig(issuer.config) : {};
 
   const certColumns: Column<Certificate>[] = [
     {
@@ -94,13 +90,21 @@ export default function IssuerDetailPage() {
         title={issuer.name}
         subtitle={typeLabels[issuer.type] || issuer.type}
         action={
-          <button
-            onClick={() => testMutation.mutate()}
-            disabled={testMutation.isPending}
-            className="btn btn-primary text-xs disabled:opacity-50"
-          >
-            {testMutation.isPending ? 'Testing...' : 'Test Connection'}
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => navigate(`/issuers?edit=${issuer.id}`)}
+              className="px-3 py-1.5 border border-surface-border rounded text-ink text-xs hover:bg-surface-hover transition-colors font-medium"
+            >
+              Edit
+            </button>
+            <button
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending}
+              className="btn btn-primary text-xs disabled:opacity-50"
+            >
+              {testMutation.isPending ? 'Testing...' : 'Test Connection'}
+            </button>
+          </div>
         }
       />
 
@@ -123,7 +127,7 @@ export default function IssuerDetailPage() {
             <InfoRow label="ID" value={<span className="font-mono text-xs">{issuer.id}</span>} />
             <InfoRow label="Name" value={issuer.name} />
             <InfoRow label="Type" value={typeLabels[issuer.type] || issuer.type} />
-            <InfoRow label="Status" value={<StatusBadge status={issuer.status} />} />
+            <InfoRow label="Status" value={<StatusBadge status={issuerStatus(issuer)} />} />
             <InfoRow label="Created" value={formatDateTime(issuer.created_at)} />
           </div>
 

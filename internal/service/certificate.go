@@ -304,6 +304,14 @@ func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (
 	if cert.UpdatedAt.IsZero() {
 		cert.UpdatedAt = now
 	}
+	// Default status to Pending if not set (DB column DEFAULT only applies when column is omitted from INSERT)
+	if cert.Status == "" {
+		cert.Status = domain.CertificateStatusPending
+	}
+	// Default tags to empty map if nil (avoids JSON null in JSONB column)
+	if cert.Tags == nil {
+		cert.Tags = make(map[string]string)
+	}
 	if err := s.certRepo.Create(context.Background(), &cert); err != nil {
 		return nil, fmt.Errorf("failed to create certificate: %w", err)
 	}

@@ -243,6 +243,7 @@ func (h CertificateHandler) CreateCertificate(w http.ResponseWriter, r *http.Req
 
 	created, err := h.svc.CreateCertificate(cert)
 	if err != nil {
+		slog.Error("failed to create certificate", "error", err, "request_id", requestID, "common_name", cert.CommonName, "name", cert.Name)
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create certificate", requestID)
 		return
 	}

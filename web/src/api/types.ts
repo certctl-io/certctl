@@ -135,6 +135,8 @@ export interface Issuer {
   type: string;
   config: Record<string, unknown>;
   status: string;
+  /** Backend returns enabled boolean; status is derived from this */
+  enabled: boolean;
   created_at: string;
 }
 

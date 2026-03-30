@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { getIssuers, testIssuerConnection, deleteIssuer, createIssuer } from '../api/client';
@@ -9,83 +9,27 @@ import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
 import type { Issuer } from '../api/types';
+import { issuerTypes, typeLabels, getIssuerCatalogStatus, type IssuerTypeConfig } from '../config/issuerTypes';
+import TypeSelector from '../components/issuer/TypeSelector';
+import ConfigForm from '../components/issuer/ConfigForm';
+import ConfigDetailModal from '../components/issuer/ConfigDetailModal';
 
-const typeLabels: Record<string, string> = {
-  local_ca: 'Local CA',
-  acme: 'ACME',
-  stepca: 'step-ca',
-  openssl: 'OpenSSL/Custom',
-  vault: 'Vault PKI',
-  manual: 'Manual',
-};
-
-interface IssuerConfigField {
-  key: string;
-  label: string;
-  placeholder?: string;
-  required: boolean;
-  type?: string;
-  options?: string[];
-  defaultValue?: string;
+/** Derive display status from backend enabled boolean */
+function issuerStatus(issuer: Issuer): string {
+  if (issuer.enabled !== undefined) {
+    return issuer.enabled ? 'Enabled' : 'Disabled';
+  }
+  // Fallback for legacy data that may have status string
+  return issuer.status || 'Unknown';
 }
-
-interface IssuerTypeConfig {
-  id: string;
-  name: string;
-  description: string;
-  configFields: IssuerConfigField[];
-}
-
-const issuerTypes: IssuerTypeConfig[] = [
-  {
-    id: 'local_ca',
-    name: 'Local CA',
-    description: 'Self-signed or subordinate CA for certificate issuance',
-    configFields: [
-      { key: 'ca_cert_path', label: 'CA Cert Path (optional)', placeholder: '/path/to/ca.crt', required: false },
-      { key: 'ca_key_path', label: 'CA Key Path (optional)', placeholder: '/path/to/ca.key', required: false },
-    ],
-  },
-  {
-    id: 'acme',
-    name: 'ACME',
-    description: "Let's Encrypt or other ACME-compatible CA",
-    configFields: [
-      { key: 'directory_url', label: 'Directory URL', placeholder: 'https://acme-v02.api.letsencrypt.org/directory', required: true },
-      { key: 'email', label: 'Email', placeholder: 'admin@example.com', required: true },
-      { key: 'challenge_type', label: 'Challenge Type', type: 'select', options: ['http-01', 'dns-01', 'dns-persist-01'], required: false, defaultValue: 'http-01' },
-    ],
-  },
-  {
-    id: 'stepca',
-    name: 'step-ca',
-    description: 'Smallstep private CA',
-    configFields: [
-      { key: 'ca_url', label: 'CA URL', placeholder: 'https://ca.example.com', required: true },
-      { key: 'provisioner_name', label: 'Provisioner Name', placeholder: 'my-provisioner', required: true },
-      { key: 'provisioner_key', label: 'Provisioner Key (JWK)', placeholder: '{...}', type: 'textarea', required: true },
-    ],
-  },
-  {
-    id: 'openssl',
-    name: 'OpenSSL/Custom',
-    description: 'Script-based signing with your own CA',
-    configFields: [
-      { key: 'sign_script', label: 'Sign Script Path', placeholder: '/path/to/sign.sh', required: true },
-      { key: 'revoke_script', label: 'Revoke Script Path (optional)', placeholder: '/path/to/revoke.sh', required: false },
-      { key: 'crl_script', label: 'CRL Script Path (optional)', placeholder: '/path/to/crl.sh', required: false },
-      { key: 'timeout_seconds', label: 'Timeout (seconds)', placeholder: '30', type: 'number', required: false },
-    ],
-  },
-];
 
 export default function IssuersPage() {
   const queryClient = useQueryClient();
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
-  const [createStep, setCreateStep] = useState<'type' | 'config'>('type');
-  const [selectedType, setSelectedType] = useState<string | null>(null);
-  const [createForm, setCreateForm] = useState<Record<string, unknown>>({});
+  const [preselectedType, setPreselectedType] = useState<string | null>(null);
+  const [typeFilter, setTypeFilter] = useState<string>('');
+  const [configModal, setConfigModal] = useState<{ title: string; config: Record<string, unknown> } | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['issuers'],
@@ -109,11 +53,21 @@ export default function IssuersPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['issuers'] });
       setShowCreateModal(false);
-      setCreateStep('type');
-      setSelectedType(null);
-      setCreateForm({});
+      setPreselectedType(null);
     },
   });
+
+  const catalogStatus = useMemo(
+    () => getIssuerCatalogStatus(data?.data || []),
+    [data?.data]
+  );
+
+  // Filter issuers by type
+  const filteredIssuers = useMemo(() => {
+    if (!data?.data) return [];
+    if (!typeFilter) return data.data;
+    return data.data.filter(i => i.type === typeFilter);
+  }, [data?.data, typeFilter]);
 
   const columns: Column<Issuer>[] = [
     {
@@ -138,7 +92,7 @@ export default function IssuersPage() {
     {
       key: 'status',
       label: 'Status',
-      render: (i) => <StatusBadge status={i.status} />,
+      render: (i) => <StatusBadge status={issuerStatus(i)} />,
     },
     {
       key: 'config',
@@ -146,9 +100,15 @@ export default function IssuersPage() {
       render: (i) => {
         if (!i.config || Object.keys(i.config).length === 0) return <span className="text-ink-faint">&mdash;</span>;
         return (
-          <span className="text-xs text-ink-muted font-mono truncate max-w-xs block">
-            {JSON.stringify(i.config).slice(0, 60)}
-          </span>
+          <button
+            onClick={(e) => {
+              e.stopPropagation();
+              setConfigModal({ title: `${i.name} Configuration`, config: i.config });
+            }}
+            className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
+          >
+            View Config
+          </button>
         );
       },
     },
@@ -184,14 +144,12 @@ export default function IssuersPage() {
     <>
       <PageHeader
         title="Issuers"
-        subtitle={data ? `${data.total} issuers` : undefined}
+        subtitle={data ? `${data.total} configured` : undefined}
         action={
           <button
             onClick={() => {
+              setPreselectedType(null);
               setShowCreateModal(true);
-              setCreateStep('type');
-              setSelectedType(null);
-              setCreateForm({});
             }}
             className="px-4 py-2 bg-brand-600 text-white rounded font-medium hover:bg-brand-700 transition-colors text-sm"
           >
@@ -205,49 +163,83 @@ export default function IssuersPage() {
           <button onClick={() => setTestResult(null)} className="ml-3 text-xs opacity-60 hover:opacity-100">dismiss</button>
         </div>
       )}
+
       <div className="flex-1 overflow-y-auto">
         {error ? (
           <ErrorState error={error as Error} onRetry={() => refetch()} />
         ) : (
-          <DataTable columns={columns} data={data?.data || []} isLoading={isLoading} emptyMessage="No issuers configured" />
+          <>
+            {/* Issuer Type Catalog Cards */}
+            <div className="px-6 py-4">
+              <h3 className="text-sm font-semibold text-ink-muted mb-3">Issuer Types</h3>
+              <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-3">
+                {catalogStatus.map(({ type, status, count }) => (
+                  <CatalogCard
+                    key={type.id}
+                    type={type}
+                    status={status}
+                    count={count}
+                    onConfigure={() => {
+                      setPreselectedType(type.id);
+                      setShowCreateModal(true);
+                    }}
+                    onFilter={() => {
+                      // Match both the canonical id and aliases
+                      const filterValue = type.id === 'local' ? 'local' : type.id;
+                      setTypeFilter(prev => prev === filterValue ? '' : filterValue);
+                    }}
+                  />
+                ))}
+              </div>
+            </div>
+
+            {/* Configured Issuers Table */}
+            <div className="px-6 pb-4">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-sm font-semibold text-ink-muted">Configured Issuers</h3>
+                <div className="flex items-center gap-2">
+                  <select
+                    value={typeFilter}
+                    onChange={(e) => setTypeFilter(e.target.value)}
+                    className="text-xs px-2 py-1.5 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500"
+                  >
+                    <option value="">All Types</option>
+                    {issuerTypes.filter(t => !t.comingSoon).map(t => (
+                      <option key={t.id} value={t.id}>{t.name}</option>
+                    ))}
+                  </select>
+                </div>
+              </div>
+              <DataTable
+                columns={columns}
+                data={filteredIssuers}
+                isLoading={isLoading}
+                emptyMessage={typeFilter ? `No ${typeLabels[typeFilter] || typeFilter} issuers configured` : 'No issuers configured'}
+              />
+            </div>
+          </>
         )}
       </div>
 
+      {/* Config Detail Modal */}
+      {configModal && (
+        <ConfigDetailModal
+          title={configModal.title}
+          config={configModal.config}
+          onClose={() => setConfigModal(null)}
+        />
+      )}
+
+      {/* Create Issuer Modal */}
       {showCreateModal && (
         <CreateIssuerModal
-          step={createStep}
-          selectedType={selectedType}
-          form={createForm}
-          onTypeSelect={(type) => {
-            setSelectedType(type);
-            const typeConfig = issuerTypes.find((t) => t.id === type);
-            const defaultConfig: Record<string, unknown> = {};
-            if (typeConfig) {
-              typeConfig.configFields.forEach((field) => {
-                if (field.defaultValue) {
-                  defaultConfig[field.key] = field.defaultValue;
-                }
-              });
-            }
-            setCreateForm({ ...defaultConfig });
-            setCreateStep('config');
-          }}
-          onFormChange={(field, value) => {
-            setCreateForm({ ...createForm, [field]: value });
-          }}
-          onBack={() => setCreateStep('type')}
-          onSubmit={() => {
-            if (!selectedType || !createForm.name) return;
-            const config: Record<string, unknown> = { ...createForm };
-            const name = config.name as string;
-            delete config.name;
-            createMutation.mutate({ name, type: selectedType, config });
+          preselectedType={preselectedType}
+          onSubmit={(name, type, config) => {
+            createMutation.mutate({ name, type, config });
           }}
           onCancel={() => {
             setShowCreateModal(false);
-            setCreateStep('type');
-            setSelectedType(null);
-            setCreateForm({});
+            setPreselectedType(null);
           }}
           isSubmitting={createMutation.isPending}
         />
@@ -256,30 +248,94 @@ export default function IssuersPage() {
   );
 }
 
+// ─── Catalog Card ───────────────────────────────────────────────
+
+interface CatalogCardProps {
+  type: IssuerTypeConfig;
+  status: 'connected' | 'available' | 'coming_soon';
+  count: number;
+  onConfigure: () => void;
+  onFilter: () => void;
+}
+
+function CatalogCard({ type, status, count, onConfigure, onFilter }: CatalogCardProps) {
+  const statusConfig = {
+    connected: { label: `${count} configured`, cls: 'bg-emerald-500/10 text-emerald-400 border-emerald-500/30' },
+    available: { label: 'Available', cls: 'bg-brand-500/10 text-brand-400 border-brand-500/30' },
+    coming_soon: { label: 'Coming Soon', cls: 'bg-gray-500/10 text-gray-400 border-gray-500/30' },
+  };
+  const { label, cls } = statusConfig[status];
+
+  return (
+    <div className={`p-4 border rounded-lg ${status === 'coming_soon' ? 'border-surface-border/50 opacity-60' : 'border-surface-border'}`}>
+      <div className="flex items-start justify-between mb-2">
+        <div className="flex items-center gap-2">
+          <span className="text-lg">{type.icon}</span>
+          <span className="font-medium text-ink text-sm">{type.name}</span>
+        </div>
+        <span className={`text-xs px-2 py-0.5 rounded-full border ${cls}`}>{label}</span>
+      </div>
+      <p className="text-xs text-ink-muted mb-3">{type.description}</p>
+      {status === 'connected' && (
+        <button
+          onClick={onFilter}
+          className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
+        >
+          View issuers
+        </button>
+      )}
+      {status === 'available' && (
+        <button
+          onClick={onConfigure}
+          className="text-xs px-3 py-1 bg-brand-600 text-white rounded hover:bg-brand-700 transition-colors"
+        >
+          Configure
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ─── Create Issuer Modal ────────────────────────────────────────
+
 interface CreateIssuerModalProps {
-  step: 'type' | 'config';
-  selectedType: string | null;
-  form: Record<string, unknown>;
-  onTypeSelect: (type: string) => void;
-  onFormChange: (field: string, value: unknown) => void;
-  onBack: () => void;
-  onSubmit: () => void;
+  preselectedType: string | null;
+  onSubmit: (name: string, type: string, config: Record<string, unknown>) => void;
   onCancel: () => void;
   isSubmitting: boolean;
 }
 
-function CreateIssuerModal({
-  step,
-  selectedType,
-  form,
-  onTypeSelect,
-  onFormChange,
-  onBack,
-  onSubmit,
-  onCancel,
-  isSubmitting,
-}: CreateIssuerModalProps) {
-  const selectedTypeConfig = issuerTypes.find((t) => t.id === selectedType);
+function CreateIssuerModal({ preselectedType, onSubmit, onCancel, isSubmitting }: CreateIssuerModalProps) {
+  const [step, setStep] = useState<'type' | 'config'>(preselectedType ? 'config' : 'type');
+  const [selectedType, setSelectedType] = useState<string | null>(preselectedType);
+  const [form, setForm] = useState<Record<string, unknown>>(() => {
+    if (preselectedType) {
+      const tc = issuerTypes.find(t => t.id === preselectedType);
+      const defaults: Record<string, unknown> = {};
+      tc?.configFields.forEach(f => { if (f.defaultValue) defaults[f.key] = f.defaultValue; });
+      return defaults;
+    }
+    return {};
+  });
+
+  const selectedTypeConfig = issuerTypes.find(t => t.id === selectedType);
+
+  function handleTypeSelect(typeId: string) {
+    setSelectedType(typeId);
+    const tc = issuerTypes.find(t => t.id === typeId);
+    const defaults: Record<string, unknown> = {};
+    tc?.configFields.forEach(f => { if (f.defaultValue) defaults[f.key] = f.defaultValue; });
+    setForm(defaults);
+    setStep('config');
+  }
+
+  function handleSubmit() {
+    if (!selectedType || !form.name) return;
+    const config = { ...form };
+    const name = config.name as string;
+    delete config.name;
+    onSubmit(name, selectedType, config);
+  }
 
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 z-50 flex items-center justify-center">
@@ -289,10 +345,7 @@ function CreateIssuerModal({
           <h2 className="text-lg font-semibold text-ink">
             {step === 'type' ? 'Create Issuer' : `Configure ${selectedTypeConfig?.name || 'Issuer'}`}
           </h2>
-          <button
-            onClick={onCancel}
-            className="text-ink-muted hover:text-ink transition-colors"
-          >
+          <button onClick={onCancel} className="text-ink-muted hover:text-ink transition-colors">
             ✕
           </button>
         </div>
@@ -300,79 +353,28 @@ function CreateIssuerModal({
         {/* Content */}
         <div className="px-6 py-6">
           {step === 'type' ? (
-            <div className="grid grid-cols-2 gap-4">
-              {issuerTypes.map((type) => (
-                <button
-                  key={type.id}
-                  onClick={() => onTypeSelect(type.id)}
-                  className="p-4 border border-surface-border rounded-lg hover:border-brand-500 hover:bg-opacity-5 transition-all text-left"
-                >
-                  <div className="font-medium text-ink">{type.name}</div>
-                  <div className="text-sm text-ink-muted mt-1">{type.description}</div>
-                </button>
-              ))}
-            </div>
+            <TypeSelector onSelect={handleTypeSelect} />
           ) : (
             <div className="space-y-5">
-              {/* Name field always shown */}
+              {/* Name field */}
               <div>
                 <label className="block text-sm font-medium text-ink mb-2">Issuer Name *</label>
                 <input
                   type="text"
                   value={(form.name as string) || ''}
-                  onChange={(e) => onFormChange('name', e.target.value)}
+                  onChange={(e) => setForm({ ...form, name: e.target.value })}
                   placeholder="e.g., Production CA"
                   className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
                 />
               </div>
-
-              {/* Type-specific fields */}
-              {selectedTypeConfig?.configFields.map((field) => (
-                <div key={field.key}>
-                  <label className="block text-sm font-medium text-ink mb-2">
-                    {field.label}
-                    {field.required && <span className="text-red-600 ml-1">*</span>}
-                  </label>
-                  {field.type === 'select' ? (
-                    <select
-                      value={(form[field.key] as string) || ''}
-                      onChange={(e) => onFormChange(field.key, e.target.value)}
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
-                    >
-                      <option value="">Select {field.label}</option>
-                      {field.options?.map((opt) => (
-                        <option key={opt} value={opt}>
-                          {opt}
-                        </option>
-                      ))}
-                    </select>
-                  ) : field.type === 'textarea' ? (
-                    <textarea
-                      value={(form[field.key] as string) || ''}
-                      onChange={(e) => onFormChange(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                      rows={4}
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors font-mono text-xs"
-                    />
-                  ) : field.type === 'number' ? (
-                    <input
-                      type="number"
-                      value={(form[field.key] as number | string) || ''}
-                      onChange={(e) => onFormChange(field.key, e.target.value ? parseInt(e.target.value, 10) : '')}
-                      placeholder={field.placeholder}
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
-                    />
-                  ) : (
-                    <input
-                      type="text"
-                      value={(form[field.key] as string) || ''}
-                      onChange={(e) => onFormChange(field.key, e.target.value)}
-                      placeholder={field.placeholder}
-                      className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
-                    />
-                  )}
-                </div>
-              ))}
+              {/* Type-specific fields via ConfigForm */}
+              {selectedTypeConfig && (
+                <ConfigForm
+                  fields={selectedTypeConfig.configFields}
+                  values={form}
+                  onChange={(key, value) => setForm({ ...form, [key]: value })}
+                />
+              )}
             </div>
           )}
         </div>
@@ -381,7 +383,7 @@ function CreateIssuerModal({
         <div className="border-t border-surface-border px-6 py-4 flex justify-end gap-3">
           {step === 'config' && (
             <button
-              onClick={onBack}
+              onClick={() => setStep('type')}
               className="px-4 py-2 border border-surface-border rounded text-ink hover:bg-surface-hover transition-colors text-sm font-medium"
             >
               Back
@@ -395,20 +397,11 @@ function CreateIssuerModal({
           </button>
           {step === 'config' && (
             <button
-              onClick={onSubmit}
+              onClick={handleSubmit}
               disabled={isSubmitting || !form.name}
               className="px-4 py-2 bg-brand-600 text-white rounded text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
             >
               {isSubmitting ? 'Creating...' : 'Create Issuer'}
-            </button>
-          )}
-          {step === 'type' && (
-            <button
-              onClick={() => selectedType && onTypeSelect(selectedType)}
-              disabled={!selectedType}
-              className="px-4 py-2 bg-brand-600 text-white rounded text-sm font-medium hover:bg-brand-700 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-            >
-              Next
             </button>
           )}
         </div>

@@ -23,6 +23,9 @@ const statusStyles: Record<string, string> = {
   Unmanaged:           'badge-warning',
   Managed:             'badge-success',
   Dismissed:           'badge-neutral',
+  // Issuer statuses
+  Enabled:             'badge-success',
+  Disabled:            'badge-neutral',
   // Notification statuses
   sent:                'badge-success',
   pending:             'badge-warning',

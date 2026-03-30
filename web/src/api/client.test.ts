@@ -632,6 +632,50 @@ describe('API Client', () => {
       expect(url).toBe('/api/v1/issuers');
       expect(init.method).toBe('POST');
     });
+
+    it('createIssuer sends correct payload for VaultPKI type', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-vault', name: 'Vault PKI' }));
+      const vaultPayload = {
+        name: 'Vault PKI',
+        type: 'VaultPKI',
+        config: {
+          addr: 'https://vault.internal:8200',
+          token: 'hvs.test-token',
+          mount: 'pki',
+          role: 'web-certs',
+          ttl: '8760h',
+        },
+      };
+      await createIssuer(vaultPayload);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/issuers');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      expect(body.type).toBe('VaultPKI');
+      expect(body.config.addr).toBe('https://vault.internal:8200');
+      expect(body.config.role).toBe('web-certs');
+    });
+
+    it('createIssuer sends correct payload for DigiCert type', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-digicert', name: 'DigiCert' }));
+      const digicertPayload = {
+        name: 'DigiCert CertCentral',
+        type: 'DigiCert',
+        config: {
+          api_key: 'test-api-key',
+          org_id: '12345',
+          product_type: 'ssl_basic',
+        },
+      };
+      await createIssuer(digicertPayload);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/issuers');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      expect(body.type).toBe('DigiCert');
+      expect(body.config.org_id).toBe('12345');
+      expect(body.config.product_type).toBe('ssl_basic');
+    });
   });
 
   // ─── Audit ──────────────────────────────────────────
