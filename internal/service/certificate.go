@@ -311,12 +311,56 @@ func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (
 }
 
 // UpdateCertificate modifies a certificate (handler interface method).
-func (s *CertificateService) UpdateCertificate(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
-	cert.ID = id
-	if err := s.certRepo.Update(context.Background(), &cert); err != nil {
+func (s *CertificateService) UpdateCertificate(id string, patch domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+	ctx := context.Background()
+
+	// Fetch existing certificate so partial updates don't zero out fields
+	existing, err := s.certRepo.Get(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("certificate not found: %w", err)
+	}
+
+	// Merge non-zero fields from patch into existing
+	if patch.Name != "" {
+		existing.Name = patch.Name
+	}
+	if patch.CommonName != "" {
+		existing.CommonName = patch.CommonName
+	}
+	if len(patch.SANs) > 0 {
+		existing.SANs = patch.SANs
+	}
+	if patch.Environment != "" {
+		existing.Environment = patch.Environment
+	}
+	if patch.OwnerID != "" {
+		existing.OwnerID = patch.OwnerID
+	}
+	if patch.TeamID != "" {
+		existing.TeamID = patch.TeamID
+	}
+	if patch.IssuerID != "" {
+		existing.IssuerID = patch.IssuerID
+	}
+	if patch.RenewalPolicyID != "" {
+		existing.RenewalPolicyID = patch.RenewalPolicyID
+	}
+	if patch.CertificateProfileID != "" {
+		existing.CertificateProfileID = patch.CertificateProfileID
+	}
+	if patch.Status != "" {
+		existing.Status = patch.Status
+	}
+	if patch.Tags != nil {
+		existing.Tags = patch.Tags
+	}
+
+	existing.UpdatedAt = time.Now()
+
+	if err := s.certRepo.Update(ctx, existing); err != nil {
 		return nil, fmt.Errorf("failed to update certificate: %w", err)
 	}
-	return &cert, nil
+	return existing, nil
 }
 
 // ArchiveCertificate marks a certificate as archived (handler interface method).

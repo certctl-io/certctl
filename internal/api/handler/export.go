@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strings"
 
@@ -49,6 +50,7 @@ func (h ExportHandler) ExportPEM(w http.ResponseWriter, r *http.Request) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}
+		slog.Error("ExportPEM failed", "cert_id", id, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to export certificate", requestID)
 		return
 	}
@@ -96,6 +98,11 @@ func (h ExportHandler) ExportPKCS12(w http.ResponseWriter, r *http.Request) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}
+		if strings.Contains(err.Error(), "cannot be parsed") || strings.Contains(err.Error(), "no certificates found") {
+			ErrorWithRequestID(w, http.StatusUnprocessableEntity, "Certificate data cannot be parsed as X.509", requestID)
+			return
+		}
+		slog.Error("ExportPKCS12 failed", "cert_id", id, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to export PKCS#12", requestID)
 		return
 	}

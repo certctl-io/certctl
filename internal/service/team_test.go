@@ -321,8 +321,8 @@ func TestTeamService_Create_EmptyName(t *testing.T) {
 		t.Fatalf("expected validation error for empty name, got nil")
 	}
 
-	if !errors.Is(err, errors.New("team name is required")) {
-		t.Logf("error: %v", err)
+	if !strings.Contains(err.Error(), "team name is required") {
+		t.Errorf("expected error containing 'team name is required', got: %v", err)
 	}
 }
 

@@ -99,7 +99,7 @@ func registerCertificateTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_create_certificate",
-		Description: "Create a new managed certificate. Requires common_name and issuer_id at minimum.",
+		Description: "Create a new managed certificate. Requires name, common_name, renewal_policy_id, issuer_id, owner_id, and team_id.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreateCertificateInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/certificates", input)
 		if err != nil {
@@ -144,7 +144,7 @@ func registerCertificateTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_trigger_renewal",
-		Description: "Trigger immediate renewal of a certificate. Creates a renewal job (async, returns 202).",
+		Description: "Trigger immediate renewal of a certificate. Creates a renewal job (async, returns 202). Returns 404 if certificate not found, 400 if certificate is archived/expired, 409 if renewal already in progress.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/certificates/"+input.ID+"/renew", nil)
 		if err != nil {
@@ -385,7 +385,7 @@ func registerAgentTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_register_agent",
-		Description: "Register a new agent. Requires name and hostname.",
+		Description: "Register a new agent. Requires name and hostname. Returns 409 if an agent with the same name already exists.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input RegisterAgentInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/agents", input)
 		if err != nil {
@@ -396,7 +396,7 @@ func registerAgentTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_agent_heartbeat",
-		Description: "Send agent heartbeat with optional metadata (OS, architecture, IP, version).",
+		Description: "Send agent heartbeat with optional metadata (OS, architecture, IP, version). Returns 404 if agent not found.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input struct {
 		ID           string `json:"id" jsonschema:"Agent ID"`
 		Version      string `json:"version,omitempty" jsonschema:"Agent version"`

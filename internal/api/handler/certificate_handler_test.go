@@ -353,11 +353,12 @@ func TestCreateCertificate_Success(t *testing.T) {
 	handler := NewCertificateHandler(mock)
 
 	certBody := domain.ManagedCertificate{
-		Name:       "Production Cert",
-		CommonName: "example.com",
-		OwnerID:    "o-alice",
-		TeamID:     "t-platform",
-		IssuerID:   "iss-local",
+		Name:            "Production Cert",
+		CommonName:      "example.com",
+		OwnerID:         "o-alice",
+		TeamID:          "t-platform",
+		IssuerID:        "iss-local",
+		RenewalPolicyID: "rp-standard",
 	}
 	body, _ := json.Marshal(certBody)
 
@@ -410,11 +411,12 @@ func TestCreateCertificate_ServiceError(t *testing.T) {
 	handler := NewCertificateHandler(mock)
 
 	certBody := domain.ManagedCertificate{
-		Name:       "Production Cert",
-		CommonName: "example.com",
-		OwnerID:    "o-alice",
-		TeamID:     "t-platform",
-		IssuerID:   "iss-local",
+		Name:            "Production Cert",
+		CommonName:      "example.com",
+		OwnerID:         "o-alice",
+		TeamID:          "t-platform",
+		IssuerID:        "iss-local",
+		RenewalPolicyID: "rp-standard",
 	}
 	body, _ := json.Marshal(certBody)
 
@@ -534,8 +536,8 @@ func TestArchiveCertificate_NotFound(t *testing.T) {
 
 	handler.ArchiveCertificate(w, req)
 
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("expected status %d, got %d", http.StatusNotFound, w.Code)
 	}
 }
 

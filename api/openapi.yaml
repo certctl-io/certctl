@@ -250,6 +250,8 @@ paths:
                 $ref: "#/components/schemas/ManagedCertificate"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
     delete:
@@ -261,6 +263,8 @@ paths:
       responses:
         "204":
           description: Certificate archived
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -306,6 +310,12 @@ paths:
             application/json:
               schema:
                 $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -820,6 +830,8 @@ paths:
                 $ref: "#/components/schemas/Agent"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "409":
+          $ref: "#/components/responses/Conflict"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -877,6 +889,8 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -2469,6 +2483,12 @@ components:
         application/json:
           schema:
             $ref: "#/components/schemas/ErrorResponse"
+    Conflict:
+      description: Resource conflict
+      content:
+        application/json:
+          schema:
+            $ref: "#/components/schemas/ErrorResponse"
     InternalError:
       description: Internal server error
       content:
@@ -2571,6 +2591,13 @@ components:
         updated_at:
           type: string
           format: date-time
+      required:
+        - name
+        - common_name
+        - renewal_policy_id
+        - issuer_id
+        - owner_id
+        - team_id
 
     CertificateVersion:
       type: object

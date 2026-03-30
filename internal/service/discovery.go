@@ -40,6 +40,11 @@ func (s *DiscoveryService) ProcessDiscoveryReport(ctx context.Context, report *d
 		return nil, fmt.Errorf("report must contain at least one certificate or error")
 	}
 
+	// Ensure directories is never nil (PostgreSQL TEXT[] NOT NULL)
+	if report.Directories == nil {
+		report.Directories = []string{}
+	}
+
 	now := time.Now()
 	scan := &domain.DiscoveryScan{
 		ID:                generateID("dscan"),
@@ -50,6 +55,11 @@ func (s *DiscoveryService) ProcessDiscoveryReport(ctx context.Context, report *d
 		ScanDurationMs:    report.ScanDurationMs,
 		StartedAt:         now.Add(-time.Duration(report.ScanDurationMs) * time.Millisecond),
 		CompletedAt:       &now,
+	}
+
+	// Store the scan record first (discovered certs reference scan via FK)
+	if err := s.discoveryRepo.CreateScan(ctx, scan); err != nil {
+		return nil, fmt.Errorf("failed to create scan record: %w", err)
 	}
 
 	// Upsert each discovered certificate
@@ -104,11 +114,6 @@ func (s *DiscoveryService) ProcessDiscoveryReport(ctx context.Context, report *d
 	}
 
 	scan.CertificatesNew = newCount
-
-	// Store the scan record
-	if err := s.discoveryRepo.CreateScan(ctx, scan); err != nil {
-		return nil, fmt.Errorf("failed to create scan record: %w", err)
-	}
 
 	// Audit trail
 	if err := s.auditService.RecordEvent(ctx, report.AgentID, domain.ActorTypeSystem,

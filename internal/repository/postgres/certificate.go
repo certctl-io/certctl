@@ -349,7 +349,7 @@ func (r *CertificateRepository) Archive(ctx context.Context, id string) error {
 func (r *CertificateRepository) ListVersions(ctx context.Context, certID string) ([]*domain.CertificateVersion, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, certificate_id, serial_number, not_before, not_after,
-		       fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
+		       fingerprint_sha256, pem_chain, csr_pem, created_at
 		FROM certificate_versions
 		WHERE certificate_id = $1
 		ORDER BY created_at DESC
@@ -363,10 +363,12 @@ func (r *CertificateRepository) ListVersions(ctx context.Context, certID string)
 	var versions []*domain.CertificateVersion
 	for rows.Next() {
 		var v domain.CertificateVersion
+		var csrPEM sql.NullString
 		if err := rows.Scan(&v.ID, &v.CertificateID, &v.SerialNumber, &v.NotBefore, &v.NotAfter,
-			&v.FingerprintSHA256, &v.PEMChain, &v.CSRPEM, &v.KeyAlgorithm, &v.KeySize, &v.CreatedAt); err != nil {
+			&v.FingerprintSHA256, &v.PEMChain, &csrPEM, &v.CreatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan certificate version: %w", err)
 		}
+		v.CSRPEM = csrPEM.String
 		versions = append(versions, &v)
 	}
 
@@ -386,11 +388,11 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO certificate_versions (
 			id, certificate_id, serial_number, not_before, not_after,
-			fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+			fingerprint_sha256, pem_chain, csr_pem, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
 	`, version.ID, version.CertificateID, version.SerialNumber, version.NotBefore, version.NotAfter,
-		version.FingerprintSHA256, version.PEMChain, version.CSRPEM, version.KeyAlgorithm, version.KeySize, version.CreatedAt).Scan(&version.ID)
+		version.FingerprintSHA256, version.PEMChain, version.CSRPEM, version.CreatedAt).Scan(&version.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create certificate version: %w", err)
@@ -433,15 +435,17 @@ func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, bef
 // GetLatestVersion returns the most recent certificate version for a certificate.
 func (r *CertificateRepository) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
 	var v domain.CertificateVersion
+	var csrPEM sql.NullString
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, certificate_id, serial_number, not_before, not_after,
-		       fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at
+		       fingerprint_sha256, pem_chain, csr_pem, created_at
 		FROM certificate_versions
 		WHERE certificate_id = $1
 		ORDER BY created_at DESC
 		LIMIT 1
 	`, certID).Scan(&v.ID, &v.CertificateID, &v.SerialNumber, &v.NotBefore, &v.NotAfter,
-		&v.FingerprintSHA256, &v.PEMChain, &v.CSRPEM, &v.KeyAlgorithm, &v.KeySize, &v.CreatedAt)
+		&v.FingerprintSHA256, &v.PEMChain, &csrPEM, &v.CreatedAt)
+	v.CSRPEM = csrPEM.String
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to get latest certificate version: %w", err)

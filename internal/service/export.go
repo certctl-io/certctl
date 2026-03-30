@@ -88,7 +88,7 @@ func (s *ExportService) ExportPKCS12(ctx context.Context, certID string, passwor
 	// Parse PEM chain into x509.Certificate objects
 	certs, err := parsePEMCertificates(version.PEMChain)
 	if err != nil {
-		return nil, fmt.Errorf("failed to parse certificate chain: %w", err)
+		return nil, fmt.Errorf("certificate data cannot be parsed as X.509: %w", err)
 	}
 
 	if len(certs) == 0 {

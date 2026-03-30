@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -231,6 +232,14 @@ func (h CertificateHandler) CreateCertificate(w http.ResponseWriter, r *http.Req
 		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 		return
 	}
+	if err := ValidateRequired("name", cert.Name); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
+	if err := ValidateRequired("renewal_policy_id", cert.RenewalPolicyID); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
 
 	created, err := h.svc.CreateCertificate(cert)
 	if err != nil {
@@ -287,6 +296,11 @@ func (h CertificateHandler) UpdateCertificate(w http.ResponseWriter, r *http.Req
 
 	updated, err := h.svc.UpdateCertificate(id, cert)
 	if err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+			return
+		}
+		slog.Error("UpdateCertificate failed", "cert_id", id, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update certificate", requestID)
 		return
 	}
@@ -311,6 +325,10 @@ func (h CertificateHandler) ArchiveCertificate(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.svc.ArchiveCertificate(id); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+			return
+		}
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to archive certificate", requestID)
 		return
 	}
@@ -353,7 +371,12 @@ func (h CertificateHandler) GetCertificateVersions(w http.ResponseWriter, r *htt
 
 	versions, total, err := h.svc.GetCertificateVersions(certID, page, perPage)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+			return
+		}
+		slog.Error("GetCertificateVersions failed", "cert_id", certID, "error", err.Error())
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to get certificate versions", requestID)
 		return
 	}
 
@@ -387,6 +410,19 @@ func (h CertificateHandler) TriggerRenewal(w http.ResponseWriter, r *http.Reques
 	certID := parts[0]
 
 	if err := h.svc.TriggerRenewal(certID); err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
+			return
+		}
+		if strings.Contains(errMsg, "cannot renew") {
+			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
+			return
+		}
+		if strings.Contains(errMsg, "already in progress") {
+			ErrorWithRequestID(w, http.StatusConflict, errMsg, requestID)
+			return
+		}
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to trigger renewal", requestID)
 		return
 	}
@@ -480,7 +516,7 @@ func (h CertificateHandler) RevokeCertificate(w http.ResponseWriter, r *http.Req
 			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
 			return
 		}
-		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to fetch") {
+		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to fetch") || strings.Contains(errMsg, "failed to get") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}

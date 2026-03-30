@@ -5071,44 +5071,517 @@ openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
 
 ## Release Sign-Off
 
-All 34 parts must pass before tagging v2.1.0.
+All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
 
-| Section | Pass? | Tester | Date | Notes |
-|---------|-------|--------|------|-------|
-| Part 1: Infrastructure & Deployment | ☐ | | | |
-| Part 2: Authentication & Security | ☐ | | | |
-| Part 3: Certificate Lifecycle (CRUD) | ☐ | | | |
-| Part 4: Renewal Workflow | ☐ | | | |
-| Part 5: Revocation | ☐ | | | |
-| Part 6: Issuer Connectors | ☐ | | | |
-| Part 7: Target Connectors & Deployment | ☐ | | | |
-| Part 8: Agent Operations | ☐ | | | |
-| Part 9: Job System | ☐ | | | |
-| Part 10: Policies & Profiles | ☐ | | | |
-| Part 11: Ownership, Teams & Agent Groups | ☐ | | | |
-| Part 12: Notifications | ☐ | | | |
-| Part 13: Observability (JSON + Prometheus) | ☐ | | | |
-| Part 14: Audit Trail | ☐ | | | |
-| Part 15: Certificate Discovery (Filesystem + Network) | ☐ | | | |
-| Part 16: Enhanced Query API | ☐ | | | |
-| Part 17: CLI Tool | ☐ | | | |
-| Part 18: MCP Server | ☐ | | | |
-| Part 19: GUI Testing | ☐ | | | |
-| Part 20: Background Scheduler | ☐ | | | |
-| Part 21: Error Handling | ☐ | | | |
-| Part 22: Performance Spot Checks | ☐ | | | |
-| Part 23: Structured Logging | ☐ | | | |
-| Part 24: Documentation Verification | ☐ | | | |
-| Part 25: Regression Tests | ☐ | | | |
-| Part 26: EST Server (RFC 7030) | ☐ | | | |
-| Part 27: Post-Deployment TLS Verification | ☐ | | | |
-| Part 28: Traefik & Caddy Target Connectors | ☐ | | | |
-| Part 29: Certificate Export (PEM & PKCS#12) | ☐ | | | |
-| Part 30: S/MIME & EKU Support | ☐ | | | |
-| Part 31: OCSP Responder & DER CRL | ☐ | | | |
-| Part 32: Request Body Size Limits | ☐ | | | |
-| Part 33: Apache & HAProxy Target Connectors | ☐ | | | |
-| Part 34: Sub-CA Mode | ☐ | | | |
+### Automated Prerequisites
+
+These must be green before starting manual QA:
+
+| Gate | Pass? | Date | Notes |
+|------|-------|------|-------|
+| CI pipeline green (Go build + vet + race + lint + vuln + tests) | ☐ | | |
+| CI pipeline green (Frontend tsc + vitest + vite build) | ☐ | | |
+| Coverage thresholds met (service 60%, handler 60%, domain 40%, middleware 50%) | ☐ | | |
+| `qa-smoke-test.sh` — 0 failures | ☑ | 2026-03-30 | 121 pass, 0 fail, 5 skip |
+
+### Part 1: Infrastructure & Deployment
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 1.1.1 | PostgreSQL is accepting connections | Auto | ☑ | 2026-03-30 |  |
+| 1.1.2 | Database schema applied (21 tables) | Auto | ☑ | 2026-03-30 |  |
+| 1.1.3 | Server liveness probe | Auto | ☑ | 2026-03-30 |  |
+| 1.1.4 | Server readiness probe | Auto | ☑ | 2026-03-30 |  |
+| 1.1.5 | Agent container is running | Auto | ☑ | 2026-03-30 |  |
+| 1.1.6 | Demo seed data loaded (all 9 resource types) | Auto | ☑ | 2026-03-30 |  |
+| 1.2.1 | Server shuts down cleanly on SIGTERM | Manual | ☐ |  |  |
+| 1.2.2 | Data persists across full restart | Manual | ☐ |  |  |
+| 1.3.1 | Custom port binding | Manual | ☐ |  |  |
+| 1.3.2 | Debug logging | Manual | ☐ |  |  |
+| 1.3.3 | Auth disabled with explicit none | Auto | ☑ | 2026-03-30 |  |
+| 1.3.4 | Auth none produces warning log | Auto | ☑ | 2026-03-30 |  |
+
+### Part 2: Authentication & Security
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 2.1.1 | Request without auth header returns 401 | Manual | ☐ |  |  |
+| 2.1.2 | Request with wrong API key returns 401 | Manual | ☐ |  |  |
+| 2.1.3 | Request with valid API key returns 200 | Manual | ☐ |  |  |
+| 2.1.4 | /health accessible without auth (always) | Manual | ☐ |  |  |
+| 2.1.5 | /ready accessible without auth (always) | Manual | ☐ |  |  |
+| 2.1.6 | /api/v1/auth/info accessible without auth (GUI bootstrap) | Manual | ☐ |  |  |
+| 2.1.7 | /api/v1/auth/check with valid key returns 200 | Manual | ☐ |  |  |
+| 2.1.8 | /api/v1/auth/check without key returns 401 | Manual | ☐ |  |  |
+| 2.2.1 | Burst exceeds limit, returns 429 with Retry-After | Manual | ☐ |  |  |
+| 2.2.2 | 429 response includes Retry-After header | Manual | ☐ |  |  |
+| 2.2.3 | Rate limit bucket refills after waiting | Manual | ☐ |  |  |
+| 2.3.1 | Preflight OPTIONS with allowed origin returns CORS headers | Manual | ☐ |  |  |
+| 2.3.2 | Request from disallowed origin has no CORS headers | Manual | ☐ |  |  |
+| 2.3.3 | Wildcard CORS mode | Manual | ☐ |  |  |
+| 2.4.1 | Private keys never in API responses (certificate detail) | Auto | ☑ | 2026-03-30 |  |
+| 2.4.2 | Private keys never in API responses (certificate versions) | Auto | ☑ | 2026-03-30 |  |
+| 2.4.3 | Private keys never in API responses (agent work) | Auto | ☑ | 2026-03-30 |  |
+| 2.4.4 | Private keys never in server logs | Auto | ☑ | 2026-03-30 |  |
+| 2.4.5 | API key stored as SHA-256 hash (not plaintext) | Manual | ☐ |  |  |
+
+### Part 3: Certificate Lifecycle (CRUD)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 3.1.1 | Create certificate with minimal fields | Auto | ☑ | 2026-03-30 |  |
+| 3.1.2 | Create certificate with all fields | Auto | ☑ | 2026-03-30 |  |
+| 3.1.3 | Create certificate with duplicate common_name | Auto | ☑ | 2026-03-30 |  |
+| 3.2.1 | List certificates with pagination metadata | Auto | ☑ | 2026-03-30 |  |
+| 3.2.2 | Filter by status | Auto | ☑ | 2026-03-30 |  |
+| 3.2.3 | Filter by owner | Auto | ☑ | 2026-03-30 |  |
+| 3.2.4 | Filter by issuer | Auto | ☑ | 2026-03-30 |  |
+| 3.2.5 | Filter by environment | Auto | ☑ | 2026-03-30 |  |
+| 3.2.6 | Pagination: page 2 | Auto | ☑ | 2026-03-30 |  |
+| 3.2.7 | Sort descending by notAfter | Manual | ☐ |  |  |
+| 3.2.8 | Sort ascending by commonName | Manual | ☐ |  |  |
+| 3.2.9 | Sparse fields | Auto | ☑ | 2026-03-30 |  |
+| 3.2.10 | Cursor pagination: first page | Auto | ☑ | 2026-03-30 |  |
+| 3.2.11 | Cursor pagination: second page | Manual | ☐ |  |  |
+| 3.2.12 | Time-range filter: expires_before | Auto | ☑ | 2026-03-30 |  |
+| 3.3.1 | Get single certificate by ID | Auto | ☑ | 2026-03-30 |  |
+| 3.3.2 | Get nonexistent certificate returns 404 | Auto | ☑ | 2026-03-30 |  |
+| 3.3.3 | Update certificate fields | Auto | ☑ | 2026-03-30 |  |
+| 3.3.4 | Archive (soft delete) certificate | Auto | ☑ | 2026-03-30 |  |
+| 3.3.5 | Get archived certificate behavior | Manual | ☐ |  |  |
+| 3.4.1 | Get certificate versions | Auto | ☑ | 2026-03-30 |  |
+| 3.4.2 | Get certificate deployments | Auto | ☑ | 2026-03-30 |  |
+| 3.4.3 | Trigger deployment creates a job | Manual | ☐ |  |  |
+
+### Part 4: Renewal Workflow
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 4.1.1 | Trigger renewal creates job | Auto | ☑ | 2026-03-30 |  |
+| 4.1.2 | Renewal job appears in jobs list | Auto | ☑ | 2026-03-30 |  |
+| 4.1.3 | Renewal on nonexistent certificate returns 404 | Auto | ☑ | 2026-03-30 |  |
+| 4.2.1 | Server keygen mode: job completes automatically | Manual | ☐ |  |  |
+| 4.3.1 | Approve a job | Manual | ☐ |  |  |
+| 4.3.2 | Reject a job with reason | Manual | ☐ |  |  |
+| 4.4.1 | Agent work endpoint returns pending jobs | Auto | ☑ | 2026-03-30 |  |
+| 4.4.2 | Agent reports job status | Manual | ☐ |  |  |
+
+### Part 5: Revocation
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 5.1.1 | Revoke with default reason | Auto | ☑ | 2026-03-30 |  |
+| 5.1.2 | Revoke with reason: keyCompromise | Auto | ☑ | 2026-03-30 |  |
+| 5.1.3 | Revoke with reason: caCompromise | Manual | ☐ |  |  |
+| 5.1.4 | Revoke with reason: affiliationChanged | Manual | ☐ |  |  |
+| 5.1.5 | Revoke with reason: superseded | Manual | ☐ |  |  |
+| 5.1.6 | Revoke with reason: cessationOfOperation | Manual | ☐ |  |  |
+| 5.1.7 | Revoke with reason: certificateHold | Manual | ☐ |  |  |
+| 5.1.8 | Revoke with reason: privilegeWithdrawn | Manual | ☐ |  |  |
+| 5.2.1 | Revoke already-revoked certificate | Auto | ☑ | 2026-03-30 |  |
+| 5.2.2 | Revoke nonexistent certificate | Auto | ☑ | 2026-03-30 |  |
+| 5.2.3 | Revoke with invalid reason | Auto | ☑ | 2026-03-30 |  |
+| 5.2.4 | Revocation appears in audit trail | Manual | ☐ |  |  |
+| 5.3.1 | JSON CRL endpoint | Auto | ☑ | 2026-03-30 |  |
+| 5.3.2 | DER CRL endpoint | Auto | ☑ | 2026-03-30 |  |
+| 5.3.3 | OCSP: good response for non-revoked cert | Auto | ☑ | 2026-03-30 |  |
+| 5.3.4 | OCSP: revoked response for revoked cert | Manual | ☐ |  |  |
+| 5.3.5 | OCSP: unknown serial | Manual | ☐ |  |  |
+
+### Part 6: Issuer Connectors
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 6.1.1 | List issuers shows seed data | Auto | ☑ | 2026-03-30 |  |
+| 6.1.2 | Get issuer detail | Auto | ☑ | 2026-03-30 |  |
+| 6.1.3 | Create issuer | Auto | ☑ | 2026-03-30 |  |
+| 6.1.4 | Update issuer | Manual | ☐ |  |  |
+| 6.1.5 | Delete issuer | Auto | ☑ | 2026-03-30 |  |
+| 6.1.6 | Test issuer connection | Manual | ☐ |  |  |
+| 6.1.7 | Create issuer with missing name returns validation error | Auto | ☑ | 2026-03-30 |  |
+| 6.1.8 | Create issuer with invalid type | Manual | ☐ |  |  |
+| 6.2.1 | List ACME issuer with DNS-01 configuration | Manual | ☐ |  |  |
+| 6.2.2 | Create ACME issuer with DNS-PERSIST-01 | Manual | ☐ |  |  |
+| 6.2.3 | Configure ACME with External Account Binding (ZeroSSL) | Manual | ☐ |  |  |
+
+### Part 7: Target Connectors & Deployment
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 7.1.1 | List targets shows seed data | Auto | ☑ | 2026-03-30 |  |
+| 7.1.2 | Create NGINX target | Auto | ☑ | 2026-03-30 |  |
+| 7.1.3 | Create Apache target | Manual | ☐ |  |  |
+| 7.1.4 | Create HAProxy target | Manual | ☐ |  |  |
+| 7.1.5 | Create F5 BIG-IP target (stub) | Auto | ☑ | 2026-03-30 |  |
+| 7.1.6 | Create IIS target (stub) | Auto | ☑ | 2026-03-30 |  |
+| 7.1.7 | Get target verifies type-specific config stored | Manual | ☐ |  |  |
+| 7.1.8 | Update target config | Manual | ☐ |  |  |
+| 7.1.9 | Delete target returns 204 | Auto | ☑ | 2026-03-30 |  |
+
+### Part 8: Agent Operations
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 8.1.1 | Register new agent | Auto | ☑ | 2026-03-30 |  |
+| 8.1.2 | List agents includes new agent | Manual | ☐ |  |  |
+| 8.1.3 | Get agent detail with metadata | Manual | ☐ |  |  |
+| 8.2.1 | Agent heartbeat updates last_heartbeat_at | Auto | ☑ | 2026-03-30 |  |
+| 8.2.2 | Heartbeat metadata stored | Auto | ☑ | 2026-03-30 |  |
+| 8.2.3 | Heartbeat for nonexistent agent | Auto | ☑ | 2026-03-30 |  |
+| 8.3.1 | Agent work polling returns jobs | Manual | ☐ |  |  |
+| 8.3.2 | Agent work polling with no pending work | Manual | ☐ |  |  |
+| 8.3.3 | Agent certificate pickup | Manual | ☐ |  |  |
+| 8.3.4 | Delete agent for cleanup | Auto | — | 2026-03-30 | Skipped — DELETE not implemented |
+
+### Part 9: Job System
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 9.1.1 | List jobs with pagination | Auto | ☑ | 2026-03-30 |  |
+| 9.1.2 | Filter jobs by status | Manual | ☐ |  |  |
+| 9.1.3 | Filter jobs by type | Manual | ☐ |  |  |
+| 9.1.4 | Get job detail | Manual | ☐ |  |  |
+| 9.1.5 | Get nonexistent job | Auto | ☑ | 2026-03-30 |  |
+| 9.2.1 | Cancel pending job | Manual | ☐ |  |  |
+| 9.2.2 | Cancel already-completed job | Manual | ☐ |  |  |
+
+### Part 10: Policies & Profiles
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 10.1.1 | List policies | Auto | ☑ | 2026-03-30 |  |
+| 10.1.2 | Create policy | Auto | ☑ | 2026-03-30 |  |
+| 10.1.3 | Get policy | Manual | ☐ |  |  |
+| 10.1.4 | Update policy | Manual | ☐ |  |  |
+| 10.1.5 | Delete policy | Auto | ☑ | 2026-03-30 |  |
+| 10.1.6 | Policy violations endpoint | Manual | ☐ |  |  |
+| 10.1.7 | Invalid policy type returns 400 | Auto | ☑ | 2026-03-30 |  |
+| 10.2.1 | List profiles | Auto | ☑ | 2026-03-30 |  |
+| 10.2.2 | Create profile with crypto constraints | Auto | ☑ | 2026-03-30 |  |
+| 10.2.3 | Get profile | Manual | ☐ |  |  |
+| 10.2.4 | Update profile | Manual | ☐ |  |  |
+| 10.2.5 | Delete profile | Auto | ☑ | 2026-03-30 |  |
+| 10.2.6 | Short-lived profile exists (TTL < 1 hour) | Manual | ☐ |  |  |
+
+### Part 11: Ownership, Teams & Agent Groups
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 11.1.1 | List teams | Auto | ☑ | 2026-03-30 |  |
+| 11.1.2 | Team CRUD cycle | Auto | ☑ | 2026-03-30 |  |
+| 11.2.1 | Owner CRUD with team assignment | Auto | ☑ | 2026-03-30 |  |
+| 11.2.2 | Get, update, delete owner | Manual | ☐ |  |  |
+| 11.3.1 | List agent groups | Auto | ☑ | 2026-03-30 |  |
+| 11.3.2 | Create agent group with dynamic criteria | Manual | ☐ |  |  |
+| 11.3.3 | Agent group membership endpoint | Manual | ☐ |  |  |
+| 11.3.4 | Delete agent group returns 204 | Manual | ☐ |  |  |
+| 11.4.1 | Delete owner with assigned certificates (expect 409) | Auto | ☑ | 2026-03-30 |  |
+| 11.4.2 | Delete issuer with assigned certificates (expect 409) | Auto | ☑ | 2026-03-30 |  |
+| 11.4.3 | Delete team cascades successfully | Manual | ☐ |  |  |
+
+### Part 12: Notifications
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 12.1.1 | List notifications with pagination | Auto | ☑ | 2026-03-30 |  |
+| 12.1.2 | Get single notification | Manual | ☐ |  |  |
+| 12.1.3 | Mark notification as read | Auto | ☑ | 2026-03-30 |  |
+| 12.1.4 | Mark already-read notification (idempotent) | Manual | ☐ |  |  |
+| 12.1.5 | Get nonexistent notification | Auto | ☑ | 2026-03-30 |  |
+| 12.1.6 | Verify notification created from revocation | Manual | ☐ |  |  |
+
+### Part 13: Observability
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 13.1.1 | Dashboard summary | Auto | ☑ | 2026-03-30 |  |
+| 13.1.2 | Certificates by status | Auto | ☑ | 2026-03-30 |  |
+| 13.1.3 | Expiration timeline | Auto | ☑ | 2026-03-30 |  |
+| 13.1.4 | Job trends | Auto | ☑ | 2026-03-30 |  |
+| 13.1.5 | Issuance rate | Auto | ☑ | 2026-03-30 |  |
+| 13.1.6 | Stats with invalid days parameter | Manual | ☐ |  |  |
+| 13.2.1 | JSON metrics endpoint | Auto | ☑ | 2026-03-30 |  |
+| 13.2.2 | Metric values are non-negative | Manual | ☐ |  |  |
+| 13.2.3 | Uptime is positive | Manual | ☐ |  |  |
+| 13.3.1 | Prometheus content type | Auto | ☑ | 2026-03-30 |  |
+| 13.3.2 | Prometheus output contains HELP lines | Auto | ☑ | 2026-03-30 |  |
+| 13.3.3 | Prometheus output contains TYPE lines | Manual | ☐ |  |  |
+| 13.3.4 | All documented Prometheus metrics present | Auto | ☑ | 2026-03-30 |  |
+| 13.3.5 | Prometheus metric values are parseable numbers | Manual | ☐ |  |  |
+| 13.3.6 | Method not allowed on metrics (POST) | Manual | ☐ |  |  |
+
+### Part 14: Audit Trail
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 14.1.1 | List audit events | Auto | ☑ | 2026-03-30 |  |
+| 14.1.2 | Get single audit event | Manual | ☐ |  |  |
+| 14.1.3 | Filter audit by time range | Manual | ☐ |  |  |
+| 14.1.4 | Filter audit by actor | Manual | ☐ |  |  |
+| 14.1.5 | Filter audit by resource type | Auto | ☑ | 2026-03-30 |  |
+| 14.1.6 | Filter audit by action | Manual | ☐ |  |  |
+| 14.1.7 | API calls create audit entries | Manual | ☐ |  |  |
+| 14.1.8 | Audit immutability (no PUT/DELETE) | Auto | ☑ | 2026-03-30 |  |
+
+### Part 15: Certificate Discovery
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 15.1.1 | Submit discovery report | Auto | ☑ | 2026-03-30 |  |
+| 15.1.2 | Submit report with multiple certificates | Manual | ☐ |  |  |
+| 15.1.3 | Duplicate fingerprint deduplication | Manual | ☐ |  |  |
+| 15.1.4 | List discovered certificates | Auto | ☑ | 2026-03-30 |  |
+| 15.1.5 | Filter by status: Unmanaged | Manual | ☐ |  |  |
+| 15.1.6 | Filter by agent_id | Manual | ☐ |  |  |
+| 15.1.7 | Get discovered certificate detail | Manual | ☐ |  |  |
+| 15.1.8 | Claim discovered certificate | Manual | ☐ |  |  |
+| 15.1.9 | Dismiss discovered certificate | Manual | ☐ |  |  |
+| 15.1.10 | List discovery scans | Manual | ☐ |  |  |
+| 15.1.11 | Discovery summary | Auto | ☑ | 2026-03-30 |  |
+| 15.2.1 | List network scan targets (seed data) | Auto | ☑ | 2026-03-30 |  |
+| 15.2.2 | Create network scan target | Auto | ☑ | 2026-03-30 |  |
+| 15.2.3 | Get scan target detail | Manual | ☐ |  |  |
+| 15.2.4 | Update scan target | Manual | ☐ |  |  |
+| 15.2.5 | Delete scan target | Auto | ☑ | 2026-03-30 |  |
+| 15.2.6 | Trigger manual scan | Manual | ☐ |  |  |
+| 15.2.7 | Invalid CIDR validation | Auto | ☑ | 2026-03-30 |  |
+
+### Part 16: Enhanced Query API
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 16.1.1 | Sparse fields: only requested fields returned | Manual | ☐ |  |  |
+| 16.1.2 | Sort ascending: commonName | Manual | ☐ |  |  |
+| 16.1.3 | Sort descending: notAfter | Manual | ☐ |  |  |
+| 16.1.4 | Sort by invalid field | Auto | ☑ | 2026-03-30 |  |
+| 16.1.5 | Cursor pagination first page | Manual | ☐ |  |  |
+| 16.1.6 | Cursor pagination second page | Manual | ☐ |  |  |
+| 16.1.7 | Time-range: expires_before | Auto | ☑ | 2026-03-30 |  |
+| 16.1.8 | Time-range: created_after | Auto | ☑ | 2026-03-30 |  |
+| 16.1.9 | Combined filters | Auto | ☑ | 2026-03-30 |  |
+
+### Part 17: CLI Tool
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 17.2.1 | List certificates (table format) | Manual | ☐ |  |  |
+| 17.2.2 | List certificates (JSON format) | Manual | ☐ |  |  |
+| 17.2.3 | Get specific certificate | Manual | ☐ |  |  |
+| 17.2.4 | Get nonexistent certificate | Manual | ☐ |  |  |
+| 17.2.5 | Renew certificate | Manual | ☐ |  |  |
+| 17.2.6 | Revoke certificate with reason | Manual | ☐ |  |  |
+| 17.3.1 | List agents | Manual | ☐ |  |  |
+| 17.3.2 | List jobs | Manual | ☐ |  |  |
+| 17.4.1 | Server status/health | Manual | ☐ |  |  |
+| 17.4.2 | CLI version | Manual | ☐ |  |  |
+| 17.5.1 | Import single PEM file | Manual | ☐ |  |  |
+| 17.6.1 | --server flag overrides env var | Manual | ☐ |  |  |
+| 17.6.2 | --api-key flag overrides env var | Manual | ☐ |  |  |
+| 17.6.3 | Missing server URL produces error | Manual | ☐ |  |  |
+
+### Part 18: MCP Server
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 18.1.1 | Binary builds successfully | Manual | ☐ |  |  |
+| 18.1.2 | Startup with valid env vars | Manual | ☐ |  |  |
+| 18.1.3 | Missing CERTCTL_SERVER_URL behavior | Manual | ☐ |  |  |
+| 18.2.1 | Tool count verification (78 tools) | Manual | ☐ |  |  |
+| 18.2.2 | All 16 resource domains present | Manual | ☐ |  |  |
+| 18.3.1 | List certificates via MCP | Manual | ☐ |  |  |
+| 18.3.2 | Get specific certificate via MCP | Manual | ☐ |  |  |
+
+### Part 19: GUI Testing
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 19.1 | Authentication Flow | Manual | ☐ |  |  |
+| 19.2 | Dashboard Page | Manual | ☐ |  |  |
+| 19.3 | Certificates Page | Manual | ☐ |  |  |
+| 19.4 | Certificate Detail Page | Manual | ☐ |  |  |
+| 19.5 | Jobs Page — Approval Workflow | Manual | ☐ |  |  |
+| 19.6 | Discovery Triage Page | Manual | ☐ |  |  |
+| 19.7 | Network Scan Management Page | Manual | ☐ |  |  |
+| 19.8 | Other Pages (agents, policies, audit, etc.) | Manual | ☐ |  |  |
+| 19.9 | Cross-Cutting (responsive, error states, dark theme) | Manual | ☐ |  |  |
+
+### Part 20: Background Scheduler
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 20.1.1 | Scheduler startup: all 7 loops registered | Manual | ☐ |  |  |
+| 20.1.2 | Job processor loop fires (30s interval) | Manual | ☐ |  |  |
+| 20.1.3 | Agent health check marks offline (2m interval) | Manual | ☐ |  |  |
+| 20.1.4 | Notification processor fires (1m interval) | Manual | ☐ |  |  |
+| 20.1.5 | Short-lived expiry check (30s interval) | Manual | ☐ |  |  |
+| 20.1.6 | Network scanner loop (conditional on env var) | Manual | ☐ |  |  |
+| 20.1.7 | Renewal check loop (1h interval — log verification) | Manual | ☐ |  |  |
+| 20.1.8 | Scheduler graceful stop | Manual | ☐ |  |  |
+
+### Part 21: Error Handling
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 21.1.1 | Malformed JSON body | Auto | ☑ | 2026-03-30 |  |
+| 21.1.2 | Missing required field | Auto | ☑ | 2026-03-30 |  |
+| 21.1.3 | Method not allowed | Auto | ☑ | 2026-03-30 |  |
+| 21.1.4 | Invalid query parameter | Manual | ☐ |  |  |
+| 21.1.5 | UTF-8 in common name | Auto | ☑ | 2026-03-30 |  |
+| 21.1.6 | Concurrent requests (parallel curl) | Manual | ☐ |  |  |
+| 21.1.7 | Server survives internal error | Auto | ☑ | 2026-03-30 |  |
+| 21.1.8 | Empty request body on POST | Auto | ☑ | 2026-03-30 |  |
+
+### Part 22: Performance Spot Checks
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 22.1.1 | List certificates < 200ms | Auto | ☑ | 2026-03-30 |  |
+| 22.1.2 | Stats summary < 500ms | Auto | ☑ | 2026-03-30 |  |
+| 22.1.3 | Metrics < 200ms | Auto | ☑ | 2026-03-30 |  |
+| 22.1.4 | 50 health checks < 5 seconds total | Manual | ☐ |  |  |
+
+### Part 23: Structured Logging
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 23.1.1 | Server logs are valid JSON | Manual | ☐ |  |  |
+| 23.1.2 | Log lines contain level field | Manual | ☐ |  |  |
+| 23.1.3 | Request ID propagation | Manual | ☐ |  |  |
+| 23.1.4 | Error logs at ERROR level | Manual | ☐ |  |  |
+| 23.1.5 | No unstructured output in log stream | Manual | ☐ |  |  |
+
+### Part 24: Documentation Verification
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 24.1 | OpenAPI spec matches router, README accuracy | Manual | ☐ |  |  |
+
+### Part 25: Regression Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 25.1.1 | DELETE endpoints return 204, not 200 | Auto | ☑ | 2026-03-30 |  |
+| 25.1.2 | per_page exceeding max falls back to default | Auto | ☑ | 2026-03-30 |  |
+| 25.1.3 | Seed demo network scan targets present | Auto | ☑ | 2026-03-30 |  |
+| 25.1.4 | GUI delete on FK-restricted entities shows error, not silent f... | Auto | ☑ | 2026-03-30 |  |
+| 25.1.5 | OpenAPI spec operations match router | Manual | ☐ |  |  |
+| 25.1.6 | Go service tests use strings.Contains, not errors.Is | Auto | ☑ | 2026-03-30 |  |
+
+### Part 26: EST Server (RFC 7030)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 26.1 | GET /.well-known/est/cacerts returns PKCS#7 CA chain | Auto | — | 2026-03-30 | Skipped — EST not enabled in demo |
+| 26.2 | GET /cacerts method enforcement | Auto | — | 2026-03-30 | Skipped — EST not enabled in demo |
+| 26.3 | POST /.well-known/est/simpleenroll with PEM CSR | Manual | ☐ |  |  |
+| 26.4 | POST /simpleenroll with base64-encoded DER CSR | Manual | ☐ |  |  |
+| 26.5 | POST /simpleenroll with empty body | Auto | — | 2026-03-30 | Skipped — EST not enabled in demo |
+| 26.6 | POST /simpleenroll with invalid CSR | Manual | ☐ |  |  |
+| 26.7 | POST /simpleenroll with CSR missing Common Name | Manual | ☐ |  |  |
+| 26.8 | POST /simpleenroll method enforcement (GET not allowed) | Manual | ☐ |  |  |
+| 26.9 | POST /.well-known/est/simplereenroll (re-enrollment) | Manual | ☐ |  |  |
+| 26.10 | GET /simplereenroll method enforcement | Manual | ☐ |  |  |
+| 26.11 | GET /.well-known/est/csrattrs returns 204 (no required attrs) | Auto | — | 2026-03-30 | Skipped — EST not enabled in demo |
+| 26.12 | POST /csrattrs method enforcement | Manual | ☐ |  |  |
+| 26.13 | EST enrollment creates audit event | Manual | ☐ |  |  |
+| 26.14 | EST disabled returns 404 | Manual | ☐ |  |  |
+| 26.15 | EST with profile binding | Manual | ☐ |  |  |
+
+### Part 27: Post-Deployment TLS Verification
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 27.1 | Submit Verification Result (Success) | Manual | ☐ |  |  |
+| 27.2 | Submit Verification Result (Failure — Fingerprint Mismatch) | Manual | ☐ |  |  |
+| 27.3 | Get Verification Status | Manual | ☐ |  |  |
+| 27.4 | Missing Required Fields | Manual | ☐ |  |  |
+| 27.5 | Audit Trail | Manual | ☐ |  |  |
+| 27.6 | Database Schema Verification | Auto | ☑ | 2026-03-30 |  |
+
+### Part 28: Traefik & Caddy Target Connectors
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 28.1 | Traefik File Provider Deployment | Manual | ☐ |  |  |
+| 28.2 | Caddy API Mode Deployment | Manual | ☐ |  |  |
+| 28.3 | Caddy File Mode Deployment | Manual | ☐ |  |  |
+| 28.4 | Agent Connector Dispatch | Manual | ☐ |  |  |
+| 28.5 | Connector Unit Tests | Manual | ☐ |  |  |
+
+### Part 29: Certificate Export
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 29.1 | Export PEM (JSON Response) | Auto | ☑ | 2026-03-30 |  |
+| 29.2 | Export PEM (File Download) | Manual | ☐ |  |  |
+| 29.3 | Export PEM — Not Found | Auto | ☑ | 2026-03-30 |  |
+| 29.4 | Export PKCS#12 | Auto | ☑ | 2026-03-30 |  |
+| 29.5 | Export PKCS#12 — Empty Password | Manual | ☐ |  |  |
+| 29.6 | Export Audit Trail | Manual | ☐ |  |  |
+| 29.7 | Export Unit Tests | Manual | ☐ |  |  |
+| 29.8 | GUI Export Buttons | Manual | ☐ |  |  |
+
+### Part 30: S/MIME & EKU Support
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 30.1 | S/MIME Profile Exists in Seed Data | Auto | ☑ | 2026-03-30 |  |
+| 30.2 | All Five Profiles Present | Auto | ☑ | 2026-03-30 |  |
+| 30.3 | EKU Strings in Profile API | Manual | ☐ |  |  |
+| 30.4 | Agent CSR SAN Splitting (Email vs DNS) | Manual | ☐ |  |  |
+| 30.5 | EKU Service-Layer Tests | Manual | ☐ |  |  |
+
+### Part 31: OCSP Responder & DER CRL
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 31.1 | DER-Encoded CRL | Auto | ☑ | 2026-03-30 |  |
+| 31.2 | DER CRL — Nonexistent Issuer | Auto | ☑ | 2026-03-30 |  |
+| 31.3 | OCSP Responder — Good Status | Manual | ☐ |  |  |
+| 31.4 | OCSP Responder — Revoked Status | Manual | ☐ |  |  |
+| 31.5 | OCSP — Unknown Certificate | Manual | ☐ |  |  |
+| 31.6 | Short-Lived Certificate CRL Exemption | Manual | ☐ |  |  |
+| 31.7 | OCSP / CRL Unit Tests | Manual | ☐ |  |  |
+
+### Part 32: Request Body Size Limits
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 32.1 | Default 1MB Limit | Manual | ☐ |  |  |
+| 32.2 | Normal-Sized Requests Work | Auto | ☑ | 2026-03-30 |  |
+| 32.3 | Custom Body Size via Environment Variable | Manual | ☐ |  |  |
+| 32.4 | Requests Without Bodies Are Unaffected | Auto | ☑ | 2026-03-30 |  |
+
+### Part 33: Apache & HAProxy Target Connectors
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 33.1 | Create Apache Target | Manual | ☐ |  |  |
+| 33.2 | Apache Config — Separate Files | Manual | ☐ |  |  |
+| 33.3 | Create HAProxy Target | Manual | ☐ |  |  |
+| 33.4 | HAProxy Combined PEM Requirement | Manual | ☐ |  |  |
+| 33.5 | Shell Command Injection Prevention | Manual | ☐ |  |  |
+| 33.6 | Connector Unit Tests | Manual | ☐ |  |  |
+
+### Part 34: Sub-CA Mode
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 34.1 | Self-Signed Mode (Default) | Manual | ☐ |  |  |
+| 34.2 | Sub-CA Mode — Configuration | Manual | ☐ |  |  |
+| 34.3 | Sub-CA Chain Construction | Manual | ☐ |  |  |
+| 34.4 | Sub-CA Validation — Non-CA Cert Rejected | Manual | ☐ |  |  |
+| 34.5 | Sub-CA Key Format Support | Manual | ☐ |  |  |
+| 34.6 | CRL Signing in Sub-CA Mode | Manual | ☐ |  |  |
+
+### Summary
+
+| Category | Count |
+|----------|-------|
+| ☑ Auto (passed in `qa-smoke-test.sh`) | 121 |
+| — Skipped (preconditions not met in demo) | 5 |
+| ☐ Manual (requires hands-on verification) | 194 |
+| **Total** | **320** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

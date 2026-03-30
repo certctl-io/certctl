@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -134,6 +135,11 @@ func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.RegisterAgent(r.Context(), agent)
 	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
+			ErrorWithRequestID(w, http.StatusConflict, "Agent with this name already exists", requestID)
+			return
+		}
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to register agent", requestID)
 		return
 	}
@@ -184,6 +190,11 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Heartbeat(r.Context(), agentID, metadata); err != nil {
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
+			return
+		}
+		slog.Error("Heartbeat failed", "agent_id", agentID, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to record heartbeat", requestID)
 		return
 	}
