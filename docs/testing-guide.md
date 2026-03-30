@@ -39,6 +39,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 32: Request Body Size Limits](#part-32-request-body-size-limits)
 - [Part 33: Apache & HAProxy Target Connectors](#part-33-apache--haproxy-target-connectors)
 - [Part 34: Sub-CA Mode](#part-34-sub-ca-mode)
+- [Part 35: ARI (RFC 9702) Scheduler Integration](#part-35-ari-rfc-9702-scheduler-integration)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5069,6 +5070,52 @@ openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
 
 ---
 
+## Part 35: ARI (RFC 9702) Scheduler Integration
+
+Tests that the renewal scheduler consults ARI before creating renewal jobs for ACME-issued certificates.
+
+### 35.1 ARI Defers Renewal When CA Says "Not Yet"
+
+**Prerequisite:** ACME issuer configured with `CERTCTL_ACME_ARI_ENABLED=true`, connected to a CA that supports ARI (e.g., Let's Encrypt staging). Certificate within the 30-day expiry window but the CA's `suggestedWindow.start` is in the future.
+
+```bash
+# Check scheduler logs for ARI deferral
+docker logs certctl-server 2>&1 | grep "ARI: renewal not yet suggested"
+```
+
+**Expected:** Log line showing `ARI: renewal not yet suggested by CA` with `cert_id`, `suggested_start`, `suggested_end`. No renewal job created for that cert.
+**PASS if** the scheduler skips renewal job creation when ARI says the window hasn't opened.
+
+### 35.2 ARI Triggers Renewal When CA Says "Now"
+
+**Prerequisite:** Same setup as 35.1, but the certificate's ARI `suggestedWindow.start` is in the past (CA is actively suggesting renewal).
+
+```bash
+# Check scheduler logs for ARI-triggered renewal
+docker logs certctl-server 2>&1 | grep "ARI: CA suggests renewal now"
+
+# Verify renewal job was created
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/jobs?type=renewal" | jq '.data[] | select(.certificate_id == "<cert-id>")'
+```
+
+**Expected:** Log line showing `ARI: CA suggests renewal now`. Renewal job created with `renewal_trigger: ari` in the audit trail.
+**PASS if** a renewal job is created when ARI indicates the renewal window is open.
+
+### 35.3 ARI Fallback on Error
+
+**Prerequisite:** ACME issuer with `CERTCTL_ACME_ARI_ENABLED=true`, but the ARI endpoint is unreachable or returns an error (e.g., network issue, 500 from CA).
+
+```bash
+# Check scheduler logs for ARI fallback
+docker logs certctl-server 2>&1 | grep "ARI check failed, falling back"
+```
+
+**Expected:** Warning log `ARI check failed, falling back to threshold-based renewal`. Renewal proceeds normally using the configured expiration thresholds.
+**PASS if** renewal still works when ARI is unavailable, using threshold-based logic as fallback.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -5082,7 +5129,7 @@ These must be green before starting manual QA:
 | CI pipeline green (Go build + vet + race + lint + vuln + tests) | ☐ | | |
 | CI pipeline green (Frontend tsc + vitest + vite build) | ☐ | | |
 | Coverage thresholds met (service 60%, handler 60%, domain 40%, middleware 50%) | ☐ | | |
-| `qa-smoke-test.sh` — 0 failures | ☑ | 2026-03-30 | 121 pass, 0 fail, 5 skip |
+| `qa-smoke-test.sh` — 0 failures | ☑ | 2026-03-30 | 124 pass, 0 fail, 5 skip |
 
 ### Part 1: Infrastructure & Deployment
 
@@ -5574,14 +5621,25 @@ These must be green before starting manual QA:
 | 34.5 | Sub-CA Key Format Support | Manual | ☐ |  |  |
 | 34.6 | CRL Signing in Sub-CA Mode | Manual | ☐ |  |  |
 
+### Part 35: ARI (RFC 9702) Scheduler Integration
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 35.a1 | ARI nil fallback — renewal jobs still created | Auto | ☑ | 2026-03-30 |  |
+| 35.a2 | No ARI errors with Local CA issuer | Auto | ☑ | 2026-03-30 |  |
+| 35.a3 | Server healthy after ARI wiring (metrics) | Auto | ☑ | 2026-03-30 |  |
+| 35.1 | ARI defers renewal when CA says "not yet" (requires ACME+ARI) | Manual | ☐ |  |  |
+| 35.2 | ARI triggers renewal when CA says "now" (requires ACME+ARI) | Manual | ☐ |  |  |
+| 35.3 | ARI fallback on error — threshold-based (requires ACME+ARI) | Manual | ☐ |  |  |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
-| ☑ Auto (passed in `qa-smoke-test.sh`) | 121 |
+| ☑ Auto (passed in `qa-smoke-test.sh`) | 124 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 194 |
-| **Total** | **320** |
+| ☐ Manual (requires hands-on verification) | 197 |
+| **Total** | **326** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

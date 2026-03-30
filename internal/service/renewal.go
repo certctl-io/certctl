@@ -163,9 +163,38 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		s.sendThresholdAlerts(ctx, cert, int(daysUntil), thresholds)
 
 		// Only create renewal job if an issuer connector is registered for this cert's issuer
-		if _, hasIssuer := s.issuerRegistry[cert.IssuerID]; !hasIssuer {
+		connector, hasIssuer := s.issuerRegistry[cert.IssuerID]
+		if !hasIssuer {
 			continue
 		}
+
+		// ARI check (RFC 9702): if the issuer supports ARI, let the CA direct renewal timing.
+		// Fetch the latest cert version to get the PEM chain for the ARI query.
+		ariChecked := false
+		if version, vErr := s.certRepo.GetLatestVersion(ctx, cert.ID); vErr == nil && version != nil && version.PEMChain != "" {
+			if ariResult, ariErr := connector.GetRenewalInfo(ctx, version.PEMChain); ariErr != nil {
+				// ARI error is non-fatal — log and fall through to threshold-based renewal
+				slog.Warn("ARI check failed, falling back to threshold-based renewal",
+					"cert_id", cert.ID, "issuer_id", cert.IssuerID, "error", ariErr)
+			} else if ariResult != nil {
+				ariChecked = true
+				now := time.Now()
+				if now.Before(ariResult.SuggestedWindowStart) {
+					// CA says it's too early to renew — skip this cert
+					slog.Debug("ARI: renewal not yet suggested by CA",
+						"cert_id", cert.ID,
+						"suggested_start", ariResult.SuggestedWindowStart,
+						"suggested_end", ariResult.SuggestedWindowEnd)
+					continue
+				}
+				slog.Info("ARI: CA suggests renewal now",
+					"cert_id", cert.ID,
+					"suggested_start", ariResult.SuggestedWindowStart,
+					"suggested_end", ariResult.SuggestedWindowEnd)
+			}
+			// ariResult == nil means issuer doesn't support ARI — fall through to threshold logic
+		}
+		_ = ariChecked // used for audit metadata below
 
 		// Check for existing pending/running renewal jobs to avoid duplicates
 		existingJobs, err := s.jobRepo.ListByCertificate(ctx, cert.ID)
@@ -206,9 +235,12 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		}
 
 		// Record audit event
+		auditMeta := map[string]interface{}{"days_until_expiry": daysUntil, "job_id": job.ID}
+		if ariChecked {
+			auditMeta["renewal_trigger"] = "ari"
+		}
 		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
-			"renewal_job_created", "certificate", cert.ID,
-			map[string]interface{}{"days_until_expiry": daysUntil, "job_id": job.ID}); auditErr != nil {
+			"renewal_job_created", "certificate", cert.ID, auditMeta); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
 	}

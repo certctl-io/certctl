@@ -863,4 +863,283 @@ func TestProcessRenewalJob_NoCertificate(t *testing.T) {
 	}
 }
 
+// --- ARI (RFC 9702) Scheduler Integration Tests ---
+
+func TestCheckExpiringCertificates_ARI_ShouldRenewNow(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+
+	certRepo := newMockCertificateRepository()
+	jobRepo := newMockJobRepository()
+	policyRepo := newMockRenewalPolicyRepository()
+	auditRepo := newMockAuditRepository()
+	notifRepo := newMockNotificationRepository()
+
+	auditSvc := NewAuditService(auditRepo)
+	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+	// ARI says renew now: window started in the past
+	ariConnector := &mockIssuerConnector{
+		getRenewalInfoResult: &RenewalInfoResult{
+			SuggestedWindowStart: time.Now().Add(-24 * time.Hour),
+			SuggestedWindowEnd:   time.Now().Add(48 * time.Hour),
+		},
+	}
+	issuerRegistry := map[string]IssuerConnector{
+		"iss-acme": ariConnector,
+	}
+
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
+
+	// Create cert expiring in 20 days with a cert version (needed for ARI lookup)
+	cert := &domain.ManagedCertificate{
+		ID:              "mc-ari-renew",
+		Name:            "ARI Cert",
+		CommonName:      "ari.example.com",
+		SANs:            []string{},
+		OwnerID:         "owner-1",
+		TeamID:          "team-1",
+		IssuerID:        "iss-acme",
+		RenewalPolicyID: "rp-standard",
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       time.Now().AddDate(0, 0, 20),
+		Tags:            make(map[string]string),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	certRepo.AddCert(cert)
+	certRepo.Versions[cert.ID] = []*domain.CertificateVersion{
+		{ID: "cv-1", CertificateID: cert.ID, PEMChain: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"},
+	}
+
+	policy := &domain.RenewalPolicy{
+		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
+		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
+		AlertThresholdsDays: []int{30, 14, 7, 0},
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	policyRepo.AddPolicy(policy)
+
+	err := svc.CheckExpiringCertificates(ctx)
+	if err != nil {
+		t.Fatalf("CheckExpiringCertificates failed: %v", err)
+	}
+
+	// ARI says renew now, so a renewal job should be created
+	hasRenewalJob := false
+	for _, job := range jobRepo.Jobs {
+		if job.Type == domain.JobTypeRenewal {
+			hasRenewalJob = true
+			break
+		}
+	}
+	if !hasRenewalJob {
+		t.Errorf("expected renewal job when ARI ShouldRenewNow is true")
+	}
+}
+
+func TestCheckExpiringCertificates_ARI_NotYet(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+
+	certRepo := newMockCertificateRepository()
+	jobRepo := newMockJobRepository()
+	policyRepo := newMockRenewalPolicyRepository()
+	auditRepo := newMockAuditRepository()
+	notifRepo := newMockNotificationRepository()
+
+	auditSvc := NewAuditService(auditRepo)
+	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+	// ARI says NOT yet: window starts in the future
+	ariConnector := &mockIssuerConnector{
+		getRenewalInfoResult: &RenewalInfoResult{
+			SuggestedWindowStart: time.Now().Add(72 * time.Hour),
+			SuggestedWindowEnd:   time.Now().Add(96 * time.Hour),
+		},
+	}
+	issuerRegistry := map[string]IssuerConnector{
+		"iss-acme": ariConnector,
+	}
+
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
+
+	// Cert is within the 30-day threshold window (would normally trigger renewal),
+	// but ARI says "not yet"
+	cert := &domain.ManagedCertificate{
+		ID:              "mc-ari-wait",
+		Name:            "ARI Wait Cert",
+		CommonName:      "ari-wait.example.com",
+		SANs:            []string{},
+		OwnerID:         "owner-1",
+		TeamID:          "team-1",
+		IssuerID:        "iss-acme",
+		RenewalPolicyID: "rp-standard",
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       time.Now().AddDate(0, 0, 10),
+		Tags:            make(map[string]string),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	certRepo.AddCert(cert)
+	certRepo.Versions[cert.ID] = []*domain.CertificateVersion{
+		{ID: "cv-2", CertificateID: cert.ID, PEMChain: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"},
+	}
+
+	policy := &domain.RenewalPolicy{
+		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
+		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
+		AlertThresholdsDays: []int{30, 14, 7, 0},
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	policyRepo.AddPolicy(policy)
+
+	err := svc.CheckExpiringCertificates(ctx)
+	if err != nil {
+		t.Fatalf("CheckExpiringCertificates failed: %v", err)
+	}
+
+	// ARI says not yet, so NO renewal job should be created
+	for _, job := range jobRepo.Jobs {
+		if job.Type == domain.JobTypeRenewal {
+			t.Errorf("expected no renewal job when ARI says not yet, but found one")
+		}
+	}
+}
+
+func TestCheckExpiringCertificates_ARI_NilResult_FallsThrough(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+
+	certRepo := newMockCertificateRepository()
+	jobRepo := newMockJobRepository()
+	policyRepo := newMockRenewalPolicyRepository()
+	auditRepo := newMockAuditRepository()
+	notifRepo := newMockNotificationRepository()
+
+	auditSvc := NewAuditService(auditRepo)
+	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+	// ARI returns nil (issuer doesn't support ARI) — default mock behavior
+	issuerRegistry := map[string]IssuerConnector{
+		"iss-local": &mockIssuerConnector{},
+	}
+
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
+
+	cert := &domain.ManagedCertificate{
+		ID:              "mc-ari-nil",
+		Name:            "No ARI Cert",
+		CommonName:      "no-ari.example.com",
+		SANs:            []string{},
+		OwnerID:         "owner-1",
+		TeamID:          "team-1",
+		IssuerID:        "iss-local",
+		RenewalPolicyID: "rp-standard",
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       time.Now().AddDate(0, 0, 20),
+		Tags:            make(map[string]string),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	certRepo.AddCert(cert)
+	certRepo.Versions[cert.ID] = []*domain.CertificateVersion{
+		{ID: "cv-3", CertificateID: cert.ID, PEMChain: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"},
+	}
+
+	policy := &domain.RenewalPolicy{
+		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
+		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
+		AlertThresholdsDays: []int{30, 14, 7, 0},
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	policyRepo.AddPolicy(policy)
+
+	err := svc.CheckExpiringCertificates(ctx)
+	if err != nil {
+		t.Fatalf("CheckExpiringCertificates failed: %v", err)
+	}
+
+	// ARI is nil (not supported), so threshold-based logic applies; cert is within 30-day window
+	hasRenewalJob := false
+	for _, job := range jobRepo.Jobs {
+		if job.Type == domain.JobTypeRenewal {
+			hasRenewalJob = true
+			break
+		}
+	}
+	if !hasRenewalJob {
+		t.Errorf("expected renewal job via threshold fallback when ARI returns nil")
+	}
+}
+
+func TestCheckExpiringCertificates_ARI_Error_FallsThrough(t *testing.T) {
+	t.Helper()
+	ctx := context.Background()
+
+	certRepo := newMockCertificateRepository()
+	jobRepo := newMockJobRepository()
+	policyRepo := newMockRenewalPolicyRepository()
+	auditRepo := newMockAuditRepository()
+	notifRepo := newMockNotificationRepository()
+
+	auditSvc := NewAuditService(auditRepo)
+	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+	// ARI returns an error — should fall through to threshold-based renewal
+	ariConnector := &mockIssuerConnector{
+		getRenewalInfoErr: fmt.Errorf("ARI endpoint unreachable"),
+	}
+	issuerRegistry := map[string]IssuerConnector{
+		"iss-acme": ariConnector,
+	}
+
+	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
+
+	cert := &domain.ManagedCertificate{
+		ID:              "mc-ari-err",
+		Name:            "ARI Error Cert",
+		CommonName:      "ari-err.example.com",
+		SANs:            []string{},
+		OwnerID:         "owner-1",
+		TeamID:          "team-1",
+		IssuerID:        "iss-acme",
+		RenewalPolicyID: "rp-standard",
+		Status:          domain.CertificateStatusActive,
+		ExpiresAt:       time.Now().AddDate(0, 0, 15),
+		Tags:            make(map[string]string),
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	certRepo.AddCert(cert)
+	certRepo.Versions[cert.ID] = []*domain.CertificateVersion{
+		{ID: "cv-4", CertificateID: cert.ID, PEMChain: "-----BEGIN CERTIFICATE-----\ntest\n-----END CERTIFICATE-----"},
+	}
+
+	policy := &domain.RenewalPolicy{
+		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
+		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
+		AlertThresholdsDays: []int{30, 14, 7, 0},
+		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+	}
+	policyRepo.AddPolicy(policy)
+
+	err := svc.CheckExpiringCertificates(ctx)
+	if err != nil {
+		t.Fatalf("CheckExpiringCertificates failed: %v", err)
+	}
+
+	// ARI failed but renewal should still happen via threshold fallback
+	hasRenewalJob := false
+	for _, job := range jobRepo.Jobs {
+		if job.Type == domain.JobTypeRenewal {
+			hasRenewalJob = true
+			break
+		}
+	}
+	if !hasRenewalJob {
+		t.Errorf("expected renewal job via threshold fallback when ARI errors")
+	}
+}
+
 // stringPtr is defined in notification_test.go

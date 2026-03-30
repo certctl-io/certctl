@@ -660,8 +660,10 @@ func (m *mockTargetRepo) AddTarget(target *domain.DeploymentTarget) {
 
 // mockIssuerConnector is a test implementation of IssuerConnector
 type mockIssuerConnector struct {
-	Result *IssuanceResult
-	Err    error
+	Result             *IssuanceResult
+	Err                error
+	getRenewalInfoResult *RenewalInfoResult
+	getRenewalInfoErr    error
 }
 
 func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error) {
@@ -717,14 +719,14 @@ func (m *mockIssuerConnector) GetCACertPEM(ctx context.Context) (string, error) 
 }
 
 func (m *mockIssuerConnector) GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error) {
-	if m.Err != nil {
-		return nil, m.Err
+	if m.getRenewalInfoErr != nil {
+		return nil, m.getRenewalInfoErr
 	}
-	now := time.Now()
-	return &RenewalInfoResult{
-		SuggestedWindowStart: now,
-		SuggestedWindowEnd:   now.Add(7 * 24 * time.Hour),
-	}, nil
+	if m.getRenewalInfoResult != nil {
+		return m.getRenewalInfoResult, nil
+	}
+	// Default: return nil, nil (issuer does not support ARI)
+	return nil, nil
 }
 
 // Constructor functions for mocks
