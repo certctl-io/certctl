@@ -317,10 +317,10 @@ func TestVaultConnector(t *testing.T) {
 
 	t.Run("RevokeCertificate_Success", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/v1/sys/health":
+			switch r.URL.Path {
+			case "/v1/sys/health":
 				w.WriteHeader(http.StatusOK)
-			case r.URL.Path == "/v1/pki/revoke":
+			case "/v1/pki/revoke":
 				// Verify token
 				if r.Header.Get("X-Vault-Token") == "" {
 					w.WriteHeader(http.StatusForbidden)
@@ -356,10 +356,10 @@ func TestVaultConnector(t *testing.T) {
 
 	t.Run("RevokeCertificate_ServerError", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/v1/sys/health":
+			switch r.URL.Path {
+			case "/v1/sys/health":
 				w.WriteHeader(http.StatusOK)
-			case r.URL.Path == "/v1/pki/revoke":
+			case "/v1/pki/revoke":
 				w.WriteHeader(http.StatusBadRequest)
 				w.Write([]byte(`{"errors":["serial not found"]}`))
 			default:
@@ -390,8 +390,8 @@ func TestVaultConnector(t *testing.T) {
 		expectedPEM := "-----BEGIN CERTIFICATE-----\nTESTCA\n-----END CERTIFICATE-----\n"
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/v1/pki/ca/pem":
+			switch r.URL.Path {
+			case "/v1/pki/ca/pem":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(expectedPEM))
 			default:

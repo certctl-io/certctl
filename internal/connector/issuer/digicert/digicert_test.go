@@ -241,11 +241,11 @@ func TestDigiCertConnector(t *testing.T) {
 		pemBundle := testCertPEM + testChainPEM
 
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/order/certificate/99001":
+			switch r.URL.Path {
+			case "/order/certificate/99001":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"id":99001,"status":"issued","certificate":{"id":88001,"common_name":"app.example.com"}}`))
-			case r.URL.Path == "/certificate/88001/download/format/pem_all":
+			case "/certificate/88001/download/format/pem_all":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(pemBundle))
 			default:
@@ -431,11 +431,11 @@ func TestDigiCertConnector(t *testing.T) {
 
 	t.Run("GetOrderStatus_DownloadError", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/order/certificate/99004":
+			switch r.URL.Path {
+			case "/order/certificate/99004":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"id":99004,"status":"issued","certificate":{"id":88004}}`))
-			case r.URL.Path == "/certificate/88004/download/format/pem_all":
+			case "/certificate/88004/download/format/pem_all":
 				w.WriteHeader(http.StatusInternalServerError)
 				w.Write([]byte(`{"errors":["internal server error"]}`))
 			default:
