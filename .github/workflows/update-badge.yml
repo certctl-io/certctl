@@ -1,0 +1,53 @@
+name: Update Claude Code Badge
+
+on:
+  push:
+    branches:
+      - master
+      - v2-dev
+
+jobs:
+  update-badge:
+    name: Update Claude Code Badge
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Update badge with timestamp
+        run: |
+          DATE=$(TZ=America/Chicago date +'%b %d, %Y %I:%M %p CST')
+          SHORT_SHA=$(git rev-parse --short HEAD)
+          BADGE_TEXT="Updated_with-Claude_Code_${SHORT_SHA}_(${DATE})-D97757"
+          # URL-encode spaces and special chars
+          BADGE_TEXT=$(echo "$BADGE_TEXT" | sed 's/ /%20/g; s/,/%2C/g; s/:/%3A/g; s/(/%28/g; s/)/%29/g')
+          BADGE_MD="[![Updated with Claude Code](https://img.shields.io/badge/${BADGE_TEXT}?style=flat\&logo=claude\&logoColor=white)](https://claude.ai/code)"
+
+          # Replace between markers
+          sed -i '/<!-- CLAUDE_CODE_BADGE:START -->/,/<!-- CLAUDE_CODE_BADGE:END -->/{
+            /<!-- CLAUDE_CODE_BADGE:START -->/!{
+              /<!-- CLAUDE_CODE_BADGE:END -->/!d
+            }
+          }' README.md
+          sed -i "/<!-- CLAUDE_CODE_BADGE:START -->/a ${BADGE_MD}" README.md
+
+      - name: Check for changes
+        id: changes
+        run: |
+          if git diff --quiet README.md; then
+            echo "changed=false" >> $GITHUB_OUTPUT
+          else
+            echo "changed=true" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Commit and push
+        if: steps.changes.outputs.changed == 'true'
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git add README.md
+          git commit -m "chore: update Claude Code badge [skip ci]"
+          git push
