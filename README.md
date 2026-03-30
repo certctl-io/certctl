@@ -27,7 +27,7 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 [![GitHub Release](https://img.shields.io/github/v/release/shankar0123/certctl)](https://github.com/shankar0123/certctl/releases)
 [![GitHub Stars](https://img.shields.io/github/stars/shankar0123/certctl?style=flat&logo=github)](https://github.com/shankar0123/certctl/stargazers)
 <!-- CLAUDE_CODE_BADGE:START -->
-[![Updated with Claude Code](https://img.shields.io/badge/Updated_with-Claude_Code-D97757?style=flat&logo=claude&logoColor=white)](https://claude.ai/code)
+[![Updated with Claude Code](https://img.shields.io/badge/Updated_with-Claude_Code_149e6a3_%28Mar%2030%2C%202026%2002%3A16%20PM%20CST%29-D97757?style=flat&logo=claude&logoColor=white)](https://claude.ai/code)
 <!-- CLAUDE_CODE_BADGE:END -->
 
 ## Documentation
