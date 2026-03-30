@@ -10,6 +10,7 @@ jobs:
   update-badge:
     name: Update Claude Code Badge
     runs-on: ubuntu-latest
+    if: "!contains(github.event.head_commit.message, '[skip ci]')"
     permissions:
       contents: write
     steps:
