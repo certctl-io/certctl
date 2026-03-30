@@ -13,6 +13,7 @@ import type { Certificate } from '../api/types';
 
 function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; onSuccess: () => void }) {
   const [form, setForm] = useState({
+    name: '',
     id: '',
     common_name: '',
     environment: 'production',
@@ -35,6 +36,12 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
         <h2 className="text-lg font-semibold text-ink mb-4">New Certificate</h2>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-4">{error}</div>}
         <div className="space-y-3">
+          <div>
+            <label className="text-xs text-ink-muted block mb-1">Name *</label>
+            <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+              placeholder="API Production Cert" />
+          </div>
           <div>
             <label className="text-xs text-ink-muted block mb-1">ID (optional)</label>
             <input value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))}
@@ -89,7 +96,7 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
           <button onClick={onClose} className="btn btn-ghost text-sm">Cancel</button>
           <button
             onClick={() => mutation.mutate()}
-            disabled={!form.common_name || !form.issuer_id || mutation.isPending}
+            disabled={!form.name || !form.common_name || !form.issuer_id || mutation.isPending}
             className="btn btn-primary text-sm disabled:opacity-50"
           >
             {mutation.isPending ? 'Creating...' : 'Create Certificate'}
