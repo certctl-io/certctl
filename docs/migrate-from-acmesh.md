@@ -99,18 +99,23 @@ Environment="CERTCTL_DISCOVERY_DIRS=/etc/acme.sh"
 In the **Discovery** page:
 1. Review the "Unmanaged" certificates found by the agent
 2. Click **Claim** on each acme.sh certificate
-3. Map to the certificate ID (certctl auto-generates suggestions)
+3. Enter the managed certificate ID to link it (e.g., `mc-api-prod`)
 
 Once claimed, the certificate appears in the main **Certificates** page with ownership, renewal history, and deployment status.
 
 ### 5. Create an ACME Issuer
 
-In **Issuers** → **Configure New Issuer:**
+In **Issuers** → **+ New Issuer:**
 
-- **Type:** ACME v2
-- **Directory URL:** `https://acme-v02.api.letsencrypt.org/directory` (production) or staging for testing
-- **Email:** Same email as your acme.sh account (required for ACME ToS)
-- **Challenge Type:** DNS-01 (to match acme.sh's DNS validation)
+1. Select **ACME** from the issuer type grid
+2. Fill in the type-specific fields: name, directory URL (`https://acme-v02.api.letsencrypt.org/directory`), and config
+
+Or configure via environment variables:
+```bash
+export CERTCTL_ACME_DIRECTORY_URL=https://acme-v02.api.letsencrypt.org/directory
+export CERTCTL_ACME_EMAIL=your-email@example.com  # same as your acme.sh account
+export CERTCTL_ACME_CHALLENGE_TYPE=dns-01
+```
 
 ### 6. Adapt Your DNS Provider Scripts
 
@@ -182,26 +187,28 @@ curl -X DELETE "https://api.cloudflare.com/client/v4/zones/${ZONE_ID}/dns_record
   -H "X-Auth-Key: ${CF_KEY}"
 ```
 
-Configure in the ACME issuer:
+Configure the ACME issuer via environment variables:
 
-```json
-{
-  "challenge_type": "dns-01",
-  "dns_present_script": "/etc/certctl/dns/cloudflare-present.sh",
-  "dns_cleanup_script": "/etc/certctl/dns/cloudflare-cleanup.sh",
-  "dns_propagation_wait": 30
-}
+```bash
+export CERTCTL_ACME_DIRECTORY_URL=https://acme-v02.api.letsencrypt.org/directory
+export CERTCTL_ACME_EMAIL=your-email@example.com
+export CERTCTL_ACME_CHALLENGE_TYPE=dns-01
+export CERTCTL_ACME_DNS_PRESENT_SCRIPT=/etc/certctl/dns/cloudflare-present.sh
+export CERTCTL_ACME_DNS_CLEANUP_SCRIPT=/etc/certctl/dns/cloudflare-cleanup.sh
 ```
+
+Or create the issuer through the dashboard: **Issuers** → **+ New Issuer** → select **ACME** → fill in the config fields.
 
 ### 7. Create Renewal Policies
 
-In **Policies:**
+In **Policies** → **+ New Policy:**
 
-- **Certificate Profile:** Select the issuer and challenge type from step 5
-- **Renewal Threshold:** 30 days before expiry (or match your acme.sh cron settings)
-- **Agent Group:** Select which agents should renew certificates
+- **Name:** e.g., "ACME DNS-01 Policy"
+- **Type:** `expiration_window` (enforces renewal thresholds)
+- **Severity:** `high`
+- **Config:** set your renewal window (default: 30 days before expiry)
 
-Set one policy per domain or domain pattern.
+Renewal scheduling is driven by the certificate's assigned profile and issuer. Policies add enforcement guardrails on top.
 
 ### 8. Phase Out acme.sh Cron
 
@@ -252,11 +259,10 @@ Benefits:
 
 To enable:
 
-```json
-{
-  "challenge_type": "dns-persist-01",
-  "dns_persist_issuer_domain": "acme-v02.api.letsencrypt.org"
-}
+```bash
+export CERTCTL_ACME_CHALLENGE_TYPE=dns-persist-01
+export CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN=letsencrypt.org
+export CERTCTL_ACME_DNS_PRESENT_SCRIPT=/etc/certctl/dns/cloudflare-present.sh
 ```
 
 certctl automatically falls back to DNS-01 if the CA doesn't support dns-persist-01 yet.

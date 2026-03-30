@@ -22,7 +22,7 @@ Option A: Docker Compose (quickest for evaluation)
 ```bash
 cd /opt/certctl
 docker compose up -d
-# Dashboard & API: https://localhost:8443
+# Dashboard & API: http://localhost:8443
 # Default API key in logs (grep CERTCTL_API_KEY docker logs certctl-server)
 ```
 
@@ -45,7 +45,7 @@ chmod +x /usr/local/bin/certctl-agent
 # Create config
 sudo mkdir -p /etc/certctl /var/lib/certctl/keys
 sudo tee /etc/certctl/agent.env > /dev/null <<EOF
-CERTCTL_SERVER_URL=https://certctl-control-plane.example.com:8080
+CERTCTL_SERVER_URL=http://certctl-control-plane.example.com:8443
 CERTCTL_API_KEY=your-api-key-here
 CERTCTL_DISCOVERY_DIRS=/etc/letsencrypt/live
 CERTCTL_KEY_DIR=/var/lib/certctl/keys
@@ -71,24 +71,34 @@ The control plane now knows about all 50 certs and where they live.
 
 ### 4. Configure ACME Issuer
 
-Go to **Issuers** → **Add Issuer**:
-- Type: ACME
-- Directory URL: `https://acme-v02.api.letsencrypt.org/directory` (production)
-- Email: your Let's Encrypt account email
-- Challenge Type: `http-01` (if you have HTTP access) or `dns-01` (for wildcard/internal certs)
-- For DNS-01, provide your DNS provider's script hook (Cloudflare, Route53, Azure DNS, etc.)
+Go to **Issuers** → **+ New Issuer**:
+1. Select **ACME** from the issuer type grid
+2. Fill in the type-specific fields: name, directory URL (`https://acme-v02.api.letsencrypt.org/directory`), and any required config
 
-Test the connection. certctl uses the same Let's Encrypt account; no new credentials needed.
+Alternatively, configure via environment variables before starting the server:
+```bash
+export CERTCTL_ACME_DIRECTORY_URL=https://acme-v02.api.letsencrypt.org/directory
+export CERTCTL_ACME_EMAIL=your-email@example.com
+export CERTCTL_ACME_CHALLENGE_TYPE=http-01  # or dns-01 for wildcard certs
+```
+
+For DNS-01, also set:
+```bash
+export CERTCTL_ACME_DNS_PRESENT_SCRIPT=/etc/certctl/dns/present.sh
+export CERTCTL_ACME_DNS_CLEANUP_SCRIPT=/etc/certctl/dns/cleanup.sh
+```
+
+certctl uses the same Let's Encrypt account; no new credentials needed.
 
 ### 5. Create Renewal Policies
 
-Go to **Policies** → **New Policy**:
-- Profile: ACME (or create a new one with `serverAuth` EKU)
-- Issuer: the ACME issuer you just created
-- Renewal Threshold: 30 days before expiry (default, adjust as needed)
-- Scope: select agent groups or individual agents managing your servers
+Go to **Policies** → **+ New Policy** to create enforcement rules:
+- Name: e.g., "ACME Renewal Policy"
+- Type: `expiration_window` (to enforce renewal thresholds)
+- Severity: `high`
+- Config: set your renewal threshold (default: 30 days before expiry)
 
-Assign this policy to your discovered certs.
+Renewal scheduling is driven by the certificate's assigned profile and issuer. Policies add enforcement guardrails (key algorithm requirements, expiration windows, etc.).
 
 ### 6. Disable Certbot Cron, One Server at a Time
 
@@ -133,11 +143,11 @@ docker compose up -d
 # Other options: CERTCTL_TEAMS_WEBHOOK_URL, CERTCTL_PAGERDUTY_ROUTING_KEY, CERTCTL_OPSGENIE_API_KEY
 ```
 
-Now you get 30/14/7-day warnings before any cert expires, across all 50 servers, in one place.
+Now you get 30/14/7-day warnings before any cert expires, across all 10 servers, in one place.
 
 ## What Changes
 
-- **Renewal**: Agent polls certctl for work instead of Certbot cron triggering locally. Faster failure detection (agent heartbeat every 5 minutes vs. cron running once a day).
+- **Renewal**: Agent polls certctl for work instead of Certbot cron triggering locally. Faster failure detection (agent heartbeat every 60 seconds vs. cron running once a day).
 - **Deployment**: certctl verifies post-deployment by probing the live TLS endpoint and comparing SHA-256 fingerprints. Catches reload failures silently.
 - **Audit Trail**: Every renewal, deployment, and alert is logged immutably. Answer "who renewed cert X when and why" within seconds.
 - **Alerting**: Threshold-based alerts to Slack/email/webhook 30/14/7 days before expiry, not when cert expires.
@@ -157,5 +167,5 @@ certctl will stop renewing that cert when the policy is disabled. Certbot resume
 ## Next Steps
 
 - Review the [Concepts Guide](./concepts.md) for terminology (profiles, policies, agents, jobs)
-- Explore [Network Discovery](./quickstart.md#network-discovery) to find certificates you didn't know about
-- Set up [Kubernetes cert-manager integration](./cert-manager.md) if you manage in-cluster certs too
+- Explore [Network Discovery](./quickstart.md#network-discovery-agentless) to find certificates you didn't know about
+- Set up [Kubernetes cert-manager integration](./certctl-for-cert-manager-users.md) if you manage in-cluster certs too

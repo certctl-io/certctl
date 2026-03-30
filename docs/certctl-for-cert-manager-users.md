@@ -27,7 +27,7 @@ Result:
 
 Deploy certctl control plane once (Docker Compose, Kubernetes Helm chart, or self-hosted). Deploy agents on your VMs, bare metal, and network appliances. One dashboard shows:
 - **All cert-manager certs** via discovery scanning (agents find cert-manager-issued certs copied to target machines, or scan the cluster directly)
-- **All certctl-managed certs** issued by shared issuers (ACME, step-ca, Vault PKI (coming in v2.1), private CA)
+- **All certctl-managed certs** issued by shared issuers (ACME, step-ca, Vault PKI (planned), private CA)
 - **Unified renewal and deployment** across both worlds
 - **Single pane of glass** with expiration timeline, renewal status, deployment verification, audit trail
 
@@ -39,8 +39,7 @@ Deploy certctl control plane once (Docker Compose, Kubernetes Helm chart, or sel
 ```bash
 cd /opt/certctl
 docker compose up -d
-# Dashboard: http://localhost:3000
-# API: http://localhost:8080
+# Dashboard & API: http://localhost:8443
 ```
 
 **Option B: Kubernetes** (recommended for prod)
@@ -60,7 +59,7 @@ chmod +x /usr/local/bin/certctl-agent
 
 # Config
 sudo tee /etc/certctl/agent.env > /dev/null <<EOF
-CERTCTL_SERVER_URL=https://certctl-control-plane:8080
+CERTCTL_SERVER_URL=http://certctl-control-plane:8443
 CERTCTL_API_KEY=your-api-key
 CERTCTL_DISCOVERY_DIRS=/etc/nginx/certs,/etc/ssl,/etc/letsencrypt/live
 CERTCTL_KEY_DIR=/var/lib/certctl/keys
@@ -83,18 +82,20 @@ Agents scan configured directories and report back all existing certs. In the da
 Set up the same issuer certctl uses for non-Kubernetes certs:
 - **ACME** (Let's Encrypt, for public certs)
 - **step-ca** (Smallstep, for internal certs)
-- **Vault PKI** (coming in v2.1) (HashiCorp Vault, for enterprise PKI)
+- **Vault PKI** (planned) (HashiCorp Vault, for enterprise PKI)
 - **Private CA** (your own internal root CA)
 
 No new CA infrastructure needed. If cert-manager already uses your CA, certctl points to the same one.
 
 ### 5. Create Policies for Non-Kubernetes Certs
 
-Go to **Policies** → **New Policy**:
-- Issuer: shared (ACME, step-ca, Vault (coming in v2.1), private CA)
-- Profile: serverAuth for NGINX/Apache/HAProxy, clientAuth for mTLS, emailProtection for S/MIME
-- Renewal Threshold: 30 days (default, adjust per SLA)
-- Scope: agent groups (VMs, bare metal, appliances)
+Go to **Policies** → **+ New Policy** to create enforcement rules:
+- **Name:** e.g., "VM Certificate Policy"
+- **Type:** `expiration_window` or `key_algorithm` (enforce renewal thresholds or crypto requirements)
+- **Severity:** `high`
+- **Config:** set your enforcement parameters
+
+Certificates are linked to issuers and profiles when created or claimed from discovery. Policies add guardrails — enforcing key algorithm requirements, expiration windows, and other compliance rules across your fleet.
 
 ### 6. View Unified Inventory
 
@@ -114,7 +115,7 @@ Go to **Policies** → **New Policy**:
 If cert-manager and certctl both use the same CA:
 - **ACME**: cert-manager uses ClusterIssuer + certctl uses ACME connector → same Let's Encrypt account, transparent coexistence
 - **step-ca**: cert-manager uses external issuer CRD + certctl uses step-ca connector → same provisioner, shared certificate inventory
-- **Vault PKI** (coming in v2.1): cert-manager uses external issuer CRD + certctl uses Vault connector → same mount, same audit trail
+- **Vault PKI** (planned): cert-manager uses external issuer CRD + certctl uses Vault connector → same mount, same audit trail
 
 No conflict. They just issue certs through the same CA. certctl's discovery scanning finds cert-manager-issued certs and shows them alongside certctl-managed ones.
 
@@ -138,6 +139,6 @@ For now: cert-manager handles Kubernetes, certctl handles everything else. They 
 ## Next Steps
 
 1. Review [Quick Start](./quickstart.md) for a 5-minute demo
-2. Explore [Agents and Targets](./architecture.md#agents-and-targets) for deployment architecture
-3. Read about [Discovery Scanning](./quickstart.md#discovery) to auto-find certs
+2. Explore [Architecture](./architecture.md#agents) for deployment architecture
+3. Read about [Discovery Scanning](./quickstart.md#certificate-discovery) to auto-find certs
 4. Check [Helm Chart](../deploy/helm/certctl/) for production Kubernetes deployment
