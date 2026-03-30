@@ -131,8 +131,9 @@ func TestHeartbeat_NotFound(t *testing.T) {
 func TestGetPendingWork(t *testing.T) {
 	ctx := context.Background()
 	now := time.Now()
+	agentID := "agent-001"
 	agent := &domain.Agent{
-		ID:              "agent-001",
+		ID:              agentID,
 		Name:            "prod-agent",
 		Hostname:        "server-01",
 		Status:          domain.AgentStatusOnline,
@@ -146,6 +147,7 @@ func TestGetPendingWork(t *testing.T) {
 		Type:          domain.JobTypeDeployment,
 		CertificateID: "cert-001",
 		Status:        domain.JobStatusPending,
+		AgentID:       &agentID,
 		CreatedAt:     now,
 	}
 	job2 := &domain.Job{
@@ -157,7 +159,7 @@ func TestGetPendingWork(t *testing.T) {
 	}
 
 	agentRepo := &mockAgentRepo{
-		Agents:           map[string]*domain.Agent{"agent-001": agent},
+		Agents:           map[string]*domain.Agent{agentID: agent},
 		HeartbeatUpdates: make(map[string]time.Time),
 	}
 	certRepo := &mockCertRepo{
@@ -177,7 +179,7 @@ func TestGetPendingWork(t *testing.T) {
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
-	jobs, err := agentService.GetPendingWork(ctx, "agent-001")
+	jobs, err := agentService.GetPendingWork(ctx, agentID)
 	if err != nil {
 		t.Fatalf("GetPendingWork failed: %v", err)
 	}
@@ -185,8 +187,129 @@ func TestGetPendingWork(t *testing.T) {
 	if len(jobs) != 1 {
 		t.Errorf("expected 1 deployment job, got %d", len(jobs))
 	}
-	if jobs[0].Type != domain.JobTypeDeployment {
+	if len(jobs) > 0 && jobs[0].Type != domain.JobTypeDeployment {
 		t.Errorf("expected JobTypeDeployment, got %s", jobs[0].Type)
+	}
+}
+
+func TestGetPendingWork_OnlyReturnsAgentJobs(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	agentA := "agent-A"
+	agentB := "agent-B"
+
+	agentRepo := &mockAgentRepo{
+		Agents: map[string]*domain.Agent{
+			agentA: {ID: agentA, Name: "agent-A", Hostname: "host-a", Status: domain.AgentStatusOnline, RegisteredAt: now, APIKeyHash: "hashA"},
+			agentB: {ID: agentB, Name: "agent-B", Hostname: "host-b", Status: domain.AgentStatusOnline, RegisteredAt: now, APIKeyHash: "hashB"},
+		},
+		HeartbeatUpdates: make(map[string]time.Time),
+	}
+
+	jobA := &domain.Job{ID: "job-A", Type: domain.JobTypeDeployment, CertificateID: "cert-001", Status: domain.JobStatusPending, AgentID: &agentA, CreatedAt: now}
+	jobB := &domain.Job{ID: "job-B", Type: domain.JobTypeDeployment, CertificateID: "cert-002", Status: domain.JobStatusPending, AgentID: &agentB, CreatedAt: now}
+
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{"job-A": jobA, "job-B": jobB},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+	certRepo := &mockCertRepo{Certs: make(map[string]*domain.ManagedCertificate), Versions: make(map[string][]*domain.CertificateVersion)}
+	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
+	auditService := NewAuditService(&mockAuditRepo{})
+
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+
+	// Agent A should only see its job
+	jobsA, err := agentService.GetPendingWork(ctx, agentA)
+	if err != nil {
+		t.Fatalf("GetPendingWork for agent-A failed: %v", err)
+	}
+	if len(jobsA) != 1 {
+		t.Fatalf("expected 1 job for agent-A, got %d", len(jobsA))
+	}
+	if jobsA[0].ID != "job-A" {
+		t.Errorf("expected job-A, got %s", jobsA[0].ID)
+	}
+
+	// Agent B should only see its job
+	jobsB, err := agentService.GetPendingWork(ctx, agentB)
+	if err != nil {
+		t.Fatalf("GetPendingWork for agent-B failed: %v", err)
+	}
+	if len(jobsB) != 1 {
+		t.Fatalf("expected 1 job for agent-B, got %d", len(jobsB))
+	}
+	if jobsB[0].ID != "job-B" {
+		t.Errorf("expected job-B, got %s", jobsB[0].ID)
+	}
+}
+
+func TestGetPendingWork_EmptyWhenNoJobsForAgent(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	agentA := "agent-A"
+	agentB := "agent-B"
+
+	agentRepo := &mockAgentRepo{
+		Agents: map[string]*domain.Agent{
+			agentA: {ID: agentA, Name: "agent-A", Hostname: "host-a", Status: domain.AgentStatusOnline, RegisteredAt: now, APIKeyHash: "hashA"},
+		},
+		HeartbeatUpdates: make(map[string]time.Time),
+	}
+
+	// All jobs belong to agent-B
+	jobB := &domain.Job{ID: "job-B", Type: domain.JobTypeDeployment, CertificateID: "cert-001", Status: domain.JobStatusPending, AgentID: &agentB, CreatedAt: now}
+
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{"job-B": jobB},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+	certRepo := &mockCertRepo{Certs: make(map[string]*domain.ManagedCertificate), Versions: make(map[string][]*domain.CertificateVersion)}
+	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
+	auditService := NewAuditService(&mockAuditRepo{})
+
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+
+	jobs, err := agentService.GetPendingWork(ctx, agentA)
+	if err != nil {
+		t.Fatalf("GetPendingWork failed: %v", err)
+	}
+	if len(jobs) != 0 {
+		t.Errorf("expected 0 jobs for agent-A (all jobs are for agent-B), got %d", len(jobs))
+	}
+}
+
+func TestGetPendingWork_DeploymentAndCSR_Scoped(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	agentA := "agent-A"
+
+	agentRepo := &mockAgentRepo{
+		Agents: map[string]*domain.Agent{
+			agentA: {ID: agentA, Name: "agent-A", Hostname: "host-a", Status: domain.AgentStatusOnline, RegisteredAt: now, APIKeyHash: "hashA"},
+		},
+		HeartbeatUpdates: make(map[string]time.Time),
+	}
+
+	deployJob := &domain.Job{ID: "job-deploy", Type: domain.JobTypeDeployment, CertificateID: "cert-001", Status: domain.JobStatusPending, AgentID: &agentA, CreatedAt: now}
+	csrJob := &domain.Job{ID: "job-csr", Type: domain.JobTypeRenewal, CertificateID: "cert-002", Status: domain.JobStatusAwaitingCSR, AgentID: &agentA, CreatedAt: now}
+
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{"job-deploy": deployJob, "job-csr": csrJob},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+	certRepo := &mockCertRepo{Certs: make(map[string]*domain.ManagedCertificate), Versions: make(map[string][]*domain.CertificateVersion)}
+	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
+	auditService := NewAuditService(&mockAuditRepo{})
+
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+
+	jobs, err := agentService.GetPendingWork(ctx, agentA)
+	if err != nil {
+		t.Fatalf("GetPendingWork failed: %v", err)
+	}
+	if len(jobs) != 2 {
+		t.Fatalf("expected 2 jobs (deployment + AwaitingCSR), got %d", len(jobs))
 	}
 }
 

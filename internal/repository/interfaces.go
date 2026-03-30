@@ -111,6 +111,8 @@ type JobRepository interface {
 	UpdateStatus(ctx context.Context, id string, status domain.JobStatus, errMsg string) error
 	// GetPendingJobs returns jobs not yet processed of a specific type.
 	GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error)
+	// ListPendingByAgentID returns pending deployment jobs and AwaitingCSR jobs for a specific agent.
+	ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error)
 }
 
 // RenewalPolicyRepository defines operations for managing renewal policies.

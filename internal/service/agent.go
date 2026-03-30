@@ -251,38 +251,17 @@ func (s *AgentService) GetCertificateForAgent(ctx context.Context, agentID strin
 
 // GetPendingWork returns actionable jobs for an agent: deployment jobs (Pending) and
 // renewal/issuance jobs awaiting CSR submission (AwaitingCSR).
+// Jobs are scoped to the requesting agent via agent_id (set at job creation) or
+// through target→agent relationships for legacy jobs and AwaitingCSR routing.
 func (s *AgentService) GetPendingWork(ctx context.Context, agentID string) ([]*domain.Job, error) {
-	// Fetch agent to verify it exists
+	// Verify agent exists
 	_, err := s.agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to fetch agent: %w", err)
 	}
 
-	var workForAgent []*domain.Job
-
-	// Get pending deployment jobs
-	pendingJobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusPending)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list pending jobs: %w", err)
-	}
-	for _, job := range pendingJobs {
-		if job.Type == domain.JobTypeDeployment {
-			workForAgent = append(workForAgent, job)
-		}
-	}
-
-	// Get AwaitingCSR jobs (agent keygen mode — agent needs to generate key + submit CSR)
-	awaitingJobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusAwaitingCSR)
-	if err != nil {
-		return nil, fmt.Errorf("failed to list awaiting CSR jobs: %w", err)
-	}
-	for _, job := range awaitingJobs {
-		if job.Type == domain.JobTypeRenewal || job.Type == domain.JobTypeIssuance {
-			workForAgent = append(workForAgent, job)
-		}
-	}
-
-	return workForAgent, nil
+	// Return only jobs assigned to this agent (via agent_id or target→agent relationship)
+	return s.jobRepo.ListPendingByAgentID(ctx, agentID)
 }
 
 // ReportJobStatus updates a job's status based on agent feedback.

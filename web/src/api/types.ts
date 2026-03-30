@@ -70,6 +70,8 @@ export interface Job {
   id: string;
   certificate_id: string;
   type: string;
+  target_id?: string;
+  agent_id?: string;
   status: string;
   attempts: number;
   max_attempts: number;

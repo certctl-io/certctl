@@ -226,6 +226,7 @@ func main() {
 	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	certificateService.SetTargetRepo(targetRepo)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
+	renewalService.SetTargetRepo(targetRepo)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)

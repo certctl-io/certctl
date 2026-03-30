@@ -65,6 +65,10 @@ func (m *mockVerificationJobRepo) GetPendingJobs(ctx context.Context, jobType do
 	return nil, nil
 }
 
+func (m *mockVerificationJobRepo) ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	return nil, nil
+}
+
 // newVerificationTestService creates a VerificationService wired with test doubles.
 func newVerificationTestService(jobs map[string]*domain.Job, jobRepoErr error) (*VerificationService, *mockVerificationJobRepo, *mockAuditRepo) {
 	jobRepo := &mockVerificationJobRepo{jobs: jobs, err: jobRepoErr}

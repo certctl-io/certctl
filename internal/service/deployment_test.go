@@ -85,6 +85,45 @@ func TestDeploymentService_CreateDeploymentJobs_Success(t *testing.T) {
 		if job.TargetID == nil || len(*job.TargetID) == 0 {
 			t.Errorf("expected job to have TargetID set")
 		}
+
+		// M31: Verify AgentID is set from target's agent assignment
+		if job.AgentID == nil {
+			t.Errorf("expected job to have AgentID set (M31 agent routing)")
+		}
+	}
+}
+
+// TestDeploymentService_CreateDeploymentJobs_SetsAgentID verifies AgentID is populated from target.
+func TestDeploymentService_CreateDeploymentJobs_SetsAgentID(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo, targetRepo, _, _, _, _ := newTestDeploymentService()
+
+	target := &domain.DeploymentTarget{
+		ID:        "tgt-nginx-1",
+		Name:      "NGINX Server 1",
+		Type:      domain.TargetTypeNGINX,
+		AgentID:   "agent-web-01",
+		Enabled:   true,
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	targetRepo.AddTarget(target)
+
+	jobIDs, err := svc.CreateDeploymentJobs(ctx, "mc-cert-1")
+	if err != nil {
+		t.Fatalf("CreateDeploymentJobs failed: %v", err)
+	}
+
+	if len(jobIDs) != 1 {
+		t.Fatalf("expected 1 job, got %d", len(jobIDs))
+	}
+
+	job := jobRepo.Jobs[jobIDs[0]]
+	if job.AgentID == nil {
+		t.Fatal("expected AgentID to be set on deployment job")
+	}
+	if *job.AgentID != "agent-web-01" {
+		t.Errorf("expected AgentID 'agent-web-01', got '%s'", *job.AgentID)
 	}
 }
 

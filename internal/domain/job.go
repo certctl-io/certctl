@@ -11,6 +11,7 @@ type Job struct {
 	Type                JobType            `json:"type"`
 	CertificateID       string             `json:"certificate_id"`
 	TargetID            *string            `json:"target_id,omitempty"`
+	AgentID             *string            `json:"agent_id,omitempty"`
 	Status              JobStatus          `json:"status"`
 	Attempts            int                `json:"attempts"`
 	MaxAttempts         int                `json:"max_attempts"`

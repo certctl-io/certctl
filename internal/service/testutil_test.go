@@ -243,6 +243,25 @@ func (m *mockJobRepo) GetPendingJobs(ctx context.Context, jobType domain.JobType
 	return jobs, nil
 }
 
+func (m *mockJobRepo) ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	var result []*domain.Job
+	for _, j := range m.Jobs {
+		if j.AgentID != nil && *j.AgentID == agentID {
+			if j.Status == domain.JobStatusPending && j.Type == domain.JobTypeDeployment {
+				result = append(result, j)
+			} else if j.Status == domain.JobStatusAwaitingCSR {
+				result = append(result, j)
+			}
+		}
+	}
+	return result, nil
+}
+
 func (m *mockJobRepo) AddJob(job *domain.Job) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

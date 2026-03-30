@@ -67,6 +67,11 @@ func (s *DeploymentService) CreateDeploymentJobs(ctx context.Context, certID str
 		if target.ID != "" {
 			job.TargetID = &target.ID
 		}
+		// Route job to the target's assigned agent
+		if target.AgentID != "" {
+			agentID := target.AgentID
+			job.AgentID = &agentID
+		}
 
 		if err := s.jobRepo.Create(ctx, job); err != nil {
 			slog.Error("failed to create deployment job for target", "target_id", target.ID, "error", err)

@@ -22,7 +22,7 @@ func NewJobRepository(db *sql.DB) *JobRepository {
 // List returns all jobs
 func (r *JobRepository) List(ctx context.Context) ([]*domain.Job, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, certificate_id, target_id, status, attempts, max_attempts,
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 		       last_error, scheduled_at, started_at, completed_at, created_at
 		FROM jobs
 		ORDER BY created_at DESC
@@ -52,7 +52,7 @@ func (r *JobRepository) List(ctx context.Context) ([]*domain.Job, error) {
 // Get retrieves a job by ID
 func (r *JobRepository) Get(ctx context.Context, id string) (*domain.Job, error) {
 	row := r.db.QueryRowContext(ctx, `
-		SELECT id, type, certificate_id, target_id, status, attempts, max_attempts,
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 		       last_error, scheduled_at, started_at, completed_at, created_at
 		FROM jobs
 		WHERE id = $1
@@ -77,11 +77,11 @@ func (r *JobRepository) Create(ctx context.Context, job *domain.Job) error {
 
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO jobs (
-			id, type, certificate_id, target_id, status, attempts, max_attempts,
+			id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 			last_error, scheduled_at, started_at, completed_at, created_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13)
 		RETURNING id
-	`, job.ID, job.Type, job.CertificateID, job.TargetID, job.Status, job.Attempts,
+	`, job.ID, job.Type, job.CertificateID, job.TargetID, job.AgentID, job.Status, job.Attempts,
 		job.MaxAttempts, job.LastError, job.ScheduledAt, job.StartedAt, job.CompletedAt,
 		job.CreatedAt).Scan(&job.ID)
 
@@ -99,15 +99,16 @@ func (r *JobRepository) Update(ctx context.Context, job *domain.Job) error {
 			type = $1,
 			certificate_id = $2,
 			target_id = $3,
-			status = $4,
-			attempts = $5,
-			max_attempts = $6,
-			last_error = $7,
-			scheduled_at = $8,
-			started_at = $9,
-			completed_at = $10
-		WHERE id = $11
-	`, job.Type, job.CertificateID, job.TargetID, job.Status, job.Attempts,
+			agent_id = $4,
+			status = $5,
+			attempts = $6,
+			max_attempts = $7,
+			last_error = $8,
+			scheduled_at = $9,
+			started_at = $10,
+			completed_at = $11
+		WHERE id = $12
+	`, job.Type, job.CertificateID, job.TargetID, job.AgentID, job.Status, job.Attempts,
 		job.MaxAttempts, job.LastError, job.ScheduledAt, job.StartedAt,
 		job.CompletedAt, job.ID)
 
@@ -150,7 +151,7 @@ func (r *JobRepository) Delete(ctx context.Context, id string) error {
 // ListByStatus returns jobs with a specific status
 func (r *JobRepository) ListByStatus(ctx context.Context, status domain.JobStatus) ([]*domain.Job, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, certificate_id, target_id, status, attempts, max_attempts,
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 		       last_error, scheduled_at, started_at, completed_at, created_at
 		FROM jobs
 		WHERE status = $1
@@ -181,7 +182,7 @@ func (r *JobRepository) ListByStatus(ctx context.Context, status domain.JobStatu
 // ListByCertificate returns all jobs for a certificate
 func (r *JobRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.Job, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, certificate_id, target_id, status, attempts, max_attempts,
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 		       last_error, scheduled_at, started_at, completed_at, created_at
 		FROM jobs
 		WHERE certificate_id = $1
@@ -239,7 +240,7 @@ func (r *JobRepository) UpdateStatus(ctx context.Context, id string, status doma
 // GetPendingJobs returns jobs not yet processed of a specific type
 func (r *JobRepository) GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, type, certificate_id, target_id, status, attempts, max_attempts,
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
 		       last_error, scheduled_at, started_at, completed_at, created_at
 		FROM jobs
 		WHERE type = $1 AND status = $2
@@ -267,13 +268,71 @@ func (r *JobRepository) GetPendingJobs(ctx context.Context, jobType domain.JobTy
 	return jobs, nil
 }
 
+// ListPendingByAgentID returns pending deployment jobs and AwaitingCSR jobs for a specific agent.
+// Deployment jobs are matched by agent_id directly (set at creation time), with a fallback
+// for legacy jobs where agent_id is NULL but target_id resolves to the agent via deployment_targets.
+// AwaitingCSR jobs are matched through certificate → target mappings → agent ownership.
+func (r *JobRepository) ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
+		       last_error, scheduled_at, started_at, completed_at, created_at
+		FROM jobs
+		WHERE agent_id = $1 AND status = 'Pending' AND type = 'Deployment'
+
+		UNION ALL
+
+		SELECT j.id, j.type, j.certificate_id, j.target_id, j.agent_id, j.status, j.attempts, j.max_attempts,
+		       j.last_error, j.scheduled_at, j.started_at, j.completed_at, j.created_at
+		FROM jobs j
+		INNER JOIN deployment_targets dt ON j.target_id = dt.id
+		WHERE j.agent_id IS NULL AND j.status = 'Pending' AND j.type = 'Deployment'
+		  AND dt.agent_id = $1
+
+		UNION ALL
+
+		SELECT j.id, j.type, j.certificate_id, j.target_id, j.agent_id, j.status, j.attempts, j.max_attempts,
+		       j.last_error, j.scheduled_at, j.started_at, j.completed_at, j.created_at
+		FROM jobs j
+		WHERE j.status = 'AwaitingCSR'
+		  AND j.type IN ('Renewal', 'Issuance')
+		  AND EXISTS (
+		    SELECT 1 FROM certificate_target_mappings ctm
+		    INNER JOIN deployment_targets dt ON ctm.target_id = dt.id
+		    WHERE ctm.certificate_id = j.certificate_id
+		      AND dt.agent_id = $1
+		  )
+
+		ORDER BY created_at ASC
+	`, agentID)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query pending jobs for agent: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*domain.Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating pending agent job rows: %w", err)
+	}
+
+	return jobs, nil
+}
+
 // scanJob scans a job from a row or rows
 func scanJob(scanner interface {
 	Scan(...interface{}) error
 }) (*domain.Job, error) {
 	var job domain.Job
 	err := scanner.Scan(&job.ID, &job.Type, &job.CertificateID, &job.TargetID,
-		&job.Status, &job.Attempts, &job.MaxAttempts, &job.LastError,
+		&job.AgentID, &job.Status, &job.Attempts, &job.MaxAttempts, &job.LastError,
 		&job.ScheduledAt, &job.StartedAt, &job.CompletedAt, &job.CreatedAt)
 
 	if err != nil {

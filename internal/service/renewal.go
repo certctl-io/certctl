@@ -26,10 +26,16 @@ type RenewalService struct {
 	jobRepo           repository.JobRepository
 	renewalPolicyRepo repository.RenewalPolicyRepository
 	profileRepo       repository.CertificateProfileRepository
+	targetRepo        repository.TargetRepository
 	auditService      *AuditService
 	notificationSvc   *NotificationService
 	issuerRegistry    map[string]IssuerConnector
 	keygenMode        string // "agent" (default) or "server" (demo only)
+}
+
+// SetTargetRepo sets the target repository for resolving agent_id on deployment jobs.
+func (s *RenewalService) SetTargetRepo(repo repository.TargetRepository) {
+	s.targetRepo = repo
 }
 
 // IssuerConnector defines the service-layer interface for interacting with certificate issuers.
@@ -636,12 +642,26 @@ func (s *RenewalService) createDeploymentJobs(ctx context.Context, cert *domain.
 	}
 	for _, targetID := range cert.TargetIDs {
 		tid := targetID
+
+		// Resolve agent_id from target for job routing
+		var agentIDPtr *string
+		if s.targetRepo != nil {
+			target, err := s.targetRepo.Get(ctx, tid)
+			if err != nil {
+				slog.Warn("failed to resolve agent for deployment job", "target_id", tid, "error", err)
+			} else if target.AgentID != "" {
+				agentID := target.AgentID
+				agentIDPtr = &agentID
+			}
+		}
+
 		deployJob := &domain.Job{
 			ID:            generateID("job"),
 			CertificateID: cert.ID,
 			Type:          domain.JobTypeDeployment,
 			Status:        domain.JobStatusPending,
 			TargetID:      &tid,
+			AgentID:       agentIDPtr,
 			MaxAttempts:   3,
 			ScheduledAt:   time.Now(),
 			CreatedAt:     time.Now(),

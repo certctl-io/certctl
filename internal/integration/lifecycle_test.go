@@ -662,6 +662,20 @@ func (m *mockJobRepository) GetPendingJobs(ctx context.Context, jobType domain.J
 	return jobs, nil
 }
 
+func (m *mockJobRepository) ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	var result []*domain.Job
+	for _, j := range m.jobs {
+		if j.AgentID != nil && *j.AgentID == agentID {
+			if j.Status == domain.JobStatusPending && j.Type == domain.JobTypeDeployment {
+				result = append(result, j)
+			} else if j.Status == domain.JobStatusAwaitingCSR {
+				result = append(result, j)
+			}
+		}
+	}
+	return result, nil
+}
+
 type mockAuditRepository struct {
 	events []*domain.AuditEvent
 }
