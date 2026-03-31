@@ -17,14 +17,23 @@ TLS certificate lifespans are shrinking fast. The CA/Browser Forum passed [Ballo
 certctl is a self-hosted platform that automates the entire certificate lifecycle — from issuance through renewal to deployment — with zero human intervention. It works with any certificate authority, deploys to any server, and keeps private keys on your infrastructure where they belong.
 
 ```mermaid
-timeline
+gantt
     title TLS Certificate Maximum Lifespan (CA/Browser Forum Ballot SC-081v3)
-    2015 : 5 years
-    2018 : 825 days
-    2020 : 398 days
-    March 2026 : 200 days
-    March 2027 : 100 days
-    March 2029 : 47 days
+    dateFormat YYYY-MM-DD
+    axisFormat %Y
+    todayMarker off
+    section 2015
+        5 years (1825 days)    :done, 2015-01-01, 1825d
+    section 2018
+        825 days               :done, 2018-03-01, 825d
+    section 2020
+        398 days               :active, 2020-09-01, 398d
+    section Mar 2026
+        200 days               :crit, 2026-03-15, 200d
+    section Mar 2027
+        100 days               :crit, 2027-03-15, 100d
+    section Mar 2029
+        47 days                :crit, 2029-03-15, 47d
 ```
 
 ## Documentation
