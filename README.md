@@ -18,22 +18,22 @@ certctl is a self-hosted platform that automates the entire certificate lifecycl
 
 ```mermaid
 gantt
-    title TLS Certificate Maximum Lifespan (CA/Browser Forum Ballot SC-081v3)
+    title TLS Certificate Maximum Lifespan — CA/Browser Forum Ballot SC-081v3
     dateFormat YYYY-MM-DD
-    axisFormat %Y
+    axisFormat
     todayMarker off
     section 2015
-        5 years (1825 days)    :done, 2015-01-01, 1825d
+        5 years (1825 days)    :done, 2020-01-01, 1825d
     section 2018
-        825 days               :done, 2018-03-01, 825d
+        825 days               :done, 2020-01-01, 825d
     section 2020
-        398 days               :active, 2020-09-01, 398d
-    section Mar 2026
-        200 days               :crit, 2026-03-15, 200d
-    section Mar 2027
-        100 days               :crit, 2027-03-15, 100d
-    section Mar 2029
-        47 days                :crit, 2029-03-15, 47d
+        398 days               :active, 2020-01-01, 398d
+    section 2026
+        200 days               :crit, 2020-01-01, 200d
+    section 2027
+        100 days               :crit, 2020-01-01, 100d
+    section 2029
+        47 days                :crit, 2020-01-01, 47d
 ```
 
 ## Documentation
