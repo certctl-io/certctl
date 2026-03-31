@@ -62,6 +62,7 @@ certctl-agent
 certctl-cli
 /server
 /agent
+/cli
 
 # Private strategy docs
 roadmap.md

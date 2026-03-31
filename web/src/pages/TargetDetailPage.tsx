@@ -1,6 +1,7 @@
+import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery } from '@tanstack/react-query';
-import { getTarget, getJobs } from '../api/client';
+import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { getTarget, getJobs, updateTarget } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import DataTable from '../components/DataTable';
@@ -30,6 +31,18 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
 
 export default function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
+  const queryClient = useQueryClient();
+  const [isEditing, setIsEditing] = useState(false);
+  const [editName, setEditName] = useState('');
+  const [editHostname, setEditHostname] = useState('');
+
+  const updateMutation = useMutation({
+    mutationFn: (data: Partial<{ name: string; hostname: string }>) => updateTarget(id!, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['target', id] });
+      setIsEditing(false);
+    },
+  });
 
   const { data: target, isLoading, error, refetch } = useQuery({
     queryKey: ['target', id],
@@ -112,6 +125,18 @@ export default function TargetDetailPage() {
       <PageHeader
         title={target.name}
         subtitle={typeLabels[target.type] || target.type}
+        action={
+          <button
+            onClick={() => {
+              setEditName(target.name);
+              setEditHostname(target.hostname || '');
+              setIsEditing(true);
+            }}
+            className="px-3 py-1.5 border border-surface-border rounded text-ink text-xs hover:bg-surface-hover transition-colors font-medium"
+          >
+            Edit
+          </button>
+        }
       />
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
@@ -164,6 +189,36 @@ export default function TargetDetailPage() {
           />
         </div>
       </div>
+
+      {/* Edit Modal */}
+      {isEditing && (
+        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={() => setIsEditing(false)}>
+          <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+            <h2 className="text-lg font-semibold text-ink mb-4">Edit Target</h2>
+            {updateMutation.isError && (
+              <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+                {(updateMutation.error as Error).message}
+              </div>
+            )}
+            <form onSubmit={e => { e.preventDefault(); updateMutation.mutate({ name: editName, hostname: editHostname }); }} className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-ink mb-1">Name</label>
+                <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+              </div>
+              <div>
+                <label className="block text-sm font-medium text-ink mb-1">Hostname</label>
+                <input value={editHostname} onChange={e => setEditHostname(e.target.value)} className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+              </div>
+              <div className="flex gap-2 pt-2">
+                <button type="submit" disabled={updateMutation.isPending} className="flex-1 btn btn-primary disabled:opacity-50">
+                  {updateMutation.isPending ? 'Saving...' : 'Save'}
+                </button>
+                <button type="button" onClick={() => setIsEditing(false)} className="flex-1 btn btn-ghost">Cancel</button>
+              </div>
+            </form>
+          </div>
+        </div>
+      )}
     </>
   );
 }

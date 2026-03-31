@@ -80,13 +80,16 @@ flowchart TB
         CA2["ACME\n(HTTP-01 + DNS-01 + DNS-PERSIST-01)\n(EAB, ZeroSSL auto-EAB)"]
         CA3["step-ca\n(/sign API)"]
         CA4["OpenSSL / Custom CA\n(script-based)"]
-        CA6["Vault PKI\n(planned)"]
+        CA6["Vault PKI\n(token auth, /sign API)"]
+        CA7["DigiCert CertCentral\n(async order model)"]
     end
 
     subgraph "Target Systems"
         T1["NGINX\n(file write + reload)"]
         T4["Apache httpd\n(file write + reload)"]
         T5["HAProxy\n(combined PEM + reload)"]
+        T6["Traefik\n(file provider)"]
+        T7["Caddy\n(admin API / file)"]
         T2["F5 BIG-IP\n(proxy agent + iControl REST, planned)"]
         T3["IIS\n(agent-local PowerShell, planned)"]
     end
@@ -96,7 +99,7 @@ flowchart TB
     SVC --> REPO
     REPO --> PG
     SCHED --> SVC
-    SVC -->|"Issue/Renew"| CA1 & CA2 & CA3
+    SVC -->|"Issue/Renew"| CA1 & CA2 & CA3 & CA4 & CA6 & CA7
 
     A1 & A2 & A3 -->|"CSR + Heartbeat"| API
     API -->|"Cert + Chain\n(NO private key)"| A1 & A2 & A3
@@ -506,7 +509,8 @@ flowchart TB
         II --> ACME["ACME v2"]
         II --> SC["step-ca"]
         II --> OC["OpenSSL / Custom CA"]
-        II --> VP["Vault PKI (planned)"]
+        II --> VP["Vault PKI"]
+        II --> DC["DigiCert CertCentral"]
     end
 
     subgraph "Target Connectors"

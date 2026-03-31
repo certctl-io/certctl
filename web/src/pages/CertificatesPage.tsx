@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners } from '../api/client';
+import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getProfiles, getIssuers } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -16,19 +16,65 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
     name: '',
     id: '',
     common_name: '',
+    sans: '',
     environment: 'production',
     issuer_id: '',
+    certificate_profile_id: '',
     owner_id: '',
     team_id: '',
     renewal_policy_id: '',
+    tags: '',
   });
   const [error, setError] = useState('');
 
+  const { data: profilesResp } = useQuery({
+    queryKey: ['profiles'],
+    queryFn: () => getProfiles(),
+  });
+  const { data: issuersResp } = useQuery({
+    queryKey: ['issuers'],
+    queryFn: () => getIssuers(),
+  });
+  const profiles = profilesResp?.data || [];
+  const issuers = issuersResp?.data || [];
+
+  const selectedProfile = profiles.find(p => p.id === form.certificate_profile_id);
+  const ttlLabel = selectedProfile
+    ? selectedProfile.max_ttl_seconds < 3600
+      ? `${Math.round(selectedProfile.max_ttl_seconds / 60)}m`
+      : selectedProfile.max_ttl_seconds < 86400
+        ? `${Math.round(selectedProfile.max_ttl_seconds / 3600)}h`
+        : `${Math.round(selectedProfile.max_ttl_seconds / 86400)}d`
+    : null;
+
   const mutation = useMutation({
-    mutationFn: () => createCertificate(form),
+    mutationFn: () => {
+      const payload: Record<string, unknown> = { ...form };
+      // Convert comma-separated SANs to array
+      if (form.sans.trim()) {
+        payload.sans = form.sans.split(',').map(s => s.trim()).filter(Boolean);
+      } else {
+        delete payload.sans;
+      }
+      // Convert comma-separated key=value tags to object
+      if (form.tags.trim()) {
+        const tags: Record<string, string> = {};
+        form.tags.split(',').forEach(pair => {
+          const [k, ...v] = pair.split('=');
+          if (k?.trim()) tags[k.trim()] = v.join('=').trim();
+        });
+        payload.tags = tags;
+      } else {
+        delete payload.tags;
+      }
+      return createCertificate(payload);
+    },
     onSuccess: () => onSuccess(),
     onError: (err: Error) => setError(err.message),
   });
+
+  const inputClass = "w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20";
+  const selectClass = "w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink";
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
@@ -39,57 +85,90 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
           <div>
             <label className="text-xs text-ink-muted block mb-1">Name *</label>
             <input value={form.name} onChange={e => setForm(f => ({ ...f, name: e.target.value }))}
-              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+              className={inputClass}
               placeholder="API Production Cert" />
           </div>
           <div>
             <label className="text-xs text-ink-muted block mb-1">ID (optional)</label>
             <input value={form.id} onChange={e => setForm(f => ({ ...f, id: e.target.value }))}
-              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+              className={inputClass}
               placeholder="mc-api-prod (auto-generated if empty)" />
           </div>
           <div>
             <label className="text-xs text-ink-muted block mb-1">Common Name *</label>
             <input value={form.common_name} onChange={e => setForm(f => ({ ...f, common_name: e.target.value }))}
-              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+              className={inputClass}
               placeholder="api.example.com" />
+          </div>
+          <div>
+            <label className="text-xs text-ink-muted block mb-1">SANs (comma-separated)</label>
+            <input value={form.sans} onChange={e => setForm(f => ({ ...f, sans: e.target.value }))}
+              className={inputClass}
+              placeholder="api.example.com, api-v2.example.com" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-ink-muted block mb-1">Issuer *</label>
+              <select value={form.issuer_id} onChange={e => setForm(f => ({ ...f, issuer_id: e.target.value }))}
+                className={selectClass}>
+                <option value="">Select issuer...</option>
+                {issuers.map(i => (
+                  <option key={i.id} value={i.id}>{i.name}</option>
+                ))}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-ink-muted block mb-1">
+                Profile {ttlLabel && <span className="text-brand-400 font-medium">(TTL: {ttlLabel})</span>}
+              </label>
+              <select value={form.certificate_profile_id} onChange={e => setForm(f => ({ ...f, certificate_profile_id: e.target.value }))}
+                className={selectClass}>
+                <option value="">Select profile...</option>
+                {profiles.map(p => (
+                  <option key={p.id} value={p.id}>
+                    {p.name}{p.max_ttl_seconds ? ` (${p.max_ttl_seconds < 3600 ? `${Math.round(p.max_ttl_seconds / 60)}m` : p.max_ttl_seconds < 86400 ? `${Math.round(p.max_ttl_seconds / 3600)}h` : `${Math.round(p.max_ttl_seconds / 86400)}d`})` : ''}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-ink-muted block mb-1">Environment</label>
               <select value={form.environment} onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
-                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink">
+                className={selectClass}>
                 <option value="production">Production</option>
                 <option value="staging">Staging</option>
                 <option value="development">Development</option>
               </select>
             </div>
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Issuer ID *</label>
-              <input value={form.issuer_id} onChange={e => setForm(f => ({ ...f, issuer_id: e.target.value }))}
-                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
-                placeholder="iss-local" />
+              <label className="text-xs text-ink-muted block mb-1">Policy</label>
+              <input value={form.renewal_policy_id} onChange={e => setForm(f => ({ ...f, renewal_policy_id: e.target.value }))}
+                className={inputClass}
+                placeholder="rp-standard" />
             </div>
           </div>
-          <div className="grid grid-cols-3 gap-3">
+          <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Owner ID</label>
+              <label className="text-xs text-ink-muted block mb-1">Owner</label>
               <input value={form.owner_id} onChange={e => setForm(f => ({ ...f, owner_id: e.target.value }))}
-                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+                className={inputClass}
                 placeholder="o-alice" />
             </div>
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Team ID</label>
+              <label className="text-xs text-ink-muted block mb-1">Team</label>
               <input value={form.team_id} onChange={e => setForm(f => ({ ...f, team_id: e.target.value }))}
-                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
+                className={inputClass}
                 placeholder="t-platform" />
             </div>
-            <div>
-              <label className="text-xs text-ink-muted block mb-1">Policy ID</label>
-              <input value={form.renewal_policy_id} onChange={e => setForm(f => ({ ...f, renewal_policy_id: e.target.value }))}
-                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400 focus:ring-1 focus:ring-brand-400/20"
-                placeholder="rp-standard" />
-            </div>
+          </div>
+          <div>
+            <label className="text-xs text-ink-muted block mb-1">Tags</label>
+            <input value={form.tags} onChange={e => setForm(f => ({ ...f, tags: e.target.value }))}
+              className={inputClass}
+              placeholder="env=prod, team=platform, app=api" />
+            <p className="text-xs text-ink-faint mt-0.5">Comma-separated key=value pairs</p>
           </div>
         </div>
         <div className="flex justify-end gap-3 mt-6">
@@ -245,15 +324,25 @@ export default function CertificatesPage() {
   const queryClient = useQueryClient();
   const [statusFilter, setStatusFilter] = useState('');
   const [envFilter, setEnvFilter] = useState('');
+  const [issuerFilter, setIssuerFilter] = useState('');
+  const [ownerFilter, setOwnerFilter] = useState('');
+  const [profileFilter, setProfileFilter] = useState('');
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkRevoke, setShowBulkRevoke] = useState(false);
   const [showBulkReassign, setShowBulkReassign] = useState(false);
   const [bulkRenewProgress, setBulkRenewProgress] = useState<{ done: number; total: number; running: boolean } | null>(null);
 
+  const { data: issuersData } = useQuery({ queryKey: ['issuers-filter'], queryFn: () => getIssuers({ per_page: '100' }) });
+  const { data: ownersData } = useQuery({ queryKey: ['owners-filter'], queryFn: () => getOwners({ per_page: '100' }) });
+  const { data: profilesData } = useQuery({ queryKey: ['profiles-filter'], queryFn: () => getProfiles({ per_page: '100' }) });
+
   const params: Record<string, string> = {};
   if (statusFilter) params.status = statusFilter;
   if (envFilter) params.environment = envFilter;
+  if (issuerFilter) params.issuer_id = issuerFilter;
+  if (ownerFilter) params.owner_id = ownerFilter;
+  if (profileFilter) params.profile_id = profileFilter;
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['certificates', params],
@@ -302,7 +391,8 @@ export default function CertificatesPage() {
         );
       },
     },
-    { key: 'env', label: 'Environment', render: (c) => <span className="text-ink-muted">{c.environment || '—'}</span> },
+    { key: 'last_renewal', label: 'Last Renewal', render: (c) => <span className="text-xs text-ink-muted">{c.last_renewal_at ? formatDate(c.last_renewal_at) : '—'}</span> },
+    { key: 'last_deploy', label: 'Last Deploy', render: (c) => <span className="text-xs text-ink-muted">{c.last_deployment_at ? formatDate(c.last_deployment_at) : '—'}</span> },
     { key: 'issuer', label: 'Issuer', render: (c) => <span className="text-ink-muted text-xs">{c.issuer_id}</span> },
     { key: 'owner', label: 'Owner', render: (c) => <span className="text-ink-muted text-xs">{c.owner_id}</span> },
   ];
@@ -381,6 +471,36 @@ export default function CertificatesPage() {
           <option value="production">Production</option>
           <option value="staging">Staging</option>
           <option value="development">Development</option>
+        </select>
+        <select
+          value={issuerFilter}
+          onChange={e => setIssuerFilter(e.target.value)}
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        >
+          <option value="">All issuers</option>
+          {issuersData?.data?.map(i => (
+            <option key={i.id} value={i.id}>{i.name}</option>
+          ))}
+        </select>
+        <select
+          value={ownerFilter}
+          onChange={e => setOwnerFilter(e.target.value)}
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        >
+          <option value="">All owners</option>
+          {ownersData?.data?.map(o => (
+            <option key={o.id} value={o.id}>{o.name}</option>
+          ))}
+        </select>
+        <select
+          value={profileFilter}
+          onChange={e => setProfileFilter(e.target.value)}
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        >
+          <option value="">All profiles</option>
+          {profilesData?.data?.map(p => (
+            <option key={p.id} value={p.id}>{p.name}</option>
+          ))}
         </select>
       </div>
       <div className="flex-1 overflow-y-auto">

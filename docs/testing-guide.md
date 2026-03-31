@@ -45,6 +45,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 38: Vault PKI Connector (M32)](#part-38-vault-pki-connector-m32)
 - [Part 39: DigiCert Connector (M37)](#part-39-digicert-connector-m37)
 - [Part 40: Issuer Catalog Page (M33)](#part-40-issuer-catalog-page-m33)
+- [Part 41: Frontend Audit Fixes](#part-41-frontend-audit-fixes)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5455,6 +5456,107 @@ cd web && npx vitest run 2>&1 | grep -qE 'Tests.*passed'
 
 ---
 
+## Part 41: Frontend Audit Fixes
+
+Comprehensive frontend coverage audit closed 60 gaps between backend capabilities and GUI surfaces. This part validates the critical fixes.
+
+### Automated Tests (qa-smoke-test.sh Part 41)
+
+| # | Test | Assertion |
+|---|------|-----------|
+| 41.1 | Certificate TS type has lifecycle fields | `types.ts` contains `last_renewal_at`, `last_deployment_at`, `target_ids` |
+| 41.2 | API client has new endpoint functions | `client.ts` exports `updateIssuer`, `updateTarget`, `getCertificateDeployments`, `getCRL`, `getOCSPStatus`, `getPolicy` |
+| 41.3 | CertificatesPage has filter dropdowns | Contains `issuerFilter`, `ownerFilter`, `profileFilter` state vars |
+| 41.4 | CertificatesPage shows last_renewal_at | Column renders `last_renewal_at` field |
+| 41.5 | JobsPage shows error_message | Error column displays first 80 chars for failed jobs |
+| 41.6 | ProfilesPage has key algorithm fields | Create form includes `allowed_key_algorithms` with add/remove rows |
+| 41.7 | ProfilesPage has EKU checkboxes | Create form includes `allowed_ekus` checkbox group |
+| 41.8 | DiscoveryPage shows is_ca badge | CA badge renders for discovered CA certificates |
+| 41.9 | TargetDetailPage has Edit functionality | Edit button wired to `updateTarget` API call |
+| 41.10 | CertificatesPage has tags field | Create form includes tags input (key=value pairs) |
+| 41.11 | AgentFleetPage maps darwin to macOS | OS display mapping applied to pie chart and platform headers |
+| 41.12 | Frontend builds after audit fixes | `npm run build` succeeds |
+
+### Manual Tests
+
+**41.M1: Profile Create Form — Key Algorithm Configuration**
+
+1. Navigate to Profiles page, click "+ New Profile"
+2. Verify default algorithms shown: ECDSA 256+, RSA 2048+
+3. Click "Remove" on RSA row — verify it disappears
+4. Click "+ Add" — verify Ed25519 appears (with "fixed" instead of size dropdown)
+5. Submit form, verify profile created with correct `allowed_key_algorithms` array
+
+**PASS if** algorithms are configurable and persisted correctly.
+
+**41.M2: Profile Create Form — EKU Selection**
+
+1. In Create Profile modal, verify EKU checkboxes visible (serverAuth checked by default)
+2. Check "Email Protection (S/MIME)" and "Client Authentication"
+3. Submit, verify profile has `allowed_ekus: ["serverAuth", "emailProtection", "clientAuth"]`
+
+**PASS if** EKUs are selectable and sent to backend.
+
+**41.M3: Certificate Create Form — Tags**
+
+1. Navigate to Certificates page, click "+ New Certificate"
+2. Enter tags: `env=prod, team=platform, app=api`
+3. Submit, verify certificate created with `tags: {"env": "prod", "team": "platform", "app": "api"}`
+
+**PASS if** tags are parsed and persisted as key-value pairs.
+
+**41.M4: Jobs Table — Error Message Column**
+
+1. Navigate to Jobs page, filter to "Failed" status
+2. Verify "Error" column shows truncated error message (max 80 chars with "...")
+3. Hover over truncated message, verify full text in tooltip
+
+**PASS if** error messages visible for failed jobs.
+
+**41.M5: Certificates Table — Lifecycle Columns**
+
+1. Navigate to Certificates page
+2. Verify "Last Renewal" and "Last Deploy" columns visible
+3. Verify dates shown for certs with data, "—" for certs without
+
+**PASS if** lifecycle timestamps displayed.
+
+**41.M6: Certificate Filters — Issuer/Owner/Profile Dropdowns**
+
+1. Navigate to Certificates page
+2. Verify Issuer, Owner, Profile dropdown filters visible
+3. Select an issuer — verify table filters to matching certificates
+4. Clear filter, select a profile — verify filtering works
+
+**PASS if** all three filter dropdowns functional.
+
+**41.M7: Target Detail — Edit Button**
+
+1. Navigate to a target detail page
+2. Click "Edit" button
+3. Modify name, click "Save"
+4. Verify name updated on the page
+
+**PASS if** target edit persists via API.
+
+**41.M8: Discovery Table — CA Badge**
+
+1. Navigate to Discovery page
+2. Verify "Key" column shows algorithm + key size
+3. For CA certificates, verify purple "CA" badge displayed
+
+**PASS if** CA certificates visually distinguished.
+
+**41.M9: Fleet Overview — macOS Display**
+
+1. Navigate to Fleet Overview page
+2. Verify OS pie chart shows "macOS" instead of "darwin"
+3. Verify platform section headers show "macOS / amd64" (not "darwin / amd64")
+
+**PASS if** darwin correctly mapped to macOS in all locations.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -6054,14 +6156,41 @@ These must be green before starting manual QA:
 | 40.m5 | Config detail modal shows full redacted config | Manual | ☐ |  | |
 | 40.m6 | Issuer type filter works | Manual | ☐ |  | |
 
+### Part 41: Frontend Audit Fixes
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 41.s1 | Certificate TS type has lifecycle fields | Auto | ☐ |  | qa-smoke-test.sh 41.1 |
+| 41.s2 | API client has new endpoint functions | Auto | ☐ |  | qa-smoke-test.sh 41.2 |
+| 41.s3 | CertificatesPage has filter dropdowns | Auto | ☐ |  | qa-smoke-test.sh 41.3 |
+| 41.s4 | CertificatesPage shows last_renewal_at | Auto | ☐ |  | qa-smoke-test.sh 41.4 |
+| 41.s5 | JobsPage shows error_message | Auto | ☐ |  | qa-smoke-test.sh 41.5 |
+| 41.s6 | ProfilesPage has key algorithm fields | Auto | ☐ |  | qa-smoke-test.sh 41.6 |
+| 41.s7 | ProfilesPage has EKU checkboxes | Auto | ☐ |  | qa-smoke-test.sh 41.7 |
+| 41.s8 | DiscoveryPage shows is_ca badge | Auto | ☐ |  | qa-smoke-test.sh 41.8 |
+| 41.s9 | TargetDetailPage has Edit functionality | Auto | ☐ |  | qa-smoke-test.sh 41.9 |
+| 41.s10 | CertificatesPage has tags field | Auto | ☐ |  | qa-smoke-test.sh 41.10 |
+| 41.s11 | AgentFleetPage maps darwin to macOS | Auto | ☐ |  | qa-smoke-test.sh 41.11 |
+| 41.s12 | Frontend builds after audit fixes | Auto | ☐ |  | qa-smoke-test.sh 41.12 |
+| 41.m1 | Profile create form — key algorithm config | Manual | ☐ |  | |
+| 41.m2 | Profile create form — EKU selection | Manual | ☐ |  | |
+| 41.m3 | Certificate create form — tags | Manual | ☐ |  | |
+| 41.m4 | Jobs table — error message column | Manual | ☐ |  | |
+| 41.m5 | Certificates table — lifecycle columns | Manual | ☐ |  | |
+| 41.m6 | Certificate filters — issuer/owner/profile | Manual | ☐ |  | |
+| 41.m7 | Target detail — edit button | Manual | ☐ |  | |
+| 41.m8 | Discovery table — CA badge | Manual | ☐ |  | |
+| 41.m9 | Fleet overview — macOS display | Manual | ☐ |  | |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
+| ☐ Auto (not yet run) | 12 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 232 |
-| **Total** | **381** |
+| ☐ Manual (requires hands-on verification) | 241 |
+| **Total** | **402** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

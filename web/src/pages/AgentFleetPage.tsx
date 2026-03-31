@@ -13,6 +13,14 @@ const OS_COLORS: Record<string, string> = {
   unknown: '#64748b',
 };
 
+const OS_DISPLAY_NAMES: Record<string, string> = {
+  darwin: 'macOS',
+};
+
+function displayOS(os: string): string {
+  return OS_DISPLAY_NAMES[os.toLowerCase()] || os;
+}
+
 const STATUS_COLORS: Record<string, string> = {
   Online: '#10b981',
   Offline: '#ef4444',
@@ -86,7 +94,7 @@ export default function AgentFleetPage() {
     return acc;
   }, {});
   const osPieData = Object.entries(osDistribution).map(([name, value]) => ({
-    name,
+    name: displayOS(name),
     value,
     fill: OS_COLORS[name.toLowerCase()] || '#64748b',
   }));
@@ -216,7 +224,7 @@ export default function AgentFleetPage() {
                         style={{ backgroundColor: OS_COLORS[group.os.toLowerCase()] || '#64748b' }}
                       />
                       <h4 className="text-sm font-medium text-ink">
-                        {group.os} / {group.arch}
+                        {displayOS(group.os)} / {group.arch}
                       </h4>
                       <span className="text-xs text-ink-faint">
                         {group.agents.length} agent{group.agents.length !== 1 ? 's' : ''}

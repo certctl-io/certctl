@@ -43,7 +43,7 @@ timeline
 | [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users with DNS-01 scripts |
 | [certctl for cert-manager Users](docs/certctl-for-cert-manager-users.md) | Using certctl alongside cert-manager for non-Kubernetes infrastructure |
 
-> **Next release:** v2.1.0 will be tagged after the full V2 feature suite passes manual QA across all 34 sections of the [testing guide](docs/testing-guide.md). Automated CI (1,471 Go tests + 193 frontend tests) gates every commit; the manual playbook covers integration, deployment, and UX verification that unit tests can't reach.
+> **Next release:** v2.1.0 will be tagged after the full V2 feature suite passes manual QA across all 34 sections of the [testing guide](docs/testing-guide.md). Automated CI (1,300+ Go tests + 211 frontend tests) gates every commit; the manual playbook covers integration, deployment, and UX verification that unit tests can't reach.
 
 ## Why certctl Exists
 
@@ -59,8 +59,8 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms (Venaf
 
 certctl gives you a single pane of glass for every TLS certificate in your organization:
 
-- **Web dashboard** — 22 operational pages: certificate inventory, deployment timeline with TLS verification, bulk operations (renew/revoke/reassign), discovery triage, network scan management, approval workflows, audit trail with CSV/JSON export, agent fleet overview with OS/arch grouping, short-lived credential monitoring, digest email preview
-- **REST API** — 99 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation, with sparse fields, sort, cursor pagination, and time-range filters
+- **Web dashboard** — 24 operational pages: certificate inventory, deployment timeline with TLS verification, bulk operations (renew/revoke/reassign), discovery triage, network scan management, approval workflows, audit trail with CSV/JSON export, agent fleet overview with OS/arch grouping, short-lived credential monitoring, digest email preview
+- **REST API** — 97 endpoints under `/api/v1/` + `/.well-known/est/` for complete automation, with sparse fields, sort, cursor pagination, and time-range filters
 - **Agents** — generate private keys locally (ECDSA P-256), discover existing certs on disk (PEM/DER), submit CSRs only (private keys never leave your servers)
 - **Network scanner** — discovers certificates on TLS endpoints across CIDR ranges without requiring agents, concurrent scanning with configurable timeouts
 - **Certificate export** — PEM (JSON or file download) and PKCS#12 formats, with audit trail; private keys never included
@@ -131,7 +131,7 @@ All connectors are pluggable — build your own by implementing the [connector i
 <tr>
 <td><a href="docs/screenshots/v2-policies.png"><img src="docs/screenshots/v2-policies.png" width="270" alt="Policies"></a><br><b>Policies</b><br><sub>Ownership, lifetime, renewal rules</sub></td>
 <td><a href="docs/screenshots/v2-profiles.png"><img src="docs/screenshots/v2-profiles.png" width="270" alt="Profiles"></a><br><b>Profiles</b><br><sub>Key types, max TTL, crypto constraints</sub></td>
-<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="270" alt="Issuers"></a><br><b>Issuers</b><br><sub>Local CA, ACME, step-ca connectors</sub></td>
+<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="270" alt="Issuers"></a><br><b>Issuers</b><br><sub>Local CA, ACME, step-ca, Vault PKI, DigiCert</sub></td>
 </tr>
 <tr>
 <td><a href="docs/screenshots/v2-targets.png"><img src="docs/screenshots/v2-targets.png" width="270" alt="Targets"></a><br><b>Targets</b><br><sub>NGINX, Apache, HAProxy, Traefik, Caddy deployment</sub></td>
@@ -145,7 +145,7 @@ All connectors are pluggable — build your own by implementing the [connector i
 </tr>
 </table>
 
-> **22 operational GUI pages** covering the full certificate lifecycle: dashboard, certificates (list + detail with EKU badges, deployment timeline, TLS verification status), agents, fleet overview, jobs (with approval workflow), notifications, policies, profiles, issuers, targets (wizard with NGINX/Apache/HAProxy/Traefik/Caddy/F5/IIS), owners, teams, agent groups, audit trail, short-lived credentials, discovery triage, and network scan management.
+> **24 operational GUI pages** covering the full certificate lifecycle: dashboard, certificates (list + detail with EKU badges, deployment timeline, TLS verification status), agents, fleet overview, jobs (list + detail with approval workflow), notifications, policies, profiles, issuers (catalog + detail), targets (list + detail + wizard), owners, teams, agent groups, audit trail, short-lived credentials, discovery triage, network scan management, digest email preview, and observability metrics.
 
 ## Quick Start
 
@@ -166,7 +166,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 Wait ~30 seconds, then open **http://localhost:8443** in your browser.
 
-The dashboard comes pre-loaded with 35 demo certificates across 5 issuers, 8 agents, 90 days of job history, discovery scan data, and network scan targets — a realistic snapshot of a certificate inventory that looks like it's been running for months.
+The dashboard comes pre-loaded with 32 demo certificates across 7 issuers, 8 agents, 180 days of job history, discovery scan data, and network scan targets — a realistic snapshot of a certificate inventory that looks like it's been running for months.
 
 Verify the API:
 ```bash
@@ -174,7 +174,7 @@ curl http://localhost:8443/health
 # {"status":"healthy"}
 
 curl -s http://localhost:8443/api/v1/certificates | jq '.total'
-# 35
+# 32
 ```
 
 ### Agent Install (One-Liner)
@@ -374,7 +374,7 @@ make docker-clean       # Stop + remove volumes
 
 ## API Overview
 
-99 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
+97 endpoints under `/api/v1/` + `/.well-known/est/`, all returning JSON. List endpoints support pagination, sparse field selection (`?fields=`), sort (`?sort=-notAfter`), time-range filters, and cursor-based pagination. Full request/response schemas in the [OpenAPI 3.1 spec](api/openapi.yaml).
 
 ### Key Endpoints
 ```
@@ -451,7 +451,7 @@ certctl-cli certs list --format json      # JSON output (default: table)
 
 ## MCP Server (AI Integration)
 
-certctl ships a standalone MCP (Model Context Protocol) server that exposes all 78 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
+certctl ships a standalone MCP (Model Context Protocol) server that exposes all 80 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
 
 ```bash
 # Install
@@ -487,7 +487,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 
 ### V2: Operational Maturity
 
-30 milestones complete, 1500+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
+30+ milestones complete, 1,500+ tests. See the [Feature Inventory](docs/features.md) for details on every capability.
 
 **What shipped (all ✅):**
 
@@ -499,7 +499,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **Observability** — Prometheus + JSON metrics, 5 stats API endpoints, dashboard charts (heatmap, trends, distribution), agent fleet overview, structured logging
 - **EST Server** (RFC 7030) — device/WiFi certificate enrollment, PKCS#7 wire format, configurable issuer + profile binding
 - **MCP Server** — 78 API operations as AI tools for Claude, Cursor, and any MCP-compatible client
-- **CLI** — 12 subcommands (list/get/renew/revoke certs, agents, jobs, import, status), JSON/table output
+- **CLI** — 10 subcommands (list/get/renew/revoke certs, list agents/jobs, import, status, health, metrics), JSON/table output
 - **Notifications** — Email (SMTP), Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie connectors
 - **API Enhancements** — sparse fields, sort, time-range filters, cursor pagination, immutable API audit logging
 - **Compliance Mapping** — SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides
@@ -512,13 +512,16 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 - **Scheduled Certificate Digest** — HTML email digests with certificate stats, expiration timeline, job trends, and agent health; configurable daily/hourly/weekly briefings via SMTP
 - **Helm Chart** — Production-ready Kubernetes with server Deployment, PostgreSQL StatefulSet with PVC, Agent DaemonSet, security contexts, resource limits, optional Ingress
 
-**Coming in v2.1.0:**
-- Dynamic issuer and target configuration via GUI (no env var restarts)
+**Also shipped:**
 - Issuer catalog page (see all supported CAs, configure from dashboard)
-- First-run onboarding wizard
+- Vault PKI and DigiCert CertCentral issuer connectors (Beta)
 - Turnkey deployment examples (ACME+NGINX, wildcard+DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer)
 - Migration guides (Certbot, acme.sh, cert-manager complement)
 - One-line agent install script with cross-compiled binaries
+
+**Coming in v2.1.0:**
+- Dynamic issuer and target configuration via GUI (no env var restarts)
+- First-run onboarding wizard
 
 ### V3: certctl Pro
 

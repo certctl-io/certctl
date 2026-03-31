@@ -198,6 +198,18 @@ export default function DiscoveryPage() {
       render: (c) => <span className="text-xs">{formatExpiry(c.not_after)}</span>,
     },
     {
+      key: 'key_info',
+      label: 'Key',
+      render: (c) => (
+        <div className="flex items-center gap-1">
+          <span className="text-xs text-ink-muted">{c.key_algorithm}{c.key_size ? ` ${c.key_size}` : ''}</span>
+          {c.is_ca && (
+            <span className="text-[10px] px-1.5 py-0.5 rounded bg-purple-100 text-purple-700 font-medium">CA</span>
+          )}
+        </div>
+      ),
+    },
+    {
       key: 'fingerprint',
       label: 'Fingerprint',
       render: (c) => <span className="font-mono text-[10px] text-ink-faint">{c.fingerprint_sha256?.substring(0, 16)}...</span>,

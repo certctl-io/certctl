@@ -83,6 +83,12 @@ import {
   getIssuer,
   getTarget,
   getPrometheusMetrics,
+  getCertificateDeployments,
+  getCRL,
+  getOCSPStatus,
+  updateIssuer,
+  updateTarget,
+  getPolicy,
 } from './client';
 
 // Mock global fetch
@@ -1148,6 +1154,55 @@ describe('API Client', () => {
       await getPrometheusMetrics();
       const [, init] = mockFetch.mock.calls[0];
       expect(init.headers['Authorization']).toBe('Bearer prom-key');
+    });
+  });
+
+  describe('Frontend Audit: New API Functions', () => {
+    it('getCertificateDeployments sends GET with cert ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0 }));
+      await getCertificateDeployments('mc-1');
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/certificates/mc-1/deployments');
+    });
+
+    it('getCRL sends GET to /crl', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ entries: [], total: 0 }));
+      await getCRL();
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/crl');
+    });
+
+    it('getOCSPStatus sends GET with issuer and serial', async () => {
+      const buf = new ArrayBuffer(8);
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 200,
+          arrayBuffer: () => Promise.resolve(buf),
+        } as Response)
+      );
+      await getOCSPStatus('iss-local', 'ABC123');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/ocsp/iss-local/ABC123');
+    });
+
+    it('updateIssuer sends PUT with data', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-1', name: 'Updated' }));
+      await updateIssuer('iss-1', { name: 'Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/issuers/iss-1');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('updateTarget sends PUT with data', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 't-1', name: 'Updated' }));
+      await updateTarget('t-1', { name: 'Updated' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/targets/t-1');
+      expect(init.method).toBe('PUT');
+    });
+
+    it('getPolicy sends GET with policy ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'pol-1', name: 'Test' }));
+      await getPolicy('pol-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/policies/pol-1');
     });
   });
 });

@@ -1469,8 +1469,8 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **Bulk revocation** | ✗ | ✓ | Planned V3 (paid) |
 | **Certificate health scores** | ✗ | ✓ | Planned V3 |
 | **Compliance scoring** | ✗ | ✓ | Planned V3 |
-| **DigiCert issuer** | ✗ | ✓ | Planned V2.1 (free) |
-| **Vault PKI issuer** | ✗ | ✓ | Planned V2.1 (free) |
+| **DigiCert issuer** | ✗ | ✓ | Implemented (Beta) |
+| **Vault PKI issuer** | ✗ | ✓ | Implemented (Beta) |
 
 ---
 

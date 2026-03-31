@@ -122,6 +122,26 @@ export const exportCertificatePKCS12 = (id: string, password: string = '') => {
   });
 };
 
+// Certificate Deployments
+export const getCertificateDeployments = (id: string, params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<Job>>(`${BASE}/certificates/${id}/deployments?${qs}`);
+};
+
+// CRL / OCSP
+export const getCRL = () =>
+  fetchJSON<{ version: number; entries: unknown[]; total: number; generated_at: string }>(`${BASE}/crl`);
+
+export const getOCSPStatus = (issuerId: string, serial: string) => {
+  const headers: Record<string, string> = {};
+  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
+  return fetch(`${BASE}/ocsp/${issuerId}/${serial}`, { headers })
+    .then(r => {
+      if (!r.ok) throw new Error(`OCSP request failed: ${r.status}`);
+      return r.arrayBuffer();
+    });
+};
+
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
@@ -170,6 +190,9 @@ export const createPolicy = (data: Partial<PolicyRule>) =>
 export const updatePolicy = (id: string, data: Partial<PolicyRule>) =>
   fetchJSON<PolicyRule>(`${BASE}/policies/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 
+export const getPolicy = (id: string) =>
+  fetchJSON<PolicyRule>(`${BASE}/policies/${id}`);
+
 export const deletePolicy = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/policies/${id}`, { method: 'DELETE' });
 
@@ -188,6 +211,9 @@ export const createIssuer = (data: Partial<Issuer>) =>
 export const testIssuerConnection = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/issuers/${id}/test`, { method: 'POST' });
 
+export const updateIssuer = (id: string, data: Partial<Issuer>) =>
+  fetchJSON<Issuer>(`${BASE}/issuers/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
 export const deleteIssuer = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/issuers/${id}`, { method: 'DELETE' });
 
@@ -199,6 +225,9 @@ export const getTargets = (params: Record<string, string> = {}) => {
 
 export const createTarget = (data: Partial<Target>) =>
   fetchJSON<Target>(`${BASE}/targets`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateTarget = (id: string, data: Partial<Target>) =>
+  fetchJSON<Target>(`${BASE}/targets/${id}`, { method: 'PUT', body: JSON.stringify(data) });
 
 export const deleteTarget = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/targets/${id}`, { method: 'DELETE' });

@@ -18,7 +18,10 @@ export interface Certificate {
   expires_at: string;
   revoked_at?: string;
   revocation_reason?: string;
+  target_ids?: string[];
   tags: Record<string, string>;
+  last_renewal_at?: string;
+  last_deployment_at?: string;
   created_at: string;
   updated_at: string;
 }
@@ -45,6 +48,8 @@ export interface CertificateVersion {
   csr_pem: string;
   not_before: string;
   not_after: string;
+  key_algorithm?: string;
+  key_size?: number;
   created_at: string;
 }
 
@@ -138,6 +143,7 @@ export interface Issuer {
   /** Backend returns enabled boolean; status is derived from this */
   enabled: boolean;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface Target {
@@ -149,6 +155,7 @@ export interface Target {
   config: Record<string, unknown>;
   status: string;
   created_at: string;
+  updated_at?: string;
 }
 
 export interface KeyAlgorithmRule {

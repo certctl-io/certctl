@@ -136,6 +136,15 @@ export default function JobsPage() {
       label: 'Attempts',
       render: (j) => <span className="text-ink-muted">{j.attempts}/{j.max_attempts}</span>,
     },
+    {
+      key: 'error',
+      label: 'Error',
+      render: (j) => j.status === 'Failed' && j.error_message ? (
+        <span className="text-xs text-red-600 truncate max-w-[200px] inline-block" title={j.error_message}>
+          {j.error_message.length > 80 ? j.error_message.substring(0, 80) + '...' : j.error_message}
+        </span>
+      ) : <span className="text-xs text-ink-faint">—</span>,
+    },
     { key: 'scheduled', label: 'Scheduled', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.scheduled_at)}</span> },
     { key: 'completed', label: 'Completed', render: (j) => <span className="text-xs text-ink-muted">{formatDateTime(j.completed_at)}</span> },
     {
