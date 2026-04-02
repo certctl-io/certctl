@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -58,6 +59,10 @@ type Config struct {
 	// ARIEnabled enables ACME Renewal Information (RFC 9702) support per CERTCTL_ACME_ARI_ENABLED.
 	// When enabled, the connector queries the CA's ARI endpoint to get CA-directed renewal timing.
 	ARIEnabled bool `json:"ari_enabled,omitempty"`
+
+	// Insecure skips TLS certificate verification when connecting to the ACME directory.
+	// Only use for testing with self-signed ACME servers like Pebble.
+	Insecure bool `json:"insecure,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for ACME-compatible CAs
@@ -114,6 +119,18 @@ func New(config *Config, logger *slog.Logger) *Connector {
 	return c
 }
 
+// httpClient returns an HTTP client configured for the ACME connector.
+// When Insecure is true (e.g., for Pebble test servers), TLS verification is skipped.
+func (c *Connector) httpClient() *http.Client {
+	client := &http.Client{Timeout: 30 * time.Second}
+	if c.config != nil && c.config.Insecure {
+		client.Transport = &http.Transport{
+			TLSClientConfig: &tls.Config{InsecureSkipVerify: true}, //nolint:gosec // Intentional for test ACME servers (Pebble)
+		}
+	}
+	return client
+}
+
 // ValidateConfig checks that the ACME directory URL is reachable and valid.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
@@ -129,10 +146,16 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("ACME email is required")
 	}
 
-	c.logger.Info("validating ACME configuration", "directory_url", cfg.DirectoryURL)
+	c.logger.Info("validating ACME configuration", "directory_url", cfg.DirectoryURL, "insecure", cfg.Insecure)
+
+	// Apply config so httpClient() can use it for the directory probe.
+	// This persists across the function — if validation fails early, the config
+	// will still be set, but that's fine since a failed ValidateConfig means
+	// the connector won't be used.
+	c.config = &cfg
 
 	// Verify that the directory URL is reachable
-	httpClient := &http.Client{Timeout: 10 * time.Second}
+	httpClient := c.httpClient()
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, cfg.DirectoryURL, nil)
 	if err != nil {
 		return fmt.Errorf("failed to create request: %w", err)
@@ -203,6 +226,7 @@ func (c *Connector) ensureClient(ctx context.Context) error {
 	c.client = &acme.Client{
 		Key:          key,
 		DirectoryURL: c.config.DirectoryURL,
+		HTTPClient:   c.httpClient(),
 	}
 
 	// Register or retrieve the ACME account
@@ -338,6 +362,12 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	}
 	c.logger.Info("ACME order created", "order_url", order.URI, "status", order.Status)
 
+	// Save FinalizeURL and URI before WaitOrder — WaitOrder returns a new Order
+	// object that may have empty FinalizeURL and URI fields (Go's crypto/acme
+	// WaitOrder doesn't populate Order.URI on the returned struct).
+	finalizeURL := order.FinalizeURL
+	orderURI := order.URI
+
 	// Step 2: Solve authorizations (HTTP-01 challenges)
 	if order.Status == acme.StatusPending {
 		if err := c.solveAuthorizations(ctx, order.AuthzURLs); err != nil {
@@ -345,9 +375,17 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		}
 
 		// Wait for the order to be ready
-		order, err = c.client.WaitOrder(ctx, order.URI)
+		order, err = c.client.WaitOrder(ctx, orderURI)
 		if err != nil {
 			return nil, fmt.Errorf("order failed after challenge: %w", err)
+		}
+		// Update finalizeURL from the waited order if it has one
+		if order.FinalizeURL != "" {
+			finalizeURL = order.FinalizeURL
+		}
+		// Preserve orderURI — WaitOrder doesn't populate Order.URI
+		if order.URI != "" {
+			orderURI = order.URI
 		}
 	}
 
@@ -361,9 +399,39 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("failed to parse CSR: %w", err)
 	}
 
-	derChain, _, err := c.client.CreateOrderCert(ctx, order.FinalizeURL, csrDER, true)
+	if finalizeURL == "" {
+		return nil, fmt.Errorf("ACME order has no finalize URL (order URI: %s, status: %s)", order.URI, order.Status)
+	}
+
+	// Step 3b: Finalize the order and fetch the certificate.
+	// CreateOrderCert POSTs the CSR to the finalize URL and attempts to retrieve
+	// the certificate. Some ACME servers (notably Pebble) return the order object
+	// per RFC 8555 rather than redirecting to the cert, which can cause
+	// CreateOrderCert's internal cert URL resolution to fail. In that case, we
+	// fall back to WaitOrder (to get the CertURL) + FetchCert.
+	derChain, _, err := c.client.CreateOrderCert(ctx, finalizeURL, csrDER, true)
 	if err != nil {
-		return nil, fmt.Errorf("failed to finalize order: %w", err)
+		c.logger.Warn("CreateOrderCert failed, attempting manual certificate fetch",
+			"error", err, "order_uri", orderURI)
+
+		// The finalize POST likely succeeded (the CA issued the cert) but cert
+		// retrieval failed. WaitOrder returns the order in "valid" state with
+		// CertURL populated.
+		validOrder, waitErr := c.client.WaitOrder(ctx, orderURI)
+		if waitErr != nil {
+			return nil, fmt.Errorf("failed to finalize order: %w (wait fallback: %v)", err, waitErr)
+		}
+
+		if validOrder.CertURL == "" {
+			return nil, fmt.Errorf("order finalized but no certificate URL returned (original error: %w)", err)
+		}
+
+		c.logger.Info("fetching certificate via fallback", "cert_url", validOrder.CertURL)
+		fetchedChain, fetchErr := c.client.FetchCert(ctx, validOrder.CertURL, true)
+		if fetchErr != nil {
+			return nil, fmt.Errorf("failed to fetch certificate: %w (original finalize error: %v)", fetchErr, err)
+		}
+		derChain = fetchedChain
 	}
 
 	if len(derChain) == 0 {
@@ -387,7 +455,7 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		Serial:    serial,
 		NotBefore: notBefore,
 		NotAfter:  notAfter,
-		OrderID:   order.URI,
+		OrderID:   orderURI,
 	}, nil
 }
 

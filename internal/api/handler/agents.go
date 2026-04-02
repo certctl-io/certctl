@@ -252,6 +252,7 @@ func (h AgentHandler) AgentCSRSubmit(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err != nil {
+		slog.Error("CSR submission failed", "agent_id", agentID, "certificate_id", req.CertificateID, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to submit CSR", requestID)
 		return
 	}
@@ -274,9 +275,10 @@ func (h AgentHandler) AgentCertificatePickup(w http.ResponseWriter, r *http.Requ
 	requestID := middleware.GetRequestID(r.Context())
 
 	// Extract agent ID and certificate ID from path /api/v1/agents/{id}/certificates/{cert_id}
+	// After TrimPrefix, path is "{id}/certificates/{cert_id}" → split gives [id, "certificates", cert_id]
 	path := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
 	parts := strings.Split(path, "/")
-	if len(parts) < 4 || parts[0] == "" || parts[2] == "" {
+	if len(parts) < 3 || parts[0] == "" || parts[2] == "" {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Agent ID and Certificate ID are required", requestID)
 		return
 	}

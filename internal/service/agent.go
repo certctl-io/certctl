@@ -178,14 +178,15 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 			}
 
 			version := &domain.CertificateVersion{
-				ID:            generateID("certver"),
-				CertificateID: certID,
-				SerialNumber:  result.Serial,
-				NotBefore:     result.NotBefore,
-				NotAfter:      result.NotAfter,
-				PEMChain:      result.CertPEM + "\n" + result.ChainPEM,
-				CSRPEM:        string(csrPEM),
-				CreatedAt:     time.Now(),
+				ID:                generateID("certver"),
+				CertificateID:     certID,
+				SerialNumber:      result.Serial,
+				NotBefore:         result.NotBefore,
+				NotAfter:          result.NotAfter,
+				FingerprintSHA256: computeCertFingerprint(result.CertPEM),
+				PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
+				CSRPEM:            string(csrPEM),
+				CreatedAt:         time.Now(),
 			}
 
 			if err := s.certRepo.CreateVersion(ctx, version); err != nil {

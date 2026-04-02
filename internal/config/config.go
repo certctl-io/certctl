@@ -256,6 +256,11 @@ type ACMEConfig struct {
 	// Default: false. Requires a CA that supports ARI (e.g., Let's Encrypt).
 	// Setting: CERTCTL_ACME_ARI_ENABLED environment variable.
 	ARIEnabled bool
+
+	// Insecure skips TLS certificate verification when connecting to the ACME directory.
+	// Only use for testing with self-signed ACME servers like Pebble. Never in production.
+	// Setting: CERTCTL_ACME_INSECURE environment variable.
+	Insecure bool
 }
 
 // OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
@@ -503,6 +508,7 @@ func Load() (*Config, error) {
 			DNSCleanUpScript:       getEnv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT", ""),
 			DNSPersistIssuerDomain: getEnv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN", ""),
 			ARIEnabled:             getEnvBool("CERTCTL_ACME_ARI_ENABLED", false),
+			Insecure:               getEnvBool("CERTCTL_ACME_INSECURE", false),
 		},
 		Digest: DigestConfig{
 			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),

@@ -27,6 +27,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -74,17 +75,37 @@ type Connector struct {
 }
 
 // New creates a new step-ca connector with the given configuration and logger.
+// If RootCertPath is set, the HTTP client will trust that CA certificate for TLS connections.
+// Otherwise, the system trust store is used (which works if setup-trust.sh has run).
 func New(config *Config, logger *slog.Logger) *Connector {
-	if config != nil && config.ValidityDays == 0 {
-		config.ValidityDays = 90
+	// Don't default ValidityDays — let step-ca use its own default duration.
+	// Operators can explicitly set ValidityDays if their step-ca is configured
+	// with longer max durations. A zero value means "omit from sign request."
+
+	httpClient := &http.Client{Timeout: 30 * time.Second}
+
+	// Load custom root CA cert if provided
+	if config != nil && config.RootCertPath != "" {
+		rootPEM, err := os.ReadFile(config.RootCertPath)
+		if err == nil {
+			pool := x509.NewCertPool()
+			if pool.AppendCertsFromPEM(rootPEM) {
+				httpClient.Transport = &http.Transport{
+					TLSClientConfig: &tls.Config{
+						RootCAs: pool,
+					},
+				}
+				logger.Info("step-ca custom root CA loaded", "path", config.RootCertPath)
+			}
+		} else {
+			logger.Warn("failed to read step-ca root cert, using system trust store", "path", config.RootCertPath, "error", err)
+		}
 	}
 
 	return &Connector{
-		config: config,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+		config:     config,
+		logger:     logger,
+		httpClient: httpClient,
 	}
 }
 
@@ -103,9 +124,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("step-ca provisioner_name is required")
 	}
 
-	if cfg.ValidityDays == 0 {
-		cfg.ValidityDays = 90
-	}
+	// Don't default ValidityDays — 0 means "let step-ca use its own default duration"
 
 	// Check CA health
 	healthURL := cfg.CAURL + "/health"
@@ -174,15 +193,18 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("failed to generate provisioner token: %w", err)
 	}
 
-	// Build the sign request
-	now := time.Now()
-	notAfter := now.AddDate(0, 0, c.config.ValidityDays)
-
+	// Build the sign request.
+	// When ValidityDays is 0 (default), omit NotBefore/NotAfter so step-ca uses its
+	// own default duration (typically 24h). The signRequest struct has omitempty on
+	// both time fields, so zero-value time.Time{} gets stripped from the JSON.
 	signReq := signRequest{
-		CsrPEM:    request.CSRPEM,
-		OTT:       ott,
-		NotBefore: now,
-		NotAfter:  notAfter,
+		CsrPEM: request.CSRPEM,
+		OTT:    ott,
+	}
+	if c.config.ValidityDays > 0 {
+		now := time.Now()
+		signReq.NotBefore = now
+		signReq.NotAfter = now.AddDate(0, 0, c.config.ValidityDays)
 	}
 
 	body, err := json.Marshal(signReq)
@@ -318,39 +340,80 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 }
 
 // generateProvisionerToken creates a short-lived JWT (One-Time Token) for step-ca API calls.
-// This is a minimal JWT signed with the provisioner's key.
+// The JWT is signed with the provisioner's private key (loaded from the encrypted JWE file
+// at ProvisionerKeyPath and decrypted with ProvisionerPassword).
 func (c *Connector) generateProvisionerToken(subject string, sans []string) (string, error) {
-	// For the initial implementation, we generate a simple self-signed JWT.
-	// In production, the provisioner key would be loaded from the configured path.
-	// step-ca expects a JWT with: sub=<CN>, iss=<provisioner>, aud=<ca-url>/sign
+	var key *ecdsa.PrivateKey
+	var kid string
+
+	if c.config.ProvisionerKeyPath != "" {
+		// Production: load and decrypt the real provisioner key from disk
+		var err error
+		key, kid, err = c.loadProvisionerKey()
+		if err != nil {
+			return "", fmt.Errorf("failed to load provisioner key: %w", err)
+		}
+	} else {
+		// Fallback: generate an ephemeral key (for testing or when key path not configured).
+		// This won't authenticate with a real step-ca server, but allows the connector
+		// to function against mock servers in tests.
+		c.logger.Warn("no provisioner key path configured, using ephemeral key (will not work with real step-ca)")
+		var err error
+		key, err = ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+		if err != nil {
+			return "", fmt.Errorf("failed to generate ephemeral key: %w", err)
+		}
+		kid = "ephemeral"
+	}
 
 	now := time.Now()
 
+	// step-ca expects: aud = <ca-url>/1.0/sign (the sign endpoint audience)
 	claims := map[string]interface{}{
 		"sub":  subject,
 		"iss":  c.config.ProvisionerName,
-		"aud":  c.config.CAURL + "/sign",
+		"aud":  c.config.CAURL + "/1.0/sign",
 		"nbf":  now.Unix(),
 		"iat":  now.Unix(),
 		"exp":  now.Add(5 * time.Minute).Unix(),
 		"jti":  generateJTI(),
-		"sha":  c.config.ProvisionerName, // step-ca uses this for key lookup
+		"sha":  kid, // step-ca uses this to look up the provisioner by key fingerprint
 	}
 
 	if len(sans) > 0 {
 		claims["sans"] = sans
 	}
 
-	// Generate an ephemeral signing key for the token.
-	// In a full implementation, this would use the provisioner key from disk.
-	// For now, we use an ephemeral key — step-ca administrators should configure
-	// the provisioner to accept tokens from this key.
-	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	if err != nil {
-		return "", fmt.Errorf("failed to generate token signing key: %w", err)
+	return signJWTWithKID(claims, key, kid)
+}
+
+// loadProvisionerKey loads and decrypts the step-ca provisioner key from disk.
+// Returns the ECDSA private key and the key ID (JWK thumbprint).
+func (c *Connector) loadProvisionerKey() (*ecdsa.PrivateKey, string, error) {
+	if c.config.ProvisionerKeyPath == "" {
+		return nil, "", fmt.Errorf("provisioner_key_path is required for step-ca JWK authentication")
 	}
 
-	return signJWT(claims, key)
+	jweData, err := os.ReadFile(c.config.ProvisionerKeyPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to read provisioner key file %s: %w", c.config.ProvisionerKeyPath, err)
+	}
+
+	password := c.config.ProvisionerPassword
+	if password == "" {
+		return nil, "", fmt.Errorf("provisioner_password is required to decrypt the provisioner key")
+	}
+
+	key, kid, err := decryptProvisionerKey(jweData, password)
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to decrypt provisioner key: %w", err)
+	}
+
+	c.logger.Info("provisioner key loaded and decrypted",
+		"key_path", c.config.ProvisionerKeyPath,
+		"kid", kid)
+
+	return key, kid, nil
 }
 
 // generateJTI creates a unique JWT ID.
@@ -360,13 +423,30 @@ func generateJTI() string {
 	return base64.RawURLEncoding.EncodeToString(b)
 }
 
-// signJWT creates a minimal ES256 JWT from the given claims.
+// signJWTWithKID creates an ES256 JWT with a key ID in the header.
+func signJWTWithKID(claims map[string]interface{}, key *ecdsa.PrivateKey, kid string) (string, error) {
+	// Header with kid so step-ca can look up the provisioner
+	header := map[string]string{
+		"alg": "ES256",
+		"typ": "JWT",
+		"kid": kid,
+	}
+
+	return signJWTRaw(claims, key, header)
+}
+
+// signJWT creates a minimal ES256 JWT from the given claims (no kid).
 func signJWT(claims map[string]interface{}, key *ecdsa.PrivateKey) (string, error) {
-	// Header
 	header := map[string]string{
 		"alg": "ES256",
 		"typ": "JWT",
 	}
+
+	return signJWTRaw(claims, key, header)
+}
+
+// signJWTRaw creates an ES256 JWT from the given claims and header.
+func signJWTRaw(claims map[string]interface{}, key *ecdsa.PrivateKey, header map[string]string) (string, error) {
 
 	headerJSON, err := json.Marshal(header)
 	if err != nil {

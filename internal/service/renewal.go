@@ -636,23 +636,50 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 }
 
 // createDeploymentJobs creates pending deployment jobs for each target associated with a cert.
+// If cert.TargetIDs is empty (common — the repository doesn't populate this field),
+// falls back to querying certificate_target_mappings via targetRepo.ListByCertificate.
 func (s *RenewalService) createDeploymentJobs(ctx context.Context, cert *domain.ManagedCertificate) {
-	if len(cert.TargetIDs) == 0 {
+	// Resolve targets: prefer in-memory TargetIDs, fall back to DB query
+	type targetInfo struct {
+		id      string
+		agentID string
+	}
+	var targets []targetInfo
+
+	if len(cert.TargetIDs) > 0 {
+		// TargetIDs populated (e.g. from test or manual wiring)
+		for _, tid := range cert.TargetIDs {
+			ti := targetInfo{id: tid}
+			if s.targetRepo != nil {
+				if target, err := s.targetRepo.Get(ctx, tid); err == nil && target.AgentID != "" {
+					ti.agentID = target.AgentID
+				}
+			}
+			targets = append(targets, ti)
+		}
+	} else if s.targetRepo != nil {
+		// TargetIDs empty — query certificate_target_mappings via repository
+		dbTargets, err := s.targetRepo.ListByCertificate(ctx, cert.ID)
+		if err != nil {
+			slog.Error("failed to query targets for certificate", "cert_id", cert.ID, "error", err)
+			return
+		}
+		for _, t := range dbTargets {
+			targets = append(targets, targetInfo{id: t.ID, agentID: t.AgentID})
+		}
+	}
+
+	if len(targets) == 0 {
+		slog.Debug("no targets found for certificate, skipping deployment", "cert_id", cert.ID)
 		return
 	}
-	for _, targetID := range cert.TargetIDs {
-		tid := targetID
 
-		// Resolve agent_id from target for job routing
+	for _, t := range targets {
+		tid := t.id
 		var agentIDPtr *string
-		if s.targetRepo != nil {
-			target, err := s.targetRepo.Get(ctx, tid)
-			if err != nil {
-				slog.Warn("failed to resolve agent for deployment job", "target_id", tid, "error", err)
-			} else if target.AgentID != "" {
-				agentID := target.AgentID
-				agentIDPtr = &agentID
-			}
+		if t.agentID != "" {
+			aid := t.agentID
+			agentIDPtr = &aid
 		}
 
 		deployJob := &domain.Job{
@@ -667,7 +694,9 @@ func (s *RenewalService) createDeploymentJobs(ctx context.Context, cert *domain.
 			CreatedAt:     time.Now(),
 		}
 		if err := s.jobRepo.Create(ctx, deployJob); err != nil {
-			slog.Error("failed to create deployment job for target", "target_id", targetID, "error", err)
+			slog.Error("failed to create deployment job for target", "target_id", tid, "cert_id", cert.ID, "error", err)
+		} else {
+			slog.Info("created deployment job", "job_id", deployJob.ID, "cert_id", cert.ID, "target_id", tid, "agent_id", t.agentID)
 		}
 	}
 }

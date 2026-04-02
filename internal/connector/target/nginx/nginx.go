@@ -7,6 +7,7 @@ import (
 	"log/slog"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
@@ -67,13 +68,13 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		"chain_path", cfg.ChainPath)
 
 	// Verify directory exists and is writable
-	certDir := cfg.CertPath[:len(cfg.CertPath)-len("/cert.pem")] // Simple path extraction
+	certDir := filepath.Dir(cfg.CertPath)
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
 		return fmt.Errorf("NGINX cert directory does not exist: %s", certDir)
 	}
 
 	// Verify validate command works
-	cmd := exec.CommandContext(ctx, cfg.ValidateCommand)
+	cmd := exec.CommandContext(ctx, "sh", "-c", cfg.ValidateCommand)
 	if err := cmd.Run(); err != nil {
 		c.logger.Warn("NGINX config validation failed during config check",
 			"error", err,
@@ -115,20 +116,37 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 
 	// Write chain with same permissions
-	if err := os.WriteFile(c.config.ChainPath, []byte(request.ChainPEM), 0644); err != nil {
-		errMsg := fmt.Sprintf("failed to write chain: %v", err)
-		c.logger.Error("chain deployment failed", "error", err)
-		return &target.DeploymentResult{
-			Success:       false,
-			TargetAddress: c.config.ChainPath,
-			Message:       errMsg,
-			DeployedAt:    time.Now(),
-		}, fmt.Errorf("%s", errMsg)
+	if c.config.ChainPath != "" {
+		if err := os.WriteFile(c.config.ChainPath, []byte(request.ChainPEM), 0644); err != nil {
+			errMsg := fmt.Sprintf("failed to write chain: %v", err)
+			c.logger.Error("chain deployment failed", "error", err)
+			return &target.DeploymentResult{
+				Success:       false,
+				TargetAddress: c.config.ChainPath,
+				Message:       errMsg,
+				DeployedAt:    time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+	}
+
+	// Write private key if provided and key_path is configured
+	if c.config.KeyPath != "" && request.KeyPEM != "" {
+		if err := os.WriteFile(c.config.KeyPath, []byte(request.KeyPEM), 0600); err != nil {
+			errMsg := fmt.Sprintf("failed to write private key: %v", err)
+			c.logger.Error("key deployment failed", "error", err)
+			return &target.DeploymentResult{
+				Success:       false,
+				TargetAddress: c.config.KeyPath,
+				Message:       errMsg,
+				DeployedAt:    time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		c.logger.Info("private key written", "key_path", c.config.KeyPath)
 	}
 
 	// Validate NGINX configuration before reload
 	c.logger.Debug("validating NGINX configuration", "validate_command", c.config.ValidateCommand)
-	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
 	if output, err := validateCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("NGINX config validation failed: %v (output: %s)", err, string(output))
 		c.logger.Error("NGINX validation failed", "error", err, "output", string(output))
@@ -142,7 +160,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Reload NGINX
 	c.logger.Debug("reloading NGINX", "reload_command", c.config.ReloadCommand)
-	reloadCmd := exec.CommandContext(ctx, c.config.ReloadCommand)
+	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
 	if output, err := reloadCmd.CombinedOutput(); err != nil {
 		errMsg := fmt.Sprintf("NGINX reload failed: %v (output: %s)", err, string(output))
 		c.logger.Error("NGINX reload failed", "error", err, "output", string(output))
@@ -187,7 +205,7 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 	startTime := time.Now()
 
 	// Validate NGINX configuration
-	validateCmd := exec.CommandContext(ctx, c.config.ValidateCommand)
+	validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
 	if err := validateCmd.Run(); err != nil {
 		errMsg := fmt.Sprintf("NGINX config validation failed: %v", err)
 		c.logger.Error("validation failed", "error", err)

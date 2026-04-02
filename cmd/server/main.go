@@ -112,6 +112,7 @@ func main() {
 		DNSPresentScript:       os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
 		DNSCleanUpScript:       os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
 		DNSPersistIssuerDomain: os.Getenv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN"),
+		Insecure:               cfg.ACME.Insecure,
 	}, logger)
 	logger.Info("initialized ACME issuer connector")
 
@@ -119,6 +120,7 @@ func main() {
 	// Uses the native /sign API with JWK provisioner authentication.
 	stepcaConnector := stepcaissuer.New(&stepcaissuer.Config{
 		CAURL:               os.Getenv("CERTCTL_STEPCA_URL"),
+		RootCertPath:        os.Getenv("CERTCTL_STEPCA_ROOT_CERT"),
 		ProvisionerName:     os.Getenv("CERTCTL_STEPCA_PROVISIONER"),
 		ProvisionerKeyPath:  os.Getenv("CERTCTL_STEPCA_KEY_PATH"),
 		ProvisionerPassword: os.Getenv("CERTCTL_STEPCA_PASSWORD"),
@@ -261,6 +263,8 @@ func main() {
 	certificateService.SetRevocationSvc(revocationSvc)
 	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	certificateService.SetTargetRepo(targetRepo)
+	certificateService.SetJobRepo(jobRepo)
+	certificateService.SetKeygenMode(cfg.Keygen.Mode)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	renewalService.SetTargetRepo(targetRepo)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
@@ -504,13 +508,28 @@ func main() {
 	if _, err := os.Stat(webDir + "/index.html"); err != nil {
 		webDir = "./web"
 	}
+	// Health/ready routes bypass the full middleware stack (no auth required).
+	// These are registered on the inner router without auth, but the outer
+	// middleware chain wraps everything. Route them directly to the inner router.
+	noAuthHandler := middleware.Chain(apiRouter,
+		middleware.RequestID,
+		structuredLogger,
+		middleware.Recovery,
+	)
+
 	if _, err := os.Stat(webDir + "/index.html"); err == nil {
 		fileServer := http.FileServer(http.Dir(webDir))
 		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
-			// API, health, and EST routes go to the API handler
-			if path == "/health" || path == "/ready" ||
-				(len(path) >= 8 && path[:8] == "/api/v1/") ||
+			// Health/ready and auth/info bypass auth middleware.
+			// Health/ready: Docker/K8s health probes don't carry Bearer tokens.
+			// auth/info: React app calls this before login to detect auth mode.
+			if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
+				noAuthHandler.ServeHTTP(w, r)
+				return
+			}
+			// All other API and EST routes go through the full middleware stack (with auth)
+			if (len(path) >= 8 && path[:8] == "/api/v1/") ||
 				(len(path) >= 16 && path[:16] == "/.well-known/est") {
 				apiHandler.ServeHTTP(w, r)
 				return
@@ -525,7 +544,15 @@ func main() {
 		})
 		logger.Info("dashboard available at /", "web_dir", webDir)
 	} else {
-		finalHandler = apiHandler
+		// No dashboard: route health/auth-info without auth, everything else through full stack
+		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			path := r.URL.Path
+			if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
+				noAuthHandler.ServeHTTP(w, r)
+				return
+			}
+			apiHandler.ServeHTTP(w, r)
+		})
 		logger.Info("dashboard directory not found, serving API only")
 	}
 
@@ -534,9 +561,9 @@ func main() {
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           finalHandler,
-		ReadTimeout:       15 * time.Second,
+		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
-		WriteTimeout:      15 * time.Second,
+		WriteTimeout:      120 * time.Second, // Must accommodate ACME issuance (order + challenge + finalize)
 		IdleTimeout:       60 * time.Second,
 	}
 

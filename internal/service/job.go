@@ -54,6 +54,16 @@ func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
 
 	// Process each job
 	for _, job := range pendingJobs {
+		// Skip deployment jobs that have an agent_id — those are meant for agent
+		// pickup via GetPendingWork(), not server-side processing. The server should
+		// only process deployment jobs without an agent (legacy/serverless targets).
+		if job.Type == domain.JobTypeDeployment && job.AgentID != nil && *job.AgentID != "" {
+			s.logger.Debug("skipping agent-routed deployment job",
+				"job_id", job.ID,
+				"agent_id", *job.AgentID)
+			continue
+		}
+
 		if err := s.processJob(ctx, job); err != nil {
 			s.logger.Error("failed to process job",
 				"job_id", job.ID,

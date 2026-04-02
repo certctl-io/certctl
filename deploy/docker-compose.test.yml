@@ -1,0 +1,303 @@
+# =============================================================================
+# certctl Testing Environment — Docker Compose
+# =============================================================================
+#
+# Spins up the full certctl platform with real CA backends for manual QA:
+#
+#   1. PostgreSQL 16        — database (clean, no demo data)
+#   2. certctl-server       — control plane API + web dashboard on :8443
+#   3. certctl-agent        — polls for work, deploys certs to NGINX
+#   4. step-ca              — private CA (JWK provisioner, auto-bootstraps)
+#   5. Pebble               — ACME test server (simulates Let's Encrypt)
+#   6. pebble-challtestsrv  — DNS/HTTP challenge test server for Pebble
+#   7. NGINX                — TLS target server on :8080 (HTTP) / :8444 (HTTPS)
+#
+# Usage:
+#   cd deploy
+#   docker compose -f docker-compose.test.yml up --build
+#
+# Dashboard:  http://localhost:8443
+# API key:    test-key-2026
+# NGINX:      https://localhost:8444 (self-signed placeholder until cert deployed)
+#
+# See docs/test-env.md for the full walkthrough.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Database
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: certctl-test-postgres
+    environment:
+      POSTGRES_DB: certctl
+      POSTGRES_USER: certctl
+      POSTGRES_PASSWORD: testpass
+    volumes:
+      - test_postgres_data:/var/lib/postgresql/data
+      - ../migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/001_schema.sql
+      - ../migrations/000002_agent_metadata.up.sql:/docker-entrypoint-initdb.d/002_agent_metadata.sql
+      - ../migrations/000003_certificate_profiles.up.sql:/docker-entrypoint-initdb.d/003_certificate_profiles.sql
+      - ../migrations/000004_agent_groups.up.sql:/docker-entrypoint-initdb.d/004_agent_groups.sql
+      - ../migrations/000005_revocation.up.sql:/docker-entrypoint-initdb.d/005_revocation.sql
+      - ../migrations/000006_discovery.up.sql:/docker-entrypoint-initdb.d/006_discovery.sql
+      - ../migrations/000007_network_discovery.up.sql:/docker-entrypoint-initdb.d/007_network_discovery.sql
+      - ../migrations/000008_verification.up.sql:/docker-entrypoint-initdb.d/008_verification.sql
+      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/010_seed.sql
+      - ../migrations/seed_test.sql:/docker-entrypoint-initdb.d/015_seed_test.sql
+      # No seed_demo.sql — start with a clean database for real testing
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.2
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U certctl -d certctl"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # Pebble — ACME test server (simulates Let's Encrypt)
+  # ---------------------------------------------------------------------------
+  # Pebble is the official ACME test server from Let's Encrypt (RFC 8555).
+  # It validates challenges via the companion challtestsrv.
+  # Root CA cert available at https://pebble:15000/roots/0 (management API).
+  pebble-challtestsrv:
+    image: ghcr.io/letsencrypt/pebble-challtestsrv:latest
+    container_name: certctl-test-challtestsrv
+    # ENTRYPOINT is /app (the binary). command: provides only the FLAGS.
+    # Matches the official Pebble docker-compose format.
+    # -doh "" disables DoH (default :8443 would conflict with certctl server).
+    # defaultIPv4 must point to the certctl-server (10.30.50.6) because that's where
+    # the ACME HTTP-01 challenge server runs (port 80 inside the container).
+    # Pebble resolves domains via challtestsrv, then connects to this IP to validate.
+    command: -defaultIPv4 10.30.50.6 -defaultIPv6 "" -doh ""
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.3
+    restart: unless-stopped
+
+  pebble:
+    image: ghcr.io/letsencrypt/pebble:latest
+    container_name: certctl-test-pebble
+    depends_on:
+      - pebble-challtestsrv
+    environment:
+      PEBBLE_VA_NOSLEEP: 1
+      PEBBLE_VA_ALWAYS_VALID: 0
+    # ENTRYPOINT is /app (the binary). command: provides only the FLAGS.
+    command:
+      - -config
+      - /test/config/pebble-config.json
+      - -dnsserver
+      - "10.30.50.3:8053"
+      - -strict
+    volumes:
+      - ./test/pebble-config.json:/test/config/pebble-config.json:ro
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.4
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # step-ca — Private CA (Smallstep)
+  # ---------------------------------------------------------------------------
+  # Auto-bootstraps on first run: generates root CA + JWK provisioner "admin".
+  # Root cert: /home/step/certs/root_ca.crt (inside stepca_data volume)
+  # Provisioner key: /home/step/secrets/provisioner_key (encrypted JWK)
+  step-ca:
+    image: smallstep/step-ca:latest
+    container_name: certctl-test-stepca
+    environment:
+      DOCKER_STEPCA_INIT_NAME: "certctl-test-ca"
+      DOCKER_STEPCA_INIT_DNS_NAMES: "step-ca,localhost"
+      DOCKER_STEPCA_INIT_PROVISIONER_NAME: "admin"
+      DOCKER_STEPCA_INIT_PASSWORD: "password123"
+      DOCKER_STEPCA_INIT_ADDRESS: ":9000"
+    volumes:
+      - stepca_data:/home/step
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.5
+    healthcheck:
+      test: ["CMD", "curl", "-fk", "https://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # certctl Server (Control Plane)
+  # ---------------------------------------------------------------------------
+  # Connects to PostgreSQL, Pebble (ACME), step-ca, and Local CA.
+  #
+  # TLS trust problem: Pebble and step-ca use self-signed root CAs that
+  # aren't in Alpine's trust store. The ACME and step-ca connectors use
+  # Go's default http.Client (no InsecureSkipVerify), so they need the
+  # CA certs in the system trust store.
+  #
+  # Solution: setup-trust.sh runs as root, fetches Pebble CA from its
+  # management API, copies step-ca root cert from the shared volume,
+  # runs update-ca-certificates, then execs the server binary.
+  certctl-server:
+    build:
+      context: ..
+      dockerfile: Dockerfile
+    container_name: certctl-test-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      pebble:
+        condition: service_started
+      step-ca:
+        condition: service_healthy
+    # Run as root so update-ca-certificates can write to /etc/ssl/certs.
+    # Container isolation provides the security boundary.
+    user: "0:0"
+    entrypoint: ["/bin/sh", "/app/setup-trust.sh"]
+    environment:
+      # Database
+      CERTCTL_DATABASE_URL: postgres://certctl:testpass@postgres:5432/certctl?sslmode=disable
+
+      # Server
+      CERTCTL_SERVER_HOST: 0.0.0.0
+      CERTCTL_SERVER_PORT: 8443
+      CERTCTL_LOG_LEVEL: debug
+
+      # Auth — API key required (production-like)
+      CERTCTL_AUTH_TYPE: api-key
+      CERTCTL_AUTH_SECRET: test-key-2026
+
+      # Key generation — agent-side (production-like)
+      CERTCTL_KEYGEN_MODE: agent
+
+      # Local CA issuer (iss-local) — self-signed mode (no CA cert/key paths)
+      # This is the simplest issuer, always available.
+
+      # ACME issuer (iss-acme-staging) — pointed at Pebble
+      CERTCTL_ACME_DIRECTORY_URL: https://pebble:14000/dir
+      CERTCTL_ACME_EMAIL: test@certctl.dev
+      CERTCTL_ACME_CHALLENGE_TYPE: http-01
+      CERTCTL_ACME_INSECURE: "true"
+
+      # step-ca issuer (iss-stepca)
+      CERTCTL_STEPCA_URL: https://step-ca:9000
+      CERTCTL_STEPCA_ROOT_CERT: /stepca-data/certs/root_ca.crt
+      CERTCTL_STEPCA_PROVISIONER: admin
+      CERTCTL_STEPCA_PASSWORD: password123
+      CERTCTL_STEPCA_KEY_PATH: /stepca-data/secrets/provisioner_key
+
+      # Network scanning
+      CERTCTL_NETWORK_SCAN_ENABLED: "true"
+
+      # Post-deployment TLS verification
+      CERTCTL_VERIFY_DEPLOYMENT: "true"
+      CERTCTL_VERIFY_TIMEOUT: "10s"
+      CERTCTL_VERIFY_DELAY: "3s"
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./test/setup-trust.sh:/app/setup-trust.sh:ro
+      # step-ca data volume (root cert at /certs/root_ca.crt, key at /secrets/provisioner_key)
+      - stepca_data:/stepca-data:ro
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.6
+    healthcheck:
+      # /health requires auth when CERTCTL_AUTH_TYPE=api-key, so include the Bearer token
+      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer test-key-2026", "http://localhost:8443/health"]
+      interval: 10s
+      timeout: 5s
+      start_period: 30s
+      retries: 10
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # NGINX — TLS Target Server
+  # ---------------------------------------------------------------------------
+  # The agent deploys certificates here via the shared nginx_certs volume.
+  # nginx-entrypoint.sh generates a self-signed placeholder cert so NGINX
+  # can boot before the agent deploys a real cert.
+  #
+  # Ports: 8080 (HTTP) / 8444 (HTTPS) — offset to avoid conflict with server.
+  nginx:
+    image: nginx:alpine
+    container_name: certctl-test-nginx
+    entrypoint: ["/bin/sh", "/entrypoint.sh"]
+    volumes:
+      - ./test/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./test/nginx-entrypoint.sh:/entrypoint.sh:ro
+      - nginx_certs:/etc/nginx/certs
+    ports:
+      - "8080:80"
+      - "8444:443"
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.7
+    healthcheck:
+      test: ["CMD-SHELL", "curl -fk https://localhost/health || exit 1"]
+      interval: 10s
+      timeout: 5s
+      start_period: 15s
+      retries: 5
+    restart: unless-stopped
+
+  # ---------------------------------------------------------------------------
+  # certctl Agent
+  # ---------------------------------------------------------------------------
+  # Polls the server for work, generates ECDSA P-256 keys locally,
+  # deploys certs to NGINX via the shared volume, and discovers existing
+  # certs in the NGINX cert directory.
+  certctl-agent:
+    build:
+      context: ..
+      dockerfile: Dockerfile.agent
+    container_name: certctl-test-agent
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    environment:
+      CERTCTL_SERVER_URL: http://certctl-server:8443
+      CERTCTL_API_KEY: test-key-2026
+      CERTCTL_AGENT_NAME: test-agent-01
+      CERTCTL_AGENT_ID: agent-test-01
+      CERTCTL_KEYGEN_MODE: agent
+      CERTCTL_LOG_LEVEL: debug
+      CERTCTL_DISCOVERY_DIRS: /nginx-certs
+    volumes:
+      - agent_keys:/var/lib/certctl/keys
+      - nginx_certs:/nginx-certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.8
+    restart: unless-stopped
+
+# =============================================================================
+# Network
+# =============================================================================
+# Static IPs are required because:
+# - Pebble needs to know the challtestsrv DNS server address (10.30.50.3)
+# - challtestsrv resolves all domains to certctl-server (10.30.50.6) for HTTP-01 challenges
+# - Avoids DNS race conditions during startup
+networks:
+  certctl-test:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 10.30.50.0/24
+
+# =============================================================================
+# Volumes
+# =============================================================================
+volumes:
+  test_postgres_data:
+    driver: local
+  stepca_data:
+    driver: local
+  agent_keys:
+    driver: local
+  nginx_certs:
+    driver: local

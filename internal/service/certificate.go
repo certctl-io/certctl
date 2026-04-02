@@ -14,10 +14,12 @@ import (
 type CertificateService struct {
 	certRepo       repository.CertificateRepository
 	targetRepo     repository.TargetRepository
+	jobRepo        repository.JobRepository
 	policyService  *PolicyService
 	auditService   *AuditService
 	revSvc         *RevocationSvc
 	caSvc          *CAOperationsSvc
+	keygenMode     string
 }
 
 // NewCertificateService creates a new certificate service.
@@ -46,6 +48,16 @@ func (s *CertificateService) SetCAOperationsSvc(svc *CAOperationsSvc) {
 // SetTargetRepo sets the target repository for deployment queries.
 func (s *CertificateService) SetTargetRepo(repo repository.TargetRepository) {
 	s.targetRepo = repo
+}
+
+// SetJobRepo sets the job repository for creating renewal/issuance jobs.
+func (s *CertificateService) SetJobRepo(repo repository.JobRepository) {
+	s.jobRepo = repo
+}
+
+// SetKeygenMode sets the key generation mode (agent or server).
+func (s *CertificateService) SetKeygenMode(mode string) {
+	s.keygenMode = mode
 }
 
 // List returns a paginated list of certificates matching the filter.
@@ -195,6 +207,8 @@ func (s *CertificateService) GetVersions(ctx context.Context, certID string) ([]
 }
 
 // TriggerRenewalWithActor initiates a renewal job if the certificate is eligible.
+// Creates a Renewal job (or Issuance for new certs) so the scheduler's job processor
+// can pick it up and route it through the issuer connector.
 func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID string, actor string) error {
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
@@ -218,6 +232,45 @@ func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID
 	cert.Status = domain.CertificateStatusRenewalInProgress
 	if err := s.certRepo.Update(ctx, cert); err != nil {
 		return fmt.Errorf("failed to update certificate status: %w", err)
+	}
+
+	// Create a renewal job so the job processor can pick it up.
+	// In agent keygen mode, the job starts as AwaitingCSR so the agent
+	// generates the key pair and submits a CSR. In server mode, it starts as Pending.
+	if s.jobRepo != nil {
+		jobStatus := domain.JobStatusPending
+		if s.keygenMode == "agent" {
+			jobStatus = domain.JobStatusAwaitingCSR
+		}
+
+		// Determine job type: Issuance for certs that have never been issued,
+		// Renewal for certs that already have a version.
+		jobType := domain.JobTypeRenewal
+		if cert.ExpiresAt.IsZero() || cert.ExpiresAt.Year() < 2000 {
+			jobType = domain.JobTypeIssuance
+		}
+
+		job := &domain.Job{
+			ID:            generateID("job"),
+			CertificateID: cert.ID,
+			Type:          jobType,
+			Status:        jobStatus,
+			MaxAttempts:   3,
+			ScheduledAt:   time.Now(),
+			CreatedAt:     time.Now(),
+		}
+
+		if err := s.jobRepo.Create(ctx, job); err != nil {
+			slog.Error("failed to create renewal job", "cert_id", cert.ID, "error", err)
+			return fmt.Errorf("failed to create renewal job: %w", err)
+		}
+
+		slog.Info("created renewal job via API trigger",
+			"job_id", job.ID,
+			"cert_id", cert.ID,
+			"job_type", string(jobType),
+			"job_status", string(jobStatus),
+			"keygen_mode", s.keygenMode)
 	}
 
 	// Record audit event

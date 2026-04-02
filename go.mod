@@ -9,7 +9,10 @@ require (
 	github.com/testcontainers/testcontainers-go v0.35.0
 )
 
-require golang.org/x/crypto v0.31.0
+require (
+	golang.org/x/crypto v0.31.0
+	software.sslmate.com/src/go-pkcs12 v0.7.0
+)
 
 require (
 	dario.cat/mergo v1.0.0 // indirect
@@ -63,5 +66,4 @@ require (
 	golang.org/x/oauth2 v0.34.0 // indirect
 	golang.org/x/sys v0.40.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
-	software.sslmate.com/src/go-pkcs12 v0.7.0 // indirect
 )
