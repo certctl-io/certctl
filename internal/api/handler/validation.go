@@ -3,6 +3,7 @@ package handler
 import (
 	"fmt"
 	"net"
+	"net/mail"
 	"strings"
 )
 
@@ -13,12 +14,20 @@ type ValidationError struct {
 }
 
 // ValidateCommonName validates a certificate common name.
+// Accepts hostnames (TLS), IP addresses, and email addresses (S/MIME).
 func ValidateCommonName(cn string) error {
 	if cn == "" {
 		return ValidationError{Field: "common_name", Message: "common_name is required"}
 	}
 	if len(cn) > 253 {
 		return ValidationError{Field: "common_name", Message: "common_name must be 253 characters or fewer"}
+	}
+	// If CN contains @, validate as email address (S/MIME certificates)
+	if strings.Contains(cn, "@") {
+		if _, err := mail.ParseAddress(cn); err != nil {
+			return ValidationError{Field: "common_name", Message: fmt.Sprintf("invalid email format for S/MIME common name: %v", err)}
+		}
+		return nil
 	}
 	// Basic hostname validation: allow alphanumeric, dots, hyphens
 	if err := isValidHostname(cn); err != nil {

@@ -116,6 +116,19 @@ VALUES (
 ) ON CONFLICT (id) DO NOTHING;
 
 -- ---------------------------------------------------------------------------
+-- Certificate Profile — S/MIME email protection
+-- ---------------------------------------------------------------------------
+INSERT INTO certificate_profiles (id, name, description, max_ttl_seconds, allowed_ekus, allowed_key_algorithms)
+VALUES (
+  'prof-test-smime',
+  'Test S/MIME Email',
+  'S/MIME certificate profile for email signing and encryption',
+  31536000,  -- 365 days
+  '["emailProtection"]'::jsonb,
+  '[{"algorithm": "ECDSA", "min_size": 256}, {"algorithm": "RSA", "min_size": 2048}]'::jsonb
+) ON CONFLICT (id) DO NOTHING;
+
+-- ---------------------------------------------------------------------------
 -- Deployment Target — NGINX (references agent-test-01)
 -- ---------------------------------------------------------------------------
 -- The agent deploys certs to NGINX via the shared nginx_certs volume.

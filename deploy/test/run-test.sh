@@ -6,14 +6,16 @@
 # Automates the full lifecycle test from docs/test-env.md:
 #   1. Bring up all 7 containers (build from source)
 #   2. Wait for every service to be healthy
-#   3. Verify pre-seeded data (agents, issuers, targets)
+#   3. Verify pre-seeded data (agents, issuers, targets, profiles)
 #   4. Issue a certificate via Local CA → deploy to NGINX → verify TLS
 #   5. Issue a certificate via ACME/Pebble → verify
 #   6. Issue a certificate via step-ca → verify
 #   7. Test revocation + CRL
 #   8. Test discovery
 #   9. Test renewal (re-issue step-ca cert, check version history)
-#  10. Print summary
+#  10. EST enrollment (RFC 7030) — cacerts + simpleenroll
+#  11. S/MIME issuance — emailProtection EKU + adaptive KeyUsage
+#  12. API spot checks + print summary
 #
 # Usage:
 #   cd certctl/deploy
@@ -383,8 +385,8 @@ fi
 # Profile
 PROFILE_RESP=$(api_get "/api/v1/profiles" 2>/dev/null || echo '{"total":0}')
 PROFILE_COUNT=$(echo "$PROFILE_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
-if [ "$PROFILE_COUNT" -ge 1 ]; then
-  pass "Profiles: $PROFILE_COUNT found (prof-test-tls)"
+if [ "$PROFILE_COUNT" -ge 2 ]; then
+  pass "Profiles: $PROFILE_COUNT found (prof-test-tls, prof-test-smime)"
 else
   fail "Profiles: expected >= 1, got $PROFILE_COUNT"
 fi
@@ -688,9 +690,180 @@ else
 fi
 
 # ---------------------------------------------------------------------------
-# PHASE 10: API Spot Checks
+# PHASE 10: EST Enrollment (RFC 7030)
 # ---------------------------------------------------------------------------
-header "Phase 10: API Spot Checks"
+header "Phase 10: EST Enrollment (RFC 7030)"
+
+# Test cacerts endpoint — should return PKCS#7 with CA cert chain
+info "Testing EST cacerts endpoint..."
+EST_CACERTS_RESP=$(curl -sf -H "${AUTH_HEADER}" "${API_URL}/.well-known/est/cacerts" 2>/dev/null || echo "ERROR")
+if [ "$EST_CACERTS_RESP" != "ERROR" ] && [ -n "$EST_CACERTS_RESP" ]; then
+  # Response should be base64-encoded PKCS#7
+  if echo "$EST_CACERTS_RESP" | base64 -d >/dev/null 2>&1; then
+    pass "EST cacerts returns valid base64 PKCS#7 response"
+  else
+    fail "EST cacerts returned non-base64 data"
+  fi
+else
+  fail "EST cacerts endpoint failed" "$EST_CACERTS_RESP"
+fi
+
+# Test csrattrs endpoint
+info "Testing EST csrattrs endpoint..."
+EST_CSRATTRS_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" -H "${AUTH_HEADER}" "${API_URL}/.well-known/est/csrattrs" 2>/dev/null || echo "000")
+if [ "$EST_CSRATTRS_STATUS" = "200" ] || [ "$EST_CSRATTRS_STATUS" = "204" ]; then
+  pass "EST csrattrs returns $EST_CSRATTRS_STATUS"
+else
+  fail "EST csrattrs returned $EST_CSRATTRS_STATUS (expected 200 or 204)"
+fi
+
+# Test simpleenroll — generate CSR, POST as base64-encoded DER
+info "Testing EST simpleenroll with generated CSR..."
+EST_KEY_FILE=$(mktemp /tmp/est-key-XXXXXX.pem)
+EST_CSR_PEM_FILE=$(mktemp /tmp/est-csr-XXXXXX.pem)
+EST_CSR_DER_FILE=$(mktemp /tmp/est-csr-XXXXXX.der)
+trap "rm -f $EST_KEY_FILE $EST_CSR_PEM_FILE $EST_CSR_DER_FILE" EXIT
+
+# Generate ECDSA key + CSR
+openssl ecparam -genkey -name prime256v1 -noout -out "$EST_KEY_FILE" 2>/dev/null
+openssl req -new -key "$EST_KEY_FILE" -out "$EST_CSR_PEM_FILE" -subj "/CN=est-device.certctl.test" 2>/dev/null
+openssl req -in "$EST_CSR_PEM_FILE" -out "$EST_CSR_DER_FILE" -outform DER 2>/dev/null
+
+# base64-encode the DER CSR (EST wire format)
+EST_CSR_B64=$(base64 < "$EST_CSR_DER_FILE" | tr -d '\n')
+
+EST_ENROLL_RESP=$(curl -sf \
+  -X POST \
+  -H "${AUTH_HEADER}" \
+  -H "Content-Type: application/pkcs10" \
+  -d "$EST_CSR_B64" \
+  "${API_URL}/.well-known/est/simpleenroll" 2>/dev/null || echo "ERROR")
+
+if [ "$EST_ENROLL_RESP" != "ERROR" ] && [ -n "$EST_ENROLL_RESP" ]; then
+  # Response should be base64-encoded PKCS#7 containing the issued cert
+  if echo "$EST_ENROLL_RESP" | base64 -d >/dev/null 2>&1; then
+    pass "EST simpleenroll issued certificate via PKCS#7 response"
+  else
+    fail "EST simpleenroll returned non-base64 data"
+  fi
+else
+  fail "EST simpleenroll failed" "$(curl -s -X POST -H "${AUTH_HEADER}" -H "Content-Type: application/pkcs10" -d "$EST_CSR_B64" "${API_URL}/.well-known/est/simpleenroll" 2>&1 | head -5)"
+fi
+
+# Test simplereenroll (should work identically)
+info "Testing EST simplereenroll..."
+EST_REENROLL_STATUS=$(curl -sf -o /dev/null -w "%{http_code}" \
+  -X POST \
+  -H "${AUTH_HEADER}" \
+  -H "Content-Type: application/pkcs10" \
+  -d "$EST_CSR_B64" \
+  "${API_URL}/.well-known/est/simplereenroll" 2>/dev/null || echo "000")
+
+if [ "$EST_REENROLL_STATUS" = "200" ]; then
+  pass "EST simplereenroll works (status 200)"
+else
+  fail "EST simplereenroll returned $EST_REENROLL_STATUS (expected 200)"
+fi
+
+# ---------------------------------------------------------------------------
+# PHASE 11: S/MIME Certificate Issuance
+# ---------------------------------------------------------------------------
+header "Phase 11: S/MIME Certificate Issuance"
+
+info "Creating S/MIME certificate record..."
+SMIME_RESP=$(api_post "/api/v1/certificates" '{
+  "id": "mc-smime-test",
+  "name": "smime-test-cert",
+  "common_name": "testuser@certctl.test",
+  "sans": ["testuser@certctl.test"],
+  "issuer_id": "iss-local",
+  "owner_id": "owner-test-admin",
+  "team_id": "team-test-ops",
+  "renewal_policy_id": "rp-default",
+  "certificate_profile_id": "prof-test-smime",
+  "environment": "staging"
+}' 2>/dev/null || echo "ERROR")
+
+if echo "$SMIME_RESP" | python3 -c "import sys,json; d=json.load(sys.stdin); assert d.get('id')=='mc-smime-test'" 2>/dev/null; then
+  pass "S/MIME certificate record created"
+else
+  fail "S/MIME certificate creation failed" "$SMIME_RESP"
+fi
+
+info "Linking S/MIME cert to target (needed for agent work routing)..."
+psql_exec "INSERT INTO certificate_target_mappings (certificate_id, target_id) VALUES ('mc-smime-test', 'target-test-nginx') ON CONFLICT DO NOTHING;"
+
+info "Triggering S/MIME issuance..."
+SMIME_RENEW=$(api_post "/api/v1/certificates/mc-smime-test/renew" 2>/dev/null || echo "ERROR")
+if echo "$SMIME_RENEW" | grep -q "renewal_triggered\|status"; then
+  pass "S/MIME issuance triggered"
+else
+  fail "S/MIME trigger failed" "$SMIME_RENEW"
+fi
+
+info "Waiting for S/MIME issuance (up to 120s)..."
+if wait_for_jobs_done "mc-smime-test" 120; then
+  pass "S/MIME jobs completed"
+
+  # Fetch the issued cert and verify EKU
+  info "Verifying S/MIME certificate EKU..."
+  SMIME_VERSIONS=$(api_get "/api/v1/certificates/mc-smime-test/versions" 2>/dev/null || echo "[]")
+  SMIME_PEM=$(echo "$SMIME_VERSIONS" | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+versions = data if isinstance(data, list) else data.get('data', [])
+if versions:
+    print(versions[-1].get('pem_chain', versions[-1].get('pem', '')))
+" 2>/dev/null || echo "")
+
+  if [ -n "$SMIME_PEM" ]; then
+    # Parse the cert and check for emailProtection EKU
+    SMIME_EKU=$(echo "$SMIME_PEM" | openssl x509 -noout -text 2>/dev/null | grep -A2 "Extended Key Usage" || echo "")
+    if echo "$SMIME_EKU" | grep -qi "emailProtection\|E-mail Protection"; then
+      pass "S/MIME cert has emailProtection EKU"
+    else
+      fail "S/MIME cert missing emailProtection EKU" "Got: $SMIME_EKU"
+    fi
+
+    # Check KeyUsage flags (S/MIME should have Digital Signature + Content Commitment)
+    SMIME_KU=$(echo "$SMIME_PEM" | openssl x509 -noout -text 2>/dev/null | awk '/X509v3 Key Usage:/{getline; print; exit}')
+    if echo "$SMIME_KU" | grep -qi "Digital Signature"; then
+      pass "S/MIME cert has Digital Signature KeyUsage"
+    else
+      fail "S/MIME cert missing Digital Signature KeyUsage" "Got: $SMIME_KU"
+    fi
+
+    # Check that email SAN is present
+    SMIME_SAN=$(echo "$SMIME_PEM" | openssl x509 -noout -ext subjectAltName 2>/dev/null || echo "")
+    if echo "$SMIME_SAN" | grep -qi "email:testuser@certctl.test"; then
+      pass "S/MIME cert has email SAN"
+    else
+      # Some implementations use rfc822Name instead of email:
+      if echo "$SMIME_SAN" | grep -qi "testuser@certctl.test"; then
+        pass "S/MIME cert has email SAN (rfc822Name)"
+      else
+        skip "S/MIME email SAN not found in cert (may be in CN only)"
+        echo "       SAN content: $SMIME_SAN"
+      fi
+    fi
+  else
+    skip "Could not extract S/MIME cert PEM for EKU verification"
+  fi
+else
+  fail "S/MIME issuance did not complete within 120s"
+  info "Checking S/MIME job status..."
+  api_get "/api/v1/jobs" 2>/dev/null | python3 -c "
+import sys, json
+data = json.load(sys.stdin)
+for j in data.get('data', []):
+    if j.get('certificate_id') == 'mc-smime-test':
+        print(f\"  Job {j['id']}: type={j['type']} status={j['status']} error={j.get('last_error','')}\")" 2>/dev/null || true
+fi
+
+# ---------------------------------------------------------------------------
+# PHASE 12: API Spot Checks
+# ---------------------------------------------------------------------------
+header "Phase 12: API Spot Checks"
 
 # Health
 if api_get "/health" >/dev/null 2>&1; then

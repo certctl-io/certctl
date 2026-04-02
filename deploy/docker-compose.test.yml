@@ -190,6 +190,10 @@ services:
       CERTCTL_STEPCA_PASSWORD: password123
       CERTCTL_STEPCA_KEY_PATH: /stepca-data/secrets/provisioner_key
 
+      # EST server (RFC 7030) — uses Local CA by default
+      CERTCTL_EST_ENABLED: "true"
+      CERTCTL_EST_ISSUER_ID: iss-local
+
       # Network scanning
       CERTCTL_NETWORK_SCAN_ENABLED: "true"
 
