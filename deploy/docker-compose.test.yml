@@ -51,6 +51,8 @@ services:
     networks:
       certctl-test:
         ipv4_address: 10.30.50.2
+    ports:
+      - "5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U certctl -d certctl"]
       interval: 5s
