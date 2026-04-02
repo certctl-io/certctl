@@ -435,16 +435,6 @@ func signJWTWithKID(claims map[string]interface{}, key *ecdsa.PrivateKey, kid st
 	return signJWTRaw(claims, key, header)
 }
 
-// signJWT creates a minimal ES256 JWT from the given claims (no kid).
-func signJWT(claims map[string]interface{}, key *ecdsa.PrivateKey) (string, error) {
-	header := map[string]string{
-		"alg": "ES256",
-		"typ": "JWT",
-	}
-
-	return signJWTRaw(claims, key, header)
-}
-
 // signJWTRaw creates an ES256 JWT from the given claims and header.
 func signJWTRaw(claims map[string]interface{}, key *ecdsa.PrivateKey, header map[string]string) (string, error) {
 

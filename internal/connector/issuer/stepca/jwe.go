@@ -201,42 +201,6 @@ func jwkToECDSA(jwk *jwkEC) (*ecdsa.PrivateKey, error) {
 	return key, nil
 }
 
-// ecdsaPublicKeyToJWK converts an ECDSA public key to a JWK map for JWT header embedding.
-func ecdsaPublicKeyToJWK(key *ecdsa.PublicKey) map[string]string {
-	var crv string
-	var size int
-	switch key.Curve {
-	case elliptic.P256():
-		crv = "P-256"
-		size = 32
-	case elliptic.P384():
-		crv = "P-384"
-		size = 48
-	case elliptic.P521():
-		crv = "P-521"
-		size = 66
-	default:
-		crv = "unknown"
-		size = 32
-	}
-
-	xBytes := key.X.Bytes()
-	yBytes := key.Y.Bytes()
-
-	// Pad to fixed size
-	xPadded := make([]byte, size)
-	yPadded := make([]byte, size)
-	copy(xPadded[size-len(xBytes):], xBytes)
-	copy(yPadded[size-len(yBytes):], yBytes)
-
-	return map[string]string{
-		"kty": "EC",
-		"crv": crv,
-		"x":   base64.RawURLEncoding.EncodeToString(xPadded),
-		"y":   base64.RawURLEncoding.EncodeToString(yPadded),
-	}
-}
-
 // aesKeyUnwrap implements AES Key Unwrap per RFC 3394.
 func aesKeyUnwrap(kek, ciphertext []byte) ([]byte, error) {
 	if len(ciphertext)%8 != 0 || len(ciphertext) < 24 {
