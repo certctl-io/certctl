@@ -13,16 +13,18 @@ This example demonstrates certctl's core use case: **automatically manage TLS ce
 
 ## Architecture
 
-```
-Your Domain (example.com)
-         ↓ [HTTP-01 validation, port 80]
-    Let's Encrypt ACME
-         ↓ [CSR submission]
-  certctl Server (control plane)
-         ↓ [API polling]
-  certctl Agent (on NGINX server)
-         ↓ [deploy cert+key]
-    NGINX Reverse Proxy
+```mermaid
+flowchart TD
+    A["Your Domain (example.com)"]
+    B["Let's Encrypt ACME"]
+    C["certctl Server (control plane)"]
+    D["certctl Agent (on NGINX server)"]
+    E["NGINX Reverse Proxy"]
+
+    A -->|HTTP-01 validation<br/>port 80| B
+    B -->|CSR submission| C
+    C -->|API polling| D
+    D -->|deploy cert+key| E
 ```
 
 ## Prerequisites

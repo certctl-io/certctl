@@ -1600,7 +1600,7 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 
 ---
 
-**Test 7.1.6 — Create IIS target (stub)**
+**Test 7.1.6 — Create IIS target**
 
 ```bash
 curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
@@ -5833,7 +5833,7 @@ These must be green before starting manual QA:
 | 7.1.3 | Create Apache target | Manual | ☐ |  |  |
 | 7.1.4 | Create HAProxy target | Manual | ☐ |  |  |
 | 7.1.5 | Create F5 BIG-IP target (stub) | Auto | ☑ | 2026-03-30 |  |
-| 7.1.6 | Create IIS target (stub) | Auto | ☑ | 2026-03-30 |  |
+| 7.1.6 | Create IIS target | Auto | ☑ | 2026-03-30 |  |
 | 7.1.7 | Get target verifies type-specific config stored | Manual | ☐ |  |  |
 | 7.1.8 | Update target config | Manual | ☐ |  |  |
 | 7.1.9 | Delete target returns 204 | Auto | ☑ | 2026-03-30 |  |

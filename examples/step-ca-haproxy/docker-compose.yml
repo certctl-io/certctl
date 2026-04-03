@@ -81,7 +81,7 @@ services:
     container_name: certctl-server-stepca-haproxy
     environment:
       # Database
-      DATABASE_URL: postgres://certctl:${DB_PASSWORD:-certctl-dev-password}@postgres:5432/certctl?sslmode=disable
+      CERTCTL_DATABASE_URL: postgres://certctl:${DB_PASSWORD:-certctl-dev-password}@postgres:5432/certctl?sslmode=disable
 
       # Server settings
       CERTCTL_SERVER_PORT: 8443
@@ -119,7 +119,7 @@ services:
     networks:
       - certctl-network
     healthcheck:
-      test: ['CMD-SHELL', 'curl -sf http://localhost:8443/api/v1/health || exit 1']
+      test: ['CMD-SHELL', 'curl -sf http://localhost:8443/health || exit 1']
       interval: 10s
       timeout: 5s
       retries: 3

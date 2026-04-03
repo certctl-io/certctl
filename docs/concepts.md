@@ -125,9 +125,9 @@ Agents also report **metadata** about themselves — their operating system, CPU
 
 ### Deployment Targets
 
-Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, F5 BIG-IP appliances, Microsoft IIS servers. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy).
+Targets are the systems where certificates actually get installed — NGINX web servers, Apache httpd servers, HAProxy load balancers, Traefik reverse proxies, Caddy servers, Envoy gateways, Postfix/Dovecot mail servers, Microsoft IIS servers, and network appliances. Each target type has a **connector** that knows how to deploy certificates to that specific system (e.g., writing files and reloading NGINX or Apache config, building a combined PEM for HAProxy).
 
-For targets where an agent runs directly on the machine (NGINX, Apache, HAProxy, IIS), the agent deploys certificates locally — no remote access needed. For network appliances where you can't install an agent (F5 BIG-IP, Palo Alto, etc.), a **proxy agent** in the same network zone picks up the deployment job and calls the appliance's API. The server never initiates outbound connections to any target.
+For targets where an agent runs directly on the machine (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS), the agent deploys certificates locally — no remote access needed. For network appliances where you can't install an agent (F5 BIG-IP, Palo Alto, etc.), a **proxy agent** in the same network zone picks up the deployment job and calls the appliance's API. The server never initiates outbound connections to any target.
 
 ## The Certificate Lifecycle
 

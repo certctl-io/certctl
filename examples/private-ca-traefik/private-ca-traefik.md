@@ -17,29 +17,16 @@ This example demonstrates certctl managing certificates for **internal services 
 
 ## Architecture
 
-```
-┌──────────────────┐
-│   certctl-server │  (Local CA issuer)
-│    (control      │
-│     plane)       │
-└────────┬─────────┘
-         │
-         │ REST API (job polling)
-         │
-┌────────▼──────────┐
-│  certctl-agent    │  (certificate deployer)
-└────────┬──────────┘
-         │
-         │ Write cert/key files
-         │
-┌────────▼──────────────────────┐
-│   Traefik                      │
-│ (watches cert directory)       │
-└────────────────────────────────┘
-         │
-         │ TLS handshakes
-         │
-   [Internal Services]
+```mermaid
+flowchart TD
+    A["certctl-server<br/>(control plane)<br/>(Local CA issuer)"]
+    B["certctl-agent<br/>(certificate deployer)"]
+    C["Traefik<br/>(watches cert directory)"]
+    D["[Internal Services]"]
+
+    A -->|REST API<br/>job polling| B
+    B -->|Write cert/key files| C
+    C -->|TLS handshakes| D
 ```
 
 ## Quick Start (Self-Signed CA)

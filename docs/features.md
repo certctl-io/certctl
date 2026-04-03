@@ -1286,11 +1286,11 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Docker Tags** — `:latest`, `:v{version}` (`shankar0123.docker.scarf.sh/certctl-server`, `shankar0123.docker.scarf.sh/certctl-agent`)
 
 ### Test Suite
-- **Unit Tests** — 625+ test functions across service, handler, middleware, domain layers
+- **Unit Tests** — 1,088+ test functions across service, handler, middleware, domain layers
 - **Integration Tests** — End-to-end workflows (issuance→renewal→deployment)
 - **Negative Tests** — Malformed input, nonexistent resources, error conditions
-- **Frontend Tests** — 86 Vitest tests (API client, utilities, stats/metrics, full endpoint coverage)
-- **Total Coverage** — 900+ tests (Go + frontend combined)
+- **Frontend Tests** — 211 Vitest tests (API client, utilities, stats/metrics, full endpoint coverage)
+- **Total Coverage** — 1,554+ tests (Go + frontend combined)
 
 ### Licensing
 - **License** — Business Source License 1.1 (BSL 1.1)
@@ -1478,10 +1478,10 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 
 | Category | Count |
 |----------|-------|
-| **API Endpoints** | 95 (under /api/v1/ + /.well-known/est/) |
+| **API Endpoints** | 97 (under /api/v1/ + /.well-known/est/) |
 | **Dashboard** | Full web GUI |
-| **Issuer Connectors** | 4 (Local CA, ACME, step-ca, OpenSSL) |
-| **Target Connectors** | 5 (3 impl: NGINX, Apache, HAProxy; 2 stubs: F5, IIS) |
+| **Issuer Connectors** | 6 (Local CA, ACME, step-ca, OpenSSL, Vault PKI, DigiCert) |
+| **Target Connectors** | 10 (9 impl: NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS, Postfix, Dovecot; 1 stub: F5) |
 | **Notifier Channels** | 6 (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) |
 | **Job Types** | 4 (Issuance, Renewal, Deployment, Validation) |
 | **Job States** | 7 (Pending, AwaitingCSR, AwaitingApproval, Running, Completed, Failed, Cancelled) |
@@ -1492,6 +1492,6 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **MCP Tools** | 76 (16 resource domains) |
 | **CLI Subcommands** | 10 |
 | **Database Tables** | 19 |
-| **Test Suite** | 900+ tests (Go backend + frontend) |
+| **Test Suite** | 1,554+ tests (Go backend + frontend) |
 | **Environment Variables** | 41+ configuration options |
 

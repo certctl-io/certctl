@@ -39,11 +39,11 @@ ON CONFLICT (id) DO NOTHING;
 -- 3. Issuers
 -- ============================================================
 INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VALUES
-  ('iss-local',    'Local Dev CA',           'local',       '{"ca_common_name": "CertCtl Demo CA", "validity_days": 90}', true,  NOW() - INTERVAL '180 days', NOW() - INTERVAL '180 days'),
-  ('iss-acme-le',  'Let''s Encrypt Staging', 'acme',        '{"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '150 days', NOW() - INTERVAL '150 days'),
-  ('iss-stepca',   'step-ca Internal',       'stepca',      '{"ca_url": "https://ca.internal:9000", "provisioner_name": "certctl", "validity_days": 90}', true, NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days'),
-  ('iss-acme-zs',  'ZeroSSL (EAB)',          'acme',        '{"directory_url": "https://acme.zerossl.com/v2/DV90", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '60 days', NOW() - INTERVAL '60 days'),
-  ('iss-openssl',  'Custom OpenSSL CA',      'openssl',     '{"sign_script": "/opt/ca/sign.sh", "timeout_seconds": 30}', false, NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days'),
+  ('iss-local',    'Local Dev CA',           'GenericCA',   '{"ca_common_name": "CertCtl Demo CA", "validity_days": 90}', true,  NOW() - INTERVAL '180 days', NOW() - INTERVAL '180 days'),
+  ('iss-acme-le',  'Let''s Encrypt Staging', 'ACME',        '{"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '150 days', NOW() - INTERVAL '150 days'),
+  ('iss-stepca',   'step-ca Internal',       'StepCA',      '{"ca_url": "https://ca.internal:9000", "provisioner_name": "certctl", "validity_days": 90}', true, NOW() - INTERVAL '120 days', NOW() - INTERVAL '120 days'),
+  ('iss-acme-zs',  'ZeroSSL (EAB)',          'ACME',        '{"directory_url": "https://acme.zerossl.com/v2/DV90", "email": "admin@example.com", "challenge_type": "http-01"}', true,  NOW() - INTERVAL '60 days', NOW() - INTERVAL '60 days'),
+  ('iss-openssl',  'Custom OpenSSL CA',      'OpenSSL',     '{"sign_script": "/opt/ca/sign.sh", "timeout_seconds": 30}', false, NOW() - INTERVAL '30 days', NOW() - INTERVAL '30 days'),
   ('iss-vault',    'HashiCorp Vault PKI',   'VaultPKI',    '{"addr": "https://vault.internal:8200", "mount": "pki", "role": "web-certs", "ttl": "8760h"}', true, NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days'),
   ('iss-digicert', 'DigiCert CertCentral',  'DigiCert',    '{"base_url": "https://www.digicert.com/services/v2", "product_type": "ssl_basic"}', true, NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days')
 ON CONFLICT (id) DO NOTHING;
@@ -52,33 +52,33 @@ ON CONFLICT (id) DO NOTHING;
 -- 4. Agents (8 agents across multiple platforms)
 -- ============================================================
 INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
-  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_1', 'linux',   'amd64', '10.0.1.10', '2.0.14'),
-  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '90 days',  'demo_hash_2', 'linux',   'amd64', '10.0.2.20', '2.0.14'),
-  ('ag-lb-prod',     'lb-prod-agent',     'lb-prod-01.internal',    'online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '150 days', 'demo_hash_3', 'linux',   'amd64', '10.0.1.50', '2.0.14'),
-  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '60 days',  'demo_hash_4', 'windows', 'amd64', '10.0.3.15', '2.0.12'),
-  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '90 days',  'demo_hash_5', 'linux',   'arm64', '10.0.4.30', '2.0.14'),
-  ('ag-edge-01',     'edge-eu-agent',     'edge-eu-01.internal',    'online',  NOW() - INTERVAL '50 seconds',  NOW() - INTERVAL '45 days',  'demo_hash_6', 'linux',   'arm64', '10.0.5.10', '2.0.14'),
-  ('ag-k8s-prod',    'k8s-prod-agent',    'k8s-node-01.internal',   'online',  NOW() - INTERVAL '10 seconds',  NOW() - INTERVAL '30 days',  'demo_hash_7', 'linux',   'amd64', '10.0.6.10', '2.0.14'),
-  ('ag-mac-dev',     'mac-dev-agent',     'dev-mac-01.internal',    'online',  NOW() - INTERVAL '60 seconds',  NOW() - INTERVAL '15 days',  'demo_hash_8', 'darwin',  'arm64', '10.0.7.5',  '2.0.14')
+  ('ag-web-prod',    'web-prod-agent',    'web-prod-01.internal',    'Online',  NOW() - INTERVAL '30 seconds',  NOW() - INTERVAL '120 days', 'demo_hash_1', 'linux',   'amd64', '10.0.1.10', '2.0.14'),
+  ('ag-web-staging', 'web-staging-agent', 'web-stg-01.internal',    'Online',  NOW() - INTERVAL '45 seconds',  NOW() - INTERVAL '90 days',  'demo_hash_2', 'linux',   'amd64', '10.0.2.20', '2.0.14'),
+  ('ag-lb-prod',     'lb-prod-agent',     'lb-prod-01.internal',    'Online',  NOW() - INTERVAL '15 seconds',  NOW() - INTERVAL '150 days', 'demo_hash_3', 'linux',   'amd64', '10.0.1.50', '2.0.14'),
+  ('ag-iis-prod',    'iis-prod-agent',    'iis-prod-01.internal',   'Offline', NOW() - INTERVAL '3 hours',     NOW() - INTERVAL '60 days',  'demo_hash_4', 'windows', 'amd64', '10.0.3.15', '2.0.12'),
+  ('ag-data-prod',   'data-prod-agent',   'data-prod-01.internal',  'Online',  NOW() - INTERVAL '20 seconds',  NOW() - INTERVAL '90 days',  'demo_hash_5', 'linux',   'arm64', '10.0.4.30', '2.0.14'),
+  ('ag-edge-01',     'edge-eu-agent',     'edge-eu-01.internal',    'Online',  NOW() - INTERVAL '50 seconds',  NOW() - INTERVAL '45 days',  'demo_hash_6', 'linux',   'arm64', '10.0.5.10', '2.0.14'),
+  ('ag-k8s-prod',    'k8s-prod-agent',    'k8s-node-01.internal',   'Online',  NOW() - INTERVAL '10 seconds',  NOW() - INTERVAL '30 days',  'demo_hash_7', 'linux',   'amd64', '10.0.6.10', '2.0.14'),
+  ('ag-mac-dev',     'mac-dev-agent',     'dev-mac-01.internal',    'Online',  NOW() - INTERVAL '60 seconds',  NOW() - INTERVAL '15 days',  'demo_hash_8', 'darwin',  'arm64', '10.0.7.5',  '2.0.14')
 ON CONFLICT (id) DO NOTHING;
 
 -- Sentinel agent for network-discovered certificates
 INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
-  ('server-scanner', 'Network Scanner (Server-Side)', 'certctl-server', 'online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.0.14')
+  ('server-scanner', 'Network Scanner (Server-Side)', 'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.0.14')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
 -- 5. Deployment Targets (8 targets across multiple connector types)
 -- ============================================================
 INSERT INTO deployment_targets (id, name, type, agent_id, config, enabled, created_at, updated_at) VALUES
-  ('tgt-nginx-prod',    'NGINX Production',     'nginx',    'ag-web-prod',    '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '120 days', NOW()),
-  ('tgt-nginx-staging', 'NGINX Staging',        'nginx',    'ag-web-staging', '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '90 days',  NOW()),
-  ('tgt-haproxy-prod',  'HAProxy Production',   'haproxy',  'ag-lb-prod',    '{"combined_pem_path": "/etc/haproxy/ssl/site.pem", "reload_command": "systemctl reload haproxy"}', true,  NOW() - INTERVAL '150 days', NOW()),
-  ('tgt-apache-prod',   'Apache Production',    'apache',   'ag-web-prod',   '{"cert_path": "/etc/httpd/ssl/cert.pem", "key_path": "/etc/httpd/ssl/key.pem", "chain_path": "/etc/httpd/ssl/chain.pem", "reload_command": "apachectl graceful"}', true, NOW() - INTERVAL '100 days', NOW()),
-  ('tgt-iis-prod',      'IIS Production',       'iis',      'ag-iis-prod',   '{"site_name": "Default Web Site", "binding_info": "*:443:"}', true,  NOW() - INTERVAL '60 days', NOW()),
-  ('tgt-traefik-prod',  'Traefik Production',   'traefik',  'ag-k8s-prod',   '{"watch_dir": "/etc/traefik/dynamic/certs"}', true, NOW() - INTERVAL '30 days', NOW()),
-  ('tgt-caddy-prod',    'Caddy Production',     'caddy',    'ag-edge-01',    '{"mode": "api", "admin_url": "http://localhost:2019"}', true, NOW() - INTERVAL '45 days', NOW()),
-  ('tgt-nginx-data',    'NGINX Data Services',  'nginx',    'ag-data-prod',  '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '90 days', NOW())
+  ('tgt-nginx-prod',    'NGINX Production',     'NGINX',    'ag-web-prod',    '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '120 days', NOW()),
+  ('tgt-nginx-staging', 'NGINX Staging',        'NGINX',    'ag-web-staging', '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '90 days',  NOW()),
+  ('tgt-haproxy-prod',  'HAProxy Production',   'HAProxy',  'ag-lb-prod',    '{"combined_pem_path": "/etc/haproxy/ssl/site.pem", "reload_command": "systemctl reload haproxy"}', true,  NOW() - INTERVAL '150 days', NOW()),
+  ('tgt-apache-prod',   'Apache Production',    'Apache',   'ag-web-prod',   '{"cert_path": "/etc/httpd/ssl/cert.pem", "key_path": "/etc/httpd/ssl/key.pem", "chain_path": "/etc/httpd/ssl/chain.pem", "reload_command": "apachectl graceful"}', true, NOW() - INTERVAL '100 days', NOW()),
+  ('tgt-iis-prod',      'IIS Production',       'IIS',      'ag-iis-prod',   '{"site_name": "Default Web Site", "binding_info": "*:443:"}', true,  NOW() - INTERVAL '60 days', NOW()),
+  ('tgt-traefik-prod',  'Traefik Production',   'Traefik',  'ag-k8s-prod',   '{"watch_dir": "/etc/traefik/dynamic/certs"}', true, NOW() - INTERVAL '30 days', NOW()),
+  ('tgt-caddy-prod',    'Caddy Production',     'Caddy',    'ag-edge-01',    '{"mode": "api", "admin_url": "http://localhost:2019"}', true, NOW() - INTERVAL '45 days', NOW()),
+  ('tgt-nginx-data',    'NGINX Data Services',  'NGINX',    'ag-data-prod',  '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '90 days', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
@@ -128,7 +128,7 @@ INSERT INTO certificate_profiles (id, name, description, allowed_key_algorithms,
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
--- 7. Managed Certificates (35 certs across multiple issuers and environments)
+-- 7. Managed Certificates (32 certs across multiple issuers and environments)
 -- ============================================================
 INSERT INTO managed_certificates (id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id, status, expires_at, tags, last_renewal_at, last_deployment_at, created_at, updated_at) VALUES
   -- ---- Active, healthy production certs (Local CA) ----

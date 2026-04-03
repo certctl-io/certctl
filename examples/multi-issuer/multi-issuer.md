@@ -13,27 +13,29 @@ With certctl, both issuer types are configured and available. You assign each ce
 
 ## Architecture
 
-```
-┌─────────────────────────────────────────────────────────────────┐
-│                    certctl Server (Control Plane)               │
-│  - Let's Encrypt ACME issuer (HTTP-01 challenges)               │
-│  - Local CA issuer (self-signed or sub-CA mode)                 │
-│  - PostgreSQL database (cert inventory, audit, jobs)            │
-└─────────────────────────────────────────────────────────────────┘
-                              ▲
-                              │ API polling
-                              │
-┌─────────────────────────────────────────────────────────────────┐
-│                      certctl Agent                               │
-│  - Discovers existing certs in /etc/nginx/ssl and /etc/app/ssl  │
-│  - Polls server for renewal/issuance/deployment jobs            │
-│  - Generates keys locally (agent-side crypto)                   │
-│  - Deploys certs to NGINX and app service directories           │
-└─────────────────────────────────────────────────────────────────┘
-             │                               │
-             ▼                               ▼
-      NGINX (public TLS)             App Services (internal TLS)
-   (Let's Encrypt certs)             (Local CA certs)
+```mermaid
+flowchart TD
+    subgraph Server ["certctl Server (Control Plane)"]
+        A["Let's Encrypt ACME issuer<br/>(HTTP-01 challenges)"]
+        B["Local CA issuer<br/>(self-signed or sub-CA mode)"]
+        C["PostgreSQL database<br/>(cert inventory, audit, jobs)"]
+    end
+
+    subgraph Agent ["certctl Agent"]
+        D["Discovers existing certs<br/>(/etc/nginx/ssl, /etc/app/ssl)"]
+        E["Polls server for<br/>renewal/issuance/deployment jobs"]
+        F["Generates keys locally<br/>(agent-side crypto)"]
+        G["Deploys certs to NGINX<br/>and app service directories"]
+    end
+
+    subgraph Targets ["Target Services"]
+        H["NGINX (public TLS)<br/>(Let's Encrypt certs)"]
+        I["App Services (internal TLS)<br/>(Local CA certs)"]
+    end
+
+    Server -->|API polling| Agent
+    Agent -->|Deploy| H
+    Agent -->|Deploy| I
 ```
 
 ## Prerequisites
@@ -212,7 +214,7 @@ Each agent independently manages its local cert inventory and deployments. The s
 - For ACME, ensure ports 80/443 are open and your domain resolves
 
 ### Agent can't reach server
-- Check network: `docker compose exec certctl-agent curl http://certctl-server:8443/api/v1/health`
+- Check network: `docker compose exec certctl-agent curl http://certctl-server:8443/health`
 - Verify `CERTCTL_SERVER_URL` environment variable
 
 ### No issuers showing up

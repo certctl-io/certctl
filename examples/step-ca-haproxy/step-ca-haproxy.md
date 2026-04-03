@@ -315,7 +315,7 @@ Common issues:
 Verify network:
 
 ```bash
-docker compose exec certctl-agent curl http://certctl-server:8443/api/v1/health
+docker compose exec certctl-agent curl http://certctl-server:8443/health
 ```
 
 ### HAProxy config validation fails

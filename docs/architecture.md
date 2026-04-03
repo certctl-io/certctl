@@ -90,8 +90,10 @@ flowchart TB
         T5["HAProxy\n(combined PEM + reload)"]
         T6["Traefik\n(file provider)"]
         T7["Caddy\n(admin API / file)"]
+        T8["Envoy\n(file-based SDS)"]
+        T9["Postfix/Dovecot\n(file + service reload)"]
         T2["F5 BIG-IP\n(proxy agent + iControl REST, planned)"]
-        T3["IIS\n(agent-local PowerShell, planned)"]
+        T3["IIS\n(WinRM + local)"]
     end
 
     DASH --> API
@@ -119,7 +121,7 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, Apache httpd, HAProxy fully implemented; F5 BIG-IP, IIS interface only with V2 implementations planned) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS fully implemented; F5 BIG-IP interface stub only) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
@@ -521,8 +523,10 @@ flowchart TB
         TI --> HP["HAProxy"]
         TI --> TF["Traefik"]
         TI --> CD["Caddy"]
+        TI --> EV["Envoy"]
+        TI --> PO["Postfix/Dovecot"]
+        TI --> IIS["IIS"]
         TI --> F5["F5 BIG-IP (interface only)"]
-        TI --> IIS["IIS (interface only)"]
     end
 
     subgraph "Notifier Connectors"
