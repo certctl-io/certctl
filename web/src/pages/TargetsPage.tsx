@@ -17,6 +17,8 @@ const typeLabels: Record<string, string> = {
   traefik: 'Traefik',
   caddy: 'Caddy',
   envoy: 'Envoy',
+  postfix: 'Postfix',
+  dovecot: 'Dovecot',
   f5_bigip: 'F5 BIG-IP',
   iis: 'IIS',
 };
@@ -28,6 +30,8 @@ const TARGET_TYPES = [
   { value: 'traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
   { value: 'caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
   { value: 'envoy', label: 'Envoy', description: 'File-based deployment — writes cert/key to watched directory. Optional SDS file generation.' },
+  { value: 'postfix', label: 'Postfix', description: 'Postfix MTA — file write + postfix reload' },
+  { value: 'dovecot', label: 'Dovecot', description: 'Dovecot IMAP/POP3 — file write + doveadm reload' },
   { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST via proxy agent (V3 implementation)' },
   { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
 ];
@@ -68,6 +72,20 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'key_filename', label: 'Key Filename', placeholder: 'key.pem (default)' },
     { key: 'chain_filename', label: 'Chain Filename (optional)', placeholder: 'chain.pem (leave empty to append to cert)' },
     { key: 'sds_config', label: 'Generate SDS Config', placeholder: 'true or false' },
+  ],
+  postfix: [
+    { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/postfix/certs/cert.pem' },
+    { key: 'key_path', label: 'Key Path', placeholder: '/etc/postfix/certs/key.pem' },
+    { key: 'chain_path', label: 'Chain Path (optional)', placeholder: '/etc/postfix/certs/chain.pem' },
+    { key: 'reload_command', label: 'Reload Command', placeholder: 'postfix reload' },
+    { key: 'validate_command', label: 'Validate Command', placeholder: 'postfix check' },
+  ],
+  dovecot: [
+    { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/dovecot/certs/cert.pem' },
+    { key: 'key_path', label: 'Key Path', placeholder: '/etc/dovecot/certs/key.pem' },
+    { key: 'chain_path', label: 'Chain Path (optional)', placeholder: '/etc/dovecot/certs/chain.pem' },
+    { key: 'reload_command', label: 'Reload Command', placeholder: 'doveadm reload' },
+    { key: 'validate_command', label: 'Validate Command', placeholder: 'doveconf -n' },
   ],
   f5_bigip: [
     { key: 'management_ip', label: 'Management IP', placeholder: '192.168.1.100', required: true },

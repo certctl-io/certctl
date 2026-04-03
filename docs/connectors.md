@@ -22,6 +22,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: HAProxy](#built-in-haproxy)
    - [Built-in: Traefik](#built-in-traefik)
    - [Built-in: Envoy](#built-in-envoy)
+   - [Built-in: Postfix / Dovecot](#built-in-postfix--dovecot)
    - [Built-in: Caddy](#built-in-caddy)
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
    - [IIS (Implemented, Dual-Mode)](#iis-implemented-dual-mode)
@@ -619,6 +620,49 @@ When `sds_config` is `true`, the connector writes an SDS JSON file (`{cert_dir}/
 When `sds_config` is `false` (the default), the connector simply writes cert and key files. Use this mode when Envoy's bootstrap config references the cert/key files directly via static `filename` fields in the TLS context.
 
 Location: `internal/connector/target/envoy/envoy.go`
+
+### Built-in: Postfix / Dovecot
+
+The Postfix/Dovecot connector is a dual-mode mail server TLS connector. It writes certificate, key, and chain files to configured paths and reloads the mail service. The `mode` field selects between Postfix MTA and Dovecot IMAP/POP3, which determines default file paths and reload commands.
+
+This connector pairs with certctl's S/MIME certificate support (email protection EKU, email SAN routing) for a complete email infrastructure story — TLS for transport encryption, S/MIME for end-to-end message signing and encryption.
+
+**Postfix configuration:**
+```json
+{
+  "mode": "postfix",
+  "cert_path": "/etc/postfix/certs/cert.pem",
+  "key_path": "/etc/postfix/certs/key.pem",
+  "chain_path": "/etc/postfix/certs/chain.pem",
+  "reload_command": "postfix reload",
+  "validate_command": "postfix check"
+}
+```
+
+**Dovecot configuration:**
+```json
+{
+  "mode": "dovecot",
+  "cert_path": "/etc/dovecot/certs/cert.pem",
+  "key_path": "/etc/dovecot/certs/key.pem",
+  "chain_path": "/etc/dovecot/certs/chain.pem",
+  "reload_command": "doveadm reload",
+  "validate_command": "doveconf -n"
+}
+```
+
+| Field | Type | Default (Postfix) | Default (Dovecot) | Description |
+|-------|------|-------------------|-------------------|-------------|
+| `mode` | string | `postfix` | `dovecot` | Service mode — determines defaults |
+| `cert_path` | string | `/etc/postfix/certs/cert.pem` | `/etc/dovecot/certs/cert.pem` | Path for certificate file |
+| `key_path` | string | `/etc/postfix/certs/key.pem` | `/etc/dovecot/certs/key.pem` | Path for private key (0600 permissions) |
+| `chain_path` | string | (empty) | (empty) | If set, chain written separately; otherwise appended to cert |
+| `reload_command` | string | `postfix reload` | `doveadm reload` | Command to reload the mail service |
+| `validate_command` | string | `postfix check` | `doveconf -n` | Optional config validation before reload |
+
+All commands are validated against shell injection via `validation.ValidateShellCommand()`. File permissions: cert/chain 0644, key 0600.
+
+Location: `internal/connector/target/postfix/postfix.go`
 
 ### F5 BIG-IP (Interface Only)
 

@@ -36,7 +36,7 @@ gantt
         47 days                :crit, 2020-01-01, 47d
 ```
 
-> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs 1,536+ tests with race detection, static analysis, and vulnerability scanning on every commit.
+> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs 1,554+ tests with race detection, static analysis, and vulnerability scanning on every commit.
 
 ## Why certctl Exists
 
@@ -44,7 +44,7 @@ Certificate lifecycle tooling today falls into two camps: expensive enterprise p
 
 certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
 
-It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, and IIS (local PowerShell or remote WinRM) — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, and IIS (local PowerShell or remote WinRM) — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
 
@@ -98,6 +98,8 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | Traefik | Implemented | `Traefik` |
 | Caddy | Implemented | `Caddy` |
 | Envoy | Implemented | `Envoy` |
+| Postfix | Implemented | `Postfix` |
+| Dovecot | Implemented | `Dovecot` |
 | Microsoft IIS | Implemented (local + WinRM) | `IIS` |
 | F5 BIG-IP | Interface only | `F5` |
 
@@ -293,7 +295,7 @@ CI runs on every push: `go vet`, `go test -race`, `golangci-lint`, `govulncheck`
 Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector, agent-side key generation, API auth + rate limiting, React dashboard, CI pipeline with coverage gates, Docker images on GHCR.
 
 ### V2: Operational Maturity — Shipped
-30+ milestones, 1,536+ tests. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9702), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
+30+ milestones, 1,554+ tests. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9702), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
 
 **Coming in v2.1.0:** Dynamic issuer and target configuration via GUI (no env var restarts), first-run onboarding wizard.
 

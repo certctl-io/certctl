@@ -85,4 +85,6 @@ const (
 	TargetTypeTraefik  TargetType = "Traefik"
 	TargetTypeCaddy    TargetType = "Caddy"
 	TargetTypeEnvoy    TargetType = "Envoy"
+	TargetTypePostfix  TargetType = "Postfix"
+	TargetTypeDovecot  TargetType = "Dovecot"
 )

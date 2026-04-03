@@ -30,6 +30,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
+	pf "github.com/shankar0123/certctl/internal/connector/target/postfix"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
@@ -621,6 +622,26 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return envoy.New(&cfg, a.logger), nil
+
+	case "Postfix":
+		var cfg pf.Config
+		cfg.Mode = "postfix"
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Postfix config: %w", err)
+			}
+		}
+		return pf.New(&cfg, a.logger), nil
+
+	case "Dovecot":
+		var cfg pf.Config
+		cfg.Mode = "dovecot"
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Dovecot config: %w", err)
+			}
+		}
+		return pf.New(&cfg, a.logger), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)
