@@ -1,0 +1,845 @@
+package iis
+
+import (
+	"context"
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/json"
+	"encoding/pem"
+	"fmt"
+	"log/slog"
+	"math/big"
+	"os"
+	"strings"
+	"testing"
+	"time"
+
+	"github.com/shankar0123/certctl/internal/connector/target"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
+)
+
+// mockExecutor records PowerShell commands and returns configurable responses.
+type mockExecutor struct {
+	// commands records all scripts passed to Execute in order
+	commands []string
+	// responses maps script substrings to (output, error) pairs.
+	// First matching substring wins.
+	responses map[string]mockResponse
+	// defaultOutput is returned when no response matches
+	defaultOutput string
+	// defaultErr is returned when no response matches
+	defaultErr error
+}
+
+type mockResponse struct {
+	output string
+	err    error
+}
+
+func newMockExecutor() *mockExecutor {
+	return &mockExecutor{
+		responses: make(map[string]mockResponse),
+	}
+}
+
+func (m *mockExecutor) Execute(ctx context.Context, script string) (string, error) {
+	m.commands = append(m.commands, script)
+	for substr, resp := range m.responses {
+		if strings.Contains(script, substr) {
+			return resp.output, resp.err
+		}
+	}
+	return m.defaultOutput, m.defaultErr
+}
+
+func testLogger() *slog.Logger {
+	return slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+}
+
+// --- ValidateConfig tests ---
+
+func TestIISConnector_ValidateConfig_Success(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-Website"] = mockResponse{output: "Default Web Site\n", err: nil}
+	executor.responses["Test-Path"] = mockResponse{output: "True\n", err: nil}
+
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}
+
+	// We need powershell.exe in PATH for LookPath — skip on non-Windows
+	connector := NewWithExecutor(&cfg, testLogger(), executor)
+	rawConfig, _ := json.Marshal(cfg)
+
+	// On non-Windows, LookPath("powershell.exe") will fail.
+	// We test the validation logic up to that point by checking the error message.
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err != nil {
+		// If it's just a "powershell not found" error, that's expected on Linux
+		if strings.Contains(err.Error(), "powershell.exe not found") {
+			t.Skip("Skipping: powershell.exe not available (non-Windows)")
+		}
+		t.Fatalf("ValidateConfig failed: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidJSON(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	err := connector.ValidateConfig(context.Background(), json.RawMessage(`{invalid}`))
+	if err == nil {
+		t.Fatal("expected error for invalid JSON")
+	}
+	if !strings.Contains(err.Error(), "invalid IIS config") {
+		t.Errorf("expected 'invalid IIS config' in error, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_MissingSiteName(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{CertStore: "My"}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for missing site_name")
+	}
+	if !strings.Contains(err.Error(), "site_name") {
+		t.Errorf("expected error about site_name, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_MissingCertStore(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{SiteName: "Default Web Site"}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for missing cert_store")
+	}
+	if !strings.Contains(err.Error(), "cert_store") {
+		t.Errorf("expected error about cert_store, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidSiteName_Injection(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{
+		SiteName:  "Default'; Drop-Database",
+		CertStore: "My",
+	}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for injection characters in site_name")
+	}
+	if !strings.Contains(err.Error(), "invalid characters") {
+		t.Errorf("expected 'invalid characters' in error, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidCertStore_Injection(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My$(whoami)",
+	}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for injection characters in cert_store")
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidPort(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      99999,
+	}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for invalid port")
+	}
+	if !strings.Contains(err.Error(), "port") {
+		t.Errorf("expected error about port, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidIPAddress(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		IPAddress: "not_an_ip",
+	}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for invalid IP address")
+	}
+	if !strings.Contains(err.Error(), "ip_address") {
+		t.Errorf("expected error about ip_address, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateConfig_DefaultValues(t *testing.T) {
+	// Test that defaults are applied (port 443, IP *)
+	executor := newMockExecutor()
+	executor.responses["Get-Website"] = mockResponse{output: "TestSite\n", err: nil}
+	executor.responses["Test-Path"] = mockResponse{output: "True\n", err: nil}
+
+	cfg := Config{
+		SiteName:  "TestSite",
+		CertStore: "WebHosting",
+		// Port and IPAddress intentionally left empty
+	}
+
+	connector := NewWithExecutor(&cfg, testLogger(), executor)
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err != nil {
+		if strings.Contains(err.Error(), "powershell.exe not found") {
+			t.Skip("Skipping: powershell.exe not available (non-Windows)")
+		}
+		t.Fatalf("ValidateConfig failed: %v", err)
+	}
+
+	// Verify defaults were applied
+	if connector.config.Port != 443 {
+		t.Errorf("expected default port 443, got %d", connector.config.Port)
+	}
+	if connector.config.IPAddress != "*" {
+		t.Errorf("expected default IP '*', got %s", connector.config.IPAddress)
+	}
+}
+
+// --- DeployCertificate tests ---
+
+// generateTestCertAndKey creates a self-signed ECDSA P-256 cert+key for testing.
+func generateTestCertAndKey() (certPEM, keyPEM, chainPEM string, err error) {
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	template := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject: pkix.Name{
+			CommonName: "test.example.com",
+		},
+		NotBefore:             time.Now(),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		BasicConstraintsValid: true,
+		DNSNames:              []string{"test.example.com"},
+	}
+
+	certDER, err := x509.CreateCertificate(rand.Reader, template, template, &key.PublicKey, key)
+	if err != nil {
+		return "", "", "", err
+	}
+
+	certPEMStr := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}))
+
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		return "", "", "", err
+	}
+	keyPEMStr := string(pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER}))
+
+	// Use the self-signed cert as its own "chain" for testing
+	chainPEMStr := certPEMStr
+
+	return certPEMStr, keyPEMStr, chainPEMStr, nil
+}
+
+func TestIISConnector_DeployCertificate_Success(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	executor.defaultOutput = "OK"
+
+	cfg := &Config{
+		Hostname:  "web01.example.com",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+		IPAddress: "*",
+	}
+
+	connector := NewWithExecutor(cfg, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+
+	// Verify thumbprint is in metadata
+	if result.Metadata["thumbprint"] == "" {
+		t.Error("expected thumbprint in metadata")
+	}
+	// SHA-1 thumbprint = 40 hex chars uppercase
+	if len(result.Metadata["thumbprint"]) != 40 {
+		t.Errorf("expected 40-char thumbprint, got %d", len(result.Metadata["thumbprint"]))
+	}
+
+	// Verify both import and binding scripts were executed
+	if len(executor.commands) != 2 {
+		t.Errorf("expected 2 PowerShell commands, got %d", len(executor.commands))
+	}
+
+	// First command should be PFX import
+	if len(executor.commands) > 0 && !strings.Contains(executor.commands[0], "Import-PfxCertificate") {
+		t.Errorf("expected Import-PfxCertificate in first command, got: %s", executor.commands[0])
+	}
+
+	// Second command should be binding update
+	if len(executor.commands) > 1 && !strings.Contains(executor.commands[1], "New-WebBinding") {
+		t.Errorf("expected New-WebBinding in second command, got: %s", executor.commands[1])
+	}
+
+	// Verify metadata
+	if result.Metadata["site_name"] != "Default Web Site" {
+		t.Errorf("expected site_name in metadata")
+	}
+	if result.Metadata["cert_store"] != "My" {
+		t.Errorf("expected cert_store in metadata")
+	}
+	if _, ok := result.Metadata["duration_ms"]; !ok {
+		t.Error("expected duration_ms in metadata")
+	}
+}
+
+func TestIISConnector_DeployCertificate_MissingKeyPEM(t *testing.T) {
+	certPEM, _, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	connector := NewWithExecutor(&Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+	}, testLogger(), newMockExecutor())
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   "", // Missing key
+		ChainPEM: chainPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error for missing KeyPEM")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+	if !strings.Contains(err.Error(), "private key") {
+		t.Errorf("expected error about private key, got: %v", err)
+	}
+}
+
+func TestIISConnector_DeployCertificate_InvalidCertPEM(t *testing.T) {
+	_, keyPEM, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test key: %v", err)
+	}
+
+	connector := NewWithExecutor(&Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+	}, testLogger(), newMockExecutor())
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  "not a valid cert",
+		KeyPEM:   keyPEM,
+		ChainPEM: "",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid cert PEM")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+}
+
+func TestIISConnector_DeployCertificate_InvalidKeyPEM(t *testing.T) {
+	certPEM, _, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	connector := NewWithExecutor(&Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+	}, testLogger(), newMockExecutor())
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   "not a valid key",
+		ChainPEM: "",
+	})
+	if err == nil {
+		t.Fatal("expected error for invalid key PEM")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+}
+
+func TestIISConnector_DeployCertificate_ImportFails(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	executor.responses["Import-PfxCertificate"] = mockResponse{
+		output: "Access denied",
+		err:    fmt.Errorf("exit status 1"),
+	}
+
+	connector := NewWithExecutor(&Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+	}, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when PFX import fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+	if !strings.Contains(err.Error(), "PFX import failed") {
+		t.Errorf("expected 'PFX import failed' in error, got: %v", err)
+	}
+}
+
+func TestIISConnector_DeployCertificate_BindingFails(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	// Import succeeds
+	executor.responses["Import-PfxCertificate"] = mockResponse{output: "OK", err: nil}
+	// Binding fails
+	executor.responses["New-WebBinding"] = mockResponse{
+		output: "The website 'Default Web Site' already has a binding",
+		err:    fmt.Errorf("exit status 1"),
+	}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when binding update fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+	// Partial success: cert was imported but binding failed
+	if result.Metadata["import_success"] != "true" {
+		t.Error("expected import_success=true in metadata (cert imported but binding failed)")
+	}
+	if result.Metadata["thumbprint"] == "" {
+		t.Error("expected thumbprint in metadata even on binding failure")
+	}
+}
+
+func TestIISConnector_DeployCertificate_SNIEnabled(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	executor.defaultOutput = "OK"
+
+	connector := NewWithExecutor(&Config{
+		Hostname:    "web01",
+		SiteName:    "Default Web Site",
+		CertStore:   "My",
+		Port:        443,
+		SNI:         true,
+		BindingInfo: "test.example.com",
+	}, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+
+	// Verify SNI flag was passed in the binding script
+	if len(executor.commands) < 2 {
+		t.Fatal("expected at least 2 commands")
+	}
+	bindingCmd := executor.commands[1]
+	if !strings.Contains(bindingCmd, "-SslFlags 1") {
+		t.Errorf("expected -SslFlags 1 for SNI, got: %s", bindingCmd)
+	}
+	if result.Metadata["sni"] != "true" {
+		t.Error("expected sni=true in metadata")
+	}
+}
+
+// --- ValidateDeployment tests ---
+
+func TestIISConnector_ValidateDeployment_Success(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-WebBinding"] = mockResponse{output: "ABC123DEF456\n", err: nil}
+	executor.responses["Get-ChildItem"] = mockResponse{output: "VALID\n", err: nil}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.ValidateDeployment(context.Background(), target.ValidationRequest{
+		CertificateID: "mc-test",
+		Serial:        "123456",
+	})
+	if err != nil {
+		t.Fatalf("ValidateDeployment failed: %v", err)
+	}
+	if !result.Valid {
+		t.Fatalf("expected valid deployment, got: %s", result.Message)
+	}
+	if result.Metadata["thumbprint"] != "ABC123DEF456" {
+		t.Errorf("expected thumbprint in metadata, got: %s", result.Metadata["thumbprint"])
+	}
+	if _, ok := result.Metadata["duration_ms"]; !ok {
+		t.Error("expected duration_ms in metadata")
+	}
+}
+
+func TestIISConnector_ValidateDeployment_NoBinding(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-WebBinding"] = mockResponse{output: "NO_BINDING\n", err: nil}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "TestSite",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.ValidateDeployment(context.Background(), target.ValidationRequest{
+		CertificateID: "mc-test",
+		Serial:        "123456",
+	})
+	if err == nil {
+		t.Fatal("expected error when no binding found")
+	}
+	if result.Valid {
+		t.Fatal("expected invalid result")
+	}
+	if !strings.Contains(err.Error(), "no HTTPS binding found") {
+		t.Errorf("expected 'no HTTPS binding found' in error, got: %v", err)
+	}
+}
+
+func TestIISConnector_ValidateDeployment_CertNotInStore(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-WebBinding"] = mockResponse{output: "DEADBEEF1234\n", err: nil}
+	executor.responses["Get-ChildItem"] = mockResponse{output: "NOT_FOUND\n", err: nil}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.ValidateDeployment(context.Background(), target.ValidationRequest{
+		CertificateID: "mc-test",
+		Serial:        "123456",
+	})
+	if err == nil {
+		t.Fatal("expected error when cert not in store")
+	}
+	if result.Valid {
+		t.Fatal("expected invalid result")
+	}
+	if result.Metadata["status"] != "not_found" {
+		t.Errorf("expected status=not_found in metadata, got: %s", result.Metadata["status"])
+	}
+}
+
+func TestIISConnector_ValidateDeployment_CertExpired(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-WebBinding"] = mockResponse{output: "DEADBEEF1234\n", err: nil}
+	executor.responses["Get-ChildItem"] = mockResponse{output: "EXPIRED\n", err: nil}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.ValidateDeployment(context.Background(), target.ValidationRequest{
+		CertificateID: "mc-test",
+		Serial:        "123456",
+	})
+	if err == nil {
+		t.Fatal("expected error when cert is expired")
+	}
+	if result.Valid {
+		t.Fatal("expected invalid result")
+	}
+	if result.Metadata["status"] != "expired" {
+		t.Errorf("expected status=expired in metadata, got: %s", result.Metadata["status"])
+	}
+}
+
+func TestIISConnector_ValidateDeployment_QueryFails(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-WebBinding"] = mockResponse{
+		output: "Permission denied",
+		err:    fmt.Errorf("exit status 1"),
+	}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.ValidateDeployment(context.Background(), target.ValidationRequest{
+		CertificateID: "mc-test",
+		Serial:        "123456",
+	})
+	if err == nil {
+		t.Fatal("expected error when query fails")
+	}
+	if result.Valid {
+		t.Fatal("expected invalid result")
+	}
+}
+
+// --- PFX conversion tests (pure Go crypto, runs on any OS) ---
+
+func TestCreatePFX_Success(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	pfxData, err := createPFX(certPEM, keyPEM, chainPEM, "testpassword")
+	if err != nil {
+		t.Fatalf("createPFX failed: %v", err)
+	}
+
+	if len(pfxData) == 0 {
+		t.Fatal("expected non-empty PFX data")
+	}
+
+	// Verify PFX is parseable
+	_, _, _, err = pkcs12.DecodeChain(pfxData, "testpassword")
+	if err != nil {
+		t.Fatalf("PFX data is not valid PKCS#12: %v", err)
+	}
+}
+
+func TestCreatePFX_NoChain(t *testing.T) {
+	certPEM, keyPEM, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	pfxData, err := createPFX(certPEM, keyPEM, "", "testpassword")
+	if err != nil {
+		t.Fatalf("createPFX with no chain failed: %v", err)
+	}
+
+	if len(pfxData) == 0 {
+		t.Fatal("expected non-empty PFX data")
+	}
+}
+
+func TestCreatePFX_InvalidCert(t *testing.T) {
+	_, keyPEM, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test key: %v", err)
+	}
+
+	_, err = createPFX("not a valid cert", keyPEM, "", "password")
+	if err == nil {
+		t.Fatal("expected error for invalid cert PEM")
+	}
+}
+
+func TestCreatePFX_InvalidKey(t *testing.T) {
+	certPEM, _, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	_, err = createPFX(certPEM, "not a valid key", "", "password")
+	if err == nil {
+		t.Fatal("expected error for invalid key PEM")
+	}
+}
+
+// --- Thumbprint tests ---
+
+func TestComputeThumbprint_Success(t *testing.T) {
+	certPEM, _, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	thumbprint, err := computeThumbprint(certPEM)
+	if err != nil {
+		t.Fatalf("computeThumbprint failed: %v", err)
+	}
+
+	// SHA-1 = 20 bytes = 40 hex chars
+	if len(thumbprint) != 40 {
+		t.Errorf("expected 40-char thumbprint, got %d chars: %s", len(thumbprint), thumbprint)
+	}
+
+	// Should be uppercase hex
+	if thumbprint != strings.ToUpper(thumbprint) {
+		t.Errorf("thumbprint should be uppercase, got: %s", thumbprint)
+	}
+}
+
+func TestComputeThumbprint_InvalidPEM(t *testing.T) {
+	_, err := computeThumbprint("not a valid pem")
+	if err == nil {
+		t.Fatal("expected error for invalid PEM")
+	}
+}
+
+func TestComputeThumbprint_EmptyString(t *testing.T) {
+	_, err := computeThumbprint("")
+	if err == nil {
+		t.Fatal("expected error for empty string")
+	}
+}
+
+// --- Validation helper tests ---
+
+func TestValidateIISName_Valid(t *testing.T) {
+	tests := []string{
+		"Default Web Site",
+		"My",
+		"WebHosting",
+		"site-01",
+		"my_site.prod",
+		"Test 123",
+	}
+
+	for _, name := range tests {
+		t.Run(name, func(t *testing.T) {
+			if err := validateIISName(name, "test_field"); err != nil {
+				t.Errorf("expected valid name %q, got error: %v", name, err)
+			}
+		})
+	}
+}
+
+func TestValidateIISName_Invalid(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+	}{
+		{"empty", ""},
+		{"semicolon", "My;Store"},
+		{"dollar", "My$Store"},
+		{"backtick", "My`Store"},
+		{"pipe", "My|Store"},
+		{"ampersand", "My&Store"},
+		{"parentheses", "My(Store)"},
+		{"quotes", `My"Store"`},
+		{"angle_brackets", "My<Store>"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if err := validateIISName(tt.input, "test_field"); err == nil {
+				t.Errorf("expected error for name %q", tt.input)
+			}
+		})
+	}
+}
+
+func TestValidateIISName_TooLong(t *testing.T) {
+	longName := strings.Repeat("a", 257)
+	if err := validateIISName(longName, "test_field"); err == nil {
+		t.Fatal("expected error for name exceeding 256 chars")
+	}
+}
+
+// --- Random password generation ---
+
+func TestGenerateRandomPassword(t *testing.T) {
+	pw, err := generateRandomPassword(32)
+	if err != nil {
+		t.Fatalf("generateRandomPassword failed: %v", err)
+	}
+	if len(pw) != 32 {
+		t.Errorf("expected 32-char password, got %d", len(pw))
+	}
+
+	// Verify it only contains allowed characters
+	for _, c := range pw {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9')) {
+			t.Errorf("unexpected character in password: %c", c)
+		}
+	}
+
+	// Verify two passwords are different (probabilistic but reliable)
+	pw2, _ := generateRandomPassword(32)
+	if pw == pw2 {
+		t.Error("two generated passwords should be different")
+	}
+}

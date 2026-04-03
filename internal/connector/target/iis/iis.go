@@ -2,13 +2,22 @@ package iis
 
 import (
 	"context"
+	"crypto/rand"
+	"crypto/sha1"
+	"crypto/x509"
+	"encoding/hex"
 	"encoding/json"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
-	"runtime"
+	"os"
+	"os/exec"
+	"regexp"
+	"strings"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
 // Config represents the IIS deployment target configuration.
@@ -18,85 +27,178 @@ type Config struct {
 	SiteName    string `json:"site_name"`    // IIS site name (e.g., "Default Web Site")
 	CertStore   string `json:"cert_store"`   // Windows cert store (e.g., "My", "WebHosting")
 	BindingInfo string `json:"binding_info"` // Binding info (e.g., "*.example.com")
+	Port        int    `json:"port"`         // HTTPS port (default 443)
+	SNI         bool   `json:"sni"`          // Enable Server Name Indication
+	IPAddress   string `json:"ip_address"`   // Bind to specific IP (default "*")
+}
+
+// PowerShellExecutor abstracts PowerShell command execution for testability.
+// On real Windows deployments, the realExecutor calls powershell.exe directly.
+// Tests inject a mock executor to verify command construction without Windows.
+type PowerShellExecutor interface {
+	Execute(ctx context.Context, script string) (string, error)
+}
+
+// realExecutor calls powershell.exe on the local system.
+type realExecutor struct{}
+
+func (e *realExecutor) Execute(ctx context.Context, script string) (string, error) {
+	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
+	output, err := cmd.CombinedOutput()
+	return string(output), err
 }
 
 // Connector implements the target.Connector interface for IIS (Internet Information Services).
-// This connector runs on Windows agents and manages certificate deployment via IIS.
+// This connector runs on Windows agents and manages certificate deployment via PowerShell.
 //
 // IIS certificate management requires:
-// - Windows Server with IIS installed
-// - PowerShell execution available
-// - Administrative privileges
+//   - Windows Server with IIS installed
+//   - PowerShell execution available
+//   - Administrative privileges
 //
-// TODO: Implement actual PowerShell command execution for:
-// - Certificate import: Import-PfxCertificate
-// - IIS binding update: New-WebBinding, Set-WebBinding
-// - Validation: Get-WebBinding
+// Deployment flow:
+//  1. Convert PEM cert+key to PFX (PKCS#12) format via go-pkcs12
+//  2. Import PFX to Windows certificate store via Import-PfxCertificate
+//  3. Compute SHA-1 thumbprint (IIS certificate identifier)
+//  4. Update IIS HTTPS binding via New-WebBinding + AddSslCertificate
+//  5. Verify binding is active via Get-WebBinding
 type Connector struct {
-	config *Config
-	logger *slog.Logger
+	config   *Config
+	logger   *slog.Logger
+	executor PowerShellExecutor
 }
 
 // New creates a new IIS target connector with the given configuration and logger.
+// Uses the real PowerShell executor for production deployments.
 func New(config *Config, logger *slog.Logger) *Connector {
 	return &Connector{
-		config: config,
-		logger: logger,
+		config:   config,
+		logger:   logger,
+		executor: &realExecutor{},
 	}
 }
 
+// NewWithExecutor creates a new IIS target connector with an injected executor.
+// Used in tests to mock PowerShell execution on non-Windows platforms.
+func NewWithExecutor(config *Config, logger *slog.Logger, executor PowerShellExecutor) *Connector {
+	return &Connector{
+		config:   config,
+		logger:   logger,
+		executor: executor,
+	}
+}
+
+// validIISName matches safe IIS site names and cert store names.
+// Allows alphanumeric, spaces, underscores, hyphens, and dots.
+var validIISName = regexp.MustCompile(`^[a-zA-Z0-9 _\-\.]+$`)
+
+// validateIISName checks that an IIS name field contains only safe characters.
+// This prevents PowerShell injection via malicious site or store names.
+func validateIISName(name, field string) error {
+	if name == "" {
+		return fmt.Errorf("%s is required", field)
+	}
+	if len(name) > 256 {
+		return fmt.Errorf("%s exceeds maximum length (256 characters)", field)
+	}
+	if !validIISName.MatchString(name) {
+		return fmt.Errorf("%s contains invalid characters (allowed: alphanumeric, space, underscore, hyphen, dot)", field)
+	}
+	return nil
+}
+
+// validIPOrWildcard matches valid IP addresses or the wildcard "*".
+var validIPOrWildcard = regexp.MustCompile(`^(\*|(\d{1,3}\.){3}\d{1,3})$`)
+
 // ValidateConfig checks that the IIS configuration is valid and accessible.
-// It verifies that we're on Windows and that the IIS site exists.
-//
-// TODO: Implement actual PowerShell checks.
+// It verifies field values, PowerShell availability, and optionally checks that
+// the IIS site exists and the cert store is accessible.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
 		return fmt.Errorf("invalid IIS config: %w", err)
 	}
 
-	if cfg.SiteName == "" || cfg.CertStore == "" {
-		return fmt.Errorf("IIS site_name and cert_store are required")
+	// Validate required fields
+	if err := validateIISName(cfg.SiteName, "site_name"); err != nil {
+		return err
+	}
+	if err := validateIISName(cfg.CertStore, "cert_store"); err != nil {
+		return err
 	}
 
-	// Verify we're on Windows
-	if runtime.GOOS != "windows" {
-		return fmt.Errorf("IIS connector only runs on Windows, got %s", runtime.GOOS)
+	// Apply defaults
+	if cfg.Port == 0 {
+		cfg.Port = 443
+	}
+	if cfg.IPAddress == "" {
+		cfg.IPAddress = "*"
+	}
+
+	// Validate port range
+	if cfg.Port < 1 || cfg.Port > 65535 {
+		return fmt.Errorf("port must be between 1 and 65535, got %d", cfg.Port)
+	}
+
+	// Validate IP address format
+	if !validIPOrWildcard.MatchString(cfg.IPAddress) {
+		return fmt.Errorf("ip_address must be a valid IPv4 address or '*', got %q", cfg.IPAddress)
+	}
+
+	// Validate binding_info if provided (safe characters only)
+	if cfg.BindingInfo != "" {
+		if len(cfg.BindingInfo) > 512 {
+			return fmt.Errorf("binding_info exceeds maximum length (512 characters)")
+		}
+		// Allow typical binding chars: alphanumeric, *, :, ., -
+		validBinding := regexp.MustCompile(`^[a-zA-Z0-9\*\:\.\-]+$`)
+		if !validBinding.MatchString(cfg.BindingInfo) {
+			return fmt.Errorf("binding_info contains invalid characters")
+		}
 	}
 
 	c.logger.Info("validating IIS configuration",
 		"site_name", cfg.SiteName,
 		"cert_store", cfg.CertStore,
-		"hostname", cfg.Hostname)
+		"hostname", cfg.Hostname,
+		"port", cfg.Port)
 
-	// TODO: Implement PowerShell check
-	// In production:
-	//   1. Run PowerShell command: Get-IISSite -Name {SiteName}
-	//   2. Verify site exists and is running
-	//   3. Check cert store: Get-Item -Path "Cert:\LocalMachine\{CertStore}"
+	// Verify PowerShell is available
+	if _, err := exec.LookPath("powershell.exe"); err != nil {
+		return fmt.Errorf("powershell.exe not found in PATH: %w", err)
+	}
 
-	c.logger.Warn("IIS validation not yet fully implemented",
-		"site_name", cfg.SiteName)
+	// Verify IIS site exists
+	siteCheckScript := fmt.Sprintf(`Get-Website -Name '%s' | Select-Object -ExpandProperty Name`, cfg.SiteName)
+	output, err := c.executor.Execute(ctx, siteCheckScript)
+	if err != nil {
+		return fmt.Errorf("IIS site %q not found or inaccessible: %s (error: %w)", cfg.SiteName, strings.TrimSpace(output), err)
+	}
+
+	// Verify cert store is accessible
+	storeCheckScript := fmt.Sprintf(`Test-Path 'Cert:\LocalMachine\%s'`, cfg.CertStore)
+	output, err = c.executor.Execute(ctx, storeCheckScript)
+	if err != nil || !strings.Contains(strings.TrimSpace(output), "True") {
+		return fmt.Errorf("certificate store %q is not accessible: %s", cfg.CertStore, strings.TrimSpace(output))
+	}
 
 	c.config = &cfg
+	c.logger.Info("IIS configuration validated",
+		"site_name", cfg.SiteName,
+		"cert_store", cfg.CertStore)
 	return nil
 }
 
 // DeployCertificate imports a certificate to the Windows certificate store and updates
 // the IIS binding to use the new certificate.
 //
-// The IIS deployment process (via PowerShell):
-//  1. Create a temporary PFX file from the certificate and existing private key
-//     (Note: The private key is managed by the agent, not provided by the control plane)
-//  2. Import the PFX to the Windows certificate store (My store by default)
-//  3. Get the certificate thumbprint
-//  4. Update the IIS binding to use the new certificate by thumbprint
-//  5. Verify the binding is active
-//
-// TODO: Implement actual PowerShell commands:
-// - Import-PfxCertificate -FilePath {pfxPath} -CertStoreLocation "Cert:\LocalMachine\My"
-// - Get-ChildItem -Path "Cert:\LocalMachine\My" | Where {$_.Subject -eq "CN=..."}
-// - Set-WebBinding -Name {SiteName} -BindingInformation "{BindingInfo}" -Protocol https -SslFlags 1 -CertificateThumbprint {thumbprint}
+// Deployment flow:
+//  1. Convert PEM cert+key+chain to PFX format (go-pkcs12 with random password)
+//  2. Write PFX to temp file (cleaned up on exit, even on error)
+//  3. Compute SHA-1 thumbprint from DER cert (matches Windows certutil output)
+//  4. Import PFX to Windows cert store via Import-PfxCertificate
+//  5. Update IIS HTTPS binding via New-WebBinding + AddSslCertificate
+//  6. Return result with thumbprint in metadata
 func (c *Connector) DeployCertificate(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
 	c.logger.Info("deploying certificate to IIS",
 		"site_name", c.config.SiteName,
@@ -104,44 +206,182 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	startTime := time.Now()
 
-	// TODO: Implement IIS certificate deployment
-	// In production:
-	//   1. Create temporary PFX from CertPEM and ChainPEM
-	//      (Private key should already exist on the agent)
-	//   2. Import certificate:
-	//      PowerShell: Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation "Cert:\LocalMachine\{CertStore}" -Password $password
-	//   3. Get certificate thumbprint:
-	//      PowerShell: (Get-ChildItem -Path "Cert:\LocalMachine\{CertStore}" | Where {$_.Subject -like "*CN=*"}).Thumbprint
-	//   4. Update IIS binding:
-	//      PowerShell: Set-WebBinding -Name "{SiteName}" -BindingInformation "{BindingInfo}:443:*.example.com" -Protocol https -CertificateThumbprint $thumbprint
-	//   5. Remove temporary PFX file
+	// Validate we have a private key (required for PFX creation)
+	if request.KeyPEM == "" {
+		errMsg := "private key (KeyPEM) is required for IIS deployment"
+		c.logger.Error("deployment failed", "error", errMsg)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	// Step 1: Create PFX from PEM inputs
+	pfxPassword, err := generateRandomPassword(32)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to generate PFX password: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	pfxData, err := createPFX(request.CertPEM, request.KeyPEM, request.ChainPEM, pfxPassword)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to create PFX: %v", err)
+		c.logger.Error("PFX creation failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	// Step 2: Write PFX to temp file
+	tmpFile, err := os.CreateTemp("", "certctl-*.pfx")
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to create temp PFX file: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+	pfxPath := tmpFile.Name()
+	defer os.Remove(pfxPath) // Always clean up temp PFX
+
+	if _, err := tmpFile.Write(pfxData); err != nil {
+		tmpFile.Close()
+		errMsg := fmt.Sprintf("failed to write temp PFX file: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+	tmpFile.Close()
+
+	// Step 3: Compute thumbprint (SHA-1 of DER-encoded cert — matches Windows certutil)
+	thumbprint, err := computeThumbprint(request.CertPEM)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to compute certificate thumbprint: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	c.logger.Debug("certificate thumbprint computed", "thumbprint", thumbprint)
+
+	// Step 4: Import PFX to Windows certificate store
+	importScript := fmt.Sprintf(
+		`$password = ConvertTo-SecureString -String '%s' -AsPlainText -Force; `+
+			`Import-PfxCertificate -FilePath '%s' -CertStoreLocation 'Cert:\LocalMachine\%s' -Password $password`,
+		pfxPassword, pfxPath, c.config.CertStore,
+	)
+
+	output, err := c.executor.Execute(ctx, importScript)
+	if err != nil {
+		errMsg := fmt.Sprintf("PFX import failed: %v (output: %s)", err, strings.TrimSpace(output))
+		c.logger.Error("PFX import failed",
+			"error", err,
+			"output", strings.TrimSpace(output),
+			"cert_store", c.config.CertStore)
+		return &target.DeploymentResult{
+			Success:       false,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			DeployedAt:    time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	c.logger.Info("PFX imported to certificate store",
+		"cert_store", c.config.CertStore,
+		"thumbprint", thumbprint)
+
+	// Step 5: Update IIS HTTPS binding
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
+	ipAddress := c.config.IPAddress
+	if ipAddress == "" {
+		ipAddress = "*"
+	}
+	hostHeader := c.config.BindingInfo
+	sniFlag := 0
+	if c.config.SNI {
+		sniFlag = 1
+	}
+
+	bindingScript := fmt.Sprintf(
+		// Remove existing HTTPS binding on this port (if any), then create new one
+		`$existing = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; `+
+			`if ($existing) { $existing | Remove-WebBinding }; `+
+			`New-WebBinding -Name '%s' -Protocol 'https' -Port %d -IPAddress '%s' -HostHeader '%s' -SslFlags %d; `+
+			`$binding = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d; `+
+			`$binding.AddSslCertificate('%s', '%s')`,
+		c.config.SiteName, port,
+		c.config.SiteName, port, ipAddress, hostHeader, sniFlag,
+		c.config.SiteName, port,
+		thumbprint, c.config.CertStore,
+	)
+
+	output, err = c.executor.Execute(ctx, bindingScript)
+	if err != nil {
+		errMsg := fmt.Sprintf("IIS binding update failed: %v (output: %s)", err, strings.TrimSpace(output))
+		c.logger.Error("IIS binding update failed",
+			"error", err,
+			"output", strings.TrimSpace(output),
+			"site_name", c.config.SiteName)
+		// Cert is imported but binding failed — partial success
+		return &target.DeploymentResult{
+			Success:       false,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			DeployedAt:    time.Now(),
+			Metadata: map[string]string{
+				"thumbprint":     thumbprint,
+				"cert_store":     c.config.CertStore,
+				"import_success": "true",
+				"binding_error":  strings.TrimSpace(output),
+			},
+		}, fmt.Errorf("%s", errMsg)
+	}
 
 	deploymentDuration := time.Since(startTime)
-
-	c.logger.Warn("IIS deployment not yet implemented",
-		"site_name", c.config.SiteName)
+	c.logger.Info("certificate deployed to IIS successfully",
+		"duration", deploymentDuration.String(),
+		"site_name", c.config.SiteName,
+		"thumbprint", thumbprint)
 
 	return &target.DeploymentResult{
 		Success:       true,
 		TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
-		DeploymentID:  fmt.Sprintf("iis-%d", time.Now().Unix()),
-		Message:       "Certificate deployment to IIS initiated (stub)",
+		DeploymentID:  fmt.Sprintf("iis-%s-%d", thumbprint[:8], time.Now().Unix()),
+		Message:       "Certificate imported and IIS binding updated successfully",
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
 			"hostname":    c.config.Hostname,
 			"site_name":   c.config.SiteName,
 			"cert_store":  c.config.CertStore,
+			"thumbprint":  thumbprint,
+			"port":        fmt.Sprintf("%d", port),
+			"sni":         fmt.Sprintf("%t", c.config.SNI),
 			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
 		},
 	}, nil
 }
 
 // ValidateDeployment verifies that the certificate is properly deployed in IIS.
-// It checks the IIS binding configuration to ensure it's active with the correct certificate.
-//
-// TODO: Implement actual PowerShell validation.
-// PowerShell command:
-// - Get-IISSiteBinding -Name {SiteName} | Where {$_.protocol -eq "https"}
+// It checks the IIS binding to ensure it's active with the correct certificate thumbprint.
 func (c *Connector) ValidateDeployment(ctx context.Context, request target.ValidationRequest) (*target.ValidationResult, error) {
 	c.logger.Info("validating IIS deployment",
 		"certificate_id", request.CertificateID,
@@ -150,33 +390,211 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 
 	startTime := time.Now()
 
-	// TODO: Implement IIS deployment validation
-	// In production:
-	//   1. Query IIS binding status:
-	//      PowerShell: Get-WebBinding -Name "{SiteName}" -Protocol "https"
-	//   2. Verify binding exists and is active
-	//   3. Extract certificate thumbprint from binding
-	//   4. Query certificate store to verify thumbprint matches expected certificate
-	//   5. Check certificate validity dates and key match
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
 
+	// Query IIS binding for HTTPS on the configured port
+	bindingScript := fmt.Sprintf(
+		`$binding = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; `+
+			`if ($binding) { $binding.certificateHash } else { 'NO_BINDING' }`,
+		c.config.SiteName, port,
+	)
+
+	output, err := c.executor.Execute(ctx, bindingScript)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to query IIS binding: %v (output: %s)", err, strings.TrimSpace(output))
+		c.logger.Error("validation failed", "error", err, "output", strings.TrimSpace(output))
+		return &target.ValidationResult{
+			Valid:         false,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			ValidatedAt:   time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	bindingHash := strings.TrimSpace(output)
+	if bindingHash == "NO_BINDING" || bindingHash == "" {
+		errMsg := fmt.Sprintf("no HTTPS binding found on IIS site %q port %d", c.config.SiteName, port)
+		c.logger.Error("validation failed", "error", errMsg)
+		return &target.ValidationResult{
+			Valid:         false,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			ValidatedAt:   time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	// Verify the certificate exists in the store
+	certCheckScript := fmt.Sprintf(
+		`$cert = Get-ChildItem -Path 'Cert:\LocalMachine\%s\%s' -ErrorAction SilentlyContinue; `+
+			`if ($cert -and $cert.NotAfter -gt (Get-Date)) { 'VALID' } `+
+			`elseif ($cert) { 'EXPIRED' } `+
+			`else { 'NOT_FOUND' }`,
+		c.config.CertStore, bindingHash,
+	)
+
+	output, err = c.executor.Execute(ctx, certCheckScript)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to verify certificate in store: %v", err)
+		c.logger.Error("validation failed", "error", err)
+		return &target.ValidationResult{
+			Valid:         false,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			ValidatedAt:   time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	certStatus := strings.TrimSpace(output)
 	validationDuration := time.Since(startTime)
 
-	c.logger.Warn("IIS validation not yet implemented",
-		"site_name", c.config.SiteName)
+	switch certStatus {
+	case "VALID":
+		c.logger.Info("IIS deployment validated successfully",
+			"duration", validationDuration.String(),
+			"thumbprint", bindingHash)
+		return &target.ValidationResult{
+			Valid:         true,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       "Certificate is bound to IIS site and valid",
+			ValidatedAt:   time.Now(),
+			Metadata: map[string]string{
+				"thumbprint":  bindingHash,
+				"site_name":   c.config.SiteName,
+				"cert_store":  c.config.CertStore,
+				"duration_ms": fmt.Sprintf("%d", validationDuration.Milliseconds()),
+			},
+		}, nil
 
-	return &target.ValidationResult{
-		Valid:         true,
-		Serial:        request.Serial,
-		TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
-		Message:       "Certificate deployment validation initiated (stub)",
-		ValidatedAt:   time.Now(),
-		Metadata: map[string]string{
-			"hostname":    c.config.Hostname,
-			"site_name":   c.config.SiteName,
-			"duration_ms": fmt.Sprintf("%d", validationDuration.Milliseconds()),
-		},
-	}, nil
+	case "EXPIRED":
+		errMsg := fmt.Sprintf("certificate %s is expired in store %q", bindingHash, c.config.CertStore)
+		c.logger.Error("validation failed: certificate expired", "thumbprint", bindingHash)
+		return &target.ValidationResult{
+			Valid:         false,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			ValidatedAt:   time.Now(),
+			Metadata: map[string]string{
+				"thumbprint": bindingHash,
+				"status":     "expired",
+			},
+		}, fmt.Errorf("%s", errMsg)
+
+	default: // NOT_FOUND or unexpected
+		errMsg := fmt.Sprintf("certificate %s not found in store %q", bindingHash, c.config.CertStore)
+		c.logger.Error("validation failed: certificate not in store", "thumbprint", bindingHash)
+		return &target.ValidationResult{
+			Valid:         false,
+			Serial:        request.Serial,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			Message:       errMsg,
+			ValidatedAt:   time.Now(),
+			Metadata: map[string]string{
+				"thumbprint": bindingHash,
+				"status":     "not_found",
+			},
+		}, fmt.Errorf("%s", errMsg)
+	}
 }
 
-// executePowerShellCommand will be implemented in V3 when IIS target connector ships.
-// Pattern: exec.CommandContext(ctx, "powershell", "-NoProfile", "-Command", psCommand)
+// createPFX converts PEM-encoded cert, key, and chain into PKCS#12 (PFX) format.
+// IIS requires PFX for certificate import. Uses go-pkcs12 Modern encoder
+// with strong encryption (same library used by M27 export service).
+func createPFX(certPEM, keyPEM, chainPEM string, password string) ([]byte, error) {
+	// Parse leaf certificate
+	certBlock, _ := pem.Decode([]byte(certPEM))
+	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
+		return nil, fmt.Errorf("failed to decode certificate PEM")
+	}
+	leafCert, err := x509.ParseCertificate(certBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse leaf certificate: %w", err)
+	}
+
+	// Parse private key (supports PKCS#8, PKCS#1 RSA, and EC)
+	keyBlock, _ := pem.Decode([]byte(keyPEM))
+	if keyBlock == nil {
+		return nil, fmt.Errorf("failed to decode private key PEM")
+	}
+	privateKey, err := parsePrivateKey(keyBlock.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("failed to parse private key: %w", err)
+	}
+
+	// Parse CA chain certificates (optional)
+	var caCerts []*x509.Certificate
+	if chainPEM != "" {
+		rest := []byte(chainPEM)
+		for {
+			var block *pem.Block
+			block, rest = pem.Decode(rest)
+			if block == nil {
+				break
+			}
+			if block.Type != "CERTIFICATE" {
+				continue
+			}
+			caCert, err := x509.ParseCertificate(block.Bytes)
+			if err != nil {
+				return nil, fmt.Errorf("failed to parse CA certificate: %w", err)
+			}
+			caCerts = append(caCerts, caCert)
+		}
+	}
+
+	// Encode as PKCS#12 with Modern encryption
+	pfxData, err := pkcs12.Modern.Encode(privateKey, leafCert, caCerts, password)
+	if err != nil {
+		return nil, fmt.Errorf("failed to encode PKCS#12: %w", err)
+	}
+
+	return pfxData, nil
+}
+
+// parsePrivateKey attempts to parse a DER-encoded private key.
+// Tries PKCS#8, PKCS#1 RSA, and EC formats in order.
+func parsePrivateKey(der []byte) (interface{}, error) {
+	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
+		return key, nil
+	}
+	if key, err := x509.ParseECPrivateKey(der); err == nil {
+		return key, nil
+	}
+	return nil, fmt.Errorf("unsupported private key format")
+}
+
+// computeThumbprint calculates the SHA-1 thumbprint of a PEM-encoded certificate.
+// IIS uses SHA-1 thumbprints as the primary certificate identifier.
+// Returns uppercase hex string matching Windows certutil output.
+func computeThumbprint(certPEM string) (string, error) {
+	block, _ := pem.Decode([]byte(certPEM))
+	if block == nil || block.Type != "CERTIFICATE" {
+		return "", fmt.Errorf("failed to decode certificate PEM for thumbprint")
+	}
+	hash := sha1.Sum(block.Bytes)
+	return strings.ToUpper(hex.EncodeToString(hash[:])), nil
+}
+
+// generateRandomPassword creates a random alphanumeric password for transient PFX encryption.
+// The password is only used between PFX creation and import — it never persists.
+func generateRandomPassword(length int) (string, error) {
+	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+	b := make([]byte, length)
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("failed to read random bytes: %w", err)
+	}
+	for i := range b {
+		b[i] = charset[int(b[i])%len(charset)]
+	}
+	return string(b), nil
+}

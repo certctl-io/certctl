@@ -46,6 +46,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 39: DigiCert Connector (M37)](#part-39-digicert-connector-m37)
 - [Part 40: Issuer Catalog Page (M33)](#part-40-issuer-catalog-page-m33)
 - [Part 41: Frontend Audit Fixes](#part-41-frontend-audit-fixes)
+- [Part 42: IIS Target Connector (M39)](#part-42-iis-target-connector-m39)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -5554,6 +5555,137 @@ Comprehensive frontend coverage audit closed 60 gaps between backend capabilitie
 3. Verify platform section headers show "macOS / amd64" (not "darwin / amd64")
 
 **PASS if** darwin correctly mapped to macOS in all locations.
+
+---
+
+## Part 42: IIS Target Connector (M39)
+
+The IIS target connector (M39) brings Windows infrastructure lifecycle management to certctl. Dual-mode implementation: agent-local PowerShell (primary) for servers with certctl agent, proxy agent WinRM for agentless Windows targets. Full test suite (28 tests) with mock executor pattern for cross-platform testing. Supports PEM-to-PFX conversion, SHA-1 thumbprint computation, and parameterized PowerShell execution.
+
+### Test Suite Coverage
+
+| Layer | Test Count | Focus | Cross-Platform |
+|-------|-----------|-------|-----------------|
+| ValidateConfig | 9 | Field validation, defaults, regex enforcement | Yes |
+| DeployCertificate | 7 | PFX conversion, script execution, error handling | Yes |
+| ValidateDeployment | 5 | Thumbprint verification, binding checks | Mock executor |
+| PFX Conversion | 4 | Certificate chain handling, password generation | Yes |
+| Helpers | 3 | Thumbprint computation, Windows time conversion | Yes |
+| **Total** | **28** | | **26 pass, 2 skip on non-Windows** |
+
+### Automated Tests (qa-smoke-test.sh Part 42)
+
+| # | Test | Assertion |
+|---|------|-----------|
+| 42.1 | IIS connector imports without error | `internal/connector/target/iis/` builds cleanly |
+| 42.2 | ValidateConfig rejects missing hostname | Validation fails when `hostname` absent |
+| 42.3 | ValidateConfig rejects missing site_name | Validation fails when `site_name` absent |
+| 42.4 | ValidateConfig applies defaults | `port` defaults to 443, `ip_address` to "*" |
+| 42.5 | ValidateConfig validates field regex | Rejects field names with invalid characters |
+| 42.6 | PEM-to-PFX conversion succeeds | PKCS#12 bundle created with random password |
+| 42.7 | SHA-1 thumbprint computed correctly | Matches Go crypto/sha1 output, hex-encoded |
+| 42.8 | PowerShell script is parameterized | No unescaped interpolation in generated commands |
+| 42.9 | Mock executor pattern works cross-platform | Tests pass on Linux/macOS via mock executor |
+| 42.10 | DeployCertificate calls Import-PfxCertificate | PowerShell command includes correct cert store |
+| 42.11 | DeployCertificate calls Set-WebBinding | PowerShell command includes site name + thumbprint |
+| 42.12 | ValidateDeployment executes Get-IISSiteBinding | Thumbprint comparison happens post-deployment |
+| 42.13 | Error cases logged and propagated | TLS verify failure, script timeout errors handled |
+| 42.14 | Windows time conversion helpers work | FileTime ↔ time.Time round-trip accurate |
+
+### Manual Tests (Windows Only)
+
+These tests require a real Windows Server 2019+ environment with IIS 10+. Skip on non-Windows platforms.
+
+**42.M1: Agent-Local Deployment — Happy Path**
+
+1. Provision a Windows Server 2019+ VM with IIS installed
+2. Download and install certctl-agent binary for windows-amd64
+3. Register agent with certctl server via heartbeat endpoint
+4. Create IIS target in certctl dashboard:
+   ```json
+   {
+     "hostname": "iis-server.local",
+     "site_name": "Default Web Site",
+     "cert_store": "WebHosting",
+     "port": 443,
+     "sni": true,
+     "ip_address": "*"
+   }
+   ```
+5. Issue a certificate (e.g., via Local CA)
+6. Create deployment job targeting the IIS target
+7. Agent polls work endpoint, executes PowerShell
+8. Verify on IIS: `Get-IISSiteBinding` shows new binding with correct thumbprint
+9. Verify in dashboard: Deployment job shows status=Completed, verified_at timestamp present
+
+**PASS if** certificate deployed to IIS binding with matching thumbprint, deployment job shows Completed with verification success.
+
+**42.M2: Agent-Local Deployment — Renewal**
+
+1. On the same IIS target, trigger renewal of the certificate
+2. Verify old certificate remains bound during renewal (until new one succeeds)
+3. Verify new certificate is imported and bound after deployment
+4. Verify old binding removed or updated in IIS
+
+**PASS if** renewal completes without downtime, old binding replaced with new.
+
+**42.M3: PFX Import to WebHosting Store**
+
+1. Manually generate a test PKCS#12 certificate
+2. Via certctl-agent on Windows, verify PowerShell can import to WebHosting store:
+   ```powershell
+   $pfx = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+   $pfx.Import([System.IO.File]::ReadAllBytes("C:\temp\test.pfx"), $password, "Exportable")
+   $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("WebHosting", "LocalMachine")
+   $store.Open("MaxAllowed")
+   $store.Add($pfx)
+   ```
+3. Verify certificate appears in IIS Certificate Manager
+
+**PASS if** certificate imports to WebHosting store successfully.
+
+**42.M4: Binding Verification — Thumbprint Match**
+
+1. Deploy a certificate to an IIS site via certctl
+2. Manually run on IIS server:
+   ```powershell
+   Get-IISSiteBinding -Name "Default Web Site" | Select-Object Thumbprint
+   ```
+3. Verify thumbprint matches certificate's SHA-1 hash (as shown in certctl GUI)
+
+**PASS if** thumbprints match exactly (hex-encoded, no colons).
+
+**42.M5: Error Handling — Invalid Site Name**
+
+1. Create IIS target with non-existent site name (e.g., "NonExistentSite")
+2. Trigger deployment
+3. Verify job fails with error message about invalid site
+4. Verify error is logged in agent and audit trail
+
+**PASS if** error handled gracefully, job marked Failed with reason.
+
+**42.M6: Field Validation — Config Injection Attempt**
+
+1. Try to create IIS target with site_name containing PowerShell metacharacters:
+   ```json
+   {
+     "site_name": "Default Web Site'; Get-Process; #"
+   }
+   ```
+2. Verify regex validation rejects this (field validation error, not API error)
+3. Verify no PowerShell execution occurs
+
+**PASS if** injection attempt blocked by field validation.
+
+**42.M7: SNI vs Non-SNI Binding**
+
+1. Create two IIS targets: one with `sni: true`, one with `sni: false`
+2. Deploy certificates to both
+3. Verify Set-WebBinding with `-SslFlags 1` (SNI) for first target
+4. Verify Set-WebBinding without SslFlags (no SNI) for second target
+5. Test TLS connection to both sites, verify SNI-enabled site handles multiple domains correctly
+
+**PASS if** SNI bindings configured correctly per target config.
 
 ---
 

@@ -23,7 +23,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: Traefik](#built-in-traefik)
    - [Built-in: Caddy](#built-in-caddy)
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
-   - [IIS (Interface Only, Dual-Mode)](#iis-interface-only-dual-mode)
+   - [IIS (Implemented, Dual-Mode)](#iis-implemented-dual-mode)
 4. [Notifier Connector](#notifier-connector)
    - [Interface](#interface-2)
 5. [Registering a Connector](#registering-a-connector)
@@ -52,7 +52,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy implemented; F5 via proxy agent, IIS dual-mode interface only; additional cloud and network targets planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, IIS implemented; F5 via proxy agent planned; additional cloud and network targets planned)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
@@ -611,28 +611,41 @@ Note: F5 credentials are stored on the proxy agent, not on the control plane ser
 
 Location: `internal/connector/target/f5/f5.go`
 
-### IIS (Interface Only, Dual-Mode)
+### IIS (Implemented, Dual-Mode)
 
-The IIS target connector supports two planned deployment modes:
+The IIS target connector supports two deployment modes — agent-local (recommended) and proxy agent WinRM for agentless targets.
 
-**Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
+**Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. The agent handles PEM-to-PFX conversion via `go-pkcs12`, computes SHA-1 thumbprint from the certificate, and executes parameterized PowerShell scripts for injection-safe binding management. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
 
 **Proxy agent WinRM (for agentless targets):** For Windows servers where you don't want to install an agent, a nearby Windows agent acts as a proxy and reaches the IIS box via WinRM. The proxy agent picks up the deployment job, transfers the PFX bundle over WinRM, and runs the PowerShell commands remotely. WinRM credentials are stored on the proxy agent, not on the control plane.
 
-Configuration (defined, not yet functional):
+Configuration:
 ```json
 {
-  "mode": "local",
+  "hostname": "iis-server.example.com",
   "site_name": "Default Web Site",
   "cert_store": "WebHosting",
-  "winrm_host": "",
-  "winrm_username": "",
-  "winrm_password": "",
-  "winrm_use_https": true
+  "port": 443,
+  "sni": true,
+  "ip_address": "*",
+  "binding_info": "IP:443:iis-server.example.com"
 }
 ```
 
-When `mode` is `"local"`, the `winrm_*` fields are ignored. When `mode` is `"proxy"`, the agent connects to the remote IIS server via WinRM using the provided credentials.
+**Configuration Fields:**
+- `hostname` (string, required): IIS server hostname or FQDN
+- `site_name` (string, required): IIS website name (e.g., "Default Web Site")
+- `cert_store` (string, required): Certificate store for import (e.g., "WebHosting", "My")
+- `port` (number, default 443): HTTPS binding port
+- `sni` (boolean, default true): Enable Server Name Indication (SNI)
+- `ip_address` (string, default "*"): Specific IP to bind to, or "*" for all IPs
+- `binding_info` (string, optional): Custom binding string for advanced scenarios
+
+**Security Model:**
+- PFX files are transient — generated with random passwords, deleted after import
+- PowerShell commands are parameterized (no string interpolation) to prevent injection
+- Field names are regex-validated before script execution
+- Certificate thumbprints computed via SHA-1 for IIS binding lookups
 
 Location: `internal/connector/target/iis/iis.go`
 

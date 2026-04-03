@@ -417,7 +417,7 @@ The agent deploys certificates using target connectors. Each connector knows how
 - **Apache httpd**: Writes separate cert/chain/key files, validates with `apachectl configtest`, graceful reload
 - **HAProxy**: Builds a combined PEM file (cert + chain + key), optionally validates config, reloads via systemctl or signal
 - **F5 BIG-IP** (planned): A proxy agent in the same network zone calls the iControl REST API to upload certificate and update SSL profile bindings. The server assigns the work; the proxy agent executes it.
-- **IIS** (planned, dual-mode): (1) Agent-local (recommended) — a Windows agent on the IIS box runs PowerShell `Import-PfxCertificate` + `Set-WebBinding` directly. (2) Proxy agent WinRM — for agentless IIS targets, a nearby Windows agent reaches the IIS box via WinRM.
+- **IIS** (implemented, dual-mode): (1) Agent-local (recommended) — a Windows agent on the IIS box runs PowerShell `Import-PfxCertificate` + `Set-WebBinding` directly with PFX conversion and SHA-1 thumbprint computation. (2) Proxy agent WinRM — for agentless IIS targets, a nearby Windows agent reaches the IIS box via WinRM.
 
 The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key and never initiates outbound connections to agents or targets (pull-only model).
 
