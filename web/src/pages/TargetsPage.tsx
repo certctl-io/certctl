@@ -27,7 +27,7 @@ const TARGET_TYPES = [
   { value: 'traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
   { value: 'caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
   { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST via proxy agent (V3 implementation)' },
-  { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or proxy WinRM (V3 implementation)' },
+  { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
 ];
 
 const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: string; required?: boolean }[]> = {
@@ -67,9 +67,18 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
   ],
   iis: [
     { key: 'site_name', label: 'IIS Site Name', placeholder: 'Default Web Site', required: true },
-    { key: 'binding_ip', label: 'Binding IP', placeholder: '*' },
-    { key: 'binding_port', label: 'Binding Port', placeholder: '443' },
-    { key: 'cert_store', label: 'Certificate Store', placeholder: 'My' },
+    { key: 'cert_store', label: 'Certificate Store', placeholder: 'My', required: true },
+    { key: 'port', label: 'HTTPS Port', placeholder: '443' },
+    { key: 'ip_address', label: 'Binding IP', placeholder: '*' },
+    { key: 'binding_info', label: 'Host Header (SNI)', placeholder: 'www.example.com' },
+    { key: 'sni', label: 'Enable SNI', placeholder: 'true or false' },
+    { key: 'mode', label: 'Deployment Mode', placeholder: 'local (default) or winrm' },
+    { key: 'winrm.winrm_host', label: 'WinRM Host (remote mode)', placeholder: 'iis-server.example.com' },
+    { key: 'winrm.winrm_port', label: 'WinRM Port', placeholder: '5985 (HTTP) or 5986 (HTTPS)' },
+    { key: 'winrm.winrm_username', label: 'WinRM Username', placeholder: 'Administrator' },
+    { key: 'winrm.winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
+    { key: 'winrm.winrm_https', label: 'WinRM Use HTTPS', placeholder: 'true or false' },
+    { key: 'winrm.winrm_insecure', label: 'WinRM Skip TLS Verify', placeholder: 'false' },
   ],
 };
 

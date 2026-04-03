@@ -617,9 +617,9 @@ The IIS target connector supports two deployment modes — agent-local (recommen
 
 **Agent-local (recommended):** A Windows agent runs directly on the IIS server and deploys certificates using PowerShell — `Import-PfxCertificate` to install into the certificate store and `Set-WebBinding` to bind to the IIS site. The agent handles PEM-to-PFX conversion via `go-pkcs12`, computes SHA-1 thumbprint from the certificate, and executes parameterized PowerShell scripts for injection-safe binding management. This is the preferred approach: no remote access needed, no credential management, same pull-based model as NGINX/Apache/HAProxy.
 
-**Proxy agent WinRM (for agentless targets):** For Windows servers where you don't want to install an agent, a nearby Windows agent acts as a proxy and reaches the IIS box via WinRM. The proxy agent picks up the deployment job, transfers the PFX bundle over WinRM, and runs the PowerShell commands remotely. WinRM credentials are stored on the proxy agent, not on the control plane.
+**Proxy agent WinRM (for agentless targets):** For Windows servers where you don't want to install an agent, a Linux or Windows proxy agent in the same network zone connects via WinRM (Windows Remote Management) and executes PowerShell commands remotely. The PFX bundle is base64-encoded, transferred inline in the WinRM session, decoded to a temp file on the remote host, imported, and the temp file is cleaned up in a `try/finally` block. WinRM credentials are configured on the target, not on the control plane. Uses the `masterzen/winrm` Go library with support for Basic, NTLM, and Kerberos authentication.
 
-Configuration:
+**Agent-local configuration:**
 ```json
 {
   "hostname": "iis-server.example.com",
@@ -628,7 +628,29 @@ Configuration:
   "port": 443,
   "sni": true,
   "ip_address": "*",
-  "binding_info": "IP:443:iis-server.example.com"
+  "binding_info": "www.example.com"
+}
+```
+
+**WinRM proxy configuration:**
+```json
+{
+  "hostname": "iis-server.example.com",
+  "site_name": "Default Web Site",
+  "cert_store": "WebHosting",
+  "port": 443,
+  "sni": true,
+  "ip_address": "*",
+  "mode": "winrm",
+  "winrm": {
+    "winrm_host": "iis-server.example.com",
+    "winrm_port": 5985,
+    "winrm_username": "Administrator",
+    "winrm_password": "...",
+    "winrm_https": false,
+    "winrm_insecure": false,
+    "winrm_timeout": 60
+  }
 }
 ```
 
@@ -637,17 +659,28 @@ Configuration:
 - `site_name` (string, required): IIS website name (e.g., "Default Web Site")
 - `cert_store` (string, required): Certificate store for import (e.g., "WebHosting", "My")
 - `port` (number, default 443): HTTPS binding port
-- `sni` (boolean, default true): Enable Server Name Indication (SNI)
+- `sni` (boolean, default false): Enable Server Name Indication (SNI)
 - `ip_address` (string, default "*"): Specific IP to bind to, or "*" for all IPs
-- `binding_info` (string, optional): Custom binding string for advanced scenarios
+- `binding_info` (string, optional): Host header for SNI bindings
+- `mode` (string, default "local"): Deployment mode — `local` (agent-local PowerShell) or `winrm` (remote via WinRM)
+
+**WinRM fields (required when `mode` is `winrm`):**
+- `winrm.winrm_host` (string, required): Remote Windows server hostname or IP
+- `winrm.winrm_port` (number, default 5985 HTTP / 5986 HTTPS): WinRM listener port
+- `winrm.winrm_username` (string, required): Windows account with admin privileges
+- `winrm.winrm_password` (string, required): Account password
+- `winrm.winrm_https` (boolean, default false): Use HTTPS transport
+- `winrm.winrm_insecure` (boolean, default false): Skip TLS certificate verification
+- `winrm.winrm_timeout` (number, default 60): Operation timeout in seconds
 
 **Security Model:**
 - PFX files are transient — generated with random passwords, deleted after import
-- PowerShell commands are parameterized (no string interpolation) to prevent injection
-- Field names are regex-validated before script execution
+- In WinRM mode, PFX data is base64-encoded and transferred inline (no SMB/file share needed), with remote temp file cleanup in `try/finally`
+- PowerShell commands use parameterized values — IIS names and cert stores are regex-validated before script execution
+- Field names are validated against `^[a-zA-Z0-9 _\-\.]+$` to prevent PowerShell injection
 - Certificate thumbprints computed via SHA-1 for IIS binding lookups
 
-Location: `internal/connector/target/iis/iis.go`
+Location: `internal/connector/target/iis/iis.go`, `internal/connector/target/iis/winrm.go`
 
 ## Notifier Connector
 

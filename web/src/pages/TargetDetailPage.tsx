@@ -164,11 +164,16 @@ export default function TargetDetailPage() {
             <h3 className="text-sm font-semibold text-ink-muted mb-4">Configuration</h3>
             {target.config && Object.keys(target.config).length > 0 ? (
               <div className="space-y-0">
-                {Object.entries(target.config).map(([key, val]) => (
-                  <InfoRow key={key} label={key.replace(/_/g, ' ')} value={
-                    <span className="font-mono text-xs truncate max-w-xs inline-block">{String(val)}</span>
-                  } />
-                ))}
+                {Object.entries(target.config).map(([key, val]) => {
+                  const sensitiveKeys = ['password', 'secret', 'token', 'key', 'winrm_password'];
+                  const isSensitive = sensitiveKeys.some(s => key.toLowerCase().includes(s));
+                  const displayVal = isSensitive && val ? '********' : String(val);
+                  return (
+                    <InfoRow key={key} label={key.replace(/_/g, ' ')} value={
+                      <span className="font-mono text-xs truncate max-w-xs inline-block">{displayVal}</span>
+                    } />
+                  );
+                })}
               </div>
             ) : (
               <div className="text-sm text-ink-faint py-4 text-center">No configuration data</div>

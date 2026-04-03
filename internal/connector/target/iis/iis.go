@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"crypto/sha1"
 	"crypto/x509"
+	"encoding/base64"
 	"encoding/hex"
 	"encoding/json"
 	"encoding/pem"
@@ -21,7 +22,9 @@ import (
 )
 
 // Config represents the IIS deployment target configuration.
-// This configuration is for Windows agents that manage IIS servers.
+// Supports two modes:
+//   - "local" (default): runs PowerShell locally on a Windows agent
+//   - "winrm": connects to a remote Windows server via WinRM (proxy agent pattern)
 type Config struct {
 	Hostname    string `json:"hostname"`     // Target hostname or IP
 	SiteName    string `json:"site_name"`    // IIS site name (e.g., "Default Web Site")
@@ -30,6 +33,10 @@ type Config struct {
 	Port        int    `json:"port"`         // HTTPS port (default 443)
 	SNI         bool   `json:"sni"`          // Enable Server Name Indication
 	IPAddress   string `json:"ip_address"`   // Bind to specific IP (default "*")
+	Mode        string `json:"mode"`         // "local" (default) or "winrm"
+
+	// WinRM settings (only used when Mode is "winrm")
+	WinRM WinRMConfig `json:"winrm"`
 }
 
 // PowerShellExecutor abstracts PowerShell command execution for testability.
@@ -69,13 +76,33 @@ type Connector struct {
 }
 
 // New creates a new IIS target connector with the given configuration and logger.
-// Uses the real PowerShell executor for production deployments.
-func New(config *Config, logger *slog.Logger) *Connector {
+// In "local" mode (default), uses the real PowerShell executor.
+// In "winrm" mode, creates a WinRM client for remote execution.
+func New(config *Config, logger *slog.Logger) (*Connector, error) {
+	mode := config.Mode
+	if mode == "" {
+		mode = "local"
+	}
+
+	var executor PowerShellExecutor
+	switch mode {
+	case "local":
+		executor = &realExecutor{}
+	case "winrm":
+		winrmExec, err := newWinRMExecutor(&config.WinRM)
+		if err != nil {
+			return nil, fmt.Errorf("failed to initialize WinRM executor: %w", err)
+		}
+		executor = winrmExec
+	default:
+		return nil, fmt.Errorf("unsupported IIS connector mode %q (must be 'local' or 'winrm')", mode)
+	}
+
 	return &Connector{
 		config:   config,
 		logger:   logger,
-		executor: &realExecutor{},
-	}
+		executor: executor,
+	}, nil
 }
 
 // NewWithExecutor creates a new IIS target connector with an injected executor.
@@ -157,15 +184,26 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		}
 	}
 
+	// Apply mode default
+	if cfg.Mode == "" {
+		cfg.Mode = "local"
+	}
+	if cfg.Mode != "local" && cfg.Mode != "winrm" {
+		return fmt.Errorf("unsupported mode %q (must be 'local' or 'winrm')", cfg.Mode)
+	}
+
 	c.logger.Info("validating IIS configuration",
 		"site_name", cfg.SiteName,
 		"cert_store", cfg.CertStore,
 		"hostname", cfg.Hostname,
-		"port", cfg.Port)
+		"port", cfg.Port,
+		"mode", cfg.Mode)
 
-	// Verify PowerShell is available
-	if _, err := exec.LookPath("powershell.exe"); err != nil {
-		return fmt.Errorf("powershell.exe not found in PATH: %w", err)
+	// Verify PowerShell is available (only in local mode — WinRM handles this remotely)
+	if cfg.Mode == "local" {
+		if _, err := exec.LookPath("powershell.exe"); err != nil {
+			return fmt.Errorf("powershell.exe not found in PATH: %w", err)
+		}
 	}
 
 	// Verify IIS site exists
@@ -240,33 +278,9 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		}, fmt.Errorf("%s", errMsg)
 	}
 
-	// Step 2: Write PFX to temp file
-	tmpFile, err := os.CreateTemp("", "certctl-*.pfx")
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to create temp PFX file: %v", err)
-		c.logger.Error("deployment failed", "error", err)
-		return &target.DeploymentResult{
-			Success:    false,
-			Message:    errMsg,
-			DeployedAt: time.Now(),
-		}, fmt.Errorf("%s", errMsg)
-	}
-	pfxPath := tmpFile.Name()
-	defer os.Remove(pfxPath) // Always clean up temp PFX
-
-	if _, err := tmpFile.Write(pfxData); err != nil {
-		tmpFile.Close()
-		errMsg := fmt.Sprintf("failed to write temp PFX file: %v", err)
-		c.logger.Error("deployment failed", "error", err)
-		return &target.DeploymentResult{
-			Success:    false,
-			Message:    errMsg,
-			DeployedAt: time.Now(),
-		}, fmt.Errorf("%s", errMsg)
-	}
-	tmpFile.Close()
-
-	// Step 3: Compute thumbprint (SHA-1 of DER-encoded cert — matches Windows certutil)
+	// Step 2+3: Compute thumbprint and import PFX
+	// In local mode: write PFX to temp file, import via file path
+	// In WinRM mode: base64-encode PFX, decode on remote side to temp file, import, clean up
 	thumbprint, err := computeThumbprint(request.CertPEM)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to compute certificate thumbprint: %v", err)
@@ -281,11 +295,57 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	c.logger.Debug("certificate thumbprint computed", "thumbprint", thumbprint)
 
 	// Step 4: Import PFX to Windows certificate store
-	importScript := fmt.Sprintf(
-		`$password = ConvertTo-SecureString -String '%s' -AsPlainText -Force; `+
-			`Import-PfxCertificate -FilePath '%s' -CertStoreLocation 'Cert:\LocalMachine\%s' -Password $password`,
-		pfxPassword, pfxPath, c.config.CertStore,
-	)
+	var importScript string
+	mode := c.config.Mode
+	if mode == "" {
+		mode = "local"
+	}
+
+	if mode == "winrm" {
+		// WinRM mode: base64-encode PFX, decode on remote, import, cleanup
+		pfxBase64 := base64.StdEncoding.EncodeToString(pfxData)
+		importScript = fmt.Sprintf(
+			`$pfxPath = [System.IO.Path]::GetTempFileName() + '.pfx'; `+
+				`[System.IO.File]::WriteAllBytes($pfxPath, [System.Convert]::FromBase64String('%s')); `+
+				`try { `+
+				`$password = ConvertTo-SecureString -String '%s' -AsPlainText -Force; `+
+				`Import-PfxCertificate -FilePath $pfxPath -CertStoreLocation 'Cert:\LocalMachine\%s' -Password $password `+
+				`} finally { Remove-Item -Path $pfxPath -Force -ErrorAction SilentlyContinue }`,
+			pfxBase64, pfxPassword, c.config.CertStore,
+		)
+	} else {
+		// Local mode: write PFX to local temp file
+		tmpFile, fileErr := os.CreateTemp("", "certctl-*.pfx")
+		if fileErr != nil {
+			errMsg := fmt.Sprintf("failed to create temp PFX file: %v", fileErr)
+			c.logger.Error("deployment failed", "error", fileErr)
+			return &target.DeploymentResult{
+				Success:    false,
+				Message:    errMsg,
+				DeployedAt: time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		pfxPath := tmpFile.Name()
+		defer os.Remove(pfxPath) // Always clean up temp PFX
+
+		if _, writeErr := tmpFile.Write(pfxData); writeErr != nil {
+			tmpFile.Close()
+			errMsg := fmt.Sprintf("failed to write temp PFX file: %v", writeErr)
+			c.logger.Error("deployment failed", "error", writeErr)
+			return &target.DeploymentResult{
+				Success:    false,
+				Message:    errMsg,
+				DeployedAt: time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		tmpFile.Close()
+
+		importScript = fmt.Sprintf(
+			`$password = ConvertTo-SecureString -String '%s' -AsPlainText -Force; `+
+				`Import-PfxCertificate -FilePath '%s' -CertStoreLocation 'Cert:\LocalMachine\%s' -Password $password`,
+			pfxPassword, pfxPath, c.config.CertStore,
+		)
+	}
 
 	output, err := c.executor.Execute(ctx, importScript)
 	if err != nil {

@@ -592,7 +592,7 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 				return nil, fmt.Errorf("invalid IIS config: %w", err)
 			}
 		}
-		return iis.New(&cfg, a.logger), nil
+		return iis.New(&cfg, a.logger)
 
 	case "Traefik":
 		var cfg traefik.Config

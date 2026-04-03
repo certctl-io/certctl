@@ -2669,7 +2669,7 @@ components:
     # ─── Targets ─────────────────────────────────────────────────────
     TargetType:
       type: string
-      enum: [NGINX, Apache, HAProxy, F5, IIS]
+      enum: [NGINX, Apache, HAProxy, Traefik, Caddy, IIS, F5]
 
     DeploymentTarget:
       type: object

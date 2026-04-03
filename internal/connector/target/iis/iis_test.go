@@ -843,3 +843,216 @@ func TestGenerateRandomPassword(t *testing.T) {
 		t.Error("two generated passwords should be different")
 	}
 }
+
+// --- WinRM mode tests ---
+
+func TestIISConnector_ValidateConfig_WinRMMode(t *testing.T) {
+	executor := newMockExecutor()
+	executor.responses["Get-Website"] = mockResponse{output: "Default Web Site\n", err: nil}
+	executor.responses["Test-Path"] = mockResponse{output: "True\n", err: nil}
+
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Mode:      "winrm",
+		WinRM: WinRMConfig{
+			Host:     "iis-server.example.com",
+			Port:     5985,
+			Username: "Administrator",
+			Password: "P@ssw0rd",
+		},
+	}
+
+	// WinRM mode should NOT check for powershell.exe locally
+	connector := NewWithExecutor(&cfg, testLogger(), executor)
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err != nil {
+		t.Fatalf("ValidateConfig failed in WinRM mode: %v", err)
+	}
+
+	// Verify PowerShell commands were executed via the executor (not locally)
+	if len(executor.commands) < 2 {
+		t.Fatalf("expected at least 2 executor commands, got %d", len(executor.commands))
+	}
+}
+
+func TestIISConnector_ValidateConfig_InvalidMode(t *testing.T) {
+	connector := NewWithExecutor(&Config{}, testLogger(), newMockExecutor())
+	cfg := Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Mode:      "invalid",
+	}
+	rawConfig, _ := json.Marshal(cfg)
+
+	err := connector.ValidateConfig(context.Background(), rawConfig)
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), "unsupported mode") {
+		t.Errorf("expected 'unsupported mode' in error, got: %v", err)
+	}
+}
+
+func TestIISConnector_DeployCertificate_WinRMMode(t *testing.T) {
+	executor := newMockExecutor()
+	executor.defaultOutput = "OK"
+
+	cfg := Config{
+		Hostname:  "iis-server.example.com",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+		IPAddress: "*",
+		Mode:      "winrm",
+	}
+
+	connector := NewWithExecutor(&cfg, testLogger(), executor)
+	certPEM, keyPEM, _, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: "",
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate in WinRM mode failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+
+	// Verify the import script used base64 encoding (WinRM mode)
+	foundBase64Import := false
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "FromBase64String") && strings.Contains(cmd, "Import-PfxCertificate") {
+			foundBase64Import = true
+			break
+		}
+	}
+	if !foundBase64Import {
+		t.Error("WinRM mode should use base64-encoded PFX transfer, but no FromBase64String found in commands")
+	}
+
+	// Verify remote temp file cleanup is in the script
+	foundCleanup := false
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "Remove-Item") && strings.Contains(cmd, "finally") {
+			foundCleanup = true
+			break
+		}
+	}
+	if !foundCleanup {
+		t.Error("WinRM mode should include remote temp file cleanup (try/finally Remove-Item)")
+	}
+}
+
+func TestIISConnector_New_WinRMMode_MissingHost(t *testing.T) {
+	cfg := Config{
+		Mode: "winrm",
+		WinRM: WinRMConfig{
+			Username: "admin",
+			Password: "pass",
+		},
+	}
+	_, err := New(&cfg, testLogger())
+	if err == nil {
+		t.Fatal("expected error for missing WinRM host")
+	}
+	if !strings.Contains(err.Error(), "winrm_host is required") {
+		t.Errorf("expected 'winrm_host is required' error, got: %v", err)
+	}
+}
+
+func TestIISConnector_New_WinRMMode_MissingUsername(t *testing.T) {
+	cfg := Config{
+		Mode: "winrm",
+		WinRM: WinRMConfig{
+			Host:     "server.example.com",
+			Password: "pass",
+		},
+	}
+	_, err := New(&cfg, testLogger())
+	if err == nil {
+		t.Fatal("expected error for missing WinRM username")
+	}
+	if !strings.Contains(err.Error(), "winrm_username is required") {
+		t.Errorf("expected 'winrm_username is required' error, got: %v", err)
+	}
+}
+
+func TestIISConnector_New_WinRMMode_MissingPassword(t *testing.T) {
+	cfg := Config{
+		Mode: "winrm",
+		WinRM: WinRMConfig{
+			Host:     "server.example.com",
+			Username: "admin",
+		},
+	}
+	_, err := New(&cfg, testLogger())
+	if err == nil {
+		t.Fatal("expected error for missing WinRM password")
+	}
+	if !strings.Contains(err.Error(), "winrm_password is required") {
+		t.Errorf("expected 'winrm_password is required' error, got: %v", err)
+	}
+}
+
+func TestIISConnector_New_InvalidMode(t *testing.T) {
+	cfg := Config{Mode: "ssh"}
+	_, err := New(&cfg, testLogger())
+	if err == nil {
+		t.Fatal("expected error for invalid mode")
+	}
+	if !strings.Contains(err.Error(), "unsupported IIS connector mode") {
+		t.Errorf("expected 'unsupported IIS connector mode' error, got: %v", err)
+	}
+}
+
+func TestIISConnector_New_DefaultLocalMode(t *testing.T) {
+	cfg := Config{} // No mode specified — should default to local
+	connector, err := New(&cfg, testLogger())
+	if err != nil {
+		t.Fatalf("New() with default mode failed: %v", err)
+	}
+	if connector == nil {
+		t.Fatal("expected non-nil connector")
+	}
+}
+
+func TestWinRMConfig_DefaultPorts(t *testing.T) {
+	// HTTP default: 5985
+	cfg := &WinRMConfig{
+		Host:     "server.example.com",
+		Username: "admin",
+		Password: "pass",
+	}
+	exec, err := newWinRMExecutor(cfg)
+	if err != nil {
+		t.Fatalf("newWinRMExecutor failed: %v", err)
+	}
+	if exec == nil {
+		t.Fatal("expected non-nil executor")
+	}
+
+	// HTTPS default: 5986
+	cfgHTTPS := &WinRMConfig{
+		Host:     "server.example.com",
+		Username: "admin",
+		Password: "pass",
+		UseHTTPS: true,
+		Insecure: true,
+	}
+	execHTTPS, err := newWinRMExecutor(cfgHTTPS)
+	if err != nil {
+		t.Fatalf("newWinRMExecutor (HTTPS) failed: %v", err)
+	}
+	if execHTTPS == nil {
+		t.Fatal("expected non-nil HTTPS executor")
+	}
+}
