@@ -267,8 +267,9 @@ export CERTCTL_ACME_DNS_PRESENT_SCRIPT=/etc/certctl/dns/cloudflare-present.sh
 
 certctl automatically falls back to DNS-01 if the CA doesn't support dns-persist-01 yet.
 
-## Support
+## Next Steps
 
-See [Connector Configuration](connectors.md) for advanced ACME options (EAB, ARI, custom timeouts).
-
-See [Discovery Guide](concepts.md#certificate-discovery) for managing discovered certificates at scale.
+- Try the [Wildcard DNS-01 example](../examples/acme-wildcard-dns01/acme-wildcard-dns01.md) — a working docker-compose with Cloudflare hooks you can adapt for your DNS provider
+- See [Connector Reference](connectors.md) for advanced ACME options (EAB, ARI, custom timeouts)
+- See [Discovery Guide](concepts.md#certificate-discovery) for managing discovered certificates at scale
+- See all [Deployment Examples](./examples.md) for other scenarios (ACME+NGINX, private CA, step-ca, multi-issuer)

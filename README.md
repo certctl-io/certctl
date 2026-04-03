@@ -211,18 +211,15 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 
 | Guide | Description |
 |-------|-------------|
-| [Why certctl?](docs/why-certctl.md) | How certctl compares to open-source and enterprise certificate management platforms |
+| [Why certctl?](docs/why-certctl.md) | How certctl compares to ACME clients, agent-based SaaS, and enterprise platforms |
 | [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
-| [Quick Start](docs/quickstart.md) | Extended quickstart — dashboard, API, CLI, discovery, stakeholder demo flow |
+| [Quick Start](docs/quickstart.md) | 5-minute setup — dashboard, API, CLI, discovery, stakeholder demo flow |
+| [Deployment Examples](docs/examples.md) | 5 turnkey scenarios (ACME+NGINX, wildcard DNS-01, private CA, step-ca, multi-issuer) with migration guides |
 | [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Feature Inventory](docs/features.md) | Complete reference of all V2 capabilities, API endpoints, and configuration |
-| [Configuration Reference](docs/features.md) | All 39 environment variables across server, agent, and connector config |
-| [Connectors](docs/connectors.md) | Build custom issuer, target, and notifier connectors |
+| [Connector Reference](docs/connectors.md) | Configuration for all 7 issuers, 10 targets, and 5 notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [Migrate from Certbot](docs/migrate-from-certbot.md) | Step-by-step migration from Certbot/Let's Encrypt cron jobs |
-| [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users with DNS-01 scripts |
-| [certctl for cert-manager Users](docs/certctl-for-cert-manager-users.md) | Using certctl alongside cert-manager for non-Kubernetes infrastructure |
 | [OpenAPI 3.1 Spec](api/openapi.yaml) | 97 operations, full request/response schemas |
 
 ## CLI

@@ -461,7 +461,10 @@ The `-v` flag removes the PostgreSQL data volume for a clean slate.
 
 ## What's Next
 
+**Ready to deploy with your stack?** The [Deployment Examples](examples.md) page has 5 turnkey docker-compose scenarios — pick the one closest to your setup and have it running in minutes. It also covers migration paths from Certbot, acme.sh, and cert-manager.
+
+- **[Deployment Examples](examples.md)** — ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer
 - **[Advanced Demo](demo-advanced.md)** — Issue a real certificate via the Local CA end-to-end
 - **[Architecture](architecture.md)** — How the control plane, agents, and connectors work together
-- **[Connector Guide](connectors.md)** — Build custom connectors for your infrastructure
+- **[Connector Reference](connectors.md)** — Configuration for all 7 issuers and 10 targets
 - **[Concepts Guide](concepts.md)** — TLS certificates, CAs, and private keys explained from scratch

@@ -82,7 +82,7 @@ Agents scan configured directories and report back all existing certs. In the da
 Set up the same issuer certctl uses for non-Kubernetes certs:
 - **ACME** (Let's Encrypt, for public certs)
 - **step-ca** (Smallstep, for internal certs)
-- **Vault PKI** (planned) (HashiCorp Vault, for enterprise PKI)
+- **Vault PKI** (HashiCorp Vault, for enterprise PKI)
 - **Private CA** (your own internal root CA)
 
 No new CA infrastructure needed. If cert-manager already uses your CA, certctl points to the same one.
@@ -115,7 +115,7 @@ Certificates are linked to issuers and profiles when created or claimed from dis
 If cert-manager and certctl both use the same CA:
 - **ACME**: cert-manager uses ClusterIssuer + certctl uses ACME connector → same Let's Encrypt account, transparent coexistence
 - **step-ca**: cert-manager uses external issuer CRD + certctl uses step-ca connector → same provisioner, shared certificate inventory
-- **Vault PKI** (planned): cert-manager uses external issuer CRD + certctl uses Vault connector → same mount, same audit trail
+- **Vault PKI**: cert-manager uses external issuer CRD + certctl uses Vault connector → same mount, same audit trail
 
 No conflict. They just issue certs through the same CA. certctl's discovery scanning finds cert-manager-issued certs and shows them alongside certctl-managed ones.
 
@@ -138,7 +138,7 @@ For now: cert-manager handles Kubernetes, certctl handles everything else. They 
 
 ## Next Steps
 
-1. Review [Quick Start](./quickstart.md) for a 5-minute demo
-2. Explore [Architecture](./architecture.md#agents) for deployment architecture
-3. Read about [Discovery Scanning](./quickstart.md#certificate-discovery) to auto-find certs
-4. Check [Helm Chart](../deploy/helm/certctl/) for production Kubernetes deployment
+1. Run through the [Quick Start](./quickstart.md) for a 5-minute demo
+2. Try the [Multi-Issuer example](../examples/multi-issuer/multi-issuer.md) — manages public and internal certs from one dashboard
+3. Explore [Architecture](./architecture.md#agents) for deployment patterns
+4. Check the [Helm Chart](../deploy/helm/certctl/) for production Kubernetes deployment
