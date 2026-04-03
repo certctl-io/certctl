@@ -1,82 +1,117 @@
 # Why certctl?
 
-Certificate management is broken at every scale between "one domain on Let's Encrypt" and "Fortune 500 budget for Venafi."
+Certificate management is broken at every scale between "one domain on Let's Encrypt" and "Fortune 500 budget for Venafi." certctl fills that gap: a self-hosted platform that automates the entire certificate lifecycle, works with any CA, deploys to any server, and keeps private keys on your infrastructure. It's free, source-available, and you own everything.
 
-If you run a personal blog, Certbot works fine. If your company spends $200K/year on Keyfactor, you're covered. But if you're an ops engineer managing 20-500 certificates across NGINX, Apache, HAProxy, and maybe a private CA — the tools available today either don't do enough or cost too much.
+## The Math That Forces the Decision
 
-certctl fills that gap.
+The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) in April 2025, mandating a phased reduction in TLS certificate lifetimes: **200 days** as of March 2026, **100 days** by March 2027, and **47 days** by March 2029.
 
-## The Problem
+At 47-day lifespans, a team managing 100 certificates is processing **7+ renewals per week**, every week, forever. At 200 certificates, it's two per day. Manual processes, calendar reminders, and certbot cron jobs don't scale to this — a single missed renewal becomes a production outage at 3 AM. Certificate lifecycle automation is no longer optional; the only question is what tool runs it.
 
-The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) in April 2025, mandating a phased reduction in TLS certificate lifetimes: 200 days as of March 2026, 100 days by March 2027, and 47 days by March 2029. That means every organization needs automated certificate renewal — not eventually, but now.
+## The Landscape Today
 
-The existing options for automation are:
+If you're evaluating your options, here's what you'll find:
 
-- **ACME clients** (Certbot, Lego, CertWarden): Handle issuance and renewal for ACME-compatible CAs, but don't manage deployment to target servers, don't provide inventory visibility, don't support non-ACME CAs, and don't offer audit trails or policy enforcement.
-- **Kubernetes-native** (cert-manager): Works well inside Kubernetes, but if your infrastructure includes bare-metal servers, VMs, or network appliances alongside Kubernetes, you need a separate solution for everything cert-manager can't reach.
-- **Commercial SaaS** (CertKit, Sectigo CLM): Handle more of the lifecycle but are proprietary, cloud-dependent, and priced per certificate — costs scale linearly with your infrastructure.
-- **Enterprise platforms** (Venafi, Keyfactor, AppViewX): Comprehensive but start at $75K/year and require dedicated teams to operate.
+**ACME clients** (certbot, lego, acme.sh) handle issuance and renewal for Let's Encrypt and similar CAs, but they don't deploy to target servers, don't track inventory, don't support private CAs, and give you no audit trail or policy enforcement. You end up writing glue scripts and hoping they don't break.
+
+**Kubernetes-native tools** (cert-manager) work well inside the cluster, but most organizations run mixed infrastructure — NGINX on VMs, HAProxy at the edge, IIS on Windows, maybe an F5. You need a separate solution for everything outside Kubernetes.
+
+**Commercial SaaS platforms** handle more of the lifecycle but are proprietary, cloud-dependent, and priced per certificate. At 100 certs and 20 agents, SaaS pricing runs $3,000-5,000/year and scales linearly. You're paying rent on your own infrastructure's security.
+
+**Enterprise platforms** (Venafi, Keyfactor, AppViewX) are comprehensive but start at $75K/year and require dedicated teams to operate. If you have a 50-server environment, the licensing costs more than the servers.
 
 ## What certctl Does Differently
 
-certctl is a self-hosted certificate lifecycle platform. It handles issuance, renewal, deployment, revocation, discovery, and monitoring — with three design decisions that no other tool at any price point combines:
+certctl handles issuance, renewal, deployment, revocation, discovery, and monitoring — with three design decisions that no other tool at any price point combines:
 
 ### 1. Private Keys Never Leave Your Infrastructure
 
-certctl agents generate private keys locally using ECDSA P-256. The agent creates a CSR and submits it to the control plane. The signed certificate comes back. The private key stays on the agent's filesystem with 0600 permissions.
+certctl agents generate ECDSA P-256 private keys locally. The agent creates a CSR and submits it to the control plane. The signed certificate comes back. The private key stays on the agent's filesystem with 0600 permissions — it never crosses the network.
 
-This isn't a premium feature — it's the default behavior in the free tier. Most competitors either generate keys server-side (creating a single point of compromise) or gate key isolation behind paid tiers.
+This isn't a premium feature. It's the default behavior, free. Most alternatives either generate keys on the server (creating a single point of compromise) or gate key isolation behind paid tiers.
 
 ### 2. CA-Agnostic Issuer Architecture
 
-certctl works with any certificate authority, not just ACME providers:
+certctl works with any certificate authority, not just ACME providers. Seven issuer connectors ship today, all free:
 
-- **ACME** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01 and DNS-01 challenges, DNS-PERSIST-01 for zero-touch renewals, External Account Binding
-- **step-ca** (Smallstep) — native /sign API with JWK provisioner authentication
-- **Local CA** — self-signed or sub-CA mode (chain to your enterprise root CA, e.g. ADCS)
-- **OpenSSL / Custom CA** — delegate signing to any shell script with configurable timeout
-- **EST enrollment** (RFC 7030) — device certificate enrollment for WiFi/802.1X, MDM, and IoT
+- **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9702)
+- **HashiCorp Vault PKI** — `/v1/{mount}/sign/{role}` API, token auth
+- **DigiCert CertCentral** — async order model, OV/EV support
+- **step-ca** (Smallstep) — native /sign API with JWK provisioner auth
+- **Local CA** — self-signed or sub-CA mode (chain to ADCS or any enterprise root)
+- **OpenSSL / Custom CA** — delegate signing to any shell script
+- **EST enrollment** (RFC 7030) — device certs for WiFi/802.1X, MDM, IoT
 
-Every issuer connector implements the same interface. Switching CAs or running multiple CAs in parallel requires zero code changes — just configuration.
+Every connector implements the same interface. Running multiple CAs in parallel — Let's Encrypt for public certs, Vault for internal services, your enterprise CA for legacy systems — is configuration, not code.
 
 ### 3. Post-Deployment Verification
 
-Every other tool in this space stops at "the deployment command succeeded." certctl goes further: after deploying a certificate to a target, the agent connects back to the target's TLS endpoint and verifies the served certificate matches what was deployed, using SHA-256 fingerprint comparison.
+Every other tool in this space stops at "the deployment command succeeded." certctl goes further: after deploying a certificate, the agent connects back to the live TLS endpoint and compares the SHA-256 fingerprint of the served certificate against what was deployed.
 
-A reload command can exit 0 while the certificate doesn't take effect — wrong virtual host, stale cache, config that validates but doesn't apply. certctl catches this.
+A reload command can exit 0 while the certificate doesn't take effect — wrong virtual host, stale cache, config that validates but doesn't apply. certctl catches this automatically.
+
+## What Else Ships Free
+
+The three differentiators above get the headlines, but the feature surface is wider than most paid platforms:
+
+**10 deployment targets** — NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell + remote WinRM), Postfix, and Dovecot. All use a pluggable connector model. The control plane never initiates outbound connections — agents poll for work, meaning certctl works behind firewalls, across network zones, and in air-gapped environments.
+
+**Network certificate discovery** — active TLS scanning of CIDR ranges finds certificates you didn't know existed. Agents also scan local filesystems for PEM/DER files. Everything feeds into a triage workflow where you claim, dismiss, or import discovered certs into management.
+
+**Immutable audit trail** — every API call recorded (method, path, actor, body hash, status, latency). Every certificate lifecycle event tracked. Append-only, no update or delete. Mapped to SOC 2, PCI-DSS 4.0, and NIST SP 800-57 compliance frameworks with published evidence guides.
+
+**Policy engine** — 5 rule types (allowed issuers, allowed domains, required metadata, allowed environments, renewal lead time) with violation tracking and severity levels.
+
+**PKI compliance** — DER-encoded X.509 CRL signed by issuing CA, embedded OCSP responder, RFC 5280 revocation with all reason codes, short-lived certificate exemption.
+
+**Prometheus metrics** — `/api/v1/metrics/prometheus` in standard exposition format. Works with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics.
+
+**MCP server** — 80 tools exposing the entire API surface for AI-assisted certificate management via Claude, Cursor, or any MCP-compatible client. No other certificate platform offers this.
+
+**Full REST API** — 97 OpenAPI 3.1-documented operations. CLI tool with 10 subcommands. Helm chart for Kubernetes deployment. Scheduled certificate digest emails. Certificate export in PEM and PKCS#12. S/MIME support with EKU-aware issuance.
+
+**1,554 tests** — Go backend with race detection, static analysis (golangci-lint), and vulnerability scanning (govulncheck) on every commit. Frontend test suite. CI runs on every push.
 
 ## How certctl Compares
 
-### vs. CertKit
+### vs. ACME Clients
 
-Closest competitor architecturally — agent-based, private key isolation (Keystore), multi-platform. certctl leads on issuer coverage (ACME + step-ca + Local CA + OpenSSL + EST vs. ACME-only), PKI compliance (CRL, OCSP, RFC 5280 revocation, immutable audit trail — all missing from CertKit today), policy engine (5 rule types vs. none), and network discovery (CIDR TLS scanning vs. none). certctl is source-available (BSL 1.1 → Apache 2.0) with no cert limit; CertKit is proprietary SaaS with a 3-cert free tier. Where CertKit leads: more deployment targets today (adds LiteSpeed, IIS, auto-detection), Windows support, Kubernetes, and polished SaaS onboarding.
+ACME clients solve one slice of the problem — issuance and renewal from ACME CAs. certctl replaces the ACME client, adds 6 more CA integrations, deploys the cert to the right server, verifies it's live, tracks it in an inventory, alerts on expiry, logs everything to an audit trail, and enforces policy. If you're currently running certbot behind a cron job and a prayer, certctl replaces all of it.
 
-### vs. KeyTalk
+### vs. Agent-Based SaaS
 
-Commercial (proprietary) PKI platform from a Dutch company — on-prem appliance, cloud, or managed service. Broader cert type coverage (TLS, S/MIME, device auth, VPN) and DigiCert + SCEP integrations. No public documentation on policy engine, API surface, or audit capabilities. No free tier, no public pricing. certctl trades breadth of cert types for full transparency — source-available, public API spec, free community edition with no limits.
+The closest architectural competitors use the same agent model — local key generation, CSR submission, push-based deployment. Where certctl differs: it supports 7 issuer types (not just ACME), provides CRL/OCSP/revocation infrastructure (not just issuance), includes a policy engine and network discovery, and is source-available with no certificate limit. SaaS alternatives are typically proprietary, priced per certificate ($2+/cert/month), and cap their free tiers at 3-5 certificates. certctl is free for any number of certificates, forever.
 
-### vs. Enterprise Platforms (Venafi, Keyfactor)
+### vs. Commercial PKI Platforms
 
-Comprehensive solutions with decades of features — at $75K-$250K+/yr. certctl targets organizations that need 80% of those capabilities at 1% of the cost. The trade-off: no SSO/RBAC yet (coming in certctl Pro), no F5/IIS target connectors yet, no SLA-backed support.
+On-prem or hosted commercial platforms offer broader cert type coverage (VPN certs, device auth, SCEP) and deeper CA integrations. The trade-off: no free tier, opaque pricing (often €13K+/year for 1,500 certs), proprietary codebases, and no public API documentation. certctl trades breadth of exotic cert types for full transparency — source-available code, 97-operation OpenAPI spec, and a free community edition with no artificial limits.
 
-## Getting Started
+### vs. Enterprise Platforms
+
+Venafi and Keyfactor offer decades of features at $75K-$250K+/year. certctl targets organizations that need 80% of those capabilities at a fraction of the cost. What certctl doesn't have yet: SSO/RBAC (coming in certctl Pro), vendor SLA-backed support. What certctl does have that enterprise platforms don't: an MCP server for AI-assisted management, ACME ARI (RFC 9702) for CA-directed renewal timing, and a deployment model that works in 5 minutes instead of 5 months.
+
+## Who Should Look Elsewhere
+
+certctl isn't the right tool for everyone:
+
+- **Single-domain sites** — if you have one certificate on one server, certbot is fine. certctl is designed for managing tens to hundreds of certificates across multiple servers and CAs.
+- **Pure Kubernetes environments** — if every workload runs in-cluster and you're happy with cert-manager, there's no reason to add another tool. certctl shines when your infrastructure extends beyond Kubernetes.
+- **Organizations that need a vendor SLA today** — certctl is source-available software maintained by a small team. If you need contractual uptime guarantees and a support hotline, an enterprise platform is the right choice (for now).
+
+## See It Running
+
+The demo seeds 32 certificates across 7 issuers, 8 agents, 6 deployment targets, and 180 days of realistic history — jobs, audit events, discovery scans, approval workflows — so you can explore every feature immediately.
 
 ```bash
-# Clone and start with Docker Compose (includes demo data)
 git clone https://github.com/shankar0123/certctl.git
-cd certctl/deploy
-docker compose up -d
-
-# Open the dashboard
-open http://localhost:8443
+cd certctl/deploy && docker compose up -d
+# Dashboard at http://localhost:8443
 ```
 
-The demo seeds 35 certificates across 5 issuers, 8 agents, 8 deployment targets, 90 days of job history, discovery scan data, network scan targets, and pending approval jobs so you can explore every feature immediately.
-
-See the [Quickstart Guide](quickstart.md) for a full walkthrough.
+See the [Quickstart Guide](quickstart.md) for a full walkthrough, or explore the [5 turnkey examples](../examples/) for specific scenarios (ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer).
 
 ## License
 
-certctl is licensed under the [Business Source License 1.1](../LICENSE). The licensed work is free to use for any purpose other than offering a competing managed service. The license converts to Apache 2.0 on March 1, 2033.
+certctl is source-available under the [Business Source License 1.1](../LICENSE). Free for any use except offering a competing managed service. Converts to Apache 2.0 on March 1, 2033.
 
-The source is available, auditable, and self-hostable. You own your data, your keys, and your deployment.
+You own your data, your keys, and your deployment.
