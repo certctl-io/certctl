@@ -21,6 +21,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: Apache httpd](#built-in-apache-httpd)
    - [Built-in: HAProxy](#built-in-haproxy)
    - [Built-in: Traefik](#built-in-traefik)
+   - [Built-in: Envoy](#built-in-envoy)
    - [Built-in: Caddy](#built-in-caddy)
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
    - [IIS (Implemented, Dual-Mode)](#iis-implemented-dual-mode)
@@ -52,7 +53,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA implemented; additional CA integrations planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, IIS implemented; F5 via proxy agent planned; additional cloud and network targets planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, IIS implemented; F5 via proxy agent planned; additional cloud and network targets planned)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
@@ -589,6 +590,35 @@ Configuration:
 When `mode` is `"api"`, the connector posts the certificate to the admin API endpoint. When `mode` is `"file"`, it writes files to `cert_dir` (same pattern as Traefik). The `admin_api` field is ignored in file mode.
 
 Location: `internal/connector/target/caddy/caddy.go`
+
+### Built-in: Envoy
+
+The Envoy connector uses file-based certificate delivery — it writes certificate and key files to a directory that Envoy watches via its SDS (Secret Discovery Service) file-based configuration or static `filename` references in the bootstrap config. When files change, Envoy automatically picks up the new certificates without requiring a reload command.
+
+Configuration:
+```json
+{
+  "cert_dir": "/etc/envoy/certs",
+  "cert_filename": "cert.pem",
+  "key_filename": "key.pem",
+  "chain_filename": "chain.pem",
+  "sds_config": true
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `cert_dir` | string | (required) | Directory where Envoy watches for certificate files |
+| `cert_filename` | string | `cert.pem` | Filename for the certificate (leaf + chain unless `chain_filename` is set) |
+| `key_filename` | string | `key.pem` | Filename for the private key |
+| `chain_filename` | string | (empty) | If set, chain is written to a separate file instead of appended to the cert |
+| `sds_config` | bool | `false` | If true, writes an `sds.json` file for Envoy's file-based SDS provider |
+
+When `sds_config` is `true`, the connector writes an SDS JSON file (`{cert_dir}/sds.json`) containing a `tls_certificate` resource that points to the cert and key file paths. Envoy's file-based SDS (`path_config_source`) watches this file for changes, providing automatic hot-reload of certificates. This is the recommended approach for production Envoy deployments using dynamic TLS configuration.
+
+When `sds_config` is `false` (the default), the connector simply writes cert and key files. Use this mode when Envoy's bootstrap config references the cert/key files directly via static `filename` fields in the TLS context.
+
+Location: `internal/connector/target/envoy/envoy.go`
 
 ### F5 BIG-IP (Interface Only)
 

@@ -16,6 +16,7 @@ const typeLabels: Record<string, string> = {
   haproxy: 'HAProxy',
   traefik: 'Traefik',
   caddy: 'Caddy',
+  envoy: 'Envoy',
   f5_bigip: 'F5 BIG-IP',
   iis: 'IIS',
 };
@@ -26,6 +27,7 @@ const TARGET_TYPES = [
   { value: 'haproxy', label: 'HAProxy', description: 'Combined PEM file (cert+chain+key), optional validate, reload' },
   { value: 'traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
   { value: 'caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
+  { value: 'envoy', label: 'Envoy', description: 'File-based deployment — writes cert/key to watched directory. Optional SDS file generation.' },
   { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST via proxy agent (V3 implementation)' },
   { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
 ];
@@ -59,6 +61,13 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'cert_dir', label: 'Certificate Directory (file mode)', placeholder: '/etc/caddy/certs' },
     { key: 'cert_file', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
     { key: 'key_file', label: 'Key Filename', placeholder: 'key.pem (default)' },
+  ],
+  envoy: [
+    { key: 'cert_dir', label: 'Certificate Directory', placeholder: '/etc/envoy/certs', required: true },
+    { key: 'cert_filename', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
+    { key: 'key_filename', label: 'Key Filename', placeholder: 'key.pem (default)' },
+    { key: 'chain_filename', label: 'Chain Filename (optional)', placeholder: 'chain.pem (leave empty to append to cert)' },
+    { key: 'sds_config', label: 'Generate SDS Config', placeholder: 'true or false' },
   ],
   f5_bigip: [
     { key: 'management_ip', label: 'Management IP', placeholder: '192.168.1.100', required: true },

@@ -29,6 +29,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target"
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
+	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
@@ -611,6 +612,15 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return caddy.New(&cfg, a.logger), nil
+
+	case "Envoy":
+		var cfg envoy.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid Envoy config: %w", err)
+			}
+		}
+		return envoy.New(&cfg, a.logger), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

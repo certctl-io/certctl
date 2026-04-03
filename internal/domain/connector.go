@@ -84,4 +84,5 @@ const (
 	TargetTypeIIS      TargetType = "IIS"
 	TargetTypeTraefik  TargetType = "Traefik"
 	TargetTypeCaddy    TargetType = "Caddy"
+	TargetTypeEnvoy    TargetType = "Envoy"
 )
