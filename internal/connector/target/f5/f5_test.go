@@ -32,7 +32,6 @@ type mockF5Client struct {
 	installCertErr      error
 	installCertErrOn    string
 	installKeyErr       error
-	installKeyErrOn     string
 	createTransactionID string
 	createTransactionErr error
 	commitTransactionErr error
