@@ -1286,11 +1286,11 @@ The web dashboard is the primary operational interface for certctl. Built with *
 - **Docker Tags** — `:latest`, `:v{version}` (`shankar0123.docker.scarf.sh/certctl-server`, `shankar0123.docker.scarf.sh/certctl-agent`)
 
 ### Test Suite
-- **Unit Tests** — 1,088+ test functions across service, handler, middleware, domain layers
-- **Integration Tests** — End-to-end workflows (issuance→renewal→deployment)
+- **Unit Tests** — Extensive coverage across service, handler, middleware, domain, and connector layers
+- **Integration Tests** — End-to-end workflows (issuance→renewal→deployment) against live Docker Compose environment
 - **Negative Tests** — Malformed input, nonexistent resources, error conditions
-- **Frontend Tests** — 211 Vitest tests (API client, utilities, stats/metrics, full endpoint coverage)
-- **Total Coverage** — 1,554+ tests (Go + frontend combined)
+- **Frontend Tests** — Vitest suite covering API client, utilities, stats/metrics, and full endpoint coverage
+- **CI Gates** — Per-layer coverage thresholds (service 60%, handler 60%, domain 40%, middleware 50%), race detection, static analysis, vulnerability scanning
 
 ### Licensing
 - **License** — Business Source License 1.1 (BSL 1.1)
@@ -1492,6 +1492,6 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **MCP Tools** | 76 (16 resource domains) |
 | **CLI Subcommands** | 10 |
 | **Database Tables** | 19 |
-| **Test Suite** | 1,554+ tests (Go backend + frontend) |
+| **Test Suite** | Extensively tested with CI-enforced coverage gates |
 | **Environment Variables** | 41+ configuration options |
 

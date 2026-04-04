@@ -70,7 +70,7 @@ The three differentiators above get the headlines, but the feature surface is wi
 
 **Full REST API** — 97 OpenAPI 3.1-documented operations. CLI tool with 10 subcommands. Helm chart for Kubernetes deployment. Scheduled certificate digest emails. Certificate export in PEM and PKCS#12. S/MIME support with EKU-aware issuance.
 
-**1,554 tests** — Go backend with race detection, static analysis (golangci-lint), and vulnerability scanning (govulncheck) on every commit. Frontend test suite. CI runs on every push.
+**Extensively tested** — Go backend with race detection, static analysis (golangci-lint), and vulnerability scanning (govulncheck) on every commit. CI-enforced per-layer coverage thresholds. Frontend test suite. Every push is gated.
 
 ## How certctl Compares
 
