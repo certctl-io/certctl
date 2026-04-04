@@ -68,6 +68,9 @@ type TargetRepository interface {
 	Get(ctx context.Context, id string) (*domain.DeploymentTarget, error)
 	// Create stores a new target.
 	Create(ctx context.Context, target *domain.DeploymentTarget) error
+	// CreateIfNotExists creates a target only if the ID doesn't already exist (ON CONFLICT DO NOTHING).
+	// Returns true if created, false if already existed.
+	CreateIfNotExists(ctx context.Context, target *domain.DeploymentTarget) (bool, error)
 	// Update modifies an existing target.
 	Update(ctx context.Context, target *domain.DeploymentTarget) error
 	// Delete removes a target.

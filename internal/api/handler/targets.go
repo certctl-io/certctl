@@ -17,6 +17,7 @@ type TargetService interface {
 	CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
 	UpdateTarget(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
 	DeleteTarget(id string) error
+	TestTargetConnection(id string) error
 }
 
 // TargetHandler handles HTTP requests for deployment target operations.
@@ -188,4 +189,37 @@ func (h TargetHandler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// TestTargetConnection tests target connectivity by checking the assigned agent's heartbeat.
+// POST /api/v1/targets/{id}/test
+func (h TargetHandler) TestTargetConnection(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	// Extract target ID from path: /api/v1/targets/{id}/test
+	path := strings.TrimPrefix(r.URL.Path, "/api/v1/targets/")
+	parts := strings.Split(path, "/")
+	if len(parts) < 2 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Target ID is required", requestID)
+		return
+	}
+	id := parts[0]
+
+	if err := h.svc.TestTargetConnection(id); err != nil {
+		JSON(w, http.StatusOK, map[string]interface{}{
+			"status":  "failed",
+			"message": err.Error(),
+		})
+		return
+	}
+
+	JSON(w, http.StatusOK, map[string]interface{}{
+		"status":  "success",
+		"message": "Agent is online and reachable",
+	})
 }

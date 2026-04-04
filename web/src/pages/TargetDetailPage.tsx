@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getTarget, getJobs, updateTarget } from '../api/client';
+import { getTarget, getJobs, updateTarget, testTargetConnection } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import DataTable from '../components/DataTable';
@@ -18,6 +18,9 @@ const typeLabels: Record<string, string> = {
   caddy: 'Caddy',
   f5_bigip: 'F5 BIG-IP',
   iis: 'IIS',
+  envoy: 'Envoy',
+  postfix: 'Postfix',
+  dovecot: 'Dovecot',
 };
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -29,18 +32,56 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
+function TestStatusIndicator({ status, testedAt }: { status?: string; testedAt?: string }) {
+  if (!status || status === 'untested') {
+    return <span className="text-xs text-ink-faint">Not tested</span>;
+  }
+  const styles: Record<string, string> = {
+    success: 'bg-emerald-100 text-emerald-700',
+    failed: 'bg-red-100 text-red-700',
+  };
+  const labels: Record<string, string> = {
+    success: 'Connected',
+    failed: 'Failed',
+  };
+  return (
+    <span className="inline-flex items-center gap-1.5">
+      <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${styles[status] || 'bg-gray-100 text-gray-600'}`}>
+        {labels[status] || status}
+      </span>
+      {testedAt && <span className="text-xs text-ink-faint">{formatDateTime(testedAt)}</span>}
+    </span>
+  );
+}
+
+function SourceBadge({ source }: { source?: string }) {
+  if (!source || source === 'database') {
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-blue-100 text-blue-700 font-medium">GUI</span>;
+  }
+  if (source === 'env') {
+    return <span className="text-xs px-2 py-0.5 rounded-full bg-amber-100 text-amber-700 font-medium">Env Var</span>;
+  }
+  return <span className="text-xs text-ink-faint">{source}</span>;
+}
+
 export default function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
   const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
-  const [editHostname, setEditHostname] = useState('');
 
   const updateMutation = useMutation({
-    mutationFn: (data: Partial<{ name: string; hostname: string }>) => updateTarget(id!, data),
+    mutationFn: (data: Partial<{ name: string }>) => updateTarget(id!, data),
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['target', id] });
       setIsEditing(false);
+    },
+  });
+
+  const testMutation = useMutation({
+    mutationFn: () => testTargetConnection(id!),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['target', id] });
     },
   });
 
@@ -126,18 +167,38 @@ export default function TargetDetailPage() {
         title={target.name}
         subtitle={typeLabels[target.type] || target.type}
         action={
-          <button
-            onClick={() => {
-              setEditName(target.name);
-              setEditHostname(target.hostname || '');
-              setIsEditing(true);
-            }}
-            className="px-3 py-1.5 border border-surface-border rounded text-ink text-xs hover:bg-surface-hover transition-colors font-medium"
-          >
-            Edit
-          </button>
+          <div className="flex gap-2">
+            <button
+              onClick={() => testMutation.mutate()}
+              disabled={testMutation.isPending}
+              className="px-3 py-1.5 border border-surface-border rounded text-ink text-xs hover:bg-surface-hover transition-colors font-medium disabled:opacity-50"
+            >
+              {testMutation.isPending ? 'Testing...' : 'Test Connection'}
+            </button>
+            <button
+              onClick={() => {
+                setEditName(target.name);
+                setIsEditing(true);
+              }}
+              className="px-3 py-1.5 border border-surface-border rounded text-ink text-xs hover:bg-surface-hover transition-colors font-medium"
+            >
+              Edit
+            </button>
+          </div>
         }
       />
+
+      {/* Test connection result banner */}
+      {testMutation.isSuccess && (
+        <div className="mx-6 mt-2 p-3 bg-emerald-50 border border-emerald-200 rounded text-sm text-emerald-700">
+          Agent connection test passed — agent is online and responsive.
+        </div>
+      )}
+      {testMutation.isError && (
+        <div className="mx-6 mt-2 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">
+          Connection test failed: {(testMutation.error as Error).message}
+        </div>
+      )}
 
       <div className="flex-1 overflow-y-auto px-6 py-4 space-y-6">
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
@@ -147,8 +208,9 @@ export default function TargetDetailPage() {
             <InfoRow label="ID" value={<span className="font-mono text-xs">{target.id}</span>} />
             <InfoRow label="Name" value={target.name} />
             <InfoRow label="Type" value={typeLabels[target.type] || target.type} />
-            <InfoRow label="Hostname" value={target.hostname || '—'} />
-            <InfoRow label="Status" value={<StatusBadge status={target.status} />} />
+            <InfoRow label="Enabled" value={<StatusBadge status={target.enabled ? 'Enabled' : 'Disabled'} />} />
+            <InfoRow label="Source" value={<SourceBadge source={target.source} />} />
+            <InfoRow label="Test Status" value={<TestStatusIndicator status={target.test_status} testedAt={target.last_tested_at} />} />
             {target.agent_id && (
               <InfoRow label="Agent" value={
                 <Link to={`/agents/${target.agent_id}`} className="text-xs text-accent hover:text-accent-bright font-mono">
@@ -157,6 +219,7 @@ export default function TargetDetailPage() {
               } />
             )}
             <InfoRow label="Created" value={formatDateTime(target.created_at)} />
+            {target.updated_at && <InfoRow label="Updated" value={formatDateTime(target.updated_at)} />}
           </div>
 
           {/* Config */}
@@ -205,14 +268,10 @@ export default function TargetDetailPage() {
                 {(updateMutation.error as Error).message}
               </div>
             )}
-            <form onSubmit={e => { e.preventDefault(); updateMutation.mutate({ name: editName, hostname: editHostname }); }} className="space-y-4">
+            <form onSubmit={e => { e.preventDefault(); updateMutation.mutate({ name: editName }); }} className="space-y-4">
               <div>
                 <label className="block text-sm font-medium text-ink mb-1">Name</label>
                 <input value={editName} onChange={e => setEditName(e.target.value)} className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-ink mb-1">Hostname</label>
-                <input value={editHostname} onChange={e => setEditHostname(e.target.value)} className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
               </div>
               <div className="flex gap-2 pt-2">
                 <button type="submit" disabled={updateMutation.isPending} className="flex-1 btn btn-primary disabled:opacity-50">

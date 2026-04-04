@@ -22,14 +22,18 @@ type Issuer struct {
 
 // DeploymentTarget represents a target system where certificates are deployed.
 type DeploymentTarget struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Type      TargetType      `json:"type"`
-	AgentID   string          `json:"agent_id"`
-	Config    json.RawMessage `json:"config"`
-	Enabled   bool            `json:"enabled"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Type            TargetType      `json:"type"`
+	AgentID         string          `json:"agent_id"`
+	Config          json.RawMessage `json:"config"`
+	EncryptedConfig []byte          `json:"-"`                         // AES-GCM encrypted full config (never exposed via API)
+	Enabled         bool            `json:"enabled"`
+	LastTestedAt    *time.Time      `json:"last_tested_at,omitempty"`
+	TestStatus      string          `json:"test_status,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // Agent represents an agent running on a target system.

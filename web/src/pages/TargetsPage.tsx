@@ -118,7 +118,6 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
   const [step, setStep] = useState<'type' | 'config' | 'review'>('type');
   const [targetType, setTargetType] = useState('');
   const [name, setName] = useState('');
-  const [hostname, setHostname] = useState('');
   const [agentId, setAgentId] = useState('');
   const [config, setConfig] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
@@ -127,7 +126,6 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
     mutationFn: () => createTarget({
       name,
       type: targetType,
-      hostname,
       agent_id: agentId,
       config: Object.fromEntries(Object.entries(config).filter(([, v]) => v)),
     }),
@@ -205,19 +203,11 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
                   className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
                   placeholder="web-server-1" />
               </div>
-              <div className="grid grid-cols-2 gap-3">
-                <div>
-                  <label className="text-xs text-ink-muted block mb-1">Hostname</label>
-                  <input value={hostname} onChange={e => setHostname(e.target.value)}
-                    className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
-                    placeholder="web1.example.com" />
-                </div>
-                <div>
-                  <label className="text-xs text-ink-muted block mb-1">Agent ID</label>
-                  <input value={agentId} onChange={e => setAgentId(e.target.value)}
-                    className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
-                    placeholder="agent-web1" />
-                </div>
+              <div>
+                <label className="text-xs text-ink-muted block mb-1">Agent ID</label>
+                <input value={agentId} onChange={e => setAgentId(e.target.value)}
+                  className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
+                  placeholder="agent-web1" />
               </div>
               {fields.map(f => (
                 <div key={f.key}>
@@ -252,12 +242,6 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
                 <span className="text-ink-muted">Type</span>
                 <span className="text-ink">{typeLabels[targetType] || targetType}</span>
               </div>
-              {hostname && (
-                <div className="flex justify-between">
-                  <span className="text-ink-muted">Hostname</span>
-                  <span className="text-ink font-mono text-xs">{hostname}</span>
-                </div>
-              )}
               {agentId && (
                 <div className="flex justify-between">
                   <span className="text-ink-muted">Agent</span>
@@ -323,19 +307,22 @@ export default function TargetsPage() {
       ),
     },
     {
-      key: 'hostname',
-      label: 'Hostname',
-      render: (t) => <span className="text-ink font-mono text-xs">{t.hostname || '\u2014'}</span>,
-    },
-    {
       key: 'agent',
       label: 'Agent',
       render: (t) => <span className="text-xs text-ink-muted font-mono">{t.agent_id || '\u2014'}</span>,
     },
     {
-      key: 'status',
+      key: 'enabled',
       label: 'Status',
-      render: (t) => <StatusBadge status={t.status} />,
+      render: (t) => <StatusBadge status={t.enabled ? 'Enabled' : 'Disabled'} />,
+    },
+    {
+      key: 'test_status',
+      label: 'Connection',
+      render: (t) => {
+        if (!t.test_status || t.test_status === 'untested') return <span className="text-xs text-ink-faint">—</span>;
+        return <StatusBadge status={t.test_status === 'success' ? 'Connected' : 'Failed'} />;
+      },
     },
     {
       key: 'created',

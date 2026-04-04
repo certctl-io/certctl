@@ -660,7 +660,7 @@ export default function CertificateDetailPage() {
             >
               <option value="">Choose a target...</option>
               {targets?.data?.map(t => (
-                <option key={t.id} value={t.id}>{t.name} ({t.type} — {t.hostname})</option>
+                <option key={t.id} value={t.id}>{t.name} ({t.type})</option>
               ))}
             </select>
             <div className="flex justify-end gap-3">

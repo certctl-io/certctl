@@ -126,6 +126,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.GetTarget))
 	r.Register("PUT /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.UpdateTarget))
 	r.Register("DELETE /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.DeleteTarget))
+	r.Register("POST /api/v1/targets/{id}/test", http.HandlerFunc(reg.Targets.TestTargetConnection))
 
 	// Agents routes: /api/v1/agents
 	r.Register("GET /api/v1/agents", http.HandlerFunc(reg.Agents.ListAgents))

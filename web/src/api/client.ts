@@ -232,6 +232,9 @@ export const updateTarget = (id: string, data: Partial<Target>) =>
 export const deleteTarget = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/targets/${id}`, { method: 'DELETE' });
 
+export const testTargetConnection = (id: string) =>
+  fetchJSON<{ status: string; message: string }>(`${BASE}/targets/${id}/test`, { method: 'POST' });
+
 // Profiles
 export const getProfiles = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();

@@ -637,6 +637,19 @@ func (m *mockTargetRepo) Create(ctx context.Context, target *domain.DeploymentTa
 	return nil
 }
 
+func (m *mockTargetRepo) CreateIfNotExists(ctx context.Context, target *domain.DeploymentTarget) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CreateErr != nil {
+		return false, m.CreateErr
+	}
+	if _, exists := m.Targets[target.ID]; exists {
+		return false, nil
+	}
+	m.Targets[target.ID] = target
+	return true, nil
+}
+
 func (m *mockTargetRepo) Update(ctx context.Context, target *domain.DeploymentTarget) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

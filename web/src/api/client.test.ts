@@ -36,6 +36,7 @@ import {
   getTargets,
   createTarget,
   deleteTarget,
+  testTargetConnection,
   getProfiles,
   getProfile,
   createProfile,
@@ -424,6 +425,14 @@ describe('API Client', () => {
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe('/api/v1/targets/t-nginx');
       expect(init.method).toBe('DELETE');
+    });
+
+    it('testTargetConnection sends POST', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ status: 'success', message: 'Agent is online' }));
+      await testTargetConnection('t-nginx');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/targets/t-nginx/test');
+      expect(init.method).toBe('POST');
     });
   });
 

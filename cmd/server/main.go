@@ -185,7 +185,7 @@ func main() {
 		logger.Error("failed to build issuer registry from database", "error", err)
 	}
 	logger.Info("issuer registry loaded", "issuers", issuerRegistry.Len())
-	targetService := service.NewTargetService(targetRepo, auditService)
+	targetService := service.NewTargetService(targetRepo, auditService, agentRepo, encryptionKey, logger)
 	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)

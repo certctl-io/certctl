@@ -156,10 +156,12 @@ export interface Target {
   id: string;
   name: string;
   type: string;
-  hostname: string;
   agent_id: string;
   config: Record<string, unknown>;
-  status: string;
+  enabled: boolean;
+  last_tested_at?: string;
+  test_status?: string;
+  source?: string;
   created_at: string;
   updated_at?: string;
 }

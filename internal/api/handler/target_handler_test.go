@@ -13,11 +13,12 @@ import (
 
 // MockTargetService is a mock implementation of TargetService interface.
 type MockTargetService struct {
-	ListTargetsFn  func(page, perPage int) ([]domain.DeploymentTarget, int64, error)
-	GetTargetFn    func(id string) (*domain.DeploymentTarget, error)
-	CreateTargetFn func(target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	UpdateTargetFn func(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	DeleteTargetFn func(id string) error
+	ListTargetsFn        func(page, perPage int) ([]domain.DeploymentTarget, int64, error)
+	GetTargetFn          func(id string) (*domain.DeploymentTarget, error)
+	CreateTargetFn       func(target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	UpdateTargetFn       func(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	DeleteTargetFn       func(id string) error
+	TestTargetConnectionFn func(id string) error
 }
 
 func (m *MockTargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
@@ -51,6 +52,13 @@ func (m *MockTargetService) UpdateTarget(id string, target domain.DeploymentTarg
 func (m *MockTargetService) DeleteTarget(id string) error {
 	if m.DeleteTargetFn != nil {
 		return m.DeleteTargetFn(id)
+	}
+	return nil
+}
+
+func (m *MockTargetService) TestTargetConnection(id string) error {
+	if m.TestTargetConnectionFn != nil {
+		return m.TestTargetConnectionFn(id)
 	}
 	return nil
 }
@@ -417,5 +425,71 @@ func TestDeleteTarget_EmptyID(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestTestTargetConnection_Success(t *testing.T) {
+	mock := &MockTargetService{
+		TestTargetConnectionFn: func(id string) error {
+			return nil
+		},
+	}
+
+	handler := NewTargetHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets/t-nginx-01/test", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.TestTargetConnection(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["status"] != "success" {
+		t.Errorf("expected status 'success', got %v", resp["status"])
+	}
+}
+
+func TestTestTargetConnection_Failed(t *testing.T) {
+	mock := &MockTargetService{
+		TestTargetConnectionFn: func(id string) error {
+			return ErrMockServiceFailed
+		},
+	}
+
+	handler := NewTargetHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets/t-nginx-01/test", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.TestTargetConnection(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+
+	var resp map[string]interface{}
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if resp["status"] != "failed" {
+		t.Errorf("expected status 'failed', got %v", resp["status"])
+	}
+}
+
+func TestTestTargetConnection_MethodNotAllowed(t *testing.T) {
+	handler := NewTargetHandler(&MockTargetService{})
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/targets/t-nginx-01/test", nil)
+	w := httptest.NewRecorder()
+
+	handler.TestTargetConnection(w, req)
+
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Fatalf("expected status 405, got %d", w.Code)
 	}
 }

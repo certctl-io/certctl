@@ -786,6 +786,14 @@ func (m *mockTargetRepository) Create(ctx context.Context, target *domain.Deploy
 	return nil
 }
 
+func (m *mockTargetRepository) CreateIfNotExists(ctx context.Context, target *domain.DeploymentTarget) (bool, error) {
+	if _, exists := m.targets[target.ID]; exists {
+		return false, nil
+	}
+	m.targets[target.ID] = target
+	return true, nil
+}
+
 func (m *mockTargetRepository) Update(ctx context.Context, target *domain.DeploymentTarget) error {
 	m.targets[target.ID] = target
 	return nil
@@ -1007,6 +1015,10 @@ func (m *mockTargetService) UpdateTarget(id string, target domain.DeploymentTarg
 
 func (m *mockTargetService) DeleteTarget(id string) error {
 	return m.targetRepo.Delete(context.Background(), id)
+}
+
+func (m *mockTargetService) TestTargetConnection(id string) error {
+	return nil // No-op for integration tests
 }
 
 type mockTeamService struct{}
