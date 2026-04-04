@@ -514,6 +514,7 @@ flowchart TB
         II --> VP["Vault PKI"]
         II --> DC["DigiCert CertCentral"]
         II --> SG["Sectigo SCM"]
+        II --> GC["Google CAS"]
     end
 
     subgraph "Target Connectors"

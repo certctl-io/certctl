@@ -379,12 +379,29 @@ The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API.
 
 Location: `internal/connector/issuer/sectigo/sectigo.go`
 
+### Built-in: Google CAS
+
+Google Cloud Certificate Authority Service — managed private CA on GCP. Synchronous issuance via CAS REST API with OAuth2 service account auth.
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `CERTCTL_GOOGLE_CAS_PROJECT` | Yes | — | GCP project ID |
+| `CERTCTL_GOOGLE_CAS_LOCATION` | Yes | — | GCP region (e.g., `us-central1`) |
+| `CERTCTL_GOOGLE_CAS_CA_POOL` | Yes | — | CA pool name |
+| `CERTCTL_GOOGLE_CAS_CREDENTIALS` | Yes | — | Path to service account JSON |
+| `CERTCTL_GOOGLE_CAS_TTL` | No | `8760h` | Default certificate TTL |
+
+**Authentication:** OAuth2 service account. The connector reads a service account JSON file, signs a JWT with the private key, and exchanges it for an access token at Google's token endpoint. Tokens are cached and refreshed automatically (5 min before expiry).
+
+**Note:** CRL and OCSP are managed by Google CAS directly. certctl records revocations locally and notifies Google CAS via the revoke endpoint.
+
+Location: `internal/connector/issuer/googlecas/googlecas.go`
+
 ### Coming in V2.2+
 
 The following issuer connectors are planned for future releases:
 
 - **Entrust** — Enterprise CA via Entrust API
-- **Google CAS** — Google Cloud Certificate Authority Service
 - **AWS ACM Private CA** — AWS-managed private CA
 
 Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.

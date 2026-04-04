@@ -72,6 +72,7 @@ const (
 	IssuerTypeVault     IssuerType = "VaultPKI"
 	IssuerTypeDigiCert  IssuerType = "DigiCert"
 	IssuerTypeSectigo   IssuerType = "Sectigo"
+	IssuerTypeGoogleCAS IssuerType = "GoogleCAS"
 )
 
 // TargetType represents the type of deployment target.

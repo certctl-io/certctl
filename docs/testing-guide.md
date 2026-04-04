@@ -6385,15 +6385,83 @@ These must be green before starting manual QA:
 
 **PASS if** correct 3-header auth on all requests.
 
+### Part 44: Google CAS Issuer Connector (M44)
+
+**Prerequisites:** GCP project with Certificate Authority Service enabled, CA pool created, service account with `roles/privateca.certificateManager`, service account JSON key file.
+
+#### Automated Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 44.s1 | `IssuerTypeGoogleCAS` constant exists in domain | Auto | ☐ |  | `grep 'GoogleCAS' internal/domain/connector.go` |
+| 44.s2 | `GoogleCASConfig` struct exists in config | Auto | ☐ |  | `grep 'GoogleCASConfig' internal/config/config.go` |
+| 44.s3 | `iss-googlecas` in seed_demo.sql | Auto | ☐ |  | `grep 'iss-googlecas' migrations/seed_demo.sql` |
+| 44.s4 | GoogleCAS in OpenAPI IssuerType enum | Auto | ☐ |  | `grep 'GoogleCAS' api/openapi.yaml` |
+| 44.s5 | Google CAS connector tests pass | Auto | ☐ |  | `go test ./internal/connector/issuer/googlecas/... -v` |
+| 44.s6 | GoogleCAS in issuerTypes.ts | Auto | ☐ |  | `grep 'GoogleCAS' web/src/config/issuerTypes.ts` |
+| 44.s7 | Frontend build succeeds | Auto | ☐ |  | `cd web && npm run build` |
+| 44.s8 | Full Go build succeeds | Auto | ☐ |  | `go build ./cmd/server/... ./cmd/agent/... ./cmd/cli/... ./cmd/mcp-server/...` |
+
+#### Manual Tests
+
+**44.M1: Validate Google CAS Credentials**
+
+1. Configure env vars: `CERTCTL_GOOGLE_CAS_PROJECT`, `CERTCTL_GOOGLE_CAS_LOCATION`, `CERTCTL_GOOGLE_CAS_CA_POOL`, `CERTCTL_GOOGLE_CAS_CREDENTIALS`
+2. Start certctl server — verify log line: `Google CAS issuer registered`
+3. Call `GET /api/v1/issuers` — verify `iss-googlecas` appears in the list
+
+**PASS if** `iss-googlecas` registered and visible in API.
+
+**44.M2: Issue Certificate via Google CAS**
+
+1. Create a certificate with `issuer_id: iss-googlecas`
+2. Trigger issuance — verify synchronous issuance (no async polling needed)
+3. Verify PEM cert returned with correct CN and SANs
+4. Verify certificate resource name stored in order_id field
+
+**PASS if** certificate issued synchronously, PEM valid, resource name tracked.
+
+**44.M3: Renewal via Google CAS**
+
+1. Trigger renewal on a Google CAS-issued certificate
+2. Verify new certificate issued (delegates to IssueCertificate)
+3. Verify new serial number, updated validity dates
+
+**PASS if** renewal produces new cert with new serial.
+
+**44.M4: Revocation via Google CAS**
+
+1. Revoke a Google CAS-issued certificate via `POST /api/v1/certificates/{id}/revoke`
+2. Verify Google CAS revoke endpoint called (`POST {name}:revoke`)
+3. Verify revocation reason mapped correctly (RFC 5280 → Google CAS enum)
+4. Verify audit trail records revocation
+
+**PASS if** revocation recorded in certctl and sent to Google CAS.
+
+**44.M5: OAuth2 Token Caching**
+
+1. Issue multiple certificates in quick succession
+2. Verify token is cached (not re-fetched for every request)
+3. Verify token refresh after expiry
+
+**PASS if** token reuse observed, refresh works after expiry.
+
+**44.M6: CA Certificate Retrieval**
+
+1. Call EST cacerts endpoint with Google CAS as issuer
+2. Verify CA certificate chain returned from Google CAS fetchCaCerts API
+
+**PASS if** CA cert PEM returned successfully.
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 20 |
+| ☐ Auto (not yet run) | 28 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 247 |
-| **Total** | **416** |
+| ☐ Manual (requires hands-on verification) | 253 |
+| **Total** | **430** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

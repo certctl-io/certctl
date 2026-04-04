@@ -22,6 +22,7 @@ import (
 	digicertissuer "github.com/shankar0123/certctl/internal/connector/issuer/digicert"
 	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	googlecasissuer "github.com/shankar0123/certctl/internal/connector/issuer/googlecas"
 	sectigoissuer "github.com/shankar0123/certctl/internal/connector/issuer/sectigo"
 	vaultissuer "github.com/shankar0123/certctl/internal/connector/issuer/vault"
 	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
@@ -172,6 +173,17 @@ func main() {
 	}, logger)
 	logger.Info("initialized Sectigo SCM issuer connector")
 
+	// Initialize Google CAS issuer connector (for GCP private CA).
+	// Uses the Google CAS REST API with OAuth2 service account auth.
+	googlecasConnector := googlecasissuer.New(&googlecasissuer.Config{
+		Project:     cfg.GoogleCAS.Project,
+		Location:    cfg.GoogleCAS.Location,
+		CAPool:      cfg.GoogleCAS.CAPool,
+		Credentials: cfg.GoogleCAS.Credentials,
+		TTL:         cfg.GoogleCAS.TTL,
+	}, logger)
+	logger.Info("initialized Google CAS issuer connector")
+
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
@@ -201,6 +213,12 @@ func main() {
 	if cfg.Sectigo.CustomerURI != "" && cfg.Sectigo.Login != "" && cfg.Sectigo.Password != "" {
 		issuerRegistry["iss-sectigo"] = service.NewIssuerConnectorAdapter(sectigoConnector)
 		logger.Info("Sectigo SCM issuer registered", "id", "iss-sectigo")
+	}
+
+	// Conditionally register Google CAS (only if project and credentials are set)
+	if cfg.GoogleCAS.Project != "" && cfg.GoogleCAS.Credentials != "" {
+		issuerRegistry["iss-googlecas"] = service.NewIssuerConnectorAdapter(googlecasConnector)
+		logger.Info("Google CAS issuer registered", "id", "iss-googlecas")
 	}
 
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))

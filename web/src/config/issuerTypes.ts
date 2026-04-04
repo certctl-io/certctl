@@ -136,6 +136,19 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
+    id: 'GoogleCAS',
+    name: 'Google CAS',
+    description: 'Google Cloud Certificate Authority Service \u2014 managed private CA on GCP',
+    icon: '\u2601\uFE0F',
+    configFields: [
+      { key: 'project', label: 'GCP Project ID', required: true, placeholder: 'my-gcp-project' },
+      { key: 'location', label: 'Location', required: true, placeholder: 'us-central1' },
+      { key: 'ca_pool', label: 'CA Pool', required: true, placeholder: 'my-ca-pool' },
+      { key: 'credentials', label: 'Service Account JSON Path', required: true, placeholder: '/path/to/credentials.json', sensitive: true },
+      { key: 'ttl', label: 'Default TTL', required: false, placeholder: '8760h' },
+    ],
+  },
+  {
     id: 'entrust',
     name: 'Entrust',
     description: 'Entrust Certificate Services \u2014 coming soon',

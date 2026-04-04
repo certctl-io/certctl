@@ -28,6 +28,7 @@ type Config struct {
 	Vault        VaultConfig
 	DigiCert     DigiCertConfig
 	Sectigo      SectigoConfig
+	GoogleCAS    GoogleCASConfig
 	Digest       DigestConfig
 }
 
@@ -230,6 +231,34 @@ type SectigoConfig struct {
 	// Default: "https://cert-manager.com/api".
 	// Setting: CERTCTL_SECTIGO_BASE_URL environment variable.
 	BaseURL string
+}
+
+// GoogleCASConfig contains Google Cloud Certificate Authority Service configuration.
+type GoogleCASConfig struct {
+	// Project is the GCP project ID.
+	// Required for Google CAS integration.
+	// Setting: CERTCTL_GOOGLE_CAS_PROJECT environment variable.
+	Project string
+
+	// Location is the GCP region (e.g., "us-central1").
+	// Required for Google CAS integration.
+	// Setting: CERTCTL_GOOGLE_CAS_LOCATION environment variable.
+	Location string
+
+	// CAPool is the Certificate Authority pool name.
+	// Required for Google CAS integration.
+	// Setting: CERTCTL_GOOGLE_CAS_CA_POOL environment variable.
+	CAPool string
+
+	// Credentials is the path to the service account JSON credentials file.
+	// Required for Google CAS integration.
+	// Setting: CERTCTL_GOOGLE_CAS_CREDENTIALS environment variable.
+	Credentials string
+
+	// TTL is the default certificate time-to-live.
+	// Default: "8760h" (1 year).
+	// Setting: CERTCTL_GOOGLE_CAS_TTL environment variable.
+	TTL string
 }
 
 // DigestConfig controls the scheduled certificate digest email feature.
@@ -546,6 +575,13 @@ func Load() (*Config, error) {
 			CertType:    getEnvInt("CERTCTL_SECTIGO_CERT_TYPE", 0),
 			Term:        getEnvInt("CERTCTL_SECTIGO_TERM", 365),
 			BaseURL:     getEnv("CERTCTL_SECTIGO_BASE_URL", "https://cert-manager.com/api"),
+		},
+		GoogleCAS: GoogleCASConfig{
+			Project:     getEnv("CERTCTL_GOOGLE_CAS_PROJECT", ""),
+			Location:    getEnv("CERTCTL_GOOGLE_CAS_LOCATION", ""),
+			CAPool:      getEnv("CERTCTL_GOOGLE_CAS_CA_POOL", ""),
+			Credentials: getEnv("CERTCTL_GOOGLE_CAS_CREDENTIALS", ""),
+			TTL:         getEnv("CERTCTL_GOOGLE_CAS_TTL", "8760h"),
 		},
 		ACME: ACMEConfig{
 			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),
