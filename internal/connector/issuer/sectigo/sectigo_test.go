@@ -250,11 +250,11 @@ func TestSectigoConnector(t *testing.T) {
 
 	t.Run("IssueCertificate_Pending", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/ssl/v1/enroll":
+			switch r.URL.Path {
+			case "/ssl/v1/enroll":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55002}`))
-			case r.URL.Path == "/ssl/v1/55002":
+			case "/ssl/v1/55002":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55002,"status":"Applied","commonName":"secure.example.com"}`))
 			default:
@@ -470,11 +470,11 @@ func TestSectigoConnector(t *testing.T) {
 
 	t.Run("RenewCertificate_NewOrder", func(t *testing.T) {
 		srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			switch {
-			case r.URL.Path == "/ssl/v1/enroll":
+			switch r.URL.Path {
+			case "/ssl/v1/enroll":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55010}`))
-			case r.URL.Path == "/ssl/v1/55010":
+			case "/ssl/v1/55010":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55010,"status":"Applied"}`))
 			default:
@@ -680,11 +680,11 @@ func TestSectigoConnector(t *testing.T) {
 				t.Errorf("Request %d: expected password 'verify-pass', got '%s'", requestCount, r.Header.Get("password"))
 			}
 
-			switch {
-			case r.URL.Path == "/ssl/v1/enroll":
+			switch r.URL.Path {
+			case "/ssl/v1/enroll":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55050}`))
-			case r.URL.Path == "/ssl/v1/55050":
+			case "/ssl/v1/55050":
 				w.WriteHeader(http.StatusOK)
 				w.Write([]byte(`{"sslId":55050,"status":"Applied"}`))
 			default:
