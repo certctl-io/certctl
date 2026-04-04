@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -66,6 +67,7 @@ func TestRenewalService_ProcessWithCancelledContext(t *testing.T) {
 		notifierRegistry: make(map[string]Notifier),
 	}
 
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 	renewalSvc := NewRenewalService(
 		mockCertRepo,
 		mockJobRepo,
@@ -73,7 +75,7 @@ func TestRenewalService_ProcessWithCancelledContext(t *testing.T) {
 		mockProfileRepo,
 		mockAuditSvc,
 		mockNotifSvc,
-		make(map[string]IssuerConnector),
+		issuerRegistry,
 		"agent",
 	)
 
@@ -162,13 +164,14 @@ func TestAgentService_HeartbeatWithCancelledContext(t *testing.T) {
 		Hostname: "localhost",
 	})
 
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 	agentSvc := NewAgentService(
 		mockAgentRepo,
 		nil, // certRepo
 		nil, // jobRepo
 		nil, // targetRepo
 		nil, // auditService
-		make(map[string]IssuerConnector),
+		issuerRegistry,
 		nil, // renewalService
 	)
 
@@ -212,13 +215,14 @@ func TestAgentService_HeartbeatWithDeadlineExceeded(t *testing.T) {
 		Hostname: "localhost",
 	})
 
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 	agentSvc := NewAgentService(
 		mockAgentRepo,
 		nil, // certRepo
 		nil, // jobRepo
 		nil, // targetRepo
 		nil, // auditService
-		make(map[string]IssuerConnector),
+		issuerRegistry,
 		nil, // renewalService
 	)
 

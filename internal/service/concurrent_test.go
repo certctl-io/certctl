@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"sync"
 	"testing"
 
@@ -130,13 +131,14 @@ func TestConcurrentAgentHeartbeats(t *testing.T) {
 		mockAgentRepo.AddAgent(agent)
 	}
 
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 	agentSvc := NewAgentService(
 		mockAgentRepo,
 		nil, // certRepo
 		nil, // jobRepo
 		nil, // targetRepo
 		nil, // auditService
-		make(map[string]IssuerConnector),
+		issuerRegistry,
 		nil, // renewalService
 	)
 

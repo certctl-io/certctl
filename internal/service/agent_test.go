@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -28,7 +29,7 @@ func TestRegisterAgent(t *testing.T) {
 	auditRepo := &mockAuditRepo{Events: []*domain.AuditEvent{}}
 	auditService := NewAuditService(auditRepo)
 
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -85,7 +86,7 @@ func TestHeartbeat(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -118,7 +119,7 @@ func TestHeartbeat_NotFound(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -175,7 +176,7 @@ func TestGetPendingWork(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -217,7 +218,8 @@ func TestGetPendingWork_OnlyReturnsAgentJobs(t *testing.T) {
 	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
 	auditService := NewAuditService(&mockAuditRepo{})
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	// Agent A should only see its job
 	jobsA, err := agentService.GetPendingWork(ctx, agentA)
@@ -268,7 +270,8 @@ func TestGetPendingWork_EmptyWhenNoJobsForAgent(t *testing.T) {
 	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
 	auditService := NewAuditService(&mockAuditRepo{})
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	jobs, err := agentService.GetPendingWork(ctx, agentA)
 	if err != nil {
@@ -302,7 +305,8 @@ func TestGetPendingWork_DeploymentAndCSR_Scoped(t *testing.T) {
 	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
 	auditService := NewAuditService(&mockAuditRepo{})
 
-	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, make(map[string]IssuerConnector), nil)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
 	jobs, err := agentService.GetPendingWork(ctx, agentA)
 	if err != nil {
@@ -350,7 +354,7 @@ func TestReportJobStatus(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{Events: []*domain.AuditEvent{}}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -409,7 +413,7 @@ func TestMarkStaleAgentsOffline(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -475,7 +479,8 @@ func TestSubmitCSR(t *testing.T) {
 			NotAfter:  now.AddDate(1, 0, 0),
 		},
 	}
-	issuerRegistry := map[string]IssuerConnector{"iss-local": issuerConnector}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-local", issuerConnector)
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -524,7 +529,7 @@ func TestSubmitCSR_EmptyCSR(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
@@ -572,7 +577,7 @@ func TestListAgents(t *testing.T) {
 	}
 	auditRepo := &mockAuditRepo{}
 	auditService := NewAuditService(auditRepo)
-	issuerRegistry := make(map[string]IssuerConnector)
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 

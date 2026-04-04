@@ -3,6 +3,7 @@
 package service
 
 import (
+	"log/slog"
 	"testing"
 	"time"
 
@@ -16,9 +17,9 @@ func newCAOperationsSvcTest() (*CAOperationsSvc, *mockRevocationRepo, *mockCertR
 	profileRepo := newMockProfileRepository()
 
 	caSvc := NewCAOperationsSvc(revocationRepo, certRepo, profileRepo)
-	caSvc.SetIssuerRegistry(map[string]IssuerConnector{
-		"iss-local": &mockIssuerConnector{},
-	})
+	registry := NewIssuerRegistry(slog.Default())
+	registry.Set("iss-local", &mockIssuerConnector{})
+	caSvc.SetIssuerRegistry(registry)
 
 	return caSvc, revocationRepo, certRepo
 }

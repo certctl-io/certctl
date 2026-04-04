@@ -21,7 +21,7 @@ type AgentService struct {
 	targetRepo     repository.TargetRepository
 	profileRepo    repository.CertificateProfileRepository
 	auditService   *AuditService
-	issuerRegistry map[string]IssuerConnector
+	issuerRegistry *IssuerRegistry
 	renewalService *RenewalService
 }
 
@@ -32,7 +32,7 @@ func NewAgentService(
 	jobRepo repository.JobRepository,
 	targetRepo repository.TargetRepository,
 	auditService *AuditService,
-	issuerRegistry map[string]IssuerConnector,
+	issuerRegistry *IssuerRegistry,
 	renewalService *RenewalService,
 ) *AgentService {
 	return &AgentService{
@@ -163,7 +163,7 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 		}
 
 		// Fallback: direct issuer signing (no AwaitingCSR job — ad-hoc CSR submission)
-		connector, ok := s.issuerRegistry[cert.IssuerID]
+		connector, ok := s.issuerRegistry.Get(cert.IssuerID)
 		if ok {
 			// Resolve EKUs from the certificate profile if available
 			var ekus []string

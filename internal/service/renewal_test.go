@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"fmt"
+	"log/slog"
 	"strings"
 	"testing"
 	"time"
@@ -26,9 +27,8 @@ func TestCheckExpiringCertificates_SendsThresholdAlerts(t *testing.T) {
 		"Email": notifier,
 	})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -108,9 +108,8 @@ func TestCheckExpiringCertificates_DeduplicatesAlerts(t *testing.T) {
 		"Email": notifier,
 	})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -188,9 +187,8 @@ func TestCheckExpiringCertificates_SkipsRenewalInProgress(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -253,9 +251,8 @@ func TestCheckExpiringCertificates_UpdatesStatusToExpiring(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -315,9 +312,8 @@ func TestCheckExpiringCertificates_UpdatesStatusToExpired(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -377,9 +373,8 @@ func TestCheckExpiringCertificates_CreatesRenewalJob(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -445,7 +440,7 @@ func TestCheckExpiringCertificates_SkipsWithoutIssuer(t *testing.T) {
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
 	// Empty issuer registry
-	issuerRegistry := map[string]IssuerConnector{}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -505,9 +500,8 @@ func TestCheckExpiringCertificates_SkipsDuplicateJobs(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -589,9 +583,8 @@ func TestProcessRenewalJob(t *testing.T) {
 	})
 
 	issuerConnector := &mockIssuerConnector{}
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": issuerConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", issuerConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -685,9 +678,8 @@ func TestProcessRenewalJob_IssuerFailure(t *testing.T) {
 		Err: fmt.Errorf("issuer service unavailable"),
 	}
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": issuerConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", issuerConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -767,9 +759,8 @@ func TestRetryFailedJobs(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -832,9 +823,8 @@ func TestProcessRenewalJob_NoCertificate(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -885,9 +875,8 @@ func TestCheckExpiringCertificates_ARI_ShouldRenewNow(t *testing.T) {
 			SuggestedWindowEnd:   time.Now().Add(48 * time.Hour),
 		},
 	}
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-acme": ariConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-acme", ariConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -958,9 +947,8 @@ func TestCheckExpiringCertificates_ARI_NotYet(t *testing.T) {
 			SuggestedWindowEnd:   time.Now().Add(96 * time.Hour),
 		},
 	}
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-acme": ariConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-acme", ariConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -1021,9 +1009,8 @@ func TestCheckExpiringCertificates_ARI_NilResult_FallsThrough(t *testing.T) {
 	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
 
 	// ARI returns nil (issuer doesn't support ARI) — default mock behavior
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-local": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-local", &mockIssuerConnector{})
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 
@@ -1090,9 +1077,8 @@ func TestCheckExpiringCertificates_ARI_Error_FallsThrough(t *testing.T) {
 	ariConnector := &mockIssuerConnector{
 		getRenewalInfoErr: fmt.Errorf("ARI endpoint unreachable"),
 	}
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-acme": ariConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-acme", ariConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
 

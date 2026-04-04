@@ -28,7 +28,8 @@ func newTestJobService(jobRepo *mockJobRepo) *JobService {
 	targetRepo := &mockTargetRepo{Targets: make(map[string]*domain.DeploymentTarget)}
 	agentRepo := &mockAgentRepo{Agents: make(map[string]*domain.Agent)}
 
-	renewalService := NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notifService, make(map[string]IssuerConnector), "server")
+	issuerRegistry := NewIssuerRegistry(logger)
+	renewalService := NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notifService, issuerRegistry, "server")
 	deploymentService := NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notifService)
 
 	return NewJobService(jobRepo, renewalService, deploymentService, logger)

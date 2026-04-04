@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -18,9 +19,8 @@ func setupShortLivedTestService(
 ) *RenewalService {
 	auditSvc := NewAuditService(auditRepo)
 
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(
 		certRepo,
@@ -137,9 +137,8 @@ func TestExpireShortLivedCertificates_ListError(t *testing.T) {
 
 	// Create the service manually to use our custom cert repo
 	auditSvc := NewAuditService(auditRepo)
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(
 		customCertRepo,
@@ -385,9 +384,8 @@ func TestExpireShortLivedCertificates_NoProfileRepository(t *testing.T) {
 	}
 
 	auditSvc := NewAuditService(auditRepo)
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-test": &mockIssuerConnector{},
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-test", &mockIssuerConnector{})
 
 	svc := NewRenewalService(
 		certRepo,

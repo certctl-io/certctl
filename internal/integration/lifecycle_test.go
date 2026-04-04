@@ -43,9 +43,8 @@ func TestCertificateLifecycle(t *testing.T) {
 	localCA := local.New(nil, logger)
 
 	// Build issuer registry with adapter
-	issuerRegistry := map[string]service.IssuerConnector{
-		"iss-local": service.NewIssuerConnectorAdapter(localCA),
-	}
+	issuerRegistry := service.NewIssuerRegistry(logger)
+	issuerRegistry.Set("iss-local", service.NewIssuerConnectorAdapter(localCA))
 
 	// Initialize services (following dependency graph)
 	auditService := service.NewAuditService(auditRepo)
@@ -67,7 +66,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
-	issuerService := service.NewIssuerService(issuerRepo, auditService)
+	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, nil, slog.Default())
 
 	// Initialize handlers
 	certificateHandler := handler.NewCertificateHandler(certificateService)
@@ -90,7 +89,8 @@ func TestCertificateLifecycle(t *testing.T) {
 	verificationHandler := handler.NewVerificationHandler(&mockVerificationService{})
 
 	// EST handler — uses real Local CA issuer via ESTService
-	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
+	localCAConnector, _ := issuerRegistry.Get("iss-local")
+	estService := service.NewESTService("iss-local", localCAConnector, auditService, logger)
 	estHandler := handler.NewESTHandler(estService)
 
 	// Create router and register handlers
@@ -952,6 +952,14 @@ func (m *mockIssuerRepository) Create(ctx context.Context, issuer *domain.Issuer
 func (m *mockIssuerRepository) Update(ctx context.Context, issuer *domain.Issuer) error {
 	m.issuers[issuer.ID] = issuer
 	return nil
+}
+
+func (m *mockIssuerRepository) CreateIfNotExists(ctx context.Context, issuer *domain.Issuer) (bool, error) {
+	if _, exists := m.issuers[issuer.ID]; exists {
+		return false, nil
+	}
+	m.issuers[issuer.ID] = issuer
+	return true, nil
 }
 
 func (m *mockIssuerRepository) Delete(ctx context.Context, id string) error {

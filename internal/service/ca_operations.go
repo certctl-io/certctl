@@ -18,7 +18,7 @@ type CAOperationsSvc struct {
 	revocationRepo repository.RevocationRepository
 	certRepo       repository.CertificateRepository
 	profileRepo    repository.CertificateProfileRepository
-	issuerRegistry map[string]IssuerConnector
+	issuerRegistry *IssuerRegistry
 }
 
 // NewCAOperationsSvc creates a new CA operations service.
@@ -35,7 +35,7 @@ func NewCAOperationsSvc(
 }
 
 // SetIssuerRegistry sets the issuer registry for CRL and OCSP operations.
-func (s *CAOperationsSvc) SetIssuerRegistry(registry map[string]IssuerConnector) {
+func (s *CAOperationsSvc) SetIssuerRegistry(registry *IssuerRegistry) {
 	s.issuerRegistry = registry
 }
 
@@ -49,7 +49,7 @@ func (s *CAOperationsSvc) GenerateDERCRL(issuerID string) ([]byte, error) {
 		return nil, fmt.Errorf("issuer registry not configured")
 	}
 
-	issuerConn, ok := s.issuerRegistry[issuerID]
+	issuerConn, ok := s.issuerRegistry.Get(issuerID)
 	if !ok {
 		return nil, fmt.Errorf("issuer not found: %s", issuerID)
 	}
@@ -104,7 +104,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 		return nil, fmt.Errorf("issuer registry not configured")
 	}
 
-	issuerConn, ok := s.issuerRegistry[issuerID]
+	issuerConn, ok := s.issuerRegistry.Get(issuerID)
 	if !ok {
 		return nil, fmt.Errorf("issuer not found: %s", issuerID)
 	}

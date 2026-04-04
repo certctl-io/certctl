@@ -51,6 +51,9 @@ type IssuerRepository interface {
 	Get(ctx context.Context, id string) (*domain.Issuer, error)
 	// Create stores a new issuer.
 	Create(ctx context.Context, issuer *domain.Issuer) error
+	// CreateIfNotExists creates an issuer only if the ID doesn't already exist (ON CONFLICT DO NOTHING).
+	// Returns true if created, false if already existed.
+	CreateIfNotExists(ctx context.Context, issuer *domain.Issuer) (bool, error)
 	// Update modifies an existing issuer.
 	Update(ctx context.Context, issuer *domain.Issuer) error
 	// Delete removes an issuer.

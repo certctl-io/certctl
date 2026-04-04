@@ -856,6 +856,17 @@ func (m *mockIssuerRepository) Update(ctx context.Context, issuer *domain.Issuer
 	return nil
 }
 
+func (m *mockIssuerRepository) CreateIfNotExists(ctx context.Context, issuer *domain.Issuer) (bool, error) {
+	if m.CreateErr != nil {
+		return false, m.CreateErr
+	}
+	if _, exists := m.issuers[issuer.ID]; exists {
+		return false, nil
+	}
+	m.issuers[issuer.ID] = issuer
+	return true, nil
+}
+
 func (m *mockIssuerRepository) Delete(ctx context.Context, id string) error {
 	if m.DeleteErr != nil {
 		return m.DeleteErr

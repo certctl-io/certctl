@@ -17,7 +17,7 @@ type RevocationSvc struct {
 	revocationRepo   repository.RevocationRepository
 	auditService     *AuditService
 	notificationSvc  *NotificationService
-	issuerRegistry   map[string]IssuerConnector
+	issuerRegistry   *IssuerRegistry
 }
 
 // NewRevocationSvc creates a new revocation service.
@@ -39,7 +39,7 @@ func (s *RevocationSvc) SetNotificationService(svc *NotificationService) {
 }
 
 // SetIssuerRegistry sets the issuer registry for issuer-level revocation.
-func (s *RevocationSvc) SetIssuerRegistry(registry map[string]IssuerConnector) {
+func (s *RevocationSvc) SetIssuerRegistry(registry *IssuerRegistry) {
 	s.issuerRegistry = registry
 }
 
@@ -110,7 +110,7 @@ func (s *RevocationSvc) RevokeCertificateWithActor(ctx context.Context, certID s
 
 	// 5. Notify the issuer connector (best-effort)
 	if s.issuerRegistry != nil {
-		if issuerConn, ok := s.issuerRegistry[cert.IssuerID]; ok {
+		if issuerConn, ok := s.issuerRegistry.Get(cert.IssuerID); ok {
 			if err := issuerConn.RevokeCertificate(ctx, version.SerialNumber, reason); err != nil {
 				slog.Error("failed to notify issuer of revocation",
 					"error", err,

@@ -45,6 +45,7 @@ export default function IssuerDetailPage() {
 
   const testMutation = useMutation({
     mutationFn: () => testIssuerConnection(id!),
+    onSuccess: () => refetch(),
   });
 
   if (error) {
@@ -128,6 +129,22 @@ export default function IssuerDetailPage() {
             <InfoRow label="Name" value={issuer.name} />
             <InfoRow label="Type" value={typeLabels[issuer.type] || issuer.type} />
             <InfoRow label="Status" value={<StatusBadge status={issuerStatus(issuer)} />} />
+            <InfoRow label="Source" value={
+              <span className={`text-xs px-2 py-0.5 rounded-full ${
+                issuer.source === 'env' ? 'bg-amber-100 text-amber-700' : 'bg-blue-100 text-blue-700'
+              }`}>
+                {issuer.source === 'env' ? 'Environment Variable' : 'GUI Configured'}
+              </span>
+            } />
+            <InfoRow label="Connection Test" value={
+              issuer.test_status === 'success' ? (
+                <span className="text-xs text-emerald-600 font-medium">Passed {issuer.last_tested_at ? formatDateTime(issuer.last_tested_at) : ''}</span>
+              ) : issuer.test_status === 'failed' ? (
+                <span className="text-xs text-red-600 font-medium">Failed {issuer.last_tested_at ? formatDateTime(issuer.last_tested_at) : ''}</span>
+              ) : (
+                <span className="text-xs text-ink-faint">Not tested</span>
+              )
+            } />
             <InfoRow label="Created" value={formatDateTime(issuer.created_at)} />
           </div>
 

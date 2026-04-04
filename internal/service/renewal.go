@@ -29,7 +29,7 @@ type RenewalService struct {
 	targetRepo        repository.TargetRepository
 	auditService      *AuditService
 	notificationSvc   *NotificationService
-	issuerRegistry    map[string]IssuerConnector
+	issuerRegistry    *IssuerRegistry
 	keygenMode        string // "agent" (default) or "server" (demo only)
 }
 
@@ -101,7 +101,7 @@ func NewRenewalService(
 	profileRepo repository.CertificateProfileRepository,
 	auditService *AuditService,
 	notificationSvc *NotificationService,
-	issuerRegistry map[string]IssuerConnector,
+	issuerRegistry *IssuerRegistry,
 	keygenMode string,
 ) *RenewalService {
 	if keygenMode == "" {
@@ -169,7 +169,7 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		s.sendThresholdAlerts(ctx, cert, int(daysUntil), thresholds)
 
 		// Only create renewal job if an issuer connector is registered for this cert's issuer
-		connector, hasIssuer := s.issuerRegistry[cert.IssuerID]
+		connector, hasIssuer := s.issuerRegistry.Get(cert.IssuerID)
 		if !hasIssuer {
 			continue
 		}
@@ -347,7 +347,7 @@ func (s *RenewalService) ProcessRenewalJob(ctx context.Context, job *domain.Job)
 		return fmt.Errorf("certificate has no issuer assigned")
 	}
 
-	_, ok := s.issuerRegistry[issuerID]
+	_, ok := s.issuerRegistry.Get(issuerID)
 	if !ok {
 		s.failJob(ctx, job, fmt.Sprintf("issuer connector not found for %s", issuerID))
 		return fmt.Errorf("issuer connector not found for %s", issuerID)
@@ -390,7 +390,7 @@ func (s *RenewalService) processRenewalAgentKeygen(ctx context.Context, job *dom
 // private key in the cert version so agents can retrieve it for deployment.
 // WARNING: Private keys touch the control plane. Use only for development/demo.
 func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *domain.Job, cert *domain.ManagedCertificate) error {
-	connector := s.issuerRegistry[cert.IssuerID]
+	connector, _ := s.issuerRegistry.Get(cert.IssuerID)
 
 	// Generate server-side RSA key + CSR
 	privKey, err := rsa.GenerateKey(rand.Reader, 2048)
@@ -524,7 +524,7 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 // It signs the CSR via the issuer connector, stores the cert version (without private key),
 // completes the renewal job, and creates deployment jobs.
 func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domain.Job, cert *domain.ManagedCertificate, csrPEM string) error {
-	connector, ok := s.issuerRegistry[cert.IssuerID]
+	connector, ok := s.issuerRegistry.Get(cert.IssuerID)
 	if !ok {
 		s.failJob(ctx, job, fmt.Sprintf("issuer connector not found for %s", cert.IssuerID))
 		return fmt.Errorf("issuer connector not found for %s", cert.IssuerID)

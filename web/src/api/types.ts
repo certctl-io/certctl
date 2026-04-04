@@ -142,6 +142,12 @@ export interface Issuer {
   status: string;
   /** Backend returns enabled boolean; status is derived from this */
   enabled: boolean;
+  /** Timestamp of last connection test */
+  last_tested_at?: string;
+  /** Result of last connection test: "untested", "success", or "failed" */
+  test_status?: string;
+  /** Config source: "database" (GUI-created) or "env" (env var seeded) */
+  source?: string;
   created_at: string;
   updated_at?: string;
 }

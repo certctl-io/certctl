@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -49,7 +50,7 @@ func TestIssuerService_List(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	issuers, total, err := service.List(ctx, 1, 2)
 
@@ -85,7 +86,8 @@ func TestIssuerService_List_DefaultPagination(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	// Call with invalid page and perPage
 	issuers, total, err := service.List(ctx, 0, 0)
@@ -113,7 +115,7 @@ func TestIssuerService_List_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	_, _, err := service.List(ctx, 1, 50)
 
@@ -134,7 +136,8 @@ func TestIssuerService_List_EmptyResult(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	issuers, total, err := service.List(ctx, 1, 50)
 
@@ -170,7 +173,7 @@ func TestIssuerService_Get(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	retrieved, err := service.Get(ctx, "iss-acme-prod")
 
@@ -195,7 +198,8 @@ func TestIssuerService_Get_NotFound(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	_, err := service.Get(ctx, "nonexistent-issuer")
 
@@ -212,7 +216,8 @@ func TestIssuerService_Create(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	config := map[string]interface{}{"endpoint": "https://acme.example.com/v2/new-account"}
 	configJSON, _ := json.Marshal(config)
@@ -274,7 +279,8 @@ func TestIssuerService_Create_EmptyName(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "",
@@ -308,7 +314,7 @@ func TestIssuerService_Create_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "Test Issuer",
@@ -335,7 +341,8 @@ func TestIssuerService_Update(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	config := map[string]interface{}{"endpoint": "https://acme.example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -379,7 +386,8 @@ func TestIssuerService_Update_EmptyName(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "",
@@ -406,7 +414,8 @@ func TestIssuerService_Delete(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	err := service.Delete(ctx, "iss-to-delete", "user-frank")
 
@@ -438,7 +447,7 @@ func TestIssuerService_Delete_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	err := service.Delete(ctx, "iss-bad-id", "user-grace")
 
@@ -455,24 +464,27 @@ func TestIssuerService_Delete_RepositoryError(t *testing.T) {
 func TestIssuerService_TestConnection_Success(t *testing.T) {
 	ctx := context.Background()
 
-	issuer := &domain.Issuer{
+	// Use GenericCA (Local CA) type because it has no required config fields,
+	// so ValidateConfig succeeds with empty config.
+	iss := &domain.Issuer{
 		ID:        "iss-test-conn",
 		Name:      "Test Connection",
-		Type:      domain.IssuerTypeACME,
+		Type:      domain.IssuerTypeGenericCA,
+		Config:    json.RawMessage(`{"validity_days":365}`),
 		Enabled:   true,
 		CreatedAt: time.Now(),
 		UpdatedAt: time.Now(),
 	}
 
 	repo := newMockIssuerRepository()
-	repo.AddIssuer(issuer)
+	repo.AddIssuer(iss)
 
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	svc := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
-	err := service.TestConnectionWithContext(ctx, "iss-test-conn")
+	err := svc.TestConnectionWithContext(ctx, "iss-test-conn")
 
 	if err != nil {
 		t.Fatalf("TestConnectionWithContext failed: %v", err)
@@ -487,7 +499,8 @@ func TestIssuerService_TestConnection_NotFound(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	err := service.TestConnectionWithContext(ctx, "nonexistent-issuer")
 
@@ -527,7 +540,7 @@ func TestIssuerService_ListIssuers_HandlerInterface(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
 
 	issuers, total, err := service.ListIssuers(1, 50)
 
@@ -554,7 +567,8 @@ func TestIssuerService_CreateIssuer_HandlerInterface(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	config := map[string]interface{}{"url": "https://example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -591,7 +605,8 @@ func TestIssuerService_DeleteIssuer_HandlerInterface(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService)
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
 
 	err := service.DeleteIssuer("iss-handler-delete")
 

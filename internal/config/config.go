@@ -30,6 +30,14 @@ type Config struct {
 	Sectigo      SectigoConfig
 	GoogleCAS    GoogleCASConfig
 	Digest       DigestConfig
+	Encryption   EncryptionConfig
+}
+
+// EncryptionConfig contains configuration for encrypting sensitive data at rest.
+type EncryptionConfig struct {
+	// ConfigEncryptionKey is the passphrase used to derive AES-256-GCM keys for encrypting
+	// issuer config secrets in the database. If empty, configs are stored in plaintext (development only).
+	ConfigEncryptionKey string
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -597,6 +605,9 @@ func Load() (*Config, error) {
 			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),
 			Interval:   getEnvDuration("CERTCTL_DIGEST_INTERVAL", 24*time.Hour),
 			Recipients: getEnvList("CERTCTL_DIGEST_RECIPIENTS", nil),
+		},
+		Encryption: EncryptionConfig{
+			ConfigEncryptionKey: getEnv("CERTCTL_CONFIG_ENCRYPTION_KEY", ""),
 		},
 	}
 

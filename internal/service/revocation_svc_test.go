@@ -4,6 +4,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -18,9 +19,9 @@ func newRevocationSvcTest() (*RevocationSvc, *mockCertRepo, *mockRevocationRepo,
 
 	auditService := NewAuditService(auditRepo)
 	revSvc := NewRevocationSvc(certRepo, revocationRepo, auditService)
-	revSvc.SetIssuerRegistry(map[string]IssuerConnector{
-		"iss-local": &mockIssuerConnector{},
-	})
+	registry := NewIssuerRegistry(slog.Default())
+	registry.Set("iss-local", &mockIssuerConnector{})
+	revSvc.SetIssuerRegistry(registry)
 
 	return revSvc, certRepo, revocationRepo, auditRepo
 }

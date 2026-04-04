@@ -36,9 +36,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	localCA := local.New(nil, logger)
 
-	issuerRegistry := map[string]service.IssuerConnector{
-		"iss-local": service.NewIssuerConnectorAdapter(localCA),
-	}
+	issuerRegistry := service.NewIssuerRegistry(logger)
+	issuerRegistry.Set("iss-local", service.NewIssuerConnectorAdapter(localCA))
 
 	revocationRepo := newMockRevocationRepository()
 
@@ -59,7 +58,7 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
-	issuerService := service.NewIssuerService(issuerRepo, auditService)
+	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, nil, logger)
 
 	certificateHandler := handler.NewCertificateHandler(certificateService)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
@@ -81,7 +80,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	verificationHandler := handler.NewVerificationHandler(&mockVerificationService{})
 
 	// EST handler — uses real Local CA issuer via ESTService
-	estService := service.NewESTService("iss-local", issuerRegistry["iss-local"], auditService, logger)
+	localCAConnector, _ := issuerRegistry.Get("iss-local")
+	estService := service.NewESTService("iss-local", localCAConnector, auditService, logger)
 	estHandler := handler.NewESTHandler(estService)
 
 	r := router.New()

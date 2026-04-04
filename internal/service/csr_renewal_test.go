@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -28,9 +29,8 @@ func newTestRenewalServiceForCSR(issuerErr error) *RenewalService {
 	})
 
 	issuerConnector := &mockIssuerConnector{Err: issuerErr}
-	issuerRegistry := map[string]IssuerConnector{
-		"iss-local": issuerConnector,
-	}
+	issuerRegistry := NewIssuerRegistry(slog.Default())
+	issuerRegistry.Set("iss-local", issuerConnector)
 
 	svc := NewRenewalService(certRepo, jobRepo, policyRepo, profileRepo, auditSvc, notifSvc, issuerRegistry, "agent")
 	return svc

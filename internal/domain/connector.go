@@ -7,13 +7,17 @@ import (
 
 // Issuer represents a certificate authority or ACME provider.
 type Issuer struct {
-	ID        string          `json:"id"`
-	Name      string          `json:"name"`
-	Type      IssuerType      `json:"type"`
-	Config    json.RawMessage `json:"config"`
-	Enabled   bool            `json:"enabled"`
-	CreatedAt time.Time       `json:"created_at"`
-	UpdatedAt time.Time       `json:"updated_at"`
+	ID              string          `json:"id"`
+	Name            string          `json:"name"`
+	Type            IssuerType      `json:"type"`
+	Config          json.RawMessage `json:"config"`
+	EncryptedConfig []byte          `json:"-"`                         // AES-GCM encrypted full config (never exposed via API)
+	Enabled         bool            `json:"enabled"`
+	LastTestedAt    *time.Time      `json:"last_tested_at,omitempty"`
+	TestStatus      string          `json:"test_status,omitempty"`
+	Source          string          `json:"source,omitempty"`
+	CreatedAt       time.Time       `json:"created_at"`
+	UpdatedAt       time.Time       `json:"updated_at"`
 }
 
 // DeploymentTarget represents a target system where certificates are deployed.

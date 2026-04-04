@@ -1,0 +1,139 @@
+package service
+
+import (
+	"encoding/json"
+	"fmt"
+	"log/slog"
+	"sync"
+
+	"github.com/shankar0123/certctl/internal/connector/issuerfactory"
+	"github.com/shankar0123/certctl/internal/crypto"
+	"github.com/shankar0123/certctl/internal/domain"
+)
+
+// IssuerRegistry is a thread-safe registry of issuer connectors.
+// It replaces the static map[string]IssuerConnector that was built at startup.
+// Consumers call Get() to look up a connector by issuer ID.
+type IssuerRegistry struct {
+	mu      sync.RWMutex
+	issuers map[string]IssuerConnector
+	logger  *slog.Logger
+}
+
+// NewIssuerRegistry creates a new empty issuer registry.
+func NewIssuerRegistry(logger *slog.Logger) *IssuerRegistry {
+	return &IssuerRegistry{
+		issuers: make(map[string]IssuerConnector),
+		logger:  logger,
+	}
+}
+
+// Get returns the issuer connector for the given ID and whether it exists.
+func (r *IssuerRegistry) Get(id string) (IssuerConnector, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	conn, ok := r.issuers[id]
+	return conn, ok
+}
+
+// Set adds or replaces an issuer connector in the registry.
+func (r *IssuerRegistry) Set(id string, conn IssuerConnector) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.issuers[id] = conn
+}
+
+// Remove removes an issuer connector from the registry.
+func (r *IssuerRegistry) Remove(id string) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	delete(r.issuers, id)
+}
+
+// List returns a copy of all registered issuers.
+func (r *IssuerRegistry) List() map[string]IssuerConnector {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	result := make(map[string]IssuerConnector, len(r.issuers))
+	for k, v := range r.issuers {
+		result[k] = v
+	}
+	return result
+}
+
+// Len returns the number of registered issuers.
+func (r *IssuerRegistry) Len() int {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return len(r.issuers)
+}
+
+// Rebuild reconstructs the registry from a list of issuer configs.
+// For each enabled issuer, it decrypts the config (if encryption key is set),
+// instantiates a connector via the factory, wraps it in an adapter, and
+// atomically swaps the entire map.
+func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey []byte) error {
+	newIssuers := make(map[string]IssuerConnector)
+	var errors []string
+
+	for _, cfg := range configs {
+		if !cfg.Enabled {
+			r.logger.Debug("skipping disabled issuer", "id", cfg.ID, "type", cfg.Type)
+			continue
+		}
+
+		// Determine the config JSON to use for connector instantiation.
+		// Prefer encrypted_config (decrypted) if available; fall back to config.
+		var configJSON json.RawMessage
+		if len(cfg.EncryptedConfig) > 0 {
+			decrypted, err := crypto.DecryptIfKeySet(cfg.EncryptedConfig, encryptionKey)
+			if err != nil {
+				errors = append(errors, fmt.Sprintf("issuer %s: decrypt failed: %v", cfg.ID, err))
+				continue
+			}
+			configJSON = json.RawMessage(decrypted)
+		} else if len(cfg.Config) > 0 {
+			configJSON = cfg.Config
+		} else {
+			configJSON = json.RawMessage("{}")
+		}
+
+		connector, err := issuerfactory.NewFromConfig(string(cfg.Type), configJSON, r.logger)
+		if err != nil {
+			errors = append(errors, fmt.Sprintf("issuer %s: factory error: %v", cfg.ID, err))
+			continue
+		}
+
+		newIssuers[cfg.ID] = NewIssuerConnectorAdapter(connector)
+		r.logger.Info("issuer loaded into registry", "id", cfg.ID, "type", cfg.Type)
+	}
+
+	// Atomic swap
+	r.mu.Lock()
+	old := r.issuers
+	r.issuers = newIssuers
+	r.mu.Unlock()
+
+	// Log changes
+	for id := range newIssuers {
+		if _, existed := old[id]; !existed {
+			r.logger.Info("issuer added to registry", "id", id)
+		}
+	}
+	for id := range old {
+		if _, exists := newIssuers[id]; !exists {
+			r.logger.Info("issuer removed from registry", "id", id)
+		}
+	}
+
+	r.logger.Info("issuer registry rebuilt", "loaded", len(newIssuers), "failed", len(errors))
+
+	if len(errors) > 0 {
+		for _, e := range errors {
+			r.logger.Warn("issuer load failure", "detail", e)
+		}
+		return fmt.Errorf("%d issuer(s) failed to load: %s", len(errors), errors[0])
+	}
+
+	return nil
+}

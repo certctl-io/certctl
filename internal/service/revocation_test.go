@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"log/slog"
 	"testing"
 	"time"
 
@@ -21,15 +22,13 @@ func newRevocationTestService() (*CertificateService, *mockCertRepo, *mockRevoca
 
 	// Create RevocationSvc
 	revSvc := NewRevocationSvc(certRepo, revocationRepo, auditService)
-	revSvc.SetIssuerRegistry(map[string]IssuerConnector{
-		"iss-local": &mockIssuerConnector{},
-	})
+	registry := NewIssuerRegistry(slog.Default())
+	registry.Set("iss-local", &mockIssuerConnector{})
+	revSvc.SetIssuerRegistry(registry)
 
 	// Create CAOperationsSvc
 	caSvc := NewCAOperationsSvc(revocationRepo, certRepo, profileRepo)
-	caSvc.SetIssuerRegistry(map[string]IssuerConnector{
-		"iss-local": &mockIssuerConnector{},
-	})
+	caSvc.SetIssuerRegistry(registry)
 
 	certService := NewCertificateService(certRepo, policyService, auditService)
 	certService.SetRevocationSvc(revSvc)
@@ -243,9 +242,9 @@ func TestRevokeCertificate_WithIssuerNotification(t *testing.T) {
 
 	// Wire up issuer registry on RevocationSvc with mock
 	mockIssuer := &mockIssuerConnector{}
-	svc.revSvc.SetIssuerRegistry(map[string]IssuerConnector{
-		"iss-local": mockIssuer,
-	})
+	registry := NewIssuerRegistry(slog.Default())
+	registry.Set("iss-local", mockIssuer)
+	svc.revSvc.SetIssuerRegistry(registry)
 
 	cert := &domain.ManagedCertificate{
 		ID:         "cert-7",

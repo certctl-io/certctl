@@ -22,7 +22,9 @@ func NewIssuerRepository(db *sql.DB) *IssuerRepository {
 // List returns all issuers
 func (r *IssuerRepository) List(ctx context.Context) ([]*domain.Issuer, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, type, config, enabled, created_at, updated_at
+		SELECT id, name, type, config, COALESCE(encrypted_config, NULL), enabled,
+		       last_tested_at, COALESCE(test_status, 'untested'), COALESCE(source, 'database'),
+		       created_at, updated_at
 		FROM issuers
 		ORDER BY created_at DESC
 	`)
@@ -36,7 +38,9 @@ func (r *IssuerRepository) List(ctx context.Context) ([]*domain.Issuer, error) {
 	for rows.Next() {
 		var issuer domain.Issuer
 		if err := rows.Scan(&issuer.ID, &issuer.Name, &issuer.Type, &issuer.Config,
-			&issuer.Enabled, &issuer.CreatedAt, &issuer.UpdatedAt); err != nil {
+			&issuer.EncryptedConfig, &issuer.Enabled,
+			&issuer.LastTestedAt, &issuer.TestStatus, &issuer.Source,
+			&issuer.CreatedAt, &issuer.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan issuer: %w", err)
 		}
 		issuers = append(issuers, &issuer)
@@ -53,11 +57,15 @@ func (r *IssuerRepository) List(ctx context.Context) ([]*domain.Issuer, error) {
 func (r *IssuerRepository) Get(ctx context.Context, id string) (*domain.Issuer, error) {
 	var issuer domain.Issuer
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, type, config, enabled, created_at, updated_at
+		SELECT id, name, type, config, COALESCE(encrypted_config, NULL), enabled,
+		       last_tested_at, COALESCE(test_status, 'untested'), COALESCE(source, 'database'),
+		       created_at, updated_at
 		FROM issuers
 		WHERE id = $1
 	`, id).Scan(&issuer.ID, &issuer.Name, &issuer.Type, &issuer.Config,
-		&issuer.Enabled, &issuer.CreatedAt, &issuer.UpdatedAt)
+		&issuer.EncryptedConfig, &issuer.Enabled,
+		&issuer.LastTestedAt, &issuer.TestStatus, &issuer.Source,
+		&issuer.CreatedAt, &issuer.UpdatedAt)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -75,11 +83,22 @@ func (r *IssuerRepository) Create(ctx context.Context, issuer *domain.Issuer) er
 		issuer.ID = uuid.New().String()
 	}
 
+	source := issuer.Source
+	if source == "" {
+		source = "database"
+	}
+	testStatus := issuer.TestStatus
+	if testStatus == "" {
+		testStatus = "untested"
+	}
+
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO issuers (id, name, type, config, encrypted_config, enabled,
+		                     last_tested_at, test_status, source, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
 		RETURNING id
-	`, issuer.ID, issuer.Name, issuer.Type, issuer.Config, issuer.Enabled,
+	`, issuer.ID, issuer.Name, issuer.Type, issuer.Config, issuer.EncryptedConfig,
+		issuer.Enabled, issuer.LastTestedAt, testStatus, source,
 		issuer.CreatedAt, issuer.UpdatedAt).Scan(&issuer.ID)
 
 	if err != nil {
@@ -89,6 +108,40 @@ func (r *IssuerRepository) Create(ctx context.Context, issuer *domain.Issuer) er
 	return nil
 }
 
+// CreateIfNotExists creates an issuer only if the ID doesn't already exist.
+// Used for env var seeding on first boot. Returns true if created, false if already existed.
+func (r *IssuerRepository) CreateIfNotExists(ctx context.Context, issuer *domain.Issuer) (bool, error) {
+	source := issuer.Source
+	if source == "" {
+		source = "env"
+	}
+	testStatus := issuer.TestStatus
+	if testStatus == "" {
+		testStatus = "untested"
+	}
+
+	var id string
+	err := r.db.QueryRowContext(ctx, `
+		INSERT INTO issuers (id, name, type, config, encrypted_config, enabled,
+		                     last_tested_at, test_status, source, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (id) DO NOTHING
+		RETURNING id
+	`, issuer.ID, issuer.Name, issuer.Type, issuer.Config, issuer.EncryptedConfig,
+		issuer.Enabled, issuer.LastTestedAt, testStatus, source,
+		issuer.CreatedAt, issuer.UpdatedAt).Scan(&id)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// ON CONFLICT DO NOTHING — row already existed
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to create issuer: %w", err)
+	}
+
+	return true, nil
+}
+
 // Update modifies an existing issuer
 func (r *IssuerRepository) Update(ctx context.Context, issuer *domain.Issuer) error {
 	result, err := r.db.ExecContext(ctx, `
@@ -96,10 +149,15 @@ func (r *IssuerRepository) Update(ctx context.Context, issuer *domain.Issuer) er
 			name = $1,
 			type = $2,
 			config = $3,
-			enabled = $4,
-			updated_at = $5
-		WHERE id = $6
-	`, issuer.Name, issuer.Type, issuer.Config, issuer.Enabled, issuer.UpdatedAt, issuer.ID)
+			encrypted_config = $4,
+			enabled = $5,
+			last_tested_at = $6,
+			test_status = $7,
+			updated_at = $8
+		WHERE id = $9
+	`, issuer.Name, issuer.Type, issuer.Config, issuer.EncryptedConfig,
+		issuer.Enabled, issuer.LastTestedAt, issuer.TestStatus,
+		issuer.UpdatedAt, issuer.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update issuer: %w", err)

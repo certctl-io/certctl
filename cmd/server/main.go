@@ -16,15 +16,8 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
 	"github.com/shankar0123/certctl/internal/config"
+	"github.com/shankar0123/certctl/internal/crypto"
 	"github.com/shankar0123/certctl/internal/domain"
-	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
-	"github.com/shankar0123/certctl/internal/connector/issuer/local"
-	digicertissuer "github.com/shankar0123/certctl/internal/connector/issuer/digicert"
-	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
-	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
-	googlecasissuer "github.com/shankar0123/certctl/internal/connector/issuer/googlecas"
-	sectigoissuer "github.com/shankar0123/certctl/internal/connector/issuer/sectigo"
-	vaultissuer "github.com/shankar0123/certctl/internal/connector/issuer/vault"
 	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
@@ -85,143 +78,18 @@ func main() {
 	ownerRepo := postgres.NewOwnerRepository(db)
 	logger.Info("initialized all repositories")
 
-	// Initialize Local CA issuer connector.
-	// In sub-CA mode (CERTCTL_CA_CERT_PATH + CERTCTL_CA_KEY_PATH set), loads a pre-signed
-	// CA cert+key from disk. All issued certs chain to the upstream root (e.g., ADCS).
-	// Otherwise, generates an ephemeral self-signed CA for development/demo.
-	localCAConfig := &local.Config{}
-	if cfg.CA.CertPath != "" && cfg.CA.KeyPath != "" {
-		localCAConfig.CACertPath = cfg.CA.CertPath
-		localCAConfig.CAKeyPath = cfg.CA.KeyPath
-		logger.Info("Local CA configured in sub-CA mode",
-			"cert_path", cfg.CA.CertPath,
-			"key_path", cfg.CA.KeyPath)
+	// Initialize dynamic issuer registry.
+	// Issuers are loaded from the database (with AES-GCM encrypted config).
+	// On first boot with an empty database, env var issuers are seeded automatically.
+	var encryptionKey []byte
+	if cfg.Encryption.ConfigEncryptionKey != "" {
+		encryptionKey = crypto.DeriveKey(cfg.Encryption.ConfigEncryptionKey)
+		logger.Info("config encryption enabled (AES-256-GCM)")
 	} else {
-		logger.Info("Local CA configured in self-signed mode (ephemeral)")
-	}
-	localCA := local.New(localCAConfig, logger)
-	logger.Info("initialized Local CA issuer connector")
-
-	// Initialize ACME issuer connector (for Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, etc.)
-	// Supports HTTP-01 (default), DNS-01 (for wildcards), and DNS-PERSIST-01 (standing record) challenge types.
-	// EAB (External Account Binding) required by ZeroSSL, Google Trust Services, SSL.com.
-	acmeConnector := acmeissuer.New(&acmeissuer.Config{
-		DirectoryURL:           os.Getenv("CERTCTL_ACME_DIRECTORY_URL"),
-		Email:                  os.Getenv("CERTCTL_ACME_EMAIL"),
-		EABKid:                 os.Getenv("CERTCTL_ACME_EAB_KID"),
-		EABHmac:                os.Getenv("CERTCTL_ACME_EAB_HMAC"),
-		ChallengeType:          os.Getenv("CERTCTL_ACME_CHALLENGE_TYPE"),
-		DNSPresentScript:       os.Getenv("CERTCTL_ACME_DNS_PRESENT_SCRIPT"),
-		DNSCleanUpScript:       os.Getenv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT"),
-		DNSPersistIssuerDomain: os.Getenv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN"),
-		Insecure:               cfg.ACME.Insecure,
-	}, logger)
-	logger.Info("initialized ACME issuer connector")
-
-	// Initialize step-ca issuer connector (for Smallstep private CA).
-	// Uses the native /sign API with JWK provisioner authentication.
-	stepcaConnector := stepcaissuer.New(&stepcaissuer.Config{
-		CAURL:               os.Getenv("CERTCTL_STEPCA_URL"),
-		RootCertPath:        os.Getenv("CERTCTL_STEPCA_ROOT_CERT"),
-		ProvisionerName:     os.Getenv("CERTCTL_STEPCA_PROVISIONER"),
-		ProvisionerKeyPath:  os.Getenv("CERTCTL_STEPCA_KEY_PATH"),
-		ProvisionerPassword: os.Getenv("CERTCTL_STEPCA_PASSWORD"),
-	}, logger)
-	logger.Info("initialized step-ca issuer connector")
-
-	// Initialize OpenSSL/Custom CA issuer connector (for script-based CA integrations).
-	// Delegates certificate signing to user-provided scripts.
-	opensslConnector := opensslissuer.New(&opensslissuer.Config{
-		SignScript:     os.Getenv("CERTCTL_OPENSSL_SIGN_SCRIPT"),
-		RevokeScript:   os.Getenv("CERTCTL_OPENSSL_REVOKE_SCRIPT"),
-		CRLScript:      os.Getenv("CERTCTL_OPENSSL_CRL_SCRIPT"),
-		TimeoutSeconds: getEnvIntDefault(os.Getenv("CERTCTL_OPENSSL_TIMEOUT_SECONDS"), 30),
-	}, logger)
-	logger.Info("initialized OpenSSL/Custom CA issuer connector")
-
-	// Initialize Vault PKI issuer connector (for HashiCorp Vault internal PKI).
-	// Uses the Vault HTTP API with token authentication.
-	vaultConnector := vaultissuer.New(&vaultissuer.Config{
-		Addr:  os.Getenv("CERTCTL_VAULT_ADDR"),
-		Token: os.Getenv("CERTCTL_VAULT_TOKEN"),
-		Mount: getEnvDefault("CERTCTL_VAULT_MOUNT", "pki"),
-		Role:  os.Getenv("CERTCTL_VAULT_ROLE"),
-		TTL:   getEnvDefault("CERTCTL_VAULT_TTL", "8760h"),
-	}, logger)
-	logger.Info("initialized Vault PKI issuer connector")
-
-	// Initialize DigiCert CertCentral issuer connector (for enterprise public CA).
-	// Uses the DigiCert REST API with async order model.
-	digicertConnector := digicertissuer.New(&digicertissuer.Config{
-		APIKey:      os.Getenv("CERTCTL_DIGICERT_API_KEY"),
-		OrgID:       os.Getenv("CERTCTL_DIGICERT_ORG_ID"),
-		ProductType: getEnvDefault("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
-		BaseURL:     getEnvDefault("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
-	}, logger)
-	logger.Info("initialized DigiCert CertCentral issuer connector")
-
-	// Initialize Sectigo SCM issuer connector (for enterprise public CA).
-	// Uses the Sectigo SCM REST API with async order model.
-	sectigoConnector := sectigoissuer.New(&sectigoissuer.Config{
-		CustomerURI: cfg.Sectigo.CustomerURI,
-		Login:       cfg.Sectigo.Login,
-		Password:    cfg.Sectigo.Password,
-		OrgID:       cfg.Sectigo.OrgID,
-		CertType:    cfg.Sectigo.CertType,
-		Term:        cfg.Sectigo.Term,
-		BaseURL:     cfg.Sectigo.BaseURL,
-	}, logger)
-	logger.Info("initialized Sectigo SCM issuer connector")
-
-	// Initialize Google CAS issuer connector (for GCP private CA).
-	// Uses the Google CAS REST API with OAuth2 service account auth.
-	googlecasConnector := googlecasissuer.New(&googlecasissuer.Config{
-		Project:     cfg.GoogleCAS.Project,
-		Location:    cfg.GoogleCAS.Location,
-		CAPool:      cfg.GoogleCAS.CAPool,
-		Credentials: cfg.GoogleCAS.Credentials,
-		TTL:         cfg.GoogleCAS.TTL,
-	}, logger)
-	logger.Info("initialized Google CAS issuer connector")
-
-	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
-	// "iss-local" matches the seed data issuer ID for the Local CA.
-	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
-	// "iss-stepca" is the step-ca private CA connector.
-	// "iss-openssl" is the custom CA/OpenSSL connector.
-	issuerRegistry := map[string]service.IssuerConnector{
-		"iss-local":        service.NewIssuerConnectorAdapter(localCA),
-		"iss-acme-staging": service.NewIssuerConnectorAdapter(acmeConnector),
-		"iss-acme-prod":    service.NewIssuerConnectorAdapter(acmeConnector),
-		"iss-stepca":       service.NewIssuerConnectorAdapter(stepcaConnector),
-		"iss-openssl":      service.NewIssuerConnectorAdapter(opensslConnector),
+		logger.Warn("CERTCTL_CONFIG_ENCRYPTION_KEY not set — issuer configs stored in plaintext (not recommended for production)")
 	}
 
-	// Conditionally register Vault PKI (only if CERTCTL_VAULT_ADDR is set)
-	if os.Getenv("CERTCTL_VAULT_ADDR") != "" {
-		issuerRegistry["iss-vault"] = service.NewIssuerConnectorAdapter(vaultConnector)
-		logger.Info("Vault PKI issuer registered", "id", "iss-vault")
-	}
-
-	// Conditionally register DigiCert (only if CERTCTL_DIGICERT_API_KEY is set)
-	if os.Getenv("CERTCTL_DIGICERT_API_KEY") != "" {
-		issuerRegistry["iss-digicert"] = service.NewIssuerConnectorAdapter(digicertConnector)
-		logger.Info("DigiCert CertCentral issuer registered", "id", "iss-digicert")
-	}
-
-	// Conditionally register Sectigo SCM (only if all 3 auth credentials are set)
-	if cfg.Sectigo.CustomerURI != "" && cfg.Sectigo.Login != "" && cfg.Sectigo.Password != "" {
-		issuerRegistry["iss-sectigo"] = service.NewIssuerConnectorAdapter(sectigoConnector)
-		logger.Info("Sectigo SCM issuer registered", "id", "iss-sectigo")
-	}
-
-	// Conditionally register Google CAS (only if project and credentials are set)
-	if cfg.GoogleCAS.Project != "" && cfg.GoogleCAS.Credentials != "" {
-		issuerRegistry["iss-googlecas"] = service.NewIssuerConnectorAdapter(googlecasConnector)
-		logger.Info("Google CAS issuer registered", "id", "iss-googlecas")
-	}
-
-	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))
+	issuerRegistry := service.NewIssuerRegistry(logger)
 
 	// Initialize revocation repository
 	revocationRepo := postgres.NewRevocationRepository(db)
@@ -309,7 +177,14 @@ func main() {
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	agentService.SetProfileRepo(profileRepo)
-	issuerService := service.NewIssuerService(issuerRepo, auditService)
+	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, encryptionKey, logger)
+
+	// Seed issuers from env vars on first boot (empty database only), then build registry
+	issuerService.SeedFromEnvVars(context.Background(), cfg)
+	if err := issuerService.BuildRegistry(context.Background()); err != nil {
+		logger.Error("failed to build issuer registry from database", "error", err)
+	}
+	logger.Info("issuer registry loaded", "issuers", issuerRegistry.Len())
 	targetService := service.NewTargetService(targetRepo, auditService)
 	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
@@ -447,7 +322,7 @@ func main() {
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {
-		issuerConn, ok := issuerRegistry[cfg.EST.IssuerID]
+		issuerConn, ok := issuerRegistry.Get(cfg.EST.IssuerID)
 		if !ok {
 			logger.Error("EST issuer not found in registry", "issuer_id", cfg.EST.IssuerID)
 			os.Exit(1)
@@ -645,22 +520,3 @@ func main() {
 	logger.Info("certctl server stopped")
 }
 
-// getEnvDefault reads an environment variable with a default fallback.
-func getEnvDefault(key, defaultVal string) string {
-	if val := os.Getenv(key); val != "" {
-		return val
-	}
-	return defaultVal
-}
-
-// getEnvIntDefault parses an integer from a string with a default fallback.
-func getEnvIntDefault(s string, defaultVal int) int {
-	if s == "" {
-		return defaultVal
-	}
-	val, err := strconv.Atoi(s)
-	if err != nil {
-		return defaultVal
-	}
-	return val
-}
