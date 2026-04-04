@@ -92,7 +92,7 @@ flowchart TB
         T7["Caddy\n(admin API / file)"]
         T8["Envoy\n(file-based SDS)"]
         T9["Postfix/Dovecot\n(file + service reload)"]
-        T2["F5 BIG-IP\n(proxy agent + iControl REST, planned)"]
+        T2["F5 BIG-IP\n(proxy agent + iControl REST)"]
         T3["IIS\n(WinRM + local)"]
     end
 
@@ -418,7 +418,7 @@ The agent deploys certificates using target connectors. Each connector knows how
 - **NGINX**: Writes cert/chain/key files to disk, validates config with `nginx -t`, reloads with `nginx -s reload` or `systemctl reload nginx`
 - **Apache httpd**: Writes separate cert/chain/key files, validates with `apachectl configtest`, graceful reload
 - **HAProxy**: Builds a combined PEM file (cert + chain + key), optionally validates config, reloads via systemctl or signal
-- **F5 BIG-IP** (planned): A proxy agent in the same network zone calls the iControl REST API to upload certificate and update SSL profile bindings. The server assigns the work; the proxy agent executes it.
+- **F5 BIG-IP**: A proxy agent in the same network zone calls the iControl REST API to upload certificate/key files, install crypto objects, and update the SSL client profile within an atomic transaction. The server assigns the work; the proxy agent executes it.
 - **IIS** (implemented, dual-mode): (1) Agent-local (recommended) — a Windows agent on the IIS box runs PowerShell `Import-PfxCertificate` + `Set-WebBinding` directly with PFX conversion and SHA-1 thumbprint computation. (2) Proxy agent WinRM — for agentless IIS targets, a nearby Windows agent reaches the IIS box via WinRM.
 
 The agent handles both the certificate (public) and the private key (read from local key store at `CERTCTL_KEY_DIR`). The control plane never sees the private key and never initiates outbound connections to agents or targets (pull-only model).
@@ -528,7 +528,7 @@ flowchart TB
         TI --> EV["Envoy"]
         TI --> PO["Postfix/Dovecot"]
         TI --> IIS["IIS"]
-        TI --> F5["F5 BIG-IP (interface only)"]
+        TI --> F5["F5 BIG-IP"]
     end
 
     subgraph "Notifier Connectors"

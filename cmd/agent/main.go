@@ -585,7 +585,11 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 				return nil, fmt.Errorf("invalid F5 config: %w", err)
 			}
 		}
-		return f5.New(&cfg, a.logger), nil
+		conn, err := f5.New(&cfg, a.logger)
+		if err != nil {
+			return nil, fmt.Errorf("failed to create F5 connector: %w", err)
+		}
+		return conn, nil
 
 	case "IIS":
 		var cfg iis.Config

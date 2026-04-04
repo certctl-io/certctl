@@ -103,7 +103,7 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | Postfix | Implemented | `Postfix` |
 | Dovecot | Implemented | `Dovecot` |
 | Microsoft IIS | Implemented (local + WinRM) | `IIS` |
-| F5 BIG-IP | Interface only | `F5` |
+| F5 BIG-IP | Beta | `F5` |
 
 ### Notifiers
 | Notifier | Status | Type |

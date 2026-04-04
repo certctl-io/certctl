@@ -704,24 +704,37 @@ All commands are validated against shell injection via `validation.ValidateShell
 
 Location: `internal/connector/target/postfix/postfix.go`
 
-### F5 BIG-IP (Interface Only)
+### F5 BIG-IP (Implemented)
 
-The F5 BIG-IP target connector interface is defined with the iControl REST flow mapped out, but the actual API calls are not yet implemented. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated agent in the same network zone picks up F5 deployment jobs and calls the iControl REST API. The server assigns the work; the proxy agent executes it.
+The F5 BIG-IP target connector deploys certificates to F5 load balancers via the iControl REST API. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated certctl agent in the same network zone polls for F5 deployment jobs and executes iControl REST calls on behalf of the control plane. Minimum supported BIG-IP version: 12.0+.
 
-The planned flow is: authenticate via `POST /mgmt/shared/authn/login`, upload cert PEM via `POST /mgmt/tm/ltm/certificate`, update the SSL profile via `PATCH /mgmt/tm/ltm/profile/client-ssl/{profile}`, and validate deployment by checking profile status.
+The deployment flow uses F5's transaction API for atomic updates: authenticate via token auth, upload cert/key/chain PEM files, install as crypto objects, update the SSL client profile within a transaction, and commit. If the transaction fails, F5 rolls back automatically and the connector cleans up uploaded crypto objects. Updating an SSL profile automatically takes effect on all bound virtual servers — no separate virtual server binding step is needed.
 
-Configuration (defined, not yet functional):
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | string | *(required)* | F5 BIG-IP management hostname or IP |
+| `port` | int | `443` | iControl REST API port |
+| `username` | string | *(required)* | Administrative username |
+| `password` | string | *(required)* | Administrative password |
+| `partition` | string | `Common` | F5 partition for crypto objects and profiles |
+| `ssl_profile` | string | *(required)* | SSL client profile name to update |
+| `insecure` | bool | `true` | Skip TLS verification for management interface (self-signed certs common) |
+| `timeout` | int | `30` | HTTP timeout in seconds |
+
 ```json
 {
   "host": "f5.internal.example.com",
+  "port": 443,
   "username": "admin",
   "password": "...",
   "partition": "Common",
-  "ssl_profile": "/Common/clientssl_api"
+  "ssl_profile": "clientssl_api",
+  "insecure": true,
+  "timeout": 30
 }
 ```
 
-Note: F5 credentials are stored on the proxy agent, not on the control plane server. This limits the credential blast radius to the proxy agent's network zone.
+F5 credentials are stored on the proxy agent, not on the control plane server. This limits the credential blast radius to the proxy agent's network zone. Config fields are validated against regex patterns to prevent injection.
 
 Location: `internal/connector/target/f5/f5.go`
 

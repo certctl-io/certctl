@@ -6453,15 +6453,84 @@ These must be green before starting manual QA:
 
 **PASS if** CA cert PEM returned successfully.
 
+### Part 45: F5 BIG-IP Target Connector (M40)
+
+**Prerequisites:** F5 BIG-IP device (v12.0+) with iControl REST enabled, admin credentials, SSL client profile configured, proxy agent in same network zone.
+
+#### Automated Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 45.s1 | `TargetTypeF5` constant exists in domain | Auto | ☐ |  | `grep 'TargetTypeF5' internal/domain/connector.go` |
+| 45.s2 | F5 connector tests pass | Auto | ☐ |  | `go test ./internal/connector/target/f5/... -v` |
+| 45.s3 | F5 config fields in TargetsPage.tsx | Auto | ☐ |  | `grep 'ssl_profile' web/src/pages/TargetsPage.tsx` |
+| 45.s4 | F5 in OpenAPI TargetType enum | Auto | ☐ |  | `grep 'F5' api/openapi.yaml` |
+| 45.s5 | Agent dispatch handles F5 error return | Auto | ☐ |  | `grep 'f5.New' cmd/agent/main.go` |
+| 45.s6 | F5 connector docs updated (not "Interface Only") | Auto | ☐ |  | `grep 'Implemented' docs/connectors.md` |
+| 45.s7 | Frontend build succeeds | Auto | ☐ |  | `cd web && npm run build` |
+| 45.s8 | Full Go build succeeds | Auto | ☐ |  | `go build ./cmd/server/... ./cmd/agent/... ./cmd/cli/... ./cmd/mcp-server/...` |
+
+#### Manual Tests
+
+**45.M1: Validate F5 Connectivity**
+
+1. Configure proxy agent with F5 target (host, username, password, partition, ssl_profile)
+2. Trigger ValidateConfig — verify authentication succeeds
+3. Verify log line: `F5 configuration validated`
+
+**PASS if** auth token obtained, no errors.
+
+**45.M2: Deploy Certificate to F5**
+
+1. Create certificate, assign to F5 target via proxy agent
+2. Trigger deployment — verify full iControl REST flow (upload → install → transaction → profile update → commit)
+3. Verify SSL profile updated via F5 management GUI or `GET /mgmt/tm/ltm/profile/client-ssl/~Common~{profile}`
+4. Verify virtual servers bound to the profile serve the new cert
+
+**PASS if** certificate deployed, profile updated, virtual servers serving new cert.
+
+**45.M3: Deploy Without Chain**
+
+1. Issue a cert without chain (self-signed or single-issuer)
+2. Deploy to F5 — verify chain upload/install steps are skipped
+3. Verify profile updated with cert and key only (no chain field)
+
+**PASS if** deployment succeeds without chain, profile has cert/key but no chain.
+
+**45.M4: Transaction Rollback on Failure**
+
+1. Configure an invalid SSL profile name
+2. Trigger deployment — verify upload/install succeeds but profile update fails
+3. Verify transaction rolled back (F5 auto-rollback)
+4. Verify cleanup: uploaded crypto objects deleted from F5
+
+**PASS if** error reported, crypto objects cleaned up.
+
+**45.M5: Validate Deployment**
+
+1. After successful deployment, call ValidateDeployment
+2. Verify SSL profile queried and cert name returned in metadata
+3. Verify `current_cert` metadata matches the deployed cert object name
+
+**PASS if** validation returns Valid=true with correct cert reference.
+
+**45.M6: Token Refresh on 401**
+
+1. Deploy with valid credentials
+2. Wait for token to expire (or manually invalidate)
+3. Trigger another deployment — verify automatic re-authentication and retry
+
+**PASS if** deployment succeeds after token refresh.
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 28 |
+| ☐ Auto (not yet run) | 36 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 253 |
-| **Total** | **430** |
+| ☐ Manual (requires hands-on verification) | 259 |
+| **Total** | **444** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

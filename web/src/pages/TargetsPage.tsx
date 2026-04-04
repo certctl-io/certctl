@@ -32,7 +32,7 @@ const TARGET_TYPES = [
   { value: 'envoy', label: 'Envoy', description: 'File-based deployment — writes cert/key to watched directory. Optional SDS file generation.' },
   { value: 'postfix', label: 'Postfix', description: 'Postfix MTA — file write + postfix reload' },
   { value: 'dovecot', label: 'Dovecot', description: 'Dovecot IMAP/POP3 — file write + doveadm reload' },
-  { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST via proxy agent (V3 implementation)' },
+  { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST — cert upload, SSL profile update via proxy agent' },
   { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
 ];
 
@@ -88,9 +88,14 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'validate_command', label: 'Validate Command', placeholder: 'doveconf -n' },
   ],
   f5_bigip: [
-    { key: 'management_ip', label: 'Management IP', placeholder: '192.168.1.100', required: true },
+    { key: 'host', label: 'Management Host', placeholder: 'f5.internal.example.com', required: true },
+    { key: 'port', label: 'Management Port', placeholder: '443' },
+    { key: 'username', label: 'Username', placeholder: 'admin', required: true },
+    { key: 'password', label: 'Password', placeholder: 'F5 admin password', required: true },
     { key: 'partition', label: 'Partition', placeholder: 'Common' },
-    { key: 'proxy_agent_id', label: 'Proxy Agent ID', placeholder: 'agent-f5-proxy' },
+    { key: 'ssl_profile', label: 'SSL Profile', placeholder: 'clientssl_api', required: true },
+    { key: 'insecure', label: 'Skip TLS Verify', placeholder: 'true (default)' },
+    { key: 'timeout', label: 'Timeout (seconds)', placeholder: '30' },
   ],
   iis: [
     { key: 'site_name', label: 'IIS Site Name', placeholder: 'Default Web Site', required: true },
