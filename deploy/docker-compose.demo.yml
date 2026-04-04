@@ -1,0 +1,14 @@
+# Demo mode: pre-populated dashboard with 15 certificates, 5 agents, issuers, etc.
+# Use this to showcase certctl's dashboard with realistic data.
+#
+# Usage:
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+#
+# To start fresh (wipe previous data):
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v
+#   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
+
+services:
+  postgres:
+    volumes:
+      - ../migrations/seed_demo.sql:/docker-entrypoint-initdb.d/030_seed_demo.sql

@@ -8,11 +8,12 @@ import {
 import {
   getCertificates, getAgents, getJobs, getNotifications, getHealth,
   getDashboardSummary, getCertificatesByStatus, getExpirationTimeline,
-  getJobTrends, getIssuanceRate, previewDigest, sendDigest,
+  getJobTrends, getIssuanceRate, previewDigest, sendDigest, getIssuers,
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import { daysUntil, expiryColor, formatDate } from '../api/utils';
+import OnboardingWizard from './OnboardingWizard';
 
 // Convert PascalCase status like "RenewalInProgress" to "Renewal In Progress"
 const formatStatus = (s: string) => s.replace(/([a-z])([A-Z])/g, '$1 $2');
@@ -162,14 +163,47 @@ function DigestCard() {
 export default function DashboardPage() {
   const navigate = useNavigate();
 
+  // Onboarding wizard state: once shown, stays shown until explicitly dismissed.
+  // Uses a ref to "latch" the first-run detection so query refetches don't yank the wizard away.
+  const [onboardingDismissed, setOnboardingDismissed] = useState(() => {
+    try { return localStorage.getItem('certctl:onboarding-dismissed') === 'true'; } catch { return false; }
+  });
+  const [showWizard, setShowWizard] = useState(false);
+
+  // All hooks must be called unconditionally (React rules of hooks — no hooks after early returns)
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30000 });
   const { data: summary } = useQuery({ queryKey: ['dashboard-summary'], queryFn: getDashboardSummary, refetchInterval: 30000 });
+  const { data: issuersData } = useQuery({ queryKey: ['issuers'], queryFn: () => getIssuers() });
   const { data: statusCounts } = useQuery({ queryKey: ['certs-by-status'], queryFn: getCertificatesByStatus, refetchInterval: 30000 });
   const { data: expirationTimeline } = useQuery({ queryKey: ['expiration-timeline'], queryFn: () => getExpirationTimeline(90), refetchInterval: 60000 });
   const { data: jobTrends } = useQuery({ queryKey: ['job-trends'], queryFn: () => getJobTrends(30), refetchInterval: 30000 });
   const { data: issuanceRate } = useQuery({ queryKey: ['issuance-rate'], queryFn: () => getIssuanceRate(30), refetchInterval: 60000 });
   const { data: certs } = useQuery({ queryKey: ['certificates', {}], queryFn: () => getCertificates(), refetchInterval: 30000 });
   const { data: jobs } = useQuery({ queryKey: ['jobs', {}], queryFn: () => getJobs(), refetchInterval: 10000 });
+
+  // Detect first-run ONCE: no user-configured issuers AND no certificates.
+  // Auto-seeded env var issuers (source="env") don't count — they exist on every fresh boot.
+  // Once showWizard latches true, it stays true until the user dismisses.
+  const userConfiguredIssuers = (issuersData?.data ?? []).filter((i: { source?: string }) => i.source !== 'env');
+  const isFirstRun = !onboardingDismissed &&
+    summary !== undefined && issuersData !== undefined &&
+    summary.total_certificates === 0 &&
+    userConfiguredIssuers.length === 0;
+
+  if (isFirstRun && !showWizard) {
+    // Can't call setState during render — use a microtask
+    setTimeout(() => setShowWizard(true), 0);
+  }
+
+  if (showWizard && !onboardingDismissed) {
+    return (
+      <OnboardingWizard onDismiss={() => {
+        try { localStorage.setItem('certctl:onboarding-dismissed', 'true'); } catch { /* noop */ }
+        setOnboardingDismissed(true);
+        setShowWizard(false);
+      }} />
+    );
+  }
 
   const totalCerts = summary?.total_certificates || 0;
   const expiringSoon = summary?.expiring_certificates || 0;

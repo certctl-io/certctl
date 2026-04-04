@@ -45,8 +45,10 @@ services:
       - ../migrations/000006_discovery.up.sql:/docker-entrypoint-initdb.d/006_discovery.sql
       - ../migrations/000007_network_discovery.up.sql:/docker-entrypoint-initdb.d/007_network_discovery.sql
       - ../migrations/000008_verification.up.sql:/docker-entrypoint-initdb.d/008_verification.sql
-      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/010_seed.sql
-      - ../migrations/seed_test.sql:/docker-entrypoint-initdb.d/015_seed_test.sql
+      - ../migrations/000009_issuer_config.up.sql:/docker-entrypoint-initdb.d/009_issuer_config.sql
+      - ../migrations/000010_target_config.up.sql:/docker-entrypoint-initdb.d/010_target_config.sql
+      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/020_seed.sql
+      - ../migrations/seed_test.sql:/docker-entrypoint-initdb.d/025_seed_test.sql
       # No seed_demo.sql — start with a clean database for real testing
     networks:
       certctl-test:
