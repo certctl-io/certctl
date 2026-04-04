@@ -355,12 +355,35 @@ The connector submits certificate orders to DigiCert's `/order/certificate/creat
 
 Location: `internal/connector/issuer/digicert/digicert.go`
 
+### Built-in: Sectigo SCM
+
+The Sectigo connector integrates with Sectigo Certificate Manager's REST API for ordering and managing DV, OV, and EV certificates. Like DigiCert, it uses an async order model: submit an enrollment, receive an sslId, then poll for completion.
+
+**Configuration:**
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `CERTCTL_SECTIGO_CUSTOMER_URI` | — | Sectigo customer URI (organization identifier) |
+| `CERTCTL_SECTIGO_LOGIN` | — | API account login |
+| `CERTCTL_SECTIGO_PASSWORD` | — | API account password |
+| `CERTCTL_SECTIGO_ORG_ID` | — | Organization ID (integer) |
+| `CERTCTL_SECTIGO_CERT_TYPE` | — | Certificate type ID (integer, from `/ssl/v1/types`) |
+| `CERTCTL_SECTIGO_TERM` | `365` | Certificate validity in days |
+| `CERTCTL_SECTIGO_BASE_URL` | `https://cert-manager.com/api` | Sectigo API base URL |
+
+The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by Sectigo) and poll-based completion. The connector periodically checks enrollment status via `/ssl/v1/{sslId}` and downloads the PEM bundle via `/ssl/v1/collect/{sslId}/pem` when issued.
+
+**Authentication:** Three custom headers on every request — `customerUri`, `login`, and `password`.
+
+**Note:** CRL and OCSP are managed by Sectigo. certctl records revocations locally and notifies Sectigo via `/ssl/v1/revoke/{sslId}`.
+
+Location: `internal/connector/issuer/sectigo/sectigo.go`
+
 ### Coming in V2.2+
 
 The following issuer connectors are planned for future releases:
 
 - **Entrust** — Enterprise CA via Entrust API
-- **Sectigo** — Commercial CA integration via Sectigo REST API
 - **Google CAS** — Google Cloud Certificate Authority Service
 - **AWS ACM Private CA** — AWS-managed private CA
 

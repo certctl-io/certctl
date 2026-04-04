@@ -71,6 +71,7 @@ const (
 	IssuerTypeOpenSSL   IssuerType = "OpenSSL"
 	IssuerTypeVault     IssuerType = "VaultPKI"
 	IssuerTypeDigiCert  IssuerType = "DigiCert"
+	IssuerTypeSectigo   IssuerType = "Sectigo"
 )
 
 // TargetType represents the type of deployment target.

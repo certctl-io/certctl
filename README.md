@@ -84,8 +84,9 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | OpenSSL / Custom CA | Implemented | `OpenSSL` |
 | Vault PKI | Beta | `VaultPKI` |
 | DigiCert CertCentral | Beta | `DigiCert` |
+| Sectigo SCM | Beta | `Sectigo` |
 
-**Vault PKI and DigiCert connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
+**Vault PKI, DigiCert, and Sectigo connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
 
 **Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
 

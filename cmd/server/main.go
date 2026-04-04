@@ -22,6 +22,7 @@ import (
 	digicertissuer "github.com/shankar0123/certctl/internal/connector/issuer/digicert"
 	opensslissuer "github.com/shankar0123/certctl/internal/connector/issuer/openssl"
 	stepcaissuer "github.com/shankar0123/certctl/internal/connector/issuer/stepca"
+	sectigoissuer "github.com/shankar0123/certctl/internal/connector/issuer/sectigo"
 	vaultissuer "github.com/shankar0123/certctl/internal/connector/issuer/vault"
 	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
@@ -158,6 +159,19 @@ func main() {
 	}, logger)
 	logger.Info("initialized DigiCert CertCentral issuer connector")
 
+	// Initialize Sectigo SCM issuer connector (for enterprise public CA).
+	// Uses the Sectigo SCM REST API with async order model.
+	sectigoConnector := sectigoissuer.New(&sectigoissuer.Config{
+		CustomerURI: cfg.Sectigo.CustomerURI,
+		Login:       cfg.Sectigo.Login,
+		Password:    cfg.Sectigo.Password,
+		OrgID:       cfg.Sectigo.OrgID,
+		CertType:    cfg.Sectigo.CertType,
+		Term:        cfg.Sectigo.Term,
+		BaseURL:     cfg.Sectigo.BaseURL,
+	}, logger)
+	logger.Info("initialized Sectigo SCM issuer connector")
+
 	// Build issuer registry: maps issuer IDs (from database) to connector implementations.
 	// "iss-local" matches the seed data issuer ID for the Local CA.
 	// "iss-acme-staging" and "iss-acme-prod" are conventional IDs for ACME issuers.
@@ -181,6 +195,12 @@ func main() {
 	if os.Getenv("CERTCTL_DIGICERT_API_KEY") != "" {
 		issuerRegistry["iss-digicert"] = service.NewIssuerConnectorAdapter(digicertConnector)
 		logger.Info("DigiCert CertCentral issuer registered", "id", "iss-digicert")
+	}
+
+	// Conditionally register Sectigo SCM (only if all 3 auth credentials are set)
+	if cfg.Sectigo.CustomerURI != "" && cfg.Sectigo.Login != "" && cfg.Sectigo.Password != "" {
+		issuerRegistry["iss-sectigo"] = service.NewIssuerConnectorAdapter(sectigoConnector)
+		logger.Info("Sectigo SCM issuer registered", "id", "iss-sectigo")
 	}
 
 	logger.Info("issuer registry configured", "issuers", len(issuerRegistry))

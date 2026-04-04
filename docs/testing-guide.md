@@ -6314,15 +6314,86 @@ These must be green before starting manual QA:
 | 41.m8 | Discovery table — CA badge | Manual | ☐ |  | |
 | 41.m9 | Fleet overview — macOS display | Manual | ☐ |  | |
 
+### Part 43: Sectigo SCM Connector (M43)
+
+**Prerequisites:** Sectigo SCM account with API access, valid customerUri + login + password credentials, at least one cert type available in `/ssl/v1/types`.
+
+#### Automated Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 43.s1 | `IssuerTypeSectigo` constant exists in domain | Auto | ☐ |  | `grep 'Sectigo' internal/domain/connector.go` |
+| 43.s2 | `SectigoConfig` struct exists in config | Auto | ☐ |  | `grep 'SectigoConfig' internal/config/config.go` |
+| 43.s3 | `iss-sectigo` in seed_demo.sql | Auto | ☐ |  | `grep 'iss-sectigo' migrations/seed_demo.sql` |
+| 43.s4 | Sectigo in OpenAPI IssuerType enum | Auto | ☐ |  | `grep 'Sectigo' api/openapi.yaml` |
+| 43.s5 | Sectigo connector tests pass | Auto | ☐ |  | `go test ./internal/connector/issuer/sectigo/... -v` |
+| 43.s6 | Sectigo in issuerTypes.ts | Auto | ☐ |  | `grep 'Sectigo' web/src/config/issuerTypes.ts` |
+| 43.s7 | Frontend build succeeds | Auto | ☐ |  | `cd web && npm run build` |
+| 43.s8 | Full Go build succeeds | Auto | ☐ |  | `go build ./cmd/server/... ./cmd/agent/... ./cmd/cli/... ./cmd/mcp-server/...` |
+
+#### Manual Tests
+
+**43.M1: Validate Sectigo Credentials**
+
+1. Configure env vars: `CERTCTL_SECTIGO_CUSTOMER_URI`, `CERTCTL_SECTIGO_LOGIN`, `CERTCTL_SECTIGO_PASSWORD`, `CERTCTL_SECTIGO_ORG_ID`
+2. Start certctl server — verify log line: `Sectigo SCM issuer registered`
+3. Call `GET /api/v1/issuers` — verify `iss-sectigo` appears in the list
+
+**PASS if** `iss-sectigo` registered and visible in API.
+
+**43.M2: Enroll DV Certificate**
+
+1. Create a certificate with `issuer_id: iss-sectigo`
+2. Trigger issuance — verify enrollment submitted (job enters Pending or AwaitingCSR)
+3. If DV, check for immediate issuance or poll via GetOrderStatus
+4. Verify `sslId` tracked in job's order_id field
+
+**PASS if** enrollment submits successfully, sslId returned, job state machine progresses.
+
+**43.M3: Async Polling — OV Certificate**
+
+1. Submit OV certificate enrollment (requires org validation)
+2. Verify job enters Pending state with sslId in order_id
+3. Wait for Sectigo to process (or mock status check)
+4. Verify GetOrderStatus returns "pending" → "completed" transition
+5. Verify PEM bundle downloaded and parsed (leaf + chain)
+
+**PASS if** async flow works end-to-end with correct status transitions.
+
+**43.M4: Collect Not Ready (400/-183 Handling)**
+
+1. If possible, catch the window where status is "Issued" but cert not yet generated
+2. Verify collect endpoint returns 400 with code -183
+3. Verify GetOrderStatus treats this as "pending" (not error)
+4. Verify next poll succeeds when cert is generated
+
+**PASS if** 400/-183 handled gracefully as pending, not as error.
+
+**43.M5: Revocation**
+
+1. Revoke an issued Sectigo certificate via `POST /api/v1/certificates/{id}/revoke`
+2. Verify Sectigo revoke endpoint called (`POST /ssl/v1/revoke/{sslId}`)
+3. Verify audit trail records revocation
+
+**PASS if** revocation recorded in certctl and sent to Sectigo.
+
+**43.M6: Auth Header Verification**
+
+1. Inspect network requests to Sectigo API (via proxy or logs)
+2. Verify all 3 headers present: `customerUri`, `login`, `password`
+3. Verify no `X-DC-DEVKEY` header (DigiCert auth should not leak)
+
+**PASS if** correct 3-header auth on all requests.
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 12 |
+| ☐ Auto (not yet run) | 20 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 241 |
-| **Total** | **402** |
+| ☐ Manual (requires hands-on verification) | 247 |
+| **Total** | **416** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

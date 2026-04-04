@@ -40,6 +40,7 @@ export const typeLabels: Record<string, string> = {
   openssl: 'OpenSSL/Custom',
   VaultPKI: 'Vault PKI',
   DigiCert: 'DigiCert',
+  Sectigo: 'Sectigo SCM',
   manual: 'Manual',
 };
 
@@ -120,12 +121,19 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
-    id: 'sectigo',
-    name: 'Sectigo',
-    description: 'Sectigo Certificate Manager \u2014 coming soon',
-    icon: '\uD83D\uDCE6',
-    configFields: [],
-    comingSoon: true,
+    id: 'Sectigo',
+    name: 'Sectigo SCM',
+    description: 'Sectigo Certificate Manager for DV, OV, and EV certificates',
+    icon: '\uD83D\uDD10',
+    configFields: [
+      { key: 'customer_uri', label: 'Customer URI', required: true, placeholder: 'your-org-uri' },
+      { key: 'login', label: 'API Login', required: true, placeholder: 'api-account-name' },
+      { key: 'password', label: 'API Password', required: true, sensitive: true, type: 'password' },
+      { key: 'org_id', label: 'Organization ID', required: true, placeholder: '12345', type: 'number' },
+      { key: 'cert_type', label: 'Certificate Type ID', required: false, placeholder: '423', type: 'number' },
+      { key: 'term', label: 'Validity (days)', required: false, placeholder: '365', type: 'number' },
+      { key: 'base_url', label: 'Base URL', required: false, placeholder: 'https://cert-manager.com/api' },
+    ],
   },
   {
     id: 'entrust',

@@ -513,6 +513,7 @@ flowchart TB
         II --> OC["OpenSSL / Custom CA"]
         II --> VP["Vault PKI"]
         II --> DC["DigiCert CertCentral"]
+        II --> SG["Sectigo SCM"]
     end
 
     subgraph "Target Connectors"

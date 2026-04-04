@@ -27,6 +27,7 @@ type Config struct {
 	ACME         ACMEConfig
 	Vault        VaultConfig
 	DigiCert     DigiCertConfig
+	Sectigo      SectigoConfig
 	Digest       DigestConfig
 }
 
@@ -191,6 +192,43 @@ type DigiCertConfig struct {
 	// BaseURL is the DigiCert CertCentral API base URL.
 	// Default: "https://www.digicert.com/services/v2".
 	// Setting: CERTCTL_DIGICERT_BASE_URL environment variable.
+	BaseURL string
+}
+
+// SectigoConfig contains Sectigo Certificate Manager issuer connector configuration.
+type SectigoConfig struct {
+	// CustomerURI is the Sectigo customer URI (organization identifier).
+	// Required for Sectigo integration.
+	// Setting: CERTCTL_SECTIGO_CUSTOMER_URI environment variable.
+	CustomerURI string
+
+	// Login is the Sectigo API account login.
+	// Required for Sectigo integration.
+	// Setting: CERTCTL_SECTIGO_LOGIN environment variable.
+	Login string
+
+	// Password is the Sectigo API account password or API key.
+	// Required for Sectigo integration.
+	// Setting: CERTCTL_SECTIGO_PASSWORD environment variable.
+	Password string
+
+	// OrgID is the Sectigo organization ID for certificate enrollments.
+	// Required for Sectigo integration.
+	// Setting: CERTCTL_SECTIGO_ORG_ID environment variable.
+	OrgID int
+
+	// CertType is the Sectigo certificate type ID (from GET /ssl/v1/types).
+	// Required for enrollment. Set via CERTCTL_SECTIGO_CERT_TYPE environment variable.
+	CertType int
+
+	// Term is the certificate validity in days (e.g., 365, 730).
+	// Default: 365.
+	// Setting: CERTCTL_SECTIGO_TERM environment variable.
+	Term int
+
+	// BaseURL is the Sectigo SCM API base URL.
+	// Default: "https://cert-manager.com/api".
+	// Setting: CERTCTL_SECTIGO_BASE_URL environment variable.
 	BaseURL string
 }
 
@@ -499,6 +537,15 @@ func Load() (*Config, error) {
 			OrgID:       getEnv("CERTCTL_DIGICERT_ORG_ID", ""),
 			ProductType: getEnv("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
 			BaseURL:     getEnv("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
+		},
+		Sectigo: SectigoConfig{
+			CustomerURI: getEnv("CERTCTL_SECTIGO_CUSTOMER_URI", ""),
+			Login:       getEnv("CERTCTL_SECTIGO_LOGIN", ""),
+			Password:    getEnv("CERTCTL_SECTIGO_PASSWORD", ""),
+			OrgID:       getEnvInt("CERTCTL_SECTIGO_ORG_ID", 0),
+			CertType:    getEnvInt("CERTCTL_SECTIGO_CERT_TYPE", 0),
+			Term:        getEnvInt("CERTCTL_SECTIGO_TERM", 365),
+			BaseURL:     getEnv("CERTCTL_SECTIGO_BASE_URL", "https://cert-manager.com/api"),
 		},
 		ACME: ACMEConfig{
 			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),
