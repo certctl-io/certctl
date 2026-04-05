@@ -14,7 +14,6 @@ import (
 	"encoding/json"
 	"fmt"
 	"log/slog"
-	"os"
 	"os/exec"
 	"regexp"
 	"strings"
@@ -242,7 +241,7 @@ func (c *Connector) buildImportScript(pfxB64, pfxPassword, thumbprint string) st
 
 	// Remove expired certs with same subject (optional)
 	if c.config.RemoveExpired {
-		sb.WriteString(fmt.Sprintf("  $subject = $cert.Subject\n"))
+		sb.WriteString("  $subject = $cert.Subject\n")
 		sb.WriteString(fmt.Sprintf("  Get-ChildItem 'Cert:\\%s\\%s' | Where-Object { $_.Subject -eq $subject -and $_.NotAfter -lt (Get-Date) -and $_.Thumbprint -ne '%s' } | Remove-Item -Force\n",
 			c.config.StoreLocation, c.config.StoreName, thumbprint))
 	}
@@ -312,20 +311,3 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 // Ensure Connector implements target.Connector.
 var _ target.Connector = (*Connector)(nil)
 
-// tempFileForPFX is a helper used only in WinRM mode — writes PFX to temp file.
-// In WinRM mode, the PFX is base64-encoded and transferred in the PowerShell script
-// (same pattern as IIS WinRM deployment).
-func tempFileForPFX(pfxData []byte) (string, func(), error) {
-	f, err := os.CreateTemp("", "certctl-pfx-*.pfx")
-	if err != nil {
-		return "", nil, fmt.Errorf("create temp PFX file: %w", err)
-	}
-	if _, err := f.Write(pfxData); err != nil {
-		f.Close()
-		os.Remove(f.Name())
-		return "", nil, fmt.Errorf("write temp PFX file: %w", err)
-	}
-	f.Close()
-	cleanup := func() { os.Remove(f.Name()) }
-	return f.Name(), cleanup, nil
-}
