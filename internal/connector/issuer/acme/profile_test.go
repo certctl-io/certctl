@@ -5,11 +5,13 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
 	"log/slog"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +20,41 @@ import (
 
 	goacme "golang.org/x/crypto/acme"
 )
+
+// verifyJWSSignature is a test helper that verifies a JWS signature.
+func verifyJWSSignature(jwsJSON []byte, pubKey *ecdsa.PublicKey) error {
+	var jws struct {
+		Protected string `json:"protected"`
+		Payload   string `json:"payload"`
+		Signature string `json:"signature"`
+	}
+
+	if err := json.Unmarshal(jwsJSON, &jws); err != nil {
+		return fmt.Errorf("unmarshal JWS: %w", err)
+	}
+
+	signingInput := jws.Protected + "." + jws.Payload
+	hash := sha256.Sum256([]byte(signingInput))
+
+	sigBytes, err := base64.RawURLEncoding.DecodeString(jws.Signature)
+	if err != nil {
+		return fmt.Errorf("decode signature: %w", err)
+	}
+
+	keyBytes := pubKey.Curve.Params().BitSize / 8
+	if len(sigBytes) != 2*keyBytes {
+		return fmt.Errorf("invalid signature length: %d (expected %d)", len(sigBytes), 2*keyBytes)
+	}
+
+	r := new(big.Int).SetBytes(sigBytes[:keyBytes])
+	s := new(big.Int).SetBytes(sigBytes[keyBytes:])
+
+	if !ecdsa.Verify(pubKey, hash[:], r, s) {
+		return fmt.Errorf("signature verification failed")
+	}
+
+	return nil
+}
 
 func TestValidateConfig_ProfileValid(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

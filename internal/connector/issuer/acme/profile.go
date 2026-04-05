@@ -2,19 +2,15 @@ package acme
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"io"
-	"math/big"
 	"net/http"
 	"strings"
-	"time"
 
 	goacme "golang.org/x/crypto/acme"
 )
@@ -254,61 +250,3 @@ func signJWS(key *ecdsa.PrivateKey, kid, nonce, targetURL string, payload []byte
 	return json.Marshal(jws)
 }
 
-// jwkThumbprint computes the JWK thumbprint per RFC 7638 for an ECDSA P-256 key.
-// This is used for JWK-mode JWS (account creation) but not for kid-mode (existing accounts).
-// Exported for potential future use; not currently used in the profile flow.
-func jwkThumbprint(key *ecdsa.PublicKey) (string, error) {
-	if key.Curve != elliptic.P256() {
-		return "", fmt.Errorf("unsupported curve: only P-256 is supported")
-	}
-
-	// JWK canonical form for EC keys: {"crv":"P-256","kty":"EC","x":"...","y":"..."}
-	x := base64.RawURLEncoding.EncodeToString(key.X.Bytes())
-	y := base64.RawURLEncoding.EncodeToString(key.Y.Bytes())
-	canonical := fmt.Sprintf(`{"crv":"P-256","kty":"EC","x":"%s","y":"%s"}`, x, y)
-
-	hash := sha256.Sum256([]byte(canonical))
-	return base64.RawURLEncoding.EncodeToString(hash[:]), nil
-}
-
-// verifyJWSSignature is a test helper that verifies a JWS signature.
-// Only used in tests — not part of the production flow.
-func verifyJWSSignature(jwsJSON []byte, pubKey *ecdsa.PublicKey) error {
-	var jws struct {
-		Protected string `json:"protected"`
-		Payload   string `json:"payload"`
-		Signature string `json:"signature"`
-	}
-
-	if err := json.Unmarshal(jwsJSON, &jws); err != nil {
-		return fmt.Errorf("unmarshal JWS: %w", err)
-	}
-
-	signingInput := jws.Protected + "." + jws.Payload
-	hash := sha256.Sum256([]byte(signingInput))
-
-	sigBytes, err := base64.RawURLEncoding.DecodeString(jws.Signature)
-	if err != nil {
-		return fmt.Errorf("decode signature: %w", err)
-	}
-
-	keyBytes := pubKey.Curve.Params().BitSize / 8
-	if len(sigBytes) != 2*keyBytes {
-		return fmt.Errorf("invalid signature length: %d (expected %d)", len(sigBytes), 2*keyBytes)
-	}
-
-	r := new(big.Int).SetBytes(sigBytes[:keyBytes])
-	s := new(big.Int).SetBytes(sigBytes[keyBytes:])
-
-	if !ecdsa.Verify(pubKey, hash[:], r, s) {
-		return fmt.Errorf("signature verification failed")
-	}
-
-	return nil
-}
-
-// Ensure crypto.Signer is satisfied (compile-time check, unused at runtime).
-var _ crypto.Signer = (*ecdsa.PrivateKey)(nil)
-
-// Ensure time is imported for potential use in NotBefore/NotAfter.
-var _ = time.Now
