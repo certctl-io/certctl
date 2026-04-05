@@ -31,6 +31,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	pf "github.com/shankar0123/certctl/internal/connector/target/postfix"
+	sshconn "github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
@@ -646,6 +647,15 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return pf.New(&cfg, a.logger), nil
+
+	case "SSH":
+		var cfg sshconn.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid SSH config: %w", err)
+			}
+		}
+		return sshconn.New(&cfg, a.logger)
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

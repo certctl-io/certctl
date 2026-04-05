@@ -26,6 +26,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: Caddy](#built-in-caddy)
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
    - [IIS (Implemented, Dual-Mode)](#iis-implemented-dual-mode)
+   - [SSH (Agentless Deployment)](#ssh-agentless-deployment)
 4. [Notifier Connector](#notifier-connector)
    - [Interface](#interface-2)
 5. [Registering a Connector](#registering-a-connector)
@@ -54,7 +55,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
 Three types of connectors:
 
 1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert implemented; additional CA integrations planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS implemented; F5 via proxy agent planned; additional cloud and network targets planned)
+2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5, SSH implemented; additional cloud and network targets planned)
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
@@ -808,6 +809,67 @@ The IIS target connector supports two deployment modes — agent-local (recommen
 - Certificate thumbprints computed via SHA-1 for IIS binding lookups
 
 Location: `internal/connector/target/iis/iis.go`, `internal/connector/target/iis/winrm.go`
+
+### SSH (Agentless Deployment)
+
+The SSH target connector enables agentless certificate deployment to any Linux/Unix server via SSH/SFTP. Instead of installing the certctl agent binary on every target, a single "proxy agent" in the same network zone deploys certificates to remote servers over SSH. This is ideal for environments where installing agents on every server is impractical.
+
+**Key authentication (recommended):**
+```json
+{
+  "host": "web-server.internal",
+  "port": 22,
+  "user": "certctl",
+  "auth_method": "key",
+  "private_key_path": "/home/certctl/.ssh/id_ed25519",
+  "cert_path": "/etc/ssl/certs/cert.pem",
+  "key_path": "/etc/ssl/private/key.pem",
+  "chain_path": "/etc/ssl/certs/chain.pem",
+  "reload_command": "systemctl reload nginx",
+  "timeout": 30
+}
+```
+
+**Password authentication:**
+```json
+{
+  "host": "legacy-server.internal",
+  "user": "deploy",
+  "auth_method": "password",
+  "password": "s3cret",
+  "cert_path": "/etc/ssl/cert.pem",
+  "key_path": "/etc/ssl/key.pem",
+  "reload_command": "systemctl reload apache2"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `host` | string | *(required)* | SSH hostname or IP address |
+| `port` | number | 22 | SSH port |
+| `user` | string | *(required)* | SSH username |
+| `auth_method` | string | `"key"` | `"key"` or `"password"` |
+| `private_key_path` | string | | Path to SSH private key file (key auth) |
+| `private_key` | string | | Inline SSH private key PEM (alternative to path) |
+| `password` | string | | SSH password (password auth) |
+| `passphrase` | string | | Passphrase for encrypted private keys |
+| `cert_path` | string | *(required)* | Remote path for certificate file |
+| `key_path` | string | *(required)* | Remote path for private key file |
+| `chain_path` | string | | Remote path for chain file (if empty, chain appended to cert) |
+| `cert_mode` | string | `"0644"` | File permissions for cert (octal) |
+| `key_mode` | string | `"0600"` | File permissions for private key (octal) |
+| `reload_command` | string | | Command to execute after deployment |
+| `timeout` | number | 30 | SSH connection timeout in seconds |
+
+**Security:**
+- Key-based authentication is recommended over password authentication
+- Reload commands are validated against shell injection (same validation as Postfix/Dovecot connectors)
+- Host field is regex-validated to prevent shell metacharacters
+- Private keys are written with 0600 permissions by default
+- Host key verification is intentionally skipped (same rationale as network scanner and F5 connector — deploying to known, operator-configured infrastructure)
+- Encrypted private keys supported via passphrase
+
+Location: `internal/connector/target/ssh/ssh.go`
 
 ## Notifier Connector
 

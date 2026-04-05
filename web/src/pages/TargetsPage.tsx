@@ -11,83 +11,85 @@ import { formatDateTime } from '../api/utils';
 import type { Target } from '../api/types';
 
 const typeLabels: Record<string, string> = {
-  nginx: 'NGINX',
-  apache: 'Apache',
-  haproxy: 'HAProxy',
-  traefik: 'Traefik',
-  caddy: 'Caddy',
-  envoy: 'Envoy',
-  postfix: 'Postfix',
-  dovecot: 'Dovecot',
-  f5_bigip: 'F5 BIG-IP',
-  iis: 'IIS',
+  NGINX: 'NGINX',
+  Apache: 'Apache',
+  HAProxy: 'HAProxy',
+  Traefik: 'Traefik',
+  Caddy: 'Caddy',
+  Envoy: 'Envoy',
+  Postfix: 'Postfix',
+  Dovecot: 'Dovecot',
+  F5: 'F5 BIG-IP',
+  IIS: 'IIS',
+  SSH: 'SSH',
 };
 
 const TARGET_TYPES = [
-  { value: 'nginx', label: 'NGINX', description: 'Deploy to NGINX web server via file write + config validation + reload' },
-  { value: 'apache', label: 'Apache httpd', description: 'Separate cert/chain/key files, apachectl configtest, graceful reload' },
-  { value: 'haproxy', label: 'HAProxy', description: 'Combined PEM file (cert+chain+key), optional validate, reload' },
-  { value: 'traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
-  { value: 'caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
-  { value: 'envoy', label: 'Envoy', description: 'File-based deployment — writes cert/key to watched directory. Optional SDS file generation.' },
-  { value: 'postfix', label: 'Postfix', description: 'Postfix MTA — file write + postfix reload' },
-  { value: 'dovecot', label: 'Dovecot', description: 'Dovecot IMAP/POP3 — file write + doveadm reload' },
-  { value: 'f5_bigip', label: 'F5 BIG-IP', description: 'iControl REST — cert upload, SSL profile update via proxy agent' },
-  { value: 'iis', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
+  { value: 'NGINX', label: 'NGINX', description: 'Deploy to NGINX web server via file write + config validation + reload' },
+  { value: 'Apache', label: 'Apache httpd', description: 'Separate cert/chain/key files, apachectl configtest, graceful reload' },
+  { value: 'HAProxy', label: 'HAProxy', description: 'Combined PEM file (cert+chain+key), optional validate, reload' },
+  { value: 'Traefik', label: 'Traefik', description: 'File provider deployment — writes cert/key to watched directory, auto-reload' },
+  { value: 'Caddy', label: 'Caddy', description: 'Admin API hot-reload or file-based deployment with configurable mode' },
+  { value: 'Envoy', label: 'Envoy', description: 'File-based deployment — writes cert/key to watched directory. Optional SDS file generation.' },
+  { value: 'Postfix', label: 'Postfix', description: 'Postfix MTA — file write + postfix reload' },
+  { value: 'Dovecot', label: 'Dovecot', description: 'Dovecot IMAP/POP3 — file write + doveadm reload' },
+  { value: 'F5', label: 'F5 BIG-IP', description: 'iControl REST — cert upload, SSL profile update via proxy agent' },
+  { value: 'IIS', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
+  { value: 'SSH', label: 'SSH', description: 'Agentless deployment via SSH/SFTP — deploy to any Linux/Unix server without installing an agent' },
 ];
 
 const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: string; required?: boolean }[]> = {
-  nginx: [
+  NGINX: [
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/nginx/ssl/cert.pem', required: true },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/nginx/ssl/key.pem', required: true },
     { key: 'chain_path', label: 'Chain Path', placeholder: '/etc/nginx/ssl/chain.pem' },
     { key: 'reload_cmd', label: 'Reload Command', placeholder: 'nginx -t && systemctl reload nginx' },
   ],
-  apache: [
+  Apache: [
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/apache2/ssl/cert.pem', required: true },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/apache2/ssl/key.pem', required: true },
     { key: 'chain_path', label: 'Chain Path', placeholder: '/etc/apache2/ssl/chain.pem' },
     { key: 'reload_cmd', label: 'Reload Command', placeholder: 'apachectl configtest && apachectl graceful' },
   ],
-  haproxy: [
+  HAProxy: [
     { key: 'pem_path', label: 'Combined PEM Path', placeholder: '/etc/haproxy/certs/combined.pem', required: true },
     { key: 'reload_cmd', label: 'Reload Command', placeholder: 'systemctl reload haproxy' },
     { key: 'validate_cmd', label: 'Validate Command (optional)', placeholder: 'haproxy -c -f /etc/haproxy/haproxy.cfg' },
   ],
-  traefik: [
+  Traefik: [
     { key: 'cert_dir', label: 'Certificate Directory', placeholder: '/etc/traefik/certs', required: true },
     { key: 'cert_file', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
     { key: 'key_file', label: 'Key Filename', placeholder: 'key.pem (default)' },
   ],
-  caddy: [
+  Caddy: [
     { key: 'mode', label: 'Deployment Mode', placeholder: 'api (default) or file', required: true },
     { key: 'admin_api', label: 'Admin API URL', placeholder: 'http://localhost:2019 (default)' },
     { key: 'cert_dir', label: 'Certificate Directory (file mode)', placeholder: '/etc/caddy/certs' },
     { key: 'cert_file', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
     { key: 'key_file', label: 'Key Filename', placeholder: 'key.pem (default)' },
   ],
-  envoy: [
+  Envoy: [
     { key: 'cert_dir', label: 'Certificate Directory', placeholder: '/etc/envoy/certs', required: true },
     { key: 'cert_filename', label: 'Certificate Filename', placeholder: 'cert.pem (default)' },
     { key: 'key_filename', label: 'Key Filename', placeholder: 'key.pem (default)' },
     { key: 'chain_filename', label: 'Chain Filename (optional)', placeholder: 'chain.pem (leave empty to append to cert)' },
     { key: 'sds_config', label: 'Generate SDS Config', placeholder: 'true or false' },
   ],
-  postfix: [
+  Postfix: [
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/postfix/certs/cert.pem' },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/postfix/certs/key.pem' },
     { key: 'chain_path', label: 'Chain Path (optional)', placeholder: '/etc/postfix/certs/chain.pem' },
     { key: 'reload_command', label: 'Reload Command', placeholder: 'postfix reload' },
     { key: 'validate_command', label: 'Validate Command', placeholder: 'postfix check' },
   ],
-  dovecot: [
+  Dovecot: [
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/dovecot/certs/cert.pem' },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/dovecot/certs/key.pem' },
     { key: 'chain_path', label: 'Chain Path (optional)', placeholder: '/etc/dovecot/certs/chain.pem' },
     { key: 'reload_command', label: 'Reload Command', placeholder: 'doveadm reload' },
     { key: 'validate_command', label: 'Validate Command', placeholder: 'doveconf -n' },
   ],
-  f5_bigip: [
+  F5: [
     { key: 'host', label: 'Management Host', placeholder: 'f5.internal.example.com', required: true },
     { key: 'port', label: 'Management Port', placeholder: '443' },
     { key: 'username', label: 'Username', placeholder: 'admin', required: true },
@@ -97,7 +99,7 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'insecure', label: 'Skip TLS Verify', placeholder: 'true (default)' },
     { key: 'timeout', label: 'Timeout (seconds)', placeholder: '30' },
   ],
-  iis: [
+  IIS: [
     { key: 'site_name', label: 'IIS Site Name', placeholder: 'Default Web Site', required: true },
     { key: 'cert_store', label: 'Certificate Store', placeholder: 'My', required: true },
     { key: 'port', label: 'HTTPS Port', placeholder: '443' },
@@ -111,6 +113,19 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'winrm.winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
     { key: 'winrm.winrm_https', label: 'WinRM Use HTTPS', placeholder: 'true or false' },
     { key: 'winrm.winrm_insecure', label: 'WinRM Skip TLS Verify', placeholder: 'false' },
+  ],
+  SSH: [
+    { key: 'host', label: 'SSH Host', placeholder: '192.168.1.100 or server.example.com', required: true },
+    { key: 'port', label: 'SSH Port', placeholder: '22 (default)' },
+    { key: 'user', label: 'SSH Username', placeholder: 'root or certctl', required: true },
+    { key: 'auth_method', label: 'Auth Method', placeholder: 'key (default) or password' },
+    { key: 'private_key_path', label: 'Private Key Path', placeholder: '/home/certctl/.ssh/id_ed25519' },
+    { key: 'password', label: 'SSH Password', placeholder: 'Leave empty for key auth' },
+    { key: 'cert_path', label: 'Remote Certificate Path', placeholder: '/etc/ssl/certs/cert.pem', required: true },
+    { key: 'key_path', label: 'Remote Key Path', placeholder: '/etc/ssl/private/key.pem', required: true },
+    { key: 'chain_path', label: 'Remote Chain Path (optional)', placeholder: '/etc/ssl/certs/chain.pem' },
+    { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl reload nginx' },
+    { key: 'timeout', label: 'Connection Timeout (seconds)', placeholder: '30 (default)' },
   ],
 };
 

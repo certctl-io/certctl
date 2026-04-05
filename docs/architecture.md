@@ -94,6 +94,7 @@ flowchart TB
         T9["Postfix/Dovecot\n(file + service reload)"]
         T2["F5 BIG-IP\n(proxy agent + iControl REST)"]
         T3["IIS\n(WinRM + local)"]
+        T10["SSH\n(SFTP + reload)"]
     end
 
     DASH --> API
@@ -529,6 +530,7 @@ flowchart TB
         TI --> PO["Postfix/Dovecot"]
         TI --> IIS["IIS"]
         TI --> F5["F5 BIG-IP"]
+        TI --> SC["SSH"]
     end
 
     subgraph "Notifier Connectors"
@@ -604,7 +606,7 @@ Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx 
 
 After deployment, agents can perform **post-deployment TLS verification**: the agent probes the live TLS endpoint using `crypto/tls.DialWithDialer` and compares the SHA-256 fingerprint of the served certificate against what was deployed. Results are reported via `POST /api/v1/jobs/{id}/verify` and stored on the job record. Verification is best-effort — failures don't block or rollback deployments.
 
-Additional cloud, network, and Kubernetes target connectors are planned for future releases.
+The SSH connector enables agentless deployment to any Linux/Unix server via SSH/SFTP, using the proxy agent pattern. Additional cloud, network, and Kubernetes target connectors are planned for future releases.
 
 ### Notifier Connector
 
@@ -976,7 +978,7 @@ certctl is extensively tested across eight layers with CI-enforced coverage gate
 
 **Frontend tests** (`web/src/api/`) — Vitest tests covering the full API client (all endpoint functions with fetch mocking), stats/metrics endpoints, utility functions, and auth flows. Test environment uses jsdom with `@testing-library/jest-dom` matchers.
 
-**Connector tests** (`internal/connector/`) — Issuer connectors (Local CA self-signed/sub-CA modes, ACME DNS-01/DNS-PERSIST-01, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS — all with httptest mock servers). Target connectors (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS with mock PowerShell executor, F5 BIG-IP with mock iControl client, Postfix/Dovecot). Notifier connectors (Slack, Teams, PagerDuty, OpsGenie).
+**Connector tests** (`internal/connector/`) — Issuer connectors (Local CA self-signed/sub-CA modes, ACME DNS-01/DNS-PERSIST-01, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS — all with httptest mock servers). Target connectors (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS with mock PowerShell executor, F5 BIG-IP with mock iControl client, Postfix/Dovecot, SSH with mock SSH client). Notifier connectors (Slack, Teams, PagerDuty, OpsGenie).
 
 **Scheduler tests** (`internal/scheduler/scheduler_test.go`) — Idempotency guards (`sync/atomic.Bool`), `WaitForCompletion` success and timeout paths, and multi-loop concurrency safety.
 

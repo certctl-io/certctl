@@ -24,6 +24,7 @@ var validTargetTypes = map[domain.TargetType]bool{
 	domain.TargetTypeEnvoy:   true,
 	domain.TargetTypePostfix: true,
 	domain.TargetTypeDovecot: true,
+	domain.TargetTypeSSH:     true,
 }
 
 // isValidTargetType checks if a type string is a known target type.

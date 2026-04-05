@@ -11,16 +11,17 @@ import { formatDateTime } from '../api/utils';
 import type { Job } from '../api/types';
 
 const typeLabels: Record<string, string> = {
-  nginx: 'NGINX',
-  apache: 'Apache',
-  haproxy: 'HAProxy',
-  traefik: 'Traefik',
-  caddy: 'Caddy',
-  f5_bigip: 'F5 BIG-IP',
-  iis: 'IIS',
-  envoy: 'Envoy',
-  postfix: 'Postfix',
-  dovecot: 'Dovecot',
+  NGINX: 'NGINX',
+  Apache: 'Apache',
+  HAProxy: 'HAProxy',
+  Traefik: 'Traefik',
+  Caddy: 'Caddy',
+  F5: 'F5 BIG-IP',
+  IIS: 'IIS',
+  Envoy: 'Envoy',
+  Postfix: 'Postfix',
+  Dovecot: 'Dovecot',
+  SSH: 'SSH',
 };
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {

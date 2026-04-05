@@ -44,7 +44,7 @@ Certificate lifecycle tooling today falls into two camps: expensive enterprise p
 
 certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
 
-It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, and IIS (local PowerShell or remote WinRM) — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
 
@@ -104,6 +104,7 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | Dovecot | Implemented | `Dovecot` |
 | Microsoft IIS | Implemented (local + WinRM) | `IIS` |
 | F5 BIG-IP | Beta | `F5` |
+| SSH (Agentless) | Beta | `SSH` |
 
 ### Notifiers
 | Notifier | Status | Type |
