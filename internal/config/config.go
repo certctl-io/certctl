@@ -325,7 +325,13 @@ type ACMEConfig struct {
 	// The record value becomes: "<issuer_domain>; accounturi=<acme_account_uri>"
 	DNSPersistIssuerDomain string
 
-	// ARIEnabled enables ACME Renewal Information (RFC 9702) support.
+	// Profile selects the ACME certificate profile for newOrder requests.
+	// Let's Encrypt supports "tlsserver" (standard TLS) and "shortlived" (6-day certs).
+	// Leave empty for the CA's default profile (backward-compatible).
+	// Setting: CERTCTL_ACME_PROFILE environment variable.
+	Profile string
+
+	// ARIEnabled enables ACME Renewal Information (RFC 9773) support.
 	// When enabled, the renewal scheduler queries the CA for suggested renewal windows
 	// instead of relying solely on static expiration thresholds.
 	// Default: false. Requires a CA that supports ARI (e.g., Let's Encrypt).
@@ -598,6 +604,7 @@ func Load() (*Config, error) {
 			DNSPresentScript:       getEnv("CERTCTL_ACME_DNS_PRESENT_SCRIPT", ""),
 			DNSCleanUpScript:       getEnv("CERTCTL_ACME_DNS_CLEANUP_SCRIPT", ""),
 			DNSPersistIssuerDomain: getEnv("CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN", ""),
+			Profile:                getEnv("CERTCTL_ACME_PROFILE", ""),
 			ARIEnabled:             getEnvBool("CERTCTL_ACME_ARI_ENABLED", false),
 			Insecure:               getEnvBool("CERTCTL_ACME_INSECURE", false),
 		},

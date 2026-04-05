@@ -514,7 +514,7 @@ export CERTCTL_PAGERDUTY_SEVERITY="critical"
 
 ---
 
-## ACME Renewal Information (ARI, RFC 9702)
+## ACME Renewal Information (ARI, RFC 9773)
 
 Instead of using fixed renewal thresholds (renew 30 days before expiry), ACME ARI lets the CA tell certctl exactly when to renew. This is useful for distributing renewal load across maintenance windows and coordinating mass-revocation scenarios.
 
@@ -530,7 +530,7 @@ export CERTCTL_ACME_ARI_ENABLED=true
 
 | Field | Details |
 |-------|---------|
-| **Protocol** | ACME Renewal Information (RFC 9702) |
+| **Protocol** | ACME Renewal Information (RFC 9773) |
 | **Cert ID Computation** | base64url(SHA-256(DER cert)) |
 | **Suggested Window** | Start and end times provided by CA |
 | **Renewal Timing** — If current time is after window start, renew immediately. Otherwise, wait until start time. |

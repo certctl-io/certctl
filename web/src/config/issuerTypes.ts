@@ -58,6 +58,7 @@ export const issuerTypes: IssuerTypeConfig[] = [
       { key: 'directory_url', label: 'Directory URL', placeholder: 'https://acme-v02.api.letsencrypt.org/directory', required: true },
       { key: 'email', label: 'Email', placeholder: 'admin@example.com', required: true },
       { key: 'challenge_type', label: 'Challenge Type', type: 'select', options: ['http-01', 'dns-01', 'dns-persist-01'], required: false, defaultValue: 'http-01' },
+      { key: 'profile', label: 'Certificate Profile', type: 'select', options: ['', 'tlsserver', 'shortlived'], required: false, defaultValue: '' },
       { key: 'eab_kid', label: 'EAB Key ID', placeholder: 'External Account Binding Key ID (optional)', required: false },
       { key: 'eab_hmac', label: 'EAB HMAC Key', placeholder: 'External Account Binding HMAC key', required: false, type: 'password', sensitive: true },
     ],

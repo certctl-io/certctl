@@ -88,7 +88,7 @@ services:
       # Default is 30s; increase if your DNS propagates slowly
       # Set via CERTCTL_ACME_DNS_PROPAGATION_WAIT in code, or rely on default
 
-      # Optional: Let's Encrypt Renewal Information (RFC 9702) for CA-directed renewal timing
+      # Optional: Let's Encrypt Renewal Information (RFC 9773) for CA-directed renewal timing
       # CERTCTL_ACME_ARI_ENABLED: "true"
 
       # Local CA as fallback for internal services (optional)

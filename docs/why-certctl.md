@@ -34,7 +34,7 @@ This isn't a premium feature. It's the default behavior, free. Most alternatives
 
 certctl works with any certificate authority, not just ACME providers. Seven issuer connectors ship today, all free:
 
-- **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9702)
+- **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9773)
 - **HashiCorp Vault PKI** — `/v1/{mount}/sign/{role}` API, token auth
 - **DigiCert CertCentral** — async order model, OV/EV support
 - **step-ca** (Smallstep) — native /sign API with JWK provisioner auth
@@ -88,7 +88,7 @@ On-prem or hosted commercial platforms offer broader cert type coverage (VPN cer
 
 ### vs. Enterprise Platforms
 
-Venafi and Keyfactor offer decades of features at $75K-$250K+/year. certctl targets organizations that need 80% of those capabilities at a fraction of the cost. What certctl doesn't have yet: SSO/RBAC (coming in certctl Pro), vendor SLA-backed support. What certctl does have that enterprise platforms don't: an MCP server for AI-assisted management, ACME ARI (RFC 9702) for CA-directed renewal timing, and a deployment model that works in 5 minutes instead of 5 months.
+Venafi and Keyfactor offer decades of features at $75K-$250K+/year. certctl targets organizations that need 80% of those capabilities at a fraction of the cost. What certctl doesn't have yet: SSO/RBAC (coming in certctl Pro), vendor SLA-backed support. What certctl does have that enterprise platforms don't: an MCP server for AI-assisted management, ACME ARI (RFC 9773) for CA-directed renewal timing, and a deployment model that works in 5 minutes instead of 5 months.
 
 ## Who Should Look Elsewhere
 

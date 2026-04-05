@@ -853,7 +853,7 @@ func TestProcessRenewalJob_NoCertificate(t *testing.T) {
 	}
 }
 
-// --- ARI (RFC 9702) Scheduler Integration Tests ---
+// --- ARI (RFC 9773) Scheduler Integration Tests ---
 
 func TestCheckExpiringCertificates_ARI_ShouldRenewNow(t *testing.T) {
 	t.Helper()

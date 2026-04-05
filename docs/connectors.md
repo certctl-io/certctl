@@ -174,7 +174,7 @@ The ACME connector implements the full ACME v2 protocol using Go's `golang.org/x
 
 **DNS-PERSIST-01 (standing record):** Creates a one-time persistent TXT record at `_validation-persist.<domain>` containing the CA's issuer domain and your ACME account URI. Once set, this record authorizes unlimited future certificate issuances without per-renewal DNS updates. Based on [draft-ietf-acme-dns-persist](https://datatracker.ietf.org/doc/draft-ietf-acme-dns-persist/) and CA/Browser Forum ballot SC-088v3. If the CA doesn't offer dns-persist-01 yet, the connector falls back to dns-01 automatically.
 
-**ACME Renewal Information (ARI, RFC 9702):** Instead of using fixed renewal thresholds (e.g., renew 30 days before expiry), certctl can ask the CA when it should renew. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. The ARI protocol lets the CA specify a `suggestedWindow` (start and end times) for when you should renew — useful for distributing load during maintenance windows or coordinating mass revocation scenarios. Cert ID is computed as `base64url(SHA-256(DER cert))`. If the CA doesn't support ARI (404 response), certctl automatically falls back to threshold-based renewal with no operator intervention required.
+**ACME Renewal Information (ARI, RFC 9773):** Instead of using fixed renewal thresholds (e.g., renew 30 days before expiry), certctl can ask the CA when it should renew. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. The ARI protocol lets the CA specify a `suggestedWindow` (start and end times) for when you should renew — useful for distributing load during maintenance windows or coordinating mass revocation scenarios. Cert ID is computed as `base64url(SHA-256(DER cert))`. If the CA doesn't support ARI (404 response), certctl automatically falls back to threshold-based renewal with no operator intervention required.
 
 HTTP-01 configuration:
 ```json
@@ -244,6 +244,9 @@ Environment variables for the default ACME connector:
 - `CERTCTL_ACME_DNS_PRESENT_SCRIPT` — Path to DNS record creation script (dns-01 and dns-persist-01)
 - `CERTCTL_ACME_DNS_CLEANUP_SCRIPT` — Path to DNS record cleanup script (dns-01 only, not used by dns-persist-01)
 - `CERTCTL_ACME_DNS_PERSIST_ISSUER_DOMAIN` — CA issuer domain for persistent record (dns-persist-01 only, e.g., `letsencrypt.org`)
+- `CERTCTL_ACME_PROFILE` — Certificate profile for the newOrder request. Let's Encrypt supports `tlsserver` (standard TLS, default) and `shortlived` (6-day certs). Leave empty for the CA's default profile.
+
+**Certificate Profiles:** Let's Encrypt (GA January 2026) supports ACME certificate profile selection. Set `CERTCTL_ACME_PROFILE=shortlived` to request 6-day certificates — ideal for ephemeral workloads where short validity substitutes for revocation. The `tlsserver` profile produces standard TLS certificates. When the profile field is empty (default), the CA uses its default profile, maintaining full backward compatibility.
 
 The connector is registered in the issuer registry under `iss-acme-staging` and `iss-acme-prod`. Use `iss-acme-staging` for Let's Encrypt staging (rate-limit-friendly testing) and `iss-acme-prod` for production certificates.
 

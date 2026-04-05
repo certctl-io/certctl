@@ -691,6 +691,28 @@ describe('API Client', () => {
       expect(body.config.org_id).toBe('12345');
       expect(body.config.product_type).toBe('ssl_basic');
     });
+
+    it('createIssuer sends correct payload for ACME with profile', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'iss-acme-shortlived', name: 'ACME Shortlived' }));
+      const acmePayload = {
+        name: 'ACME Shortlived',
+        type: 'acme',
+        config: {
+          directory_url: 'https://acme-v02.api.letsencrypt.org/directory',
+          email: 'admin@example.com',
+          challenge_type: 'http-01',
+          profile: 'shortlived',
+        },
+      };
+      await createIssuer(acmePayload);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/issuers');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      expect(body.type).toBe('acme');
+      expect(body.config.profile).toBe('shortlived');
+      expect(body.config.directory_url).toBe('https://acme-v02.api.letsencrypt.org/directory');
+    });
   });
 
   // ─── Audit ──────────────────────────────────────────

@@ -56,7 +56,13 @@ type Config struct {
 	// Required when ChallengeType is "dns-persist-01". For Let's Encrypt, use "letsencrypt.org".
 	DNSPersistIssuerDomain string `json:"dns_persist_issuer_domain,omitempty"`
 
-	// ARIEnabled enables ACME Renewal Information (RFC 9702) support per CERTCTL_ACME_ARI_ENABLED.
+	// Profile selects the ACME certificate profile for the newOrder request.
+	// Let's Encrypt supports "tlsserver" (standard TLS, default) and "shortlived" (6-day certs).
+	// Leave empty for the CA's default profile (backward-compatible).
+	// See: https://letsencrypt.org/2025/01/09/acme-profiles.html
+	Profile string `json:"profile,omitempty"`
+
+	// ARIEnabled enables ACME Renewal Information (RFC 9773) support per CERTCTL_ACME_ARI_ENABLED.
 	// When enabled, the connector queries the CA's ARI endpoint to get CA-directed renewal timing.
 	ARIEnabled bool `json:"ari_enabled,omitempty"`
 
@@ -182,6 +188,15 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	// Validate challenge type
 	if cfg.ChallengeType != "http-01" && cfg.ChallengeType != "dns-01" && cfg.ChallengeType != "dns-persist-01" {
 		return fmt.Errorf("invalid challenge_type: %s (must be http-01, dns-01, or dns-persist-01)", cfg.ChallengeType)
+	}
+
+	// Validate profile if set (alphanumeric + hyphens only)
+	if cfg.Profile != "" {
+		for _, ch := range cfg.Profile {
+			if !((ch >= 'a' && ch <= 'z') || (ch >= 'A' && ch <= 'Z') || (ch >= '0' && ch <= '9') || ch == '-') {
+				return fmt.Errorf("invalid profile: %q (must contain only alphanumeric characters and hyphens)", cfg.Profile)
+			}
+		}
 	}
 
 	// DNS-01 and DNS-PERSIST-01 require a present script
@@ -355,8 +370,8 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	// Build the list of identifiers (domains)
 	identifiers := buildIdentifiers(request.CommonName, request.SANs)
 
-	// Step 1: Create order
-	order, err := c.client.AuthorizeOrder(ctx, identifiers)
+	// Step 1: Create order (with optional profile for CAs that support it)
+	order, err := c.authorizeOrderWithProfile(ctx, identifiers, c.config.Profile)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create ACME order: %w", err)
 	}

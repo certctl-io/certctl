@@ -54,7 +54,7 @@ type IssuerConnector interface {
 	SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error)
 	// GetCACertPEM returns the PEM-encoded CA certificate chain for this issuer.
 	GetCACertPEM(ctx context.Context) (string, error)
-	// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9702 for a certificate.
+	// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9773 for a certificate.
 	// certPEM is the PEM-encoded certificate. Returns nil, nil if the issuer does not support ARI.
 	GetRenewalInfo(ctx context.Context, certPEM string) (*RenewalInfoResult, error)
 }
@@ -174,7 +174,7 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 			continue
 		}
 
-		// ARI check (RFC 9702): if the issuer supports ARI, let the CA direct renewal timing.
+		// ARI check (RFC 9773): if the issuer supports ARI, let the CA direct renewal timing.
 		// Fetch the latest cert version to get the PEM chain for the ARI query.
 		ariChecked := false
 		if version, vErr := s.certRepo.GetLatestVersion(ctx, cert.ID); vErr == nil && version != nil && version.PEMChain != "" {

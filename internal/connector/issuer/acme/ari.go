@@ -15,7 +15,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 )
 
-// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9702 for a certificate.
+// GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9773 for a certificate.
 // certPEM is the PEM-encoded certificate. Returns nil, nil if the CA does not support ARI.
 func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer.RenewalInfoResult, error) {
 	if !c.config.ARIEnabled {
@@ -102,7 +102,7 @@ func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer
 	}, nil
 }
 
-// computeARICertID computes the ARI certificate ID as defined in RFC 9702.
+// computeARICertID computes the ARI certificate ID as defined in RFC 9773.
 // The cert ID is base64url(SHA256(DER encoding of the certificate)).
 func computeARICertID(certPEM string) (string, error) {
 	block, _ := pem.Decode([]byte(certPEM))

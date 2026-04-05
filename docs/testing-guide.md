@@ -39,7 +39,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 32: Request Body Size Limits](#part-32-request-body-size-limits)
 - [Part 33: Apache & HAProxy Target Connectors](#part-33-apache--haproxy-target-connectors)
 - [Part 34: Sub-CA Mode](#part-34-sub-ca-mode)
-- [Part 35: ARI (RFC 9702) Scheduler Integration](#part-35-ari-rfc-9702-scheduler-integration)
+- [Part 35: ARI (RFC 9773) Scheduler Integration](#part-35-ari-rfc-9773-scheduler-integration)
 - [Part 36: Agent Work Routing (M31)](#part-36-agent-work-routing-m31)
 - [Part 37: GUI Completeness (Pre-2.1.0-E)](#part-37-gui-completeness-pre-210-e)
 - [Part 38: Vault PKI Connector (M32)](#part-38-vault-pki-connector-m32)
@@ -5077,7 +5077,7 @@ openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
 
 ---
 
-## Part 35: ARI (RFC 9702) Scheduler Integration
+## Part 35: ARI (RFC 9773) Scheduler Integration
 
 Tests that the renewal scheduler consults ARI before creating renewal jobs for ACME-issued certificates.
 
@@ -6194,7 +6194,7 @@ These must be green before starting manual QA:
 | 34.5 | Sub-CA Key Format Support | Manual | ☐ |  |  |
 | 34.6 | CRL Signing in Sub-CA Mode | Manual | ☐ |  |  |
 
-### Part 35: ARI (RFC 9702) Scheduler Integration
+### Part 35: ARI (RFC 9773) Scheduler Integration
 
 | Test | Description | Method | Pass? | Date | Notes |
 |------|-------------|--------|-------|------|-------|

@@ -58,7 +58,7 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [
 
 ## What It Does
 
-- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9702) lets your CA tell certctl exactly when to renew.
+- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles).
 
 - **You see everything in one place.** A 25-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with TLS verification, discovery triage, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections.
 
@@ -295,7 +295,7 @@ CI runs on every push: `go vet`, `go test -race`, `golangci-lint`, `govulncheck`
 Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector, agent-side key generation, API auth + rate limiting, React dashboard, CI pipeline with coverage gates, Docker images on GHCR.
 
 ### V2: Operational Maturity — Shipped
-30+ milestones, extensively tested with CI-enforced coverage gates. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9702), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
+30+ milestones, extensively tested with CI-enforced coverage gates. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9773), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
 
 **Coming in v2.1.0:** Dynamic issuer and target configuration via GUI (no env var restarts), first-run onboarding wizard.
 

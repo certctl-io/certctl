@@ -2,7 +2,7 @@ package domain
 
 import "time"
 
-// RenewalInfo represents ACME Renewal Information (ARI) per RFC 9702.
+// RenewalInfo represents ACME Renewal Information (ARI) per RFC 9773.
 // It provides CA-directed renewal timing via a suggested renewal window.
 type RenewalInfo struct {
 	// SuggestedWindowStart is the beginning of the time window during which the CA suggests renewal.
@@ -27,7 +27,7 @@ func (r *RenewalInfo) ShouldRenewNow() bool {
 }
 
 // OptimalRenewalTime returns the midpoint of the suggested renewal window,
-// which is the recommended time to initiate renewal per RFC 9702.
+// which is the recommended time to initiate renewal per RFC 9773.
 // This can be used for scheduling if the current time is before the window.
 func (r *RenewalInfo) OptimalRenewalTime() time.Time {
 	duration := r.SuggestedWindowEnd.Sub(r.SuggestedWindowStart)
