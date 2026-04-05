@@ -22,6 +22,8 @@ const typeLabels: Record<string, string> = {
   F5: 'F5 BIG-IP',
   IIS: 'IIS',
   SSH: 'SSH',
+  WinCertStore: 'Windows Cert Store',
+  JavaKeystore: 'Java Keystore',
 };
 
 const TARGET_TYPES = [
@@ -36,6 +38,8 @@ const TARGET_TYPES = [
   { value: 'F5', label: 'F5 BIG-IP', description: 'iControl REST — cert upload, SSL profile update via proxy agent' },
   { value: 'IIS', label: 'IIS', description: 'Windows IIS via agent-local PowerShell or remote WinRM proxy agent' },
   { value: 'SSH', label: 'SSH', description: 'Agentless deployment via SSH/SFTP — deploy to any Linux/Unix server without installing an agent' },
+  { value: 'WinCertStore', label: 'Windows Cert Store', description: 'Import certificates into Windows Certificate Store for Exchange, RDP, SQL Server, ADFS' },
+  { value: 'JavaKeystore', label: 'Java Keystore', description: 'Deploy to JKS/PKCS#12 keystores for Tomcat, Jetty, Kafka, Elasticsearch, and JVM services' },
 ];
 
 const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: string; required?: boolean }[]> = {
@@ -126,6 +130,25 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'chain_path', label: 'Remote Chain Path (optional)', placeholder: '/etc/ssl/certs/chain.pem' },
     { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl reload nginx' },
     { key: 'timeout', label: 'Connection Timeout (seconds)', placeholder: '30 (default)' },
+  ],
+  WinCertStore: [
+    { key: 'store_name', label: 'Certificate Store', placeholder: 'My (default)', required: true },
+    { key: 'store_location', label: 'Store Location', placeholder: 'LocalMachine (default) or CurrentUser' },
+    { key: 'friendly_name', label: 'Friendly Name (optional)', placeholder: 'My Production Cert' },
+    { key: 'remove_expired', label: 'Remove Expired Certs', placeholder: 'false (default)' },
+    { key: 'mode', label: 'Deployment Mode', placeholder: 'local (default) or winrm' },
+    { key: 'winrm_host', label: 'WinRM Host (remote mode)', placeholder: 'win-server.example.com' },
+    { key: 'winrm_port', label: 'WinRM Port', placeholder: '5985 (HTTP) or 5986 (HTTPS)' },
+    { key: 'winrm_username', label: 'WinRM Username', placeholder: 'Administrator' },
+    { key: 'winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
+  ],
+  JavaKeystore: [
+    { key: 'keystore_path', label: 'Keystore Path', placeholder: '/opt/app/conf/keystore.p12', required: true },
+    { key: 'keystore_password', label: 'Keystore Password', placeholder: 'changeit', required: true },
+    { key: 'keystore_type', label: 'Keystore Type', placeholder: 'PKCS12 (default) or JKS' },
+    { key: 'alias', label: 'Key Alias', placeholder: 'server (default)' },
+    { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl restart tomcat' },
+    { key: 'keytool_path', label: 'Keytool Path (optional)', placeholder: 'keytool (default, from PATH)' },
   ],
 };
 

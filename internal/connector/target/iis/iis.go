@@ -2,13 +2,8 @@ package iis
 
 import (
 	"context"
-	"crypto/rand"
-	"crypto/sha1"
-	"crypto/x509"
 	"encoding/base64"
-	"encoding/hex"
 	"encoding/json"
-	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"os"
@@ -18,7 +13,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
-	pkcs12 "software.sslmate.com/src/go-pkcs12"
+	"github.com/shankar0123/certctl/internal/connector/target/certutil"
 )
 
 // Config represents the IIS deployment target configuration.
@@ -256,7 +251,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 
 	// Step 1: Create PFX from PEM inputs
-	pfxPassword, err := generateRandomPassword(32)
+	pfxPassword, err := certutil.GenerateRandomPassword(32)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to generate PFX password: %v", err)
 		c.logger.Error("deployment failed", "error", err)
@@ -267,7 +262,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		}, fmt.Errorf("%s", errMsg)
 	}
 
-	pfxData, err := createPFX(request.CertPEM, request.KeyPEM, request.ChainPEM, pfxPassword)
+	pfxData, err := certutil.CreatePFX(request.CertPEM, request.KeyPEM, request.ChainPEM, pfxPassword)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to create PFX: %v", err)
 		c.logger.Error("PFX creation failed", "error", err)
@@ -281,7 +276,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	// Step 2+3: Compute thumbprint and import PFX
 	// In local mode: write PFX to temp file, import via file path
 	// In WinRM mode: base64-encode PFX, decode on remote side to temp file, import, clean up
-	thumbprint, err := computeThumbprint(request.CertPEM)
+	thumbprint, err := certutil.ComputeThumbprint(request.CertPEM)
 	if err != nil {
 		errMsg := fmt.Sprintf("failed to compute certificate thumbprint: %v", err)
 		c.logger.Error("deployment failed", "error", err)
@@ -564,97 +559,6 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 	}
 }
 
-// createPFX converts PEM-encoded cert, key, and chain into PKCS#12 (PFX) format.
-// IIS requires PFX for certificate import. Uses go-pkcs12 Modern encoder
-// with strong encryption (same library used by M27 export service).
-func createPFX(certPEM, keyPEM, chainPEM string, password string) ([]byte, error) {
-	// Parse leaf certificate
-	certBlock, _ := pem.Decode([]byte(certPEM))
-	if certBlock == nil || certBlock.Type != "CERTIFICATE" {
-		return nil, fmt.Errorf("failed to decode certificate PEM")
-	}
-	leafCert, err := x509.ParseCertificate(certBlock.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse leaf certificate: %w", err)
-	}
-
-	// Parse private key (supports PKCS#8, PKCS#1 RSA, and EC)
-	keyBlock, _ := pem.Decode([]byte(keyPEM))
-	if keyBlock == nil {
-		return nil, fmt.Errorf("failed to decode private key PEM")
-	}
-	privateKey, err := parsePrivateKey(keyBlock.Bytes)
-	if err != nil {
-		return nil, fmt.Errorf("failed to parse private key: %w", err)
-	}
-
-	// Parse CA chain certificates (optional)
-	var caCerts []*x509.Certificate
-	if chainPEM != "" {
-		rest := []byte(chainPEM)
-		for {
-			var block *pem.Block
-			block, rest = pem.Decode(rest)
-			if block == nil {
-				break
-			}
-			if block.Type != "CERTIFICATE" {
-				continue
-			}
-			caCert, err := x509.ParseCertificate(block.Bytes)
-			if err != nil {
-				return nil, fmt.Errorf("failed to parse CA certificate: %w", err)
-			}
-			caCerts = append(caCerts, caCert)
-		}
-	}
-
-	// Encode as PKCS#12 with Modern encryption
-	pfxData, err := pkcs12.Modern.Encode(privateKey, leafCert, caCerts, password)
-	if err != nil {
-		return nil, fmt.Errorf("failed to encode PKCS#12: %w", err)
-	}
-
-	return pfxData, nil
-}
-
-// parsePrivateKey attempts to parse a DER-encoded private key.
-// Tries PKCS#8, PKCS#1 RSA, and EC formats in order.
-func parsePrivateKey(der []byte) (interface{}, error) {
-	if key, err := x509.ParsePKCS8PrivateKey(der); err == nil {
-		return key, nil
-	}
-	if key, err := x509.ParsePKCS1PrivateKey(der); err == nil {
-		return key, nil
-	}
-	if key, err := x509.ParseECPrivateKey(der); err == nil {
-		return key, nil
-	}
-	return nil, fmt.Errorf("unsupported private key format")
-}
-
-// computeThumbprint calculates the SHA-1 thumbprint of a PEM-encoded certificate.
-// IIS uses SHA-1 thumbprints as the primary certificate identifier.
-// Returns uppercase hex string matching Windows certutil output.
-func computeThumbprint(certPEM string) (string, error) {
-	block, _ := pem.Decode([]byte(certPEM))
-	if block == nil || block.Type != "CERTIFICATE" {
-		return "", fmt.Errorf("failed to decode certificate PEM for thumbprint")
-	}
-	hash := sha1.Sum(block.Bytes)
-	return strings.ToUpper(hex.EncodeToString(hash[:])), nil
-}
-
-// generateRandomPassword creates a random alphanumeric password for transient PFX encryption.
-// The password is only used between PFX creation and import — it never persists.
-func generateRandomPassword(length int) (string, error) {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
-	b := make([]byte, length)
-	if _, err := rand.Read(b); err != nil {
-		return "", fmt.Errorf("failed to read random bytes: %w", err)
-	}
-	for i := range b {
-		b[i] = charset[int(b[i])%len(charset)]
-	}
-	return string(b), nil
-}
+// NOTE: PFX creation, key parsing, thumbprint computation, and password generation
+// have been extracted to the shared certutil package (internal/connector/target/certutil)
+// for reuse by WinCertStore and JavaKeystore connectors.

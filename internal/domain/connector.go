@@ -97,5 +97,7 @@ const (
 	TargetTypeEnvoy    TargetType = "Envoy"
 	TargetTypePostfix  TargetType = "Postfix"
 	TargetTypeDovecot  TargetType = "Dovecot"
-	TargetTypeSSH      TargetType = "SSH"
+	TargetTypeSSH          TargetType = "SSH"
+	TargetTypeWinCertStore TargetType = "WinCertStore"
+	TargetTypeJavaKeystore TargetType = "JavaKeystore"
 )

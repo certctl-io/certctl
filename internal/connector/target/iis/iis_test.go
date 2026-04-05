@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/connector/target/certutil"
 	pkcs12 "software.sslmate.com/src/go-pkcs12"
 )
 
@@ -672,7 +673,7 @@ func TestCreatePFX_Success(t *testing.T) {
 		t.Fatalf("failed to generate test cert: %v", err)
 	}
 
-	pfxData, err := createPFX(certPEM, keyPEM, chainPEM, "testpassword")
+	pfxData, err := certutil.CreatePFX(certPEM, keyPEM, chainPEM, "testpassword")
 	if err != nil {
 		t.Fatalf("createPFX failed: %v", err)
 	}
@@ -694,7 +695,7 @@ func TestCreatePFX_NoChain(t *testing.T) {
 		t.Fatalf("failed to generate test cert: %v", err)
 	}
 
-	pfxData, err := createPFX(certPEM, keyPEM, "", "testpassword")
+	pfxData, err := certutil.CreatePFX(certPEM, keyPEM, "", "testpassword")
 	if err != nil {
 		t.Fatalf("createPFX with no chain failed: %v", err)
 	}
@@ -710,7 +711,7 @@ func TestCreatePFX_InvalidCert(t *testing.T) {
 		t.Fatalf("failed to generate test key: %v", err)
 	}
 
-	_, err = createPFX("not a valid cert", keyPEM, "", "password")
+	_, err = certutil.CreatePFX("not a valid cert", keyPEM, "", "password")
 	if err == nil {
 		t.Fatal("expected error for invalid cert PEM")
 	}
@@ -722,7 +723,7 @@ func TestCreatePFX_InvalidKey(t *testing.T) {
 		t.Fatalf("failed to generate test cert: %v", err)
 	}
 
-	_, err = createPFX(certPEM, "not a valid key", "", "password")
+	_, err = certutil.CreatePFX(certPEM, "not a valid key", "", "password")
 	if err == nil {
 		t.Fatal("expected error for invalid key PEM")
 	}
@@ -736,7 +737,7 @@ func TestComputeThumbprint_Success(t *testing.T) {
 		t.Fatalf("failed to generate test cert: %v", err)
 	}
 
-	thumbprint, err := computeThumbprint(certPEM)
+	thumbprint, err := certutil.ComputeThumbprint(certPEM)
 	if err != nil {
 		t.Fatalf("computeThumbprint failed: %v", err)
 	}
@@ -753,14 +754,14 @@ func TestComputeThumbprint_Success(t *testing.T) {
 }
 
 func TestComputeThumbprint_InvalidPEM(t *testing.T) {
-	_, err := computeThumbprint("not a valid pem")
+	_, err := certutil.ComputeThumbprint("not a valid pem")
 	if err == nil {
 		t.Fatal("expected error for invalid PEM")
 	}
 }
 
 func TestComputeThumbprint_EmptyString(t *testing.T) {
-	_, err := computeThumbprint("")
+	_, err := certutil.ComputeThumbprint("")
 	if err == nil {
 		t.Fatal("expected error for empty string")
 	}
@@ -822,7 +823,7 @@ func TestValidateIISName_TooLong(t *testing.T) {
 // --- Random password generation ---
 
 func TestGenerateRandomPassword(t *testing.T) {
-	pw, err := generateRandomPassword(32)
+	pw, err := certutil.GenerateRandomPassword(32)
 	if err != nil {
 		t.Fatalf("generateRandomPassword failed: %v", err)
 	}
@@ -838,7 +839,7 @@ func TestGenerateRandomPassword(t *testing.T) {
 	}
 
 	// Verify two passwords are different (probabilistic but reliable)
-	pw2, _ := generateRandomPassword(32)
+	pw2, _ := certutil.GenerateRandomPassword(32)
 	if pw == pw2 {
 		t.Error("two generated passwords should be different")
 	}

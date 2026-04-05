@@ -33,6 +33,8 @@ import (
 	pf "github.com/shankar0123/certctl/internal/connector/target/postfix"
 	sshconn "github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
+	jks "github.com/shankar0123/certctl/internal/connector/target/javakeystore"
+	wcs "github.com/shankar0123/certctl/internal/connector/target/wincertstore"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/nginx"
@@ -656,6 +658,24 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return sshconn.New(&cfg, a.logger)
+
+	case "WinCertStore":
+		var cfg wcs.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid WinCertStore config: %w", err)
+			}
+		}
+		return wcs.New(&cfg, a.logger)
+
+	case "JavaKeystore":
+		var cfg jks.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid JavaKeystore config: %w", err)
+			}
+		}
+		return jks.New(&cfg, a.logger), nil
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

@@ -27,6 +27,8 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [F5 BIG-IP (Interface Only)](#f5-big-ip-interface-only)
    - [IIS (Implemented, Dual-Mode)](#iis-implemented-dual-mode)
    - [SSH (Agentless Deployment)](#ssh-agentless-deployment)
+   - [Windows Certificate Store](#windows-certificate-store)
+   - [Java Keystore (JKS / PKCS#12)](#java-keystore-jks--pkcs12)
 4. [Notifier Connector](#notifier-connector)
    - [Interface](#interface-2)
 5. [Registering a Connector](#registering-a-connector)
@@ -873,6 +875,67 @@ The SSH target connector enables agentless certificate deployment to any Linux/U
 - Encrypted private keys supported via passphrase
 
 Location: `internal/connector/target/ssh/ssh.go`
+
+### Windows Certificate Store
+
+The Windows Certificate Store connector imports certificates into the Windows cert store via PowerShell, without managing IIS site bindings. Use this for non-IIS Windows services that read certificates from the cert store (Exchange, RDP, SQL Server, ADFS, etc.). Same injectable `PowerShellExecutor` pattern as the IIS connector, with optional WinRM proxy mode.
+
+```json
+{
+  "store_name": "My",
+  "store_location": "LocalMachine",
+  "friendly_name": "Production API Cert",
+  "remove_expired": true
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `store_name` | string | `"My"` | Windows cert store name (My, Root, WebHosting, etc.) |
+| `store_location` | string | `"LocalMachine"` | `"LocalMachine"` or `"CurrentUser"` |
+| `friendly_name` | string | | Optional friendly name for the imported certificate |
+| `remove_expired` | boolean | `false` | Remove expired certs with same CN after import |
+| `mode` | string | `"local"` | `"local"` (agent-local) or `"winrm"` (remote) |
+| `winrm_host` | string | | WinRM hostname (required for winrm mode) |
+| `winrm_port` | number | 5985 | WinRM port (5985 HTTP, 5986 HTTPS) |
+| `winrm_username` | string | | WinRM username (required for winrm mode) |
+| `winrm_password` | string | | WinRM password (required for winrm mode) |
+| `winrm_https` | boolean | `false` | Use HTTPS for WinRM |
+| `winrm_insecure` | boolean | `false` | Skip TLS verification for WinRM |
+
+Location: `internal/connector/target/wincertstore/wincertstore.go`
+
+### Java Keystore (JKS / PKCS#12)
+
+The Java Keystore connector deploys certificates to JKS or PKCS#12 keystores via the `keytool` CLI. This enables TLS cert deployment for Tomcat, Jetty, Kafka, Elasticsearch, and any JVM-based service. Flow: PEM to temp PKCS#12, then `keytool -importkeystore` into the target keystore.
+
+```json
+{
+  "keystore_path": "/opt/tomcat/conf/keystore.p12",
+  "keystore_password": "changeit",
+  "keystore_type": "PKCS12",
+  "alias": "server",
+  "reload_command": "systemctl restart tomcat"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `keystore_path` | string | *(required)* | Absolute path to the keystore file |
+| `keystore_password` | string | *(required)* | Keystore password |
+| `keystore_type` | string | `"PKCS12"` | `"PKCS12"` or `"JKS"` |
+| `alias` | string | `"server"` | Key entry alias in the keystore |
+| `reload_command` | string | | Optional command to run after keystore update |
+| `create_keystore` | boolean | `true` | Create keystore if it doesn't exist |
+| `keytool_path` | string | `"keytool"` | Override keytool binary path |
+
+**Security:**
+- Reload commands validated against shell injection via `validation.ValidateShellCommand()`
+- Alias validated against injection (alphanumeric, hyphens, underscores only)
+- Path traversal prevention on keystore path
+- Transient PKCS#12 temp file cleaned up after import (even on error)
+
+Location: `internal/connector/target/javakeystore/javakeystore.go`
 
 ## Notifier Connector
 

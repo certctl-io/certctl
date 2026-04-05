@@ -22,6 +22,8 @@ const typeLabels: Record<string, string> = {
   Postfix: 'Postfix',
   Dovecot: 'Dovecot',
   SSH: 'SSH',
+  WinCertStore: 'Windows Cert Store',
+  JavaKeystore: 'Java Keystore',
 };
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
@@ -229,7 +231,7 @@ export default function TargetDetailPage() {
             {target.config && Object.keys(target.config).length > 0 ? (
               <div className="space-y-0">
                 {Object.entries(target.config).map(([key, val]) => {
-                  const sensitiveKeys = ['password', 'secret', 'token', 'key', 'winrm_password'];
+                  const sensitiveKeys = ['password', 'secret', 'token', 'key', 'winrm_password', 'keystore_password'];
                   const isSensitive = sensitiveKeys.some(s => key.toLowerCase().includes(s));
                   const displayVal = isSensitive && val ? '********' : String(val);
                   return (
