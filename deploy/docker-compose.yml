@@ -48,6 +48,7 @@ services:
       CERTCTL_AUTH_TYPE: none
       CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
       CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI with seeded demo targets
+      CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}  # AES-256-GCM for dynamic issuer/target config
     ports:
       - "8443:8443"
     networks:
@@ -83,6 +84,7 @@ services:
       CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
       CERTCTL_AGENT_NAME: docker-agent
       CERTCTL_LOG_LEVEL: info
+      CERTCTL_DISCOVERY_DIRS: /var/lib/certctl/keys  # Agent scans this directory for existing certificates
     volumes:
       - agent_keys:/var/lib/certctl/keys
     networks:

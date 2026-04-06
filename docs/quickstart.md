@@ -73,6 +73,8 @@ The `deploy/` directory contains four compose files for different use cases:
 
 Override files are layered onto the base with multiple `-f` flags. The test environment is self-contained and runs independently. To reset any environment's data, add `down -v` to remove volumes.
 
+For a deep dive into every service, environment variable, and networking decision, see the [Docker Compose Environments Guide](../deploy/ENVIRONMENTS.md).
+
 ### Kubernetes with Helm
 
 For production deployments on Kubernetes, use the Helm chart:

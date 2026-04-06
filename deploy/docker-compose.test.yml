@@ -198,6 +198,9 @@ services:
       CERTCTL_EST_ENABLED: "true"
       CERTCTL_EST_ISSUER_ID: iss-local
 
+      # Dynamic issuer/target config encryption (M34/M35)
+      CERTCTL_CONFIG_ENCRYPTION_KEY: test-encryption-key-32chars!!
+
       # Network scanning
       CERTCTL_NETWORK_SCAN_ENABLED: "true"
 
