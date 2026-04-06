@@ -981,7 +981,7 @@ export CERTCTL_API_KEY="test-key-123"
 
 ## Part 15: MCP Server for AI Integration (M18a)
 
-certctl exposes 78 MCP tools covering the REST API via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
+certctl exposes the full REST API via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
 
 ```bash
 # Build the MCP server

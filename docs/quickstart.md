@@ -60,6 +60,19 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
+### Docker Compose Environments
+
+The `deploy/` directory contains four compose files for different use cases:
+
+| File | Purpose | How to run |
+|------|---------|------------|
+| `docker-compose.yml` | **Base platform.** PostgreSQL + certctl server + agent. Clean dashboard with onboarding wizard — use this for production or first-time setup. | `docker compose -f deploy/docker-compose.yml up --build` |
+| `docker-compose.demo.yml` | **Demo data override.** Layers 180 days of realistic seed data (15 certs, 5 agents, multiple issuers) onto the base. Dashboard charts and tables look populated on first boot. | `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up --build` |
+| `docker-compose.dev.yml` | **Development override.** Adds PgAdmin (port 5050), debug-level logging, and a Delve debugger port (40000) for the server. | `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.dev.yml up --build` |
+| `docker-compose.test.yml` | **Integration test environment.** 7 containers on a static-IP subnet: PostgreSQL, certctl server+agent, step-ca, Pebble ACME server, challenge test server, and NGINX. Runs the full issuance→deployment→verification flow against real CA backends. Standalone — does not combine with the base file. | `docker compose -f deploy/docker-compose.test.yml up --build` |
+
+Override files are layered onto the base with multiple `-f` flags. The test environment is self-contained and runs independently. To reset any environment's data, add `down -v` to remove volumes.
+
 ### Kubernetes with Helm
 
 For production deployments on Kubernetes, use the Helm chart:
@@ -404,7 +417,7 @@ export CERTCTL_API_KEY="test-key-123"
 ./mcp-server
 ```
 
-Exposes 78 MCP tools covering the REST API via stdio transport. Ask Claude: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
+Exposes the full REST API via MCP over stdio transport. Ask Claude: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
 
 ## Demo Data Reference
 

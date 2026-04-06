@@ -7,7 +7,7 @@ Complete reference of all features shipped in the V2 release (as of March 2026).
 ## API Surface
 
 ### Overview
-- **99 endpoints** across 23 resource domains under `/api/v1/` + `/.well-known/est/`
+- REST API across 23 resource domains under `/api/v1/` + `/.well-known/est/`
 - REST API with HTTP semantics (GET, POST, PUT, DELETE)
 - All endpoints require authentication by default (configurable)
 - OpenAPI 3.1 spec with full schema documentation
@@ -1134,12 +1134,12 @@ The web dashboard is the primary operational interface for certctl. Built with *
 ## Integration Interfaces
 
 ### MCP Server (M18a)
-**Separate binary** (`cmd/mcp-server/`) providing AI-native access to certctl via Claude, Cursor, OpenClaw. Instead of memorizing 91 API endpoints, ask your AI assistant "what certificates are expiring this week?" or "renew the API prod cert" and it translates to the right API calls.
+**Separate binary** (`cmd/mcp-server/`) providing AI-native access to certctl via Claude, Cursor, OpenClaw. Instead of memorizing API endpoints, ask your AI assistant "what certificates are expiring this week?" or "renew the API prod cert" and it translates to the right API calls.
 
 - **Transport** — stdio (stdin/stdout)
 - **Protocol** — Model Context Protocol v1
 - **SDK** — Official `modelcontextprotocol/go-sdk` v1.4.1
-- **Tools** — 78 MCP tools covering all API endpoints
+- **Tools** — MCP tools covering all API endpoints
 - **Organization** — 16 resource domains (Certificates, Issuers, Targets, Agents, Jobs, etc.)
 - **Authentication** — Bearer token via `CERTCTL_API_KEY` env var
 - **Configuration** — `CERTCTL_SERVER_URL` (e.g., http://localhost:8080) + `CERTCTL_API_KEY`
@@ -1439,8 +1439,8 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Feature | V2 | V3 (Paid) | Status |
 |---------|----|-----------|-|
 | Certificate lifecycle (create/renew/revoke) | ✓ | ✓ | Shipped v1.0+ |
-| 4 issuer connectors (Local CA, ACME, step-ca, OpenSSL) | ✓ | ✓ | Shipped |
-| 3 target connectors (NGINX, Apache, HAProxy) | ✓ | ✓ | Shipped |
+| 9 issuer connectors (Local CA, ACME, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS, EST) | ✓ | ✓ | Shipped |
+| 13 target connectors (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS, F5, Postfix, Dovecot, SSH, WinCertStore, JavaKeystore) | ✓ | ✓ | Shipped |
 | 6 notifier channels (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) | ✓ | ✓ | Shipped |
 | Agent fleet + metadata | ✓ | ✓ | Shipped |
 | Agent groups (dynamic + manual) | ✓ | ✓ | Shipped |
@@ -1449,28 +1449,33 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | Revocation (RFC 5280, CRL, OCSP) | ✓ | ✓ | Shipped |
 | Full web dashboard | ✓ | ✓ | Shipped |
 | Observability (charts, metrics, stats) | ✓ | ✓ | Shipped |
-| REST API (91 endpoints) | ✓ | ✓ | Shipped |
-| MCP server (78 tools) | ✓ | ✓ | Shipped v2.1 |
-| CLI tool (12 subcommands) | ✓ | ✓ | Shipped |
+| REST API | ✓ | ✓ | Shipped |
+| MCP server (REST API exposed via MCP) | ✓ | ✓ | Shipped v2.1 |
+| CLI tool | ✓ | ✓ | Shipped |
 | Compliance mapping docs (SOC 2, PCI-DSS, NIST) | ✓ | ✓ | Shipped |
-| Filesystem cert discovery (M18b) | ✓ | ✓ | Shipped |
-| Network cert discovery (M21) | ✓ | ✓ | Shipped |
-| Prometheus metrics (M22) | ✓ | ✓ | Shipped |
+| Filesystem cert discovery | ✓ | ✓ | Shipped |
+| Network cert discovery | ✓ | ✓ | Shipped |
+| Prometheus metrics | ✓ | ✓ | Shipped |
 | Enhanced query API (sort, filter, cursor, fields) | ✓ | ✓ | Shipped |
 | Immutable API audit log | ✓ | ✓ | Shipped |
+| Bulk operations | ✓ | ✓ | Shipped |
+| EST server (RFC 7030) | ✓ | ✓ | Shipped |
+| Post-deployment TLS verification | ✓ | ✓ | Shipped |
+| Certificate export (PEM + PKCS#12) | ✓ | ✓ | Shipped |
+| S/MIME support (EKU-aware issuance) | ✓ | ✓ | Shipped |
+| ACME ARI (RFC 9773) | ✓ | ✓ | Shipped |
+| Scheduled certificate digest emails | ✓ | ✓ | Shipped |
+| Helm chart (Kubernetes) | ✓ | ✓ | Shipped |
+| Dynamic issuer/target configuration (GUI) | ✓ | ✓ | Shipped |
+| Onboarding wizard | ✓ | ✓ | Shipped |
 | **OIDC/SSO auth** | ✗ | ✓ | Planned V3 |
 | **RBAC (role-based access control)** | ✗ | ✓ | Planned V3 |
-| **F5 BIG-IP implementation** | Stub | ✓ | Planned V3 |
-| **IIS implementation** | Stub | ✓ | Planned V3 |
 | **NATS event bus** | ✗ | ✓ | Planned V3 |
 | **Real-time updates (SSE/WebSocket)** | ✗ | ✓ | Planned V3 |
 | **Advanced search DSL** | ✗ | ✓ | Planned V3 |
-| **Bulk operations** | ✓ | ✓ | M13 (free) |
-| **Bulk revocation** | ✗ | ✓ | Planned V3 (paid) |
+| **Bulk revocation (by profile/owner/agent)** | ✗ | ✓ | Planned V3 |
 | **Certificate health scores** | ✗ | ✓ | Planned V3 |
 | **Compliance scoring** | ✗ | ✓ | Planned V3 |
-| **DigiCert issuer** | ✗ | ✓ | Implemented (Beta) |
-| **Vault PKI issuer** | ✗ | ✓ | Implemented (Beta) |
 
 ---
 
@@ -1478,10 +1483,9 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 
 | Category | Count |
 |----------|-------|
-| **API Endpoints** | 97 (under /api/v1/ + /.well-known/est/) |
-| **Dashboard** | Full web GUI |
-| **Issuer Connectors** | 6 (Local CA, ACME, step-ca, OpenSSL, Vault PKI, DigiCert) |
-| **Target Connectors** | 10 (9 impl: NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS, Postfix, Dovecot; 1 stub: F5) |
+| **Dashboard** | Full web GUI with operational views wired to real API data |
+| **Issuer Connectors** | 8 (Local CA, ACME, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS) + EST server |
+| **Target Connectors** | 13 (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS, F5, Postfix, Dovecot, SSH, WinCertStore, JavaKeystore) |
 | **Notifier Channels** | 6 (Email, Webhook, Slack, Teams, PagerDuty, OpsGenie) |
 | **Job Types** | 4 (Issuance, Renewal, Deployment, Validation) |
 | **Job States** | 7 (Pending, AwaitingCSR, AwaitingApproval, Running, Completed, Failed, Cancelled) |
@@ -1489,9 +1493,8 @@ Each guide includes an evidence summary table mapping specific criteria to certc
 | **Certificate States** | 8 (Pending, Active, Expiring, Expired, RenewalInProgress, Failed, Revoked, Archived) |
 | **Revocation Reason Codes** | 8 (RFC 5280 compliant) |
 | **Discovery Statuses** | 3 (Unmanaged, Managed, Dismissed) |
-| **MCP Tools** | 76 (16 resource domains) |
+| **MCP Server** | REST API exposed via MCP (16 resource domains) |
 | **CLI Subcommands** | 10 |
-| **Database Tables** | 19 |
 | **Test Suite** | Extensively tested with CI-enforced coverage gates |
 | **Environment Variables** | 41+ configuration options |
 

@@ -94,7 +94,7 @@ Add certctl as an MCP server in your project's `.mcp.json`:
 
 ## Available Tools
 
-The MCP server registers 78 tools organized across 16 resource domains:
+The MCP server exposes the full REST API organized across 16 resource domains:
 
 | Domain | Tools | Examples |
 |--------|-------|---------|
@@ -153,7 +153,7 @@ flowchart LR
     AI <-->|"stdio"| MCP
     MCP -->|"HTTP + Bearer token"| SERVER
 
-    MCP ~~~ TOOLS["78 tools · 16 domains\nTyped input structs"]
+    MCP ~~~ TOOLS["REST API via MCP · 16 domains\nTyped input structs"]
 ```
 
 The MCP server is intentionally thin:

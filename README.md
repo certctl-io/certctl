@@ -46,7 +46,7 @@ certctl fills that gap. It's **CA-agnostic** — plug in any certificate authori
 
 It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
-For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
+For a detailed comparison with other competitors and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
 
 ## Who Is This For
 
@@ -60,7 +60,7 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [
 
 - **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles).
 
-- **You see everything in one place.** A 25-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with TLS verification, discovery triage, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections.
+- **You see everything in one place.** The operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with TLS verification, discovery triage, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections.
 
 - **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served.
 
@@ -68,7 +68,7 @@ For a detailed comparison with CertKit, KeyTalk, and enterprise platforms, see [
 
 - **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
 
-- **Multiple interfaces for different workflows.** REST API (97 endpoints) for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), EST server (RFC 7030) for device enrollment, Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
+- **Multiple interfaces for different workflows.** REST API for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), EST server (RFC 7030) for device enrollment, Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
 
 For the full capability breakdown — revocation infrastructure (CRL + OCSP), policy engine, certificate profiles, S/MIME support, approval workflows, and more — see the [Feature Inventory](docs/features.md).
 
@@ -158,16 +158,19 @@ cd certctl
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Wait ~30 seconds, then open **http://localhost:8443** in your browser.
+Wait ~30 seconds, then open **http://localhost:8443** in your browser. The onboarding wizard walks you through connecting a CA, deploying an agent, and issuing your first certificate.
 
-The dashboard comes pre-loaded with 32 demo certificates across 7 issuers, 8 agents, 180 days of job history, discovery scan data, and network scan targets — a realistic snapshot of a certificate inventory that looks like it's been running for months.
+**Want a pre-populated demo instead?** Add the demo override to see 32 certificates across 7 issuers, 8 agents, and 180 days of realistic history:
+
+```bash
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
+```
+
+The `deploy/` directory has four compose files: `docker-compose.yml` (base platform), `docker-compose.demo.yml` (demo data overlay), `docker-compose.dev.yml` (PgAdmin + debug logging), and `docker-compose.test.yml` (standalone integration tests with real CA backends). See the [Quick Start Guide](docs/quickstart.md#docker-compose-environments) for details.
 
 ```bash
 curl http://localhost:8443/health
 # {"status":"healthy"}
-
-curl -s http://localhost:8443/api/v1/certificates | jq '.total'
-# 32
 ```
 
 ### Agent Install (One-Liner)
@@ -223,7 +226,7 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 | [Feature Inventory](docs/features.md) | Complete reference of all V2 capabilities, API endpoints, and configuration |
 | [Connector Reference](docs/connectors.md) | Configuration for all 7 issuers, 10 targets, and 5 notifier connectors |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [OpenAPI 3.1 Spec](api/openapi.yaml) | 97 operations, full request/response schemas |
+| [OpenAPI 3.1 Spec](api/openapi.yaml) | Full request/response schemas for all operations |
 
 ## CLI
 
@@ -303,7 +306,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 Team access controls and identity provider integration (OIDC/SSO). Role-based access control with profile-gating. Event-driven architecture (NATS) with real-time operational views. Advanced search DSL, compliance and risk scoring, bulk fleet operations.
 
 ### V4+: Cloud, Scale & Passive Discovery
-Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Google CAS, EJBCA, Sectigo), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
+Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Entrust, GlobalSign, EJBCA), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
 
 ## License
 

@@ -32,11 +32,13 @@ This isn't a premium feature. It's the default behavior, free. Most alternatives
 
 ### 2. CA-Agnostic Issuer Architecture
 
-certctl works with any certificate authority, not just ACME providers. Seven issuer connectors ship today, all free:
+certctl works with any certificate authority, not just ACME providers. Nine issuer connectors ship today, all free:
 
-- **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9773)
+- **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9773), certificate profile selection
 - **HashiCorp Vault PKI** — `/v1/{mount}/sign/{role}` API, token auth
 - **DigiCert CertCentral** — async order model, OV/EV support
+- **Sectigo SCM** — async order model, DV/OV/EV support, 3-header auth
+- **Google Cloud CAS** — Certificate Authority Service, OAuth2 service account auth, CA pool selection
 - **step-ca** (Smallstep) — native /sign API with JWK provisioner auth
 - **Local CA** — self-signed or sub-CA mode (chain to ADCS or any enterprise root)
 - **OpenSSL / Custom CA** — delegate signing to any shell script
@@ -54,7 +56,7 @@ A reload command can exit 0 while the certificate doesn't take effect — wrong 
 
 The three differentiators above get the headlines, but the feature surface is wider than most paid platforms:
 
-**10 deployment targets** — NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell + remote WinRM), Postfix, and Dovecot. All use a pluggable connector model. The control plane never initiates outbound connections — agents poll for work, meaning certctl works behind firewalls, across network zones, and in air-gapped environments.
+**13 deployment targets** — NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell + remote WinRM), F5 BIG-IP (proxy agent + iControl REST), Postfix, Dovecot, SSH (agentless), Windows Certificate Store, and Java Keystore. All use a pluggable connector model. The control plane never initiates outbound connections — agents poll for work, meaning certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 **Network certificate discovery** — active TLS scanning of CIDR ranges finds certificates you didn't know existed. Agents also scan local filesystems for PEM/DER files. Everything feeds into a triage workflow where you claim, dismiss, or import discovered certs into management.
 
@@ -66,9 +68,9 @@ The three differentiators above get the headlines, but the feature surface is wi
 
 **Prometheus metrics** — `/api/v1/metrics/prometheus` in standard exposition format. Works with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics.
 
-**MCP server** — 80 tools exposing the entire API surface for AI-assisted certificate management via Claude, Cursor, or any MCP-compatible client. No other certificate platform offers this.
+**MCP server** — the entire REST API is exposed via MCP for AI-assisted certificate management via Claude, Cursor, or any MCP-compatible client. No other certificate platform offers this.
 
-**Full REST API** — 97 OpenAPI 3.1-documented operations. CLI tool with 10 subcommands. Helm chart for Kubernetes deployment. Scheduled certificate digest emails. Certificate export in PEM and PKCS#12. S/MIME support with EKU-aware issuance.
+**Full REST API** — OpenAPI 3.1-documented operations covering the entire platform. CLI tool with 10 subcommands. Helm chart for Kubernetes deployment. Scheduled certificate digest emails. Certificate export in PEM and PKCS#12. S/MIME support with EKU-aware issuance.
 
 **Extensively tested** — Go backend with race detection, static analysis (golangci-lint), and vulnerability scanning (govulncheck) on every commit. CI-enforced per-layer coverage thresholds. Frontend test suite. Every push is gated.
 
@@ -80,11 +82,11 @@ ACME clients solve one slice of the problem — issuance and renewal from ACME C
 
 ### vs. Agent-Based SaaS
 
-The closest architectural competitors use the same agent model — local key generation, CSR submission, push-based deployment. Where certctl differs: it supports 7 issuer types (not just ACME), provides CRL/OCSP/revocation infrastructure (not just issuance), includes a policy engine and network discovery, and is source-available with no certificate limit. SaaS alternatives are typically proprietary, priced per certificate ($2+/cert/month), and cap their free tiers at 3-5 certificates. certctl is free for any number of certificates, forever.
+The closest architectural competitors use the same agent model — local key generation, CSR submission, push-based deployment. Where certctl differs: it supports 9 issuer types (not just ACME), provides CRL/OCSP/revocation infrastructure (not just issuance), includes a policy engine and network discovery, and is source-available with no certificate limit. SaaS alternatives are typically proprietary, priced per certificate ($2+/cert/month), and cap their free tiers at 3-5 certificates. certctl is free for any number of certificates, forever.
 
 ### vs. Commercial PKI Platforms
 
-On-prem or hosted commercial platforms offer broader cert type coverage (VPN certs, device auth, SCEP) and deeper CA integrations. The trade-off: no free tier, opaque pricing (often €13K+/year for 1,500 certs), proprietary codebases, and no public API documentation. certctl trades breadth of exotic cert types for full transparency — source-available code, 97-operation OpenAPI spec, and a free community edition with no artificial limits.
+On-prem or hosted commercial platforms offer broader cert type coverage (VPN certs, device auth, SCEP) and deeper CA integrations. The trade-off: no free tier, opaque pricing (often €13K+/year for 1,500 certs), proprietary codebases, and no public API documentation. certctl trades breadth of exotic cert types for full transparency — source-available code, fully documented OpenAPI spec, and a free community edition with no artificial limits.
 
 ### vs. Enterprise Platforms
 
@@ -100,7 +102,7 @@ certctl isn't the right tool for everyone:
 
 ## See It Running
 
-The demo seeds 32 certificates across 7 issuers, 8 agents, 6 deployment targets, and 180 days of realistic history — jobs, audit events, discovery scans, approval workflows — so you can explore every feature immediately.
+The demo seeds certificates across multiple issuers, agents, and deployment targets with 180 days of realistic history — jobs, audit events, discovery scans, approval workflows — so you can explore every feature immediately.
 
 ```bash
 git clone https://github.com/shankar0123/certctl.git

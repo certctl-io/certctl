@@ -3276,7 +3276,7 @@ timeout 3 bash -c 'CERTCTL_API_KEY=$API_KEY ./certctl-mcp 2>&1' || true
 
 ### 18.2 Tool Registration
 
-**Test 18.2.1 — Tool count verification (78 tools)**
+**Test 18.2.1 — Tool count verification**
 
 ```bash
 echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
@@ -6006,7 +6006,7 @@ These must be green before starting manual QA:
 | 18.1.1 | Binary builds successfully | Manual | ☐ |  |  |
 | 18.1.2 | Startup with valid env vars | Manual | ☐ |  |  |
 | 18.1.3 | Missing CERTCTL_SERVER_URL behavior | Manual | ☐ |  |  |
-| 18.2.1 | Tool count verification (78 tools) | Manual | ☐ |  |  |
+| 18.2.1 | Tool count verification | Manual | ☐ |  |  |
 | 18.2.2 | All 16 resource domains present | Manual | ☐ |  |  |
 | 18.3.1 | List certificates via MCP | Manual | ☐ |  |  |
 | 18.3.2 | Get specific certificate via MCP | Manual | ☐ |  |  |
