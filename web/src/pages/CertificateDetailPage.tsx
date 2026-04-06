@@ -60,7 +60,7 @@ function TimelineStep({ label, status, time, isLast }: { label: string; status: 
   );
 }
 
-function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certId: string; certStatus: string; createdAt: string; issuedAt: string }) {
+function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certId: string; certStatus: string; createdAt: string; issuedAt?: string }) {
   const { data: jobsData } = useQuery({
     queryKey: ['jobs', { certificate_id: certId }],
     queryFn: () => getJobs({ certificate_id: certId }),
@@ -372,6 +372,12 @@ export default function CertificateDetailPage() {
     );
   }
 
+  // Derive certificate metadata from latest version (backend doesn't include these on the cert object)
+  const latestVersion = versions?.data?.[0];
+  const serialNumber = cert.serial_number || latestVersion?.serial_number;
+  const fingerprintSha256 = cert.fingerprint_sha256 || latestVersion?.fingerprint_sha256;
+  const issuedAt = cert.issued_at || latestVersion?.not_before;
+
   const days = daysUntil(cert.expires_at);
   const isRevoked = cert.status === 'Revoked';
   const isArchived = cert.status === 'Archived';
@@ -492,7 +498,7 @@ export default function CertificateDetailPage() {
         )}
 
         {/* Deployment Status Timeline */}
-        <DeploymentTimeline certId={id!} certStatus={cert.status} createdAt={cert.created_at} issuedAt={cert.issued_at} />
+        <DeploymentTimeline certId={id!} certStatus={cert.status} createdAt={cert.created_at} issuedAt={issuedAt} />
 
         <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
           {/* Certificate Info */}
@@ -518,9 +524,9 @@ export default function CertificateDetailPage() {
                 })}
               </span>
             ) : '—'} />
-            <InfoRow label="Serial Number" value={cert.serial_number || '—'} />
+            <InfoRow label="Serial Number" value={serialNumber || '—'} />
             <InfoRow label="Fingerprint" value={
-              cert.fingerprint ? <span className="font-mono text-xs">{cert.fingerprint.slice(0, 24)}...</span> : '—'
+              fingerprintSha256 ? <span className="font-mono text-xs">{fingerprintSha256.slice(0, 24)}...</span> : '—'
             } />
             <InfoRow label="Key Algorithm" value={cert.key_algorithm || '—'} />
             <InfoRow label="Key Size" value={cert.key_size ? `${cert.key_size} bits` : '—'} />
@@ -556,7 +562,7 @@ export default function CertificateDetailPage() {
           {/* Lifecycle */}
           <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
             <h3 className="text-sm font-semibold text-ink-muted mb-4">Lifecycle</h3>
-            <InfoRow label="Issued" value={formatDate(cert.issued_at)} />
+            <InfoRow label="Issued" value={formatDate(issuedAt)} />
             <InfoRow label="Expires" value={
               <span className={isRevoked ? 'text-red-600 line-through' : expiryColor(days)}>
                 {formatDate(cert.expires_at)} ({days <= 0 ? 'expired' : `${days} days`})
@@ -615,7 +621,7 @@ export default function CertificateDetailPage() {
                 <div key={v.id} className="flex items-center justify-between py-2 border-b border-surface-border/50 last:border-0">
                   <div>
                     <div className="flex items-center gap-2">
-                      <span className="text-sm text-ink">Version {v.version}</span>
+                      <span className="text-sm text-ink">Version {versions.data.length - idx}</span>
                       {idx === 0 && <span className="text-xs bg-brand-100 text-brand-700 px-1.5 py-0.5 rounded">Current</span>}
                     </div>
                     <div className="text-xs text-ink-faint font-mono">{v.serial_number}</div>

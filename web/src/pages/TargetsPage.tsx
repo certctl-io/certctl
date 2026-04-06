@@ -47,18 +47,20 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/nginx/ssl/cert.pem', required: true },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/nginx/ssl/key.pem', required: true },
     { key: 'chain_path', label: 'Chain Path', placeholder: '/etc/nginx/ssl/chain.pem' },
-    { key: 'reload_cmd', label: 'Reload Command', placeholder: 'nginx -t && systemctl reload nginx' },
+    { key: 'reload_command', label: 'Reload Command', placeholder: 'nginx -s reload' },
+    { key: 'validate_command', label: 'Validate Command', placeholder: 'nginx -t' },
   ],
   Apache: [
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/apache2/ssl/cert.pem', required: true },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/apache2/ssl/key.pem', required: true },
     { key: 'chain_path', label: 'Chain Path', placeholder: '/etc/apache2/ssl/chain.pem' },
-    { key: 'reload_cmd', label: 'Reload Command', placeholder: 'apachectl configtest && apachectl graceful' },
+    { key: 'reload_command', label: 'Reload Command', placeholder: 'apachectl graceful' },
+    { key: 'validate_command', label: 'Validate Command', placeholder: 'apachectl configtest' },
   ],
   HAProxy: [
     { key: 'pem_path', label: 'Combined PEM Path', placeholder: '/etc/haproxy/certs/combined.pem', required: true },
-    { key: 'reload_cmd', label: 'Reload Command', placeholder: 'systemctl reload haproxy' },
-    { key: 'validate_cmd', label: 'Validate Command (optional)', placeholder: 'haproxy -c -f /etc/haproxy/haproxy.cfg' },
+    { key: 'reload_command', label: 'Reload Command', placeholder: 'systemctl reload haproxy' },
+    { key: 'validate_command', label: 'Validate Command (optional)', placeholder: 'haproxy -c -f /etc/haproxy/haproxy.cfg' },
   ],
   Traefik: [
     { key: 'cert_dir', label: 'Certificate Directory', placeholder: '/etc/traefik/certs', required: true },
@@ -87,6 +89,7 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'validate_command', label: 'Validate Command', placeholder: 'postfix check' },
   ],
   Dovecot: [
+    { key: 'mode', label: 'Mode', placeholder: 'dovecot (auto-set)' },
     { key: 'cert_path', label: 'Certificate Path', placeholder: '/etc/dovecot/certs/cert.pem' },
     { key: 'key_path', label: 'Key Path', placeholder: '/etc/dovecot/certs/key.pem' },
     { key: 'chain_path', label: 'Chain Path (optional)', placeholder: '/etc/dovecot/certs/chain.pem' },
@@ -104,6 +107,7 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'timeout', label: 'Timeout (seconds)', placeholder: '30' },
   ],
   IIS: [
+    { key: 'hostname', label: 'Target Hostname', placeholder: 'iis-server.example.com' },
     { key: 'site_name', label: 'IIS Site Name', placeholder: 'Default Web Site', required: true },
     { key: 'cert_store', label: 'Certificate Store', placeholder: 'My', required: true },
     { key: 'port', label: 'HTTPS Port', placeholder: '443' },
@@ -111,12 +115,13 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'binding_info', label: 'Host Header (SNI)', placeholder: 'www.example.com' },
     { key: 'sni', label: 'Enable SNI', placeholder: 'true or false' },
     { key: 'mode', label: 'Deployment Mode', placeholder: 'local (default) or winrm' },
-    { key: 'winrm.winrm_host', label: 'WinRM Host (remote mode)', placeholder: 'iis-server.example.com' },
-    { key: 'winrm.winrm_port', label: 'WinRM Port', placeholder: '5985 (HTTP) or 5986 (HTTPS)' },
-    { key: 'winrm.winrm_username', label: 'WinRM Username', placeholder: 'Administrator' },
-    { key: 'winrm.winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
-    { key: 'winrm.winrm_https', label: 'WinRM Use HTTPS', placeholder: 'true or false' },
-    { key: 'winrm.winrm_insecure', label: 'WinRM Skip TLS Verify', placeholder: 'false' },
+    { key: 'winrm_host', label: 'WinRM Host (remote mode)', placeholder: 'iis-server.example.com' },
+    { key: 'winrm_port', label: 'WinRM Port', placeholder: '5985 (HTTP) or 5986 (HTTPS)' },
+    { key: 'winrm_username', label: 'WinRM Username', placeholder: 'Administrator' },
+    { key: 'winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
+    { key: 'winrm_https', label: 'WinRM Use HTTPS', placeholder: 'true or false' },
+    { key: 'winrm_insecure', label: 'WinRM Skip TLS Verify', placeholder: 'false' },
+    { key: 'winrm_timeout', label: 'WinRM Timeout (seconds)', placeholder: '60' },
   ],
   SSH: [
     { key: 'host', label: 'SSH Host', placeholder: '192.168.1.100 or server.example.com', required: true },
@@ -124,10 +129,14 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'user', label: 'SSH Username', placeholder: 'root or certctl', required: true },
     { key: 'auth_method', label: 'Auth Method', placeholder: 'key (default) or password' },
     { key: 'private_key_path', label: 'Private Key Path', placeholder: '/home/certctl/.ssh/id_ed25519' },
+    { key: 'private_key', label: 'Inline Private Key PEM', placeholder: 'Paste PEM key (alternative to path)' },
     { key: 'password', label: 'SSH Password', placeholder: 'Leave empty for key auth' },
+    { key: 'passphrase', label: 'Key Passphrase', placeholder: 'For encrypted private keys' },
     { key: 'cert_path', label: 'Remote Certificate Path', placeholder: '/etc/ssl/certs/cert.pem', required: true },
     { key: 'key_path', label: 'Remote Key Path', placeholder: '/etc/ssl/private/key.pem', required: true },
     { key: 'chain_path', label: 'Remote Chain Path (optional)', placeholder: '/etc/ssl/certs/chain.pem' },
+    { key: 'cert_mode', label: 'Cert File Permissions', placeholder: '0644 (default)' },
+    { key: 'key_mode', label: 'Key File Permissions', placeholder: '0600 (default)' },
     { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl reload nginx' },
     { key: 'timeout', label: 'Connection Timeout (seconds)', placeholder: '30 (default)' },
   ],
@@ -141,12 +150,15 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'winrm_port', label: 'WinRM Port', placeholder: '5985 (HTTP) or 5986 (HTTPS)' },
     { key: 'winrm_username', label: 'WinRM Username', placeholder: 'Administrator' },
     { key: 'winrm_password', label: 'WinRM Password', placeholder: '(sensitive)' },
+    { key: 'winrm_https', label: 'WinRM Use HTTPS', placeholder: 'true or false' },
+    { key: 'winrm_insecure', label: 'WinRM Skip TLS Verify', placeholder: 'false' },
   ],
   JavaKeystore: [
     { key: 'keystore_path', label: 'Keystore Path', placeholder: '/opt/app/conf/keystore.p12', required: true },
     { key: 'keystore_password', label: 'Keystore Password', placeholder: 'changeit', required: true },
     { key: 'keystore_type', label: 'Keystore Type', placeholder: 'PKCS12 (default) or JKS' },
     { key: 'alias', label: 'Key Alias', placeholder: 'server (default)' },
+    { key: 'create_keystore', label: 'Create Keystore If Missing', placeholder: 'true (default)' },
     { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl restart tomcat' },
     { key: 'keytool_path', label: 'Keytool Path (optional)', placeholder: 'keytool (default, from PATH)' },
   ],
@@ -160,12 +172,64 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
   const [config, setConfig] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
 
+  // Fields that backends expect as boolean (Go bool)
+  const BOOL_FIELDS = new Set([
+    'sni', 'insecure', 'sds_config', 'remove_expired', 'create_keystore',
+    'winrm_https', 'winrm_insecure',
+  ]);
+  // Fields that backends expect as integer (Go int)
+  const INT_FIELDS = new Set([
+    'port', 'timeout', 'winrm_port', 'winrm_timeout', 'timeout_seconds',
+  ]);
+
+  // Coerce string form values to their Go types
+  const coerceValue = (key: string, val: string): unknown => {
+    if (BOOL_FIELDS.has(key)) return val === 'true';
+    if (INT_FIELDS.has(key)) { const n = parseInt(val, 10); return isNaN(n) ? val : n; }
+    return val;
+  };
+
+  // Build config payload with type-specific transformations
+  const buildConfigPayload = () => {
+    const flat = Object.fromEntries(Object.entries(config).filter(([, v]) => v));
+
+    // Dovecot uses the same Postfix connector with mode="dovecot"
+    if (targetType === 'Dovecot' && !flat['mode']) {
+      flat['mode'] = 'dovecot';
+    }
+
+    // IIS backend expects WinRM fields nested under "winrm" key
+    if (targetType === 'IIS') {
+      const iisWinrmKeys = ['winrm_host', 'winrm_port', 'winrm_username', 'winrm_password', 'winrm_https', 'winrm_insecure', 'winrm_timeout'];
+      const winrmObj: Record<string, unknown> = {};
+      const result: Record<string, unknown> = {};
+      for (const [k, v] of Object.entries(flat)) {
+        if (iisWinrmKeys.includes(k)) {
+          winrmObj[k] = coerceValue(k, v);
+        } else {
+          result[k] = coerceValue(k, v);
+        }
+      }
+      if (Object.keys(winrmObj).length > 0) {
+        result['winrm'] = winrmObj;
+      }
+      return result;
+    }
+
+    // All other target types: coerce values to proper Go types
+    const result: Record<string, unknown> = {};
+    for (const [k, v] of Object.entries(flat)) {
+      result[k] = coerceValue(k, v);
+    }
+    return result;
+  };
+
   const mutation = useMutation({
     mutationFn: () => createTarget({
       name,
       type: targetType,
       agent_id: agentId,
-      config: Object.fromEntries(Object.entries(config).filter(([, v]) => v)),
+      config: buildConfigPayload(),
     }),
     onSuccess: () => onSuccess(),
     onError: (err: Error) => setError(err.message),

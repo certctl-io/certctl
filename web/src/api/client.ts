@@ -169,6 +169,9 @@ export const getNotifications = (params: Record<string, string> = {}) => {
   return fetchJSON<PaginatedResponse<Notification>>(`${BASE}/notifications?${qs}`);
 };
 
+export const getNotification = (id: string) =>
+  fetchJSON<Notification>(`${BASE}/notifications/${id}`);
+
 export const markNotificationRead = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/notifications/${id}/read`, { method: 'POST' });
 
@@ -177,6 +180,9 @@ export const getAuditEvents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
   return fetchJSON<PaginatedResponse<AuditEvent>>(`${BASE}/audit?${qs}`);
 };
+
+export const getAuditEvent = (id: string) =>
+  fetchJSON<AuditEvent>(`${BASE}/audit/${id}`);
 
 // Policies
 export const getPolicies = (params: Record<string, string> = {}) => {

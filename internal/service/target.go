@@ -284,6 +284,11 @@ func (s *TargetService) CreateTarget(target domain.DeploymentTarget) (*domain.De
 	if target.Source == "" {
 		target.Source = "database"
 	}
+	// GUI-created targets should be enabled by default.
+	// Go's bool zero value is false, which overrides the DB default when explicitly inserted.
+	if target.Source == "database" && !target.Enabled {
+		target.Enabled = true
+	}
 
 	// Encrypt config
 	if len(target.Config) > 0 {

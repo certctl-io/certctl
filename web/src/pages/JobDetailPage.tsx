@@ -114,9 +114,9 @@ export default function JobDetailPage() {
               } />
             )}
             <InfoRow label="Attempts" value={`${job.attempts} / ${job.max_attempts}`} />
-            {job.error_message && (
+            {job.last_error && (
               <InfoRow label="Error" value={
-                <span className="text-red-600 text-xs">{job.error_message}</span>
+                <span className="text-red-600 text-xs">{job.last_error}</span>
               } />
             )}
           </div>

@@ -139,9 +139,9 @@ export default function JobsPage() {
     {
       key: 'error',
       label: 'Error',
-      render: (j) => j.status === 'Failed' && j.error_message ? (
-        <span className="text-xs text-red-600 truncate max-w-[200px] inline-block" title={j.error_message}>
-          {j.error_message.length > 80 ? j.error_message.substring(0, 80) + '...' : j.error_message}
+      render: (j) => j.status === 'Failed' && j.last_error ? (
+        <span className="text-xs text-red-600 truncate max-w-[200px] inline-block" title={j.last_error}>
+          {j.last_error.length > 80 ? j.last_error.substring(0, 80) + '...' : j.last_error}
         </span>
       ) : <span className="text-xs text-ink-faint">—</span>,
     },

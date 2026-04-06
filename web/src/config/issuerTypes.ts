@@ -29,19 +29,23 @@ export interface IssuerTypeConfig {
 }
 
 /**
- * Canonical type label map. Keys match what the backend API returns.
- * DB stores: local, acme, stepca, openssl, VaultPKI, DigiCert
+ * Canonical type label map. Keys MUST match backend IssuerType constants
+ * defined in internal/domain/connector.go (e.g., "ACME", "GenericCA", "StepCA").
  */
 export const typeLabels: Record<string, string> = {
-  local: 'Local CA',
+  GenericCA: 'Local CA',
+  local: 'Local CA',          // backward compat for old DB records
   local_ca: 'Local CA',       // backward compat (some frontend references)
-  acme: 'ACME',
-  stepca: 'step-ca',
-  openssl: 'OpenSSL/Custom',
+  ACME: 'ACME',
+  acme: 'ACME',               // backward compat for old DB records
+  StepCA: 'step-ca',
+  stepca: 'step-ca',          // backward compat for old DB records
+  OpenSSL: 'OpenSSL/Custom',
+  openssl: 'OpenSSL/Custom',  // backward compat for old DB records
   VaultPKI: 'Vault PKI',
   DigiCert: 'DigiCert',
   Sectigo: 'Sectigo SCM',
-  manual: 'Manual',
+  GoogleCAS: 'Google CAS',
 };
 
 /**
@@ -50,7 +54,7 @@ export const typeLabels: Record<string, string> = {
  */
 export const issuerTypes: IssuerTypeConfig[] = [
   {
-    id: 'acme',
+    id: 'ACME',
     name: 'ACME',
     description: "Let's Encrypt, ZeroSSL, or any ACME-compatible CA",
     icon: '\uD83D\uDD12',
@@ -64,7 +68,7 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
-    id: 'local',
+    id: 'GenericCA',
     name: 'Local CA',
     description: 'Self-signed or subordinate CA for internal certificates',
     icon: '\uD83C\uDFE0',
@@ -74,14 +78,15 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
-    id: 'stepca',
+    id: 'StepCA',
     name: 'step-ca',
     description: 'Smallstep private CA with JWK provisioner auth',
     icon: '\uD83D\uDC63',
     configFields: [
       { key: 'ca_url', label: 'CA URL', placeholder: 'https://ca.example.com', required: true },
       { key: 'provisioner_name', label: 'Provisioner Name', placeholder: 'my-provisioner', required: true },
-      { key: 'provisioner_key', label: 'Provisioner Key (JWK)', placeholder: '{...}', type: 'textarea', required: true, sensitive: true },
+      { key: 'provisioner_key_path', label: 'Provisioner Key Path', placeholder: '/path/to/provisioner.key', required: false, sensitive: true },
+      { key: 'provisioner_password', label: 'Provisioner Password', placeholder: 'Password for encrypted key', required: false, type: 'password', sensitive: true },
     ],
   },
   {
@@ -110,7 +115,7 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
-    id: 'openssl',
+    id: 'OpenSSL',
     name: 'OpenSSL/Custom',
     description: 'Script-based signing with your own CA',
     icon: '\uD83D\uDD27',
@@ -188,7 +193,10 @@ export function getIssuerCatalogStatus(
     }
     // Match both the canonical id and common aliases
     const aliases: Record<string, string[]> = {
-      local: ['local', 'local_ca'],
+      GenericCA: ['GenericCA', 'local', 'local_ca'],
+      ACME: ['ACME', 'acme'],
+      StepCA: ['StepCA', 'stepca'],
+      OpenSSL: ['OpenSSL', 'openssl'],
     };
     const matchIds = aliases[t.id] || [t.id];
     const matching = configuredIssuers.filter(i => matchIds.includes(i.type));

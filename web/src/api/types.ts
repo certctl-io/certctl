@@ -10,11 +10,11 @@ export interface Certificate {
   team_id: string;
   renewal_policy_id: string;
   certificate_profile_id: string;
-  serial_number: string;
-  fingerprint: string;
-  key_algorithm: string;
-  key_size: number;
-  issued_at: string;
+  serial_number?: string;
+  fingerprint_sha256?: string;
+  key_algorithm?: string;
+  key_size?: number;
+  issued_at?: string;
   expires_at: string;
   revoked_at?: string;
   revocation_reason?: string;
@@ -40,11 +40,9 @@ export const REVOCATION_REASONS = [
 export interface CertificateVersion {
   id: string;
   certificate_id: string;
-  version: number;
   serial_number: string;
-  fingerprint: string;
-  cert_pem: string;
-  chain_pem: string;
+  fingerprint_sha256: string;
+  pem_chain: string;
   csr_pem: string;
   not_before: string;
   not_after: string;
@@ -80,7 +78,7 @@ export interface Job {
   status: string;
   attempts: number;
   max_attempts: number;
-  error_message: string;
+  last_error?: string;
   scheduled_at: string;
   started_at: string;
   completed_at: string;

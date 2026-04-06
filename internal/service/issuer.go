@@ -536,6 +536,11 @@ func (s *IssuerService) CreateIssuer(iss domain.Issuer) (*domain.Issuer, error) 
 	if iss.Source == "" {
 		iss.Source = "database"
 	}
+	// GUI-created issuers should be enabled by default.
+	// Go's bool zero value is false, which overrides the DB default when explicitly inserted.
+	if iss.Source == "database" && !iss.Enabled {
+		iss.Enabled = true
+	}
 
 	// Encrypt config
 	if len(iss.Config) > 0 {
