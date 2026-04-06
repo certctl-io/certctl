@@ -65,7 +65,7 @@ certctl-cli
 /cli
 
 # Private strategy docs
-roadmap.md
+strategy.md
 SECURITY_REMEDIATION.md
 
 # OS

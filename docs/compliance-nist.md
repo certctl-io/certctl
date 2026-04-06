@@ -72,7 +72,7 @@ certctl implements tiered key storage with different protection profiles based o
 - Configured via: `CERTCTL_CA_CERT_PATH=/path/to/ca.crt` and `CERTCTL_CA_KEY_PATH=/path/to/ca.key`
 
 **NIST Gap: HSM Storage**
-NIST SP 800-57 Part 1 recommends Hardware Security Module (HSM) storage for high-value keys (CA signing keys). certctl V2 uses filesystem storage on the server. HSM support is planned for V5 roadmap, enabling integration with:
+NIST SP 800-57 Part 1 recommends Hardware Security Module (HSM) storage for high-value keys (CA signing keys). certctl V2 uses filesystem storage on the server. HSM support is planned for certctl Pro (V3), enabling integration with:
 - AWS CloudHSM
 - Azure Dedicated HSM
 - Thales Luna, Gemalto SafeNet, YubiHSM (on-premises)
@@ -285,7 +285,7 @@ All revocation events logged:
 | NIST SP 800-57 Area | Status | Coverage | Notes |
 |---|---|---|---|
 | **Key Generation** | ✅ Aligned | 100% | Agent-side ECDSA P-256 using crypto/rand; server mode flagged as demo-only |
-| **Key Storage** | ⚠️ Partially Aligned | 80% | Filesystem with 0600 perms; HSM support planned V5 |
+| **Key Storage** | ⚠️ Partially Aligned | 80% | Filesystem with 0600 perms; HSM support planned V3 Pro |
 | **Cryptoperiods** | ✅ Aligned | 100% | Profile-enforced max_ttl; threshold-based renewal alerting |
 | **Key States** | ✅ Aligned | 100% | Full lifecycle tracking with immutable audit trail |
 | **Algorithms** | ✅ Aligned | 100% | NIST-approved algorithms only; post-quantum tracking in progress |
@@ -305,9 +305,8 @@ All revocation events logged:
 - Role-based access control (limit revocation/approval to authorized operators)
 - Bulk revocation by profile/owner/agent (fleet-level revocation policy)
 
-### V5 (Planned: 2027+)
-- HSM support for CA key storage
-- PKCS#11 integration for hardware tokens
+### V3 Pro (Planned)
+- HSM support for CA key storage and agent key storage (TPM 2.0, PKCS#11)
 - FIPS 140-2/3 validated crypto module (BoringCrypto build or external FIPS library)
 - Key destruction API (explicit secure erasure of agent keys)
 - Key escrow / recovery mechanism (backup encrypted private keys for disaster recovery)
