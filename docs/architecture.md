@@ -986,6 +986,8 @@ certctl is extensively tested across eight layers with CI-enforced coverage gate
 
 **CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs. Go: build, vet, `go test -race`, `golangci-lint` (11 linters), `govulncheck`, test with coverage, per-layer coverage threshold enforcement (service 60%, handler 60%, domain 40%, middleware 50%). Frontend: TypeScript type check, Vitest, Vite production build.
 
+For detailed test procedures, smoke tests, and the release sign-off checklist, see the [Testing Guide](testing-guide.md). For setting up the Docker Compose test environment with real CA backends, see [Test Environment](test-env.md).
+
 ## What's Next
 
 - [Quick Start](quickstart.md) — Get certctl running locally
@@ -994,3 +996,5 @@ certctl is extensively tested across eight layers with CI-enforced coverage gate
 - [Compliance Mapping](compliance.md) — SOC 2, PCI-DSS 4.0, and NIST SP 800-57 alignment
 - [MCP Server Guide](mcp.md) — AI-native access to the API
 - [OpenAPI Spec](openapi.md) — Full API reference and SDK generation
+- [Testing Guide](testing-guide.md) — Test procedures and release sign-off
+- [Test Environment](test-env.md) — Docker Compose test environment setup

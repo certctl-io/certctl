@@ -224,9 +224,15 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 | [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
 | [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
 | [Feature Inventory](docs/features.md) | Complete reference of all V2 capabilities, API endpoints, and configuration |
-| [Connector Reference](docs/connectors.md) | Configuration for all 7 issuers, 10 targets, and 5 notifier connectors |
+| [Connector Reference](docs/connectors.md) | Configuration for all issuer, target, and notifier connectors |
+| [MCP Server](docs/mcp.md) | AI integration via Model Context Protocol — setup, available tools, examples |
+| [OpenAPI 3.1 Spec](docs/openapi.md) | API reference guide with endpoint overview ([raw spec](api/openapi.yaml)) |
 | [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [OpenAPI 3.1 Spec](api/openapi.yaml) | Full request/response schemas for all operations |
+| [Migrate from certbot](docs/migrate-from-certbot.md) | Step-by-step migration from certbot cron jobs to certctl |
+| [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users, DNS hook compatibility |
+| [certctl for cert-manager users](docs/certctl-for-cert-manager-users.md) | How certctl complements cert-manager for mixed infrastructure |
+| [Test Environment](docs/test-env.md) | Docker Compose test environment with real CA backends |
+| [Testing Guide](docs/testing-guide.md) | Comprehensive test procedures, smoke tests, and release sign-off checklist |
 
 ## CLI
 
