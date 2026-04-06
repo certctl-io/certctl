@@ -1,4 +1,4 @@
-# certctl V2.0 Release QA Guide
+# certctl V2.1 Release QA Guide
 
 Comprehensive manual testing playbook. Every test has a concrete command, an explanation of what it validates and why it matters, exact expected output, and an unambiguous pass/fail criterion.
 
@@ -10,43 +10,53 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 3: Certificate Lifecycle (CRUD)](#part-3-certificate-lifecycle-crud)
 - [Part 4: Renewal Workflow](#part-4-renewal-workflow)
 - [Part 5: Revocation](#part-5-revocation)
-- [Part 6: Issuer Connectors](#part-6-issuer-connectors)
-- [Part 7: Target Connectors & Deployment](#part-7-target-connectors--deployment)
-- [Part 8: Agent Operations](#part-8-agent-operations)
-- [Part 9: Job System](#part-9-job-system)
-- [Part 10: Policies & Profiles](#part-10-policies--profiles)
-- [Part 11: Ownership, Teams & Agent Groups](#part-11-ownership-teams--agent-groups)
-- [Part 12: Notifications](#part-12-notifications)
-- [Part 13: Observability](#part-13-observability)
-- [Part 14: Audit Trail](#part-14-audit-trail)
-- [Part 15: Certificate Discovery (Filesystem + Network)](#part-15-certificate-discovery-filesystem--network)
-- [Part 16: Enhanced Query API](#part-16-enhanced-query-api)
-- [Part 17: CLI Tool](#part-17-cli-tool)
-- [Part 18: MCP Server](#part-18-mcp-server)
-- [Part 19: GUI Testing](#part-19-gui-testing)
-- [Part 20: Background Scheduler](#part-20-background-scheduler)
-- [Part 21: Error Handling](#part-21-error-handling)
-- [Part 22: Performance Spot Checks](#part-22-performance-spot-checks)
-- [Part 23: Structured Logging Verification](#part-23-structured-logging-verification)
-- [Part 24: Documentation Verification](#part-24-documentation-verification)
-- [Part 25: Regression Tests](#part-25-regression-tests)
-- [Part 26: EST Server (RFC 7030)](#part-26-est-server-rfc-7030)
-- [Part 27: Post-Deployment TLS Verification](#part-27-post-deployment-tls-verification)
-- [Part 28: Traefik & Caddy Target Connectors](#part-28-traefik--caddy-target-connectors)
-- [Part 29: Certificate Export (PEM & PKCS#12)](#part-29-certificate-export-pem--pkcs12)
-- [Part 30: S/MIME & EKU Support](#part-30-smime--eku-support)
-- [Part 31: OCSP Responder & DER CRL](#part-31-ocsp-responder--der-crl)
-- [Part 32: Request Body Size Limits](#part-32-request-body-size-limits)
-- [Part 33: Apache & HAProxy Target Connectors](#part-33-apache--haproxy-target-connectors)
-- [Part 34: Sub-CA Mode](#part-34-sub-ca-mode)
-- [Part 35: ARI (RFC 9773) Scheduler Integration](#part-35-ari-rfc-9773-scheduler-integration)
-- [Part 36: Agent Work Routing (M31)](#part-36-agent-work-routing-m31)
-- [Part 37: GUI Completeness (Pre-2.1.0-E)](#part-37-gui-completeness-pre-210-e)
-- [Part 38: Vault PKI Connector (M32)](#part-38-vault-pki-connector-m32)
-- [Part 39: DigiCert Connector (M37)](#part-39-digicert-connector-m37)
-- [Part 40: Issuer Catalog Page (M33)](#part-40-issuer-catalog-page-m33)
-- [Part 41: Frontend Audit Fixes](#part-41-frontend-audit-fixes)
-- [Part 42: IIS Target Connector (M39)](#part-42-iis-target-connector-m39)
+- [Part 6: Policies & Profiles](#part-6-policies--profiles)
+- [Part 7: Ownership, Teams & Agent Groups](#part-7-ownership-teams--agent-groups)
+- [Part 8: Job System](#part-8-job-system)
+- [Part 9: Issuer Connectors](#part-9-issuer-connectors)
+- [Part 10: Sub-CA Mode](#part-10-sub-ca-mode)
+- [Part 11: ARI (RFC 9773) Scheduler Integration](#part-11-ari-rfc-9773-scheduler-integration)
+- [Part 12: Vault PKI Connector (M32)](#part-12-vault-pki-connector-m32)
+- [Part 13: DigiCert Connector (M37)](#part-13-digicert-connector-m37)
+- [Part 14: Target Connectors & Deployment](#part-14-target-connectors--deployment)
+- [Part 15: Apache & HAProxy Target Connectors](#part-15-apache--haproxy-target-connectors)
+- [Part 16: Traefik & Caddy Target Connectors](#part-16-traefik--caddy-target-connectors)
+- [Part 17: IIS Target Connector (M39)](#part-17-iis-target-connector-m39)
+- [Part 18: Agent Operations](#part-18-agent-operations)
+- [Part 19: Agent Work Routing (M31)](#part-19-agent-work-routing-m31)
+- [Part 20: Post-Deployment TLS Verification](#part-20-post-deployment-tls-verification)
+- [Part 21: EST Server (RFC 7030)](#part-21-est-server-rfc-7030)
+- [Part 22: Certificate Export (PEM & PKCS#12)](#part-22-certificate-export-pem--pkcs12)
+- [Part 23: S/MIME & EKU Support](#part-23-smime--eku-support)
+- [Part 24: OCSP Responder & DER CRL](#part-24-ocsp-responder--der-crl)
+- [Part 25: Certificate Discovery (Filesystem + Network)](#part-25-certificate-discovery-filesystem--network)
+- [Part 26: Enhanced Query API](#part-26-enhanced-query-api)
+- [Part 27: Request Body Size Limits](#part-27-request-body-size-limits)
+- [Part 28: CLI Tool](#part-28-cli-tool)
+- [Part 29: MCP Server](#part-29-mcp-server)
+- [Part 30: Observability](#part-30-observability)
+- [Part 31: Notifications](#part-31-notifications)
+- [Part 32: Audit Trail](#part-32-audit-trail)
+- [Part 33: Background Scheduler](#part-33-background-scheduler)
+- [Part 34: Structured Logging Verification](#part-34-structured-logging-verification)
+- [Part 35: GUI Testing](#part-35-gui-testing)
+- [Part 36: Issuer Catalog Page (M33)](#part-36-issuer-catalog-page-m33)
+- [Part 37: Frontend Audit Fixes](#part-37-frontend-audit-fixes)
+- [Part 38: Error Handling](#part-38-error-handling)
+- [Part 39: Performance Spot Checks](#part-39-performance-spot-checks)
+- [Part 40: Documentation Verification](#part-40-documentation-verification)
+- [Part 41: Regression Tests](#part-41-regression-tests)
+- [Part 42: Envoy Target Connector](#part-42-envoy-target-connector)
+- [Part 43: Postfix & Dovecot Target Connectors](#part-43-postfix--dovecot-target-connectors)
+- [Part 44: SSH Target Connector](#part-44-ssh-target-connector)
+- [Part 45: Windows Certificate Store Connector](#part-45-windows-certificate-store-connector)
+- [Part 46: Java Keystore Connector](#part-46-java-keystore-connector)
+- [Part 47: Certificate Digest Email](#part-47-certificate-digest-email)
+- [Part 48: Dynamic Issuer Configuration (M34)](#part-48-dynamic-issuer-configuration-m34)
+- [Part 49: Dynamic Target Configuration (M35)](#part-49-dynamic-target-configuration-m35)
+- [Part 50: Onboarding Wizard (M36)](#part-50-onboarding-wizard-m36)
+- [Part 51: ACME Profile Selection (M45)](#part-51-acme-profile-selection-m45)
+- [Part 52: Helm Chart Deployment (M30)](#part-52-helm-chart-deployment-m30)
 - [Release Sign-Off](#release-sign-off)
 
 ---
@@ -1350,13 +1360,460 @@ curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/ocsp/iss-local/non
 
 ---
 
-## Part 6: Issuer Connectors
+## Part 6: Policies & Profiles
+
+**What this validates:** Policy engine CRUD, profile management, and the interaction between profiles and certificate behavior.
+
+**Why it matters:** Policies enforce organizational standards (key type, max TTL, renewal windows). Profiles define certificate enrollment templates. Broken policies mean non-compliant certificates ship to production.
+
+### 6.1 Policies
+
+**Test 10.1.1 — List policies**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/policies" | jq '{total, ids: [.items[].id]}'
+```
+
+**Expected:** `total` ≥ 3 (seed: rp-standard, rp-urgent, rp-manual).
+**PASS if** total ≥ 3. **FAIL** otherwise.
+
+---
+
+**Test 10.1.2 — Create policy**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "rp-test", "name": "Test Policy", "type": "scheduled", "config": {"renewal_window_days": 14, "alert_thresholds_days": [30, 14, 7]}}' \
+  $SERVER/api/v1/policies | jq '{id, name, type}'
+```
+
+**Expected:** HTTP 201.
+**PASS if** HTTP 201. **FAIL** otherwise.
+
+---
+
+**Test 10.1.3 — Get policy**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/policies/rp-test" | jq '{id, name, type}'
+```
+
+**Expected:** HTTP 200 with matching fields.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 10.1.4 — Update policy**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
+  -d '{"name": "Updated Test Policy"}' \
+  $SERVER/api/v1/policies/rp-test | jq '{name}'
+```
+
+**Expected:** HTTP 200. `name` = "Updated Test Policy".
+**PASS if** HTTP 200 and name updated. **FAIL** otherwise.
+
+---
+
+**Test 10.1.5 — Delete policy**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/policies/rp-test"
+```
+
+**Expected:** HTTP 204.
+**PASS if** HTTP 204. **FAIL** otherwise.
+
+---
+
+**Test 10.1.6 — Policy violations endpoint**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations" | jq '{total}'
+```
+
+**What:** Lists policy violations for a specific policy.
+**Why:** Operators need to see which certificates violate their policies.
+**Expected:** HTTP 200 with violations array.
+**PASS if** HTTP 200. **FAIL** if 500.
+
+---
+
+**Test 10.1.7 — Invalid policy type returns 400**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "rp-bad", "name": "Bad", "type": "quantum-policy"}' \
+  $SERVER/api/v1/policies
+```
+
+**Expected:** HTTP 400 with validation error.
+**PASS if** HTTP 400. **FAIL** if 201.
+
+---
+
+### 6.2 Certificate Profiles
+
+**Test 10.2.1 — List profiles**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/profiles" | jq '{total, ids: [.items[].id]}'
+```
+
+**Expected:** `total` = 5 (seed profiles: prof-standard-tls, prof-internal-mtls, prof-short-lived, prof-wildcard, prof-smime).
+**PASS if** total = 5. **FAIL** otherwise.
+
+---
+
+**Test 10.2.2 — Create profile with crypto constraints**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "prof-test", "name": "Test Profile", "allowed_key_algorithms": ["RSA", "ECDSA"], "min_key_size": 2048, "max_ttl_hours": 8760}' \
+  $SERVER/api/v1/profiles | jq '{id, name, allowed_key_algorithms}'
+```
+
+**What:** Creates a profile with key type constraints and max TTL.
+**Why:** Profiles enforce crypto policy — only approved algorithms and key sizes can be used.
+**Expected:** HTTP 201 with crypto constraint fields.
+**PASS if** HTTP 201 and `allowed_key_algorithms` matches. **FAIL** otherwise.
+
+---
+
+**Test 10.2.3 — Get profile**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/profiles/prof-test" | jq '{id, name}'
+```
+
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 10.2.4 — Update profile**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
+  -d '{"name": "Updated Test Profile", "max_ttl_hours": 720}' \
+  $SERVER/api/v1/profiles/prof-test | jq '{name, max_ttl_hours}'
+```
+
+**Expected:** HTTP 200. Fields updated.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 10.2.5 — Delete profile**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/profiles/prof-test"
+```
+
+**Expected:** HTTP 204.
+**PASS if** HTTP 204. **FAIL** otherwise.
+
+---
+
+**Test 10.2.6 — Short-lived profile exists (TTL < 1 hour)**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/profiles/prof-short-lived" | jq '{id, name, max_ttl_hours, is_short_lived}'
+```
+
+**What:** Verifies the short-lived profile is configured with TTL < 1 hour.
+**Why:** Short-lived certs skip CRL/OCSP — expiry IS revocation. The profile must be correctly flagged.
+**Expected:** `max_ttl_hours` < 1 or `is_short_lived` = true.
+**PASS if** profile exists and indicates short-lived. **FAIL** if missing.
+
+---
+
+## Part 7: Ownership, Teams & Agent Groups
+
+**What this validates:** Organizational structure — teams, certificate owners, and dynamic agent grouping.
+
+**Why it matters:** Ownership drives notification routing (who gets alerted when a cert expires). Agent groups enable fleet-wide policy application. Without these, operators can't manage at scale.
+
+### 7.1 Teams
+
+**Test 11.1.1 — List teams**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/teams" | jq '{total, ids: [.items[].id]}'
+```
+
+**Expected:** `total` = 5 (seed teams).
+**PASS if** total = 5. **FAIL** otherwise.
+
+---
+
+**Test 11.1.2 — Team CRUD cycle**
+
+```bash
+# Create
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "t-test", "name": "Test Team"}' \
+  $SERVER/api/v1/teams | jq '{id, name}'
+
+# Get
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/teams/t-test" | jq '{id}'
+
+# Update
+curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
+  -d '{"name": "Updated Test Team"}' \
+  $SERVER/api/v1/teams/t-test | jq '{name}'
+
+# Delete
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/teams/t-test"
+```
+
+**Expected:** Create = 201, Get = 200, Update = 200, Delete = 204.
+**PASS if** all four operations return expected codes. **FAIL** if any fails.
+
+---
+
+### 7.2 Owners
+
+**Test 11.2.1 — Owner CRUD with team assignment**
+
+```bash
+# Create owner with team
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "o-test", "name": "Test Owner", "email": "test@example.com", "team_id": "t-platform"}' \
+  $SERVER/api/v1/owners | jq '{id, email, team_id}'
+```
+
+**What:** Creates an owner assigned to a team.
+**Why:** Owner email is used for notification routing. Team assignment enables team-level queries.
+**Expected:** HTTP 201. `team_id` = "t-platform".
+**PASS if** HTTP 201 and team_id matches. **FAIL** otherwise.
+
+---
+
+**Test 11.2.2 — Get, update, delete owner**
+
+```bash
+# Get
+curl -s -H "$AUTH" "$SERVER/api/v1/owners/o-test" | jq '{id, email}'
+# Update
+curl -s -X PUT -H "$AUTH" -H "$CT" -d '{"name": "Updated Owner"}' $SERVER/api/v1/owners/o-test | jq '{name}'
+# Delete
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-test"
+```
+
+**Expected:** Get = 200, Update = 200, Delete = 204.
+**PASS if** all succeed. **FAIL** otherwise.
+
+---
+
+### 7.3 Agent Groups
+
+**Test 11.3.1 — List agent groups**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/agent-groups" | jq '{total, ids: [.items[].id]}'
+```
+
+**Expected:** `total` = 5 (seed groups).
+**PASS if** total = 5. **FAIL** otherwise.
+
+---
+
+**Test 11.3.2 — Create agent group with dynamic criteria**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "ag-test-group", "name": "Test Group", "match_os": "linux", "match_architecture": "amd64", "match_ip_cidr": "10.0.0.0/8"}' \
+  $SERVER/api/v1/agent-groups | jq '{id, name, match_os}'
+```
+
+**What:** Creates a group with OS, architecture, and CIDR matching criteria.
+**Why:** Dynamic groups automatically include agents matching the criteria — no manual membership management.
+**Expected:** HTTP 201 with criteria fields.
+**PASS if** HTTP 201. **FAIL** otherwise.
+
+---
+
+**Test 11.3.3 — Agent group membership endpoint**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-linux-prod/members" | jq .
+```
+
+**What:** Lists agents that match the group's criteria.
+**Why:** Operators need to see which agents fall into each group for policy assignment.
+**Expected:** HTTP 200 with array of matching agents.
+**PASS if** HTTP 200. **FAIL** if 500.
+
+---
+
+**Test 11.3.4 — Delete agent group returns 204**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-test-group"
+```
+
+**Expected:** HTTP 204.
+**PASS if** HTTP 204. **FAIL** if 200 (wrong status code for delete — regression test).
+
+---
+
+### 7.4 Foreign Key Constraint Behavior
+
+**What this validates:** Delete operations correctly fail with 409 when referenced entities still exist.
+
+**Why it matters:** Owners and issuers use `ON DELETE RESTRICT` — you can't delete them while certificates reference them. Teams use `ON DELETE CASCADE`, so team deletes succeed and cascade. If the server returns a silent 500 instead of 409, the GUI swallows the error and the user thinks nothing happened.
+
+**Test 11.4.1 — Delete owner with assigned certificates (expect 409)**
+
+```bash
+# Try to delete Alice Chen (o-alice) — she owns certificates in the demo data
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice" | jq .
+```
+
+**Expected:** HTTP 409 with message "Cannot delete owner: certificates are still assigned to this owner".
+**PASS if** 409 Conflict. **FAIL** if 204 (data integrity violation) or 500 (unhelpful error).
+
+---
+
+**Test 11.4.2 — Delete issuer with assigned certificates (expect 409)**
+
+```bash
+# Try to delete the Local Dev CA (iss-local) — certificates reference it
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local" | jq .
+```
+
+**Expected:** HTTP 409 with message "Cannot delete issuer: certificates are still using this issuer".
+**PASS if** 409 Conflict. **FAIL** if 204 or 500.
+
+---
+
+**Test 11.4.3 — Delete team cascades successfully**
+
+```bash
+# Create a test team, then delete it — teams use ON DELETE CASCADE
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id": "t-fk-test", "name": "FK Test Team"}' $SERVER/api/v1/teams > /dev/null
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/teams/t-fk-test"
+```
+
+**Expected:** HTTP 204 (cascade allows deletion).
+**PASS if** 204. **FAIL** if 409 or 500.
+
+---
+
+## Part 8: Job System
+
+**What this validates:** Job lifecycle — listing, filtering, detail view, cancellation, approval, and rejection.
+
+**Why it matters:** Jobs are the execution engine for renewals and deployments. If jobs can't be queried, cancelled, or approved, operators lose control of the workflow.
+
+### 8.1 Job Queries
+
+**Test 9.1.1 — List jobs with pagination**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=5" | jq '{total, page, per_page, items_count: (.items | length)}'
+```
+
+**What:** Lists jobs with pagination metadata.
+**Expected:** `total` ≥ 0, pagination fields present.
+**PASS if** HTTP 200 and pagination metadata present. **FAIL** otherwise.
+
+---
+
+**Test 9.1.2 — Filter jobs by status**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs?status=Completed" | jq '{total, statuses: [.items[].status] | unique}'
+```
+
+**What:** Filters jobs to only Completed status.
+**Expected:** All items have `status` = "Completed".
+**PASS if** all items match filter. **FAIL** if any mismatch.
+
+---
+
+**Test 9.1.3 — Filter jobs by type**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs?type=Renewal" | jq '{total, types: [.items[].type] | unique}'
+```
+
+**What:** Filters jobs to only Renewal type.
+**Expected:** All items have `type` = "Renewal".
+**PASS if** all match. **FAIL** if any mismatch.
+
+---
+
+**Test 9.1.4 — Get job detail**
+
+```bash
+JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '{id, type, status, certificate_id}'
+```
+
+**What:** Retrieves a specific job by ID.
+**Expected:** HTTP 200 with full job record including `type`, `status`, `certificate_id`.
+**PASS if** HTTP 200 and all fields present. **FAIL** otherwise.
+
+---
+
+**Test 9.1.5 — Get nonexistent job**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/jobs/job-nonexistent"
+```
+
+**Expected:** HTTP 404.
+**PASS if** HTTP 404. **FAIL** if 200 or 500.
+
+---
+
+### 8.2 Job Actions
+
+**Test 9.2.1 — Cancel pending job**
+
+```bash
+# Create a renewal to get a fresh job
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{}' $SERVER/api/v1/certificates/mc-data-prod/renew > /dev/null
+JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=1&type=Renewal" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{}' \
+  $SERVER/api/v1/jobs/$JOB_ID/cancel | jq .
+```
+
+**What:** Cancels a pending job.
+**Why:** Operators need to abort incorrect or unnecessary jobs before they execute.
+**Expected:** HTTP 200. Status changes to "Cancelled".
+**PASS if** HTTP 200. **FAIL** if 500 or if job cannot be cancelled.
+
+---
+
+**Test 9.2.2 — Cancel already-completed job**
+
+```bash
+# Find a completed job
+JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?status=Completed&per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{}' \
+  $SERVER/api/v1/jobs/$JOB_ID/cancel
+```
+
+**What:** Attempts to cancel a job that already completed.
+**Why:** Completed jobs shouldn't be cancelable — the work is done. The API should return an appropriate error.
+**Expected:** HTTP 400 or 409 (conflict — invalid state transition).
+**PASS if** HTTP 400 or 409. **FAIL** if 200 (accepted invalid cancellation).
+
+---
+
+## Part 9: Issuer Connectors
 
 **What this validates:** CRUD operations for issuer connectors and the Local CA issuer functionality.
 
 **Why it matters:** Issuers are the CAs that sign certificates. If issuer management is broken, no new certs can be issued.
 
-### 6.1 Issuer CRUD
+### 9.1 Issuer CRUD
 
 **Test 6.1.1 — List issuers shows seed data**
 
@@ -1470,7 +1927,7 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 
 ---
 
-### 6.2 ACME DNS Challenge Configuration
+### 9.2 ACME DNS Challenge Configuration
 
 **Test 6.2.1 — List ACME issuer with DNS-01 configuration**
 
@@ -1526,13 +1983,403 @@ curl -s -H "$AUTH" "$SERVER/api/v1/issuers/iss-acme-prod" | jq '{id, type}'
 
 ---
 
-## Part 7: Target Connectors & Deployment
+## Part 10: Sub-CA Mode
+
+**What:** The Local CA issuer connector can operate in two modes: self-signed root (default) or sub-CA. In sub-CA mode, set `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` to point at a pre-signed CA certificate and its private key. The CA cert must have `IsCA=true` and `KeyUsageCertSign`. All issued certificates then chain to the upstream root (e.g., Active Directory Certificate Services). Supports RSA, ECDSA, and PKCS#8 key formats.
+
+**Why:** Enterprise environments already have a root CA (ADCS, Vault, etc.). Sub-CA mode lets certctl operate as a subordinate CA without replacing the existing trust hierarchy. Users' browsers and devices already trust the enterprise root, so certctl-issued certs are automatically trusted.
+
+### 10.1: Self-Signed Mode (Default)
+
+**What:** Without `CERTCTL_CA_CERT_PATH` / `CERTCTL_CA_KEY_PATH`, the Local CA generates its own self-signed root on startup. This is the default for development and demos.
+
+```bash
+# Verify the CA cert is self-signed (issuer == subject)
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-api-prod/export/pem?download=true" \
+  -o /tmp/chain.pem
+
+# Extract the last cert in the chain (the CA cert)
+csplit -f /tmp/cert- -z /tmp/chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' 2>/dev/null
+LAST_CERT=$(ls /tmp/cert-* | tail -1)
+openssl x509 -in "$LAST_CERT" -noout -subject -issuer
+```
+
+**Expected:** For self-signed mode, the CA cert's Subject and Issuer are identical.
+**PASS if** Subject == Issuer (self-signed root).
+
+### 10.2: Sub-CA Mode — Configuration
+
+**What:** Setting `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` environment variables switches the Local CA to sub-CA mode. The server logs the mode at startup.
+
+**How to test:**
+1. Generate a test CA hierarchy (root CA + sub-CA):
+```bash
+# Generate root CA
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/root-key.pem -out /tmp/root-cert.pem \
+  -days 3650 -nodes -subj "/CN=Test Root CA" \
+  -addext "basicConstraints=critical,CA:TRUE" \
+  -addext "keyUsage=critical,keyCertSign,cRLSign"
+
+# Generate sub-CA key and CSR
+openssl req -newkey rsa:2048 -keyout /tmp/subca-key.pem -out /tmp/subca-csr.pem \
+  -nodes -subj "/CN=CertCtl Sub-CA"
+
+# Sign sub-CA cert with root
+openssl x509 -req -in /tmp/subca-csr.pem -CA /tmp/root-cert.pem -CAkey /tmp/root-key.pem \
+  -CAcreateserial -out /tmp/subca-cert.pem -days 1825 \
+  -extfile <(echo -e "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign")
+```
+
+2. Start the server with sub-CA config:
+```bash
+CERTCTL_CA_CERT_PATH=/tmp/subca-cert.pem \
+CERTCTL_CA_KEY_PATH=/tmp/subca-key.pem \
+./certctl-server
+```
+
+3. Check startup logs for sub-CA mode indication.
+
+**PASS if** the server starts successfully and logs indicate sub-CA mode with the loaded cert path.
+**FAIL if** the server fails to start or falls back to self-signed mode.
+
+### 10.3: Sub-CA Chain Construction
+
+**What:** In sub-CA mode, issued certificates should chain to the sub-CA, which chains to the root. The PEM chain in certificate versions should include the leaf, the sub-CA cert, and optionally the root.
+
+```bash
+# Issue a certificate (after starting in sub-CA mode)
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"id": "mc-subca-test", "common_name": "subca.test.local", "issuer_id": "iss-local"}' \
+  "http://localhost:8443/api/v1/certificates"
+
+# Export and verify chain
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/certificates/mc-subca-test/export/pem" | jq -r '.full_pem' > /tmp/subca-chain.pem
+
+openssl verify -CAfile /tmp/root-cert.pem -untrusted /tmp/subca-cert.pem /tmp/subca-chain.pem
+```
+
+**Expected:** Certificate chain validates against the root CA. The leaf cert's Issuer matches the sub-CA's Subject.
+**PASS if** `openssl verify` returns "OK".
+**FAIL if** chain is broken or leaf is signed by self-signed root instead of sub-CA.
+
+### 10.4: Sub-CA Validation — Non-CA Cert Rejected
+
+**What:** If `CERTCTL_CA_CERT_PATH` points to a certificate without `IsCA=true` or `KeyUsageCertSign`, the server should reject it at startup.
+
+```bash
+# Generate a non-CA cert (leaf cert, not a CA)
+openssl req -x509 -newkey rsa:2048 -keyout /tmp/leaf-key.pem -out /tmp/leaf-cert.pem \
+  -days 365 -nodes -subj "/CN=Not A CA"
+
+# Try to start server with non-CA cert — should fail
+CERTCTL_CA_CERT_PATH=/tmp/leaf-cert.pem \
+CERTCTL_CA_KEY_PATH=/tmp/leaf-key.pem \
+./certctl-server
+```
+
+**Expected:** Server fails to start (or logs a fatal error) because the loaded cert is not a CA.
+**PASS if** server rejects the non-CA certificate.
+**FAIL if** server starts and silently uses the non-CA cert for signing.
+
+### 10.5: Sub-CA Key Format Support
+
+**What:** The sub-CA key can be RSA, ECDSA, or PKCS#8 encoded. All three formats should load successfully.
+
+```bash
+go test ./internal/connector/issuer/local/ -run "TestSubCA" -v
+```
+
+**Expected:** All 7 sub-CA tests pass (RSA, ECDSA, config validation, invalid cert, non-CA cert, renewal, chain construction).
+**PASS if** exit code 0.
+
+### 10.6: CRL Signing in Sub-CA Mode
+
+**What:** In sub-CA mode, the DER CRL (Part 31.1) should be signed by the sub-CA key, not a self-signed root.
+
+```bash
+# After starting in sub-CA mode and revoking a cert:
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/subca-crl.der
+
+openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
+```
+
+**Expected:** CRL issuer matches the sub-CA's subject (not the self-signed CA).
+**PASS if** issuer is the sub-CA distinguished name.
+
+---
+
+## Part 11: ARI (RFC 9773) Scheduler Integration
+
+**What this validates:** ACME Renewal Information (ARI, RFC 9773) integration with the renewal scheduler. ARI lets the CA tell certctl *when* to renew instead of relying on static expiration thresholds. The scheduler must query the ARI endpoint, respect the CA's suggested renewal window, and fall back gracefully if ARI is unavailable.
+
+**Why it matters:** With the industry moving to shorter certificate lifetimes (SC-081v3: 200→100→47 days, Let's Encrypt 6-day shortlived), hardcoded thresholds become unreliable. ARI is the CA-driven replacement — the CA knows its own issuance capacity, revocation status, and optimal renewal timing. If this integration breaks, certctl either renews too early (wasting resources) or too late (causing outages for short-lived certs where the margin is hours, not days).
+
+### 11.1 ARI Defers Renewal When CA Says "Not Yet"
+
+**What:** Verifies the scheduler skips renewal job creation when the ARI endpoint returns a `suggestedWindow.start` that is in the future.
+**Why:** This is the core ARI value proposition — the CA says "not yet" and certctl listens. Without this, ARI is decoration. Tests the `ShouldRenewNow()` → false path.
+
+**Prerequisite:** ACME issuer configured with `CERTCTL_ACME_ARI_ENABLED=true`, connected to a CA that supports ARI (e.g., Let's Encrypt staging). Certificate within the 30-day expiry window but the CA's `suggestedWindow.start` is in the future.
+
+```bash
+# Check scheduler logs for ARI deferral
+docker logs certctl-server 2>&1 | grep "ARI: renewal not yet suggested"
+```
+
+**Expected:** Log line showing `ARI: renewal not yet suggested by CA` with `cert_id`, `suggested_start`, `suggested_end`. No renewal job created for that cert.
+**PASS if** the scheduler skips renewal job creation when ARI says the window hasn't opened.
+
+### 11.2 ARI Triggers Renewal When CA Says "Now"
+
+**What:** Verifies the scheduler creates a renewal job when ARI's `suggestedWindow.start` is in the past and the current time falls within the window.
+**Why:** Tests the positive path — ARI authorizes renewal and the scheduler acts on it. Also verifies the audit trail records `renewal_trigger: ari` (not `threshold`), which is critical for operators to understand why a renewal happened.
+
+**Prerequisite:** Same setup as 35.1, but the certificate's ARI `suggestedWindow.start` is in the past (CA is actively suggesting renewal).
+
+```bash
+# Check scheduler logs for ARI-triggered renewal
+docker logs certctl-server 2>&1 | grep "ARI: CA suggests renewal now"
+
+# Verify renewal job was created
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/jobs?type=renewal" | jq '.data[] | select(.certificate_id == "<cert-id>")'
+```
+
+**Expected:** Log line showing `ARI: CA suggests renewal now`. Renewal job created with `renewal_trigger: ari` in the audit trail.
+**PASS if** a renewal job is created when ARI indicates the renewal window is open.
+
+### 11.3 ARI Fallback on Error
+
+**What:** Verifies the scheduler falls back to threshold-based renewal logic when the ARI endpoint is unreachable or returns an error.
+**Why:** ARI is an optimization, not a hard dependency. If the CA's ARI endpoint is down, renewals must still happen based on the configured expiration thresholds. This tests the graceful degradation path — critical for production reliability since ARI is a relatively new protocol and CA support varies.
+
+**Prerequisite:** ACME issuer with `CERTCTL_ACME_ARI_ENABLED=true`, but the ARI endpoint is unreachable or returns an error (e.g., network issue, 500 from CA).
+
+```bash
+# Check scheduler logs for ARI fallback
+docker logs certctl-server 2>&1 | grep "ARI check failed, falling back"
+```
+
+**Expected:** Warning log `ARI check failed, falling back to threshold-based renewal`. Renewal proceeds normally using the configured expiration thresholds.
+**PASS if** renewal still works when ARI is unavailable, using threshold-based logic as fallback.
+
+---
+
+## Part 12: Vault PKI Connector (M32)
+
+### Prerequisites
+
+- Vault server running with PKI secrets engine enabled at `pki` mount
+- PKI role created with appropriate certificate generation policy
+- Vault token with read/sign permissions on the PKI path
+- Environment variables configured:
+  ```bash
+  export CERTCTL_VAULT_ADDR="https://vault.internal:8200"
+  export CERTCTL_VAULT_TOKEN="s.xxxxxxxxxxxxxxxx"
+  export CERTCTL_VAULT_MOUNT="pki"
+  export CERTCTL_VAULT_ROLE="certctl-role"
+  export CERTCTL_VAULT_TTL="8760h"
+  ```
+
+### 12.1 Register Vault PKI Issuer
+
+**Test:** Register a Vault PKI issuer via the API.
+
+```bash
+curl -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/issuers" \
+  -d '{
+    "id": "iss-vault-prod",
+    "name": "Vault PKI Production",
+    "type": "VaultPKI",
+    "config": {
+      "vault_addr": "'"$CERTCTL_VAULT_ADDR"'",
+      "vault_token": "'"$CERTCTL_VAULT_TOKEN"'",
+      "vault_mount": "'"$CERTCTL_VAULT_MOUNT"'",
+      "vault_role": "'"$CERTCTL_VAULT_ROLE"'",
+      "vault_ttl": "'"$CERTCTL_VAULT_TTL"'"
+    }
+  }' | jq '.id'
+```
+
+**Expected:** Returns issuer ID `iss-vault-prod`.
+**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
+
+### 12.2 Issue Certificate via Vault PKI
+
+**Test:** Create a certificate and issue it through Vault PKI.
+
+```bash
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "vault-test.example.com",
+    "issuer_id": "iss-vault-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq '.job_id'
+```
+
+**Expected:** Renewal job created and eventually moves to Completed status.
+**PASS if** certificate is issued by Vault with valid serial number and chain.
+
+### 12.3 Verify Certificate Serial and Subject
+
+**Test:** Check that the issued certificate has correct Vault metadata.
+
+```bash
+curl -s -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID" | jq '.versions[0] | {serial, subject_dn, not_before, not_after}'
+```
+
+**Expected:** Serial, DN, and validity dates from Vault PKI.
+**PASS if** certificate metadata is populated from Vault's response.
+
+### 12.4 Revocation Records Locally
+
+**Test:** Revoke the certificate and verify local recording.
+
+```bash
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
+  -d '{"reason": "superseded"}' | jq '.revoked_at'
+```
+
+**Expected:** Returns `revoked_at` timestamp.
+**PASS if** revocation is recorded locally in the audit trail but not propagated to Vault (Vault is authoritative for its own revocation).
+
+---
+
+## Part 13: DigiCert Connector (M37)
+
+### Prerequisites
+
+- DigiCert CertCentral account with API access
+- API key and organization ID from DigiCert
+- Environment variables configured:
+  ```bash
+  export CERTCTL_DIGICERT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
+  export CERTCTL_DIGICERT_ORG_ID="123456"
+  export CERTCTL_DIGICERT_PRODUCT_TYPE="ssl_basic"
+  export CERTCTL_DIGICERT_BASE_URL="https://www.digicert.com/services/v2"
+  ```
+
+### 13.1 Register DigiCert Issuer
+
+**Test:** Register a DigiCert CertCentral issuer via the API.
+
+```bash
+curl -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/issuers" \
+  -d '{
+    "id": "iss-digicert-prod",
+    "name": "DigiCert CertCentral",
+    "type": "DigiCert",
+    "config": {
+      "api_key": "'"$CERTCTL_DIGICERT_API_KEY"'",
+      "org_id": "'"$CERTCTL_DIGICERT_ORG_ID"'",
+      "product_type": "'"$CERTCTL_DIGICERT_PRODUCT_TYPE"'",
+      "base_url": "'"$CERTCTL_DIGICERT_BASE_URL"'"
+    }
+  }' | jq '.id'
+```
+
+**Expected:** Returns issuer ID `iss-digicert-prod`.
+**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
+
+### 13.2 Issue DV Certificate via DigiCert
+
+**Test:** Create a DV certificate order and track it to completion.
+
+```bash
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "dv-test.example.com",
+    "issuer_id": "iss-digicert-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+JOB_ID=$(curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
+
+# Poll for job completion (DV certs may issue immediately)
+for i in {1..30}; do
+  STATUS=$(curl -s -H "$AUTH" \
+    "$SERVER/api/v1/jobs/$JOB_ID" | jq -r '.status')
+  echo "Job status: $STATUS"
+  [ "$STATUS" = "Completed" ] && break
+  sleep 2
+done
+```
+
+**Expected:** Job eventually reaches Completed status with certificate issued.
+**PASS if** certificate has DigiCert serial number and chain.
+
+### 13.3 Verify Order ID Tracking
+
+**Test:** Check that the job record includes the DigiCert order ID for auditing.
+
+```bash
+curl -s -H "$AUTH" \
+  "$SERVER/api/v1/jobs/$JOB_ID" | jq '.metadata'
+```
+
+**Expected:** Metadata includes `order_id` from DigiCert for order tracking.
+**PASS if** audit trail shows the DigiCert order lifecycle.
+
+### 13.4 Async Poll Behavior
+
+**Test:** Verify the connector polls for certificate completion (OV certs take longer).
+
+```bash
+# Submit OV certificate order (requires validation)
+CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
+  "$SERVER/api/v1/certificates" \
+  -d '{
+    "common_name": "ov-test.example.com",
+    "issuer_id": "iss-digicert-prod",
+    "key_algorithm": "RSA-2048"
+  }' | jq -r '.id')
+
+JOB_ID=$(curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
+
+# Check job status transitions
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '.status'
+```
+
+**Expected:** Job status transitions through pending states as DigiCert validates.
+**PASS if** polling mechanism works and job reaches completion once DigiCert issues the certificate.
+
+### 13.5 Revocation Records Locally
+
+**Test:** Revoke a DigiCert-issued certificate.
+
+```bash
+curl -s -X POST -H "$AUTH" \
+  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
+  -d '{"reason": "cessationOfOperation"}' | jq '.revoked_at'
+```
+
+**Expected:** Returns `revoked_at` timestamp.
+**PASS if** revocation is recorded locally; operator manages revocation in DigiCert CertCentral dashboard.
+
+---
+
+## Part 14: Target Connectors & Deployment
 
 **What this validates:** CRUD for deployment targets, including type-specific configuration for all 5 target types.
 
 **Why it matters:** Targets are where certificates get deployed (NGINX, Apache, etc.). If target management is broken, certificates can't be pushed to production servers.
 
-### 7.1 Target CRUD
+### 14.1 Target CRUD
 
 **Test 7.1.1 — List targets shows seed data**
 
@@ -1651,13 +2498,358 @@ curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/targets/
 
 ---
 
-## Part 8: Agent Operations
+## Part 15: Apache & HAProxy Target Connectors
+
+**What:** certctl ships two additional target connectors beyond NGINX: Apache httpd (separate cert/chain/key files, `apachectl configtest` + graceful reload) and HAProxy (combined PEM file with cert+chain+key, config validation, reload). Both run on the agent side and follow the same pattern as the NGINX connector.
+
+**Why:** Apache and HAProxy are the second and third most common reverse proxies in enterprise environments. Supporting them out of the box removes a common adoption blocker.
+
+### 15.1: Create Apache Target
+
+**What:** Create a deployment target of type `apache` with the required configuration fields.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-apache",
+    "name": "Test Apache Server",
+    "type": "apache",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "cert_path": "/etc/apache2/ssl/cert.pem",
+      "key_path": "/etc/apache2/ssl/key.pem",
+      "chain_path": "/etc/apache2/ssl/chain.pem",
+      "reload_command": "apachectl graceful",
+      "validate_command": "apachectl configtest"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
+```
+
+**Expected:** 201 Created with type `apache`.
+
+**PASS if:**
+- Target is created successfully
+- Type is `apache`
+- Config fields are persisted (verify via GET)
+
+**FAIL if** type is rejected or config fields are missing in the response.
+
+### 15.2: Apache Config — Separate Files
+
+**What:** Apache uses three separate files (cert, chain, key) unlike NGINX's dual-file or HAProxy's combined PEM. Verify that `cert_path`, `chain_path`, and `key_path` are all required.
+
+```bash
+# Missing chain_path should fail validation
+curl -s -w "\n%{http_code}" -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-apache-bad",
+    "name": "Bad Apache",
+    "type": "apache",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "cert_path": "/etc/apache2/ssl/cert.pem",
+      "reload_command": "apachectl graceful",
+      "validate_command": "apachectl configtest"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets"
+```
+
+**Expected:** The target is created (config validation happens at deploy time on the agent), but when the agent attempts to deploy, it will fail if required fields are missing.
+**PASS if** the validation behavior matches the connector's `ValidateConfig` — `cert_path` and `chain_path` are both required.
+
+### 15.3: Create HAProxy Target
+
+**What:** Create a deployment target of type `haproxy`. HAProxy uses a single combined PEM file (cert + chain + key concatenated), not separate files.
+
+```bash
+curl -s -X POST -H "Authorization: Bearer $API_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "id": "t-test-haproxy",
+    "name": "Test HAProxy",
+    "type": "haproxy",
+    "agent_id": "agent-demo-1",
+    "config": {
+      "pem_path": "/etc/haproxy/certs/site.pem",
+      "reload_command": "systemctl reload haproxy",
+      "validate_command": "haproxy -c -f /etc/haproxy/haproxy.cfg"
+    }
+  }' \
+  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
+```
+
+**Expected:** 201 Created with type `haproxy`.
+**PASS if** target created with correct type and config persisted.
+
+### 15.4: HAProxy Combined PEM Requirement
+
+**What:** HAProxy's `pem_path` is the single file where cert+chain+key are concatenated. The `pem_path` field is required; `reload_command` is also required.
+
+**Why:** HAProxy's `bind ssl crt` directive expects one file per certificate. The combined PEM format eliminates the need for multiple `SSLCertificate*` directives.
+
+This is verified in the connector's `ValidateConfig`:
+
+```bash
+go test ./internal/connector/target/haproxy/... -v
+```
+
+**Expected:** Tests validate that missing `pem_path` and missing `reload_command` both produce errors.
+**PASS if** all haproxy connector tests pass.
+
+### 15.5: Shell Command Injection Prevention
+
+**What:** Both Apache and HAProxy connectors validate `reload_command` and `validate_command` against the shell injection prevention logic in `internal/validation/command.go`. Commands containing shell metacharacters (`;`, `|`, `&`, `$()`, backticks) are rejected.
+
+**Why:** An attacker who controls target configuration could inject arbitrary commands if the reload/validate commands aren't sanitized. This was remediated in the security hardening pass (TICKET-001).
+
+```bash
+go test ./internal/validation/ -run TestValidateShellCommand -v
+```
+
+**Expected:** All 80+ adversarial test cases pass — commands with injection attempts are rejected, safe commands are accepted.
+**PASS if** exit code 0.
+
+### 15.6: Connector Unit Tests
+
+```bash
+go test ./internal/connector/target/apache/... -v
+go test ./internal/connector/target/haproxy/... -v
+```
+
+**Expected:** All Apache and HAProxy connector tests pass (config validation, deployment logic).
+**PASS if** exit code 0 for both.
+
+---
+
+## Part 16: Traefik & Caddy Target Connectors
+
+### Why test this?
+
+Traefik and Caddy are increasingly popular reverse proxies. Testing ensures cert deployment works with their specific file-watching and admin API patterns.
+
+### 16.1: Traefik File Provider Deployment
+
+**Setup:** Configure a target with type `Traefik` pointing to a test directory.
+
+```bash
+# Create a Traefik target
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Traefik Test",
+  "type": "Traefik",
+  "agent_id": "a-test-agent",
+  "config": {
+    "cert_dir": "/tmp/traefik-certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created with target details.
+**PASS if** target created with type `Traefik` and config fields preserved.
+
+### 16.2: Caddy API Mode Deployment
+
+```bash
+# Create a Caddy target in API mode
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Caddy API Test",
+  "type": "Caddy",
+  "agent_id": "a-test-agent",
+  "config": {
+    "mode": "api",
+    "admin_api": "http://localhost:2019",
+    "cert_dir": "/etc/caddy/certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created.
+**PASS if** target created with mode `api` and `admin_api` URL preserved.
+
+### 16.3: Caddy File Mode Deployment
+
+```bash
+# Create a Caddy target in file mode
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
+  "name": "Caddy File Test",
+  "type": "Caddy",
+  "agent_id": "a-test-agent",
+  "config": {
+    "mode": "file",
+    "cert_dir": "/etc/caddy/certs",
+    "cert_file": "test.crt",
+    "key_file": "test.key"
+  }
+}'
+```
+
+**Expected:** 201 Created.
+**PASS if** target created with mode `file`.
+
+### 16.4: Agent Connector Dispatch
+
+Verify the agent binary recognizes Traefik and Caddy target types from the work endpoint response. This requires a running agent with deployment jobs assigned to Traefik/Caddy targets.
+
+**Expected:** Agent logs show connector instantiation for the target type (e.g., "deploying to Traefik target" or "deploying to Caddy target").
+**PASS if** agent does not error with "unknown target type" for Traefik or Caddy.
+
+### 16.5: Connector Unit Tests
+
+```bash
+go test ./internal/connector/target/traefik/... -v
+go test ./internal/connector/target/caddy/... -v
+```
+
+**Expected:** All tests pass.
+**PASS if** exit code 0 for both test suites.
+
+---
+
+## Part 17: IIS Target Connector (M39)
+
+The IIS target connector (M39) brings Windows infrastructure lifecycle management to certctl. Dual-mode implementation: agent-local PowerShell (primary) for servers with certctl agent, proxy agent WinRM for agentless Windows targets. Full test suite (28 tests) with mock executor pattern for cross-platform testing. Supports PEM-to-PFX conversion, SHA-1 thumbprint computation, and parameterized PowerShell execution.
+
+### Test Suite Coverage
+
+| Layer | Test Count | Focus | Cross-Platform |
+|-------|-----------|-------|-----------------|
+| ValidateConfig | 9 | Field validation, defaults, regex enforcement | Yes |
+| DeployCertificate | 7 | PFX conversion, script execution, error handling | Yes |
+| ValidateDeployment | 5 | Thumbprint verification, binding checks | Mock executor |
+| PFX Conversion | 4 | Certificate chain handling, password generation | Yes |
+| Helpers | 3 | Thumbprint computation, Windows time conversion | Yes |
+| **Total** | **28** | | **26 pass, 2 skip on non-Windows** |
+
+### Automated Tests (qa-smoke-test.sh Part 42)
+
+| # | Test | Assertion |
+|---|------|-----------|
+| 42.1 | IIS connector imports without error | `internal/connector/target/iis/` builds cleanly |
+| 42.2 | ValidateConfig rejects missing hostname | Validation fails when `hostname` absent |
+| 42.3 | ValidateConfig rejects missing site_name | Validation fails when `site_name` absent |
+| 42.4 | ValidateConfig applies defaults | `port` defaults to 443, `ip_address` to "*" |
+| 42.5 | ValidateConfig validates field regex | Rejects field names with invalid characters |
+| 42.6 | PEM-to-PFX conversion succeeds | PKCS#12 bundle created with random password |
+| 42.7 | SHA-1 thumbprint computed correctly | Matches Go crypto/sha1 output, hex-encoded |
+| 42.8 | PowerShell script is parameterized | No unescaped interpolation in generated commands |
+| 42.9 | Mock executor pattern works cross-platform | Tests pass on Linux/macOS via mock executor |
+| 42.10 | DeployCertificate calls Import-PfxCertificate | PowerShell command includes correct cert store |
+| 42.11 | DeployCertificate calls Set-WebBinding | PowerShell command includes site name + thumbprint |
+| 42.12 | ValidateDeployment executes Get-IISSiteBinding | Thumbprint comparison happens post-deployment |
+| 42.13 | Error cases logged and propagated | TLS verify failure, script timeout errors handled |
+| 42.14 | Windows time conversion helpers work | FileTime ↔ time.Time round-trip accurate |
+
+### Manual Tests (Windows Only)
+
+These tests require a real Windows Server 2019+ environment with IIS 10+. Skip on non-Windows platforms.
+
+**42.M1: Agent-Local Deployment — Happy Path**
+
+1. Provision a Windows Server 2019+ VM with IIS installed
+2. Download and install certctl-agent binary for windows-amd64
+3. Register agent with certctl server via heartbeat endpoint
+4. Create IIS target in certctl dashboard:
+   ```json
+   {
+     "hostname": "iis-server.local",
+     "site_name": "Default Web Site",
+     "cert_store": "WebHosting",
+     "port": 443,
+     "sni": true,
+     "ip_address": "*"
+   }
+   ```
+5. Issue a certificate (e.g., via Local CA)
+6. Create deployment job targeting the IIS target
+7. Agent polls work endpoint, executes PowerShell
+8. Verify on IIS: `Get-IISSiteBinding` shows new binding with correct thumbprint
+9. Verify in dashboard: Deployment job shows status=Completed, verified_at timestamp present
+
+**PASS if** certificate deployed to IIS binding with matching thumbprint, deployment job shows Completed with verification success.
+
+**42.M2: Agent-Local Deployment — Renewal**
+
+1. On the same IIS target, trigger renewal of the certificate
+2. Verify old certificate remains bound during renewal (until new one succeeds)
+3. Verify new certificate is imported and bound after deployment
+4. Verify old binding removed or updated in IIS
+
+**PASS if** renewal completes without downtime, old binding replaced with new.
+
+**42.M3: PFX Import to WebHosting Store**
+
+1. Manually generate a test PKCS#12 certificate
+2. Via certctl-agent on Windows, verify PowerShell can import to WebHosting store:
+   ```powershell
+   $pfx = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
+   $pfx.Import([System.IO.File]::ReadAllBytes("C:\temp\test.pfx"), $password, "Exportable")
+   $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("WebHosting", "LocalMachine")
+   $store.Open("MaxAllowed")
+   $store.Add($pfx)
+   ```
+3. Verify certificate appears in IIS Certificate Manager
+
+**PASS if** certificate imports to WebHosting store successfully.
+
+**42.M4: Binding Verification — Thumbprint Match**
+
+1. Deploy a certificate to an IIS site via certctl
+2. Manually run on IIS server:
+   ```powershell
+   Get-IISSiteBinding -Name "Default Web Site" | Select-Object Thumbprint
+   ```
+3. Verify thumbprint matches certificate's SHA-1 hash (as shown in certctl GUI)
+
+**PASS if** thumbprints match exactly (hex-encoded, no colons).
+
+**42.M5: Error Handling — Invalid Site Name**
+
+1. Create IIS target with non-existent site name (e.g., "NonExistentSite")
+2. Trigger deployment
+3. Verify job fails with error message about invalid site
+4. Verify error is logged in agent and audit trail
+
+**PASS if** error handled gracefully, job marked Failed with reason.
+
+**42.M6: Field Validation — Config Injection Attempt**
+
+1. Try to create IIS target with site_name containing PowerShell metacharacters:
+   ```json
+   {
+     "site_name": "Default Web Site'; Get-Process; #"
+   }
+   ```
+2. Verify regex validation rejects this (field validation error, not API error)
+3. Verify no PowerShell execution occurs
+
+**PASS if** injection attempt blocked by field validation.
+
+**42.M7: SNI vs Non-SNI Binding**
+
+1. Create two IIS targets: one with `sni: true`, one with `sni: false`
+2. Deploy certificates to both
+3. Verify Set-WebBinding with `-SslFlags 1` (SNI) for first target
+4. Verify Set-WebBinding without SslFlags (no SNI) for second target
+5. Test TLS connection to both sites, verify SNI-enabled site handles multiple domains correctly
+
+**PASS if** SNI bindings configured correctly per target config.
+
+---
+
+## Part 18: Agent Operations
 
 **What this validates:** Agent registration, heartbeat reporting, metadata collection, work polling, and CSR submission.
 
 **Why it matters:** Agents are the remote executors — they deploy certificates to target infrastructure. If agents can't register, heartbeat, or receive work, the deployment model collapses.
 
-### 8.1 Agent CRUD & Registration
+### 18.1 Agent CRUD & Registration
 
 **Test 8.1.1 — Register new agent**
 
@@ -1699,7 +2891,7 @@ curl -s -H "$AUTH" "$SERVER/api/v1/agents/ag-web-prod" | jq '{id, name, os, arch
 
 ---
 
-### 8.2 Heartbeat
+### 18.2 Heartbeat
 
 **Test 8.2.1 — Agent heartbeat updates last_heartbeat_at**
 
@@ -1743,7 +2935,7 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 
 ---
 
-### 8.3 Agent Work & CSR
+### 18.3 Agent Work & CSR
 
 **Test 8.3.1 — Agent work polling returns jobs**
 
@@ -1793,2186 +2985,149 @@ curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/agents/a
 
 ---
 
-## Part 9: Job System
+## Part 19: Agent Work Routing (M31)
 
-**What this validates:** Job lifecycle — listing, filtering, detail view, cancellation, approval, and rejection.
+**What this validates:** Job-to-agent scoping. When an agent polls `GET /agents/{id}/work`, it must receive *only* jobs destined for its assigned targets — not every pending job in the system. This tests both the query scoping (`ListPendingByAgentID`) and the data wiring (`agent_id` populated on deployment job creation from the target→agent relationship).
 
-**Why it matters:** Jobs are the execution engine for renewals and deployments. If jobs can't be queried, cancelled, or approved, operators lose control of the workflow.
+**Why it matters:** Without agent work routing, every agent in a fleet sees every deployment job, leading to duplicate deployments, race conditions, and security violations (agents deploying certs to targets they shouldn't touch). This was a real bug — `GetPendingWork()` originally fetched ALL pending jobs and filtered in Go. The fix (M31) pushes scoping into the SQL query via a UNION of direct `agent_id` match and `target→agent` JOIN fallback for legacy jobs.
 
-### 9.1 Job Queries
+### 19.1 Multi-Agent Routing
 
-**Test 9.1.1 — List jobs with pagination**
+**What:** Two agents, two targets, each agent polls for work and only sees jobs for its own target.
+**Why:** This is the primary correctness test. If agent-web-01 sees agent-lb-01's deployment job, the routing is broken. Tests the `ListPendingByAgentID()` UNION query (direct match + JOIN fallback).
 
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=5" | jq '{total, page, per_page, items_count: (.items | length)}'
-```
-
-**What:** Lists jobs with pagination metadata.
-**Expected:** `total` ≥ 0, pagination fields present.
-**PASS if** HTTP 200 and pagination metadata present. **FAIL** otherwise.
-
----
-
-**Test 9.1.2 — Filter jobs by status**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/jobs?status=Completed" | jq '{total, statuses: [.items[].status] | unique}'
-```
-
-**What:** Filters jobs to only Completed status.
-**Expected:** All items have `status` = "Completed".
-**PASS if** all items match filter. **FAIL** if any mismatch.
-
----
-
-**Test 9.1.3 — Filter jobs by type**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/jobs?type=Renewal" | jq '{total, types: [.items[].type] | unique}'
-```
-
-**What:** Filters jobs to only Renewal type.
-**Expected:** All items have `type` = "Renewal".
-**PASS if** all match. **FAIL** if any mismatch.
-
----
-
-**Test 9.1.4 — Get job detail**
-
-```bash
-JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '{id, type, status, certificate_id}'
-```
-
-**What:** Retrieves a specific job by ID.
-**Expected:** HTTP 200 with full job record including `type`, `status`, `certificate_id`.
-**PASS if** HTTP 200 and all fields present. **FAIL** otherwise.
-
----
-
-**Test 9.1.5 — Get nonexistent job**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/jobs/job-nonexistent"
-```
-
-**Expected:** HTTP 404.
-**PASS if** HTTP 404. **FAIL** if 200 or 500.
-
----
-
-### 9.2 Job Actions
-
-**Test 9.2.1 — Cancel pending job**
-
-```bash
-# Create a renewal to get a fresh job
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{}' $SERVER/api/v1/certificates/mc-data-prod/renew > /dev/null
-JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?per_page=1&type=Renewal" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{}' \
-  $SERVER/api/v1/jobs/$JOB_ID/cancel | jq .
-```
-
-**What:** Cancels a pending job.
-**Why:** Operators need to abort incorrect or unnecessary jobs before they execute.
-**Expected:** HTTP 200. Status changes to "Cancelled".
-**PASS if** HTTP 200. **FAIL** if 500 or if job cannot be cancelled.
-
----
-
-**Test 9.2.2 — Cancel already-completed job**
-
-```bash
-# Find a completed job
-JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?status=Completed&per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{}' \
-  $SERVER/api/v1/jobs/$JOB_ID/cancel
-```
-
-**What:** Attempts to cancel a job that already completed.
-**Why:** Completed jobs shouldn't be cancelable — the work is done. The API should return an appropriate error.
-**Expected:** HTTP 400 or 409 (conflict — invalid state transition).
-**PASS if** HTTP 400 or 409. **FAIL** if 200 (accepted invalid cancellation).
-
----
-
-## Part 10: Policies & Profiles
-
-**What this validates:** Policy engine CRUD, profile management, and the interaction between profiles and certificate behavior.
-
-**Why it matters:** Policies enforce organizational standards (key type, max TTL, renewal windows). Profiles define certificate enrollment templates. Broken policies mean non-compliant certificates ship to production.
-
-### 10.1 Policies
-
-**Test 10.1.1 — List policies**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/policies" | jq '{total, ids: [.items[].id]}'
-```
-
-**Expected:** `total` ≥ 3 (seed: rp-standard, rp-urgent, rp-manual).
-**PASS if** total ≥ 3. **FAIL** otherwise.
-
----
-
-**Test 10.1.2 — Create policy**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "rp-test", "name": "Test Policy", "type": "scheduled", "config": {"renewal_window_days": 14, "alert_thresholds_days": [30, 14, 7]}}' \
-  $SERVER/api/v1/policies | jq '{id, name, type}'
-```
-
-**Expected:** HTTP 201.
-**PASS if** HTTP 201. **FAIL** otherwise.
-
----
-
-**Test 10.1.3 — Get policy**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/policies/rp-test" | jq '{id, name, type}'
-```
-
-**Expected:** HTTP 200 with matching fields.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 10.1.4 — Update policy**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
-  -d '{"name": "Updated Test Policy"}' \
-  $SERVER/api/v1/policies/rp-test | jq '{name}'
-```
-
-**Expected:** HTTP 200. `name` = "Updated Test Policy".
-**PASS if** HTTP 200 and name updated. **FAIL** otherwise.
-
----
-
-**Test 10.1.5 — Delete policy**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/policies/rp-test"
-```
-
-**Expected:** HTTP 204.
-**PASS if** HTTP 204. **FAIL** otherwise.
-
----
-
-**Test 10.1.6 — Policy violations endpoint**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/policies/rp-standard/violations" | jq '{total}'
-```
-
-**What:** Lists policy violations for a specific policy.
-**Why:** Operators need to see which certificates violate their policies.
-**Expected:** HTTP 200 with violations array.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 10.1.7 — Invalid policy type returns 400**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "rp-bad", "name": "Bad", "type": "quantum-policy"}' \
-  $SERVER/api/v1/policies
-```
-
-**Expected:** HTTP 400 with validation error.
-**PASS if** HTTP 400. **FAIL** if 201.
-
----
-
-### 10.2 Certificate Profiles
-
-**Test 10.2.1 — List profiles**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/profiles" | jq '{total, ids: [.items[].id]}'
-```
-
-**Expected:** `total` = 5 (seed profiles: prof-standard-tls, prof-internal-mtls, prof-short-lived, prof-wildcard, prof-smime).
-**PASS if** total = 5. **FAIL** otherwise.
-
----
-
-**Test 10.2.2 — Create profile with crypto constraints**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "prof-test", "name": "Test Profile", "allowed_key_algorithms": ["RSA", "ECDSA"], "min_key_size": 2048, "max_ttl_hours": 8760}' \
-  $SERVER/api/v1/profiles | jq '{id, name, allowed_key_algorithms}'
-```
-
-**What:** Creates a profile with key type constraints and max TTL.
-**Why:** Profiles enforce crypto policy — only approved algorithms and key sizes can be used.
-**Expected:** HTTP 201 with crypto constraint fields.
-**PASS if** HTTP 201 and `allowed_key_algorithms` matches. **FAIL** otherwise.
-
----
-
-**Test 10.2.3 — Get profile**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/profiles/prof-test" | jq '{id, name}'
-```
-
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 10.2.4 — Update profile**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
-  -d '{"name": "Updated Test Profile", "max_ttl_hours": 720}' \
-  $SERVER/api/v1/profiles/prof-test | jq '{name, max_ttl_hours}'
-```
-
-**Expected:** HTTP 200. Fields updated.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 10.2.5 — Delete profile**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/profiles/prof-test"
-```
-
-**Expected:** HTTP 204.
-**PASS if** HTTP 204. **FAIL** otherwise.
-
----
-
-**Test 10.2.6 — Short-lived profile exists (TTL < 1 hour)**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/profiles/prof-short-lived" | jq '{id, name, max_ttl_hours, is_short_lived}'
-```
-
-**What:** Verifies the short-lived profile is configured with TTL < 1 hour.
-**Why:** Short-lived certs skip CRL/OCSP — expiry IS revocation. The profile must be correctly flagged.
-**Expected:** `max_ttl_hours` < 1 or `is_short_lived` = true.
-**PASS if** profile exists and indicates short-lived. **FAIL** if missing.
-
----
-
-## Part 11: Ownership, Teams & Agent Groups
-
-**What this validates:** Organizational structure — teams, certificate owners, and dynamic agent grouping.
-
-**Why it matters:** Ownership drives notification routing (who gets alerted when a cert expires). Agent groups enable fleet-wide policy application. Without these, operators can't manage at scale.
-
-### 11.1 Teams
-
-**Test 11.1.1 — List teams**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/teams" | jq '{total, ids: [.items[].id]}'
-```
-
-**Expected:** `total` = 5 (seed teams).
-**PASS if** total = 5. **FAIL** otherwise.
-
----
-
-**Test 11.1.2 — Team CRUD cycle**
-
-```bash
-# Create
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "t-test", "name": "Test Team"}' \
-  $SERVER/api/v1/teams | jq '{id, name}'
-
-# Get
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/teams/t-test" | jq '{id}'
-
-# Update
-curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
-  -d '{"name": "Updated Test Team"}' \
-  $SERVER/api/v1/teams/t-test | jq '{name}'
-
-# Delete
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/teams/t-test"
-```
-
-**Expected:** Create = 201, Get = 200, Update = 200, Delete = 204.
-**PASS if** all four operations return expected codes. **FAIL** if any fails.
-
----
-
-### 11.2 Owners
-
-**Test 11.2.1 — Owner CRUD with team assignment**
-
-```bash
-# Create owner with team
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "o-test", "name": "Test Owner", "email": "test@example.com", "team_id": "t-platform"}' \
-  $SERVER/api/v1/owners | jq '{id, email, team_id}'
-```
-
-**What:** Creates an owner assigned to a team.
-**Why:** Owner email is used for notification routing. Team assignment enables team-level queries.
-**Expected:** HTTP 201. `team_id` = "t-platform".
-**PASS if** HTTP 201 and team_id matches. **FAIL** otherwise.
-
----
-
-**Test 11.2.2 — Get, update, delete owner**
-
-```bash
-# Get
-curl -s -H "$AUTH" "$SERVER/api/v1/owners/o-test" | jq '{id, email}'
-# Update
-curl -s -X PUT -H "$AUTH" -H "$CT" -d '{"name": "Updated Owner"}' $SERVER/api/v1/owners/o-test | jq '{name}'
-# Delete
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-test"
-```
-
-**Expected:** Get = 200, Update = 200, Delete = 204.
-**PASS if** all succeed. **FAIL** otherwise.
-
----
-
-### 11.3 Agent Groups
-
-**Test 11.3.1 — List agent groups**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/agent-groups" | jq '{total, ids: [.items[].id]}'
-```
-
-**Expected:** `total` = 5 (seed groups).
-**PASS if** total = 5. **FAIL** otherwise.
-
----
-
-**Test 11.3.2 — Create agent group with dynamic criteria**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "ag-test-group", "name": "Test Group", "match_os": "linux", "match_architecture": "amd64", "match_ip_cidr": "10.0.0.0/8"}' \
-  $SERVER/api/v1/agent-groups | jq '{id, name, match_os}'
-```
-
-**What:** Creates a group with OS, architecture, and CIDR matching criteria.
-**Why:** Dynamic groups automatically include agents matching the criteria — no manual membership management.
-**Expected:** HTTP 201 with criteria fields.
-**PASS if** HTTP 201. **FAIL** otherwise.
-
----
-
-**Test 11.3.3 — Agent group membership endpoint**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-linux-prod/members" | jq .
-```
-
-**What:** Lists agents that match the group's criteria.
-**Why:** Operators need to see which agents fall into each group for policy assignment.
-**Expected:** HTTP 200 with array of matching agents.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 11.3.4 — Delete agent group returns 204**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-test-group"
-```
-
-**Expected:** HTTP 204.
-**PASS if** HTTP 204. **FAIL** if 200 (wrong status code for delete — regression test).
-
----
-
-### 11.4 Foreign Key Constraint Behavior
-
-**What this validates:** Delete operations correctly fail with 409 when referenced entities still exist.
-
-**Why it matters:** Owners and issuers use `ON DELETE RESTRICT` — you can't delete them while certificates reference them. Teams use `ON DELETE CASCADE`, so team deletes succeed and cascade. If the server returns a silent 500 instead of 409, the GUI swallows the error and the user thinks nothing happened.
-
-**Test 11.4.1 — Delete owner with assigned certificates (expect 409)**
-
-```bash
-# Try to delete Alice Chen (o-alice) — she owns certificates in the demo data
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice" | jq .
-```
-
-**Expected:** HTTP 409 with message "Cannot delete owner: certificates are still assigned to this owner".
-**PASS if** 409 Conflict. **FAIL** if 204 (data integrity violation) or 500 (unhelpful error).
-
----
-
-**Test 11.4.2 — Delete issuer with assigned certificates (expect 409)**
-
-```bash
-# Try to delete the Local Dev CA (iss-local) — certificates reference it
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local" | jq .
-```
-
-**Expected:** HTTP 409 with message "Cannot delete issuer: certificates are still using this issuer".
-**PASS if** 409 Conflict. **FAIL** if 204 or 500.
-
----
-
-**Test 11.4.3 — Delete team cascades successfully**
-
-```bash
-# Create a test team, then delete it — teams use ON DELETE CASCADE
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id": "t-fk-test", "name": "FK Test Team"}' $SERVER/api/v1/teams > /dev/null
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/teams/t-fk-test"
-```
-
-**Expected:** HTTP 204 (cascade allows deletion).
-**PASS if** 204. **FAIL** if 409 or 500.
-
----
-
-## Part 12: Notifications
-
-**What this validates:** Notification creation, listing, and read status management.
-
-**Why it matters:** Notifications are how certctl tells operators about important events (expiring certs, failed renewals, revocations). If notifications are lost or unreadable, operators miss critical events.
-
-### 12.1 Notification Queries
-
-**Test 12.1.1 — List notifications with pagination**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=5" | jq '{total, items_count: (.items | length), first_type: .items[0].type}'
-```
-
-**What:** Lists notifications with pagination.
-**Expected:** `total` ≥ 6 (seed notifications). Items present.
-**PASS if** HTTP 200 and total ≥ 1. **FAIL** if 500 or total = 0.
-
----
-
-**Test 12.1.2 — Get single notification**
-
-```bash
-NOTIF_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/notifications/$NOTIF_ID" | jq '{id, type, read}'
-```
-
-**What:** Fetches a specific notification by ID.
-**Expected:** HTTP 200 with notification detail including `type` and `read` fields.
-**PASS if** HTTP 200 and fields present. **FAIL** otherwise.
-
----
-
-**Test 12.1.3 — Mark notification as read**
-
-```bash
-NOTIF_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/notifications/$NOTIF_ID/read
-```
-
-**What:** Marks a notification as read.
-**Why:** Read/unread state lets operators track which notifications they've acknowledged.
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 12.1.4 — Mark already-read notification (idempotent)**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/notifications/$NOTIF_ID/read
-```
-
-**What:** Marks the same notification as read again.
-**Why:** Should be idempotent — marking an already-read notification shouldn't error.
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** if 409 or 500.
-
----
-
-**Test 12.1.5 — Get nonexistent notification**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/notifications/notif-nonexistent"
-```
-
-**Expected:** HTTP 404.
-**PASS if** HTTP 404. **FAIL** if 200 or 500.
-
----
-
-**Test 12.1.6 — Verify notification created from revocation**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=20" | jq '[.items[] | select(.type == "revocation" or .type == "certificate_revoked")] | length'
-```
-
-**What:** Checks that revocation events from Part 5 generated notifications.
-**Why:** Revocation without notification means nobody knows a cert was revoked — defeating the purpose.
-**Expected:** Count ≥ 1.
-**PASS if** count ≥ 1. **FAIL** if 0.
-
----
-
-## Part 13: Observability
-
-**What this validates:** Dashboard stats, JSON/Prometheus metrics, and structured logging — the operator's visibility into system health.
-
-**Why it matters:** Without observability, operators are flying blind. They can't tell if renewals are succeeding, how many certs are expiring, or whether the system is healthy.
-
-### 13.1 Stats Endpoints
-
-**Test 13.1.1 — Dashboard summary**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/summary" | jq .
-```
-
-**What:** Fetches the high-level dashboard summary.
-**Why:** This powers the four stat cards on the GUI dashboard.
-**Expected:** HTTP 200 with fields: `total_certificates`, `active_certificates`, `expiring_certificates`, `expired_certificates`.
-**PASS if** HTTP 200 and all four fields present with numeric values. **FAIL** otherwise.
-
----
-
-**Test 13.1.2 — Certificates by status**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/certificates-by-status" | jq .
-```
-
-**What:** Returns certificate count broken down by status.
-**Why:** Powers the donut chart in the GUI. Each status (Active, Expiring, Expired, Revoked) should have a count.
-**Expected:** HTTP 200 with array of `{status, count}` objects.
-**PASS if** HTTP 200 and array contains status breakdowns. **FAIL** otherwise.
-
----
-
-**Test 13.1.3 — Expiration timeline**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/expiration-timeline?days=90" | jq .
-```
-
-**What:** Returns weekly expiration buckets for the next 90 days.
-**Why:** Powers the expiration heatmap chart. Operators need to see when the next wave of renewals is due.
-**Expected:** HTTP 200 with array of time-bucketed data points.
-**PASS if** HTTP 200 with data array. **FAIL** otherwise.
-
----
-
-**Test 13.1.4 — Job trends**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/job-trends?days=30" | jq .
-```
-
-**What:** Returns job success/failure trends for the last 30 days.
-**Expected:** HTTP 200 with trend data points.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 13.1.5 — Issuance rate**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/issuance-rate?days=30" | jq .
-```
-
-**What:** Returns certificate issuance rate over time.
-**Expected:** HTTP 200 with rate data.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 13.1.6 — Stats with invalid days parameter**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/expiration-timeline?days=abc"
-```
-
-**What:** Sends an invalid non-numeric `days` parameter.
-**Why:** Should default to a reasonable value or return 400 — not crash.
-**Expected:** HTTP 200 (with default days) or HTTP 400.
-**PASS if** HTTP 200 or 400. **FAIL** if 500.
-
----
-
-### 13.2 JSON Metrics
-
-**Test 13.2.1 — JSON metrics endpoint**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/metrics" | jq '{gauges: (.gauges | keys), counters: (.counters | keys), uptime_seconds}'
-```
-
-**What:** Fetches the JSON metrics endpoint.
-**Why:** This is the machine-readable metrics format for custom integrations and monitoring.
-**Expected:** HTTP 200. `gauges` contains certificate/agent metrics, `counters` contains job metrics, `uptime_seconds` > 0.
-**PASS if** HTTP 200, gauges and counters present, uptime > 0. **FAIL** otherwise.
-
----
-
-**Test 13.2.2 — Metric values are non-negative**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/metrics" | jq '[.gauges | to_entries[] | select(.value < 0)] | length'
-```
-
-**What:** Checks all gauge values are ≥ 0.
-**Why:** Negative certificate counts or agent counts indicate a counting bug.
-**Expected:** Length = 0 (no negative values).
-**PASS if** count = 0. **FAIL** if any negative values found.
-
----
-
-**Test 13.2.3 — Uptime is positive**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/metrics" | jq '.uptime_seconds'
-```
-
-**What:** Verifies the server reports positive uptime.
-**Expected:** Value > 0.
-**PASS if** uptime > 0. **FAIL** if 0 or negative.
-
----
-
-### 13.3 Prometheus Metrics
-
-**Test 13.3.1 — Prometheus content type**
-
-```bash
-curl -s -D - -o /dev/null -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -i "content-type"
-```
-
-**What:** Verifies the Prometheus endpoint returns the correct Content-Type.
-**Why:** Prometheus scrapers validate Content-Type. Wrong type = scrape failure = no monitoring.
-**Expected:** `Content-Type: text/plain` (or `text/plain; version=0.0.4`).
-**PASS if** Content-Type contains `text/plain`. **FAIL** otherwise.
-
----
-
-**Test 13.3.2 — Prometheus output contains HELP lines**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# HELP"
-```
-
-**What:** Counts `# HELP` comment lines (metric descriptions).
-**Why:** HELP lines are required by the Prometheus exposition format. Missing = non-compliant.
-**Expected:** Count > 0 (one per metric).
-**PASS if** count > 0. **FAIL** if 0.
-
----
-
-**Test 13.3.3 — Prometheus output contains TYPE lines**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# TYPE"
-```
-
-**What:** Counts `# TYPE` annotations (gauge/counter declarations).
-**Expected:** Count > 0.
-**PASS if** count > 0. **FAIL** if 0.
-
----
-
-**Test 13.3.4 — All documented Prometheus metrics present**
-
-```bash
-METRICS=$(curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus")
-for m in certctl_certificate_total certctl_certificate_active certctl_certificate_expiring_soon certctl_certificate_expired certctl_certificate_revoked certctl_agent_total certctl_agent_online certctl_job_pending certctl_job_completed_total certctl_job_failed_total certctl_uptime_seconds; do
-  echo -n "$m: "
-  echo "$METRICS" | grep -c "^$m "
-done
-```
-
-**What:** Verifies all documented Prometheus metrics are present in the output.
-**Why:** Missing metrics mean missing dashboard panels in Grafana. Each metric was chosen for operational value.
-**Expected:** Each metric reports count = 1 (present).
-**PASS if** all metrics show count = 1. **FAIL** if any shows 0.
-
----
-
-**Test 13.3.5 — Prometheus metric values are parseable numbers**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -v "^#" | grep -v "^$" | awk '{print $2}' | while read val; do
-  echo "$val" | grep -qE '^[0-9]+(\.[0-9]+)?$' || echo "INVALID: $val"
-done
-```
-
-**What:** Verifies all metric values are valid numbers (not NaN, not strings).
-**Why:** Non-numeric values cause Prometheus scrape errors and break dashboards.
-**Expected:** No "INVALID" lines printed.
-**PASS if** no invalid values found. **FAIL** if any invalid values.
-
----
-
-**Test 13.3.6 — Method not allowed on metrics (POST)**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/metrics
-```
-
-**What:** Sends POST to a GET-only endpoint.
-**Expected:** HTTP 405 (Method Not Allowed).
-**PASS if** HTTP 405. **FAIL** if 200 or 500.
-
----
-
-## Part 14: Audit Trail
-
-**What this validates:** The immutable audit trail — listing, filtering, and verifying that API actions generate audit entries.
-
-**Why it matters:** The audit trail is a compliance requirement (SOC 2, PCI-DSS). If events aren't recorded, the organization can't prove who did what and when.
-
-### 14.1 Audit Queries
-
-**Test 14.1.1 — List audit events**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=5" | jq '{total, items_count: (.items | length)}'
-```
-
-**What:** Lists audit events with pagination.
-**Expected:** `total` > 0 (seed data + actions from earlier tests). Items present.
-**PASS if** HTTP 200 and total > 0. **FAIL** if 500 or total = 0.
-
----
-
-**Test 14.1.2 — Get single audit event**
-
-```bash
-EVENT_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/audit/$EVENT_ID" | jq '{id, action, actor, resource_type}'
-```
-
-**What:** Fetches a specific audit event by ID.
-**Expected:** HTTP 200 with event detail including `action`, `actor`, `resource_type`.
-**PASS if** HTTP 200 and fields present. **FAIL** otherwise.
-
----
-
-**Test 14.1.3 — Filter audit by time range**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z" | jq '{total}'
-```
-
-**What:** Filters audit events to a specific time range.
-**Expected:** HTTP 200 with `total` > 0.
-**PASS if** total > 0 for the current year range. **FAIL** if 0.
-
----
-
-**Test 14.1.4 — Filter audit by actor**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?actor=system" | jq '{total}'
-```
-
-**What:** Filters audit events by actor (system-generated events).
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 14.1.5 — Filter audit by resource type**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?resource_type=certificate" | jq '{total}'
-```
-
-**What:** Filters to certificate-related audit events only.
-**Expected:** HTTP 200 with total > 0.
-**PASS if** HTTP 200 and total > 0. **FAIL** otherwise.
-
----
-
-**Test 14.1.6 — Filter audit by action**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?action=certificate.created" | jq '{total}'
-```
-
-**What:** Filters to a specific action type.
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 14.1.7 — API calls create audit entries**
-
-```bash
-# Make a distinct API call
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"mc-audit-test","common_name":"audit.test.local"}' $SERVER/api/v1/certificates > /dev/null
-# Find the audit entry
-sleep 2
-curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=5" | jq '[.items[] | select(.resource_id == "mc-audit-test")] | length'
-```
-
-**What:** Creates a certificate and verifies an audit event was recorded for it.
-**Why:** Every API mutation must produce an audit entry. This confirms the audit middleware is wired correctly.
-**Expected:** Count ≥ 1 (at least one audit event for the new cert).
-**PASS if** count ≥ 1. **FAIL** if 0.
-
----
-
-**Test 14.1.8 — Audit immutability (no PUT/DELETE)**
-
-```bash
-EVENT_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=1" | jq -r '.items[0].id')
-echo "=== PUT ==="
-curl -s -w "HTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" -d '{}' "$SERVER/api/v1/audit/$EVENT_ID"
-echo "=== DELETE ==="
-curl -s -w "HTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/audit/$EVENT_ID"
-```
-
-**What:** Attempts to modify or delete an audit event.
-**Why:** Audit trails must be immutable for compliance. If you can edit or delete events, the trail is unreliable.
-**Expected:** Both return HTTP 405 (Method Not Allowed).
-**PASS if** both return 405. **FAIL** if either returns 200 or 204.
-
----
-
-## Part 15: Certificate Discovery (Filesystem + Network)
-
-**What this validates:** Filesystem discovery (agents scanning for existing certs), network discovery (server-side TLS scanning), and the triage workflow.
-
-**Why it matters:** Organizations often have thousands of unmanaged certificates scattered across servers. Discovery finds them so they can be brought under management.
-
-### 15.1 Filesystem Discovery
-
-**Test 15.1.1 — Submit discovery report**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{
-    "agent_id": "ag-web-prod",
-    "certificates": [{
-      "common_name": "discovered.test.local",
-      "serial_number": "ABC123",
-      "issuer_dn": "CN=Test CA",
-      "subject_dn": "CN=discovered.test.local",
-      "not_before": "2026-01-01T00:00:00Z",
-      "not_after": "2027-01-01T00:00:00Z",
-      "key_algorithm": "RSA",
-      "key_size": 2048,
-      "fingerprint_sha256": "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344",
-      "source_path": "/etc/ssl/certs/discovered.pem"
-    }]
-  }' \
-  $SERVER/api/v1/agents/ag-web-prod/discoveries | jq .
-```
-
-**What:** Agent submits a filesystem scan report with one discovered certificate.
-**Why:** This is the primary data ingestion path for discovery.
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** if 400 or 500.
-
----
-
-**Test 15.1.2 — Submit report with multiple certificates**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{
-    "agent_id": "ag-web-prod",
-    "certificates": [
-      {"common_name": "multi1.test.local", "serial_number": "M001", "issuer_dn": "CN=CA", "subject_dn": "CN=multi1.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "ECDSA", "key_size": 256, "fingerprint_sha256": "1111111111111111111111111111111111111111111111111111111111111111", "source_path": "/certs/multi1.pem"},
-      {"common_name": "multi2.test.local", "serial_number": "M002", "issuer_dn": "CN=CA", "subject_dn": "CN=multi2.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "RSA", "key_size": 4096, "fingerprint_sha256": "2222222222222222222222222222222222222222222222222222222222222222", "source_path": "/certs/multi2.pem"}
-    ]
-  }' \
-  $SERVER/api/v1/agents/ag-web-prod/discoveries
-```
-
-**Expected:** HTTP 200. Both certificates stored.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 15.1.3 — Duplicate fingerprint deduplication**
-
-```bash
-# Submit the same fingerprint again
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{
-    "agent_id": "ag-web-prod",
-    "certificates": [{"common_name": "discovered.test.local", "serial_number": "ABC123", "issuer_dn": "CN=Test CA", "subject_dn": "CN=discovered.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "RSA", "key_size": 2048, "fingerprint_sha256": "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344", "source_path": "/etc/ssl/certs/discovered.pem"}]
-  }' \
-  $SERVER/api/v1/agents/ag-web-prod/discoveries
-# Check total count hasn't doubled
-curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates" | jq '.total'
-```
-
-**What:** Submits the same certificate fingerprint a second time.
-**Why:** Dedup by fingerprint prevents the same physical cert from creating multiple discovery records.
-**Expected:** HTTP 200 on resubmission. Total count doesn't increase (upsert, not insert).
-**PASS if** total is same as before resubmission. **FAIL** if total increased.
-
----
-
-**Test 15.1.4 — List discovered certificates**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates" | jq '{total, items_count: (.items | length)}'
-```
-
-**Expected:** HTTP 200. `total` ≥ 3 (from tests above).
-**PASS if** total ≥ 3. **FAIL** otherwise.
-
----
-
-**Test 15.1.5 — Filter by status: Unmanaged**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged" | jq '{total}'
-```
-
-**Expected:** HTTP 200. All items have Unmanaged status.
-**PASS if** HTTP 200 and total > 0. **FAIL** if 500.
-
----
-
-**Test 15.1.6 — Filter by agent_id**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?agent_id=ag-web-prod" | jq '{total}'
-```
-
-**Expected:** HTTP 200.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 15.1.7 — Get discovered certificate detail**
-
-```bash
-DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovered-certificates/$DISC_ID" | jq '{id, common_name, status, fingerprint_sha256}'
-```
-
-**Expected:** HTTP 200 with full discovery record.
-**PASS if** HTTP 200 and all fields present. **FAIL** otherwise.
-
----
-
-**Test 15.1.8 — Claim discovered certificate**
-
-```bash
-DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged&per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"managed_certificate_id": "mc-api-prod"}' \
-  $SERVER/api/v1/discovered-certificates/$DISC_ID/claim
-```
-
-**What:** Claims (links) a discovered cert to an existing managed certificate.
-**Why:** This is how operators bring discovered certs under certctl management.
-**Expected:** HTTP 200. Status changes to "Managed".
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 15.1.9 — Dismiss discovered certificate**
-
-```bash
-DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged&per_page=1" | jq -r '.items[0].id')
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"reason": "Known self-signed test cert"}' \
-  $SERVER/api/v1/discovered-certificates/$DISC_ID/dismiss
-```
-
-**What:** Dismisses a discovered cert from the triage queue.
-**Why:** Not every discovered cert needs management. Dismiss removes it from the "needs attention" view.
-**Expected:** HTTP 200. Status changes to "Dismissed".
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 15.1.10 — List discovery scans**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovery-scans" | jq '{total}'
-```
-
-**What:** Lists discovery scan history.
-**Expected:** HTTP 200 with scan records (from the submissions above).
-**PASS if** HTTP 200 and total ≥ 1. **FAIL** otherwise.
-
----
-
-**Test 15.1.11 — Discovery summary**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovery-summary" | jq .
-```
-
-**What:** Returns aggregate counts by discovery status.
-**Expected:** HTTP 200 with counts for Unmanaged, Managed, Dismissed.
-**PASS if** HTTP 200 and status counts present. **FAIL** otherwise.
-
----
-
-### 15.2 Network Discovery
-
-**Test 15.2.1 — List network scan targets (seed data)**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/network-scan-targets" | jq '{total, ids: [.items[].id]}'
-```
-
-**What:** Lists seed network scan targets.
-**Expected:** `total` = 3 (nst-dc1-web, nst-dc2-apps, nst-dmz).
-**PASS if** total = 3 and all 3 IDs present. **FAIL** otherwise.
-
----
-
-**Test 15.2.2 — Create network scan target**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "nst-test", "name": "Test Scan Target", "cidrs": ["192.168.1.0/24"], "ports": [443, 8443], "scan_interval_hours": 12}' \
-  $SERVER/api/v1/network-scan-targets | jq '{id, name, cidrs, ports}'
-```
-
-**What:** Creates a new network scan target with CIDR range and ports.
-**Expected:** HTTP 201 with all fields.
-**PASS if** HTTP 201 and `cidrs` contains "192.168.1.0/24". **FAIL** otherwise.
-
----
-
-**Test 15.2.3 — Get scan target detail**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/network-scan-targets/nst-test" | jq '{id, cidrs, ports}'
-```
-
-**Expected:** HTTP 200 with matching fields.
-**PASS if** HTTP 200. **FAIL** otherwise.
-
----
-
-**Test 15.2.4 — Update scan target**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
-  -d '{"name": "Updated Target", "cidrs": ["192.168.1.0/24", "10.0.0.0/24"], "ports": [443]}' \
-  $SERVER/api/v1/network-scan-targets/nst-test | jq '{name, cidrs}'
-```
-
-**Expected:** HTTP 200. `cidrs` now has 2 entries.
-**PASS if** HTTP 200 and cidrs updated. **FAIL** otherwise.
-
----
-
-**Test 15.2.5 — Delete scan target**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/network-scan-targets/nst-test"
-```
-
-**Expected:** HTTP 204.
-**PASS if** HTTP 204. **FAIL** otherwise.
-
----
-
-**Test 15.2.6 — Trigger manual scan**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{}' \
-  $SERVER/api/v1/network-scan-targets/nst-dc1-web/scan
-```
-
-**What:** Triggers an immediate network scan on a target.
-**Why:** Operators need to scan on-demand, not just on the 6h schedule.
-**Expected:** HTTP 200 or 202.
-**PASS if** HTTP 200/202. **FAIL** if 500.
-
----
-
-**Test 15.2.7 — Invalid CIDR validation**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "nst-bad", "name": "Bad Target", "cidrs": ["not-a-cidr"], "ports": [443]}' \
-  $SERVER/api/v1/network-scan-targets
-```
-
-**What:** Attempts to create a scan target with invalid CIDR notation.
-**Why:** Bad CIDRs would cause the scanner to crash or scan random addresses.
-**Expected:** HTTP 400 with validation error.
-**PASS if** HTTP 400. **FAIL** if 201.
-
----
-
-## Part 16: Enhanced Query API
-
-**What this validates:** Advanced query features — sparse fields, sorting, cursor pagination, time-range filters, and combined filters.
-
-**Why it matters:** These features reduce API bandwidth, enable efficient pagination for large inventories, and power the GUI's advanced filtering.
-
-**Test 16.1.1 — Sparse fields: only requested fields returned**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?fields=id,common_name&per_page=3" | jq '.items[0] | keys'
-```
-
-**What:** Requests only `id` and `common_name` fields.
-**Expected:** Keys array contains only `["common_name", "id"]`.
-**PASS if** only requested fields present. **FAIL** if additional fields.
-
----
-
-**Test 16.1.2 — Sort ascending: commonName**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?sort=commonName&per_page=5" | jq '[.items[].common_name]'
-```
-
-**Expected:** Names in ascending alphabetical order.
-**PASS if** sorted A→Z. **FAIL** if unsorted.
-
----
-
-**Test 16.1.3 — Sort descending: notAfter**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?sort=-notAfter&per_page=5" | jq '[.items[].not_after]'
-```
-
-**Expected:** Dates in descending order.
-**PASS if** sorted newest→oldest. **FAIL** if unsorted.
-
----
-
-**Test 16.1.4 — Sort by invalid field**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?sort=hackMe"
-```
-
-**What:** Attempts to sort by a field not in the whitelist.
-**Why:** Sorting by arbitrary columns could be a SQL injection vector or expose internal fields.
-**Expected:** HTTP 400 (invalid sort field) or HTTP 200 (ignored, default sort applied).
-**PASS if** HTTP 400 or 200 with default ordering. **FAIL** if 500.
-
----
-
-**Test 16.1.5 — Cursor pagination first page**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq '{next_cursor, items_count: (.items | length)}'
-```
-
-**Expected:** `next_cursor` present, `items_count` = 3.
-**PASS if** next_cursor non-null. **FAIL** if missing.
-
----
-
-**Test 16.1.6 — Cursor pagination second page**
-
-```bash
-CURSOR=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq -r '.next_cursor')
-FIRST_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq -r '.items[0].id')
-SECOND_PAGE_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3&cursor=$CURSOR" | jq -r '.items[0].id')
-echo "Page 1 first: $FIRST_ID, Page 2 first: $SECOND_PAGE_ID"
-```
-
-**Expected:** Different IDs on page 1 vs page 2.
-**PASS if** IDs differ. **FAIL** if same.
-
----
-
-**Test 16.1.7 — Time-range: expires_before**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2027-01-01T00:00:00Z" | jq '{total}'
-```
-
-**Expected:** HTTP 200 with total > 0.
-**PASS if** total > 0. **FAIL** otherwise.
-
----
-
-**Test 16.1.8 — Time-range: created_after**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?created_after=2025-01-01T00:00:00Z" | jq '{total}'
-```
-
-**Expected:** HTTP 200 with total > 0.
-**PASS if** total > 0. **FAIL** otherwise.
-
----
-
-**Test 16.1.9 — Combined filters**
-
-```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?status=Active&sort=-notAfter&fields=id,common_name,status&per_page=5" | jq '{total, items_count: (.items | length), first_keys: (.items[0] | keys)}'
-```
-
-**What:** Combines status filter + sort + sparse fields + pagination in one query.
-**Why:** Real-world API usage combines multiple features. They must work together, not interfere.
-**Expected:** All items Active, sorted by notAfter desc, only requested fields present, max 5 items.
-**PASS if** all constraints applied simultaneously. **FAIL** if any constraint ignored.
-
----
-
-## Part 17: CLI Tool
-
-**What this validates:** The `certctl-cli` binary — all subcommands, output formats, flag overrides, and error handling.
-
-**Why it matters:** The CLI is how DevOps engineers interact with certctl in scripts, CI/CD, and terminals. If CLI commands are broken, automation pipelines fail.
-
-### 17.1 Setup
-
-```bash
-export CERTCTL_SERVER_URL=$SERVER
-export CERTCTL_API_KEY=$API_KEY
-```
-
-### 17.2 Certificate Commands
-
-**Test 17.2.1 — List certificates (table format)**
-
-```bash
-./certctl-cli certs list
-```
-
-**What:** Lists certificates in the default table format.
-**Expected:** Tabular output with columns (ID, Common Name, Status, etc.). At least 15 rows.
-**PASS if** table renders with data. **FAIL** if error or empty.
-
----
-
-**Test 17.2.2 — List certificates (JSON format)**
-
-```bash
-./certctl-cli --format json certs list
-```
-
-**What:** Lists certificates in JSON format.
-**Expected:** Valid JSON array output.
-**PASS if** valid JSON with certificate data. **FAIL** if parse error.
-
----
-
-**Test 17.2.3 — Get specific certificate**
-
-```bash
-./certctl-cli certs get mc-api-prod
-```
-
-**What:** Fetches a specific cert by ID.
-**Expected:** Certificate detail for mc-api-prod displayed.
-**PASS if** output shows mc-api-prod details. **FAIL** if error.
-
----
-
-**Test 17.2.4 — Get nonexistent certificate**
-
-```bash
-./certctl-cli certs get mc-nonexistent 2>&1
-```
-
-**What:** Fetches a cert that doesn't exist.
-**Expected:** Error message (not a stack trace).
-**PASS if** clean error message. **FAIL** if panic or no output.
-
----
-
-**Test 17.2.5 — Renew certificate**
-
-```bash
-./certctl-cli certs renew mc-pay-prod
-```
-
-**What:** Triggers renewal via CLI.
-**Expected:** Success message or job ID.
-**PASS if** success output. **FAIL** if error.
-
----
-
-**Test 17.2.6 — Revoke certificate with reason**
-
-```bash
-./certctl-cli certs revoke mc-auth-prod --reason superseded
-```
-
-**What:** Revokes via CLI with an RFC 5280 reason.
-**Expected:** Success message indicating revocation.
-**PASS if** success output. **FAIL** if error.
-
----
-
-### 17.3 Agent & Job Commands
-
-**Test 17.3.1 — List agents**
-
-```bash
-./certctl-cli agents list
-```
-
-**Expected:** Table with 5+ agents.
-**PASS if** agent data displayed. **FAIL** if error.
-
----
-
-**Test 17.3.2 — List jobs**
-
-```bash
-./certctl-cli jobs list
-```
-
-**Expected:** Table with job data.
-**PASS if** job data displayed. **FAIL** if error.
-
----
-
-### 17.4 System Commands
-
-**Test 17.4.1 — Server status/health**
-
-```bash
-./certctl-cli status
-```
-
-**What:** Shows server health and summary stats.
-**Expected:** Health status and cert/agent counts.
-**PASS if** health info displayed. **FAIL** if connection error.
-
----
-
-**Test 17.4.2 — CLI version**
-
-```bash
-./certctl-cli version
-```
-
-**Expected:** Version string (e.g., "certctl-cli version 0.1.0").
-**PASS if** version displayed. **FAIL** if error.
-
----
-
-### 17.5 Bulk Import
-
-**Test 17.5.1 — Import single PEM file**
-
-```bash
-# Create a test PEM file
-cat > /tmp/test-import.pem << 'CERTEOF'
------BEGIN CERTIFICATE-----
-MIIBkTCB+wIJALRiMLAh++nfMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl
-c3RjYTAeFw0yNTAxMDEwMDAwMDBaFw0yNjAxMDEwMDAwMDBaMBQxEjAQBgNVBAMM
-CWltcG9ydC5tZTBcMA0GCSqGSIb3DQEBAQUAA0sAMEgCQQC7o96lXXvVJX5K+d4B
-bJGjzyy/ET0X/D/gHfJCwA7RVbgWBZaDJpME5Iq7VB9rkDx0RGdVdMNVKxMJkjD
-P4RnAgMBAAEwDQYJKoZIhvcNAQELBQADQQBxqT7OQHV1ZhEYOJxEkDvFqHFNeUP
-IbN7t5YfSZmHnXjyNMGQeFnvHlJjOOPHHnpfp2KX7rqBLPrZnFJnHNFk
------END CERTIFICATE-----
-CERTEOF
-./certctl-cli import /tmp/test-import.pem
-```
-
-**What:** Imports a PEM file containing one certificate.
-**Expected:** Success message with import count.
-**PASS if** import succeeds. **FAIL** if parse error.
-
----
-
-### 17.6 Flag Overrides
-
-**Test 17.6.1 — --server flag overrides env var**
-
-```bash
-./certctl-cli --server http://localhost:8443 status
-```
-
-**Expected:** Uses the flag value, not the env var.
-**PASS if** status displayed. **FAIL** if connection error.
-
----
-
-**Test 17.6.2 — --api-key flag overrides env var**
-
-```bash
-./certctl-cli --api-key "change-me-in-production" status
-```
-
-**Expected:** Uses the flag API key.
-**PASS if** status displayed. **FAIL** if auth error.
-
----
-
-**Test 17.6.3 — Missing server URL produces error**
-
-```bash
-unset CERTCTL_SERVER_URL
-./certctl-cli certs list 2>&1
-export CERTCTL_SERVER_URL=$SERVER  # Restore
-```
-
-**What:** Runs CLI with no server URL configured.
-**Expected:** Error message about missing server URL (or defaults to localhost).
-**PASS if** meaningful error or default fallback. **FAIL** if panic.
-
----
-
-## Part 18: MCP Server
-
-**What this validates:** The Model Context Protocol server — binary build, startup, tool registration, and tool invocation via JSON-RPC over stdio.
-
-**Why it matters:** MCP is the AI adoption driver. If developers can manage certificates from Claude or Cursor, certctl becomes part of their daily workflow.
-
-### 18.1 Build & Startup
-
-**Test 18.1.1 — Binary builds successfully**
-
-```bash
-go build -o certctl-mcp ./cmd/mcp-server/... && echo "BUILD OK"
-```
-
-**Expected:** "BUILD OK" — no compile errors.
-**PASS if** binary created. **FAIL** if compile error.
-
----
-
-**Test 18.1.2 — Startup with valid env vars**
+**Prerequisite:** Two agents registered (`agent-web-01`, `agent-lb-01`), two targets (one per agent), one certificate mapped to both targets. Trigger renewal to create deployment jobs.
 
 ```bash
-timeout 3 bash -c 'CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY ./certctl-mcp 2>&1' || true
-```
-
-**What:** Starts the MCP server and captures stderr output for 3 seconds.
-**Why:** The server should print its version and backend URL on startup without errors.
-**Expected:** Output contains version info. No panic or fatal error.
-**PASS if** no errors in output. **FAIL** if panic or fatal.
-
----
-
-**Test 18.1.3 — Missing CERTCTL_SERVER_URL behavior**
-
-```bash
-timeout 3 bash -c 'CERTCTL_API_KEY=$API_KEY ./certctl-mcp 2>&1' || true
-```
-
-**What:** Starts without a server URL.
-**Expected:** Either defaults to localhost:8443 or prints an error. No panic.
-**PASS if** no panic. **FAIL** if panic/crash.
-
----
-
-### 18.2 Tool Registration
-
-**Test 18.2.1 — Tool count verification**
-
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
-  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 5 ./certctl-mcp 2>/dev/null | \
-  jq '.result.tools | length'
-```
-
-**What:** Sends a JSON-RPC `tools/list` request via stdin and counts registered tools.
-**Why:** All 78 API endpoints must be exposed as MCP tools. Missing tools mean missing LLM capabilities.
-**Expected:** `78`
-**PASS if** count = 78. **FAIL** if different.
-
----
-
-**Test 18.2.2 — All 16 resource domains present**
-
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
-  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 5 ./certctl-mcp 2>/dev/null | \
-  jq '[.result.tools[].name | split("_")[0]] | unique | sort'
-```
-
-**What:** Extracts the domain prefix from each tool name and checks all 16 domains are represented.
-**Expected:** Array includes prefixes for certificates, crl, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent groups, audit, notifications, stats, metrics, health.
-**PASS if** all 16 domains present. **FAIL** if any missing.
-
----
-
-### 18.3 Tool Invocation
-
-**Test 18.3.1 — List certificates via MCP**
-
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_certificates","arguments":{}},"id":2}' | \
-  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 10 ./certctl-mcp 2>/dev/null | \
-  jq '.result'
-```
-
-**What:** Invokes the `list_certificates` tool via JSON-RPC.
-**Why:** Tool registration is necessary but not sufficient — the tool must actually proxy to the HTTP API and return data.
-**Expected:** Result contains certificate data from the running server.
-**PASS if** result contains certificate data. **FAIL** if error or empty.
-
----
-
-**Test 18.3.2 — Get specific certificate via MCP**
-
-```bash
-echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_certificate","arguments":{"id":"mc-api-prod"}},"id":3}' | \
-  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 10 ./certctl-mcp 2>/dev/null | \
-  jq '.result'
-```
-
-**What:** Invokes `get_certificate` with a known ID.
-**Expected:** Result contains mc-api-prod certificate detail.
-**PASS if** result contains the cert data. **FAIL** if error.
-
----
-
-## Part 19: GUI Testing
-
-**What this validates:** The full web dashboard — all pages of operational UI.
-
-**Why it matters:** Operators spend 80% of their time in the GUI. If it's broken, the product is broken, regardless of how good the API is.
-
-Open `http://localhost:8443` in a browser.
-
-### 19.1 Authentication Flow
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.1.1 | Login page renders | Open dashboard URL | Login page with API key input field | PASS if login form visible |
-| 19.1.2 | Invalid key error | Enter "wrong-key", submit | Error message displayed | PASS if error shown, not silent failure |
-| 19.1.3 | Valid key login | Enter the correct API key | Redirect to dashboard | PASS if dashboard loads with data |
-
-### 19.2 Dashboard Page
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.2.1 | Stat cards | View dashboard | 4 stat cards with real numbers (total, active, expiring, expired) | PASS if all 4 show non-zero values |
-| 19.2.2 | Expiration heatmap | View dashboard | Heatmap chart renders with data | PASS if chart visible with bars/cells |
-| 19.2.3 | Renewal trends | View dashboard | Line chart renders | PASS if chart visible |
-| 19.2.4 | Status distribution | View dashboard | Donut chart renders with legend | PASS if chart visible with segments |
-| 19.2.5 | Issuance rate | View dashboard | Bar chart renders | PASS if chart visible |
-
-### 19.3 Certificates Page
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.3.1 | Table loads | Navigate to Certificates | Table with 15+ certs | PASS if table populated |
-| 19.3.2 | Multi-select | Click checkboxes | Checkboxes toggle, select-all works | PASS if selection works |
-| 19.3.3 | Bulk renew | Select certs, click Renew | Jobs created, progress indicator | PASS if renew triggered |
-| 19.3.4 | Bulk revoke | Select certs, click Revoke | Reason modal appears | PASS if modal with RFC 5280 reasons |
-
-### 19.4 Certificate Detail Page
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.4.1 | All fields | Click a certificate | All metadata fields displayed | PASS if CN, SANs, dates, status shown |
-| 19.4.2 | Version history | Scroll to versions | Current badge on latest, list of versions | PASS if Current badge visible |
-| 19.4.3 | Rollback button | View previous version | Rollback button on non-current versions | PASS if button visible and clickable |
-| 19.4.4 | Deployment timeline | View deployment section | 4-step visual timeline | PASS if timeline renders |
-| 19.4.5 | Inline policy editor | Click edit on policy section | Dropdown selectors appear, save/cancel buttons | PASS if edit mode works |
-| 19.4.6 | Revoke button | Click revoke | Reason modal, status updates after | PASS if revocation completes |
-
-### 19.5 Jobs Page — Approval Workflow
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.5.1 | Approval banner | Navigate to Jobs with AwaitingApproval jobs | Amber banner shows count of pending approvals | PASS if banner visible with correct count |
-| 19.5.2 | Approve button | Find AwaitingApproval job, click Approve | Job status changes to Running/Completed | PASS if status transitions |
-| 19.5.3 | Reject button | Find AwaitingApproval job, click Reject | Modal opens with reason input | PASS if modal appears |
-| 19.5.4 | Reject with reason | Enter reason, submit rejection | Job status changes, modal closes | PASS if job rejected |
-| 19.5.5 | Status filter | Select "Awaiting Approval" from status dropdown | Only AwaitingApproval jobs shown | PASS if filter works |
-| 19.5.6 | AwaitingCSR filter | Select "Awaiting CSR" from status dropdown | Only AwaitingCSR jobs shown | PASS if filter works |
-
-### 19.6 Discovery Triage Page
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.6.1 | Summary stats | Navigate to Discovery | Stats bar shows Unmanaged/Managed/Dismissed counts | PASS if all 3 counts visible |
-| 19.6.2 | Table loads | View Discovery page | Table populated with discovered certificates | PASS if certs listed |
-| 19.6.3 | Status filter | Select "Unmanaged" from status dropdown | Only Unmanaged certs shown | PASS if filter works |
-| 19.6.4 | Agent filter | Select agent from dropdown | Certs filtered by agent | PASS if filter works |
-| 19.6.5 | Claim button | Click Claim on Unmanaged cert | Modal opens with managed cert ID input | PASS if modal appears |
-| 19.6.6 | Claim submit | Enter cert ID, submit claim | Cert status changes to Managed, modal closes | PASS if status updates |
-| 19.6.7 | Dismiss button | Click Dismiss on Unmanaged cert | Cert status changes to Dismissed | PASS if status updates |
-| 19.6.8 | Scan history | Click "Show Scan History" | Collapsible panel shows scan records with agent, directories, counts | PASS if scan history visible |
-
-### 19.7 Network Scan Management Page
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.7.1 | Table loads | Navigate to Network Scans | Table with seed scan targets | PASS if targets listed |
-| 19.7.2 | New Target button | Click "+ New Target" | Create modal opens | PASS if modal visible |
-| 19.7.3 | Create target | Fill name, CIDRs, ports, submit | New target appears in table | PASS if target created |
-| 19.7.4 | Enable toggle | Click toggle on a target | Enabled state flips | PASS if toggle works |
-| 19.7.5 | Scan Now | Click Scan Now on a target | Scan triggered (check last_scan_at updates) | PASS if scan initiated |
-| 19.7.6 | Delete target | Click Delete on a target | Target removed from table | PASS if target gone |
-
-### 19.8 Other Pages
-
-| Test ID | Test | Page | Expected | Pass/Fail Criteria |
-|---------|------|------|----------|-------------------|
-| 19.8.1 | Target wizard | Targets → New Target | 3-step wizard (type → config → review) | PASS if all 3 steps work |
-| 19.8.2 | Audit filters | Audit | Time, actor, action filters work | PASS if filters change results |
-| 19.8.3 | Audit export | Audit → Export | CSV/JSON file downloads | PASS if file downloads |
-| 19.8.4 | Short-lived creds | Short-Lived | Certs with TTL < 1h, countdown timers | PASS if timers count down |
-| 19.8.5 | Agent list | Agents | OS/Arch column visible | PASS if metadata shown |
-| 19.8.6 | Agent detail | Click agent | System Information card | PASS if OS, arch, IP shown |
-| 19.8.7 | Fleet overview | Fleet Overview | OS/arch grouping charts | PASS if pie charts render |
-
-### 19.9 Cross-Cutting
-
-| Test ID | Test | Action | Expected | Pass/Fail Criteria |
-|---------|------|--------|----------|-------------------|
-| 19.9.1 | Sidebar nav | Click all sidebar links | All 21 pages load without errors | PASS if no broken routes |
-| 19.9.2 | Logout | Click logout | Returns to login screen | PASS if login page shown |
-| 19.9.3 | 401 redirect | Expire/remove auth token | Auto-redirect to login | PASS if login page shown |
-| 19.9.4 | Theme consistency | Check page styling | Light content area, teal sidebar, branded colors, readable text | PASS if theme consistent across all pages |
-
----
-
-## Part 20: Background Scheduler
-
-**What this validates:** The 7 background scheduler loops — renewal checks, job processing, agent health, notification processing, short-lived cert expiry, network scanning, and scheduled digest emailer.
-
-**Why it matters:** The scheduler is the automation engine. Without it, nothing happens automatically — certs expire unnoticed, jobs sit pending, agents go stale, notifications never fire.
-
-> **Tip:** Open a second terminal with `docker compose logs -f certctl-server` to watch scheduler log output in real time.
-
-**Test 20.1.1 — Scheduler startup: all 7 loops registered**
-
-```bash
-docker compose logs certctl-server 2>&1 | grep -i "scheduler\|renewal check\|job processor\|health check\|notification\|short-lived\|network scan" | head -20
-```
-
-**What:** Checks server startup logs for scheduler loop registration.
-**Why:** If a loop isn't registered, that automation never runs. Catching this at startup prevents days of "why didn't my cert renew?"
-**Expected:** Log lines indicating all loops started (e.g., "scheduler starting").
-**PASS if** scheduler startup message present. **FAIL** if no scheduler logs.
-
----
-
-**Test 20.1.2 — Job processor loop fires (30s interval)**
-
-```bash
-# Trigger a renewal to create a pending job
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{}' $SERVER/api/v1/certificates/mc-dash-prod/renew > /dev/null
-JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?type=Renewal&per_page=1" | jq -r '.items[0].id')
-echo "Job: $JOB_ID"
-# Wait for processor (30s interval)
-sleep 45
-curl -s -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '{status}'
-```
-
-**What:** Creates a job and waits for the job processor to pick it up.
-**Why:** If the 30-second loop isn't running, jobs never execute.
-**Expected:** Status is "Running" or "Completed" after 45 seconds.
-**PASS if** status is not "Pending". **FAIL** if still "Pending".
-
----
-
-**Test 20.1.3 — Agent health check marks offline (2m interval)**
-
-```bash
-# Stop the agent container
-docker compose stop certctl-agent
-# Wait for health check interval (2 minutes + buffer)
-echo "Waiting 150 seconds for health check..."
-sleep 150
-# Check agent status
-curl -s -H "$AUTH" "$SERVER/api/v1/agents/ag-web-prod" | jq '{status}'
-# Restart agent
-docker compose start certctl-agent
-```
-
-**What:** Stops the agent and waits for the health check to mark it offline.
-**Why:** If the health check doesn't detect stale agents, operators think agents are healthy when they're actually dead.
-**Expected:** Agent status changes to "Offline" (or similar inactive status).
-**PASS if** status indicates offline/inactive. **FAIL** if still "Online" after 2.5 minutes.
-
-> **Alternative (log check):** If you don't want to wait 2.5 minutes:
-> ```bash
-> docker compose logs certctl-server 2>&1 | grep -i "health check\|agent.*offline\|stale"
-> ```
-
----
-
-**Test 20.1.4 — Notification processor fires (1m interval)**
-
-```bash
-# Check notification count before
-BEFORE=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications" | jq '.total')
-# Trigger an event that creates a notification (revocation generates one)
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{"reason": "superseded"}' $SERVER/api/v1/certificates/mc-wildcard-prod/revoke > /dev/null
-# Wait for notification processor
-sleep 90
-AFTER=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications" | jq '.total')
-echo "Before: $BEFORE, After: $AFTER"
-```
-
-**What:** Triggers a revocation and waits for the notification processor to create the notification.
-**Expected:** `AFTER` > `BEFORE` (new notification created).
-**PASS if** notification count increased. **FAIL** if unchanged.
-
----
-
-**Test 20.1.5 — Short-lived expiry check (30s interval)**
-
-```bash
-docker compose logs certctl-server 2>&1 | grep -i "short-lived expiry\|short.lived.*check\|expire.*short"
-```
-
-**What:** Checks logs for evidence the short-lived expiry loop has run.
-**Why:** Short-lived certs (TTL < 1 hour) rely on this loop for status transitions.
-**Expected:** At least one log line about short-lived expiry check.
-**PASS if** log line found. **FAIL** if no evidence of the loop running.
-
----
-
-**Test 20.1.6 — Network scanner loop (conditional on env var)**
-
-```bash
-docker compose logs certctl-server 2>&1 | grep -i "network scan"
-```
-
-**What:** Checks if the network scanner loop is registered.
-**Why:** The network scan loop is conditional on `CERTCTL_NETWORK_SCAN_ENABLED=true`. By default it's disabled. If enabled, it should log its startup.
-**Expected:** If `CERTCTL_NETWORK_SCAN_ENABLED=true` is set, log line present. If not set, no log line (which is correct behavior).
-**PASS if** behavior matches config. **FAIL** if enabled but no logs, or disabled but scanner running.
-
----
-
-**Test 20.1.7 — Renewal check loop (1h interval — log verification)**
-
-```bash
-docker compose logs certctl-server 2>&1 | grep -i "renewal check"
-```
-
-**What:** Verifies the renewal check loop has fired at least once (it runs immediately on startup).
-**Expected:** Log line about renewal check (completed or in progress).
-**PASS if** log evidence found. **FAIL** if none.
-
----
-
-**Test 20.1.8 — Scheduler graceful stop**
-
-```bash
-docker compose stop certctl-server
-docker compose logs certctl-server 2>&1 | tail -10 | grep -i "scheduler\|shutting down\|shutdown"
-docker compose start certctl-server && sleep 10
-```
-
-**What:** Stops the server and checks for clean scheduler shutdown.
-**Why:** Scheduler goroutines must stop cleanly. Leaked goroutines cause resource exhaustion on repeated restarts.
-**Expected:** Log line containing "scheduler shutting down" or similar. No panic traces.
-**PASS if** clean shutdown log present. **FAIL** if panic or missing shutdown log.
-
----
-
-## Part 21: Error Handling
-
-**What this validates:** The API's behavior when given malformed, invalid, or unexpected input.
+# Poll as agent-web-01 — should only see its deployment job
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-web-01/work" | jq '.[] | .target_id'
 
-**Why it matters:** Production systems receive garbage input constantly — from buggy clients, scanners, and attackers. Every error path must return a clean error response, not a 500 or a panic.
-
-**Test 21.1.1 — Malformed JSON body**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{this is not json}' \
-  $SERVER/api/v1/certificates
-```
-
-**What:** Sends a body that isn't valid JSON.
-**Expected:** HTTP 400 with error message.
-**PASS if** HTTP 400. **FAIL** if 500.
-
----
-
-**Test 21.1.2 — Missing required field**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "mc-no-cn"}' \
-  $SERVER/api/v1/certificates
-```
-
-**What:** Creates a certificate without the required `common_name`.
-**Expected:** HTTP 400 with validation error mentioning `common_name`.
-**PASS if** HTTP 400. **FAIL** if 201 (accepted invalid input).
-
----
-
-**Test 21.1.3 — Method not allowed**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/stats/summary
-```
-
-**What:** Sends POST to a GET-only endpoint.
-**Expected:** HTTP 405.
-**PASS if** HTTP 405. **FAIL** if 200 or 500.
-
----
-
-**Test 21.1.4 — Invalid query parameter**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=abc"
-```
-
-**What:** Sends a non-numeric value for a numeric parameter.
-**Expected:** HTTP 400 or HTTP 200 with default value (graceful degradation).
-**PASS if** HTTP 400 or 200. **FAIL** if 500.
-
----
-
-**Test 21.1.5 — UTF-8 in common name**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '{"id": "mc-utf8-test", "common_name": "münchen.example.de"}' \
-  $SERVER/api/v1/certificates | jq '{common_name}'
-```
-
-**What:** Creates a certificate with a UTF-8 common name (German umlaut).
-**Why:** Internationalized domain names are real. The API must handle non-ASCII without corruption.
-**Expected:** HTTP 201 with `common_name` preserved correctly.
-**PASS if** HTTP 201 and common_name matches input. **FAIL** if 400 or garbled text.
-
----
-
-**Test 21.1.6 — Concurrent requests (parallel curl)**
-
-```bash
-for i in $(seq 1 10); do
-  curl -s -o /dev/null -w "HTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=1" &
-done
-wait
-```
-
-**What:** Sends 10 parallel requests.
-**Why:** Concurrency bugs (race conditions, connection pool exhaustion) only appear under parallel load.
-**Expected:** All 10 requests return HTTP 200.
-**PASS if** all 10 return 200. **FAIL** if any return 500.
-
----
-
-**Test 21.1.7 — Server survives internal error**
-
-```bash
-# Trigger an error condition
-curl -s -o /dev/null $SERVER/api/v1/certificates/$(python3 -c "print('x'*10000)")
-# Server should still respond
-curl -s -w "\nHTTP %{http_code}\n" $SERVER/health
-```
-
-**What:** Sends a request with an extremely long path, then verifies the server is still alive.
-**Why:** One bad request must not crash the process. The recovery middleware should catch panics.
-**Expected:** Health check returns HTTP 200 after the bad request.
-**PASS if** health returns 200. **FAIL** if server is unresponsive.
-
----
-
-**Test 21.1.8 — Empty request body on POST**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
-  -d '' \
-  $SERVER/api/v1/certificates
-```
-
-**What:** Sends an empty body to a POST endpoint.
-**Expected:** HTTP 400 (missing required fields).
-**PASS if** HTTP 400. **FAIL** if 500.
-
----
-
-## Part 22: Performance Spot Checks
-
-**What this validates:** Basic response time benchmarks to catch obvious performance regressions.
-
-**Why it matters:** An API that takes 5 seconds per request is unusable. These aren't load tests — they're sanity checks.
-
-**Test 22.1.1 — List certificates < 200ms**
-
-```bash
-TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=15")
-echo "List certs: ${TIME}s"
-```
-
-**Expected:** `time_total` < 0.200 (200ms).
-**PASS if** < 200ms. **FAIL** if > 200ms.
-
----
-
-**Test 22.1.2 — Stats summary < 500ms**
-
-```bash
-TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/stats/summary")
-echo "Stats summary: ${TIME}s"
-```
-
-**Expected:** < 0.500 (500ms).
-**PASS if** < 500ms. **FAIL** if > 500ms.
-
----
-
-**Test 22.1.3 — Metrics < 200ms**
-
-```bash
-TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/metrics")
-echo "Metrics: ${TIME}s"
-```
-
-**Expected:** < 0.200.
-**PASS if** < 200ms. **FAIL** if > 200ms.
-
----
-
-**Test 22.1.4 — 50 health checks < 5 seconds total**
-
-```bash
-START=$(date +%s%N)
-for i in $(seq 1 50); do
-  curl -s -o /dev/null $SERVER/health
-done
-END=$(date +%s%N)
-DURATION=$(( (END - START) / 1000000 ))
-echo "50 health checks: ${DURATION}ms"
-```
-
-**Expected:** Total < 5000ms (100ms average per request).
-**PASS if** < 5000ms. **FAIL** if > 5000ms.
-
----
-
-## Part 23: Structured Logging Verification
-
-**What this validates:** Server logs are properly structured JSON (slog), log levels work, and request IDs propagate across log lines.
-
-**Why it matters:** Structured logs are essential for log aggregation (ELK, Splunk, Datadog). Unstructured `fmt.Printf` lines break JSON parsers. Missing request IDs make it impossible to correlate logs for a single request.
-
-**Test 23.1.1 — Server logs are valid JSON**
-
-```bash
-docker compose logs certctl-server 2>&1 | tail -20 | while read line; do
-  echo "$line" | jq . > /dev/null 2>&1 || echo "INVALID JSON: $line"
-done
-```
-
-**What:** Parses each recent log line as JSON.
-**Why:** If any line fails to parse, it's an unstructured `fmt.Printf` or panic trace leaking into the JSON stream.
-**Expected:** No "INVALID JSON" lines (or only Docker metadata lines that aren't from the server).
-**PASS if** all server-originated lines are valid JSON. **FAIL** if invalid JSON found.
-
----
-
-**Test 23.1.2 — Log lines contain level field**
-
-```bash
-docker compose logs certctl-server 2>&1 | tail -10 | jq -r '.level // "MISSING"' 2>/dev/null | sort | uniq -c
-```
-
-**What:** Extracts the `level` field from log lines.
-**Expected:** Values like "INFO", "DEBUG", "WARN", "ERROR". No "MISSING".
-**PASS if** all lines have a level field. **FAIL** if "MISSING" appears.
-
----
-
-**Test 23.1.3 — Request ID propagation**
-
-```bash
-# Make a request and capture request ID from response header
-REQ_ID=$(curl -s -D - -o /dev/null -H "$AUTH" "$SERVER/api/v1/certificates?per_page=1" | grep -i "x-request-id" | tr -d '\r' | awk '{print $2}')
-echo "Request ID: $REQ_ID"
-# Search for it in logs
-docker compose logs certctl-server 2>&1 | grep "$REQ_ID" | wc -l
+# Poll as agent-lb-01 — should only see its deployment job
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-lb-01/work" | jq '.[] | .target_id'
 ```
-
-**What:** Makes an API call, extracts the request ID from the response header, then searches for that ID in server logs.
-**Why:** Request ID propagation lets operators trace a single request across all log lines it produced. Without it, debugging is guesswork.
-**Expected:** Request ID found in at least 1 log line (ideally the access log line).
-**PASS if** count ≥ 1. **FAIL** if 0 (request ID not propagated).
 
----
-
-**Test 23.1.4 — Error logs at ERROR level**
-
-```bash
-docker compose logs certctl-server 2>&1 | jq -r 'select(.level == "ERROR") | .msg' 2>/dev/null | head -5
-```
+**Expected:** Each agent receives only the deployment job for its assigned target. Agent-web-01 does NOT see agent-lb-01's job and vice versa.
+**PASS if** each agent's work response contains only jobs for targets it owns.
 
-**What:** Checks if error-level log entries exist and have proper messages.
-**Why:** Errors should be logged at ERROR level, not INFO. Wrong levels mean operators miss critical issues.
-**Expected:** Either no ERROR lines (healthy system) or ERROR lines with descriptive messages (not empty).
-**PASS if** ERROR entries have messages (or no errors at all). **FAIL** if empty/garbled error messages.
+### 19.2 Agent With No Targets Gets Empty Work
 
----
+**What:** An agent with no target assignments polls for work and gets an empty response.
+**Why:** Edge case that prevents a newly registered agent from receiving phantom work items. Also validates that the UNION query returns empty rather than erroring when no targets match.
 
-**Test 23.1.5 — No unstructured output in log stream**
+**Prerequisite:** Register a new agent with no target assignments.
 
 ```bash
-docker compose logs certctl-server 2>&1 | grep -v "^certctl-server" | grep -cv "^{" || echo "0"
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/agents/agent-no-targets/work" | jq 'length'
 ```
-
-**What:** Counts log lines that don't start with `{` (i.e., not JSON).
-**Why:** `fmt.Printf` calls in the Go code bypass slog and produce unstructured output that breaks log parsers.
-**Expected:** Count = 0 (all lines are JSON).
-**PASS if** 0 non-JSON lines. **FAIL** if > 0.
-
----
-
-## Part 24: Documentation Verification
 
-**What this validates:** Documentation accuracy against the running system. Claims in docs must match reality.
+**Expected:** Empty array (0 jobs).
+**PASS if** the response is an empty list.
 
-**Why it matters:** Inaccurate documentation destroys trust. Claims in docs must match the running system. If the README says "X features" but the code doesn't have them, evaluators question everything else too.
+### 19.3 Deployment Jobs Have agent_id Populated
 
-| Test ID | Document | Verification | Pass/Fail Criteria |
-|---------|----------|-------------|-------------------|
-| 24.1.1 | `README.md` | Feature list matches actual capabilities. Screenshot paths resolve. Mermaid diagram shows database schema tables. | PASS if all claims verified |
-| 24.1.2 | `docs/quickstart.md` | Every command in the quickstart works on a clean clone. | PASS if all commands succeed |
-| 24.1.3 | `docs/concepts.md` | Terminology matches API field names and UI labels. | PASS if terminology consistent |
-| 24.1.4 | `docs/architecture.md` | Component diagram matches `docker compose ps`. Key components and tables documented. | PASS if accurate |
-| 24.1.5 | `docs/connectors.md` | All issuer types and target types documented. F5/IIS marked as stubs. | PASS if all documented |
-| 24.1.6 | `docs/features.md` | Feature list complete and accurate. | PASS if accurate |
-| 24.1.7 | `docs/quickstart.md` | Quick start + demo walkthrough works against fresh `docker compose up`. | PASS if all steps work |
-| 24.1.8 | `docs/demo-advanced.md` | All parts executable against running stack. Network discovery section present. | PASS if all executable |
-| 24.1.9 | `docs/compliance.md` | Framework links resolve, mapping references real features. | PASS if links work |
-| 24.1.10 | `docs/compliance-soc2.md` | API endpoints cited actually exist in the router. | PASS if endpoints exist |
-| 24.1.11 | `docs/compliance-pci-dss.md` | Claims match implementation (audit trail, revocation, key management). | PASS if claims verified |
-| 24.1.12 | `docs/compliance-nist.md` | Key management claims match agent keygen behavior. | PASS if claims verified |
-| 24.1.13 | `docs/mcp.md` | Tool coverage documented, setup instructions work. | PASS if accurate |
-| 24.1.14 | `api/openapi.yaml` | OpenAPI spec matches all routes in router.go (check operation count). | PASS if count matches |
+**What:** Verifies that deployment jobs created by the renewal pipeline have `agent_id` set from the target's agent assignment.
+**Why:** This is the data wiring that makes routing possible. If `agent_id` is NULL on deployment jobs, `ListPendingByAgentID()` can't match them to agents. Tests `createDeploymentJobs()` in renewal.go and `CreateDeploymentJobs()` in deployment.go.
 
-**Verification command for OpenAPI parity:**
+**Prerequisite:** Deployment jobs created via renewal or manual trigger.
 
 ```bash
-# Count OpenAPI operations
-OPENAPI_OPS=$(grep -c "operationId:" api/openapi.yaml)
-# Count router registrations
-ROUTER_REGS=$(grep -c "r.Register\|r.mux.Handle" internal/api/router/router.go)
-echo "OpenAPI operations: $OPENAPI_OPS"
-echo "Router registrations: $ROUTER_REGS"
+# Check that deployment jobs in the system have agent_id set
+curl -s -H "Authorization: Bearer $API_KEY" \
+  "http://localhost:8443/api/v1/jobs" | jq '[.data[] | select(.type == "Deployment") | .agent_id] | map(select(. != null)) | length'
 ```
 
-**Expected:** Both counts match.
-**PASS if** both counts are equal. **FAIL** if mismatch (indicates spec/code drift).
+**Expected:** All deployment jobs for targets with agent assignments have `agent_id` populated.
+**PASS if** deployment jobs have non-null `agent_id` values.
 
 ---
 
-## Part 25: Regression Tests
+## Part 20: Post-Deployment TLS Verification
 
-**What this validates:** Specific bugs found and fixed during development. These prevent re-introduction.
+### Why test this?
 
-**Why it matters:** Regression bugs are the most embarrassing — you already found and fixed them once. These tests ensure they stay fixed.
+Post-deployment verification is the final confidence check: after a certificate is deployed to a target, the agent probes the live TLS endpoint and confirms the served certificate matches what was deployed. This catches silent failures where a reload command exits 0 but the certificate doesn't take effect.
 
-**Test 25.1.1 — DELETE endpoints return 204, not 200**
+### 20.1: Submit Verification Result (Success)
 
 ```bash
-# Create and delete a target
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"tgt-regression","name":"Regression","type":"nginx","config":{}}' $SERVER/api/v1/targets > /dev/null
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/targets/tgt-regression")
-echo "DELETE target: HTTP $CODE"
+# Create a deployment job first (or use an existing completed deployment job ID)
+JOB_ID="j-deploy-001"
 
-# Create and delete an agent group
-curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"ag-regression","name":"Regression Group"}' $SERVER/api/v1/agent-groups > /dev/null
-CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-regression")
-echo "DELETE agent group: HTTP $CODE"
+# Submit a successful verification result
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "target_id": "tgt-nginx-prod",
+  "expected_fingerprint": "sha256:abc123def456",
+  "actual_fingerprint": "sha256:abc123def456",
+  "verified": true
+}'
 ```
 
-**What:** Verifies DELETE endpoints return 204 (No Content), not 200.
-**Why:** This was a real bug — handlers returned 200 for delete operations. The fix was applied in M15a.
-**Expected:** Both return HTTP 204.
-**PASS if** both 204. **FAIL** if either returns 200.
-
----
+**Expected:** 200 OK with `{"job_id": "j-deploy-001", "verified": true, "verified_at": "..."}`.
+**PASS if** response contains `verified: true` and a valid `verified_at` timestamp.
 
-**Test 25.1.2 — per_page exceeding max falls back to default**
+### 20.2: Submit Verification Result (Failure — Fingerprint Mismatch)
 
 ```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/certificates?per_page=9999" | jq '{per_page}'
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "target_id": "tgt-nginx-prod",
+  "expected_fingerprint": "sha256:abc123def456",
+  "actual_fingerprint": "sha256:zzz999different",
+  "verified": false,
+  "error": "fingerprint mismatch"
+}'
 ```
 
-**What:** Sends `per_page=9999` which exceeds the maximum (500).
-**Why:** Bug: the handler was supposed to cap at 500 but instead rejected values > 500 and fell back to the default (50). The tests were written expecting cap-at-500 but the actual behavior is fall-back-to-50.
-**Expected:** `per_page` = 50 (default fallback), not 500 or 9999.
-**PASS if** per_page = 50. **FAIL** if 500 or 9999.
+**Expected:** 200 OK with `verified: false`.
+**PASS if** verification failure recorded without error status code (verification is best-effort).
 
----
-
-**Test 25.1.3 — Seed demo network scan targets present**
+### 20.3: Get Verification Status
 
 ```bash
-curl -s -H "$AUTH" "$SERVER/api/v1/network-scan-targets" | jq '{total, ids: [.items[].id] | sort}'
+curl -H "$AUTH" $SERVER/api/v1/jobs/$JOB_ID/verification | jq .
 ```
 
-**What:** Verifies the 3 seed network scan targets were loaded.
-**Why:** These were added during M21 and initially missed from seed data.
-**Expected:** `total` = 3. IDs: `["nst-dc1-web", "nst-dc2-apps", "nst-dmz"]`.
-**PASS if** total = 3 and all 3 IDs present. **FAIL** otherwise.
-
----
+**Expected:** Returns the verification result previously submitted.
+**PASS if** response includes `job_id`, `verified`, `verified_at`, and `actual_fingerprint`.
 
-**Test 25.1.4 — GUI delete on FK-restricted entities shows error, not silent failure**
+### 20.4: Missing Required Fields
 
 ```bash
-# Try deleting owner o-alice via API — she owns demo certificates
-CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice")
-echo "DELETE owner with certs: HTTP $CODE"
-cat /tmp/delete-resp.json | jq .
-
-# Try deleting issuer iss-local — certificates reference it
-CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local")
-echo "DELETE issuer with certs: HTTP $CODE"
-cat /tmp/delete-resp.json | jq .
+# Missing target_id
+curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
+  "expected_fingerprint": "sha256:abc",
+  "actual_fingerprint": "sha256:abc",
+  "verified": true
+}'
 ```
-
-**What:** Verifies that deleting owners/issuers with assigned certificates returns 409 Conflict with a descriptive message.
-**Why:** This was a real bug — the backend returned 500 (generic "Failed to delete"), `fetchJSON` threw on the error, and TanStack Query's `onError` wasn't wired up. The user clicked OK on the confirm dialog and nothing visibly happened. Fixed by: (1) backend returns 409 with descriptive message for FK constraint violations, (2) `fetchJSON` handles 204 No Content for successful deletes, (3) frontend mutation `onError` surfaces the error.
-**Expected:** Both return HTTP 409 with descriptive conflict messages.
-**PASS if** both 409 with messages. **FAIL** if 500 (unhelpful error) or 204 (data integrity violation).
 
----
+**Expected:** 400 Bad Request with message about missing `target_id`.
+**PASS if** status code is 400.
 
-**Test 25.1.5 — OpenAPI spec operations match router**
+### 20.5: Audit Trail
 
 ```bash
-echo "OpenAPI operations: $(grep -c 'operationId:' api/openapi.yaml)"
-echo "Router registrations: $(grep -c 'r.Register\|r.mux.Handle' internal/api/router/router.go)"
+curl -H "$AUTH" "$SERVER/api/v1/audit?action=job_verification_success" | jq '.data[0]'
 ```
 
-**What:** Counts operations in the OpenAPI spec and route registrations in the router, verifying they match.
-**Why:** OpenAPI spec drift happens as endpoints are added or removed. Mismatches indicate the spec is out of date.
-**Expected:** Both counts equal.
-**PASS if** both counts match. **FAIL** if mismatch (indicates spec/code drift).
-
----
+**Expected:** Audit event recorded with verification details (job_id, target_id, fingerprints).
+**PASS if** audit event exists with expected action and details.
 
-**Test 25.1.6 — Go service tests use strings.Contains, not errors.Is**
+### 20.6: Database Schema Verification
 
 ```bash
-grep -rn "errors.Is.*errors.New\|errors.Is(.*err.*errors.New" internal/service/*_test.go | wc -l
+docker compose exec postgres psql -U certctl -d certctl -c \
+  "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='jobs' AND column_name LIKE 'verification%';"
 ```
 
-**What:** Checks for the anti-pattern `errors.Is(err, errors.New(...))` which never matches because `errors.New` creates a new instance every time.
-**Why:** This was a real bug in `TestTeamService_List_RepositoryError` — the test was passing for the wrong reason (both sides returned false). The fix was to use `strings.Contains`.
-**Expected:** Count = 0 (no instances of the anti-pattern).
-**PASS if** count = 0. **FAIL** if > 0.
+**Expected:** Four columns: `verification_status`, `verified_at`, `verification_fingerprint`, `verification_error`.
+**PASS if** all four columns exist with correct types.
 
 ---
 
-## Part 26: EST Server (RFC 7030)
+## Part 21: EST Server (RFC 7030)
 
 **Scope:** Enrollment over Secure Transport — 4 endpoints under `/.well-known/est/` for device certificate enrollment. Tests cover CA cert distribution, certificate enrollment (PEM and base64-DER CSR formats), re-enrollment, CSR attributes, wire format compliance, and error handling.
 
@@ -4211,183 +3366,13 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 
 ---
 
-## Part 27: Post-Deployment TLS Verification
-
-### Why test this?
-
-Post-deployment verification is the final confidence check: after a certificate is deployed to a target, the agent probes the live TLS endpoint and confirms the served certificate matches what was deployed. This catches silent failures where a reload command exits 0 but the certificate doesn't take effect.
-
-### 27.1: Submit Verification Result (Success)
-
-```bash
-# Create a deployment job first (or use an existing completed deployment job ID)
-JOB_ID="j-deploy-001"
-
-# Submit a successful verification result
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
-  "target_id": "tgt-nginx-prod",
-  "expected_fingerprint": "sha256:abc123def456",
-  "actual_fingerprint": "sha256:abc123def456",
-  "verified": true
-}'
-```
-
-**Expected:** 200 OK with `{"job_id": "j-deploy-001", "verified": true, "verified_at": "..."}`.
-**PASS if** response contains `verified: true` and a valid `verified_at` timestamp.
-
-### 27.2: Submit Verification Result (Failure — Fingerprint Mismatch)
-
-```bash
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
-  "target_id": "tgt-nginx-prod",
-  "expected_fingerprint": "sha256:abc123def456",
-  "actual_fingerprint": "sha256:zzz999different",
-  "verified": false,
-  "error": "fingerprint mismatch"
-}'
-```
-
-**Expected:** 200 OK with `verified: false`.
-**PASS if** verification failure recorded without error status code (verification is best-effort).
-
-### 27.3: Get Verification Status
-
-```bash
-curl -H "$AUTH" $SERVER/api/v1/jobs/$JOB_ID/verification | jq .
-```
-
-**Expected:** Returns the verification result previously submitted.
-**PASS if** response includes `job_id`, `verified`, `verified_at`, and `actual_fingerprint`.
-
-### 27.4: Missing Required Fields
-
-```bash
-# Missing target_id
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/jobs/$JOB_ID/verify -d '{
-  "expected_fingerprint": "sha256:abc",
-  "actual_fingerprint": "sha256:abc",
-  "verified": true
-}'
-```
-
-**Expected:** 400 Bad Request with message about missing `target_id`.
-**PASS if** status code is 400.
-
-### 27.5: Audit Trail
-
-```bash
-curl -H "$AUTH" "$SERVER/api/v1/audit?action=job_verification_success" | jq '.data[0]'
-```
-
-**Expected:** Audit event recorded with verification details (job_id, target_id, fingerprints).
-**PASS if** audit event exists with expected action and details.
-
-### 27.6: Database Schema Verification
-
-```bash
-docker compose exec postgres psql -U certctl -d certctl -c \
-  "SELECT column_name, data_type FROM information_schema.columns WHERE table_name='jobs' AND column_name LIKE 'verification%';"
-```
-
-**Expected:** Four columns: `verification_status`, `verified_at`, `verification_fingerprint`, `verification_error`.
-**PASS if** all four columns exist with correct types.
-
----
-
-## Part 28: Traefik & Caddy Target Connectors
-
-### Why test this?
-
-Traefik and Caddy are increasingly popular reverse proxies. Testing ensures cert deployment works with their specific file-watching and admin API patterns.
-
-### 28.1: Traefik File Provider Deployment
-
-**Setup:** Configure a target with type `Traefik` pointing to a test directory.
-
-```bash
-# Create a Traefik target
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
-  "name": "Traefik Test",
-  "type": "Traefik",
-  "agent_id": "a-test-agent",
-  "config": {
-    "cert_dir": "/tmp/traefik-certs",
-    "cert_file": "test.crt",
-    "key_file": "test.key"
-  }
-}'
-```
-
-**Expected:** 201 Created with target details.
-**PASS if** target created with type `Traefik` and config fields preserved.
-
-### 28.2: Caddy API Mode Deployment
-
-```bash
-# Create a Caddy target in API mode
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
-  "name": "Caddy API Test",
-  "type": "Caddy",
-  "agent_id": "a-test-agent",
-  "config": {
-    "mode": "api",
-    "admin_api": "http://localhost:2019",
-    "cert_dir": "/etc/caddy/certs",
-    "cert_file": "test.crt",
-    "key_file": "test.key"
-  }
-}'
-```
-
-**Expected:** 201 Created.
-**PASS if** target created with mode `api` and `admin_api` URL preserved.
-
-### 28.3: Caddy File Mode Deployment
-
-```bash
-# Create a Caddy target in file mode
-curl -X POST -H "$AUTH" -H "$CT" $SERVER/api/v1/targets -d '{
-  "name": "Caddy File Test",
-  "type": "Caddy",
-  "agent_id": "a-test-agent",
-  "config": {
-    "mode": "file",
-    "cert_dir": "/etc/caddy/certs",
-    "cert_file": "test.crt",
-    "key_file": "test.key"
-  }
-}'
-```
-
-**Expected:** 201 Created.
-**PASS if** target created with mode `file`.
-
-### 28.4: Agent Connector Dispatch
-
-Verify the agent binary recognizes Traefik and Caddy target types from the work endpoint response. This requires a running agent with deployment jobs assigned to Traefik/Caddy targets.
-
-**Expected:** Agent logs show connector instantiation for the target type (e.g., "deploying to Traefik target" or "deploying to Caddy target").
-**PASS if** agent does not error with "unknown target type" for Traefik or Caddy.
-
-### 28.5: Connector Unit Tests
-
-```bash
-go test ./internal/connector/target/traefik/... -v
-go test ./internal/connector/target/caddy/... -v
-```
-
-**Expected:** All tests pass.
-**PASS if** exit code 0 for both test suites.
-
----
-
-## Part 29: Certificate Export (PEM & PKCS#12)
+## Part 22: Certificate Export (PEM & PKCS#12)
 
 **What:** certctl lets operators export managed certificates in two formats — PEM (JSON or file download) and PKCS#12 (.p12 bundle). Private keys are **never** included in exports since they live exclusively on agents. This section verifies both export paths, the audit trail they produce, and the GUI integration.
 
 **Why:** Certificate export is a daily operational task — feeding certs into load balancers that lack agent support, importing into Java trust stores, or handing off to external teams. If export silently produces malformed output or fails to audit, operators lose trust in the platform.
 
-### 29.1: Export PEM (JSON Response)
+### 22.1: Export PEM (JSON Response)
 
 **What:** `GET /api/v1/certificates/{id}/export/pem` returns a JSON object with the leaf certificate PEM, the CA chain PEM, and the full concatenated PEM. This is the default response format when no `?download=true` query parameter is present.
 
@@ -4411,7 +3396,7 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 
 **FAIL if:** Response is non-JSON, fields are missing, or `full_pem` doesn't equal `cert_pem` + `chain_pem`.
 
-### 29.2: Export PEM (File Download)
+### 22.2: Export PEM (File Download)
 
 **What:** Adding `?download=true` to the PEM export endpoint returns the raw PEM file with `Content-Type: application/x-pem-file` and a `Content-Disposition: attachment` header, suitable for browser "Save As" workflows.
 
@@ -4435,7 +3420,7 @@ openssl x509 -in /tmp/exported.pem -noout -subject
 
 **FAIL if:** Headers are wrong (JSON Content-Type), file is empty, or `openssl` rejects the PEM.
 
-### 29.3: Export PEM — Not Found
+### 22.3: Export PEM — Not Found
 
 **What:** Requesting export for a nonexistent certificate ID returns 404.
 
@@ -4447,7 +3432,7 @@ curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
 **Expected:** 404 Not Found with error message.
 **PASS if** status code is 404 and body contains "not found".
 
-### 29.4: Export PKCS#12
+### 22.4: Export PKCS#12
 
 **What:** `POST /api/v1/certificates/{id}/export/pkcs12` returns a binary PKCS#12 (.p12) file containing the certificate chain (no private key). An optional `password` field in the JSON body encrypts the bundle.
 
@@ -4474,7 +3459,7 @@ openssl pkcs12 -in /tmp/exported.p12 -nokeys -passin pass:export-test-2024 -info
 
 **FAIL if:** Response is JSON instead of binary, file is empty, or `openssl` rejects the PKCS#12 format.
 
-### 29.5: Export PKCS#12 — Empty Password
+### 22.5: Export PKCS#12 — Empty Password
 
 **What:** The password field is optional. Omitting it (or sending an empty body) should still produce a valid PKCS#12 bundle encrypted with an empty password.
 
@@ -4490,7 +3475,7 @@ openssl pkcs12 -in /tmp/exported-nopass.p12 -nokeys -passin pass: -info
 **Expected:** 200 OK with valid PKCS#12.
 **PASS if** `openssl pkcs12` parses with an empty password.
 
-### 29.6: Export Audit Trail
+### 22.6: Export Audit Trail
 
 **What:** Both PEM and PKCS#12 exports record audit events (`export_pem` and `export_pkcs12`) with the certificate's serial number.
 
@@ -4510,7 +3495,7 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 **PASS if** the audit event exists with serial number in metadata.
 **FAIL if** no audit event is recorded for the export.
 
-### 29.7: Export Unit Tests
+### 22.7: Export Unit Tests
 
 ```bash
 go test ./internal/service/ -run TestExport -v
@@ -4520,7 +3505,7 @@ go test ./internal/api/handler/ -run TestExport -v
 **Expected:** All export service tests (9 tests) and handler tests (11 tests) pass.
 **PASS if** exit code 0 for both.
 
-### 29.8: GUI Export Buttons
+### 22.8: GUI Export Buttons
 
 **What:** The certificate detail page shows "Export PEM" and "Export PKCS#12" buttons. PEM triggers a file download. PKCS#12 opens a password modal, then triggers a binary download.
 
@@ -4535,13 +3520,13 @@ go test ./internal/api/handler/ -run TestExport -v
 
 ---
 
-## Part 30: S/MIME & EKU Support
+## Part 23: S/MIME & EKU Support
 
 **What:** Certificate profiles can specify Extended Key Usage (EKU) constraints — `serverAuth`, `clientAuth`, `codeSigning`, `emailProtection`, `timeStamping`. The Local CA respects these EKUs during issuance, adapting the X.509 `KeyUsage` flags accordingly (TLS uses `DigitalSignature|KeyEncipherment`; S/MIME uses `DigitalSignature|ContentCommitment`). A demo `prof-smime` profile ships in seed data.
 
 **Why:** S/MIME certificates protect email with digital signatures and encryption. They require the `emailProtection` EKU and `ContentCommitment` (formerly NonRepudiation) key usage flag. If the platform treats all certs as TLS certs, S/MIME certs will be rejected by mail clients.
 
-### 30.1: S/MIME Profile Exists in Seed Data
+### 23.1: S/MIME Profile Exists in Seed Data
 
 **What:** The demo seed creates 5 profiles including `prof-smime` with `emailProtection` EKU.
 
@@ -4554,7 +3539,7 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 **PASS if** the profile exists and EKUs match.
 **FAIL if** 404 or EKUs are wrong/missing.
 
-### 30.2: All Five Profiles Present
+### 23.2: All Five Profiles Present
 
 **What:** The seed data creates 5 profiles total. Previous versions of this guide referenced 4 — the `prof-smime` profile was added in M27.
 
@@ -4567,7 +3552,7 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 **PASS if** count is 5.
 **FAIL if** count is 4 or fewer (missing prof-smime).
 
-### 30.3: EKU Strings in Profile API
+### 23.3: EKU Strings in Profile API
 
 **What:** The profile API accepts and returns EKU names as human-readable strings rather than OID numbers. The supported values are: `serverAuth`, `clientAuth`, `codeSigning`, `emailProtection`, `timeStamping`.
 
@@ -4589,7 +3574,7 @@ curl -s -X POST -H "Authorization: Bearer $API_KEY" \
 **Expected:** 201 Created with `allowed_ekus: ["codeSigning"]`.
 **PASS if** the EKU round-trips correctly through create/get.
 
-### 30.4: Agent CSR SAN Splitting (Email vs DNS)
+### 23.4: Agent CSR SAN Splitting (Email vs DNS)
 
 **What:** When generating CSRs for S/MIME certificates, the agent splits SANs by type: values containing `@` are placed in `EmailAddresses` (not `DNSNames`). This prevents mail clients from rejecting the cert due to incorrect SAN encoding.
 
@@ -4604,7 +3589,7 @@ go test ./cmd/agent/ -run TestSAN -v
 **Expected:** Tests pass showing email-type SANs are routed to `EmailAddresses`.
 **PASS if** exit code 0.
 
-### 30.5: EKU Service-Layer Tests
+### 23.5: EKU Service-Layer Tests
 
 ```bash
 go test ./internal/service/ -run TestEKU -v
@@ -4616,13 +3601,13 @@ go test ./internal/service/ -run TestCSRRenewal -v
 
 ---
 
-## Part 31: OCSP Responder & DER CRL
+## Part 24: OCSP Responder & DER CRL
 
 **What:** certctl includes an embedded OCSP responder and a DER-encoded CRL generator, both operating per-issuer. These are the standard online (OCSP) and offline (CRL) methods for checking certificate revocation status. Short-lived certificates (profile TTL < 1 hour) are exempt from both — their natural expiry is sufficient revocation.
 
 **Why:** TLS clients need to verify that certificates haven't been revoked. Without OCSP/CRL, a compromised certificate remains trusted until it expires. The short-lived exemption avoids bloating the CRL with certs that expire before distribution.
 
-### 31.1: DER-Encoded CRL
+### 24.1: DER-Encoded CRL
 
 **What:** `GET /api/v1/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA. Content-Type is `application/pkix-crl`. The CRL has 24-hour validity.
 
@@ -4648,7 +3633,7 @@ openssl crl -in /tmp/crl.der -inform DER -noout -text
 
 **FAIL if:** Response is JSON (wrong endpoint), `openssl` rejects the DER format, or headers are wrong.
 
-### 31.2: DER CRL — Nonexistent Issuer
+### 24.2: DER CRL — Nonexistent Issuer
 
 ```bash
 curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
@@ -4658,7 +3643,7 @@ curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
 **Expected:** 404 Not Found.
 **PASS if** status code is 404 and body contains "not found".
 
-### 31.3: OCSP Responder — Good Status
+### 24.3: OCSP Responder — Good Status
 
 **What:** `GET /api/v1/ocsp/{issuer_id}/{serial}` returns a signed OCSP response. For a non-revoked certificate, the status is "good".
 
@@ -4689,7 +3674,7 @@ fi
 
 **FAIL if:** Response is JSON, OCSP status is wrong, or `openssl` rejects the response.
 
-### 31.4: OCSP Responder — Revoked Status
+### 24.4: OCSP Responder — Revoked Status
 
 **What:** After revoking a certificate, the OCSP responder should return "revoked" with the revocation reason and timestamp.
 
@@ -4712,7 +3697,7 @@ openssl ocsp -respin /tmp/ocsp-revoked.der -text -noverify
 **PASS if** status is "revoked" with correct reason.
 **FAIL if** status is still "good" after revocation.
 
-### 31.5: OCSP — Unknown Certificate
+### 24.5: OCSP — Unknown Certificate
 
 **What:** Querying a serial number that doesn't exist in the inventory returns an "unknown" OCSP status (not an error — this is the correct OCSP behavior per RFC 6960).
 
@@ -4727,7 +3712,7 @@ openssl ocsp -respin /tmp/ocsp-unknown.der -text -noverify
 **Expected:** OCSP response with `Cert Status: unknown`.
 **PASS if** status is "unknown" (not a 404 HTTP error).
 
-### 31.6: Short-Lived Certificate CRL Exemption
+### 24.6: Short-Lived Certificate CRL Exemption
 
 **What:** Certificates issued under a profile with TTL < 1 hour are excluded from both CRL and OCSP responses. Their natural expiry is considered sufficient revocation.
 
@@ -4746,7 +3731,7 @@ openssl crl -in /tmp/crl.der -inform DER -text | grep -i "$SHORT_SERIAL"
 **Expected:** The short-lived cert's serial does NOT appear in the CRL.
 **PASS if** short-lived cert is absent from CRL despite being revoked.
 
-### 31.7: OCSP / CRL Unit Tests
+### 24.7: OCSP / CRL Unit Tests
 
 ```bash
 go test ./internal/service/ -run "TestGenerateDERCRL|TestGetOCSPResponse" -v
@@ -4759,13 +3744,397 @@ go test ./internal/connector/issuer/local/ -run "TestGenerateCRL|TestSignOCSP" -
 
 ---
 
-## Part 32: Request Body Size Limits
+## Part 25: Certificate Discovery (Filesystem + Network)
+
+**What this validates:** Filesystem discovery (agents scanning for existing certs), network discovery (server-side TLS scanning), and the triage workflow.
+
+**Why it matters:** Organizations often have thousands of unmanaged certificates scattered across servers. Discovery finds them so they can be brought under management.
+
+### 25.1 Filesystem Discovery
+
+**Test 15.1.1 — Submit discovery report**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{
+    "agent_id": "ag-web-prod",
+    "certificates": [{
+      "common_name": "discovered.test.local",
+      "serial_number": "ABC123",
+      "issuer_dn": "CN=Test CA",
+      "subject_dn": "CN=discovered.test.local",
+      "not_before": "2026-01-01T00:00:00Z",
+      "not_after": "2027-01-01T00:00:00Z",
+      "key_algorithm": "RSA",
+      "key_size": 2048,
+      "fingerprint_sha256": "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344",
+      "source_path": "/etc/ssl/certs/discovered.pem"
+    }]
+  }' \
+  $SERVER/api/v1/agents/ag-web-prod/discoveries | jq .
+```
+
+**What:** Agent submits a filesystem scan report with one discovered certificate.
+**Why:** This is the primary data ingestion path for discovery.
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** if 400 or 500.
+
+---
+
+**Test 15.1.2 — Submit report with multiple certificates**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{
+    "agent_id": "ag-web-prod",
+    "certificates": [
+      {"common_name": "multi1.test.local", "serial_number": "M001", "issuer_dn": "CN=CA", "subject_dn": "CN=multi1.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "ECDSA", "key_size": 256, "fingerprint_sha256": "1111111111111111111111111111111111111111111111111111111111111111", "source_path": "/certs/multi1.pem"},
+      {"common_name": "multi2.test.local", "serial_number": "M002", "issuer_dn": "CN=CA", "subject_dn": "CN=multi2.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "RSA", "key_size": 4096, "fingerprint_sha256": "2222222222222222222222222222222222222222222222222222222222222222", "source_path": "/certs/multi2.pem"}
+    ]
+  }' \
+  $SERVER/api/v1/agents/ag-web-prod/discoveries
+```
+
+**Expected:** HTTP 200. Both certificates stored.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 15.1.3 — Duplicate fingerprint deduplication**
+
+```bash
+# Submit the same fingerprint again
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{
+    "agent_id": "ag-web-prod",
+    "certificates": [{"common_name": "discovered.test.local", "serial_number": "ABC123", "issuer_dn": "CN=Test CA", "subject_dn": "CN=discovered.test.local", "not_before": "2026-01-01T00:00:00Z", "not_after": "2027-01-01T00:00:00Z", "key_algorithm": "RSA", "key_size": 2048, "fingerprint_sha256": "aabbccdd11223344aabbccdd11223344aabbccdd11223344aabbccdd11223344", "source_path": "/etc/ssl/certs/discovered.pem"}]
+  }' \
+  $SERVER/api/v1/agents/ag-web-prod/discoveries
+# Check total count hasn't doubled
+curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates" | jq '.total'
+```
+
+**What:** Submits the same certificate fingerprint a second time.
+**Why:** Dedup by fingerprint prevents the same physical cert from creating multiple discovery records.
+**Expected:** HTTP 200 on resubmission. Total count doesn't increase (upsert, not insert).
+**PASS if** total is same as before resubmission. **FAIL** if total increased.
+
+---
+
+**Test 15.1.4 — List discovered certificates**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates" | jq '{total, items_count: (.items | length)}'
+```
+
+**Expected:** HTTP 200. `total` ≥ 3 (from tests above).
+**PASS if** total ≥ 3. **FAIL** otherwise.
+
+---
+
+**Test 15.1.5 — Filter by status: Unmanaged**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged" | jq '{total}'
+```
+
+**Expected:** HTTP 200. All items have Unmanaged status.
+**PASS if** HTTP 200 and total > 0. **FAIL** if 500.
+
+---
+
+**Test 15.1.6 — Filter by agent_id**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?agent_id=ag-web-prod" | jq '{total}'
+```
+
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** if 500.
+
+---
+
+**Test 15.1.7 — Get discovered certificate detail**
+
+```bash
+DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovered-certificates/$DISC_ID" | jq '{id, common_name, status, fingerprint_sha256}'
+```
+
+**Expected:** HTTP 200 with full discovery record.
+**PASS if** HTTP 200 and all fields present. **FAIL** otherwise.
+
+---
+
+**Test 15.1.8 — Claim discovered certificate**
+
+```bash
+DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged&per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"managed_certificate_id": "mc-api-prod"}' \
+  $SERVER/api/v1/discovered-certificates/$DISC_ID/claim
+```
+
+**What:** Claims (links) a discovered cert to an existing managed certificate.
+**Why:** This is how operators bring discovered certs under certctl management.
+**Expected:** HTTP 200. Status changes to "Managed".
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 15.1.9 — Dismiss discovered certificate**
+
+```bash
+DISC_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/discovered-certificates?status=Unmanaged&per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"reason": "Known self-signed test cert"}' \
+  $SERVER/api/v1/discovered-certificates/$DISC_ID/dismiss
+```
+
+**What:** Dismisses a discovered cert from the triage queue.
+**Why:** Not every discovered cert needs management. Dismiss removes it from the "needs attention" view.
+**Expected:** HTTP 200. Status changes to "Dismissed".
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 15.1.10 — List discovery scans**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovery-scans" | jq '{total}'
+```
+
+**What:** Lists discovery scan history.
+**Expected:** HTTP 200 with scan records (from the submissions above).
+**PASS if** HTTP 200 and total ≥ 1. **FAIL** otherwise.
+
+---
+
+**Test 15.1.11 — Discovery summary**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/discovery-summary" | jq .
+```
+
+**What:** Returns aggregate counts by discovery status.
+**Expected:** HTTP 200 with counts for Unmanaged, Managed, Dismissed.
+**PASS if** HTTP 200 and status counts present. **FAIL** otherwise.
+
+---
+
+### 25.2 Network Discovery
+
+**Test 15.2.1 — List network scan targets (seed data)**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/network-scan-targets" | jq '{total, ids: [.items[].id]}'
+```
+
+**What:** Lists seed network scan targets.
+**Expected:** `total` = 3 (nst-dc1-web, nst-dc2-apps, nst-dmz).
+**PASS if** total = 3 and all 3 IDs present. **FAIL** otherwise.
+
+---
+
+**Test 15.2.2 — Create network scan target**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "nst-test", "name": "Test Scan Target", "cidrs": ["192.168.1.0/24"], "ports": [443, 8443], "scan_interval_hours": 12}' \
+  $SERVER/api/v1/network-scan-targets | jq '{id, name, cidrs, ports}'
+```
+
+**What:** Creates a new network scan target with CIDR range and ports.
+**Expected:** HTTP 201 with all fields.
+**PASS if** HTTP 201 and `cidrs` contains "192.168.1.0/24". **FAIL** otherwise.
+
+---
+
+**Test 15.2.3 — Get scan target detail**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/network-scan-targets/nst-test" | jq '{id, cidrs, ports}'
+```
+
+**Expected:** HTTP 200 with matching fields.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 15.2.4 — Update scan target**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" \
+  -d '{"name": "Updated Target", "cidrs": ["192.168.1.0/24", "10.0.0.0/24"], "ports": [443]}' \
+  $SERVER/api/v1/network-scan-targets/nst-test | jq '{name, cidrs}'
+```
+
+**Expected:** HTTP 200. `cidrs` now has 2 entries.
+**PASS if** HTTP 200 and cidrs updated. **FAIL** otherwise.
+
+---
+
+**Test 15.2.5 — Delete scan target**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/network-scan-targets/nst-test"
+```
+
+**Expected:** HTTP 204.
+**PASS if** HTTP 204. **FAIL** otherwise.
+
+---
+
+**Test 15.2.6 — Trigger manual scan**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{}' \
+  $SERVER/api/v1/network-scan-targets/nst-dc1-web/scan
+```
+
+**What:** Triggers an immediate network scan on a target.
+**Why:** Operators need to scan on-demand, not just on the 6h schedule.
+**Expected:** HTTP 200 or 202.
+**PASS if** HTTP 200/202. **FAIL** if 500.
+
+---
+
+**Test 15.2.7 — Invalid CIDR validation**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "nst-bad", "name": "Bad Target", "cidrs": ["not-a-cidr"], "ports": [443]}' \
+  $SERVER/api/v1/network-scan-targets
+```
+
+**What:** Attempts to create a scan target with invalid CIDR notation.
+**Why:** Bad CIDRs would cause the scanner to crash or scan random addresses.
+**Expected:** HTTP 400 with validation error.
+**PASS if** HTTP 400. **FAIL** if 201.
+
+---
+
+## Part 26: Enhanced Query API
+
+**What this validates:** Advanced query features — sparse fields, sorting, cursor pagination, time-range filters, and combined filters.
+
+**Why it matters:** These features reduce API bandwidth, enable efficient pagination for large inventories, and power the GUI's advanced filtering.
+
+**Test 16.1.1 — Sparse fields: only requested fields returned**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?fields=id,common_name&per_page=3" | jq '.items[0] | keys'
+```
+
+**What:** Requests only `id` and `common_name` fields.
+**Expected:** Keys array contains only `["common_name", "id"]`.
+**PASS if** only requested fields present. **FAIL** if additional fields.
+
+---
+
+**Test 16.1.2 — Sort ascending: commonName**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?sort=commonName&per_page=5" | jq '[.items[].common_name]'
+```
+
+**Expected:** Names in ascending alphabetical order.
+**PASS if** sorted A→Z. **FAIL** if unsorted.
+
+---
+
+**Test 16.1.3 — Sort descending: notAfter**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?sort=-notAfter&per_page=5" | jq '[.items[].not_after]'
+```
+
+**Expected:** Dates in descending order.
+**PASS if** sorted newest→oldest. **FAIL** if unsorted.
+
+---
+
+**Test 16.1.4 — Sort by invalid field**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?sort=hackMe"
+```
+
+**What:** Attempts to sort by a field not in the whitelist.
+**Why:** Sorting by arbitrary columns could be a SQL injection vector or expose internal fields.
+**Expected:** HTTP 400 (invalid sort field) or HTTP 200 (ignored, default sort applied).
+**PASS if** HTTP 400 or 200 with default ordering. **FAIL** if 500.
+
+---
+
+**Test 16.1.5 — Cursor pagination first page**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq '{next_cursor, items_count: (.items | length)}'
+```
+
+**Expected:** `next_cursor` present, `items_count` = 3.
+**PASS if** next_cursor non-null. **FAIL** if missing.
+
+---
+
+**Test 16.1.6 — Cursor pagination second page**
+
+```bash
+CURSOR=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq -r '.next_cursor')
+FIRST_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3" | jq -r '.items[0].id')
+SECOND_PAGE_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/certificates?page_size=3&cursor=$CURSOR" | jq -r '.items[0].id')
+echo "Page 1 first: $FIRST_ID, Page 2 first: $SECOND_PAGE_ID"
+```
+
+**Expected:** Different IDs on page 1 vs page 2.
+**PASS if** IDs differ. **FAIL** if same.
+
+---
+
+**Test 16.1.7 — Time-range: expires_before**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?expires_before=2027-01-01T00:00:00Z" | jq '{total}'
+```
+
+**Expected:** HTTP 200 with total > 0.
+**PASS if** total > 0. **FAIL** otherwise.
+
+---
+
+**Test 16.1.8 — Time-range: created_after**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?created_after=2025-01-01T00:00:00Z" | jq '{total}'
+```
+
+**Expected:** HTTP 200 with total > 0.
+**PASS if** total > 0. **FAIL** otherwise.
+
+---
+
+**Test 16.1.9 — Combined filters**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?status=Active&sort=-notAfter&fields=id,common_name,status&per_page=5" | jq '{total, items_count: (.items | length), first_keys: (.items[0] | keys)}'
+```
+
+**What:** Combines status filter + sort + sparse fields + pagination in one query.
+**Why:** Real-world API usage combines multiple features. They must work together, not interfere.
+**Expected:** All items Active, sorted by notAfter desc, only requested fields present, max 5 items.
+**PASS if** all constraints applied simultaneously. **FAIL** if any constraint ignored.
+
+---
+
+## Part 27: Request Body Size Limits
 
 **What:** The `NewBodyLimit` middleware wraps request bodies with `http.MaxBytesReader`, enforcing a configurable maximum payload size (default 1MB). Oversized requests receive a 413 Request Entity Too Large response. This protects against memory exhaustion and denial of service (CWE-400).
 
 **Why:** Without body limits, an attacker could send a multi-gigabyte POST to exhaust server memory. The 1MB default is generous for certificate API payloads (a typical CSR is ~1KB, a PKCS#12 export request is <100 bytes) while blocking abuse.
 
-### 32.1: Default 1MB Limit
+### 27.1: Default 1MB Limit
 
 **What:** With default configuration (`CERTCTL_MAX_BODY_SIZE` unset), the server rejects request bodies larger than 1MB.
 
@@ -4784,7 +4153,7 @@ curl -s -w "\n%{http_code}" -X POST \
 **PASS if** the request is rejected and does not cause server memory issues.
 **FAIL if** the server accepts the oversized payload or crashes.
 
-### 32.2: Normal-Sized Requests Work
+### 27.2: Normal-Sized Requests Work
 
 **What:** Standard API requests well under the limit work normally.
 
@@ -4799,7 +4168,7 @@ curl -s -w "\n%{http_code}" -X POST \
 **Expected:** 201 Created — normal payloads are unaffected by the body limit.
 **PASS if** status code is 201.
 
-### 32.3: Custom Body Size via Environment Variable
+### 27.3: Custom Body Size via Environment Variable
 
 **What:** Set `CERTCTL_MAX_BODY_SIZE` to a custom value (e.g., `2097152` for 2MB) and verify the new limit is respected.
 
@@ -4807,7 +4176,7 @@ curl -s -w "\n%{http_code}" -X POST \
 
 **PASS if** the configured limit is enforced instead of the 1MB default.
 
-### 32.4: Requests Without Bodies Are Unaffected
+### 27.4: Requests Without Bodies Are Unaffected
 
 **What:** GET requests and other methods without request bodies pass through the body limit middleware without interference.
 
@@ -4821,565 +4190,1041 @@ curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
 
 ---
 
-## Part 33: Apache & HAProxy Target Connectors
+## Part 28: CLI Tool
 
-**What:** certctl ships two additional target connectors beyond NGINX: Apache httpd (separate cert/chain/key files, `apachectl configtest` + graceful reload) and HAProxy (combined PEM file with cert+chain+key, config validation, reload). Both run on the agent side and follow the same pattern as the NGINX connector.
+**What this validates:** The `certctl-cli` binary — all subcommands, output formats, flag overrides, and error handling.
 
-**Why:** Apache and HAProxy are the second and third most common reverse proxies in enterprise environments. Supporting them out of the box removes a common adoption blocker.
+**Why it matters:** The CLI is how DevOps engineers interact with certctl in scripts, CI/CD, and terminals. If CLI commands are broken, automation pipelines fail.
 
-### 33.1: Create Apache Target
-
-**What:** Create a deployment target of type `apache` with the required configuration fields.
+### 28.1 Setup
 
 ```bash
-curl -s -X POST -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "t-test-apache",
-    "name": "Test Apache Server",
-    "type": "apache",
-    "agent_id": "agent-demo-1",
-    "config": {
-      "cert_path": "/etc/apache2/ssl/cert.pem",
-      "key_path": "/etc/apache2/ssl/key.pem",
-      "chain_path": "/etc/apache2/ssl/chain.pem",
-      "reload_command": "apachectl graceful",
-      "validate_command": "apachectl configtest"
-    }
-  }' \
-  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
+export CERTCTL_SERVER_URL=$SERVER
+export CERTCTL_API_KEY=$API_KEY
 ```
 
-**Expected:** 201 Created with type `apache`.
+### 28.2 Certificate Commands
 
-**PASS if:**
-- Target is created successfully
-- Type is `apache`
-- Config fields are persisted (verify via GET)
-
-**FAIL if** type is rejected or config fields are missing in the response.
-
-### 33.2: Apache Config — Separate Files
-
-**What:** Apache uses three separate files (cert, chain, key) unlike NGINX's dual-file or HAProxy's combined PEM. Verify that `cert_path`, `chain_path`, and `key_path` are all required.
+**Test 17.2.1 — List certificates (table format)**
 
 ```bash
-# Missing chain_path should fail validation
-curl -s -w "\n%{http_code}" -X POST -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "t-test-apache-bad",
-    "name": "Bad Apache",
-    "type": "apache",
-    "agent_id": "agent-demo-1",
-    "config": {
-      "cert_path": "/etc/apache2/ssl/cert.pem",
-      "reload_command": "apachectl graceful",
-      "validate_command": "apachectl configtest"
-    }
-  }' \
-  "http://localhost:8443/api/v1/targets"
+./certctl-cli certs list
 ```
 
-**Expected:** The target is created (config validation happens at deploy time on the agent), but when the agent attempts to deploy, it will fail if required fields are missing.
-**PASS if** the validation behavior matches the connector's `ValidateConfig` — `cert_path` and `chain_path` are both required.
-
-### 33.3: Create HAProxy Target
-
-**What:** Create a deployment target of type `haproxy`. HAProxy uses a single combined PEM file (cert + chain + key concatenated), not separate files.
-
-```bash
-curl -s -X POST -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "id": "t-test-haproxy",
-    "name": "Test HAProxy",
-    "type": "haproxy",
-    "agent_id": "agent-demo-1",
-    "config": {
-      "pem_path": "/etc/haproxy/certs/site.pem",
-      "reload_command": "systemctl reload haproxy",
-      "validate_command": "haproxy -c -f /etc/haproxy/haproxy.cfg"
-    }
-  }' \
-  "http://localhost:8443/api/v1/targets" | jq '{id, name, type}'
-```
-
-**Expected:** 201 Created with type `haproxy`.
-**PASS if** target created with correct type and config persisted.
-
-### 33.4: HAProxy Combined PEM Requirement
-
-**What:** HAProxy's `pem_path` is the single file where cert+chain+key are concatenated. The `pem_path` field is required; `reload_command` is also required.
-
-**Why:** HAProxy's `bind ssl crt` directive expects one file per certificate. The combined PEM format eliminates the need for multiple `SSLCertificate*` directives.
-
-This is verified in the connector's `ValidateConfig`:
-
-```bash
-go test ./internal/connector/target/haproxy/... -v
-```
-
-**Expected:** Tests validate that missing `pem_path` and missing `reload_command` both produce errors.
-**PASS if** all haproxy connector tests pass.
-
-### 33.5: Shell Command Injection Prevention
-
-**What:** Both Apache and HAProxy connectors validate `reload_command` and `validate_command` against the shell injection prevention logic in `internal/validation/command.go`. Commands containing shell metacharacters (`;`, `|`, `&`, `$()`, backticks) are rejected.
-
-**Why:** An attacker who controls target configuration could inject arbitrary commands if the reload/validate commands aren't sanitized. This was remediated in the security hardening pass (TICKET-001).
-
-```bash
-go test ./internal/validation/ -run TestValidateShellCommand -v
-```
-
-**Expected:** All 80+ adversarial test cases pass — commands with injection attempts are rejected, safe commands are accepted.
-**PASS if** exit code 0.
-
-### 33.6: Connector Unit Tests
-
-```bash
-go test ./internal/connector/target/apache/... -v
-go test ./internal/connector/target/haproxy/... -v
-```
-
-**Expected:** All Apache and HAProxy connector tests pass (config validation, deployment logic).
-**PASS if** exit code 0 for both.
+**What:** Lists certificates in the default table format.
+**Expected:** Tabular output with columns (ID, Common Name, Status, etc.). At least 15 rows.
+**PASS if** table renders with data. **FAIL** if error or empty.
 
 ---
 
-## Part 34: Sub-CA Mode
-
-**What:** The Local CA issuer connector can operate in two modes: self-signed root (default) or sub-CA. In sub-CA mode, set `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` to point at a pre-signed CA certificate and its private key. The CA cert must have `IsCA=true` and `KeyUsageCertSign`. All issued certificates then chain to the upstream root (e.g., Active Directory Certificate Services). Supports RSA, ECDSA, and PKCS#8 key formats.
-
-**Why:** Enterprise environments already have a root CA (ADCS, Vault, etc.). Sub-CA mode lets certctl operate as a subordinate CA without replacing the existing trust hierarchy. Users' browsers and devices already trust the enterprise root, so certctl-issued certs are automatically trusted.
-
-### 34.1: Self-Signed Mode (Default)
-
-**What:** Without `CERTCTL_CA_CERT_PATH` / `CERTCTL_CA_KEY_PATH`, the Local CA generates its own self-signed root on startup. This is the default for development and demos.
+**Test 17.2.2 — List certificates (JSON format)**
 
 ```bash
-# Verify the CA cert is self-signed (issuer == subject)
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/certificates/mc-api-prod/export/pem?download=true" \
-  -o /tmp/chain.pem
-
-# Extract the last cert in the chain (the CA cert)
-csplit -f /tmp/cert- -z /tmp/chain.pem '/-----BEGIN CERTIFICATE-----/' '{*}' 2>/dev/null
-LAST_CERT=$(ls /tmp/cert-* | tail -1)
-openssl x509 -in "$LAST_CERT" -noout -subject -issuer
+./certctl-cli --format json certs list
 ```
 
-**Expected:** For self-signed mode, the CA cert's Subject and Issuer are identical.
-**PASS if** Subject == Issuer (self-signed root).
-
-### 34.2: Sub-CA Mode — Configuration
-
-**What:** Setting `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH` environment variables switches the Local CA to sub-CA mode. The server logs the mode at startup.
-
-**How to test:**
-1. Generate a test CA hierarchy (root CA + sub-CA):
-```bash
-# Generate root CA
-openssl req -x509 -newkey rsa:2048 -keyout /tmp/root-key.pem -out /tmp/root-cert.pem \
-  -days 3650 -nodes -subj "/CN=Test Root CA" \
-  -addext "basicConstraints=critical,CA:TRUE" \
-  -addext "keyUsage=critical,keyCertSign,cRLSign"
-
-# Generate sub-CA key and CSR
-openssl req -newkey rsa:2048 -keyout /tmp/subca-key.pem -out /tmp/subca-csr.pem \
-  -nodes -subj "/CN=CertCtl Sub-CA"
-
-# Sign sub-CA cert with root
-openssl x509 -req -in /tmp/subca-csr.pem -CA /tmp/root-cert.pem -CAkey /tmp/root-key.pem \
-  -CAcreateserial -out /tmp/subca-cert.pem -days 1825 \
-  -extfile <(echo -e "basicConstraints=critical,CA:TRUE\nkeyUsage=critical,keyCertSign,cRLSign")
-```
-
-2. Start the server with sub-CA config:
-```bash
-CERTCTL_CA_CERT_PATH=/tmp/subca-cert.pem \
-CERTCTL_CA_KEY_PATH=/tmp/subca-key.pem \
-./certctl-server
-```
-
-3. Check startup logs for sub-CA mode indication.
-
-**PASS if** the server starts successfully and logs indicate sub-CA mode with the loaded cert path.
-**FAIL if** the server fails to start or falls back to self-signed mode.
-
-### 34.3: Sub-CA Chain Construction
-
-**What:** In sub-CA mode, issued certificates should chain to the sub-CA, which chains to the root. The PEM chain in certificate versions should include the leaf, the sub-CA cert, and optionally the root.
-
-```bash
-# Issue a certificate (after starting in sub-CA mode)
-curl -s -X POST -H "Authorization: Bearer $API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"id": "mc-subca-test", "common_name": "subca.test.local", "issuer_id": "iss-local"}' \
-  "http://localhost:8443/api/v1/certificates"
-
-# Export and verify chain
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/certificates/mc-subca-test/export/pem" | jq -r '.full_pem' > /tmp/subca-chain.pem
-
-openssl verify -CAfile /tmp/root-cert.pem -untrusted /tmp/subca-cert.pem /tmp/subca-chain.pem
-```
-
-**Expected:** Certificate chain validates against the root CA. The leaf cert's Issuer matches the sub-CA's Subject.
-**PASS if** `openssl verify` returns "OK".
-**FAIL if** chain is broken or leaf is signed by self-signed root instead of sub-CA.
-
-### 34.4: Sub-CA Validation — Non-CA Cert Rejected
-
-**What:** If `CERTCTL_CA_CERT_PATH` points to a certificate without `IsCA=true` or `KeyUsageCertSign`, the server should reject it at startup.
-
-```bash
-# Generate a non-CA cert (leaf cert, not a CA)
-openssl req -x509 -newkey rsa:2048 -keyout /tmp/leaf-key.pem -out /tmp/leaf-cert.pem \
-  -days 365 -nodes -subj "/CN=Not A CA"
-
-# Try to start server with non-CA cert — should fail
-CERTCTL_CA_CERT_PATH=/tmp/leaf-cert.pem \
-CERTCTL_CA_KEY_PATH=/tmp/leaf-key.pem \
-./certctl-server
-```
-
-**Expected:** Server fails to start (or logs a fatal error) because the loaded cert is not a CA.
-**PASS if** server rejects the non-CA certificate.
-**FAIL if** server starts and silently uses the non-CA cert for signing.
-
-### 34.5: Sub-CA Key Format Support
-
-**What:** The sub-CA key can be RSA, ECDSA, or PKCS#8 encoded. All three formats should load successfully.
-
-```bash
-go test ./internal/connector/issuer/local/ -run "TestSubCA" -v
-```
-
-**Expected:** All 7 sub-CA tests pass (RSA, ECDSA, config validation, invalid cert, non-CA cert, renewal, chain construction).
-**PASS if** exit code 0.
-
-### 34.6: CRL Signing in Sub-CA Mode
-
-**What:** In sub-CA mode, the DER CRL (Part 31.1) should be signed by the sub-CA key, not a self-signed root.
-
-```bash
-# After starting in sub-CA mode and revoking a cert:
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/subca-crl.der
-
-openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
-```
-
-**Expected:** CRL issuer matches the sub-CA's subject (not the self-signed CA).
-**PASS if** issuer is the sub-CA distinguished name.
+**What:** Lists certificates in JSON format.
+**Expected:** Valid JSON array output.
+**PASS if** valid JSON with certificate data. **FAIL** if parse error.
 
 ---
 
-## Part 35: ARI (RFC 9773) Scheduler Integration
-
-Tests that the renewal scheduler consults ARI before creating renewal jobs for ACME-issued certificates.
-
-### 35.1 ARI Defers Renewal When CA Says "Not Yet"
-
-**Prerequisite:** ACME issuer configured with `CERTCTL_ACME_ARI_ENABLED=true`, connected to a CA that supports ARI (e.g., Let's Encrypt staging). Certificate within the 30-day expiry window but the CA's `suggestedWindow.start` is in the future.
+**Test 17.2.3 — Get specific certificate**
 
 ```bash
-# Check scheduler logs for ARI deferral
-docker logs certctl-server 2>&1 | grep "ARI: renewal not yet suggested"
+./certctl-cli certs get mc-api-prod
 ```
 
-**Expected:** Log line showing `ARI: renewal not yet suggested by CA` with `cert_id`, `suggested_start`, `suggested_end`. No renewal job created for that cert.
-**PASS if** the scheduler skips renewal job creation when ARI says the window hasn't opened.
-
-### 35.2 ARI Triggers Renewal When CA Says "Now"
-
-**Prerequisite:** Same setup as 35.1, but the certificate's ARI `suggestedWindow.start` is in the past (CA is actively suggesting renewal).
-
-```bash
-# Check scheduler logs for ARI-triggered renewal
-docker logs certctl-server 2>&1 | grep "ARI: CA suggests renewal now"
-
-# Verify renewal job was created
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/jobs?type=renewal" | jq '.data[] | select(.certificate_id == "<cert-id>")'
-```
-
-**Expected:** Log line showing `ARI: CA suggests renewal now`. Renewal job created with `renewal_trigger: ari` in the audit trail.
-**PASS if** a renewal job is created when ARI indicates the renewal window is open.
-
-### 35.3 ARI Fallback on Error
-
-**Prerequisite:** ACME issuer with `CERTCTL_ACME_ARI_ENABLED=true`, but the ARI endpoint is unreachable or returns an error (e.g., network issue, 500 from CA).
-
-```bash
-# Check scheduler logs for ARI fallback
-docker logs certctl-server 2>&1 | grep "ARI check failed, falling back"
-```
-
-**Expected:** Warning log `ARI check failed, falling back to threshold-based renewal`. Renewal proceeds normally using the configured expiration thresholds.
-**PASS if** renewal still works when ARI is unavailable, using threshold-based logic as fallback.
+**What:** Fetches a specific cert by ID.
+**Expected:** Certificate detail for mc-api-prod displayed.
+**PASS if** output shows mc-api-prod details. **FAIL** if error.
 
 ---
 
-## Part 36: Agent Work Routing (M31)
-
-Tests that `GetPendingWork()` returns only jobs scoped to the requesting agent, and that deployment jobs have `agent_id` populated at creation time.
-
-### 36.1 Multi-Agent Routing
-
-**Prerequisite:** Two agents registered (`agent-web-01`, `agent-lb-01`), two targets (one per agent), one certificate mapped to both targets. Trigger renewal to create deployment jobs.
+**Test 17.2.4 — Get nonexistent certificate**
 
 ```bash
-# Poll as agent-web-01 — should only see its deployment job
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/agents/agent-web-01/work" | jq '.[] | .target_id'
-
-# Poll as agent-lb-01 — should only see its deployment job
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/agents/agent-lb-01/work" | jq '.[] | .target_id'
+./certctl-cli certs get mc-nonexistent 2>&1
 ```
 
-**Expected:** Each agent receives only the deployment job for its assigned target. Agent-web-01 does NOT see agent-lb-01's job and vice versa.
-**PASS if** each agent's work response contains only jobs for targets it owns.
-
-### 36.2 Agent With No Targets Gets Empty Work
-
-**Prerequisite:** Register a new agent with no target assignments.
-
-```bash
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/agents/agent-no-targets/work" | jq 'length'
-```
-
-**Expected:** Empty array (0 jobs).
-**PASS if** the response is an empty list.
-
-### 36.3 Deployment Jobs Have agent_id Populated
-
-**Prerequisite:** Deployment jobs created via renewal or manual trigger.
-
-```bash
-# Check that deployment jobs in the system have agent_id set
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/jobs" | jq '[.data[] | select(.type == "Deployment") | .agent_id] | map(select(. != null)) | length'
-```
-
-**Expected:** All deployment jobs for targets with agent assignments have `agent_id` populated.
-**PASS if** deployment jobs have non-null `agent_id` values.
+**What:** Fetches a cert that doesn't exist.
+**Expected:** Error message (not a stack trace).
+**PASS if** clean error message. **FAIL** if panic or no output.
 
 ---
 
-## Part 38: Vault PKI Connector (M32)
-
-### Prerequisites
-
-- Vault server running with PKI secrets engine enabled at `pki` mount
-- PKI role created with appropriate certificate generation policy
-- Vault token with read/sign permissions on the PKI path
-- Environment variables configured:
-  ```bash
-  export CERTCTL_VAULT_ADDR="https://vault.internal:8200"
-  export CERTCTL_VAULT_TOKEN="s.xxxxxxxxxxxxxxxx"
-  export CERTCTL_VAULT_MOUNT="pki"
-  export CERTCTL_VAULT_ROLE="certctl-role"
-  export CERTCTL_VAULT_TTL="8760h"
-  ```
-
-### 38.1 Register Vault PKI Issuer
-
-**Test:** Register a Vault PKI issuer via the API.
+**Test 17.2.5 — Renew certificate**
 
 ```bash
-curl -X POST -H "$AUTH" -H "$CT" \
-  "$SERVER/api/v1/issuers" \
-  -d '{
-    "id": "iss-vault-prod",
-    "name": "Vault PKI Production",
-    "type": "VaultPKI",
-    "config": {
-      "vault_addr": "'"$CERTCTL_VAULT_ADDR"'",
-      "vault_token": "'"$CERTCTL_VAULT_TOKEN"'",
-      "vault_mount": "'"$CERTCTL_VAULT_MOUNT"'",
-      "vault_role": "'"$CERTCTL_VAULT_ROLE"'",
-      "vault_ttl": "'"$CERTCTL_VAULT_TTL"'"
-    }
-  }' | jq '.id'
+./certctl-cli certs renew mc-pay-prod
 ```
 
-**Expected:** Returns issuer ID `iss-vault-prod`.
-**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
-
-### 38.2 Issue Certificate via Vault PKI
-
-**Test:** Create a certificate and issue it through Vault PKI.
-
-```bash
-CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
-  "$SERVER/api/v1/certificates" \
-  -d '{
-    "common_name": "vault-test.example.com",
-    "issuer_id": "iss-vault-prod",
-    "key_algorithm": "RSA-2048"
-  }' | jq -r '.id')
-
-curl -s -X POST -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq '.job_id'
-```
-
-**Expected:** Renewal job created and eventually moves to Completed status.
-**PASS if** certificate is issued by Vault with valid serial number and chain.
-
-### 38.3 Verify Certificate Serial and Subject
-
-**Test:** Check that the issued certificate has correct Vault metadata.
-
-```bash
-curl -s -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID" | jq '.versions[0] | {serial, subject_dn, not_before, not_after}'
-```
-
-**Expected:** Serial, DN, and validity dates from Vault PKI.
-**PASS if** certificate metadata is populated from Vault's response.
-
-### 38.4 Revocation Records Locally
-
-**Test:** Revoke the certificate and verify local recording.
-
-```bash
-curl -s -X POST -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
-  -d '{"reason": "superseded"}' | jq '.revoked_at'
-```
-
-**Expected:** Returns `revoked_at` timestamp.
-**PASS if** revocation is recorded locally in the audit trail but not propagated to Vault (Vault is authoritative for its own revocation).
+**What:** Triggers renewal via CLI.
+**Expected:** Success message or job ID.
+**PASS if** success output. **FAIL** if error.
 
 ---
 
-## Part 39: DigiCert Connector (M37)
-
-### Prerequisites
-
-- DigiCert CertCentral account with API access
-- API key and organization ID from DigiCert
-- Environment variables configured:
-  ```bash
-  export CERTCTL_DIGICERT_API_KEY="xxxxxxxxxxxxxxxxxxxxxxxx"
-  export CERTCTL_DIGICERT_ORG_ID="123456"
-  export CERTCTL_DIGICERT_PRODUCT_TYPE="ssl_basic"
-  export CERTCTL_DIGICERT_BASE_URL="https://www.digicert.com/services/v2"
-  ```
-
-### 39.1 Register DigiCert Issuer
-
-**Test:** Register a DigiCert CertCentral issuer via the API.
+**Test 17.2.6 — Revoke certificate with reason**
 
 ```bash
-curl -X POST -H "$AUTH" -H "$CT" \
-  "$SERVER/api/v1/issuers" \
-  -d '{
-    "id": "iss-digicert-prod",
-    "name": "DigiCert CertCentral",
-    "type": "DigiCert",
-    "config": {
-      "api_key": "'"$CERTCTL_DIGICERT_API_KEY"'",
-      "org_id": "'"$CERTCTL_DIGICERT_ORG_ID"'",
-      "product_type": "'"$CERTCTL_DIGICERT_PRODUCT_TYPE"'",
-      "base_url": "'"$CERTCTL_DIGICERT_BASE_URL"'"
-    }
-  }' | jq '.id'
+./certctl-cli certs revoke mc-auth-prod --reason superseded
 ```
 
-**Expected:** Returns issuer ID `iss-digicert-prod`.
-**PASS if** issuer is registered and appears in `GET /api/v1/issuers`.
+**What:** Revokes via CLI with an RFC 5280 reason.
+**Expected:** Success message indicating revocation.
+**PASS if** success output. **FAIL** if error.
 
-### 39.2 Issue DV Certificate via DigiCert
+---
 
-**Test:** Create a DV certificate order and track it to completion.
+### 28.3 Agent & Job Commands
+
+**Test 17.3.1 — List agents**
 
 ```bash
-CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
-  "$SERVER/api/v1/certificates" \
-  -d '{
-    "common_name": "dv-test.example.com",
-    "issuer_id": "iss-digicert-prod",
-    "key_algorithm": "RSA-2048"
-  }' | jq -r '.id')
+./certctl-cli agents list
+```
 
-JOB_ID=$(curl -s -X POST -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
+**Expected:** Table with 5+ agents.
+**PASS if** agent data displayed. **FAIL** if error.
 
-# Poll for job completion (DV certs may issue immediately)
-for i in {1..30}; do
-  STATUS=$(curl -s -H "$AUTH" \
-    "$SERVER/api/v1/jobs/$JOB_ID" | jq -r '.status')
-  echo "Job status: $STATUS"
-  [ "$STATUS" = "Completed" ] && break
-  sleep 2
+---
+
+**Test 17.3.2 — List jobs**
+
+```bash
+./certctl-cli jobs list
+```
+
+**Expected:** Table with job data.
+**PASS if** job data displayed. **FAIL** if error.
+
+---
+
+### 28.4 System Commands
+
+**Test 17.4.1 — Server status/health**
+
+```bash
+./certctl-cli status
+```
+
+**What:** Shows server health and summary stats.
+**Expected:** Health status and cert/agent counts.
+**PASS if** health info displayed. **FAIL** if connection error.
+
+---
+
+**Test 17.4.2 — CLI version**
+
+```bash
+./certctl-cli version
+```
+
+**Expected:** Version string (e.g., "certctl-cli version 0.1.0").
+**PASS if** version displayed. **FAIL** if error.
+
+---
+
+### 28.5 Bulk Import
+
+**Test 17.5.1 — Import single PEM file**
+
+```bash
+# Create a test PEM file
+cat > /tmp/test-import.pem << 'CERTEOF'
+-----BEGIN CERTIFICATE-----
+MIIBkTCB+wIJALRiMLAh++nfMA0GCSqGSIb3DQEBCwUAMBExDzANBgNVBAMMBnRl
+c3RjYTAeFw0yNTAxMDEwMDAwMDBaFw0yNjAxMDEwMDAwMDBaMBQxEjAQBgNVBAMM
+CWltcG9ydC5tZTBcMA0GCSqGSIb3DQEBAQUAA0sAMEgCQQC7o96lXXvVJX5K+d4B
+bJGjzyy/ET0X/D/gHfJCwA7RVbgWBZaDJpME5Iq7VB9rkDx0RGdVdMNVKxMJkjD
+P4RnAgMBAAEwDQYJKoZIhvcNAQELBQADQQBxqT7OQHV1ZhEYOJxEkDvFqHFNeUP
+IbN7t5YfSZmHnXjyNMGQeFnvHlJjOOPHHnpfp2KX7rqBLPrZnFJnHNFk
+-----END CERTIFICATE-----
+CERTEOF
+./certctl-cli import /tmp/test-import.pem
+```
+
+**What:** Imports a PEM file containing one certificate.
+**Expected:** Success message with import count.
+**PASS if** import succeeds. **FAIL** if parse error.
+
+---
+
+### 28.6 Flag Overrides
+
+**Test 17.6.1 — --server flag overrides env var**
+
+```bash
+./certctl-cli --server http://localhost:8443 status
+```
+
+**Expected:** Uses the flag value, not the env var.
+**PASS if** status displayed. **FAIL** if connection error.
+
+---
+
+**Test 17.6.2 — --api-key flag overrides env var**
+
+```bash
+./certctl-cli --api-key "change-me-in-production" status
+```
+
+**Expected:** Uses the flag API key.
+**PASS if** status displayed. **FAIL** if auth error.
+
+---
+
+**Test 17.6.3 — Missing server URL produces error**
+
+```bash
+unset CERTCTL_SERVER_URL
+./certctl-cli certs list 2>&1
+export CERTCTL_SERVER_URL=$SERVER  # Restore
+```
+
+**What:** Runs CLI with no server URL configured.
+**Expected:** Error message about missing server URL (or defaults to localhost).
+**PASS if** meaningful error or default fallback. **FAIL** if panic.
+
+---
+
+## Part 29: MCP Server
+
+**What this validates:** The Model Context Protocol server — binary build, startup, tool registration, and tool invocation via JSON-RPC over stdio.
+
+**Why it matters:** MCP is the AI adoption driver. If developers can manage certificates from Claude or Cursor, certctl becomes part of their daily workflow.
+
+### 29.1 Build & Startup
+
+**Test 18.1.1 — Binary builds successfully**
+
+```bash
+go build -o certctl-mcp ./cmd/mcp-server/... && echo "BUILD OK"
+```
+
+**Expected:** "BUILD OK" — no compile errors.
+**PASS if** binary created. **FAIL** if compile error.
+
+---
+
+**Test 18.1.2 — Startup with valid env vars**
+
+```bash
+timeout 3 bash -c 'CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY ./certctl-mcp 2>&1' || true
+```
+
+**What:** Starts the MCP server and captures stderr output for 3 seconds.
+**Why:** The server should print its version and backend URL on startup without errors.
+**Expected:** Output contains version info. No panic or fatal error.
+**PASS if** no errors in output. **FAIL** if panic or fatal.
+
+---
+
+**Test 18.1.3 — Missing CERTCTL_SERVER_URL behavior**
+
+```bash
+timeout 3 bash -c 'CERTCTL_API_KEY=$API_KEY ./certctl-mcp 2>&1' || true
+```
+
+**What:** Starts without a server URL.
+**Expected:** Either defaults to localhost:8443 or prints an error. No panic.
+**PASS if** no panic. **FAIL** if panic/crash.
+
+---
+
+### 29.2 Tool Registration
+
+**Test 18.2.1 — Tool count verification**
+
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
+  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 5 ./certctl-mcp 2>/dev/null | \
+  jq '.result.tools | length'
+```
+
+**What:** Sends a JSON-RPC `tools/list` request via stdin and counts registered tools.
+**Why:** All 78 API endpoints must be exposed as MCP tools. Missing tools mean missing LLM capabilities.
+**Expected:** `78`
+**PASS if** count = 78. **FAIL** if different.
+
+---
+
+**Test 18.2.2 — All 16 resource domains present**
+
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/list","id":1}' | \
+  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 5 ./certctl-mcp 2>/dev/null | \
+  jq '[.result.tools[].name | split("_")[0]] | unique | sort'
+```
+
+**What:** Extracts the domain prefix from each tool name and checks all 16 domains are represented.
+**Expected:** Array includes prefixes for certificates, crl, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent groups, audit, notifications, stats, metrics, health.
+**PASS if** all 16 domains present. **FAIL** if any missing.
+
+---
+
+### 29.3 Tool Invocation
+
+**Test 18.3.1 — List certificates via MCP**
+
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"list_certificates","arguments":{}},"id":2}' | \
+  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 10 ./certctl-mcp 2>/dev/null | \
+  jq '.result'
+```
+
+**What:** Invokes the `list_certificates` tool via JSON-RPC.
+**Why:** Tool registration is necessary but not sufficient — the tool must actually proxy to the HTTP API and return data.
+**Expected:** Result contains certificate data from the running server.
+**PASS if** result contains certificate data. **FAIL** if error or empty.
+
+---
+
+**Test 18.3.2 — Get specific certificate via MCP**
+
+```bash
+echo '{"jsonrpc":"2.0","method":"tools/call","params":{"name":"get_certificate","arguments":{"id":"mc-api-prod"}},"id":3}' | \
+  CERTCTL_SERVER_URL=$SERVER CERTCTL_API_KEY=$API_KEY timeout 10 ./certctl-mcp 2>/dev/null | \
+  jq '.result'
+```
+
+**What:** Invokes `get_certificate` with a known ID.
+**Expected:** Result contains mc-api-prod certificate detail.
+**PASS if** result contains the cert data. **FAIL** if error.
+
+---
+
+## Part 30: Observability
+
+**What this validates:** Dashboard stats, JSON/Prometheus metrics, and structured logging — the operator's visibility into system health.
+
+**Why it matters:** Without observability, operators are flying blind. They can't tell if renewals are succeeding, how many certs are expiring, or whether the system is healthy.
+
+### 30.1 Stats Endpoints
+
+**Test 13.1.1 — Dashboard summary**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/summary" | jq .
+```
+
+**What:** Fetches the high-level dashboard summary.
+**Why:** This powers the four stat cards on the GUI dashboard.
+**Expected:** HTTP 200 with fields: `total_certificates`, `active_certificates`, `expiring_certificates`, `expired_certificates`.
+**PASS if** HTTP 200 and all four fields present with numeric values. **FAIL** otherwise.
+
+---
+
+**Test 13.1.2 — Certificates by status**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/certificates-by-status" | jq .
+```
+
+**What:** Returns certificate count broken down by status.
+**Why:** Powers the donut chart in the GUI. Each status (Active, Expiring, Expired, Revoked) should have a count.
+**Expected:** HTTP 200 with array of `{status, count}` objects.
+**PASS if** HTTP 200 and array contains status breakdowns. **FAIL** otherwise.
+
+---
+
+**Test 13.1.3 — Expiration timeline**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/expiration-timeline?days=90" | jq .
+```
+
+**What:** Returns weekly expiration buckets for the next 90 days.
+**Why:** Powers the expiration heatmap chart. Operators need to see when the next wave of renewals is due.
+**Expected:** HTTP 200 with array of time-bucketed data points.
+**PASS if** HTTP 200 with data array. **FAIL** otherwise.
+
+---
+
+**Test 13.1.4 — Job trends**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/job-trends?days=30" | jq .
+```
+
+**What:** Returns job success/failure trends for the last 30 days.
+**Expected:** HTTP 200 with trend data points.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 13.1.5 — Issuance rate**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/issuance-rate?days=30" | jq .
+```
+
+**What:** Returns certificate issuance rate over time.
+**Expected:** HTTP 200 with rate data.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 13.1.6 — Stats with invalid days parameter**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/stats/expiration-timeline?days=abc"
+```
+
+**What:** Sends an invalid non-numeric `days` parameter.
+**Why:** Should default to a reasonable value or return 400 — not crash.
+**Expected:** HTTP 200 (with default days) or HTTP 400.
+**PASS if** HTTP 200 or 400. **FAIL** if 500.
+
+---
+
+### 30.2 JSON Metrics
+
+**Test 13.2.1 — JSON metrics endpoint**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/metrics" | jq '{gauges: (.gauges | keys), counters: (.counters | keys), uptime_seconds}'
+```
+
+**What:** Fetches the JSON metrics endpoint.
+**Why:** This is the machine-readable metrics format for custom integrations and monitoring.
+**Expected:** HTTP 200. `gauges` contains certificate/agent metrics, `counters` contains job metrics, `uptime_seconds` > 0.
+**PASS if** HTTP 200, gauges and counters present, uptime > 0. **FAIL** otherwise.
+
+---
+
+**Test 13.2.2 — Metric values are non-negative**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/metrics" | jq '[.gauges | to_entries[] | select(.value < 0)] | length'
+```
+
+**What:** Checks all gauge values are ≥ 0.
+**Why:** Negative certificate counts or agent counts indicate a counting bug.
+**Expected:** Length = 0 (no negative values).
+**PASS if** count = 0. **FAIL** if any negative values found.
+
+---
+
+**Test 13.2.3 — Uptime is positive**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/metrics" | jq '.uptime_seconds'
+```
+
+**What:** Verifies the server reports positive uptime.
+**Expected:** Value > 0.
+**PASS if** uptime > 0. **FAIL** if 0 or negative.
+
+---
+
+### 30.3 Prometheus Metrics
+
+**Test 13.3.1 — Prometheus content type**
+
+```bash
+curl -s -D - -o /dev/null -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -i "content-type"
+```
+
+**What:** Verifies the Prometheus endpoint returns the correct Content-Type.
+**Why:** Prometheus scrapers validate Content-Type. Wrong type = scrape failure = no monitoring.
+**Expected:** `Content-Type: text/plain` (or `text/plain; version=0.0.4`).
+**PASS if** Content-Type contains `text/plain`. **FAIL** otherwise.
+
+---
+
+**Test 13.3.2 — Prometheus output contains HELP lines**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# HELP"
+```
+
+**What:** Counts `# HELP` comment lines (metric descriptions).
+**Why:** HELP lines are required by the Prometheus exposition format. Missing = non-compliant.
+**Expected:** Count > 0 (one per metric).
+**PASS if** count > 0. **FAIL** if 0.
+
+---
+
+**Test 13.3.3 — Prometheus output contains TYPE lines**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -c "^# TYPE"
+```
+
+**What:** Counts `# TYPE` annotations (gauge/counter declarations).
+**Expected:** Count > 0.
+**PASS if** count > 0. **FAIL** if 0.
+
+---
+
+**Test 13.3.4 — All documented Prometheus metrics present**
+
+```bash
+METRICS=$(curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus")
+for m in certctl_certificate_total certctl_certificate_active certctl_certificate_expiring_soon certctl_certificate_expired certctl_certificate_revoked certctl_agent_total certctl_agent_online certctl_job_pending certctl_job_completed_total certctl_job_failed_total certctl_uptime_seconds; do
+  echo -n "$m: "
+  echo "$METRICS" | grep -c "^$m "
 done
 ```
 
-**Expected:** Job eventually reaches Completed status with certificate issued.
-**PASS if** certificate has DigiCert serial number and chain.
-
-### 39.3 Verify Order ID Tracking
-
-**Test:** Check that the job record includes the DigiCert order ID for auditing.
-
-```bash
-curl -s -H "$AUTH" \
-  "$SERVER/api/v1/jobs/$JOB_ID" | jq '.metadata'
-```
-
-**Expected:** Metadata includes `order_id` from DigiCert for order tracking.
-**PASS if** audit trail shows the DigiCert order lifecycle.
-
-### 39.4 Async Poll Behavior
-
-**Test:** Verify the connector polls for certificate completion (OV certs take longer).
-
-```bash
-# Submit OV certificate order (requires validation)
-CERT_ID=$(curl -s -X POST -H "$AUTH" -H "$CT" \
-  "$SERVER/api/v1/certificates" \
-  -d '{
-    "common_name": "ov-test.example.com",
-    "issuer_id": "iss-digicert-prod",
-    "key_algorithm": "RSA-2048"
-  }' | jq -r '.id')
-
-JOB_ID=$(curl -s -X POST -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID/renew" | jq -r '.job_id')
-
-# Check job status transitions
-curl -s -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '.status'
-```
-
-**Expected:** Job status transitions through pending states as DigiCert validates.
-**PASS if** polling mechanism works and job reaches completion once DigiCert issues the certificate.
-
-### 39.5 Revocation Records Locally
-
-**Test:** Revoke a DigiCert-issued certificate.
-
-```bash
-curl -s -X POST -H "$AUTH" \
-  "$SERVER/api/v1/certificates/$CERT_ID/revoke" \
-  -d '{"reason": "cessationOfOperation"}' | jq '.revoked_at'
-```
-
-**Expected:** Returns `revoked_at` timestamp.
-**PASS if** revocation is recorded locally; operator manages revocation in DigiCert CertCentral dashboard.
+**What:** Verifies all documented Prometheus metrics are present in the output.
+**Why:** Missing metrics mean missing dashboard panels in Grafana. Each metric was chosen for operational value.
+**Expected:** Each metric reports count = 1 (present).
+**PASS if** all metrics show count = 1. **FAIL** if any shows 0.
 
 ---
 
-## Part 40: Issuer Catalog Page (M33)
+**Test 13.3.5 — Prometheus metric values are parseable numbers**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/metrics/prometheus" | grep -v "^#" | grep -v "^$" | awk '{print $2}' | while read val; do
+  echo "$val" | grep -qE '^[0-9]+(\.[0-9]+)?$' || echo "INVALID: $val"
+done
+```
+
+**What:** Verifies all metric values are valid numbers (not NaN, not strings).
+**Why:** Non-numeric values cause Prometheus scrape errors and break dashboards.
+**Expected:** No "INVALID" lines printed.
+**PASS if** no invalid values found. **FAIL** if any invalid values.
+
+---
+
+**Test 13.3.6 — Method not allowed on metrics (POST)**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/metrics
+```
+
+**What:** Sends POST to a GET-only endpoint.
+**Expected:** HTTP 405 (Method Not Allowed).
+**PASS if** HTTP 405. **FAIL** if 200 or 500.
+
+---
+
+## Part 31: Notifications
+
+**What this validates:** Notification creation, listing, and read status management.
+
+**Why it matters:** Notifications are how certctl tells operators about important events (expiring certs, failed renewals, revocations). If notifications are lost or unreadable, operators miss critical events.
+
+### 31.1 Notification Queries
+
+**Test 12.1.1 — List notifications with pagination**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=5" | jq '{total, items_count: (.items | length), first_type: .items[0].type}'
+```
+
+**What:** Lists notifications with pagination.
+**Expected:** `total` ≥ 6 (seed notifications). Items present.
+**PASS if** HTTP 200 and total ≥ 1. **FAIL** if 500 or total = 0.
+
+---
+
+**Test 12.1.2 — Get single notification**
+
+```bash
+NOTIF_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/notifications/$NOTIF_ID" | jq '{id, type, read}'
+```
+
+**What:** Fetches a specific notification by ID.
+**Expected:** HTTP 200 with notification detail including `type` and `read` fields.
+**PASS if** HTTP 200 and fields present. **FAIL** otherwise.
+
+---
+
+**Test 12.1.3 — Mark notification as read**
+
+```bash
+NOTIF_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/notifications/$NOTIF_ID/read
+```
+
+**What:** Marks a notification as read.
+**Why:** Read/unread state lets operators track which notifications they've acknowledged.
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** otherwise.
+
+---
+
+**Test 12.1.4 — Mark already-read notification (idempotent)**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/notifications/$NOTIF_ID/read
+```
+
+**What:** Marks the same notification as read again.
+**Why:** Should be idempotent — marking an already-read notification shouldn't error.
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** if 409 or 500.
+
+---
+
+**Test 12.1.5 — Get nonexistent notification**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/notifications/notif-nonexistent"
+```
+
+**Expected:** HTTP 404.
+**PASS if** HTTP 404. **FAIL** if 200 or 500.
+
+---
+
+**Test 12.1.6 — Verify notification created from revocation**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/notifications?per_page=20" | jq '[.items[] | select(.type == "revocation" or .type == "certificate_revoked")] | length'
+```
+
+**What:** Checks that revocation events from Part 5 generated notifications.
+**Why:** Revocation without notification means nobody knows a cert was revoked — defeating the purpose.
+**Expected:** Count ≥ 1.
+**PASS if** count ≥ 1. **FAIL** if 0.
+
+---
+
+## Part 32: Audit Trail
+
+**What this validates:** The immutable audit trail — listing, filtering, and verifying that API actions generate audit entries.
+
+**Why it matters:** The audit trail is a compliance requirement (SOC 2, PCI-DSS). If events aren't recorded, the organization can't prove who did what and when.
+
+### 32.1 Audit Queries
+
+**Test 14.1.1 — List audit events**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=5" | jq '{total, items_count: (.items | length)}'
+```
+
+**What:** Lists audit events with pagination.
+**Expected:** `total` > 0 (seed data + actions from earlier tests). Items present.
+**PASS if** HTTP 200 and total > 0. **FAIL** if 500 or total = 0.
+
+---
+
+**Test 14.1.2 — Get single audit event**
+
+```bash
+EVENT_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=1" | jq -r '.items[0].id')
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/audit/$EVENT_ID" | jq '{id, action, actor, resource_type}'
+```
+
+**What:** Fetches a specific audit event by ID.
+**Expected:** HTTP 200 with event detail including `action`, `actor`, `resource_type`.
+**PASS if** HTTP 200 and fields present. **FAIL** otherwise.
+
+---
+
+**Test 14.1.3 — Filter audit by time range**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?from=2026-01-01T00:00:00Z&to=2026-12-31T23:59:59Z" | jq '{total}'
+```
+
+**What:** Filters audit events to a specific time range.
+**Expected:** HTTP 200 with `total` > 0.
+**PASS if** total > 0 for the current year range. **FAIL** if 0.
+
+---
+
+**Test 14.1.4 — Filter audit by actor**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?actor=system" | jq '{total}'
+```
+
+**What:** Filters audit events by actor (system-generated events).
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** if 500.
+
+---
+
+**Test 14.1.5 — Filter audit by resource type**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?resource_type=certificate" | jq '{total}'
+```
+
+**What:** Filters to certificate-related audit events only.
+**Expected:** HTTP 200 with total > 0.
+**PASS if** HTTP 200 and total > 0. **FAIL** otherwise.
+
+---
+
+**Test 14.1.6 — Filter audit by action**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?action=certificate.created" | jq '{total}'
+```
+
+**What:** Filters to a specific action type.
+**Expected:** HTTP 200.
+**PASS if** HTTP 200. **FAIL** if 500.
+
+---
+
+**Test 14.1.7 — API calls create audit entries**
+
+```bash
+# Make a distinct API call
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"mc-audit-test","common_name":"audit.test.local"}' $SERVER/api/v1/certificates > /dev/null
+# Find the audit entry
+sleep 2
+curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=5" | jq '[.items[] | select(.resource_id == "mc-audit-test")] | length'
+```
+
+**What:** Creates a certificate and verifies an audit event was recorded for it.
+**Why:** Every API mutation must produce an audit entry. This confirms the audit middleware is wired correctly.
+**Expected:** Count ≥ 1 (at least one audit event for the new cert).
+**PASS if** count ≥ 1. **FAIL** if 0.
+
+---
+
+**Test 14.1.8 — Audit immutability (no PUT/DELETE)**
+
+```bash
+EVENT_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=1" | jq -r '.items[0].id')
+echo "=== PUT ==="
+curl -s -w "HTTP %{http_code}\n" -X PUT -H "$AUTH" -H "$CT" -d '{}' "$SERVER/api/v1/audit/$EVENT_ID"
+echo "=== DELETE ==="
+curl -s -w "HTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/audit/$EVENT_ID"
+```
+
+**What:** Attempts to modify or delete an audit event.
+**Why:** Audit trails must be immutable for compliance. If you can edit or delete events, the trail is unreliable.
+**Expected:** Both return HTTP 405 (Method Not Allowed).
+**PASS if** both return 405. **FAIL** if either returns 200 or 204.
+
+---
+
+## Part 33: Background Scheduler
+
+**What this validates:** The 7 background scheduler loops — renewal checks, job processing, agent health, notification processing, short-lived cert expiry, network scanning, and scheduled digest emailer.
+
+**Why it matters:** The scheduler is the automation engine. Without it, nothing happens automatically — certs expire unnoticed, jobs sit pending, agents go stale, notifications never fire.
+
+> **Tip:** Open a second terminal with `docker compose logs -f certctl-server` to watch scheduler log output in real time.
+
+**Test 20.1.1 — Scheduler startup: all 7 loops registered**
+
+```bash
+docker compose logs certctl-server 2>&1 | grep -i "scheduler\|renewal check\|job processor\|health check\|notification\|short-lived\|network scan" | head -20
+```
+
+**What:** Checks server startup logs for scheduler loop registration.
+**Why:** If a loop isn't registered, that automation never runs. Catching this at startup prevents days of "why didn't my cert renew?"
+**Expected:** Log lines indicating all loops started (e.g., "scheduler starting").
+**PASS if** scheduler startup message present. **FAIL** if no scheduler logs.
+
+---
+
+**Test 20.1.2 — Job processor loop fires (30s interval)**
+
+```bash
+# Trigger a renewal to create a pending job
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{}' $SERVER/api/v1/certificates/mc-dash-prod/renew > /dev/null
+JOB_ID=$(curl -s -H "$AUTH" "$SERVER/api/v1/jobs?type=Renewal&per_page=1" | jq -r '.items[0].id')
+echo "Job: $JOB_ID"
+# Wait for processor (30s interval)
+sleep 45
+curl -s -H "$AUTH" "$SERVER/api/v1/jobs/$JOB_ID" | jq '{status}'
+```
+
+**What:** Creates a job and waits for the job processor to pick it up.
+**Why:** If the 30-second loop isn't running, jobs never execute.
+**Expected:** Status is "Running" or "Completed" after 45 seconds.
+**PASS if** status is not "Pending". **FAIL** if still "Pending".
+
+---
+
+**Test 20.1.3 — Agent health check marks offline (2m interval)**
+
+```bash
+# Stop the agent container
+docker compose stop certctl-agent
+# Wait for health check interval (2 minutes + buffer)
+echo "Waiting 150 seconds for health check..."
+sleep 150
+# Check agent status
+curl -s -H "$AUTH" "$SERVER/api/v1/agents/ag-web-prod" | jq '{status}'
+# Restart agent
+docker compose start certctl-agent
+```
+
+**What:** Stops the agent and waits for the health check to mark it offline.
+**Why:** If the health check doesn't detect stale agents, operators think agents are healthy when they're actually dead.
+**Expected:** Agent status changes to "Offline" (or similar inactive status).
+**PASS if** status indicates offline/inactive. **FAIL** if still "Online" after 2.5 minutes.
+
+> **Alternative (log check):** If you don't want to wait 2.5 minutes:
+> ```bash
+> docker compose logs certctl-server 2>&1 | grep -i "health check\|agent.*offline\|stale"
+> ```
+
+---
+
+**Test 20.1.4 — Notification processor fires (1m interval)**
+
+```bash
+# Check notification count before
+BEFORE=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications" | jq '.total')
+# Trigger an event that creates a notification (revocation generates one)
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"reason": "superseded"}' $SERVER/api/v1/certificates/mc-wildcard-prod/revoke > /dev/null
+# Wait for notification processor
+sleep 90
+AFTER=$(curl -s -H "$AUTH" "$SERVER/api/v1/notifications" | jq '.total')
+echo "Before: $BEFORE, After: $AFTER"
+```
+
+**What:** Triggers a revocation and waits for the notification processor to create the notification.
+**Expected:** `AFTER` > `BEFORE` (new notification created).
+**PASS if** notification count increased. **FAIL** if unchanged.
+
+---
+
+**Test 20.1.5 — Short-lived expiry check (30s interval)**
+
+```bash
+docker compose logs certctl-server 2>&1 | grep -i "short-lived expiry\|short.lived.*check\|expire.*short"
+```
+
+**What:** Checks logs for evidence the short-lived expiry loop has run.
+**Why:** Short-lived certs (TTL < 1 hour) rely on this loop for status transitions.
+**Expected:** At least one log line about short-lived expiry check.
+**PASS if** log line found. **FAIL** if no evidence of the loop running.
+
+---
+
+**Test 20.1.6 — Network scanner loop (conditional on env var)**
+
+```bash
+docker compose logs certctl-server 2>&1 | grep -i "network scan"
+```
+
+**What:** Checks if the network scanner loop is registered.
+**Why:** The network scan loop is conditional on `CERTCTL_NETWORK_SCAN_ENABLED=true`. By default it's disabled. If enabled, it should log its startup.
+**Expected:** If `CERTCTL_NETWORK_SCAN_ENABLED=true` is set, log line present. If not set, no log line (which is correct behavior).
+**PASS if** behavior matches config. **FAIL** if enabled but no logs, or disabled but scanner running.
+
+---
+
+**Test 20.1.7 — Renewal check loop (1h interval — log verification)**
+
+```bash
+docker compose logs certctl-server 2>&1 | grep -i "renewal check"
+```
+
+**What:** Verifies the renewal check loop has fired at least once (it runs immediately on startup).
+**Expected:** Log line about renewal check (completed or in progress).
+**PASS if** log evidence found. **FAIL** if none.
+
+---
+
+**Test 20.1.8 — Scheduler graceful stop**
+
+```bash
+docker compose stop certctl-server
+docker compose logs certctl-server 2>&1 | tail -10 | grep -i "scheduler\|shutting down\|shutdown"
+docker compose start certctl-server && sleep 10
+```
+
+**What:** Stops the server and checks for clean scheduler shutdown.
+**Why:** Scheduler goroutines must stop cleanly. Leaked goroutines cause resource exhaustion on repeated restarts.
+**Expected:** Log line containing "scheduler shutting down" or similar. No panic traces.
+**PASS if** clean shutdown log present. **FAIL** if panic or missing shutdown log.
+
+---
+
+## Part 34: Structured Logging Verification
+
+**What this validates:** Server logs are properly structured JSON (slog), log levels work, and request IDs propagate across log lines.
+
+**Why it matters:** Structured logs are essential for log aggregation (ELK, Splunk, Datadog). Unstructured `fmt.Printf` lines break JSON parsers. Missing request IDs make it impossible to correlate logs for a single request.
+
+**Test 23.1.1 — Server logs are valid JSON**
+
+```bash
+docker compose logs certctl-server 2>&1 | tail -20 | while read line; do
+  echo "$line" | jq . > /dev/null 2>&1 || echo "INVALID JSON: $line"
+done
+```
+
+**What:** Parses each recent log line as JSON.
+**Why:** If any line fails to parse, it's an unstructured `fmt.Printf` or panic trace leaking into the JSON stream.
+**Expected:** No "INVALID JSON" lines (or only Docker metadata lines that aren't from the server).
+**PASS if** all server-originated lines are valid JSON. **FAIL** if invalid JSON found.
+
+---
+
+**Test 23.1.2 — Log lines contain level field**
+
+```bash
+docker compose logs certctl-server 2>&1 | tail -10 | jq -r '.level // "MISSING"' 2>/dev/null | sort | uniq -c
+```
+
+**What:** Extracts the `level` field from log lines.
+**Expected:** Values like "INFO", "DEBUG", "WARN", "ERROR". No "MISSING".
+**PASS if** all lines have a level field. **FAIL** if "MISSING" appears.
+
+---
+
+**Test 23.1.3 — Request ID propagation**
+
+```bash
+# Make a request and capture request ID from response header
+REQ_ID=$(curl -s -D - -o /dev/null -H "$AUTH" "$SERVER/api/v1/certificates?per_page=1" | grep -i "x-request-id" | tr -d '\r' | awk '{print $2}')
+echo "Request ID: $REQ_ID"
+# Search for it in logs
+docker compose logs certctl-server 2>&1 | grep "$REQ_ID" | wc -l
+```
+
+**What:** Makes an API call, extracts the request ID from the response header, then searches for that ID in server logs.
+**Why:** Request ID propagation lets operators trace a single request across all log lines it produced. Without it, debugging is guesswork.
+**Expected:** Request ID found in at least 1 log line (ideally the access log line).
+**PASS if** count ≥ 1. **FAIL** if 0 (request ID not propagated).
+
+---
+
+**Test 23.1.4 — Error logs at ERROR level**
+
+```bash
+docker compose logs certctl-server 2>&1 | jq -r 'select(.level == "ERROR") | .msg' 2>/dev/null | head -5
+```
+
+**What:** Checks if error-level log entries exist and have proper messages.
+**Why:** Errors should be logged at ERROR level, not INFO. Wrong levels mean operators miss critical issues.
+**Expected:** Either no ERROR lines (healthy system) or ERROR lines with descriptive messages (not empty).
+**PASS if** ERROR entries have messages (or no errors at all). **FAIL** if empty/garbled error messages.
+
+---
+
+**Test 23.1.5 — No unstructured output in log stream**
+
+```bash
+docker compose logs certctl-server 2>&1 | grep -v "^certctl-server" | grep -cv "^{" || echo "0"
+```
+
+**What:** Counts log lines that don't start with `{` (i.e., not JSON).
+**Why:** `fmt.Printf` calls in the Go code bypass slog and produce unstructured output that breaks log parsers.
+**Expected:** Count = 0 (all lines are JSON).
+**PASS if** 0 non-JSON lines. **FAIL** if > 0.
+
+---
+
+## Part 35: GUI Testing
+
+**What this validates:** The full web dashboard — all pages of operational UI.
+
+**Why it matters:** Operators spend 80% of their time in the GUI. If it's broken, the product is broken, regardless of how good the API is.
+
+Open `http://localhost:8443` in a browser.
+
+### 35.1 Authentication Flow
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.1.1 | Login page renders | Open dashboard URL | Login page with API key input field | PASS if login form visible |
+| 19.1.2 | Invalid key error | Enter "wrong-key", submit | Error message displayed | PASS if error shown, not silent failure |
+| 19.1.3 | Valid key login | Enter the correct API key | Redirect to dashboard | PASS if dashboard loads with data |
+
+### 35.2 Dashboard Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.2.1 | Stat cards | View dashboard | 4 stat cards with real numbers (total, active, expiring, expired) | PASS if all 4 show non-zero values |
+| 19.2.2 | Expiration heatmap | View dashboard | Heatmap chart renders with data | PASS if chart visible with bars/cells |
+| 19.2.3 | Renewal trends | View dashboard | Line chart renders | PASS if chart visible |
+| 19.2.4 | Status distribution | View dashboard | Donut chart renders with legend | PASS if chart visible with segments |
+| 19.2.5 | Issuance rate | View dashboard | Bar chart renders | PASS if chart visible |
+
+### 35.3 Certificates Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.3.1 | Table loads | Navigate to Certificates | Table with 15+ certs | PASS if table populated |
+| 19.3.2 | Multi-select | Click checkboxes | Checkboxes toggle, select-all works | PASS if selection works |
+| 19.3.3 | Bulk renew | Select certs, click Renew | Jobs created, progress indicator | PASS if renew triggered |
+| 19.3.4 | Bulk revoke | Select certs, click Revoke | Reason modal appears | PASS if modal with RFC 5280 reasons |
+
+### 35.4 Certificate Detail Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.4.1 | All fields | Click a certificate | All metadata fields displayed | PASS if CN, SANs, dates, status shown |
+| 19.4.2 | Version history | Scroll to versions | Current badge on latest, list of versions | PASS if Current badge visible |
+| 19.4.3 | Rollback button | View previous version | Rollback button on non-current versions | PASS if button visible and clickable |
+| 19.4.4 | Deployment timeline | View deployment section | 4-step visual timeline | PASS if timeline renders |
+| 19.4.5 | Inline policy editor | Click edit on policy section | Dropdown selectors appear, save/cancel buttons | PASS if edit mode works |
+| 19.4.6 | Revoke button | Click revoke | Reason modal, status updates after | PASS if revocation completes |
+
+### 35.5 Jobs Page — Approval Workflow
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.5.1 | Approval banner | Navigate to Jobs with AwaitingApproval jobs | Amber banner shows count of pending approvals | PASS if banner visible with correct count |
+| 19.5.2 | Approve button | Find AwaitingApproval job, click Approve | Job status changes to Running/Completed | PASS if status transitions |
+| 19.5.3 | Reject button | Find AwaitingApproval job, click Reject | Modal opens with reason input | PASS if modal appears |
+| 19.5.4 | Reject with reason | Enter reason, submit rejection | Job status changes, modal closes | PASS if job rejected |
+| 19.5.5 | Status filter | Select "Awaiting Approval" from status dropdown | Only AwaitingApproval jobs shown | PASS if filter works |
+| 19.5.6 | AwaitingCSR filter | Select "Awaiting CSR" from status dropdown | Only AwaitingCSR jobs shown | PASS if filter works |
+
+### 35.6 Discovery Triage Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.6.1 | Summary stats | Navigate to Discovery | Stats bar shows Unmanaged/Managed/Dismissed counts | PASS if all 3 counts visible |
+| 19.6.2 | Table loads | View Discovery page | Table populated with discovered certificates | PASS if certs listed |
+| 19.6.3 | Status filter | Select "Unmanaged" from status dropdown | Only Unmanaged certs shown | PASS if filter works |
+| 19.6.4 | Agent filter | Select agent from dropdown | Certs filtered by agent | PASS if filter works |
+| 19.6.5 | Claim button | Click Claim on Unmanaged cert | Modal opens with managed cert ID input | PASS if modal appears |
+| 19.6.6 | Claim submit | Enter cert ID, submit claim | Cert status changes to Managed, modal closes | PASS if status updates |
+| 19.6.7 | Dismiss button | Click Dismiss on Unmanaged cert | Cert status changes to Dismissed | PASS if status updates |
+| 19.6.8 | Scan history | Click "Show Scan History" | Collapsible panel shows scan records with agent, directories, counts | PASS if scan history visible |
+
+### 35.7 Network Scan Management Page
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.7.1 | Table loads | Navigate to Network Scans | Table with seed scan targets | PASS if targets listed |
+| 19.7.2 | New Target button | Click "+ New Target" | Create modal opens | PASS if modal visible |
+| 19.7.3 | Create target | Fill name, CIDRs, ports, submit | New target appears in table | PASS if target created |
+| 19.7.4 | Enable toggle | Click toggle on a target | Enabled state flips | PASS if toggle works |
+| 19.7.5 | Scan Now | Click Scan Now on a target | Scan triggered (check last_scan_at updates) | PASS if scan initiated |
+| 19.7.6 | Delete target | Click Delete on a target | Target removed from table | PASS if target gone |
+
+### 35.8 Other Pages
+
+| Test ID | Test | Page | Expected | Pass/Fail Criteria |
+|---------|------|------|----------|-------------------|
+| 19.8.1 | Target wizard | Targets → New Target | 3-step wizard (type → config → review) | PASS if all 3 steps work |
+| 19.8.2 | Audit filters | Audit | Time, actor, action filters work | PASS if filters change results |
+| 19.8.3 | Audit export | Audit → Export | CSV/JSON file downloads | PASS if file downloads |
+| 19.8.4 | Short-lived creds | Short-Lived | Certs with TTL < 1h, countdown timers | PASS if timers count down |
+| 19.8.5 | Agent list | Agents | OS/Arch column visible | PASS if metadata shown |
+| 19.8.6 | Agent detail | Click agent | System Information card | PASS if OS, arch, IP shown |
+| 19.8.7 | Fleet overview | Fleet Overview | OS/arch grouping charts | PASS if pie charts render |
+
+### 35.9 Cross-Cutting
+
+| Test ID | Test | Action | Expected | Pass/Fail Criteria |
+|---------|------|--------|----------|-------------------|
+| 19.9.1 | Sidebar nav | Click all sidebar links | All 21 pages load without errors | PASS if no broken routes |
+| 19.9.2 | Logout | Click logout | Returns to login screen | PASS if login page shown |
+| 19.9.3 | 401 redirect | Expire/remove auth token | Auto-redirect to login | PASS if login page shown |
+| 19.9.4 | Theme consistency | Check page styling | Light content area, teal sidebar, branded colors, readable text | PASS if theme consistent across all pages |
+
+---
+
+## Part 36: Issuer Catalog Page (M33)
 
 Frontend-only milestone. No backend changes. All tests are automated via `qa-smoke-test.sh` and `vitest`.
 
-### 40.1 Shared Issuer Type Config
+### 36.1 Shared Issuer Type Config
 
 **Test:** Verify shared config file exists with all 6 supported types + 2 coming soon stubs.
 
@@ -5393,7 +5238,7 @@ grep -c 'sensitive' web/src/config/issuerTypes.ts     # >= 1
 
 **PASS if** file exists, all types present, EAB fields and sensitive flags included.
 
-### 40.2 Composable Wizard Components
+### 36.2 Composable Wizard Components
 
 **Test:** Verify reusable components exist.
 
@@ -5405,7 +5250,7 @@ test -f web/src/components/issuer/ConfigDetailModal.tsx
 
 **PASS if** all 3 component files exist.
 
-### 40.3 Frontend Build
+### 36.3 Frontend Build
 
 **Test:** Verify frontend builds with zero errors.
 
@@ -5415,7 +5260,7 @@ cd web && npm run build 2>&1 | tail -1 | grep -q 'built in'
 
 **PASS if** build succeeds.
 
-### 40.4 Frontend Tests
+### 36.4 Frontend Tests
 
 **Test:** Verify all Vitest tests pass including new VaultPKI/DigiCert create tests.
 
@@ -5425,39 +5270,39 @@ cd web && npx vitest run 2>&1 | grep -qE 'Tests.*passed'
 
 **PASS if** all tests pass.
 
-### 40.5 (Manual) Create VaultPKI Issuer via Wizard
+### 36.5 (Manual) Create VaultPKI Issuer via Wizard
 
 **Test:** Open Issuers page, click "Configure" on Vault PKI card, fill in form (addr, token, mount, role, ttl), submit.
 **PASS if** issuer appears in configured issuers table.
 
-### 40.6 (Manual) Create DigiCert Issuer via Wizard
+### 36.6 (Manual) Create DigiCert Issuer via Wizard
 
 **Test:** Open Issuers page, click "Configure" on DigiCert card, fill in form (api_key, org_id, product_type), submit.
 **PASS if** issuer appears in configured issuers table.
 
-### 40.7 (Manual) Create ACME Issuer with EAB Fields
+### 36.7 (Manual) Create ACME Issuer with EAB Fields
 
 **Test:** Open create wizard, select ACME, verify EAB Key ID and EAB HMAC Key fields are visible.
 **PASS if** EAB fields render and accept input.
 
-### 40.8 (Manual) Catalog Cards Show Correct Status
+### 36.8 (Manual) Catalog Cards Show Correct Status
 
 **Test:** Verify catalog cards show "Connected" (green, count) for types with configured issuers, "Available" (blue) for unconfigured types, and "Coming Soon" (grey) for Sectigo/Entrust.
 **PASS if** all 8 cards render with correct status.
 
-### 40.9 (Manual) Config Detail Modal Shows Full Redacted Config
+### 36.9 (Manual) Config Detail Modal Shows Full Redacted Config
 
 **Test:** Click "View Config" on a configured issuer row. Verify modal shows full config JSON with sensitive fields (token, key, hmac, password, private, secret) redacted as `********`.
 **PASS if** modal opens, full config visible, sensitive fields redacted.
 
-### 40.10 (Manual) Issuer Type Filter Works
+### 36.10 (Manual) Issuer Type Filter Works
 
 **Test:** Use the type filter dropdown above the configured issuers table. Select a specific type.
 **PASS if** table filters to show only issuers of the selected type.
 
 ---
 
-## Part 41: Frontend Audit Fixes
+## Part 37: Frontend Audit Fixes
 
 Comprehensive frontend coverage audit closed 60 gaps between backend capabilities and GUI surfaces. This part validates the critical fixes.
 
@@ -5558,134 +5403,1025 @@ Comprehensive frontend coverage audit closed 60 gaps between backend capabilitie
 
 ---
 
-## Part 42: IIS Target Connector (M39)
+## Part 38: Error Handling
 
-The IIS target connector (M39) brings Windows infrastructure lifecycle management to certctl. Dual-mode implementation: agent-local PowerShell (primary) for servers with certctl agent, proxy agent WinRM for agentless Windows targets. Full test suite (28 tests) with mock executor pattern for cross-platform testing. Supports PEM-to-PFX conversion, SHA-1 thumbprint computation, and parameterized PowerShell execution.
+**What this validates:** The API's behavior when given malformed, invalid, or unexpected input.
 
-### Test Suite Coverage
+**Why it matters:** Production systems receive garbage input constantly — from buggy clients, scanners, and attackers. Every error path must return a clean error response, not a 500 or a panic.
 
-| Layer | Test Count | Focus | Cross-Platform |
-|-------|-----------|-------|-----------------|
-| ValidateConfig | 9 | Field validation, defaults, regex enforcement | Yes |
-| DeployCertificate | 7 | PFX conversion, script execution, error handling | Yes |
-| ValidateDeployment | 5 | Thumbprint verification, binding checks | Mock executor |
-| PFX Conversion | 4 | Certificate chain handling, password generation | Yes |
-| Helpers | 3 | Thumbprint computation, Windows time conversion | Yes |
-| **Total** | **28** | | **26 pass, 2 skip on non-Windows** |
+**Test 21.1.1 — Malformed JSON body**
 
-### Automated Tests (qa-smoke-test.sh Part 42)
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{this is not json}' \
+  $SERVER/api/v1/certificates
+```
 
-| # | Test | Assertion |
-|---|------|-----------|
-| 42.1 | IIS connector imports without error | `internal/connector/target/iis/` builds cleanly |
-| 42.2 | ValidateConfig rejects missing hostname | Validation fails when `hostname` absent |
-| 42.3 | ValidateConfig rejects missing site_name | Validation fails when `site_name` absent |
-| 42.4 | ValidateConfig applies defaults | `port` defaults to 443, `ip_address` to "*" |
-| 42.5 | ValidateConfig validates field regex | Rejects field names with invalid characters |
-| 42.6 | PEM-to-PFX conversion succeeds | PKCS#12 bundle created with random password |
-| 42.7 | SHA-1 thumbprint computed correctly | Matches Go crypto/sha1 output, hex-encoded |
-| 42.8 | PowerShell script is parameterized | No unescaped interpolation in generated commands |
-| 42.9 | Mock executor pattern works cross-platform | Tests pass on Linux/macOS via mock executor |
-| 42.10 | DeployCertificate calls Import-PfxCertificate | PowerShell command includes correct cert store |
-| 42.11 | DeployCertificate calls Set-WebBinding | PowerShell command includes site name + thumbprint |
-| 42.12 | ValidateDeployment executes Get-IISSiteBinding | Thumbprint comparison happens post-deployment |
-| 42.13 | Error cases logged and propagated | TLS verify failure, script timeout errors handled |
-| 42.14 | Windows time conversion helpers work | FileTime ↔ time.Time round-trip accurate |
+**What:** Sends a body that isn't valid JSON.
+**Expected:** HTTP 400 with error message.
+**PASS if** HTTP 400. **FAIL** if 500.
 
-### Manual Tests (Windows Only)
+---
 
-These tests require a real Windows Server 2019+ environment with IIS 10+. Skip on non-Windows platforms.
+**Test 21.1.2 — Missing required field**
 
-**42.M1: Agent-Local Deployment — Happy Path**
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "mc-no-cn"}' \
+  $SERVER/api/v1/certificates
+```
 
-1. Provision a Windows Server 2019+ VM with IIS installed
-2. Download and install certctl-agent binary for windows-amd64
-3. Register agent with certctl server via heartbeat endpoint
-4. Create IIS target in certctl dashboard:
-   ```json
-   {
-     "hostname": "iis-server.local",
-     "site_name": "Default Web Site",
-     "cert_store": "WebHosting",
-     "port": 443,
-     "sni": true,
-     "ip_address": "*"
-   }
-   ```
-5. Issue a certificate (e.g., via Local CA)
-6. Create deployment job targeting the IIS target
-7. Agent polls work endpoint, executes PowerShell
-8. Verify on IIS: `Get-IISSiteBinding` shows new binding with correct thumbprint
-9. Verify in dashboard: Deployment job shows status=Completed, verified_at timestamp present
+**What:** Creates a certificate without the required `common_name`.
+**Expected:** HTTP 400 with validation error mentioning `common_name`.
+**PASS if** HTTP 400. **FAIL** if 201 (accepted invalid input).
 
-**PASS if** certificate deployed to IIS binding with matching thumbprint, deployment job shows Completed with verification success.
+---
 
-**42.M2: Agent-Local Deployment — Renewal**
+**Test 21.1.3 — Method not allowed**
 
-1. On the same IIS target, trigger renewal of the certificate
-2. Verify old certificate remains bound during renewal (until new one succeeds)
-3. Verify new certificate is imported and bound after deployment
-4. Verify old binding removed or updated in IIS
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" $SERVER/api/v1/stats/summary
+```
 
-**PASS if** renewal completes without downtime, old binding replaced with new.
+**What:** Sends POST to a GET-only endpoint.
+**Expected:** HTTP 405.
+**PASS if** HTTP 405. **FAIL** if 200 or 500.
 
-**42.M3: PFX Import to WebHosting Store**
+---
 
-1. Manually generate a test PKCS#12 certificate
-2. Via certctl-agent on Windows, verify PowerShell can import to WebHosting store:
-   ```powershell
-   $pfx = New-Object System.Security.Cryptography.X509Certificates.X509Certificate2
-   $pfx.Import([System.IO.File]::ReadAllBytes("C:\temp\test.pfx"), $password, "Exportable")
-   $store = New-Object System.Security.Cryptography.X509Certificates.X509Store("WebHosting", "LocalMachine")
-   $store.Open("MaxAllowed")
-   $store.Add($pfx)
-   ```
-3. Verify certificate appears in IIS Certificate Manager
+**Test 21.1.4 — Invalid query parameter**
 
-**PASS if** certificate imports to WebHosting store successfully.
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=abc"
+```
 
-**42.M4: Binding Verification — Thumbprint Match**
+**What:** Sends a non-numeric value for a numeric parameter.
+**Expected:** HTTP 400 or HTTP 200 with default value (graceful degradation).
+**PASS if** HTTP 400 or 200. **FAIL** if 500.
 
-1. Deploy a certificate to an IIS site via certctl
-2. Manually run on IIS server:
-   ```powershell
-   Get-IISSiteBinding -Name "Default Web Site" | Select-Object Thumbprint
-   ```
-3. Verify thumbprint matches certificate's SHA-1 hash (as shown in certctl GUI)
+---
 
-**PASS if** thumbprints match exactly (hex-encoded, no colons).
+**Test 21.1.5 — UTF-8 in common name**
 
-**42.M5: Error Handling — Invalid Site Name**
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '{"id": "mc-utf8-test", "common_name": "münchen.example.de"}' \
+  $SERVER/api/v1/certificates | jq '{common_name}'
+```
 
-1. Create IIS target with non-existent site name (e.g., "NonExistentSite")
-2. Trigger deployment
-3. Verify job fails with error message about invalid site
-4. Verify error is logged in agent and audit trail
+**What:** Creates a certificate with a UTF-8 common name (German umlaut).
+**Why:** Internationalized domain names are real. The API must handle non-ASCII without corruption.
+**Expected:** HTTP 201 with `common_name` preserved correctly.
+**PASS if** HTTP 201 and common_name matches input. **FAIL** if 400 or garbled text.
 
-**PASS if** error handled gracefully, job marked Failed with reason.
+---
 
-**42.M6: Field Validation — Config Injection Attempt**
+**Test 21.1.6 — Concurrent requests (parallel curl)**
 
-1. Try to create IIS target with site_name containing PowerShell metacharacters:
-   ```json
-   {
-     "site_name": "Default Web Site'; Get-Process; #"
-   }
-   ```
-2. Verify regex validation rejects this (field validation error, not API error)
-3. Verify no PowerShell execution occurs
+```bash
+for i in $(seq 1 10); do
+  curl -s -o /dev/null -w "HTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=1" &
+done
+wait
+```
 
-**PASS if** injection attempt blocked by field validation.
+**What:** Sends 10 parallel requests.
+**Why:** Concurrency bugs (race conditions, connection pool exhaustion) only appear under parallel load.
+**Expected:** All 10 requests return HTTP 200.
+**PASS if** all 10 return 200. **FAIL** if any return 500.
 
-**42.M7: SNI vs Non-SNI Binding**
+---
 
-1. Create two IIS targets: one with `sni: true`, one with `sni: false`
-2. Deploy certificates to both
-3. Verify Set-WebBinding with `-SslFlags 1` (SNI) for first target
-4. Verify Set-WebBinding without SslFlags (no SNI) for second target
-5. Test TLS connection to both sites, verify SNI-enabled site handles multiple domains correctly
+**Test 21.1.7 — Server survives internal error**
 
-**PASS if** SNI bindings configured correctly per target config.
+```bash
+# Trigger an error condition
+curl -s -o /dev/null $SERVER/api/v1/certificates/$(python3 -c "print('x'*10000)")
+# Server should still respond
+curl -s -w "\nHTTP %{http_code}\n" $SERVER/health
+```
+
+**What:** Sends a request with an extremely long path, then verifies the server is still alive.
+**Why:** One bad request must not crash the process. The recovery middleware should catch panics.
+**Expected:** Health check returns HTTP 200 after the bad request.
+**PASS if** health returns 200. **FAIL** if server is unresponsive.
+
+---
+
+**Test 21.1.8 — Empty request body on POST**
+
+```bash
+curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
+  -d '' \
+  $SERVER/api/v1/certificates
+```
+
+**What:** Sends an empty body to a POST endpoint.
+**Expected:** HTTP 400 (missing required fields).
+**PASS if** HTTP 400. **FAIL** if 500.
+
+---
+
+## Part 39: Performance Spot Checks
+
+**What this validates:** Basic response time benchmarks to catch obvious performance regressions.
+
+**Why it matters:** An API that takes 5 seconds per request is unusable. These aren't load tests — they're sanity checks.
+
+**Test 22.1.1 — List certificates < 200ms**
+
+```bash
+TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/certificates?per_page=15")
+echo "List certs: ${TIME}s"
+```
+
+**Expected:** `time_total` < 0.200 (200ms).
+**PASS if** < 200ms. **FAIL** if > 200ms.
+
+---
+
+**Test 22.1.2 — Stats summary < 500ms**
+
+```bash
+TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/stats/summary")
+echo "Stats summary: ${TIME}s"
+```
+
+**Expected:** < 0.500 (500ms).
+**PASS if** < 500ms. **FAIL** if > 500ms.
+
+---
+
+**Test 22.1.3 — Metrics < 200ms**
+
+```bash
+TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/metrics")
+echo "Metrics: ${TIME}s"
+```
+
+**Expected:** < 0.200.
+**PASS if** < 200ms. **FAIL** if > 200ms.
+
+---
+
+**Test 22.1.4 — 50 health checks < 5 seconds total**
+
+```bash
+START=$(date +%s%N)
+for i in $(seq 1 50); do
+  curl -s -o /dev/null $SERVER/health
+done
+END=$(date +%s%N)
+DURATION=$(( (END - START) / 1000000 ))
+echo "50 health checks: ${DURATION}ms"
+```
+
+**Expected:** Total < 5000ms (100ms average per request).
+**PASS if** < 5000ms. **FAIL** if > 5000ms.
+
+---
+
+**Test 39.1.5 — Prometheus endpoint < 300ms**
+
+```bash
+TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/metrics/prometheus")
+echo "Prometheus metrics: ${TIME}s"
+```
+
+**What:** Benchmarks the Prometheus text exposition endpoint that Grafana/Datadog agents scrape every 15-30s.
+**Why:** If Prometheus scraping takes > 300ms, it indicates the metrics computation is doing expensive DB queries per scrape rather than caching. This endpoint is hit by automated monitoring and must stay fast.
+**Expected:** `time_total` < 0.300 (300ms).
+**PASS if** < 300ms. **FAIL** if > 300ms.
+
+---
+
+**Test 39.1.6 — Audit trail query < 500ms**
+
+```bash
+TIME=$(curl -s -o /dev/null -w "%{time_total}" -H "$AUTH" "$SERVER/api/v1/events?per_page=50")
+echo "Audit trail (50 events): ${TIME}s"
+```
+
+**What:** Benchmarks the audit event list endpoint with a typical page size.
+**Why:** The audit trail is append-only and grows continuously. If queries slow down proportionally to table size, it signals missing indexes on `audit_events`. This is the canary for the largest table in the schema.
+**Expected:** `time_total` < 0.500 (500ms).
+**PASS if** < 500ms. **FAIL** if > 500ms.
+
+---
+
+## Part 40: Documentation Verification
+
+**What this validates:** Documentation accuracy against the running system. Claims in docs must match reality.
+
+**Why it matters:** Inaccurate documentation destroys trust. If the README claims 8 issuer connectors but only 6 exist in the code, evaluators question everything else too. These are executable checks, not reading assignments.
+
+### 40.1 README Screenshots Resolve
+
+```bash
+# Verify every screenshot referenced in README exists on disk
+grep -oP 'docs/screenshots/\S+\.png' README.md | while read f; do
+  [ -f "$f" ] && echo "OK: $f" || echo "MISSING: $f"
+done
+```
+
+**What:** Checks that every screenshot path in the README points to a real file.
+**Why:** Broken image links make the README look abandoned. GitHub renders them as broken icons.
+**PASS if** zero MISSING lines. **FAIL** if any screenshot file is missing.
+
+---
+
+### 40.2 Issuer Types Match Code ↔ Docs
+
+```bash
+# Extract issuer types from Go domain constants
+CODE_ISSUERS=$(grep 'IssuerType = "' internal/domain/connector.go | grep -oP '"[^"]+"' | sort)
+# Extract issuer types from connectors docs
+DOC_ISSUERS=$(grep -oP '(?<=Type: `)[^`]+' docs/connectors.md | sort)
+echo "Code: $CODE_ISSUERS"
+echo "Docs: $DOC_ISSUERS"
+```
+
+**What:** Cross-references issuer types defined in Go source against what's documented in connectors.md.
+**Why:** New connectors (Sectigo, Google CAS) get added to code but documentation updates get missed. This catches drift.
+**PASS if** both lists match. **FAIL** if any type is in code but not in docs (or vice versa).
+
+---
+
+### 40.3 Target Types Match Code ↔ Docs
+
+```bash
+CODE_TARGETS=$(grep 'TargetType = "' internal/domain/connector.go | grep -oP '"[^"]+"' | sort)
+DOC_TARGETS=$(grep -oP '(?<=Type: `)[^`]+' docs/connectors.md | grep -v 'Issuer' | sort)
+echo "Code: $CODE_TARGETS"
+echo "Docs: $DOC_TARGETS"
+```
+
+**What:** Same as 40.2 but for target connector types. Catches undocumented connectors (e.g., WinCertStore, JavaKeystore added in M46).
+**PASS if** both lists match. **FAIL** if any target type is missing from docs.
+
+---
+
+### 40.4 Quickstart Commands Execute
+
+```bash
+# Extract code blocks from quickstart and verify they parse
+grep -A1 '```bash' docs/quickstart.md | grep -v '```' | grep -v '^--$' | head -5
+```
+
+**What:** Spot-checks that quickstart bash commands are syntactically valid.
+**Why:** Copy-paste errors in quickstart commands (missing quotes, wrong env vars) cause immediate frustration for new users — the first 5 minutes determine whether they continue.
+**PASS if** commands parse without syntax errors. **FAIL** if any command has obvious errors.
+
+---
+
+### 40.5 Architecture Docs Match Running Containers
+
+```bash
+# Compare documented components against actual Docker Compose services
+COMPOSE_SERVICES=$(docker compose -f deploy/docker-compose.yml config --services | sort)
+echo "Compose services: $COMPOSE_SERVICES"
+# Cross-reference against architecture.md component list
+grep -c 'certctl-server\|certctl-agent\|postgres' docs/architecture.md
+```
+
+**What:** Validates that architecture.md accurately describes the components that actually run in Docker Compose.
+**Why:** Architecture diagrams that don't match the running system mislead operators during troubleshooting.
+**PASS if** all compose services are referenced in architecture.md. **FAIL** if components are missing.
+
+---
+
+### 40.6 OpenAPI Spec Parity With Router
+
+```bash
+# Count OpenAPI operations
+OPENAPI_OPS=$(grep -c "operationId:" api/openapi.yaml)
+# Count router registrations
+ROUTER_REGS=$(grep -c "r.Register\|r.mux.Handle" internal/api/router/router.go)
+echo "OpenAPI operations: $OPENAPI_OPS"
+echo "Router registrations: $ROUTER_REGS"
+```
+
+**What:** Counts operations in the OpenAPI spec vs route registrations in the router.
+**Why:** OpenAPI spec drift is the #1 API documentation failure mode. If the spec says an endpoint exists but the router doesn't register it (or vice versa), SDK generators and MCP tools break.
+**PASS if** both counts are equal. **FAIL** if mismatch (indicates spec/code drift).
+
+---
+
+### 40.7 Compliance Docs Reference Real Features
+
+```bash
+# Verify SOC 2 doc references endpoints that exist in the router
+grep -oP '/api/v1/[a-z\-/]+' docs/compliance-soc2.md | sort -u | while read ep; do
+  grep -q "${ep}" internal/api/router/router.go && echo "OK: $ep" || echo "MISSING: $ep"
+done
+```
+
+**What:** Cross-references API endpoints cited in compliance documentation against the actual router.
+**Why:** Compliance mappings that cite nonexistent endpoints are worse than no compliance docs at all — they create audit risk. An auditor who checks a cited endpoint and finds a 404 will question the entire mapping.
+**PASS if** zero MISSING lines. **FAIL** if any cited endpoint doesn't exist in the router.
+
+---
+
+### 40.8 Migration Guide Commands Are Valid
+
+```bash
+# Check that migration guides reference real CLI commands
+for guide in docs/migrate-from-certbot.md docs/migrate-from-acmesh.md docs/certctl-for-cert-manager-users.md; do
+  [ -f "$guide" ] && echo "EXISTS: $guide" || echo "MISSING: $guide"
+done
+```
+
+**What:** Verifies all three migration guides exist and are accessible.
+**Why:** Migration guides are SEO landing pages and adoption funnels. Missing files return 404s on GitHub, killing the funnel.
+**PASS if** all 3 files exist. **FAIL** if any migration guide is missing.
+
+---
+
+## Part 41: Regression Tests
+
+**What this validates:** Specific bugs found and fixed during development. These prevent re-introduction.
+
+**Why it matters:** Regression bugs are the most embarrassing — you already found and fixed them once. These tests ensure they stay fixed.
+
+**Test 25.1.1 — DELETE endpoints return 204, not 200**
+
+```bash
+# Create and delete a target
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"tgt-regression","name":"Regression","type":"nginx","config":{}}' $SERVER/api/v1/targets > /dev/null
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/targets/tgt-regression")
+echo "DELETE target: HTTP $CODE"
+
+# Create and delete an agent group
+curl -s -X POST -H "$AUTH" -H "$CT" -d '{"id":"ag-regression","name":"Regression Group"}' $SERVER/api/v1/agent-groups > /dev/null
+CODE=$(curl -s -o /dev/null -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/agent-groups/ag-regression")
+echo "DELETE agent group: HTTP $CODE"
+```
+
+**What:** Verifies DELETE endpoints return 204 (No Content), not 200.
+**Why:** This was a real bug — handlers returned 200 for delete operations. The fix was applied in M15a.
+**Expected:** Both return HTTP 204.
+**PASS if** both 204. **FAIL** if either returns 200.
+
+---
+
+**Test 25.1.2 — per_page exceeding max falls back to default**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates?per_page=9999" | jq '{per_page}'
+```
+
+**What:** Sends `per_page=9999` which exceeds the maximum (500).
+**Why:** Bug: the handler was supposed to cap at 500 but instead rejected values > 500 and fell back to the default (50). The tests were written expecting cap-at-500 but the actual behavior is fall-back-to-50.
+**Expected:** `per_page` = 50 (default fallback), not 500 or 9999.
+**PASS if** per_page = 50. **FAIL** if 500 or 9999.
+
+---
+
+**Test 25.1.3 — Seed demo network scan targets present**
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/network-scan-targets" | jq '{total, ids: [.items[].id] | sort}'
+```
+
+**What:** Verifies the 3 seed network scan targets were loaded.
+**Why:** These were added during M21 and initially missed from seed data.
+**Expected:** `total` = 3. IDs: `["nst-dc1-web", "nst-dc2-apps", "nst-dmz"]`.
+**PASS if** total = 3 and all 3 IDs present. **FAIL** otherwise.
+
+---
+
+**Test 25.1.4 — GUI delete on FK-restricted entities shows error, not silent failure**
+
+```bash
+# Try deleting owner o-alice via API — she owns demo certificates
+CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/owners/o-alice")
+echo "DELETE owner with certs: HTTP $CODE"
+cat /tmp/delete-resp.json | jq .
+
+# Try deleting issuer iss-local — certificates reference it
+CODE=$(curl -s -o /tmp/delete-resp.json -w "%{http_code}" -X DELETE -H "$AUTH" "$SERVER/api/v1/issuers/iss-local")
+echo "DELETE issuer with certs: HTTP $CODE"
+cat /tmp/delete-resp.json | jq .
+```
+
+**What:** Verifies that deleting owners/issuers with assigned certificates returns 409 Conflict with a descriptive message.
+**Why:** This was a real bug — the backend returned 500 (generic "Failed to delete"), `fetchJSON` threw on the error, and TanStack Query's `onError` wasn't wired up. The user clicked OK on the confirm dialog and nothing visibly happened. Fixed by: (1) backend returns 409 with descriptive message for FK constraint violations, (2) `fetchJSON` handles 204 No Content for successful deletes, (3) frontend mutation `onError` surfaces the error.
+**Expected:** Both return HTTP 409 with descriptive conflict messages.
+**PASS if** both 409 with messages. **FAIL** if 500 (unhelpful error) or 204 (data integrity violation).
+
+---
+
+**Test 25.1.5 — OpenAPI spec operations match router**
+
+```bash
+echo "OpenAPI operations: $(grep -c 'operationId:' api/openapi.yaml)"
+echo "Router registrations: $(grep -c 'r.Register\|r.mux.Handle' internal/api/router/router.go)"
+```
+
+**What:** Counts operations in the OpenAPI spec and route registrations in the router, verifying they match.
+**Why:** OpenAPI spec drift happens as endpoints are added or removed. Mismatches indicate the spec is out of date.
+**Expected:** Both counts equal.
+**PASS if** both counts match. **FAIL** if mismatch (indicates spec/code drift).
+
+---
+
+**Test 25.1.6 — Go service tests use strings.Contains, not errors.Is**
+
+```bash
+grep -rn "errors.Is.*errors.New\|errors.Is(.*err.*errors.New" internal/service/*_test.go | wc -l
+```
+
+**What:** Checks for the anti-pattern `errors.Is(err, errors.New(...))` which never matches because `errors.New` creates a new instance every time.
+**Why:** This was a real bug in `TestTeamService_List_RepositoryError` — the test was passing for the wrong reason (both sides returned false). The fix was to use `strings.Contains`.
+**Expected:** Count = 0 (no instances of the anti-pattern).
+**PASS if** count = 0. **FAIL** if > 0.
+
+---
+
+## Part 42: Envoy Target Connector
+
+**What this validates:** File-based certificate deployment to Envoy proxy, including optional SDS (Secret Discovery Service) JSON config generation.
+
+**Why it matters:** Envoy is the default data plane for Istio and many service mesh deployments. File-based deployment with optional SDS JSON means certctl can manage certs for Envoy without requiring xDS integration — Envoy watches the filesystem and auto-reloads.
+
+### 42.1 Envoy Connector Unit Tests Pass
+
+```bash
+go test ./internal/connector/target/envoy/... -v -count=1
+```
+
+**What:** Runs the 15 Envoy connector tests (config validation, deployment, SDS JSON generation, path traversal prevention).
+**Expected:** All 15 tests pass.
+**PASS if** exit code 0. **FAIL** if any test fails.
+
+---
+
+### 42.2 Envoy in Domain Types
+
+```bash
+grep 'TargetTypeEnvoy' internal/domain/connector.go
+```
+
+**What:** Verifies the `TargetTypeEnvoy` constant is registered in the domain model.
+**PASS if** grep finds the constant. **FAIL** if not found.
+
+---
+
+### 42.3 Envoy Config Fields in Frontend
+
+```bash
+grep -c 'Envoy' web/src/pages/TargetsPage.tsx
+```
+
+**What:** Verifies Envoy appears in the frontend target wizard with appropriate config fields (cert_dir, cert_filename, key_filename, chain_filename, sds_config).
+**PASS if** count > 0. **FAIL** if Envoy is missing from the target wizard.
+
+---
+
+### 42.4 SDS JSON Output Validation
+
+```bash
+go test ./internal/connector/target/envoy/... -run TestDeploy.*SDS -v
+```
+
+**What:** Runs the SDS-specific deployment test that verifies the generated SDS JSON contains the correct `type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.Secret` resource with file references.
+**PASS if** SDS JSON is valid and references the correct cert/key paths.
+
+---
+
+### 42.5 Path Traversal Prevention
+
+```bash
+go test ./internal/connector/target/envoy/... -run TestValidateConfig.*Traversal -v
+```
+
+**What:** Verifies that config values containing `../` are rejected to prevent writing certs outside the designated directory.
+**Why:** Envoy cert_dir paths come from user config — without validation, an attacker could write files to arbitrary locations.
+**PASS if** path traversal attempts are rejected with an error.
+
+---
+
+## Part 43: Postfix & Dovecot Target Connectors
+
+**What this validates:** Dual-mode mail server TLS connector (postfix/dovecot modes), file-based certificate deployment with service reload.
+
+**Why it matters:** Email servers are the forgotten TLS surface. Postfix and Dovecot handle STARTTLS for SMTP and IMAP — expired certs here cause silent mail delivery failures that are hard to diagnose.
+
+### 43.1 Postfix/Dovecot Unit Tests Pass
+
+```bash
+go test ./internal/connector/target/postfix/... -v -count=1
+```
+
+**What:** Runs all 18 connector tests covering config validation, deployment, and shell injection prevention for both Postfix and Dovecot modes.
+**Expected:** All 18 tests pass.
+**PASS if** exit code 0. **FAIL** if any test fails.
+
+---
+
+### 43.2 Shell Injection Prevention
+
+```bash
+go test ./internal/connector/target/postfix/... -run TestValidateConfig.*Injection -v
+```
+
+**What:** Runs the 4 shell injection security tests (semicolons, pipes, command substitution, backticks in reload/validate commands).
+**Why:** Reload commands are executed via `os/exec`. Without validation, a malicious config like `reload_command: "postfix reload; rm -rf /"` would execute arbitrary commands on the agent.
+**PASS if** all injection attempts rejected.
+
+---
+
+### 43.3 Dovecot Mode Config
+
+```bash
+go test ./internal/connector/target/postfix/... -run TestValidateConfig_DovecotMode -v
+```
+
+**What:** Verifies Dovecot mode applies correct defaults (doveadm reload, doveconf -n) distinct from Postfix mode (postfix reload, postfix check).
+**PASS if** Dovecot-specific defaults applied correctly.
+
+---
+
+### 43.4 Domain Types Registered
+
+```bash
+grep -E 'TargetTypePostfix|TargetTypeDovecot' internal/domain/connector.go
+```
+
+**What:** Verifies both mail server target types are registered in the domain model.
+**PASS if** both constants found. **FAIL** if either is missing.
+
+---
+
+## Part 44: SSH Target Connector
+
+**What this validates:** Agentless certificate deployment via SSH/SFTP to any Linux/Unix server without requiring the certctl agent binary.
+
+**Why it matters:** Not every server can run a dedicated agent (locked-down environments, legacy systems, appliances). SSH deployment via a proxy agent means certctl can manage certs on any reachable server with SSH access.
+
+### 44.1 SSH Connector Unit Tests Pass
+
+```bash
+go test ./internal/connector/target/ssh/... -v -count=1
+```
+
+**What:** Runs all 25 SSH connector tests covering config validation (key/password/inline auth), deployment, and shell injection prevention.
+**Expected:** All 25 tests pass.
+**PASS if** exit code 0. **FAIL** if any test fails.
+
+---
+
+### 44.2 Auth Method Validation
+
+```bash
+go test ./internal/connector/target/ssh/... -run TestValidateConfig -v
+```
+
+**What:** Verifies config validation for all 3 auth methods (key file, inline key PEM, password) and rejects invalid combinations (e.g., auth_method=key with no key_path or inline_key).
+**PASS if** all validation tests pass.
+
+---
+
+### 44.3 Shell Injection Prevention
+
+```bash
+go test ./internal/connector/target/ssh/... -run TestValidateConfig.*Injection -v
+```
+
+**What:** Verifies reload commands containing shell metacharacters are rejected.
+**Why:** The SSH connector executes reload commands on remote servers via `session.Run()`. Injection here has remote code execution impact.
+**PASS if** all injection attempts rejected.
+
+---
+
+### 44.4 SFTP File Permissions
+
+```bash
+go test ./internal/connector/target/ssh/... -run TestDeploy -v
+```
+
+**What:** Verifies cert/key/chain files are written via SFTP with configurable octal permissions (e.g., key files at 0600, cert files at 0644).
+**PASS if** mock SSH client receives correct permission values.
+
+---
+
+### 44.5 Domain Type and Agent Dispatch
+
+```bash
+grep 'TargetTypeSSH' internal/domain/connector.go && grep 'sshconn' cmd/agent/main.go
+```
+
+**What:** Verifies the SSH target type is in the domain model and the agent dispatch switch handles it with the `sshconn` import alias.
+**PASS if** both greps find matches. **FAIL** if either is missing.
+
+---
+
+## Part 45: Windows Certificate Store Connector
+
+**What this validates:** PowerShell-based certificate import into the Windows certificate store (My/Root/CA/WebHosting), dual-mode local/WinRM deployment.
+
+**Why it matters:** Not all Windows apps use IIS — many services (SQL Server, Exchange, RDP) read certs directly from the Windows certificate store. This connector covers that surface.
+
+### 45.1 WinCertStore Unit Tests Pass
+
+```bash
+go test ./internal/connector/target/wincertstore/... -v -count=1
+```
+
+**What:** Runs all 19 WinCertStore connector tests via the injectable PowerShellExecutor mock.
+**Expected:** All 19 tests pass (including on Linux CI via mock executor).
+**PASS if** exit code 0.
+
+---
+
+### 45.2 Store Location Validation
+
+```bash
+go test ./internal/connector/target/wincertstore/... -run TestValidateConfig -v
+```
+
+**What:** Verifies config validation for store names (My/Root/CA/WebHosting) and locations (LocalMachine/CurrentUser), rejecting invalid values.
+**PASS if** valid stores accepted, invalid stores rejected.
+
+---
+
+### 45.3 Shared certutil Package
+
+```bash
+go test ./internal/connector/target/certutil/... -v -count=1
+```
+
+**What:** Runs the 13 shared certutil tests (CreatePFX, ParsePrivateKey, ComputeThumbprint, GenerateRandomPassword, ParseCertificatePEM) used by IIS, WinCertStore, and JavaKeystore connectors.
+**Why:** This shared package is a critical dependency for 3 connectors. A regression here breaks Windows and Java deployment simultaneously.
+**PASS if** all 13 tests pass.
+
+---
+
+## Part 46: Java Keystore Connector
+
+**What this validates:** PEM → PKCS#12 → keytool import pipeline for JKS and PKCS12 keystore formats, used by Tomcat, Spring Boot, and Java middleware.
+
+**Why it matters:** Java apps are the largest enterprise deployment surface that still uses keystores. Automating `keytool -importkeystore` eliminates a manual, error-prone step that causes outages when operators forget to update the keystore.
+
+### 46.1 JavaKeystore Unit Tests Pass
+
+```bash
+go test ./internal/connector/target/javakeystore/... -v -count=1
+```
+
+**What:** Runs all 21 JavaKeystore connector tests via the injectable CommandExecutor mock.
+**Expected:** All 21 tests pass.
+**PASS if** exit code 0.
+
+---
+
+### 46.2 Alias Validation
+
+```bash
+go test ./internal/connector/target/javakeystore/... -run TestValidateConfig -v
+```
+
+**What:** Verifies alias names are validated against `^[a-zA-Z0-9_\-\.]+$` and path traversal in keystore_path is rejected.
+**Why:** Aliases with special characters break keytool commands. Path traversal could overwrite arbitrary files.
+**PASS if** valid aliases accepted, invalid patterns rejected.
+
+---
+
+### 46.3 Keystore Format Support
+
+```bash
+go test ./internal/connector/target/javakeystore/... -run TestDeploy -v
+```
+
+**What:** Verifies both JKS and PKCS12 keystore formats work with the correct `-deststoretype` flag.
+**PASS if** both formats deploy successfully via mock executor.
+
+---
+
+### 46.4 Shell Injection in Reload Command
+
+```bash
+go test ./internal/connector/target/javakeystore/... -run TestValidateConfig.*Injection -v
+```
+
+**What:** Verifies reload commands (e.g., `systemctl restart tomcat`) are validated against shell injection.
+**PASS if** injection attempts rejected.
+
+---
+
+### 46.5 Existing Alias Deletion Before Import
+
+```bash
+go test ./internal/connector/target/javakeystore/... -run TestDeploy.*Existing -v
+```
+
+**What:** Verifies the connector runs `keytool -delete` before `keytool -importkeystore` to replace existing aliases, and tolerates missing alias (first deployment).
+**PASS if** delete-before-import sequence executed, missing alias tolerated.
+
+---
+
+## Part 47: Certificate Digest Email
+
+**What this validates:** Scheduled HTML digest email with certificate stats, expiring certs table, and owner email fallback.
+
+**Why it matters:** The digest is the primary ops awareness mechanism for teams that don't have the dashboard open all day. If the digest breaks, expiring certs go unnoticed until they cause outages.
+
+### 47.1 Digest Service Unit Tests Pass
+
+```bash
+go test ./internal/service/ -run TestDigest -v -count=1
+```
+
+**What:** Runs the 10 digest service tests (HTML rendering, stats aggregation, owner email fallback, empty states).
+**Expected:** All 10 tests pass.
+**PASS if** exit code 0.
+
+---
+
+### 47.2 Digest Preview Endpoint
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/digest/preview" -o /dev/null -w "%{http_code}"
+```
+
+**What:** Calls the digest preview endpoint and checks it returns HTML content (200) or 503 if SMTP is not configured.
+**PASS if** HTTP 200 (with SMTP configured) or HTTP 503 (without SMTP). **FAIL** if 500.
+
+---
+
+### 47.3 Email Adapter Unit Tests
+
+```bash
+go test ./internal/connector/notifier/email/... -v -count=1
+```
+
+**What:** Runs the 3 email adapter tests verifying the NotifierAdapter bridges connector-layer SMTP to service-layer Notifier interface.
+**PASS if** all 3 tests pass.
+
+---
+
+### 47.4 Digest Handler Tests
+
+```bash
+go test ./internal/api/handler/ -run TestDigest -v -count=1
+```
+
+**What:** Runs the 8 digest handler tests (preview success/error, send success/error, method not allowed, nil handler safety).
+**PASS if** all 8 tests pass.
+
+---
+
+## Part 48: Dynamic Issuer Configuration (M34)
+
+**What this validates:** GUI-driven issuer CRUD with AES-256-GCM encrypted config storage, test connection flow, and dynamic registry rebuild without server restart.
+
+**Why it matters:** Before M34, adding an issuer required editing env vars and restarting the server. Dynamic config means operators can add, test, and activate a new CA from the dashboard in 30 seconds. The encryption protects sensitive fields (API keys, tokens) at rest in PostgreSQL.
+
+### 48.1 Crypto Package Tests
+
+```bash
+go test ./internal/crypto/... -v -count=1
+```
+
+**What:** Runs the 10 encryption tests (AES-256-GCM encrypt/decrypt, key derivation, nil key passthrough, tamper detection).
+**Why:** The crypto package protects every issuer and target config stored in the database. A regression here leaks credentials.
+**PASS if** all 10 tests pass.
+
+---
+
+### 48.2 Create Issuer via API with Encrypted Config
+
+```bash
+curl -s -X POST -H "$AUTH" -H "$CT" "$SERVER/api/v1/issuers" -d '{
+  "name": "Test ACME",
+  "type": "ACME",
+  "config": {"directory_url": "https://acme-staging-v02.api.letsencrypt.org/directory", "email": "test@example.com"}
+}' | jq '{id, name, type, source}'
+```
+
+**What:** Creates an issuer via the API and verifies it's stored with `source: "database"` (not "env").
+**PASS if** issuer created with source="database". **FAIL** if source="env" or error.
+
+---
+
+### 48.3 Config Redaction in API Response
+
+```bash
+curl -s -H "$AUTH" "$SERVER/api/v1/issuers" | jq '.data[] | select(.type == "VaultPKI") | .config'
+```
+
+**What:** Verifies that sensitive config fields (vault_token, api_key, password) are redacted in API GET responses.
+**Why:** Config contains secrets. API responses should never expose raw credentials — they must be masked with "********".
+**PASS if** sensitive fields show "********". **FAIL** if raw credentials visible.
+
+---
+
+### 48.4 Env Var Backward Compatibility Seeding
+
+```bash
+# Check that env-var-configured issuers appear with source="env"
+curl -s -H "$AUTH" "$SERVER/api/v1/issuers" | jq '[.data[] | select(.source == "env") | .id]'
+```
+
+**What:** Verifies that issuers configured via environment variables (e.g., `CERTCTL_ACME_DIRECTORY_URL`) are seeded into the database with `source: "env"` on first boot.
+**Why:** Backward compatibility — existing deployments using env vars must not break when upgrading to v2.1.0.
+**PASS if** env-configured issuers have source="env". **FAIL** if missing or wrong source.
+
+---
+
+## Part 49: Dynamic Target Configuration (M35)
+
+**What this validates:** Same pattern as M34 but for target connectors — GUI-driven CRUD with encrypted config and test connection via agent heartbeat status.
+
+### 49.1 Create Target via API
+
+```bash
+curl -s -X POST -H "$AUTH" -H "$CT" "$SERVER/api/v1/targets" -d '{
+  "name": "Test NGINX",
+  "type": "NGINX",
+  "agent_id": "agent-web-01",
+  "config": {"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}
+}' | jq '{id, name, type, source, enabled}'
+```
+
+**What:** Creates a target via the API with encrypted config storage.
+**PASS if** target created with source="database" and enabled=true.
+
+---
+
+### 49.2 Test Connection via Agent Heartbeat
+
+```bash
+# Target's assigned agent must have heartbeat within last 5 minutes
+curl -s -X POST -H "$AUTH" "$SERVER/api/v1/targets/tgt-test-nginx/test" | jq '{status, message}'
+```
+
+**What:** Tests target connection by checking if the assigned agent is online (heartbeat within 5 minutes).
+**Why:** Unlike issuers (which can be tested by calling ValidateConfig), targets can only be tested indirectly — the agent must be reachable.
+**PASS if** test returns status "connected" (agent online) or "disconnected" with message. **FAIL** if 500.
+
+---
+
+## Part 50: Onboarding Wizard (M36)
+
+**What this validates:** First-run setup wizard shown on fresh installs when no user-configured issuers or certificates exist.
+
+**Why it matters:** The onboarding wizard is the first thing a new user sees. If it breaks, the product looks unfinished. If it shows on existing installs, it's annoying. The detection logic must be precise.
+
+### 50.1 Wizard Shows on Fresh Install
+
+```bash
+# With demo mode disabled (no seed_demo.sql), check that dashboard returns zero certs
+curl -s -H "$AUTH" "$SERVER/api/v1/certificates" | jq '.total'
+```
+
+**What:** Verifies the precondition for wizard display: zero certificates in the system.
+**Why:** The wizard should only show when `total_certificates === 0` AND no user-configured issuers exist.
+**PASS if** total=0 on fresh install. (Manual: verify wizard appears in browser.)
+
+---
+
+### 50.2 Wizard Does Not Show in Demo Mode
+
+**Manual test:** Start with `docker compose -f docker-compose.yml -f docker-compose.demo.yml up`. Navigate to dashboard.
+
+**What:** Verifies the wizard does NOT appear when seed demo data is loaded (15 certs, 5 agents).
+**PASS if** dashboard shows charts and data, no wizard overlay.
+
+---
+
+### 50.3 Wizard Dismissal Persists
+
+**Manual test:** Click "Skip setup" on the wizard. Refresh the page.
+
+**What:** Verifies `localStorage` dismissal key (`certctl:onboarding-dismissed`) prevents wizard from reappearing.
+**PASS if** wizard does not reappear after refresh.
+
+---
+
+### 50.4 Wizard Step 1: Connect a CA
+
+**Manual test:** In the wizard, select an issuer type (e.g., Local CA), fill in config, click Create + Test.
+
+**What:** Verifies the issuer creation flow works end-to-end from within the wizard, using the same M34 API endpoints.
+**PASS if** issuer created and test connection succeeds.
+
+---
+
+### 50.5 Docker Compose Split
+
+```bash
+# Verify clean compose has no seed_demo.sql reference
+grep -c 'seed_demo' deploy/docker-compose.yml
+# Verify demo override has seed_demo.sql
+grep -c 'seed_demo' deploy/docker-compose.demo.yml
+```
+
+**What:** Confirms the Docker Compose split: clean default (wizard-compatible) vs demo override (pre-seeded).
+**PASS if** docker-compose.yml has 0 references, docker-compose.demo.yml has 1+ references.
+
+---
+
+## Part 51: ACME Profile Selection (M45)
+
+**What this validates:** ACME certificate profile selection in the newOrder request, enabling Let's Encrypt shortlived (6-day) and tlsserver profiles.
+
+**Why it matters:** Let's Encrypt's 6-day shortlived certificates are the future of the web PKI. Without profile selection, certctl can only request default certificates. This feature unlocks the entire short-lived cert ecosystem.
+
+### 51.1 Profile Selection Unit Tests
+
+```bash
+go test ./internal/connector/issuer/acme/ -run TestProfile -v -count=1
+```
+
+**What:** Runs the 13 ACME profile selection tests (JWS signing, nonce management, directory discovery, profile validation, empty profile fallback).
+**Expected:** All 13 tests pass.
+**PASS if** exit code 0.
+
+---
+
+### 51.2 SC-081v3 Threshold Domain Tests
+
+```bash
+go test ./internal/domain/ -run TestSC081 -v -count=1
+```
+
+**What:** Runs the 5 domain tests validating renewal thresholds against the SC-081v3 validity reduction timeline (200→100→47 days, 6-day shortlived).
+**Why:** Confirms that the default thresholds [30,14,7,0] work correctly at all SC-081v3 mandated lifetimes.
+**PASS if** all 5 tests pass.
+
+---
+
+### 51.3 Profile Config in Frontend
+
+```bash
+grep 'profile' web/src/config/issuerTypes.ts | grep -i 'acme'
+```
+
+**What:** Verifies the ACME issuer config includes a profile selection field (empty/tlsserver/shortlived) in the frontend.
+**PASS if** profile field found in ACME config. **FAIL** if missing.
+
+---
+
+## Part 52: Helm Chart Deployment (M30)
+
+**What this validates:** Kubernetes deployment via the Helm chart — server, PostgreSQL, agent, with security contexts, health probes, and configurable values.
+
+**Why it matters:** Helm is the standard Kubernetes deployment mechanism. The chart must produce valid manifests, set security contexts (non-root, read-only rootfs), and wire all certctl config options through values.yaml.
+
+### 52.1 Helm Lint
+
+```bash
+helm lint deploy/helm/certctl/
+```
+
+**What:** Runs Helm's built-in linter to catch template syntax errors, missing required values, and structural issues.
+**PASS if** lint passes with no errors. Warnings are acceptable.
+
+---
+
+### 52.2 Helm Template Renders
+
+```bash
+helm template certctl deploy/helm/certctl/ | head -50
+```
+
+**What:** Renders the chart templates with default values and verifies YAML output is valid.
+**PASS if** valid YAML rendered without errors. **FAIL** if template rendering fails.
+
+---
+
+### 52.3 Security Contexts Present
+
+```bash
+helm template certctl deploy/helm/certctl/ | grep -c 'securityContext'
+```
+
+**What:** Verifies that rendered manifests include security contexts (non-root user, read-only root filesystem).
+**Why:** Kubernetes clusters with PodSecurityPolicies or PodSecurityAdmission will reject pods without security contexts.
+**PASS if** count > 0 (security contexts present in server Deployment, agent DaemonSet).
+
+---
+
+### 52.4 Health Probes Configured
+
+```bash
+helm template certctl deploy/helm/certctl/ | grep -c 'livenessProbe\|readinessProbe'
+```
+
+**What:** Verifies that server and agent pods have health probes for Kubernetes to manage restarts.
+**PASS if** at least 2 probe references found (liveness + readiness for server).
+
+---
+
+### 52.5 Values Override
+
+```bash
+helm template certctl deploy/helm/certctl/ --set server.replicaCount=3 | grep 'replicas: 3'
+```
+
+**What:** Verifies that values.yaml overrides work (e.g., scaling server replicas).
+**PASS if** rendered manifest shows `replicas: 3`. **FAIL** if override is ignored.
 
 ---
 
@@ -6522,15 +7258,115 @@ These must be green before starting manual QA:
 
 **PASS if** deployment succeeds after token refresh.
 
+### Part 42: Envoy Target Connector
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 42.1 | Envoy connector unit tests pass | Auto | ☐ |  | `go test ./internal/connector/target/envoy/...` |
+| 42.2 | TargetTypeEnvoy in domain | Auto | ☐ |  | `grep 'TargetTypeEnvoy' internal/domain/connector.go` |
+| 42.3 | Envoy config fields in frontend | Auto | ☐ |  | `grep 'Envoy' web/src/pages/TargetsPage.tsx` |
+| 42.4 | SDS JSON output validation | Auto | ☐ |  | `go test -run TestDeploy.*SDS` |
+| 42.5 | Path traversal prevention | Auto | ☐ |  | `go test -run TestValidateConfig.*Traversal` |
+
+### Part 43: Postfix & Dovecot Target Connectors
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 43.1 | Postfix/Dovecot unit tests pass | Auto | ☐ |  | `go test ./internal/connector/target/postfix/...` |
+| 43.2 | Shell injection prevention | Auto | ☐ |  | `go test -run TestValidateConfig.*Injection` |
+| 43.3 | Dovecot mode config | Auto | ☐ |  | `go test -run TestValidateConfig_DovecotMode` |
+| 43.4 | Domain types registered | Auto | ☐ |  | `grep 'TargetTypePostfix\|TargetTypeDovecot'` |
+
+### Part 44: SSH Target Connector
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 44.1 | SSH connector unit tests pass | Auto | ☐ |  | `go test ./internal/connector/target/ssh/...` |
+| 44.2 | Auth method validation | Auto | ☐ |  | `go test -run TestValidateConfig` |
+| 44.3 | Shell injection prevention | Auto | ☐ |  | `go test -run TestValidateConfig.*Injection` |
+| 44.4 | SFTP file permissions | Auto | ☐ |  | `go test -run TestDeploy` |
+| 44.5 | Domain type and agent dispatch | Auto | ☐ |  | `grep 'TargetTypeSSH\|sshconn'` |
+
+### Part 45: Windows Certificate Store Connector
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 45.1 | WinCertStore unit tests pass | Auto | ☐ |  | `go test ./internal/connector/target/wincertstore/...` |
+| 45.2 | Store location validation | Auto | ☐ |  | `go test -run TestValidateConfig` |
+| 45.3 | Shared certutil package tests | Auto | ☐ |  | `go test ./internal/connector/target/certutil/...` |
+
+### Part 46: Java Keystore Connector
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 46.1 | JavaKeystore unit tests pass | Auto | ☐ |  | `go test ./internal/connector/target/javakeystore/...` |
+| 46.2 | Alias validation | Auto | ☐ |  | `go test -run TestValidateConfig` |
+| 46.3 | Keystore format support | Auto | ☐ |  | `go test -run TestDeploy` |
+| 46.4 | Shell injection in reload | Auto | ☐ |  | `go test -run TestValidateConfig.*Injection` |
+| 46.5 | Existing alias deletion | Auto | ☐ |  | `go test -run TestDeploy.*Existing` |
+
+### Part 47: Certificate Digest Email
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 47.1 | Digest service unit tests | Auto | ☐ |  | `go test -run TestDigest` |
+| 47.2 | Digest preview endpoint | Auto | ☐ |  | `curl /api/v1/digest/preview` |
+| 47.3 | Email adapter unit tests | Auto | ☐ |  | `go test ./internal/connector/notifier/email/...` |
+| 47.4 | Digest handler tests | Auto | ☐ |  | `go test -run TestDigest` (handler) |
+
+### Part 48: Dynamic Issuer Configuration (M34)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 48.1 | Crypto package tests | Auto | ☐ |  | `go test ./internal/crypto/...` |
+| 48.2 | Create issuer via API | Auto | ☐ |  | `POST /api/v1/issuers` |
+| 48.3 | Config redaction in response | Manual | ☐ |  | Verify sensitive fields masked |
+| 48.4 | Env var backward compat seeding | Manual | ☐ |  | Verify source="env" for env issuers |
+
+### Part 49: Dynamic Target Configuration (M35)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 49.1 | Create target via API | Auto | ☐ |  | `POST /api/v1/targets` |
+| 49.2 | Test connection via heartbeat | Manual | ☐ |  | Agent must be online |
+
+### Part 50: Onboarding Wizard (M36)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 50.1 | Wizard shows on fresh install | Manual | ☐ |  | No seed data |
+| 50.2 | Wizard does NOT show in demo mode | Manual | ☐ |  | With seed_demo.sql |
+| 50.3 | Wizard dismissal persists | Manual | ☐ |  | localStorage check |
+| 50.4 | Wizard Step 1: Connect a CA | Manual | ☐ |  | Full issuer creation flow |
+| 50.5 | Docker Compose split | Auto | ☐ |  | `grep seed_demo` both files |
+
+### Part 51: ACME Profile Selection (M45)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 51.1 | Profile selection unit tests | Auto | ☐ |  | `go test -run TestProfile` |
+| 51.2 | SC-081v3 threshold domain tests | Auto | ☐ |  | `go test -run TestSC081` |
+| 51.3 | Profile config in frontend | Auto | ☐ |  | `grep 'profile' issuerTypes.ts` |
+
+### Part 52: Helm Chart Deployment (M30)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 52.1 | Helm lint | Auto | ☐ |  | `helm lint deploy/helm/certctl/` |
+| 52.2 | Helm template renders | Auto | ☐ |  | `helm template certctl deploy/helm/certctl/` |
+| 52.3 | Security contexts present | Auto | ☐ |  | `grep securityContext` in output |
+| 52.4 | Health probes configured | Auto | ☐ |  | `grep livenessProbe\|readinessProbe` |
+| 52.5 | Values override | Auto | ☐ |  | `--set server.replicaCount=3` |
+
 ### Summary
 
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 36 |
+| ☐ Auto (not yet run) | 88 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 259 |
-| **Total** | **444** |
+| ☐ Manual (requires hands-on verification) | 270 |
+| **Total** | **507** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 
