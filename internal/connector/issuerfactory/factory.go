@@ -7,6 +7,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/acme"
+	"github.com/shankar0123/certctl/internal/connector/issuer/awsacmpca"
 	"github.com/shankar0123/certctl/internal/connector/issuer/digicert"
 	"github.com/shankar0123/certctl/internal/connector/issuer/googlecas"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
@@ -80,6 +81,13 @@ func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.L
 			return nil, fmt.Errorf("invalid Google CAS config: %w", err)
 		}
 		return googlecas.New(&cfg, logger), nil
+
+	case "AWSACMPCA":
+		var cfg awsacmpca.Config
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("invalid AWS ACM PCA config: %w", err)
+		}
+		return awsacmpca.New(&cfg, logger), nil
 
 	default:
 		return nil, fmt.Errorf("unknown issuer type: %q", issuerType)

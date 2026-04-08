@@ -24,6 +24,7 @@ const typeLabels: Record<string, string> = {
   SSH: 'SSH',
   WinCertStore: 'Windows Cert Store',
   JavaKeystore: 'Java Keystore',
+  KubernetesSecrets: 'Kubernetes Secrets',
 };
 
 function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {

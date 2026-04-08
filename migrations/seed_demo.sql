@@ -47,7 +47,8 @@ INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VA
   ('iss-vault',    'HashiCorp Vault PKI',   'VaultPKI',    '{"addr": "https://vault.internal:8200", "mount": "pki", "role": "web-certs", "ttl": "8760h"}', true, NOW() - INTERVAL '20 days', NOW() - INTERVAL '20 days'),
   ('iss-digicert', 'DigiCert CertCentral',  'DigiCert',    '{"base_url": "https://www.digicert.com/services/v2", "product_type": "ssl_basic"}', true, NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days'),
   ('iss-sectigo',  'Sectigo SCM',           'Sectigo',     '{"base_url": "https://cert-manager.com/api", "cert_type": 423, "term": 365}', true, NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days'),
-  ('iss-googlecas','Google CAS',            'GoogleCAS',   '{"project": "demo-project", "location": "us-central1", "ca_pool": "demo-pool"}', false, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days')
+  ('iss-googlecas','Google CAS',            'GoogleCAS',   '{"project": "demo-project", "location": "us-central1", "ca_pool": "demo-pool"}', false, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'),
+  ('iss-awsacmpca','AWS ACM Private CA',    'AWSACMPCA',   '{"region": "us-east-1", "ca_arn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/demo", "signing_algorithm": "SHA256WITHRSA", "validity_days": 365}', false, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================

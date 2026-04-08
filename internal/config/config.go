@@ -29,8 +29,39 @@ type Config struct {
 	DigiCert     DigiCertConfig
 	Sectigo      SectigoConfig
 	GoogleCAS    GoogleCASConfig
+	AWSACMPCA    AWSACMPCAConfig
 	Digest       DigestConfig
 	Encryption   EncryptionConfig
+}
+
+// AWSACMPCAConfig contains AWS ACM Private CA issuer connector configuration.
+type AWSACMPCAConfig struct {
+	// Region is the AWS region where the Private CA resides (e.g., "us-east-1").
+	// Required for AWS ACM PCA integration.
+	// Setting: CERTCTL_AWS_PCA_REGION environment variable.
+	Region string
+
+	// CAArn is the ARN of the ACM Private CA certificate authority.
+	// Format: arn:aws:acm-pca:<region>:<account>:certificate-authority/<id>
+	// Required for AWS ACM PCA integration.
+	// Setting: CERTCTL_AWS_PCA_CA_ARN environment variable.
+	CAArn string
+
+	// SigningAlgorithm is the signing algorithm for certificate issuance.
+	// Valid: SHA256WITHRSA, SHA384WITHRSA, SHA512WITHRSA, SHA256WITHECDSA, SHA384WITHECDSA, SHA512WITHECDSA.
+	// Default: "SHA256WITHRSA".
+	// Setting: CERTCTL_AWS_PCA_SIGNING_ALGORITHM environment variable.
+	SigningAlgorithm string
+
+	// ValidityDays is the certificate validity period in days.
+	// Default: 365.
+	// Setting: CERTCTL_AWS_PCA_VALIDITY_DAYS environment variable.
+	ValidityDays int
+
+	// TemplateArn is the optional ARN of an ACM PCA certificate template.
+	// Used for constrained subordinate CAs or custom certificate profiles.
+	// Setting: CERTCTL_AWS_PCA_TEMPLATE_ARN environment variable.
+	TemplateArn string
 }
 
 // EncryptionConfig contains configuration for encrypting sensitive data at rest.
@@ -596,6 +627,13 @@ func Load() (*Config, error) {
 			CAPool:      getEnv("CERTCTL_GOOGLE_CAS_CA_POOL", ""),
 			Credentials: getEnv("CERTCTL_GOOGLE_CAS_CREDENTIALS", ""),
 			TTL:         getEnv("CERTCTL_GOOGLE_CAS_TTL", "8760h"),
+		},
+		AWSACMPCA: AWSACMPCAConfig{
+			Region:           getEnv("CERTCTL_AWS_PCA_REGION", ""),
+			CAArn:            getEnv("CERTCTL_AWS_PCA_CA_ARN", ""),
+			SigningAlgorithm: getEnv("CERTCTL_AWS_PCA_SIGNING_ALGORITHM", "SHA256WITHRSA"),
+			ValidityDays:     getEnvInt("CERTCTL_AWS_PCA_VALIDITY_DAYS", 365),
+			TemplateArn:      getEnv("CERTCTL_AWS_PCA_TEMPLATE_ARN", ""),
 		},
 		ACME: ACMEConfig{
 			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),

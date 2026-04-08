@@ -34,6 +34,7 @@ import (
 	sshconn "github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
 	jks "github.com/shankar0123/certctl/internal/connector/target/javakeystore"
+	k8s "github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
 	wcs "github.com/shankar0123/certctl/internal/connector/target/wincertstore"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
@@ -676,6 +677,15 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return jks.New(&cfg, a.logger), nil
+
+	case "KubernetesSecrets":
+		var cfg k8s.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid KubernetesSecrets config: %w", err)
+			}
+		}
+		return k8s.New(&cfg, a.logger)
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

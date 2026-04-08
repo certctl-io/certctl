@@ -10,11 +10,11 @@
 
 `deploy/test/qa_test.go` is a single Go test file (~1700 lines) that automates as much of `docs/testing-guide.md` as possible against a running certctl Docker Compose demo stack. It replaces the legacy `qa-smoke-test.sh` bash script.
 
-It covers **all 52 Parts** of the testing guide:
+It covers **all 54 Parts** of the testing guide:
 
-- **~120 automated subtests** — API calls, database queries, source file checks, performance benchmarks
+- **~164 automated subtests** — API calls, database queries, source file checks, performance benchmarks
 - **11 skipped Parts** — with documented reasons (external CAs, Windows, browser-only, etc.)
-- **Remaining ~270 manual tests** — GUI flows, scheduler timing, Docker log inspection — must be done by a human following `docs/testing-guide.md`
+- **Remaining ~282 manual tests** — GUI flows, scheduler timing, Docker log inspection — must be done by a human following `docs/testing-guide.md`
 
 ## Architecture
 
@@ -143,8 +143,10 @@ This table shows what each Part tests and what's left for manual verification.
 | 50 | Onboarding Wizard | 2 | Wizard component exists, docker-compose split (clean vs demo) | Wizard UI flow, step completion |
 | 51 | ACME Profile Selection | 3 | Profile module exists, frontend config, RFC 9702→9773 renumber check | Profile-aware issuance against real CA |
 | 52 | Helm Chart | 5 | Chart.yaml, values.yaml, 4 templates exist, securityContext, health probes | `helm template` rendering, `helm install` |
+| 53 | Kubernetes Secrets Target Connector (M47) | 18 | Config validation (namespace DNS-1123, secret name DNS subdomain, label keys, required fields), deployment (create/update Secret, chain concatenation, error propagation), validation (serial comparison, not-found, empty cert) | GUI target wizard KubernetesSecrets fields (namespace, secret_name, labels, kubeconfig_path), Helm RBAC toggle, TargetDetailPage type label |
+| 54 | AWS ACM Private CA Issuer Connector (M47) | 23 | Config validation (region, CA ARN regex, signing algorithm whitelist, validity_days, defaults), issuance (full flow, empty CSR, errors), renewal (reuses issuance), revocation (reason mapping, default, errors), GetOrderStatus completed, GetCACertPEM (success/chain/error), GetRenewalInfo nil | GUI issuer wizard AWSACMPCA fields (region, ca_arn, signing_algorithm, validity_days, template_arn), seed data visibility, create issuer flow |
 
-**Totals:** ~120 automated subtests, 11 fully skipped Parts, ~270 manual tests remaining.
+**Totals:** ~164 automated subtests, 11 fully skipped Parts, ~282 manual tests remaining.
 
 ## Test Categories
 
@@ -290,3 +292,4 @@ When a new feature ships:
 ## Version History
 
 - **v1.0** (April 2026) — Initial release covering all 52 Parts of testing-guide.md v2.1. Replaces `qa-smoke-test.sh`.
+- **v1.1** (April 2026) — Added Parts 53–54 (M47: Kubernetes Secrets target + AWS ACM PCA issuer). 54 Parts total, ~164 automated subtests.

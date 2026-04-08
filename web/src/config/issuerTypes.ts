@@ -155,6 +155,19 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
+    id: 'AWSACMPCA',
+    name: 'AWS ACM Private CA',
+    description: 'AWS Certificate Manager Private Certificate Authority \u2014 managed private CA on AWS',
+    icon: '\u2601\uFE0F',
+    configFields: [
+      { key: 'region', label: 'AWS Region', required: true, placeholder: 'us-east-1' },
+      { key: 'ca_arn', label: 'CA ARN', required: true, placeholder: 'arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/...' },
+      { key: 'signing_algorithm', label: 'Signing Algorithm', required: false, type: 'select', options: ['SHA256WITHRSA', 'SHA384WITHRSA', 'SHA512WITHRSA', 'SHA256WITHECDSA', 'SHA384WITHECDSA', 'SHA512WITHECDSA'], defaultValue: 'SHA256WITHRSA' },
+      { key: 'validity_days', label: 'Validity (days)', required: false, type: 'number', placeholder: '365' },
+      { key: 'template_arn', label: 'Template ARN (optional)', required: false, placeholder: 'arn:aws:acm-pca:...:template/...' },
+    ],
+  },
+  {
     id: 'entrust',
     name: 'Entrust',
     description: 'Entrust Certificate Services \u2014 coming soon',

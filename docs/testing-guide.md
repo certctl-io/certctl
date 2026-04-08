@@ -18,6 +18,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 11: ARI (RFC 9773) Scheduler Integration](#part-11-ari-rfc-9773-scheduler-integration)
 - [Part 12: Vault PKI Connector (M32)](#part-12-vault-pki-connector-m32)
 - [Part 13: DigiCert Connector (M37)](#part-13-digicert-connector-m37)
+- [Part 54: AWS ACM Private CA Issuer Connector (M47)](#part-54-aws-acm-private-ca-issuer-connector-m47)
 - [Part 14: Target Connectors & Deployment](#part-14-target-connectors--deployment)
 - [Part 15: Apache & HAProxy Target Connectors](#part-15-apache--haproxy-target-connectors)
 - [Part 16: Traefik & Caddy Target Connectors](#part-16-traefik--caddy-target-connectors)
@@ -51,6 +52,7 @@ Comprehensive manual testing playbook. Every test has a concrete command, an exp
 - [Part 44: SSH Target Connector](#part-44-ssh-target-connector)
 - [Part 45: Windows Certificate Store Connector](#part-45-windows-certificate-store-connector)
 - [Part 46: Java Keystore Connector](#part-46-java-keystore-connector)
+- [Part 53: Kubernetes Secrets Target Connector (M47)](#part-53-kubernetes-secrets-target-connector-m47)
 - [Part 47: Certificate Digest Email](#part-47-certificate-digest-email)
 - [Part 48: Dynamic Issuer Configuration (M34)](#part-48-dynamic-issuer-configuration-m34)
 - [Part 49: Dynamic Target Configuration (M35)](#part-49-dynamic-target-configuration-m35)
@@ -2370,6 +2372,103 @@ curl -s -X POST -H "$AUTH" \
 
 **Expected:** Returns `revoked_at` timestamp.
 **PASS if** revocation is recorded locally; operator manages revocation in DigiCert CertCentral dashboard.
+
+---
+
+## Part 54: AWS ACM Private CA Issuer Connector (M47)
+
+**What this validates:** The AWS ACM Private CA issuer connector (`internal/connector/issuer/awsacmpca/`). Tests config validation (ARN format, signing algorithms), synchronous issuance via AWS PCA API, RFC 5280 revocation reason mapping, and interface compliance (CRL/OCSP delegation, ARI unsupported).
+
+**Why it matters:** AWS is the dominant cloud platform. Organizations running private PKI on AWS need lifecycle management for ACM PCA-issued certificates. This connector gives AWS shops a managed CA option without leaving certctl.
+
+### 54.1 Config Validation
+
+```bash
+go test ./internal/connector/issuer/awsacmpca/... -run TestValidateConfig -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.1.1 | Valid region + ca_arn | Auto | ☐ | | `TestValidateConfig_Success` |
+| 54.1.2 | All optional fields (signing_algorithm, validity_days, template_arn) | Auto | ☐ | | `TestValidateConfig_AllOptionalFields` |
+| 54.1.3 | Invalid JSON rejected | Auto | ☐ | | `TestValidateConfig_InvalidJSON` |
+| 54.1.4 | Missing region rejected | Auto | ☐ | | `TestValidateConfig_MissingRegion` |
+| 54.1.5 | Missing ca_arn rejected | Auto | ☐ | | `TestValidateConfig_MissingCAArn` |
+| 54.1.6 | Invalid ca_arn format rejected | Auto | ☐ | | `TestValidateConfig_InvalidCAArn` |
+| 54.1.7 | Invalid signing algorithm rejected | Auto | ☐ | | `TestValidateConfig_InvalidSigningAlgorithm` |
+| 54.1.8 | Invalid validity_days (≤0) rejected | Auto | ☐ | | `TestValidateConfig_InvalidValidityDays` |
+
+---
+
+### 54.2 Issuance
+
+```bash
+go test ./internal/connector/issuer/awsacmpca/... -run TestIssueCertificate -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.2.1 | Full issuance: issue → get cert → parse serial/validity | Auto | ☐ | | `TestIssueCertificate_Success` |
+| 54.2.2 | Empty CSR rejected | Auto | ☐ | | `TestIssueCertificate_EmptyCSR` |
+| 54.2.3 | Issue API error propagated | Auto | ☐ | | `TestIssueCertificate_IssueError` |
+| 54.2.4 | GetCertificate API error propagated | Auto | ☐ | | `TestIssueCertificate_GetCertificateError` |
+
+---
+
+### 54.3 Renewal
+
+```bash
+go test ./internal/connector/issuer/awsacmpca/... -run TestRenewCertificate -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.3.1 | Renewal reuses issuance path (AWS PCA treats as new cert) | Auto | ☐ | | `TestRenewCertificate_Success` |
+
+---
+
+### 54.4 Revocation
+
+```bash
+go test ./internal/connector/issuer/awsacmpca/... -run TestRevokeCertificate -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.4.1 | Revocation with specific reason (RFC 5280 → AWS mapping) | Auto | ☐ | | `TestRevokeCertificate_Success` |
+| 54.4.2 | Revocation with default reason (UNSPECIFIED) | Auto | ☐ | | `TestRevokeCertificate_WithDefaultReason` |
+| 54.4.3 | Revocation API error propagated | Auto | ☐ | | `TestRevokeCertificate_Error` |
+
+---
+
+### 54.5 Other Interface Methods
+
+```bash
+go test ./internal/connector/issuer/awsacmpca/... -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.5.1 | GetOrderStatus returns "completed" (sync issuer) | Auto | ☐ | | `TestGetOrderStatus_ReturnsCompleted` |
+| 54.5.2 | GetCACertPEM returns CA certificate | Auto | ☐ | | `TestGetCACertPEM_Success` |
+| 54.5.3 | GetCACertPEM returns cert + chain | Auto | ☐ | | `TestGetCACertPEM_WithChain` |
+| 54.5.4 | GetCACertPEM error propagated | Auto | ☐ | | `TestGetCACertPEM_Error` |
+| 54.5.5 | GetRenewalInfo returns nil (no ARI support) | Auto | ☐ | | `TestGetRenewalInfo_ReturnsNil` |
+| 54.5.6 | Default signing_algorithm and validity_days applied | Auto | ☐ | | `TestValidateConfig_AppliesDefaults` |
+| 54.5.7 | All RFC 5280 revocation reasons mapped to AWS codes | Auto | ☐ | | `TestRevocationReason_Mapping` |
+
+---
+
+### 54.6 Manual GUI Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.6.1 | AWSACMPCA appears in issuer catalog card | Manual | ☐ | | issuerTypes.ts entry |
+| 54.6.2 | Config wizard shows 5 fields (region, ca_arn, signing_algorithm, validity_days, template_arn) | Manual | ☐ | | ConfigField definitions |
+| 54.6.3 | signing_algorithm rendered as select dropdown | Manual | ☐ | | type: 'select' with 6 options |
+| 54.6.4 | Create issuer via wizard succeeds | Manual | ☐ | | End-to-end wizard flow |
+| 54.6.5 | Seed data row (iss-awsacmpca) visible in demo mode | Manual | ☐ | | seed_demo.sql entry |
+| 54.6.6 | Issuer detail page shows "AWS ACM Private CA" label | Manual | ☐ | | typeLabels or issuerTypes name |
 
 ---
 
@@ -6120,6 +6219,76 @@ go test ./internal/connector/target/javakeystore/... -run TestDeploy.*Existing -
 
 ---
 
+## Part 53: Kubernetes Secrets Target Connector (M47)
+
+**What this validates:** The Kubernetes Secrets target connector (`internal/connector/target/k8ssecret/`). Tests config validation against DNS-1123 naming rules, `kubernetes.io/tls` Secret creation/update, cert chain concatenation, and deployment validation via serial number comparison.
+
+**Why it matters:** Kubernetes is the primary deployment target for modern infrastructure. This connector enables cert deployment as native TLS Secrets for Ingress controllers, service meshes, and workloads without cert-manager dependency.
+
+### 53.1 Config Validation
+
+```bash
+go test ./internal/connector/target/k8ssecret/... -run TestValidateConfig -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 53.1.1 | Valid namespace + secret_name | Auto | ☐ | | `TestValidateConfig_Success` |
+| 53.1.2 | Valid config with labels | Auto | ☐ | | `TestValidateConfig_WithLabels` |
+| 53.1.3 | Valid config with kubeconfig_path | Auto | ☐ | | `TestValidateConfig_WithKubeconfig` |
+| 53.1.4 | Invalid JSON rejected | Auto | ☐ | | `TestValidateConfig_InvalidJSON` |
+| 53.1.5 | Missing namespace rejected | Auto | ☐ | | `TestValidateConfig_MissingNamespace` |
+| 53.1.6 | Missing secret_name rejected | Auto | ☐ | | `TestValidateConfig_MissingSecretName` |
+| 53.1.7 | Invalid namespace (uppercase) rejected | Auto | ☐ | | `TestValidateConfig_InvalidNamespace` |
+| 53.1.8 | Invalid secret name (special chars) rejected | Auto | ☐ | | `TestValidateConfig_InvalidSecretName` |
+
+---
+
+### 53.2 Deployment
+
+```bash
+go test ./internal/connector/target/k8ssecret/... -run TestDeployCertificate -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 53.2.1 | Create new kubernetes.io/tls Secret | Auto | ☐ | | `TestDeployCertificate_Success_CreateNewSecret` |
+| 53.2.2 | Update existing Secret | Auto | ☐ | | `TestDeployCertificate_Success_UpdateExistingSecret` |
+| 53.2.3 | Chain PEM concatenated into tls.crt | Auto | ☐ | | `TestDeployCertificate_Success_WithChain` |
+| 53.2.4 | Missing KeyPEM rejected | Auto | ☐ | | `TestDeployCertificate_MissingKeyPEM` |
+| 53.2.5 | Missing CertPEM rejected | Auto | ☐ | | `TestDeployCertificate_MissingCertPEM` |
+| 53.2.6 | K8s API error propagated | Auto | ☐ | | `TestDeployCertificate_CreateError` |
+
+---
+
+### 53.3 Validation
+
+```bash
+go test ./internal/connector/target/k8ssecret/... -run TestValidateDeployment -v -count=1
+```
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 53.3.1 | Successful validation with serial match | Auto | ☐ | | `TestValidateDeployment_Success` |
+| 53.3.2 | Secret not found returns error | Auto | ☐ | | `TestValidateDeployment_SecretNotFound` |
+| 53.3.3 | Empty tls.crt detected | Auto | ☐ | | `TestValidateDeployment_EmptyTLSCert` |
+| 53.3.4 | Serial mismatch detected | Auto | ☐ | | `TestValidateDeployment_SerialMismatch` |
+
+---
+
+### 53.4 Manual GUI Tests
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 53.4.1 | KubernetesSecrets appears in target type selector | Manual | ☐ | | TargetsPage.tsx TARGET_TYPES array |
+| 53.4.2 | Config wizard shows 4 fields (namespace, secret_name, labels, kubeconfig_path) | Manual | ☐ | | CONFIG_FIELDS entry |
+| 53.4.3 | Create target via wizard succeeds | Manual | ☐ | | End-to-end wizard flow |
+| 53.4.4 | TargetDetailPage renders "Kubernetes Secrets" type label | Manual | ☐ | | typeLabels map |
+| 53.4.5 | Helm values.yaml has kubernetesSecrets.enabled | Manual | ☐ | | Helm chart config |
+| 53.4.6 | Helm RBAC includes secrets permissions when enabled | Manual | ☐ | | serviceaccount.yaml template |
+
+---
+
 ## Part 47: Certificate Digest Email
 
 **What this validates:** Scheduled HTML digest email with certificate stats, expiring certs table, and owner email fallback.
@@ -7005,6 +7174,40 @@ These must be green before starting manual QA:
 | 39.4 | Async poll behavior | Manual | ☐ |  | Requires DigiCert sandbox |
 | 39.5 | Revocation records locally | Manual | ☐ |  | Requires DigiCert sandbox |
 
+### Part 54: AWS ACM Private CA Issuer Connector (M47)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 54.1.1 | Valid region + ca_arn | Auto | ☐ |  | `TestValidateConfig_Success` |
+| 54.1.2 | All optional fields | Auto | ☐ |  | `TestValidateConfig_AllOptionalFields` |
+| 54.1.3 | Invalid JSON rejected | Auto | ☐ |  | `TestValidateConfig_InvalidJSON` |
+| 54.1.4 | Missing region rejected | Auto | ☐ |  | `TestValidateConfig_MissingRegion` |
+| 54.1.5 | Missing ca_arn rejected | Auto | ☐ |  | `TestValidateConfig_MissingCAArn` |
+| 54.1.6 | Invalid ca_arn format rejected | Auto | ☐ |  | `TestValidateConfig_InvalidCAArn` |
+| 54.1.7 | Invalid signing algorithm rejected | Auto | ☐ |  | `TestValidateConfig_InvalidSigningAlgorithm` |
+| 54.1.8 | Invalid validity_days rejected | Auto | ☐ |  | `TestValidateConfig_InvalidValidityDays` |
+| 54.2.1 | Full issuance: issue → get cert → parse | Auto | ☐ |  | `TestIssueCertificate_Success` |
+| 54.2.2 | Empty CSR rejected | Auto | ☐ |  | `TestIssueCertificate_EmptyCSR` |
+| 54.2.3 | Issue API error propagated | Auto | ☐ |  | `TestIssueCertificate_IssueError` |
+| 54.2.4 | GetCertificate API error propagated | Auto | ☐ |  | `TestIssueCertificate_GetCertificateError` |
+| 54.3.1 | Renewal reuses issuance path | Auto | ☐ |  | `TestRenewCertificate_Success` |
+| 54.4.1 | Revocation with specific reason | Auto | ☐ |  | `TestRevokeCertificate_Success` |
+| 54.4.2 | Revocation with default reason | Auto | ☐ |  | `TestRevokeCertificate_WithDefaultReason` |
+| 54.4.3 | Revocation API error propagated | Auto | ☐ |  | `TestRevokeCertificate_Error` |
+| 54.5.1 | GetOrderStatus returns completed | Auto | ☐ |  | `TestGetOrderStatus_ReturnsCompleted` |
+| 54.5.2 | GetCACertPEM returns CA certificate | Auto | ☐ |  | `TestGetCACertPEM_Success` |
+| 54.5.3 | GetCACertPEM returns cert + chain | Auto | ☐ |  | `TestGetCACertPEM_WithChain` |
+| 54.5.4 | GetCACertPEM error propagated | Auto | ☐ |  | `TestGetCACertPEM_Error` |
+| 54.5.5 | GetRenewalInfo returns nil (no ARI) | Auto | ☐ |  | `TestGetRenewalInfo_ReturnsNil` |
+| 54.5.6 | Default signing_algorithm applied | Auto | ☐ |  | `TestValidateConfig_AppliesDefaults` |
+| 54.5.7 | RFC 5280 revocation reasons mapped | Auto | ☐ |  | `TestRevocationReason_Mapping` |
+| 54.6.1 | AWSACMPCA appears in issuer catalog card | Manual | ☐ |  | issuerTypes.ts entry |
+| 54.6.2 | Config wizard shows 5 fields | Manual | ☐ |  | ConfigField definitions |
+| 54.6.3 | signing_algorithm rendered as dropdown | Manual | ☐ |  | type: 'select' with 6 options |
+| 54.6.4 | Create issuer via wizard succeeds | Manual | ☐ |  | End-to-end wizard flow |
+| 54.6.5 | Seed data row visible in demo mode | Manual | ☐ |  | seed_demo.sql entry |
+| 54.6.6 | Issuer detail page shows label | Manual | ☐ |  | typeLabels or issuerTypes name |
+
 ### Part 40: Issuer Catalog Page (M33)
 
 | Test | Description | Method | Pass? | Date | Notes |
@@ -7305,6 +7508,35 @@ These must be green before starting manual QA:
 | 46.4 | Shell injection in reload | Auto | ☐ |  | `go test -run TestValidateConfig.*Injection` |
 | 46.5 | Existing alias deletion | Auto | ☐ |  | `go test -run TestDeploy.*Existing` |
 
+### Part 53: Kubernetes Secrets Target Connector (M47)
+
+| Test | Description | Method | Pass? | Date | Notes |
+|------|-------------|--------|-------|------|-------|
+| 53.1.1 | Valid namespace + secret_name | Auto | ☐ |  | `TestValidateConfig_Success` |
+| 53.1.2 | Valid config with labels | Auto | ☐ |  | `TestValidateConfig_WithLabels` |
+| 53.1.3 | Valid config with kubeconfig_path | Auto | ☐ |  | `TestValidateConfig_WithKubeconfig` |
+| 53.1.4 | Invalid JSON rejected | Auto | ☐ |  | `TestValidateConfig_InvalidJSON` |
+| 53.1.5 | Missing namespace rejected | Auto | ☐ |  | `TestValidateConfig_MissingNamespace` |
+| 53.1.6 | Missing secret_name rejected | Auto | ☐ |  | `TestValidateConfig_MissingSecretName` |
+| 53.1.7 | Invalid namespace (uppercase) rejected | Auto | ☐ |  | `TestValidateConfig_InvalidNamespace` |
+| 53.1.8 | Invalid secret name (special chars) rejected | Auto | ☐ |  | `TestValidateConfig_InvalidSecretName` |
+| 53.2.1 | Create new kubernetes.io/tls Secret | Auto | ☐ |  | `TestDeployCertificate_Success_CreateNewSecret` |
+| 53.2.2 | Update existing Secret | Auto | ☐ |  | `TestDeployCertificate_Success_UpdateExistingSecret` |
+| 53.2.3 | Chain PEM concatenated into tls.crt | Auto | ☐ |  | `TestDeployCertificate_Success_WithChain` |
+| 53.2.4 | Missing KeyPEM rejected | Auto | ☐ |  | `TestDeployCertificate_MissingKeyPEM` |
+| 53.2.5 | Missing CertPEM rejected | Auto | ☐ |  | `TestDeployCertificate_MissingCertPEM` |
+| 53.2.6 | K8s API error propagated | Auto | ☐ |  | `TestDeployCertificate_CreateError` |
+| 53.3.1 | Successful validation with serial match | Auto | ☐ |  | `TestValidateDeployment_Success` |
+| 53.3.2 | Secret not found returns error | Auto | ☐ |  | `TestValidateDeployment_SecretNotFound` |
+| 53.3.3 | Empty tls.crt detected | Auto | ☐ |  | `TestValidateDeployment_EmptyTLSCert` |
+| 53.3.4 | Serial mismatch detected | Auto | ☐ |  | `TestValidateDeployment_SerialMismatch` |
+| 53.4.1 | KubernetesSecrets appears in target type selector | Manual | ☐ |  | TargetsPage.tsx TARGET_TYPES array |
+| 53.4.2 | Config wizard shows 4 fields | Manual | ☐ |  | CONFIG_FIELDS entry |
+| 53.4.3 | Create target via wizard succeeds | Manual | ☐ |  | End-to-end wizard flow |
+| 53.4.4 | TargetDetailPage renders type label | Manual | ☐ |  | typeLabels map |
+| 53.4.5 | Helm values.yaml has kubernetesSecrets.enabled | Manual | ☐ |  | Helm chart config |
+| 53.4.6 | Helm RBAC includes secrets permissions | Manual | ☐ |  | serviceaccount.yaml template |
+
 ### Part 47: Certificate Digest Email
 
 | Test | Description | Method | Pass? | Date | Notes |
@@ -7363,10 +7595,10 @@ These must be green before starting manual QA:
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 88 |
+| ☐ Auto (not yet run) | 129 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 270 |
-| **Total** | **507** |
+| ☐ Manual (requires hands-on verification) | 282 |
+| **Total** | **560** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

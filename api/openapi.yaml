@@ -2643,7 +2643,7 @@ components:
     # ─── Issuers ─────────────────────────────────────────────────────
     IssuerType:
       type: string
-      enum: [ACME, GenericCA, StepCA, VaultPKI, DigiCert, Sectigo, GoogleCAS]
+      enum: [ACME, GenericCA, StepCA, VaultPKI, DigiCert, Sectigo, GoogleCAS, AWSACMPCA]
 
     Issuer:
       type: object
@@ -2669,7 +2669,7 @@ components:
     # ─── Targets ─────────────────────────────────────────────────────
     TargetType:
       type: string
-      enum: [NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5, SSH, WinCertStore, JavaKeystore]
+      enum: [NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5, SSH, WinCertStore, JavaKeystore, KubernetesSecrets]
 
     DeploymentTarget:
       type: object

@@ -81,6 +81,7 @@ const (
 	IssuerTypeDigiCert  IssuerType = "DigiCert"
 	IssuerTypeSectigo   IssuerType = "Sectigo"
 	IssuerTypeGoogleCAS IssuerType = "GoogleCAS"
+	IssuerTypeAWSACMPCA IssuerType = "AWSACMPCA"
 )
 
 // TargetType represents the type of deployment target.
@@ -97,7 +98,8 @@ const (
 	TargetTypeEnvoy    TargetType = "Envoy"
 	TargetTypePostfix  TargetType = "Postfix"
 	TargetTypeDovecot  TargetType = "Dovecot"
-	TargetTypeSSH          TargetType = "SSH"
-	TargetTypeWinCertStore TargetType = "WinCertStore"
-	TargetTypeJavaKeystore TargetType = "JavaKeystore"
+	TargetTypeSSH               TargetType = "SSH"
+	TargetTypeWinCertStore      TargetType = "WinCertStore"
+	TargetTypeJavaKeystore      TargetType = "JavaKeystore"
+	TargetTypeKubernetesSecrets TargetType = "KubernetesSecrets"
 )

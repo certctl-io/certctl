@@ -24,6 +24,7 @@ const typeLabels: Record<string, string> = {
   SSH: 'SSH',
   WinCertStore: 'Windows Cert Store',
   JavaKeystore: 'Java Keystore',
+  KubernetesSecrets: 'Kubernetes Secrets',
 };
 
 const TARGET_TYPES = [
@@ -40,6 +41,7 @@ const TARGET_TYPES = [
   { value: 'SSH', label: 'SSH', description: 'Agentless deployment via SSH/SFTP — deploy to any Linux/Unix server without installing an agent' },
   { value: 'WinCertStore', label: 'Windows Cert Store', description: 'Import certificates into Windows Certificate Store for Exchange, RDP, SQL Server, ADFS' },
   { value: 'JavaKeystore', label: 'Java Keystore', description: 'Deploy to JKS/PKCS#12 keystores for Tomcat, Jetty, Kafka, Elasticsearch, and JVM services' },
+  { value: 'KubernetesSecrets', label: 'Kubernetes Secrets', description: 'Deploy as kubernetes.io/tls Secrets for Ingress controllers, service meshes, and workloads' },
 ];
 
 const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: string; required?: boolean }[]> = {
@@ -161,6 +163,12 @@ const CONFIG_FIELDS: Record<string, { key: string; label: string; placeholder: s
     { key: 'create_keystore', label: 'Create Keystore If Missing', placeholder: 'true (default)' },
     { key: 'reload_command', label: 'Reload Command (optional)', placeholder: 'systemctl restart tomcat' },
     { key: 'keytool_path', label: 'Keytool Path (optional)', placeholder: 'keytool (default, from PATH)' },
+  ],
+  KubernetesSecrets: [
+    { key: 'namespace', label: 'Namespace', placeholder: 'default', required: true },
+    { key: 'secret_name', label: 'Secret Name', placeholder: 'my-tls-secret', required: true },
+    { key: 'labels', label: 'Labels (JSON)', placeholder: '{"app": "my-app"}' },
+    { key: 'kubeconfig_path', label: 'Kubeconfig Path (optional)', placeholder: '/home/agent/.kube/config' },
   ],
 };
 

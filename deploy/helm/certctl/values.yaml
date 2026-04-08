@@ -382,6 +382,13 @@ rbac:
   create: true
 
 # ==============================================================================
+# Kubernetes Secrets Target Connector
+# ==============================================================================
+kubernetesSecrets:
+  # Enable RBAC rules for managing TLS Secrets
+  enabled: false
+
+# ==============================================================================
 # Pod Disruption Budget (for HA deployments)
 # ==============================================================================
 podDisruptionBudget:

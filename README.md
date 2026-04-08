@@ -88,8 +88,9 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | DigiCert CertCentral | Beta | `DigiCert` |
 | Sectigo SCM | Beta | `Sectigo` |
 | Google CAS | Beta | `GoogleCAS` |
+| AWS ACM Private CA | Beta | `AWSACMPCA` |
 
-**Vault PKI, DigiCert, Sectigo, and Google CAS connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
+**Vault PKI, DigiCert, Sectigo, Google CAS, and AWS ACM PCA connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
 
 **Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
 
@@ -107,6 +108,9 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | Microsoft IIS | Implemented (local + WinRM) | `IIS` |
 | F5 BIG-IP | Beta | `F5` |
 | SSH (Agentless) | Beta | `SSH` |
+| Windows Cert Store | Implemented | `WinCertStore` |
+| Java Keystore | Implemented | `JavaKeystore` |
+| Kubernetes Secrets | Beta | `KubernetesSecrets` |
 
 ### Notifiers
 | Notifier | Status | Type |

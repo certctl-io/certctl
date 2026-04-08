@@ -90,6 +90,7 @@ var validIssuerTypes = map[domain.IssuerType]bool{
 	domain.IssuerTypeDigiCert:  true,
 	domain.IssuerTypeSectigo:   true,
 	domain.IssuerTypeGoogleCAS: true,
+	domain.IssuerTypeAWSACMPCA: true,
 }
 
 // isValidIssuerType checks if a type string is a known issuer type.
@@ -474,6 +475,26 @@ func (s *IssuerService) buildEnvVarSeeds(cfg *config.Config) []*domain.Issuer {
 				"ca_pool":     cfg.GoogleCAS.CAPool,
 				"credentials": cfg.GoogleCAS.Credentials,
 				"ttl":         cfg.GoogleCAS.TTL,
+			}),
+			Enabled:   true,
+			Source:    "env",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
+	// Conditional: AWS ACM PCA
+	if cfg.AWSACMPCA.CAArn != "" {
+		seeds = append(seeds, &domain.Issuer{
+			ID:   "iss-awsacmpca",
+			Name: "AWS ACM Private CA",
+			Type: domain.IssuerTypeAWSACMPCA,
+			Config: mustJSON(map[string]interface{}{
+				"region":            cfg.AWSACMPCA.Region,
+				"ca_arn":            cfg.AWSACMPCA.CAArn,
+				"signing_algorithm": cfg.AWSACMPCA.SigningAlgorithm,
+				"validity_days":     cfg.AWSACMPCA.ValidityDays,
+				"template_arn":      cfg.AWSACMPCA.TemplateArn,
 			}),
 			Enabled:   true,
 			Source:    "env",

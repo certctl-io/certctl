@@ -11,6 +11,11 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Built-in: ACME v2 (Let's Encrypt, Sectigo, ZeroSSL)](#built-in-acme-v2-lets-encrypt-sectigo-zerossl)
    - [Built-in: step-ca (Smallstep Private CA)](#built-in-step-ca-smallstep-private-ca)
    - [OpenSSL / Custom CA](#openssl--custom-ca)
+   - [Built-in: Vault PKI](#built-in-vault-pki)
+   - [Built-in: DigiCert CertCentral](#built-in-digicert-certcentral)
+   - [Built-in: Sectigo SCM](#built-in-sectigo-scm)
+   - [Built-in: Google CAS](#built-in-google-cas)
+   - [Built-in: AWS ACM Private CA](#built-in-aws-acm-private-ca)
    - [Revocation Across Issuers](#revocation-across-issuers)
    - [EST Integration (GetCACertPEM)](#est-integration-getcacertpem)
    - [Building a Custom Issuer](#building-a-custom-issuer)
@@ -28,6 +33,7 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [SSH (Agentless Deployment)](#ssh-agentless-deployment)
    - [Windows Certificate Store](#windows-certificate-store)
    - [Java Keystore (JKS / PKCS#12)](#java-keystore-jks--pkcs12)
+   - [Kubernetes Secrets](#kubernetes-secrets)
 4. [Notifier Connector](#notifier-connector)
    - [Interface](#interface-2)
 5. [Registering a Connector](#registering-a-connector)
@@ -401,6 +407,26 @@ Google Cloud Certificate Authority Service — managed private CA on GCP. Synchr
 **Note:** CRL and OCSP are managed by Google CAS directly. certctl records revocations locally and notifies Google CAS via the revoke endpoint.
 
 Location: `internal/connector/issuer/googlecas/googlecas.go`
+
+### Built-in: AWS ACM Private CA
+
+AWS Certificate Manager Private Certificate Authority — managed private CA on AWS. Synchronous issuance via ACM PCA API with standard AWS credential chain (env vars, IAM roles, instance profiles, SSO).
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `CERTCTL_AWS_PCA_REGION` | Yes | — | AWS region (e.g., `us-east-1`) |
+| `CERTCTL_AWS_PCA_CA_ARN` | Yes | — | ARN of the ACM Private CA |
+| `CERTCTL_AWS_PCA_SIGNING_ALGORITHM` | No | `SHA256WITHRSA` | Signing algorithm |
+| `CERTCTL_AWS_PCA_VALIDITY_DAYS` | No | `365` | Certificate validity in days |
+| `CERTCTL_AWS_PCA_TEMPLATE_ARN` | No | — | Optional certificate template ARN |
+
+**Supported signing algorithms:** SHA256WITHRSA, SHA384WITHRSA, SHA512WITHRSA, SHA256WITHECDSA, SHA384WITHECDSA, SHA512WITHECDSA.
+
+**Authentication:** Standard AWS credential chain. The connector uses `aws-sdk-go-v2/config.LoadDefaultConfig()` which supports environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), IAM roles (EC2/ECS), instance profiles, and SSO credentials.
+
+**Note:** CRL and OCSP are managed by AWS ACM PCA directly. certctl records revocations locally and notifies AWS via the RevokeCertificate API with RFC 5280 reason mapping.
+
+Location: `internal/connector/issuer/awsacmpca/awsacmpca.go`
 
 ### Coming in V2.2+
 
@@ -935,6 +961,36 @@ The Java Keystore connector deploys certificates to JKS or PKCS#12 keystores via
 - Transient PKCS#12 temp file cleaned up after import (even on error)
 
 Location: `internal/connector/target/javakeystore/javakeystore.go`
+
+### Kubernetes Secrets
+
+The Kubernetes Secrets connector deploys certificates as `kubernetes.io/tls` Secrets, compatible with Ingress controllers (nginx-ingress, Traefik, HAProxy), service meshes (Istio, Linkerd), and any Kubernetes workload that reads TLS Secrets.
+
+```json
+{
+  "namespace": "production",
+  "secret_name": "api-tls",
+  "labels": {"app": "api-gateway"},
+  "kubeconfig_path": "/home/agent/.kube/config"
+}
+```
+
+| Field | Type | Default | Description |
+|-------|------|---------|-------------|
+| `namespace` | string | *(required)* | Kubernetes namespace (DNS-1123, max 63 chars) |
+| `secret_name` | string | *(required)* | Secret name (DNS subdomain, max 253 chars) |
+| `labels` | object | | Additional labels to apply to the Secret |
+| `kubeconfig_path` | string | | Path to kubeconfig for out-of-cluster agents |
+
+**Deployment modes:**
+- **In-cluster (default):** Agent runs as a Pod with a ServiceAccount. Authentication via auto-mounted token. Requires RBAC (`secrets.get`, `secrets.create`, `secrets.update`, `secrets.list`) — see Helm chart.
+- **Out-of-cluster:** Agent runs outside the cluster with `kubeconfig_path` pointing to a kubeconfig file. Useful for proxy agent pattern.
+
+**Secret format:** Standard `kubernetes.io/tls` with `tls.crt` (cert + chain PEM) and `tls.key` (private key PEM). Managed labels (`app.kubernetes.io/managed-by: certctl`) and annotations (`certctl.io/deployed-at`, `certctl.io/certificate-id`) are applied automatically.
+
+**Validation:** After deployment, the connector reads the Secret back and compares the certificate serial number to verify successful deployment.
+
+Location: `internal/connector/target/k8ssecret/k8ssecret.go`
 
 ## Notifier Connector
 

@@ -1712,6 +1712,84 @@ func TestQA(t *testing.T) {
 			fileContains(t, "deploy/helm/certctl/templates/server-deployment.yaml", "readinessProbe")
 		})
 	})
+
+	// ===================================================================
+	t.Run("Part53_KubernetesSecrets", func(t *testing.T) {
+		t.Run("ConnectorPackageExists", func(t *testing.T) {
+			fileExists(t, "internal/connector/target/k8ssecret/k8ssecret.go")
+		})
+
+		t.Run("TestFileExists", func(t *testing.T) {
+			fileExists(t, "internal/connector/target/k8ssecret/k8ssecret_test.go")
+		})
+
+		t.Run("DomainTypeRegistered", func(t *testing.T) {
+			fileContains(t, "internal/domain/connector.go", `TargetTypeKubernetesSecrets`)
+		})
+
+		t.Run("ServiceValidationEntry", func(t *testing.T) {
+			fileContains(t, "internal/service/target.go", `TargetTypeKubernetesSecrets`)
+		})
+
+		t.Run("AgentDispatchCase", func(t *testing.T) {
+			fileContains(t, "cmd/agent/main.go", `"KubernetesSecrets"`)
+		})
+
+		t.Run("FrontendTypeLabel", func(t *testing.T) {
+			fileContains(t, "web/src/pages/TargetsPage.tsx", `KubernetesSecrets`)
+		})
+
+		t.Run("OpenAPIEnum", func(t *testing.T) {
+			fileContains(t, "api/openapi.yaml", `KubernetesSecrets`)
+		})
+
+		t.Run("HelmRBAC", func(t *testing.T) {
+			fileContains(t, "deploy/helm/certctl/templates/serviceaccount.yaml", `secrets`)
+		})
+	})
+
+	// ===================================================================
+	t.Run("Part54_AWSACMPCA", func(t *testing.T) {
+		t.Run("ConnectorPackageExists", func(t *testing.T) {
+			fileExists(t, "internal/connector/issuer/awsacmpca/awsacmpca.go")
+		})
+
+		t.Run("TestFileExists", func(t *testing.T) {
+			fileExists(t, "internal/connector/issuer/awsacmpca/awsacmpca_test.go")
+		})
+
+		t.Run("DomainTypeRegistered", func(t *testing.T) {
+			fileContains(t, "internal/domain/connector.go", `IssuerTypeAWSACMPCA`)
+		})
+
+		t.Run("ServiceValidationEntry", func(t *testing.T) {
+			fileContains(t, "internal/service/issuer.go", `IssuerTypeAWSACMPCA`)
+		})
+
+		t.Run("FactoryCase", func(t *testing.T) {
+			fileContains(t, "internal/connector/issuerfactory/factory.go", `"AWSACMPCA"`)
+		})
+
+		t.Run("ConfigStruct", func(t *testing.T) {
+			fileContains(t, "internal/config/config.go", `AWSACMPCAConfig`)
+		})
+
+		t.Run("EnvVarSeed", func(t *testing.T) {
+			fileContains(t, "internal/service/issuer.go", `iss-awsacmpca`)
+		})
+
+		t.Run("FrontendIssuerType", func(t *testing.T) {
+			fileContains(t, "web/src/config/issuerTypes.ts", `AWSACMPCA`)
+		})
+
+		t.Run("OpenAPIEnum", func(t *testing.T) {
+			fileContains(t, "api/openapi.yaml", `AWSACMPCA`)
+		})
+
+		t.Run("SeedDemoData", func(t *testing.T) {
+			fileContains(t, "migrations/seed_demo.sql", `iss-awsacmpca`)
+		})
+	})
 }
 
 // Note: uses Go 1.21+ built-in min() — no custom definition needed.
