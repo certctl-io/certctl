@@ -376,7 +376,7 @@ func TestGenerateProvisionerTokenEphemeralKey(t *testing.T) {
 		ProvisionerName: "test-provisioner",
 		// No ProvisionerKeyPath — forces ephemeral key generation
 	}
-	connector := stepca.New(config, logger)
+	_ = stepca.New(config, logger) // verify constructor doesn't panic
 
 	// This should NOT panic and should return a non-empty token
 	_, csrPEM, _ := generateStepCATestCSR("test.example.com")
@@ -405,7 +405,7 @@ func TestGenerateProvisionerTokenEphemeralKey(t *testing.T) {
 	defer srv.Close()
 
 	config.CAURL = srv.URL
-	connector = stepca.New(config, logger)
+	connector := stepca.New(config, logger)
 
 	result, err := connector.IssueCertificate(ctx, req)
 	if err != nil {
@@ -427,7 +427,7 @@ func TestParseSignResponse_SimpleFormat(t *testing.T) {
 		CAURL:           "https://ca.example.com",
 		ProvisionerName: "test-provisioner",
 	}
-	connector := stepca.New(config, logger)
+	_ = stepca.New(config, logger) // verify constructor doesn't panic
 
 	// Test the simple crt/ca response format
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -447,7 +447,7 @@ func TestParseSignResponse_SimpleFormat(t *testing.T) {
 	defer srv.Close()
 
 	config.CAURL = srv.URL
-	connector = stepca.New(config, logger)
+	connector := stepca.New(config, logger)
 
 	_, csrPEM, _ := generateStepCATestCSR("test.example.com")
 	req := issuer.IssuanceRequest{
@@ -478,7 +478,7 @@ func TestParseSignResponse_StructuredFormat(t *testing.T) {
 		CAURL:           "https://ca.example.com",
 		ProvisionerName: "test-provisioner",
 	}
-	connector := stepca.New(config, logger)
+	_ = stepca.New(config, logger) // verify constructor doesn't panic
 
 	// Test the structured response format
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -501,7 +501,7 @@ func TestParseSignResponse_StructuredFormat(t *testing.T) {
 	defer srv.Close()
 
 	config.CAURL = srv.URL
-	connector = stepca.New(config, logger)
+	connector := stepca.New(config, logger)
 
 	_, csrPEM, _ := generateStepCATestCSR("test.example.com")
 	req := issuer.IssuanceRequest{
@@ -792,7 +792,7 @@ func TestParseSignResponse_CertChainFormat(t *testing.T) {
 		CAURL:           "https://ca.example.com",
 		ProvisionerName: "test-provisioner",
 	}
-	connector := stepca.New(config, logger)
+	_ = stepca.New(config, logger) // verify constructor doesn't panic
 
 	// Test the certChainPEM array response format (multiple certs in array)
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -818,7 +818,7 @@ func TestParseSignResponse_CertChainFormat(t *testing.T) {
 	defer srv.Close()
 
 	config.CAURL = srv.URL
-	connector = stepca.New(config, logger)
+	connector := stepca.New(config, logger)
 
 	_, csrPEM, _ := generateStepCATestCSR("test.example.com")
 	req := issuer.IssuanceRequest{

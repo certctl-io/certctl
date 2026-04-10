@@ -512,7 +512,8 @@ func TestMain_ContentTypeMiddleware(t *testing.T) {
 
 // TestMain_ContextPropagation verifies context is propagated through middleware.
 func TestMain_ContextPropagation(t *testing.T) {
-	testKey := "test-key"
+	type contextKey string
+	testKey := contextKey("test-key")
 	testValue := "test-value"
 
 	baseHandler := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

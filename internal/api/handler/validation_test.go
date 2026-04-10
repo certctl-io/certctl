@@ -7,7 +7,6 @@ import (
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/pem"
-	"fmt"
 	"strings"
 	"testing"
 )
@@ -522,7 +521,7 @@ func TestValidationError_ErrorMessage(t *testing.T) {
 			name: "error with field info",
 			err: ValidationError{
 				Field:   "test_field",
-				Message: fmt.Sprintf("test_field must be 10 characters or fewer"),
+				Message: "test_field must be 10 characters or fewer",
 			},
 			wantMsg: "test_field must be 10 characters or fewer",
 		},
@@ -540,16 +539,16 @@ func TestValidationError_ErrorMessage(t *testing.T) {
 
 // TestValidationError_IsError tests that ValidationError satisfies error interface.
 func TestValidationError_IsError(t *testing.T) {
-	var err error = ValidationError{
+	ve := ValidationError{
 		Field:   "test",
 		Message: "test error",
 	}
 
-	if err == nil {
-		t.Error("ValidationError should satisfy error interface")
-	}
+	// Assign to interface variable to verify it satisfies error
+	var err error = ve
+	_ = err
 
-	msg := err.Error()
+	msg := ve.Error()
 	if msg != "test error" {
 		t.Errorf("Expected error message 'test error', got %q", msg)
 	}

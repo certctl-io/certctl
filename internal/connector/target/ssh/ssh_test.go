@@ -760,7 +760,7 @@ func TestDeployCertificate_FullChainMode(t *testing.T) {
 	}
 
 	certData := string(certWriteCall.Data)
-	if !containsString(certData, "BEGIN CERTIFICATE") || !containsString(certData, "BEGIN CERTIFICATE") {
+	if !containsString(certData, "BEGIN CERTIFICATE") || !containsString(certData, "END CERTIFICATE") {
 		t.Errorf("cert data should contain combined cert and chain")
 	}
 
