@@ -24,6 +24,8 @@ type mockCertRepo struct {
 	ListVersionsResult []*domain.CertificateVersion
 	CreateVersionErr   error
 	ArchiveErr         error
+	Updated            []*domain.ManagedCertificate
+	MockGetExpiring    []*domain.ManagedCertificate
 }
 
 func (m *mockCertRepo) List(ctx context.Context, filter *repository.CertificateFilter) ([]*domain.ManagedCertificate, int, error) {
@@ -61,6 +63,7 @@ func (m *mockCertRepo) Update(ctx context.Context, cert *domain.ManagedCertifica
 		return m.UpdateErr
 	}
 	m.Certs[cert.ID] = cert
+	m.Updated = append(m.Updated, cert)
 	return nil
 }
 
@@ -95,6 +98,10 @@ func (m *mockCertRepo) CreateVersion(ctx context.Context, version *domain.Certif
 }
 
 func (m *mockCertRepo) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
+	// Return MockGetExpiring if set, for test control
+	if m.MockGetExpiring != nil {
+		return m.MockGetExpiring, nil
+	}
 	var expiring []*domain.ManagedCertificate
 	for _, c := range m.Certs {
 		if c.ExpiresAt.Before(before) {
@@ -128,6 +135,7 @@ type mockJobRepo struct {
 	ListErr         error
 	ListByStatusErr error
 	DeleteErr       error
+	Updated         []*domain.Job
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -173,6 +181,7 @@ func (m *mockJobRepo) Update(ctx context.Context, job *domain.Job) error {
 		return m.UpdateErr
 	}
 	m.Jobs[job.ID] = job
+	m.Updated = append(m.Updated, job)
 	return nil
 }
 
@@ -688,6 +697,12 @@ func (m *mockTargetRepo) AddTarget(target *domain.DeploymentTarget) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Targets[target.ID] = target
+}
+
+func newMockTargetRepository() *mockTargetRepo {
+	return &mockTargetRepo{
+		Targets: make(map[string]*domain.DeploymentTarget),
+	}
 }
 
 // mockIssuerConnector is a test implementation of IssuerConnector

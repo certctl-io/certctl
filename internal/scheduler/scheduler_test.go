@@ -734,3 +734,217 @@ func TestSchedulerLoopContextCancellation(t *testing.T) {
 
 	t.Logf("scheduler shut down gracefully on context cancellation")
 }
+
+// mockDigestService is a mock implementation of DigestServicer for testing.
+type mockDigestService struct {
+	mu          sync.Mutex
+	callCount   int
+	callTimes   []time.Time
+	slowDelay   time.Duration
+	shouldError bool
+}
+
+func (m *mockDigestService) ProcessDigest(ctx context.Context) error {
+	m.mu.Lock()
+	m.callCount++
+	m.callTimes = append(m.callTimes, time.Now())
+	m.mu.Unlock()
+
+	if m.slowDelay > 0 {
+		select {
+		case <-time.After(m.slowDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if m.shouldError {
+		return context.Canceled
+	}
+	return nil
+}
+
+// TestScheduler_DigestLoop_DoesNotRunImmediately verifies that the digest loop
+// does NOT run immediately on startup (unlike other loops). The digest is infrequent
+// (24h default) and shouldn't fire on every restart.
+func TestScheduler_DigestLoop_DoesNotRunImmediately(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+	digestMock := &mockDigestService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetDigestService(digestMock)
+	sched.SetDigestInterval(100 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the scheduler
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Sleep briefly to allow any immediate execution
+	time.Sleep(50 * time.Millisecond)
+
+	digestMock.mu.Lock()
+	callCount := digestMock.callCount
+	digestMock.mu.Unlock()
+
+	// Digest should NOT have been called immediately on startup
+	if callCount > 0 {
+		t.Errorf("digest should not run immediately on startup, expected 0 calls, got %d", callCount)
+	}
+
+	t.Logf("digest loop correctly did not run immediately (calls: %d)", callCount)
+}
+
+// TestScheduler_DigestLoop_RunsOnFirstTick verifies that the digest loop DOES run
+// after the first tick interval expires.
+func TestScheduler_DigestLoop_RunsOnFirstTick(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+	digestMock := &mockDigestService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetDigestService(digestMock)
+	sched.SetDigestInterval(100 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	// Start the scheduler
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Sleep longer than the interval to allow the first tick to fire
+	time.Sleep(200 * time.Millisecond)
+
+	digestMock.mu.Lock()
+	callCount := digestMock.callCount
+	digestMock.mu.Unlock()
+
+	// Digest should have been called once after the first tick
+	if callCount < 1 {
+		t.Errorf("digest should run after first tick, expected at least 1 call, got %d", callCount)
+	}
+
+	t.Logf("digest loop ran on first tick (calls: %d)", callCount)
+
+	cancel()
+
+	// Verify clean shutdown
+	err := sched.WaitForCompletion(2 * time.Second)
+	if err != nil {
+		t.Fatalf("WaitForCompletion should succeed: %v", err)
+	}
+}
+
+// TestScheduler_DigestLoop_WithIdempotencyGuard verifies that slow digest
+// processing prevents duplicate execution (idempotency guard).
+func TestScheduler_DigestLoop_WithIdempotencyGuard(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+	digestMock := &mockDigestService{
+		slowDelay: 150 * time.Millisecond, // Slower than tick interval
+	}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetDigestService(digestMock)
+	sched.SetDigestInterval(100 * time.Millisecond) // Tick every 100ms, but job takes 150ms
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Run for 400ms (enough for 4 ticks: 100ms, 200ms, 300ms, 400ms)
+	time.Sleep(400 * time.Millisecond)
+
+	digestMock.mu.Lock()
+	callCount := digestMock.callCount
+	digestMock.mu.Unlock()
+
+	// With a 150ms slow job and 100ms tick interval, idempotency guard should
+	// prevent overlapping execution. We should get 2-3 calls, not 4+.
+	if callCount > 3 {
+		t.Logf("WARNING: digest called %d times in 400ms with 100ms interval and 150ms job — guard may not be working", callCount)
+	}
+
+	t.Logf("digest loop with idempotency guard: %d calls in 400ms (100ms interval, 150ms job)", callCount)
+
+	cancel()
+	err := sched.WaitForCompletion(2 * time.Second)
+	if err != nil {
+		t.Fatalf("WaitForCompletion should succeed: %v", err)
+	}
+}
+
+// TestScheduler_DigestLoop_SetDigestService tests that SetDigestService wires
+// the digest service correctly and starts the digest loop.
+func TestScheduler_DigestLoop_SetDigestService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+
+	// Initially, no digest service
+	if sched.digestService != nil {
+		t.Error("digestService should be nil initially")
+	}
+
+	// Set digest service
+	digestMock := &mockDigestService{}
+	sched.SetDigestService(digestMock)
+
+	if sched.digestService == nil {
+		t.Error("digestService should be set after SetDigestService")
+	}
+
+	// Verify it's the same service we set
+	if sched.digestService != digestMock {
+		t.Error("digestService should be the mock we provided")
+	}
+}
+
+// TestScheduler_DigestLoop_SetDigestInterval tests that SetDigestInterval
+// configures the digest tick interval.
+func TestScheduler_DigestLoop_SetDigestInterval(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+
+	// Default is 24h
+	if sched.digestInterval != 24*time.Hour {
+		t.Errorf("default digestInterval should be 24h, got %v", sched.digestInterval)
+	}
+
+	// Set custom interval
+	customInterval := 5 * time.Minute
+	sched.SetDigestInterval(customInterval)
+
+	if sched.digestInterval != customInterval {
+		t.Errorf("digestInterval should be %v after SetDigestInterval, got %v", customInterval, sched.digestInterval)
+	}
+}

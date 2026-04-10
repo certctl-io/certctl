@@ -713,6 +713,188 @@ func TestApplyDefaults(t *testing.T) {
 	}
 }
 
+// TestDeployCertificate_FullChainMode tests that when ChainPath is not set but
+// ChainPEM is provided, the chain is appended to the certificate data before writing.
+func TestDeployCertificate_FullChainMode(t *testing.T) {
+	keyFile := createTempKeyFile(t)
+
+	cfg := &Config{
+		Host:           "example.com",
+		Port:           22,
+		User:           "deploy",
+		AuthMethod:     "key",
+		PrivateKeyPath: keyFile,
+		CertPath:       "/etc/ssl/certs/cert.pem",
+		KeyPath:        "/etc/ssl/private/key.pem",
+		ChainPath:      "", // Not set, so chain should be appended to cert
+		CertMode:       "0644",
+		KeyMode:        "0600",
+		Timeout:        30,
+	}
+
+	mock := &mockSSHClient{}
+	connector := NewWithClient(cfg, mock, testLogger())
+
+	deployReq := target.DeploymentRequest{
+		CertPEM:  "-----BEGIN CERTIFICATE-----\nMIIBk...\n-----END CERTIFICATE-----",
+		KeyPEM:   "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----",
+		ChainPEM: "-----BEGIN CERTIFICATE-----\nMIIBj...\n-----END CERTIFICATE-----",
+	}
+
+	result, err := connector.DeployCertificate(context.Background(), deployReq)
+	if err != nil {
+		t.Fatalf("deployment failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("deployment result was not successful: %s", result.Message)
+	}
+
+	// Verify that the cert file received contains both cert and chain concatenated
+	if len(mock.writeFileCalls) < 2 {
+		t.Fatalf("expected at least 2 WriteFile calls, got %d", len(mock.writeFileCalls))
+	}
+
+	certWriteCall := mock.writeFileCalls[0]
+	if certWriteCall.Path != "/etc/ssl/certs/cert.pem" {
+		t.Errorf("expected cert path /etc/ssl/certs/cert.pem, got %s", certWriteCall.Path)
+	}
+
+	certData := string(certWriteCall.Data)
+	if !containsString(certData, "BEGIN CERTIFICATE") || !containsString(certData, "BEGIN CERTIFICATE") {
+		t.Errorf("cert data should contain combined cert and chain")
+	}
+
+	// Verify chain was not written separately (since ChainPath is empty)
+	if len(mock.writeFileCalls) > 2 {
+		t.Errorf("expected only 2 WriteFile calls (cert + key), got %d", len(mock.writeFileCalls))
+	}
+}
+
+// TestDeployCertificate_Permissions tests that the correct file permissions are
+// passed to WriteFile for both certificate and key files.
+func TestDeployCertificate_Permissions(t *testing.T) {
+	keyFile := createTempKeyFile(t)
+
+	cfg := &Config{
+		Host:           "example.com",
+		Port:           22,
+		User:           "deploy",
+		AuthMethod:     "key",
+		PrivateKeyPath: keyFile,
+		CertPath:       "/etc/ssl/certs/cert.pem",
+		KeyPath:        "/etc/ssl/private/key.pem",
+		ChainPath:      "",
+		CertMode:       "0644",
+		KeyMode:        "0600",
+		Timeout:        30,
+	}
+
+	mock := &mockSSHClient{}
+	connector := NewWithClient(cfg, mock, testLogger())
+
+	deployReq := target.DeploymentRequest{
+		CertPEM:  "-----BEGIN CERTIFICATE-----\nMIIBk...\n-----END CERTIFICATE-----",
+		KeyPEM:   "-----BEGIN PRIVATE KEY-----\nMIIE...\n-----END PRIVATE KEY-----",
+		ChainPEM: "",
+	}
+
+	_, err := connector.DeployCertificate(context.Background(), deployReq)
+	if err != nil {
+		t.Fatalf("deployment failed: %v", err)
+	}
+
+	if len(mock.writeFileCalls) < 2 {
+		t.Fatalf("expected at least 2 WriteFile calls, got %d", len(mock.writeFileCalls))
+	}
+
+	// Check cert file permissions (0644 = rw-r--r--)
+	certMode := mock.writeFileCalls[0].Mode
+	expectedCertMode := os.FileMode(0644)
+	if certMode != expectedCertMode {
+		t.Errorf("expected cert mode 0644, got %o", certMode)
+	}
+
+	// Check key file permissions (0600 = rw-------)
+	keyMode := mock.writeFileCalls[1].Mode
+	expectedKeyMode := os.FileMode(0600)
+	if keyMode != expectedKeyMode {
+		t.Errorf("expected key mode 0600, got %o", keyMode)
+	}
+}
+
+// TestValidateDeployment_KeyNotFound tests that ValidateDeployment fails when
+// the key file is not found on the remote server.
+func TestValidateDeployment_KeyNotFound(t *testing.T) {
+	keyFile := createTempKeyFile(t)
+
+	cfg := &Config{
+		Host:           "example.com",
+		Port:           22,
+		User:           "deploy",
+		AuthMethod:     "key",
+		PrivateKeyPath: keyFile,
+		CertPath:       "/etc/ssl/certs/cert.pem",
+		KeyPath:        "/etc/ssl/private/key.pem",
+		ChainPath:      "",
+		CertMode:       "0644",
+		KeyMode:        "0600",
+		Timeout:        30,
+	}
+
+	// Create a custom mock that succeeds for cert but fails for key
+	mock := &conditionalStatMockSSHClient{
+		base: &mockSSHClient{},
+	}
+
+	connector := NewWithClient(cfg, mock, testLogger())
+
+	valReq := target.ValidationRequest{
+		Serial: "11111",
+	}
+
+	result, err := connector.ValidateDeployment(context.Background(), valReq)
+	if err == nil {
+		t.Error("expected validation to fail when key file is not found")
+	}
+	if result.Valid {
+		t.Error("expected Valid=false when key file is missing")
+	}
+	if !containsString(result.Message, "key file not found") {
+		t.Errorf("expected 'key file not found' in message, got: %s", result.Message)
+	}
+}
+
+// conditionalStatMockSSHClient wraps mockSSHClient to fail on key path during StatFile.
+type conditionalStatMockSSHClient struct {
+	base      *mockSSHClient
+	callCount int
+}
+
+func (m *conditionalStatMockSSHClient) Connect(ctx context.Context) error {
+	return m.base.Connect(ctx)
+}
+
+func (m *conditionalStatMockSSHClient) WriteFile(remotePath string, data []byte, mode os.FileMode) error {
+	return m.base.WriteFile(remotePath, data, mode)
+}
+
+func (m *conditionalStatMockSSHClient) Execute(ctx context.Context, command string) (string, error) {
+	return m.base.Execute(ctx, command)
+}
+
+func (m *conditionalStatMockSSHClient) StatFile(remotePath string) (int64, error) {
+	m.callCount++
+	// First call succeeds (cert), second call fails (key)
+	if m.callCount == 2 {
+		return 0, fmt.Errorf("file not found")
+	}
+	return 1024, nil
+}
+
+func (m *conditionalStatMockSSHClient) Close() error {
+	return m.base.Close()
+}
+
 // --- Helpers ---
 
 // createTempKeyFile creates a temporary file that simulates an SSH private key.
@@ -724,4 +906,26 @@ func createTempKeyFile(t *testing.T) string {
 		t.Fatalf("failed to create temp key file: %v", err)
 	}
 	return keyFile
+}
+
+// containsString is a helper to check if a string contains a substring.
+func containsString(s, substr string) bool {
+	return len(s) >= len(substr) && stringIndex(s, substr) != -1
+}
+
+// stringIndex returns the index of the first occurrence of substr in s, or -1 if not found.
+func stringIndex(s, substr string) int {
+	for i := 0; i <= len(s)-len(substr); i++ {
+		match := true
+		for j := 0; j < len(substr); j++ {
+			if s[i+j] != substr[j] {
+				match = false
+				break
+			}
+		}
+		if match {
+			return i
+		}
+	}
+	return -1
 }

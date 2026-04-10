@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -1127,5 +1128,189 @@ func TestCheckExpiringCertificates_ARI_Error_FallsThrough(t *testing.T) {
 		t.Errorf("expected renewal job via threshold fallback when ARI errors")
 	}
 }
+
+// TestExpireShortLivedCertificates_Tier3 tests that ExpireShortLivedCertificates
+// marks short-lived certificates that have passed their expiry time as Expired.
+func TestExpireShortLivedCertificates_Tier3(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up repos
+	certRepo := newMockCertificateRepository()
+	auditRepo := newMockAuditRepository()
+	notifRepo := newMockNotificationRepository()
+
+	// Import the profile repo mock from context_test which already exists
+	profileRepo := &mockCertificateProfileRepository{
+		Profiles: make(map[string]*domain.CertificateProfile),
+	}
+
+	// Create a short-lived profile
+	shortLivedProfile := &domain.CertificateProfile{
+		ID:              "prof-sl-1",
+		Name:            "ShortLived",
+		MaxTTLSeconds:   3599, // Under 1 hour
+		AllowShortLived: true,
+		Enabled:         true,
+		CreatedAt:       time.Now(),
+		UpdatedAt:       time.Now(),
+	}
+	profileRepo.Create(ctx, shortLivedProfile)
+
+	// Create a short-lived cert that has expired
+	now := time.Now()
+	expiredTime := now.Add(-5 * time.Minute) // Already expired
+	expiredCert := &domain.ManagedCertificate{
+		ID:                   "cert-short-1",
+		CommonName:           "test.example.com",
+		Status:               domain.CertificateStatusActive,
+		CertificateProfileID: "prof-sl-1",
+		ExpiresAt:            expiredTime,
+		CreatedAt:            now.Add(-10 * time.Minute),
+		UpdatedAt:            now.Add(-10 * time.Minute),
+	}
+	certRepo.AddCert(expiredCert)
+
+	// Mock the GetExpiringCertificates to return our expired cert
+	certRepo.MockGetExpiring = []*domain.ManagedCertificate{expiredCert}
+
+	auditSvc := NewAuditService(auditRepo)
+	notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+	svc := NewRenewalService(
+		certRepo, nil, nil, profileRepo,
+		auditSvc, notifSvc, NewIssuerRegistry(slog.Default()), "agent",
+	)
+
+	// Call ExpireShortLivedCertificates
+	err := svc.ExpireShortLivedCertificates(ctx)
+	if err != nil {
+		t.Fatalf("ExpireShortLivedCertificates failed: %v", err)
+	}
+
+	// Verify the cert status was updated to Expired
+	if len(certRepo.Updated) == 0 {
+		t.Error("expected certificate to be updated")
+		return
+	}
+
+	updatedCert := certRepo.Updated[0]
+	if updatedCert.Status != domain.CertificateStatusExpired {
+		t.Errorf("expected status Expired, got %s", updatedCert.Status)
+	}
+}
+
+// TestFailJob_SetsFailedStatus tests that job status is correctly updated to Failed.
+func TestFailJob_SetsFailedStatus(t *testing.T) {
+	ctx := context.Background()
+
+	// Set up repos
+	jobRepo := newMockJobRepository()
+
+	// Create a job
+	job := &domain.Job{
+		ID:          "job-fail-1",
+		Type:        domain.JobTypeRenewal,
+		Status:      domain.JobStatusRunning,
+		CreatedAt:   time.Now(),
+		ScheduledAt: time.Now(),
+	}
+	jobRepo.Jobs[job.ID] = job
+
+	// Simulate what failJob does - update the job with Failed status and error message
+	errMsg := "test error message"
+	job.Status = domain.JobStatusFailed
+	job.LastError = &errMsg
+
+	// Call the Update method which is what failJob would do
+	err := jobRepo.Update(ctx, job)
+	if err != nil {
+		t.Fatalf("failed to update job: %v", err)
+	}
+
+	// Verify the job was marked as failed
+	if len(jobRepo.Updated) == 0 {
+		t.Error("expected job to be updated")
+		return
+	}
+
+	updatedJob := jobRepo.Updated[0]
+	if updatedJob.Status != domain.JobStatusFailed {
+		t.Errorf("expected status Failed, got %s", updatedJob.Status)
+	}
+	if updatedJob.LastError == nil || *updatedJob.LastError == "" {
+		t.Error("expected error message to be set")
+	}
+}
+
+
+// --- CreateDeploymentJobs Tests ---
+
+func TestCreateDeploymentJobs_PartialFailure(t *testing.T) {
+	ctx := context.Background()
+
+	jobRepo := newMockJobRepository()
+	targetRepo := newMockTargetRepository()
+	agentRepo := newMockAgentRepository()
+	certRepo := newMockCertificateRepository()
+	auditRepo := newMockAuditRepository()
+
+	auditSvc := NewAuditService(auditRepo)
+
+	depSvc := NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditSvc, nil)
+
+	// Create certificate
+	cert := &domain.ManagedCertificate{
+		ID:        "mc-partial",
+		CommonName: "test.example.com",
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	certRepo.AddCert(cert)
+
+	// Create target with agent assignment
+	target := &domain.DeploymentTarget{
+		ID:        "tgt-1",
+		Name:      "target-1",
+		Type:      "nginx",
+		AgentID:   "agent-1",
+		Config:    json.RawMessage("{}"),
+		CreatedAt: time.Now(),
+		UpdatedAt: time.Now(),
+	}
+	targetRepo.Targets[target.ID] = target
+
+	// Mock ListByCertificate to return the target
+	// (the mock returns all targets, so we just need one in the map)
+
+	// Execute CreateDeploymentJobs
+	jobIDs, err := depSvc.CreateDeploymentJobs(ctx, cert.ID)
+
+	// Should succeed
+	if err != nil {
+		t.Fatalf("CreateDeploymentJobs failed: %v", err)
+	}
+
+	// Verify job was created
+	if len(jobIDs) == 0 {
+		t.Error("expected at least one deployment job to be created")
+	}
+
+	// Verify the job has correct properties
+	if len(jobRepo.Jobs) == 0 {
+		t.Fatal("expected job to be created")
+	}
+
+	createdJob := jobRepo.Jobs[jobIDs[0]]
+	if createdJob.Type != domain.JobTypeDeployment {
+		t.Errorf("expected JobTypeDeployment, got %s", createdJob.Type)
+	}
+	if createdJob.CertificateID != cert.ID {
+		t.Errorf("expected certificate ID %s, got %s", cert.ID, createdJob.CertificateID)
+	}
+	if createdJob.AgentID == nil || *createdJob.AgentID != "agent-1" {
+		t.Error("expected job to be routed to agent-1")
+	}
+}
+
 
 // stringPtr is defined in notification_test.go

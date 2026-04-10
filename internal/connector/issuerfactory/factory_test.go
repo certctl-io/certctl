@@ -136,3 +136,14 @@ func TestNewFromConfig_EmptyConfig(t *testing.T) {
 		t.Fatal("expected non-nil connector")
 	}
 }
+
+func TestNewFromConfig_AWSACMPCA(t *testing.T) {
+	cfg := json.RawMessage(`{"project":"my-project","location":"us-central1","ca_pool":"my-pool","credentials":"/path/to/creds.json"}`)
+	conn, err := NewFromConfig("AWSACMPCA", cfg, testLogger())
+	if err != nil {
+		t.Fatalf("NewFromConfig(AWSACMPCA) failed: %v", err)
+	}
+	if conn == nil {
+		t.Fatal("expected non-nil connector")
+	}
+}

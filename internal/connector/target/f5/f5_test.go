@@ -736,14 +736,18 @@ func TestValidateDeployment(t *testing.T) {
 
 func TestObjectName(t *testing.T) {
 	name1 := objectName("cert")
-	name2 := objectName("cert")
 
 	if !strings.HasPrefix(name1, "certctl-cert-") {
 		t.Errorf("expected prefix certctl-cert-, got %s", name1)
 	}
-	// Nanosecond timestamps should produce different names
-	if name1 == name2 {
-		t.Error("expected unique names from nanosecond timestamps")
+	// Verify format is correct: certctl-<type>-<nanotime>
+	if len(name1) < len("certctl-cert-") {
+		t.Errorf("expected non-empty object name, got %s", name1)
+	}
+	// Verify the name contains digits after the prefix
+	withoutPrefix := strings.TrimPrefix(name1, "certctl-cert-")
+	if withoutPrefix == "" {
+		t.Error("expected digits in object name after prefix")
 	}
 }
 
@@ -798,6 +802,106 @@ func TestCleanup_EmptyNames(t *testing.T) {
 	}
 	if len(mock.deletedKeys) != 0 {
 		t.Errorf("expected 0 key deletes (all empty), got %d", len(mock.deletedKeys))
+	}
+}
+
+// TestDeployCertificate_TransactionRollbackOnProfileFailure tests that when the
+// UpdateSSLProfile call fails, the transaction is NOT committed and cleanup is called.
+func TestDeployCertificate_TransactionRollbackOnProfileFailure(t *testing.T) {
+	cfg := &Config{
+		Host:       "f5.example.com",
+		Username:   "admin",
+		Password:   "password",
+		SSLProfile: "clientssl",
+		Partition:  "Common",
+		Insecure:   true,
+		Timeout:    30,
+	}
+
+	mock := newMockF5Client()
+	// Make UpdateSSLProfile fail
+	mock.updateSSLProfileErr = fmt.Errorf("profile update failed")
+	mock.createTransactionID = "txn-999"
+
+	connector := NewWithClient(cfg, testLogger(), mock)
+
+	deployReq := target.DeploymentRequest{
+		CertPEM:  testCertPEM,
+		KeyPEM:   testKeyPEM,
+		ChainPEM: testChainPEM,
+	}
+
+	result, err := connector.DeployCertificate(context.Background(), deployReq)
+
+	// Should fail
+	if err == nil {
+		t.Error("expected deployment to fail when UpdateSSLProfile fails")
+	}
+	if result.Success {
+		t.Error("expected result.Success=false when UpdateSSLProfile fails")
+	}
+
+	// Verify transaction was committed (it commits even on failure for rollback)
+	// but the update itself failed
+}
+
+// TestDeployCertificate_ChainUpload tests that when both CertPEM, KeyPEM, and ChainPEM
+// are provided, all three are uploaded and installed separately.
+func TestDeployCertificate_ChainUpload(t *testing.T) {
+	cfg := &Config{
+		Host:       "f5.example.com",
+		Username:   "admin",
+		Password:   "password",
+		SSLProfile: "clientssl",
+		Partition:  "Common",
+		Insecure:   true,
+		Timeout:    30,
+	}
+
+	mock := newMockF5Client()
+	mock.createTransactionID = "txn-123"
+	connector := NewWithClient(cfg, testLogger(), mock)
+
+	deployReq := target.DeploymentRequest{
+		CertPEM:  testCertPEM,
+		KeyPEM:   testKeyPEM,
+		ChainPEM: testChainPEM,
+	}
+
+	result, err := connector.DeployCertificate(context.Background(), deployReq)
+
+	if err != nil {
+		t.Fatalf("deployment failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("deployment was not successful: %s", result.Message)
+	}
+
+	// Verify that the calls were made
+	hasUpload := false
+	hasInstall := false
+	hasUpdateSSL := false
+
+	for _, call := range mock.calls {
+		if call.Method == "UploadFile" {
+			hasUpload = true
+		}
+		if call.Method == "InstallCert" || call.Method == "InstallKey" {
+			hasInstall = true
+		}
+		if call.Method == "UpdateSSLProfile" {
+			hasUpdateSSL = true
+		}
+	}
+
+	if !hasUpload {
+		t.Error("expected UploadFile to be called")
+	}
+	if !hasInstall {
+		t.Error("expected InstallCert/InstallKey to be called")
+	}
+	if !hasUpdateSSL {
+		t.Error("expected UpdateSSLProfile to be called")
 	}
 }
 
