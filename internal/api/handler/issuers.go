@@ -2,6 +2,7 @@ package handler
 
 import (
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -22,12 +23,18 @@ type IssuerService interface {
 
 // IssuerHandler handles HTTP requests for issuer operations.
 type IssuerHandler struct {
-	svc IssuerService
+	svc    IssuerService
+	logger *slog.Logger
 }
 
 // NewIssuerHandler creates a new IssuerHandler with a service dependency.
 func NewIssuerHandler(svc IssuerService) IssuerHandler {
-	return IssuerHandler{svc: svc}
+	return IssuerHandler{svc: svc, logger: slog.Default()}
+}
+
+// NewIssuerHandlerWithLogger creates a new IssuerHandler with a custom logger.
+func NewIssuerHandlerWithLogger(svc IssuerService, logger *slog.Logger) IssuerHandler {
+	return IssuerHandler{svc: svc, logger: logger}
 }
 
 // ListIssuers lists all configured issuers.
@@ -127,7 +134,16 @@ func (h IssuerHandler) CreateIssuer(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.CreateIssuer(issuer)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create issuer", requestID)
+		h.logger.Error("failed to create issuer", "error", err, "name", issuer.Name, "type", issuer.Type)
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate"):
+			ErrorWithRequestID(w, http.StatusConflict, "An issuer with this name already exists", requestID)
+		case strings.Contains(errMsg, "unsupported issuer type"):
+			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
+		default:
+			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create issuer", requestID)
+		}
 		return
 	}
 
@@ -160,7 +176,16 @@ func (h IssuerHandler) UpdateIssuer(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateIssuer(id, issuer)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update issuer", requestID)
+		h.logger.Error("failed to update issuer", "error", err, "id", id)
+		errMsg := err.Error()
+		switch {
+		case strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate"):
+			ErrorWithRequestID(w, http.StatusConflict, "An issuer with this name already exists", requestID)
+		case strings.Contains(errMsg, "not found"):
+			ErrorWithRequestID(w, http.StatusNotFound, "Issuer not found", requestID)
+		default:
+			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update issuer", requestID)
+		}
 		return
 	}
 

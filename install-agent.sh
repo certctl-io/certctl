@@ -60,7 +60,20 @@ OPTIONS:
     -h, --help          Show this help message
     --server-url URL    Set CERTCTL_SERVER_URL (skips interactive prompt)
     --api-key KEY       Set CERTCTL_API_KEY (skips interactive prompt)
+    --agent-id ID       Set CERTCTL_AGENT_ID (defaults to hostname)
     --no-start          Install but don't start the service
+
+EXAMPLES:
+    # Interactive install (download first):
+    curl -sSLO https://raw.githubusercontent.com/${GITHUB_REPO}/master/install-agent.sh
+    chmod +x install-agent.sh
+    sudo ./install-agent.sh
+
+    # Non-interactive install (pipe via curl):
+    curl -sSL https://raw.githubusercontent.com/${GITHUB_REPO}/master/install-agent.sh \\
+      | sudo bash -s -- \\
+          --server-url https://certctl.example.com \\
+          --api-key YOUR_API_KEY
 
 EOF
 }
@@ -74,24 +87,102 @@ parse_args() {
                 exit 0
                 ;;
             --server-url)
-                SERVER_URL="$2"
+                SERVER_URL="${2:-}"
+                if [[ -z "$SERVER_URL" ]]; then
+                    echo -e "${RED}Error: --server-url requires a value${NC}" >&2
+                    exit 1
+                fi
                 shift 2
                 ;;
+            --server-url=*)
+                SERVER_URL="${1#*=}"
+                shift
+                ;;
             --api-key)
-                API_KEY="$2"
+                API_KEY="${2:-}"
+                if [[ -z "$API_KEY" ]]; then
+                    echo -e "${RED}Error: --api-key requires a value${NC}" >&2
+                    exit 1
+                fi
                 shift 2
+                ;;
+            --api-key=*)
+                API_KEY="${1#*=}"
+                shift
+                ;;
+            --agent-id)
+                AGENT_ID="${2:-}"
+                if [[ -z "$AGENT_ID" ]]; then
+                    echo -e "${RED}Error: --agent-id requires a value${NC}" >&2
+                    exit 1
+                fi
+                shift 2
+                ;;
+            --agent-id=*)
+                AGENT_ID="${1#*=}"
+                shift
                 ;;
             --no-start)
                 NO_START=true
                 shift
                 ;;
             *)
-                echo -e "${RED}Error: Unknown option: $1${NC}"
+                echo -e "${RED}Error: Unknown option: $1${NC}" >&2
                 usage
                 exit 1
                 ;;
         esac
     done
+}
+
+# Ensure stdin is interactive before prompting. When the script is piped via
+# curl|bash, stdin is the pipe from curl, so `read` hits EOF immediately and
+# set -e aborts the script silently. Reopen stdin from the controlling terminal
+# (/dev/tty) if available; otherwise print a helpful error pointing at the
+# flag-based non-interactive install.
+ensure_interactive_input() {
+    # If all required config is already provided via flags, no prompting needed.
+    if [[ -n "${SERVER_URL:-}" && -n "${API_KEY:-}" ]]; then
+        return
+    fi
+
+    # Already interactive — nothing to do.
+    if [[ -t 0 ]]; then
+        return
+    fi
+
+    # Piped stdin — try to reopen from the controlling terminal. Actually
+    # attempt to open /dev/tty inside a subshell: the device node may exist
+    # even when the process has no controlling terminal (ENXIO on open), so
+    # `[[ -r /dev/tty ]]` is not reliable.
+    if ( exec </dev/tty ) 2>/dev/null; then
+        exec </dev/tty
+        return
+    fi
+
+    # No terminal available — emit clear guidance and exit.
+    # Use printf '%b' so the ANSI color escapes in $RED/$NC are interpreted
+    # rather than rendered as literal backslash sequences (a heredoc would
+    # keep them as raw text).
+    {
+        printf '%b\n' "${RED}Error: No interactive terminal available.${NC}"
+        printf '\n'
+        printf 'The installer was piped through curl and no controlling terminal (/dev/tty)\n'
+        printf 'is available for prompts. Pass the required values as flags instead:\n'
+        printf '\n'
+        printf '  curl -sSL https://raw.githubusercontent.com/%s/master/install-agent.sh \\\n' "$GITHUB_REPO"
+        printf '    | sudo bash -s -- \\\n'
+        printf '        --server-url https://certctl.example.com \\\n'
+        printf '        --api-key YOUR_API_KEY\n'
+        printf '\n'
+        printf 'Or download the script first and run it directly:\n'
+        printf '\n'
+        printf '  curl -sSLO https://raw.githubusercontent.com/%s/master/install-agent.sh\n' "$GITHUB_REPO"
+        printf '  chmod +x install-agent.sh\n'
+        printf '  sudo ./install-agent.sh\n'
+        printf '\n'
+    } >&2
+    exit 1
 }
 
 # Check if running as root/sudo on Linux
@@ -103,23 +194,33 @@ check_privileges() {
 }
 
 # Download agent binary from GitHub Releases
+# IMPORTANT: main() captures this function's stdout via `binary_path=$(download_binary)`,
+# so every status/error message MUST go to stderr (>&2). Only the final
+# `echo "$temp_file"` is allowed on stdout — that's the return value.
+#
+# We deliberately do NOT register an EXIT trap to clean up $temp_file: because
+# of the command substitution, this function runs in a subshell, and any EXIT
+# trap set here fires when the subshell exits — which is *before* install_binary
+# gets a chance to cp the file. Cleanup on success is install_binary's job
+# (after the cp), and cleanup on curl failure is handled inline below.
 download_binary() {
     local binary_name="certctl-agent-${OS_TYPE}-${ARCH_TYPE}"
     local download_url="${RELEASE_URL}/${binary_name}"
 
-    echo -e "${YELLOW}Downloading certctl agent (${OS_TYPE}-${ARCH_TYPE})...${NC}"
+    echo -e "${YELLOW}Downloading certctl agent (${OS_TYPE}-${ARCH_TYPE})...${NC}" >&2
 
     if ! command -v curl &> /dev/null; then
-        echo -e "${RED}Error: curl is required but not installed${NC}"
+        echo -e "${RED}Error: curl is required but not installed${NC}" >&2
         exit 1
     fi
 
-    local temp_file=$(mktemp)
-    trap "rm -f $temp_file" EXIT
+    local temp_file
+    temp_file=$(mktemp)
 
-    if ! curl -sSL -f "$download_url" -o "$temp_file"; then
-        echo -e "${RED}Error: Failed to download binary from $download_url${NC}"
-        echo "Make sure the latest release exists on GitHub with the binary asset for ${OS_TYPE}-${ARCH_TYPE}."
+    if ! curl -sSL -f "$download_url" -o "$temp_file" >&2; then
+        rm -f "$temp_file"
+        echo -e "${RED}Error: Failed to download binary from $download_url${NC}" >&2
+        echo "Make sure the latest release exists on GitHub with the binary asset for ${OS_TYPE}-${ARCH_TYPE}." >&2
         exit 1
     fi
 
@@ -146,35 +247,52 @@ install_binary() {
 
     chmod +x "$INSTALL_DIR/$SERVICE_NAME"
     echo -e "${GREEN}Binary installed: $INSTALL_DIR/$SERVICE_NAME${NC}"
+
+    # Clean up the temp file created by download_binary. We can't use an EXIT
+    # trap inside download_binary because it runs in a subshell (command
+    # substitution), so the trap would fire before we got here. Doing it
+    # explicitly after the successful cp is the simplest correct pattern.
+    rm -f "$binary_path"
 }
 
-# Prompt for configuration (unless --server-url and --api-key provided)
+# Prompt for configuration. Any value supplied via flag is honored as-is
+# and we only prompt for the missing pieces. `read || true` prevents set -e
+# from aborting the script on EOF — instead the empty check below fires the
+# proper "required" error message.
 prompt_for_config() {
     if [[ -z "${SERVER_URL:-}" ]]; then
         echo ""
         echo -e "${YELLOW}Enter certctl server URL (e.g., https://certctl.example.com):${NC}"
-        read -r SERVER_URL
-        if [[ -z "$SERVER_URL" ]]; then
-            echo -e "${RED}Error: Server URL is required${NC}"
+        read -r SERVER_URL || true
+        if [[ -z "${SERVER_URL:-}" ]]; then
+            echo -e "${RED}Error: Server URL is required${NC}" >&2
+            echo "Hint: pass --server-url <URL> to run non-interactively." >&2
             exit 1
         fi
     fi
 
     if [[ -z "${API_KEY:-}" ]]; then
         echo -e "${YELLOW}Enter certctl API key:${NC}"
-        read -sr API_KEY
+        read -rs API_KEY || true
         echo ""
-        if [[ -z "$API_KEY" ]]; then
-            echo -e "${RED}Error: API key is required${NC}"
+        if [[ -z "${API_KEY:-}" ]]; then
+            echo -e "${RED}Error: API key is required${NC}" >&2
+            echo "Hint: pass --api-key <KEY> to run non-interactively." >&2
             exit 1
         fi
     fi
 
     if [[ -z "${AGENT_ID:-}" ]]; then
-        local default_agent_id="$(hostname)"
-        echo -e "${YELLOW}Enter agent ID (default: $default_agent_id):${NC}"
-        read -r AGENT_ID
-        if [[ -z "$AGENT_ID" ]]; then
+        local default_agent_id
+        default_agent_id="$(hostname)"
+        # If stdin is still piped (no /dev/tty was available but SERVER_URL +
+        # API_KEY arrived via flags), skip the prompt entirely and use the
+        # default — no need to block on an optional value.
+        if [[ -t 0 ]]; then
+            echo -e "${YELLOW}Enter agent ID (default: $default_agent_id):${NC}"
+            read -r AGENT_ID || true
+        fi
+        if [[ -z "${AGENT_ID:-}" ]]; then
             AGENT_ID="$default_agent_id"
         fi
     fi
@@ -447,6 +565,7 @@ main() {
     echo "Detected platform: ${OS_TYPE}-${ARCH_TYPE}"
     echo ""
 
+    ensure_interactive_input
     prompt_for_config
 
     # Download and install binary

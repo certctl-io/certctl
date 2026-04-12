@@ -3,8 +3,10 @@ package handler
 import (
 	"bytes"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -321,6 +323,122 @@ func TestCreateIssuer_NameTooLong(t *testing.T) {
 
 	if w.Code != http.StatusBadRequest {
 		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+}
+
+func TestCreateIssuer_DuplicateName(t *testing.T) {
+	mock := &MockIssuerService{
+		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+			return nil, fmt.Errorf("failed to create issuer: duplicate key value violates unique constraint \"issuers_name_key\"")
+		},
+	}
+
+	body := map[string]interface{}{
+		"name": "ACME Issuer",
+		"type": "ACME",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	handler := NewIssuerHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.CreateIssuer(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !strings.Contains(resp.Message, "already exists") {
+		t.Errorf("expected message to contain 'already exists', got %q", resp.Message)
+	}
+}
+
+func TestCreateIssuer_UnsupportedType(t *testing.T) {
+	mock := &MockIssuerService{
+		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+			return nil, fmt.Errorf("unsupported issuer type: FakeCA")
+		},
+	}
+
+	body := map[string]interface{}{
+		"name": "Fake Issuer",
+		"type": "FakeCA",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	handler := NewIssuerHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.CreateIssuer(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected status 400, got %d", w.Code)
+	}
+
+	var resp ErrorResponse
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if !strings.Contains(resp.Message, "unsupported issuer type") {
+		t.Errorf("expected message to contain 'unsupported issuer type', got %q", resp.Message)
+	}
+}
+
+func TestCreateIssuer_GenericServiceError(t *testing.T) {
+	mock := &MockIssuerService{
+		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+			return nil, fmt.Errorf("failed to encrypt config: cipher error")
+		},
+	}
+
+	body := map[string]interface{}{
+		"name": "Some Issuer",
+		"type": "ACME",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	handler := NewIssuerHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.CreateIssuer(w, req)
+
+	if w.Code != http.StatusInternalServerError {
+		t.Fatalf("expected status 500, got %d", w.Code)
+	}
+}
+
+func TestUpdateIssuer_DuplicateName(t *testing.T) {
+	mock := &MockIssuerService{
+		UpdateIssuerFn: func(id string, issuer domain.Issuer) (*domain.Issuer, error) {
+			return nil, fmt.Errorf("failed to update issuer: duplicate key value violates unique constraint")
+		},
+	}
+
+	body := map[string]interface{}{
+		"name": "Existing Name",
+		"type": "ACME",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	handler := NewIssuerHandler(mock)
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/issuers/iss-test", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.UpdateIssuer(w, req)
+
+	if w.Code != http.StatusConflict {
+		t.Fatalf("expected status 409, got %d", w.Code)
 	}
 }
 

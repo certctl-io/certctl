@@ -115,6 +115,15 @@ function IssuerStep({ onNext, onSkip, onIssuerCreated }: {
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
   const [issuerName, setIssuerName] = useState('');
+
+  // Pre-populate default values when a type is selected (matches IssuersPage behavior)
+  function handleTypeSelect(typeId: string) {
+    setSelectedType(typeId);
+    const tc = issuerTypes.find(t => t.id === typeId);
+    const defaults: Record<string, unknown> = {};
+    tc?.configFields.forEach(f => { if (f.defaultValue !== undefined) defaults[f.key] = f.defaultValue; });
+    setConfigValues(defaults);
+  }
   const [error, setError] = useState('');
   const [testResult, setTestResult] = useState<{ ok: boolean; msg: string } | null>(null);
   const [createdIssuer, setCreatedIssuer] = useState<Issuer | null>(null);
@@ -196,7 +205,7 @@ function IssuerStep({ onNext, onSkip, onIssuerCreated }: {
           {issuerTypes.filter(t => !t.comingSoon).map((type: IssuerTypeConfig) => (
             <button
               key={type.id}
-              onClick={() => setSelectedType(type.id)}
+              onClick={() => handleTypeSelect(type.id)}
               className="p-4 border border-surface-border rounded-lg hover:border-brand-500 hover:bg-surface-muted transition-all text-left"
             >
               <div className="flex items-center gap-2">
@@ -219,7 +228,7 @@ function IssuerStep({ onNext, onSkip, onIssuerCreated }: {
   return (
     <div>
       <div className="flex items-center gap-2 mb-1">
-        <button onClick={() => { setSelectedType(null); setConfigValues({}); setError(''); }}
+        <button onClick={() => { setSelectedType(null); setConfigValues({}); setIssuerName(''); setError(''); }}
           className="text-ink-muted hover:text-ink transition-colors">
           <svg className="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
             <path strokeLinecap="round" strokeLinejoin="round" d="M15 19l-7-7 7-7" />
@@ -289,28 +298,27 @@ function AgentStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void 
   const commands: Record<string, { code: string; label: string }> = {
     linux: {
       label: 'Install via shell script (systemd service)',
-      code: `curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
+      code: `# Non-interactive install (recommended for curl | bash):
+curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh \\
+  | sudo bash -s -- \\
+      --server-url ${serverUrl} \\
+      --api-key ${apiKey}
 
-# Then configure:
-sudo systemctl edit certctl-agent
-# Add:
-# [Service]
-# Environment="CERTCTL_SERVER_URL=${serverUrl}"
-# Environment="CERTCTL_API_KEY=${apiKey}"
-
-sudo systemctl restart certctl-agent`,
+# The script downloads the agent binary, writes /etc/certctl/agent.env,
+# installs /etc/systemd/system/certctl-agent.service, and starts it.
+# Check status with: sudo systemctl status certctl-agent`,
     },
     macos: {
       label: 'Install via shell script (launchd service)',
-      code: `curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
+      code: `# Non-interactive install (recommended for curl | bash):
+curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh \\
+  | bash -s -- \\
+      --server-url ${serverUrl} \\
+      --api-key ${apiKey}
 
-# Then configure:
-# Edit /Library/LaunchDaemons/com.certctl.agent.plist
-# Set CERTCTL_SERVER_URL to ${serverUrl}
-# Set CERTCTL_API_KEY to ${apiKey}
-
-sudo launchctl unload /Library/LaunchDaemons/com.certctl.agent.plist
-sudo launchctl load /Library/LaunchDaemons/com.certctl.agent.plist`,
+# The script writes ~/.certctl/agent.env and loads
+# ~/Library/LaunchAgents/com.certctl.agent.plist.
+# Check status with: launchctl list | grep certctl`,
     },
     docker: {
       label: 'Run as Docker container',
