@@ -177,7 +177,7 @@ export const markNotificationRead = (id: string) =>
 
 // Audit
 export const getAuditEvents = (params: Record<string, string> = {}) => {
-  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  const qs = new URLSearchParams({ page: '1', per_page: '200', ...params }).toString();
   return fetchJSON<PaginatedResponse<AuditEvent>>(`${BASE}/audit?${qs}`);
 };
 

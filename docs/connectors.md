@@ -962,7 +962,9 @@ The Java Keystore connector deploys certificates to JKS or PKCS#12 keystores via
 
 Location: `internal/connector/target/javakeystore/javakeystore.go`
 
-### Kubernetes Secrets
+### Kubernetes Secrets (Coming in 2.1)
+
+> **Status:** Config validation, tests, UI, and Helm RBAC are implemented. The Kubernetes API client (`k8s.io/client-go`) integration is not yet wired — runtime deployment will be available in v2.1.0.
 
 The Kubernetes Secrets connector deploys certificates as `kubernetes.io/tls` Secrets, compatible with Ingress controllers (nginx-ingress, Traefik, HAProxy), service meshes (Istio, Linkerd), and any Kubernetes workload that reads TLS Secrets.
 

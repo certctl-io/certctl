@@ -110,7 +110,7 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | SSH (Agentless) | Beta | `SSH` |
 | Windows Cert Store | Implemented | `WinCertStore` |
 | Java Keystore | Implemented | `JavaKeystore` |
-| Kubernetes Secrets | Beta | `KubernetesSecrets` |
+| Kubernetes Secrets | Coming in 2.1 | `KubernetesSecrets` |
 
 ### Notifiers
 | Notifier | Status | Type |
