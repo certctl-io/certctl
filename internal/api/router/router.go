@@ -238,6 +238,15 @@ func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
 	r.Register("GET /.well-known/est/csrattrs", http.HandlerFunc(est.CSRAttrs))
 }
 
+// RegisterSCEPHandlers sets up SCEP (RFC 8894) routes.
+// SCEP uses a single endpoint with operation-based dispatch via query parameters.
+// Authentication is via challenge password in the CSR, not TLS client certs or API keys.
+func (r *Router) RegisterSCEPHandlers(scep handler.SCEPHandler) {
+	// SCEP uses a single path; the handler dispatches on ?operation= query param
+	r.Register("GET /scep", http.HandlerFunc(scep.HandleSCEP))
+	r.Register("POST /scep", http.HandlerFunc(scep.HandleSCEP))
+}
+
 // GetMux returns the underlying http.ServeMux for direct access if needed.
 func (r *Router) GetMux() *http.ServeMux {
 	return r.mux

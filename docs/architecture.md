@@ -673,6 +673,46 @@ type ESTService interface {
 
 **Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID.
 
+### SCEP Server (RFC 8894)
+
+The SCEP (Simple Certificate Enrollment Protocol) server provides certificate enrollment for MDM platforms and network devices. It runs at `/scep` with operation-based dispatch via query parameters per RFC 8894.
+
+**Architecture:** SCEP follows the exact same layering as EST — a handler-level protocol that delegates certificate issuance to an existing `IssuerConnector`. The `SCEPService` bridges the `SCEPHandler` to whichever issuer connector is configured via `CERTCTL_SCEP_ISSUER_ID`.
+
+```
+Client (MDM, network device, SCEP client)
+    │
+    ▼
+SCEPHandler (handler layer)
+    │  PKCS#7 envelope parsing, CSR extraction, challenge password extraction
+    ▼
+SCEPService (service layer)
+    │  Challenge password validation, CSR validation, CN/SAN extraction, audit recording
+    ▼
+IssuerConnector (connector layer via IssuerConnectorAdapter)
+    │  Certificate signing (Local CA, step-ca, etc.)
+    ▼
+Signed certificate returned as PKCS#7 certs-only
+```
+
+**Wire format:** SCEP clients wrap CSRs in PKCS#7 SignedData envelopes. The handler parses the outer ASN.1 ContentInfo → SignedData → EncapsulatedContentInfo to extract the CSR bytes. Fallback paths handle base64-encoded PKCS#7 and raw CSR submissions (for simpler clients). Responses use PKCS#7 certs-only via the shared `internal/pkcs7` package (same as EST). Single certs are returned as raw DER for `GetCACert`, chains as PKCS#7.
+
+**Authentication:** SCEP uses challenge passwords embedded in CSR attributes (OID 1.2.840.113549.1.9.7) rather than TLS client certificates. The server validates the challenge password against `CERTCTL_SCEP_CHALLENGE_PASSWORD`. When no challenge password is configured, any value is accepted.
+
+**Interface:** The `SCEPHandler` defines an `SCEPService` interface (dependency inversion):
+
+```go
+type SCEPService interface {
+    GetCACaps(ctx context.Context) string
+    GetCACert(ctx context.Context) (string, error)
+    PKCSReq(ctx context.Context, csrPEM string, challengePassword string, transactionID string) (*domain.SCEPEnrollResult, error)
+}
+```
+
+**Shared PKCS#7 package:** Both EST and SCEP handlers share a common `internal/pkcs7` package for building PKCS#7 certs-only responses and PEM-to-DER chain conversion, eliminating code duplication between the two enrollment protocols.
+
+**Audit:** Every SCEP enrollment is recorded in the audit trail with `protocol: "SCEP"`, the CN, SANs, issuer ID, serial number, transaction ID, and optional profile ID.
+
 ## Security Model
 
 ### Private Key Management

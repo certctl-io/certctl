@@ -12,6 +12,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/pkcs7"
 )
 
 // ESTService defines the service interface for EST enrollment operations.
@@ -67,7 +68,7 @@ func (h ESTHandler) CACerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Parse PEM to DER for PKCS#7 encoding
-	derCerts, err := pemToDERChain(caCertPEM)
+	derCerts, err := pkcs7.PEMToDERChain(caCertPEM)
 	if err != nil {
 		requestID := middleware.GetRequestID(r.Context())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to encode CA certificates", requestID)
@@ -75,7 +76,7 @@ func (h ESTHandler) CACerts(w http.ResponseWriter, r *http.Request) {
 	}
 
 	// Build a simple PKCS#7 SignedData (certs-only, degenerate) structure
-	pkcs7Data, err := buildCertsOnlyPKCS7(derCerts)
+	pkcs7Data, err := pkcs7.BuildCertsOnlyPKCS7(derCerts)
 	if err != nil {
 		requestID := middleware.GetRequestID(r.Context())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to build PKCS#7 response", requestID)
@@ -237,7 +238,7 @@ func (h ESTHandler) writeCertResponse(w http.ResponseWriter, result *domain.ESTE
 	var derCerts [][]byte
 
 	// Add the issued certificate
-	certDER, err := pemToDERChain(result.CertPEM)
+	certDER, err := pkcs7.PEMToDERChain(result.CertPEM)
 	if err != nil || len(certDER) == 0 {
 		http.Error(w, "Failed to encode certificate", http.StatusInternalServerError)
 		return
@@ -246,14 +247,14 @@ func (h ESTHandler) writeCertResponse(w http.ResponseWriter, result *domain.ESTE
 
 	// Add the CA chain if present
 	if result.ChainPEM != "" {
-		chainDER, err := pemToDERChain(result.ChainPEM)
+		chainDER, err := pkcs7.PEMToDERChain(result.ChainPEM)
 		if err == nil {
 			derCerts = append(derCerts, chainDER...)
 		}
 	}
 
 	// Build PKCS#7 certs-only
-	pkcs7Data, err := buildCertsOnlyPKCS7(derCerts)
+	pkcs7Data, err := pkcs7.BuildCertsOnlyPKCS7(derCerts)
 	if err != nil {
 		http.Error(w, "Failed to build PKCS#7 response", http.StatusInternalServerError)
 		return
@@ -273,132 +274,5 @@ func (h ESTHandler) writeCertResponse(w http.ResponseWriter, result *domain.ESTE
 	}
 }
 
-// pemToDERChain converts PEM-encoded certificates to a slice of DER-encoded certificates.
-func pemToDERChain(pemData string) ([][]byte, error) {
-	var derCerts [][]byte
-	rest := []byte(pemData)
-	for {
-		var block *pem.Block
-		block, rest = pem.Decode(rest)
-		if block == nil {
-			break
-		}
-		if block.Type == "CERTIFICATE" {
-			derCerts = append(derCerts, block.Bytes)
-		}
-	}
-	if len(derCerts) == 0 {
-		return nil, fmt.Errorf("no certificates found in PEM data")
-	}
-	return derCerts, nil
-}
-
-// buildCertsOnlyPKCS7 creates a degenerate PKCS#7 SignedData structure containing only certificates.
-// This is the "certs-only" format specified in RFC 7030 Section 4.1.3 for /cacerts responses
-// and enrollment responses.
-//
-// ASN.1 structure (simplified):
-//
-//	ContentInfo {
-//	  contentType: signedData (1.2.840.113549.1.7.2)
-//	  content: SignedData {
-//	    version: 1
-//	    digestAlgorithms: {} (empty)
-//	    encapContentInfo: { contentType: data (1.2.840.113549.1.7.1) }
-//	    certificates: [cert1, cert2, ...]
-//	    signerInfos: {} (empty)
-//	  }
-//	}
-func buildCertsOnlyPKCS7(derCerts [][]byte) ([]byte, error) {
-	// We build the ASN.1 manually to avoid pulling in a PKCS#7 library.
-	// This is a well-defined, static structure — no signing needed.
-
-	// OID for signedData: 1.2.840.113549.1.7.2
-	oidSignedData := []byte{0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x02}
-	// OID for data: 1.2.840.113549.1.7.1
-	oidData := []byte{0x06, 0x09, 0x2a, 0x86, 0x48, 0x86, 0xf7, 0x0d, 0x01, 0x07, 0x01}
-
-	// Build certificates [0] IMPLICIT SET OF Certificate
-	var certsContent []byte
-	for _, cert := range derCerts {
-		certsContent = append(certsContent, cert...)
-	}
-	certsField := asn1WrapImplicit(0, certsContent)
-
-	// Build encapContentInfo: SEQUENCE { OID data }
-	encapContentInfo := asn1WrapSequence(oidData)
-
-	// Build digestAlgorithms: SET {} (empty)
-	digestAlgorithms := asn1WrapSet(nil)
-
-	// Build signerInfos: SET {} (empty)
-	signerInfos := asn1WrapSet(nil)
-
-	// Version: INTEGER 1
-	version := []byte{0x02, 0x01, 0x01}
-
-	// Build SignedData SEQUENCE
-	var signedDataContent []byte
-	signedDataContent = append(signedDataContent, version...)
-	signedDataContent = append(signedDataContent, digestAlgorithms...)
-	signedDataContent = append(signedDataContent, encapContentInfo...)
-	signedDataContent = append(signedDataContent, certsField...)
-	signedDataContent = append(signedDataContent, signerInfos...)
-	signedData := asn1WrapSequence(signedDataContent)
-
-	// Wrap in [0] EXPLICIT for ContentInfo.content
-	contentField := asn1WrapExplicit(0, signedData)
-
-	// Build ContentInfo SEQUENCE
-	var contentInfoContent []byte
-	contentInfoContent = append(contentInfoContent, oidSignedData...)
-	contentInfoContent = append(contentInfoContent, contentField...)
-	contentInfo := asn1WrapSequence(contentInfoContent)
-
-	return contentInfo, nil
-}
-
-// asn1WrapSequence wraps content in an ASN.1 SEQUENCE tag (0x30).
-func asn1WrapSequence(content []byte) []byte {
-	return asn1Wrap(0x30, content)
-}
-
-// asn1WrapSet wraps content in an ASN.1 SET tag (0x31).
-func asn1WrapSet(content []byte) []byte {
-	return asn1Wrap(0x31, content)
-}
-
-// asn1WrapExplicit wraps content in an ASN.1 context-specific EXPLICIT tag.
-func asn1WrapExplicit(tag int, content []byte) []byte {
-	return asn1Wrap(byte(0xa0|tag), content)
-}
-
-// asn1WrapImplicit wraps content in an ASN.1 context-specific IMPLICIT CONSTRUCTED tag.
-func asn1WrapImplicit(tag int, content []byte) []byte {
-	return asn1Wrap(byte(0xa0|tag), content)
-}
-
-// asn1Wrap wraps content with an ASN.1 tag and length.
-func asn1Wrap(tag byte, content []byte) []byte {
-	length := len(content)
-	var result []byte
-	result = append(result, tag)
-	result = append(result, asn1EncodeLength(length)...)
-	result = append(result, content...)
-	return result
-}
-
-// asn1EncodeLength encodes a length in ASN.1 DER format.
-func asn1EncodeLength(length int) []byte {
-	if length < 0x80 {
-		return []byte{byte(length)}
-	}
-	// Long form
-	var lengthBytes []byte
-	l := length
-	for l > 0 {
-		lengthBytes = append([]byte{byte(l & 0xff)}, lengthBytes...)
-		l >>= 8
-	}
-	return append([]byte{byte(0x80 | len(lengthBytes))}, lengthBytes...)
-}
+// NOTE: PKCS#7 helpers (BuildCertsOnlyPKCS7, PEMToDERChain, ASN.1 wrappers)
+// are in the shared internal/pkcs7 package, used by both EST and SCEP handlers.

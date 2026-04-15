@@ -18,6 +18,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/pkcs7"
 )
 
 // mockESTService implements ESTService for testing.
@@ -338,12 +339,12 @@ func TestESTCSRAttrs_MethodNotAllowed(t *testing.T) {
 	}
 }
 
-func TestBuildCertsOnlyPKCS7(t *testing.T) {
-	// Test with a dummy DER certificate
+func TestBuildCertsOnlyPKCS7_ViaSharedPackage(t *testing.T) {
+	// Test with a dummy DER certificate via shared pkcs7 package
 	dummyCert := []byte{0x30, 0x82, 0x01, 0x00} // minimal ASN.1 SEQUENCE
-	result, err := buildCertsOnlyPKCS7([][]byte{dummyCert})
+	result, err := pkcs7.BuildCertsOnlyPKCS7([][]byte{dummyCert})
 	if err != nil {
-		t.Fatalf("buildCertsOnlyPKCS7 failed: %v", err)
+		t.Fatalf("BuildCertsOnlyPKCS7 failed: %v", err)
 	}
 	if len(result) == 0 {
 		t.Error("expected non-empty PKCS#7 output")
@@ -354,46 +355,21 @@ func TestBuildCertsOnlyPKCS7(t *testing.T) {
 	}
 }
 
-func TestPemToDERChain(t *testing.T) {
+func TestPemToDERChain_ViaSharedPackage(t *testing.T) {
 	pemData := generateTestCertPEM(t)
-	certs, err := pemToDERChain(pemData)
+	certs, err := pkcs7.PEMToDERChain(pemData)
 	if err != nil {
-		t.Fatalf("pemToDERChain failed: %v", err)
+		t.Fatalf("PEMToDERChain failed: %v", err)
 	}
 	if len(certs) != 1 {
 		t.Errorf("expected 1 cert, got %d", len(certs))
 	}
 }
 
-func TestPemToDERChain_NoCerts(t *testing.T) {
-	_, err := pemToDERChain("not a PEM")
+func TestPemToDERChain_NoCerts_ViaSharedPackage(t *testing.T) {
+	_, err := pkcs7.PEMToDERChain("not a PEM")
 	if err == nil {
 		t.Error("expected error for invalid PEM")
-	}
-}
-
-func TestASN1EncodeLength(t *testing.T) {
-	tests := []struct {
-		length   int
-		expected []byte
-	}{
-		{0, []byte{0x00}},
-		{1, []byte{0x01}},
-		{127, []byte{0x7f}},
-		{128, []byte{0x81, 0x80}},
-		{256, []byte{0x82, 0x01, 0x00}},
-	}
-	for _, tt := range tests {
-		result := asn1EncodeLength(tt.length)
-		if len(result) != len(tt.expected) {
-			t.Errorf("asn1EncodeLength(%d): expected %d bytes, got %d", tt.length, len(tt.expected), len(result))
-			continue
-		}
-		for i := range result {
-			if result[i] != tt.expected[i] {
-				t.Errorf("asn1EncodeLength(%d): byte %d: expected 0x%02x, got 0x%02x", tt.length, i, tt.expected[i], result[i])
-			}
-		}
 	}
 }
 

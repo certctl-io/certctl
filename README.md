@@ -70,7 +70,7 @@ For a detailed comparison with other competitors and enterprise platforms, see [
 
 - **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
 
-- **Standards-based protocol support.** EST server (RFC 7030) for device and WiFi certificate enrollment. ACME ARI (RFC 9773) for CA-directed renewal timing. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email. DER-encoded X.509 CRL and embedded OCSP responder for revocation infrastructure.
+- **Standards-based protocol support.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. ACME ARI (RFC 9773) for CA-directed renewal timing. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email. DER-encoded X.509 CRL and embedded OCSP responder for revocation infrastructure.
 
 - **Multiple interfaces for different workflows.** REST API (107 routes) for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard (24 pages) for day-to-day operations.
 

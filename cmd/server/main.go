@@ -339,6 +339,26 @@ func main() {
 			"endpoints", "/.well-known/est/{cacerts,simpleenroll,simplereenroll,csrattrs}")
 	}
 
+	// Register SCEP (RFC 8894) handlers if enabled
+	if cfg.SCEP.Enabled {
+		issuerConn, ok := issuerRegistry.Get(cfg.SCEP.IssuerID)
+		if !ok {
+			logger.Error("SCEP issuer not found in registry", "issuer_id", cfg.SCEP.IssuerID)
+			os.Exit(1)
+		}
+		scepService := service.NewSCEPService(cfg.SCEP.IssuerID, issuerConn, auditService, logger, cfg.SCEP.ChallengePassword)
+		if cfg.SCEP.ProfileID != "" {
+			scepService.SetProfileID(cfg.SCEP.ProfileID)
+		}
+		scepHandler := handler.NewSCEPHandler(scepService)
+		apiRouter.RegisterSCEPHandlers(scepHandler)
+		logger.Info("SCEP server enabled",
+			"issuer_id", cfg.SCEP.IssuerID,
+			"profile_id", cfg.SCEP.ProfileID,
+			"challenge_password_set", cfg.SCEP.ChallengePassword != "",
+			"endpoints", "/scep?operation={GetCACaps,GetCACert,PKIOperation}")
+	}
+
 	logger.Info("registered all API handlers")
 
 	// Build middleware stack

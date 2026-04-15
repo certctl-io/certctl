@@ -314,16 +314,16 @@ Each issuer handles revocation differently:
 - **step-ca**: Calls step-ca's `/revoke` API endpoint. Clients should check step-ca's own CRL/OCSP for authoritative status.
 - **OpenSSL/Custom CA**: Invokes the configured revoke script (`CERTCTL_OPENSSL_REVOKE_SCRIPT`) with the serial number as an argument.
 
-### EST Integration (GetCACertPEM)
+### EST/SCEP Integration (GetCACertPEM)
 
-The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used by the EST server's `/.well-known/est/cacerts` endpoint (RFC 7030) to distribute the CA chain to enrolling devices. Each issuer handles this differently:
+The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used by both the EST server's `/.well-known/est/cacerts` endpoint (RFC 7030) and the SCEP server's `GetCACert` operation (RFC 8894) to distribute the CA chain to enrolling devices. Each issuer handles this differently:
 
-- **Local CA**: Returns the CA certificate PEM (self-signed or sub-CA cert). This is the primary EST issuer.
+- **Local CA**: Returns the CA certificate PEM (self-signed or sub-CA cert). This is the primary EST/SCEP issuer.
 - **ACME**: Returns error — ACME CAs provide chains per-issuance, not statically.
 - **step-ca**: Returns error — step-ca serves its own `/root` endpoint for CA distribution.
 - **OpenSSL/Custom CA**: Returns error — custom script-based CAs have no CA cert access through certctl.
 
-Note: EST (Enrollment over Secure Transport) is not a connector — it's a protocol handler (`internal/api/handler/est.go`) that delegates certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
+Note: EST and SCEP are not connectors — they are protocol handlers (`internal/api/handler/est.go` and `internal/api/handler/scep.go`) that delegate certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID` or `CERTCTL_SCEP_ISSUER_ID`. Both share a common `internal/pkcs7` package for PKCS#7 response encoding. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
 
 ### Built-in: Vault PKI
 

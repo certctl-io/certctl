@@ -444,6 +444,27 @@ Accepts both base64-encoded DER (EST standard) and PEM-encoded PKCS#10 CSR input
 | `CERTCTL_EST_ISSUER_ID` | `iss-local` | Issuer for EST enrollments |
 | `CERTCTL_EST_PROFILE_ID` | (none) | Optional profile constraint |
 
+### SCEP Server (RFC 8894)
+
+<!-- Source: internal/service/scep.go, internal/api/handler/scep.go -->
+
+Simple Certificate Enrollment Protocol for MDM platforms and network devices. Single endpoint with operation-based dispatch:
+
+| Operation | Method | Description |
+|---|---|---|
+| `GetCACaps` | GET | Server capabilities (plaintext, one per line) |
+| `GetCACert` | GET | CA certificate (DER for single cert, PKCS#7 for chain) |
+| `PKIOperation` | POST | Certificate enrollment (PKCS#7-wrapped or raw CSR) |
+
+SCEP uses a single URL (`/scep?operation=...`). The handler extracts PKCS#10 CSRs from PKCS#7 SignedData envelopes, with fallback support for base64-encoded and raw CSR submissions. Challenge password authentication via CSR attributes (OID 1.2.840.113549.1.9.7). Responses are PKCS#7 certs-only (same shared `internal/pkcs7` package as EST).
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_SCEP_ENABLED` | `false` | Enable SCEP endpoint |
+| `CERTCTL_SCEP_ISSUER_ID` | `iss-local` | Issuer for SCEP enrollments |
+| `CERTCTL_SCEP_PROFILE_ID` | (none) | Optional profile constraint |
+| `CERTCTL_SCEP_CHALLENGE_PASSWORD` | (none) | Shared secret for enrollment authentication |
+
 ---
 
 ## ACME Renewal Information (RFC 9773)

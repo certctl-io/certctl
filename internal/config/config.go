@@ -23,6 +23,7 @@ type Config struct {
 	Notifiers    NotifierConfig
 	NetworkScan  NetworkScanConfig
 	EST          ESTConfig
+	SCEP         SCEPConfig
 	Verification VerificationConfig
 	ACME         ACMEConfig
 	Vault        VaultConfig
@@ -417,6 +418,26 @@ type ESTConfig struct {
 	ProfileID string
 }
 
+// SCEPConfig controls the RFC 8894 Simple Certificate Enrollment Protocol server.
+type SCEPConfig struct {
+	// Enabled controls whether SCEP endpoints are available for device enrollment.
+	// Default: false (SCEP disabled). Set to true to enable SCEP endpoints under /scep/.
+	Enabled bool
+
+	// IssuerID selects which issuer connector processes SCEP certificate requests.
+	// Default: "iss-local". Must reference a configured issuer.
+	IssuerID string
+
+	// ProfileID optionally constrains SCEP enrollments to a specific certificate profile.
+	// Leave empty to allow SCEP to use any configured issuer's defaults.
+	ProfileID string
+
+	// ChallengePassword is the shared secret used to authenticate SCEP enrollment requests.
+	// Clients include this in the PKCS#10 CSR challengePassword attribute.
+	// Required when SCEP is enabled.
+	ChallengePassword string
+}
+
 // NetworkScanConfig controls the server-side active TLS scanner.
 type NetworkScanConfig struct {
 	Enabled      bool          // Enable network scanning (default false)
@@ -593,6 +614,12 @@ func Load() (*Config, error) {
 			Enabled:   getEnvBool("CERTCTL_EST_ENABLED", false),
 			IssuerID:  getEnv("CERTCTL_EST_ISSUER_ID", "iss-local"),
 			ProfileID: getEnv("CERTCTL_EST_PROFILE_ID", ""),
+		},
+		SCEP: SCEPConfig{
+			Enabled:           getEnvBool("CERTCTL_SCEP_ENABLED", false),
+			IssuerID:          getEnv("CERTCTL_SCEP_ISSUER_ID", "iss-local"),
+			ProfileID:         getEnv("CERTCTL_SCEP_PROFILE_ID", ""),
+			ChallengePassword: getEnv("CERTCTL_SCEP_CHALLENGE_PASSWORD", ""),
 		},
 		Verification: VerificationConfig{
 			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
