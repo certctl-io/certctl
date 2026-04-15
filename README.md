@@ -58,56 +58,6 @@ gantt
 | [Test Environment](docs/test-env.md) | Docker Compose test environment with real CA backends |
 | [Testing Guide](docs/testing-guide.md) | Comprehensive test procedures, smoke tests, and release sign-off checklist |
 
-> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
-
-**Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
-
-## Why certctl Exists
-
-Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, IIS on Windows, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
-
-certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, Sectigo SCM, Google Cloud CAS, AWS ACM Private CA, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
-
-It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), Windows Certificate Store, Java Keystores, Kubernetes Secrets, and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
-
-For a detailed comparison with other competitors and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
-
-## Who Is This For
-
-**Platform engineering and DevOps teams** managing 10–500+ certificates across mixed infrastructure who need automated renewal, deployment, and a single dashboard for visibility. If you're currently running certbot cron jobs, manually renewing certs, or stitching together scripts — certctl replaces all of that.
-
-**Security and compliance teams** who need an immutable audit trail, certificate ownership tracking, policy enforcement, and evidence for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 audits. certctl ships with [compliance mapping documentation](docs/compliance.md) for all three frameworks.
-
-**Small teams without enterprise budgets** who need the lifecycle automation that Venafi and Keyfactor provide but can't justify six-figure licensing for a 50-server environment.
-
-## What It Does
-
-- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles). ACME certificate profile selection (`tlsserver`, `shortlived`) supported.
-
-- **You see everything in one place.** 26-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with rollback, discovery triage, network scan management, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections. Short-lived credential dashboard with live TTL countdown.
-
-- **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served by comparing SHA-256 fingerprints against the live TLS endpoint.
-
-- **Configure everything from the dashboard.** Issuers and targets are configured through the GUI — no env var editing or server restarts. AES-256-GCM encrypted credential storage. Test connection before saving. First-run onboarding wizard guides you through connecting a CA, deploying an agent, and issuing your first certificate.
-
-- **Discover what you don't know about.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without requiring agents. Both feed into a triage workflow where you claim, dismiss, or import discovered certificates.
-
-- **Enforce policy and control access.** Certificate profiles constrain allowed key types, maximum TTL, and required EKUs. Interactive approval workflows pause renewal jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
-
-- **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call (with actor attribution, SHA-256 body hash, latency), and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
-
-- **Standards-based enrollment protocols.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. Both share a common PKCS#7 package and delegate to any configured issuer connector. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email.
-
-- **Full revocation infrastructure.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder with good/revoked/unknown status. RFC 5280 reason codes. Short-lived certificates (profile TTL < 1 hour) automatically exempt from CRL/OCSP — expiry is sufficient revocation.
-
-- **Certificate export.** Download certificates in PEM (JSON or file) and PKCS#12 formats. Private keys are never included — they live on agents only. Every export is recorded in the audit trail.
-
-- **Multiple interfaces for different workflows.** REST API (111 routes) for automation, CLI (12 commands) for scripting, MCP server (80 tools) for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
-
-- **Notification routing.** Slack, Microsoft Teams, PagerDuty, OpsGenie, email (SMTP), and webhooks. Notifications route by certificate owner email. Scheduled certificate digest emails with HTML template, stats grid, and expiring certs table.
-
-For the full capability breakdown, see the [Feature Inventory](docs/features.md).
-
 ## Supported Integrations
 
 ### Certificate Issuers
@@ -191,6 +141,56 @@ All connectors are pluggable — build your own by implementing the [connector i
 </table>
 
 **[See all screenshots →](docs/screenshots/)**
+
+> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
+
+**Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
+
+## Why certctl Exists
+
+Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, IIS on Windows, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
+
+certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, Sectigo SCM, Google Cloud CAS, AWS ACM Private CA, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
+
+It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), Windows Certificate Store, Java Keystores, Kubernetes Secrets, and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+
+For a detailed comparison with other competitors and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
+
+## Who Is This For
+
+**Platform engineering and DevOps teams** managing 10–500+ certificates across mixed infrastructure who need automated renewal, deployment, and a single dashboard for visibility. If you're currently running certbot cron jobs, manually renewing certs, or stitching together scripts — certctl replaces all of that.
+
+**Security and compliance teams** who need an immutable audit trail, certificate ownership tracking, policy enforcement, and evidence for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 audits. certctl ships with [compliance mapping documentation](docs/compliance.md) for all three frameworks.
+
+**Small teams without enterprise budgets** who need the lifecycle automation that Venafi and Keyfactor provide but can't justify six-figure licensing for a 50-server environment.
+
+## What It Does
+
+- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles). ACME certificate profile selection (`tlsserver`, `shortlived`) supported.
+
+- **You see everything in one place.** 26-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with rollback, discovery triage, network scan management, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections. Short-lived credential dashboard with live TTL countdown.
+
+- **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served by comparing SHA-256 fingerprints against the live TLS endpoint.
+
+- **Configure everything from the dashboard.** Issuers and targets are configured through the GUI — no env var editing or server restarts. AES-256-GCM encrypted credential storage. Test connection before saving. First-run onboarding wizard guides you through connecting a CA, deploying an agent, and issuing your first certificate.
+
+- **Discover what you don't know about.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without requiring agents. Both feed into a triage workflow where you claim, dismiss, or import discovered certificates.
+
+- **Enforce policy and control access.** Certificate profiles constrain allowed key types, maximum TTL, and required EKUs. Interactive approval workflows pause renewal jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
+
+- **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call (with actor attribution, SHA-256 body hash, latency), and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
+
+- **Standards-based enrollment protocols.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. Both share a common PKCS#7 package and delegate to any configured issuer connector. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email.
+
+- **Full revocation infrastructure.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder with good/revoked/unknown status. RFC 5280 reason codes. Short-lived certificates (profile TTL < 1 hour) automatically exempt from CRL/OCSP — expiry is sufficient revocation.
+
+- **Certificate export.** Download certificates in PEM (JSON or file) and PKCS#12 formats. Private keys are never included — they live on agents only. Every export is recorded in the audit trail.
+
+- **Multiple interfaces for different workflows.** REST API (111 routes) for automation, CLI (12 commands) for scripting, MCP server (80 tools) for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
+
+- **Notification routing.** Slack, Microsoft Teams, PagerDuty, OpsGenie, email (SMTP), and webhooks. Notifications route by certificate owner email. Scheduled certificate digest emails with HTML template, stats grid, and expiring certs table.
+
+For the full capability breakdown, see the [Feature Inventory](docs/features.md).
 
 ## Quick Start
 
