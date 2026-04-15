@@ -36,6 +36,28 @@ gantt
         47 days                :crit, 2020-01-01, 47d
 ```
 
+## Documentation
+
+| Guide | Description |
+|-------|-------------|
+| [Why certctl?](docs/why-certctl.md) | How certctl compares to ACME clients, agent-based SaaS, and enterprise platforms |
+| [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
+| [Quick Start](docs/quickstart.md) | 5-minute setup — dashboard, API, CLI, discovery, stakeholder demo flow |
+| [Docker Compose Environments](deploy/ENVIRONMENTS.md) | Service-by-service walkthrough of all 4 compose files, env var reference |
+| [Deployment Examples](docs/examples.md) | 5 turnkey scenarios (ACME+NGINX, wildcard DNS-01, private CA, step-ca, multi-issuer) with migration guides |
+| [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
+| [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
+| [Feature Inventory](docs/features.md) | Complete reference of all capabilities, API endpoints, and configuration |
+| [Connector Reference](docs/connectors.md) | Configuration for all issuer, target, and notifier connectors |
+| [MCP Server](docs/mcp.md) | AI integration via Model Context Protocol — setup, available tools, examples |
+| [OpenAPI 3.1 Spec](docs/openapi.md) | API reference guide with endpoint overview ([raw spec](api/openapi.yaml)) |
+| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
+| [Migrate from certbot](docs/migrate-from-certbot.md) | Step-by-step migration from certbot cron jobs to certctl |
+| [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users, DNS hook compatibility |
+| [certctl for cert-manager users](docs/certctl-for-cert-manager-users.md) | How certctl complements cert-manager for mixed infrastructure |
+| [Test Environment](docs/test-env.md) | Docker Compose test environment with real CA backends |
+| [Testing Guide](docs/testing-guide.md) | Comprehensive test procedures, smoke tests, and release sign-off checklist |
+
 > **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
 
 **Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
@@ -44,9 +66,9 @@ gantt
 
 Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, IIS on Windows, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
 
-certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
+certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, Sectigo SCM, Google Cloud CAS, AWS ACM Private CA, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
 
-It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), Windows Certificate Store, Java Keystores, Kubernetes Secrets, and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 For a detailed comparison with other competitors and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
 
@@ -54,73 +76,104 @@ For a detailed comparison with other competitors and enterprise platforms, see [
 
 **Platform engineering and DevOps teams** managing 10–500+ certificates across mixed infrastructure who need automated renewal, deployment, and a single dashboard for visibility. If you're currently running certbot cron jobs, manually renewing certs, or stitching together scripts — certctl replaces all of that.
 
-**Security and compliance teams** who need an immutable audit trail, certificate ownership tracking, policy enforcement, and evidence for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 audits.
+**Security and compliance teams** who need an immutable audit trail, certificate ownership tracking, policy enforcement, and evidence for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 audits. certctl ships with [compliance mapping documentation](docs/compliance.md) for all three frameworks.
 
 **Small teams without enterprise budgets** who need the lifecycle automation that Venafi and Keyfactor provide but can't justify six-figure licensing for a 50-server environment.
 
 ## What It Does
 
-- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles).
+- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles). ACME certificate profile selection (`tlsserver`, `shortlived`) supported.
 
-- **You see everything in one place.** The operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with TLS verification, discovery triage, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections.
+- **You see everything in one place.** 26-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with rollback, discovery triage, network scan management, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections. Short-lived credential dashboard with live TTL countdown.
 
-- **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served.
+- **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served by comparing SHA-256 fingerprints against the live TLS endpoint.
+
+- **Configure everything from the dashboard.** Issuers and targets are configured through the GUI — no env var editing or server restarts. AES-256-GCM encrypted credential storage. Test connection before saving. First-run onboarding wizard guides you through connecting a CA, deploying an agent, and issuing your first certificate.
 
 - **Discover what you don't know about.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without requiring agents. Both feed into a triage workflow where you claim, dismiss, or import discovered certificates.
 
-- **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
+- **Enforce policy and control access.** Certificate profiles constrain allowed key types, maximum TTL, and required EKUs. Interactive approval workflows pause renewal jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
 
-- **Standards-based protocol support.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. ACME ARI (RFC 9773) for CA-directed renewal timing. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email. DER-encoded X.509 CRL and embedded OCSP responder for revocation infrastructure.
+- **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call (with actor attribution, SHA-256 body hash, latency), and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
 
-- **Multiple interfaces for different workflows.** REST API (107 routes) for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard (24 pages) for day-to-day operations.
+- **Standards-based enrollment protocols.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. Both share a common PKCS#7 package and delegate to any configured issuer connector. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email.
 
-For the full capability breakdown, including the policy engine, certificate profiles, approval workflows, certificate export (PEM/PKCS#12), and more, see the [Feature Inventory](docs/features.md).
+- **Full revocation infrastructure.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder with good/revoked/unknown status. RFC 5280 reason codes. Short-lived certificates (profile TTL < 1 hour) automatically exempt from CRL/OCSP — expiry is sufficient revocation.
+
+- **Certificate export.** Download certificates in PEM (JSON or file) and PKCS#12 formats. Private keys are never included — they live on agents only. Every export is recorded in the audit trail.
+
+- **Multiple interfaces for different workflows.** REST API (111 routes) for automation, CLI (12 commands) for scripting, MCP server (80 tools) for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
+
+- **Notification routing.** Slack, Microsoft Teams, PagerDuty, OpsGenie, email (SMTP), and webhooks. Notifications route by certificate owner email. Scheduled certificate digest emails with HTML template, stats grid, and expiring certs table.
+
+For the full capability breakdown, see the [Feature Inventory](docs/features.md).
 
 ## Supported Integrations
 
 ### Certificate Issuers
-| Issuer | Status | Type |
-|--------|--------|------|
-| Local CA (self-signed + sub-CA) | Implemented | `GenericCA` |
-| ACME v2 (Let's Encrypt, Sectigo) | Implemented (HTTP-01 + DNS-01 + DNS-PERSIST-01) | `ACME` |
-| ACME EAB (ZeroSSL, Google Trust) | Implemented (auto-fetch EAB from ZeroSSL) | `ACME` |
-| step-ca | Implemented | `StepCA` |
-| OpenSSL / Custom CA | Implemented | `OpenSSL` |
-| Vault PKI | Implemented | `VaultPKI` |
-| DigiCert CertCentral | Implemented | `DigiCert` |
-| Sectigo SCM | Implemented | `Sectigo` |
-| Google CAS | Implemented | `GoogleCAS` |
-| AWS ACM Private CA | Implemented | `AWSACMPCA` |
 
-**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
+| Issuer | Type | Notes |
+|--------|------|-------|
+| Local CA (self-signed + sub-CA) | `GenericCA` | Sub-CA mode chains to enterprise root (ADCS, etc.) |
+| ACME v2 (Let's Encrypt, ZeroSSL, etc.) | `ACME` | HTTP-01, DNS-01, DNS-PERSIST-01 challenges. EAB auto-fetch from ZeroSSL. Profile selection (`tlsserver`, `shortlived`). |
+| step-ca (Smallstep) | `StepCA` | JWK provisioner auth, issuance + renewal + revocation |
+| OpenSSL / Custom CA | `OpenSSL` | Shell script adapter — any CA with a CLI |
+| HashiCorp Vault PKI | `VaultPKI` | Token auth, synchronous issuance, CRL/OCSP delegated to Vault |
+| DigiCert CertCentral | `DigiCert` | Async order model, OV/EV support, PEM bundle parsing |
+| Sectigo SCM | `Sectigo` | 3-header auth, DV/OV/EV, collect-not-ready graceful handling |
+| Google Cloud CAS | `GoogleCAS` | OAuth2 service account, synchronous issuance, CA pool selection |
+| AWS ACM Private CA | `AWSACMPCA` | Synchronous issuance, configurable signing algorithm/template ARN |
+
+**Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated via the OpenSSL/Custom CA connector.
 
 ### Deployment Targets
-| Target | Status | Type |
-|--------|--------|------|
-| NGINX | Implemented | `NGINX` |
-| Apache httpd | Implemented | `Apache` |
-| HAProxy | Implemented | `HAProxy` |
-| Traefik | Implemented | `Traefik` |
-| Caddy | Implemented | `Caddy` |
-| Envoy | Implemented | `Envoy` |
-| Postfix | Implemented | `Postfix` |
-| Dovecot | Implemented | `Dovecot` |
-| Microsoft IIS | Implemented (local + WinRM) | `IIS` |
-| F5 BIG-IP | Implemented (proxy agent) | `F5` |
-| SSH (Agentless) | Implemented | `SSH` |
-| Windows Cert Store | Implemented | `WinCertStore` |
-| Java Keystore | Implemented | `JavaKeystore` |
-| Kubernetes Secrets | Implemented | `KubernetesSecrets` |
+
+| Target | Type | Notes |
+|--------|------|-------|
+| NGINX | `NGINX` | File write, config validation, reload |
+| Apache httpd | `Apache` | Separate cert/chain/key files, configtest, graceful reload |
+| HAProxy | `HAProxy` | Combined PEM file, validate, reload |
+| Traefik | `Traefik` | File provider deployment, auto-reload via filesystem watch |
+| Caddy | `Caddy` | Dual-mode: admin API hot-reload or file-based |
+| Envoy | `Envoy` | File-based with optional SDS JSON config |
+| Postfix | `Postfix` | Mail server TLS, pairs with S/MIME support |
+| Dovecot | `Dovecot` | Mail server TLS, pairs with S/MIME support |
+| Microsoft IIS | `IIS` | Local PowerShell or remote WinRM, PEM→PFX, SNI support |
+| F5 BIG-IP | `F5` | iControl REST via proxy agent, transaction-based atomic updates |
+| SSH (Agentless) | `SSH` | SFTP cert/key deployment to any Linux/Unix server |
+| Windows Certificate Store | `WinCertStore` | PowerShell Import-PfxCertificate, configurable store/location |
+| Java Keystore | `JavaKeystore` | PEM→PKCS#12→keytool pipeline, JKS and PKCS12 formats |
+| Kubernetes Secrets | `KubernetesSecrets` | `kubernetes.io/tls` Secrets, in-cluster or kubeconfig auth |
+
+### Enrollment Protocols
+
+| Protocol | Standard | Use Case |
+|----------|----------|----------|
+| EST (Enrollment over Secure Transport) | RFC 7030 | Device enrollment, WiFi/802.1X, IoT |
+| SCEP (Simple Certificate Enrollment Protocol) | RFC 8894 | MDM platforms (Jamf, Intune), network devices |
+| ACME v2 | RFC 8555 | Public CA automated issuance (Let's Encrypt, ZeroSSL) |
+| ACME ARI (Renewal Information) | RFC 9773 | CA-directed renewal timing — the CA tells you when to renew |
+
+### Standards & Revocation
+
+| Capability | Standard | Notes |
+|------------|----------|-------|
+| DER-encoded X.509 CRL | RFC 5280 | Per-issuer, signed by issuing CA, 24h validity |
+| Embedded OCSP responder | RFC 6960 | Good/revoked/unknown status per issuer |
+| S/MIME certificates | RFC 8551 | Email protection EKU, adaptive KeyUsage flags |
+| Certificate export | — | PEM (JSON/file) and PKCS#12 formats |
+| ACME DNS-PERSIST-01 | IETF draft | Standing validation record, no per-renewal DNS updates |
 
 ### Notifiers
-| Notifier | Status | Type |
-|----------|--------|------|
-| Email (SMTP) | Implemented | `Email` |
-| Webhooks | Implemented | `Webhook` |
-| Slack | Implemented | `Slack` |
-| Microsoft Teams | Implemented | `Teams` |
-| PagerDuty | Implemented | `PagerDuty` |
-| OpsGenie | Implemented | `OpsGenie` |
+
+| Notifier | Type |
+|----------|------|
+| Email (SMTP) | `Email` |
+| Webhooks | `Webhook` |
+| Slack | `Slack` |
+| Microsoft Teams | `Teams` |
+| PagerDuty | `PagerDuty` |
+| OpsGenie | `OpsGenie` |
 
 All connectors are pluggable — build your own by implementing the [connector interface](docs/connectors.md).
 
@@ -128,31 +181,16 @@ All connectors are pluggable — build your own by implementing the [connector i
 
 <table>
 <tr>
-<td><a href="docs/screenshots/v2-dashboard.png"><img src="docs/screenshots/v2-dashboard.png" width="270" alt="Dashboard"></a><br><b>Dashboard</b><br><sub>Stats, expiration heatmap, renewal trends</sub></td>
-<td><a href="docs/screenshots/v2-certificates.png"><img src="docs/screenshots/v2-certificates.png" width="270" alt="Certificates"></a><br><b>Certificates</b><br><sub>Inventory with status, owner, team filters</sub></td>
-<td><a href="docs/screenshots/v2-agents.png"><img src="docs/screenshots/v2-agents.png" width="270" alt="Agents"></a><br><b>Agents</b><br><sub>Fleet health, OS/arch, IP, version</sub></td>
+<td><a href="docs/screenshots/v2-dashboard.png"><img src="docs/screenshots/v2-dashboard.png" width="400" alt="Dashboard"></a><br><b>Dashboard</b><br><sub>Stats, expiration heatmap, renewal trends, issuance rate</sub></td>
+<td><a href="docs/screenshots/v2-certificates.png"><img src="docs/screenshots/v2-certificates.png" width="400" alt="Certificates"></a><br><b>Certificates</b><br><sub>Inventory with bulk ops, status filters, owner/team columns</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2-fleet.png"><img src="docs/screenshots/v2-fleet.png" width="270" alt="Fleet Overview"></a><br><b>Fleet Overview</b><br><sub>OS distribution, status breakdown</sub></td>
-<td><a href="docs/screenshots/v2-jobs.png"><img src="docs/screenshots/v2-jobs.png" width="270" alt="Jobs"></a><br><b>Jobs</b><br><sub>Issuance, renewal, deployment queue</sub></td>
-<td><a href="docs/screenshots/v2-notifications.png"><img src="docs/screenshots/v2-notifications.png" width="270" alt="Notifications"></a><br><b>Notifications</b><br><sub>Expiration warnings, renewal results</sub></td>
-</tr>
-<tr>
-<td><a href="docs/screenshots/v2-policies.png"><img src="docs/screenshots/v2-policies.png" width="270" alt="Policies"></a><br><b>Policies</b><br><sub>Ownership, lifetime, renewal rules</sub></td>
-<td><a href="docs/screenshots/v2-profiles.png"><img src="docs/screenshots/v2-profiles.png" width="270" alt="Profiles"></a><br><b>Profiles</b><br><sub>Key types, max TTL, crypto constraints</sub></td>
-<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="270" alt="Issuers"></a><br><b>Issuers</b><br><sub>Local CA, ACME, step-ca, Vault PKI, DigiCert</sub></td>
-</tr>
-<tr>
-<td><a href="docs/screenshots/v2-targets.png"><img src="docs/screenshots/v2-targets.png" width="270" alt="Targets"></a><br><b>Targets</b><br><sub>NGINX, Apache, HAProxy, Traefik, Caddy, IIS deployment</sub></td>
-<td><a href="docs/screenshots/v2-owners.png"><img src="docs/screenshots/v2-owners.png" width="270" alt="Owners"></a><br><b>Owners</b><br><sub>Cert ownership with team assignment</sub></td>
-<td><a href="docs/screenshots/v2-teams.png"><img src="docs/screenshots/v2-teams.png" width="270" alt="Teams"></a><br><b>Teams</b><br><sub>Org grouping for notification routing</sub></td>
-</tr>
-<tr>
-<td><a href="docs/screenshots/v2-agent-groups.png"><img src="docs/screenshots/v2-agent-groups.png" width="270" alt="Agent Groups"></a><br><b>Agent Groups</b><br><sub>Dynamic grouping by OS, arch, CIDR</sub></td>
-<td><a href="docs/screenshots/v2-audit-trail.png"><img src="docs/screenshots/v2-audit-trail.png" width="270" alt="Audit Trail"></a><br><b>Audit Trail</b><br><sub>Immutable log, CSV/JSON export</sub></td>
-<td><a href="docs/screenshots/v2-short-lived.png"><img src="docs/screenshots/v2-short-lived.png" width="270" alt="Short-Lived"></a><br><b>Short-Lived Creds</b><br><sub>Ephemeral certs with live TTL countdown</sub></td>
+<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="400" alt="Issuers"></a><br><b>Issuers</b><br><sub>Catalog with 10 CA types, GUI config, test connection</sub></td>
+<td><a href="docs/screenshots/v2-jobs.png"><img src="docs/screenshots/v2-jobs.png" width="400" alt="Jobs"></a><br><b>Jobs</b><br><sub>Issuance, renewal, deployment queue with approval workflow</sub></td>
 </tr>
 </table>
+
+**[See all screenshots →](docs/screenshots/)**
 
 ## Quick Start
 
@@ -220,7 +258,7 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 
 ## Architecture
 
-**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment). For Windows servers without a local agent, a proxy agent in the same network zone handles deployment via WinRM. Background scheduler runs 7 loops: renewal checks (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h), certificate digest (24h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
+**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment, TLS verification). For Windows servers without a local agent, a proxy agent in the same network zone handles deployment via WinRM. Background scheduler runs 7 loops: renewal checks with ARI integration (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h), certificate digest (24h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
 
 ### Key Design Decisions
 
@@ -228,28 +266,8 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 - **TEXT primary keys, not UUIDs.** IDs are human-readable prefixed strings (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resource types at a glance in logs and queries.
 - **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
 - **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
-
-## Documentation
-
-| Guide | Description |
-|-------|-------------|
-| [Why certctl?](docs/why-certctl.md) | How certctl compares to ACME clients, agent-based SaaS, and enterprise platforms |
-| [Concepts](docs/concepts.md) | TLS certificates explained from scratch — for beginners who know nothing about certs |
-| [Quick Start](docs/quickstart.md) | 5-minute setup — dashboard, API, CLI, discovery, stakeholder demo flow |
-| [Docker Compose Environments](deploy/ENVIRONMENTS.md) | Service-by-service walkthrough of all 4 compose files, env var reference |
-| [Deployment Examples](docs/examples.md) | 5 turnkey scenarios (ACME+NGINX, wildcard DNS-01, private CA, step-ca, multi-issuer) with migration guides |
-| [Advanced Demo](docs/demo-advanced.md) | Issue a certificate end-to-end with technical deep-dives |
-| [Architecture](docs/architecture.md) | System design, data flow diagrams, security model |
-| [Feature Inventory](docs/features.md) | Complete reference of all V2 capabilities, API endpoints, and configuration |
-| [Connector Reference](docs/connectors.md) | Configuration for all issuer, target, and notifier connectors |
-| [MCP Server](docs/mcp.md) | AI integration via Model Context Protocol — setup, available tools, examples |
-| [OpenAPI 3.1 Spec](docs/openapi.md) | API reference guide with endpoint overview ([raw spec](api/openapi.yaml)) |
-| [Compliance Mapping](docs/compliance.md) | SOC 2 Type II, PCI-DSS 4.0, NIST SP 800-57 alignment guides |
-| [Migrate from certbot](docs/migrate-from-certbot.md) | Step-by-step migration from certbot cron jobs to certctl |
-| [Migrate from acme.sh](docs/migrate-from-acmesh.md) | Migration guide for acme.sh users, DNS hook compatibility |
-| [certctl for cert-manager users](docs/certctl-for-cert-manager-users.md) | How certctl complements cert-manager for mixed infrastructure |
-| [Test Environment](docs/test-env.md) | Docker Compose test environment with real CA backends |
-| [Testing Guide](docs/testing-guide.md) | Comprehensive test procedures, smoke tests, and release sign-off checklist |
+- **Pull-only deployment model.** The server never initiates outbound connections. Agents poll for work. Proxy agents handle network appliances (F5, IIS via WinRM) and agentless servers (SSH/SFTP).
+- **Dynamic configuration.** Issuers and targets can be configured via GUI with AES-256-GCM encrypted credential storage. Env var backward compatibility preserved — env-configured connectors seed the database on first boot.
 
 ## CLI
 
@@ -274,7 +292,7 @@ certctl-cli certs list --format json      # JSON output (default: table)
 
 ## MCP Server (AI Integration)
 
-certctl ships a standalone MCP (Model Context Protocol) server that exposes all API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
+certctl ships a standalone MCP (Model Context Protocol) server that exposes all 80 API endpoints as tools for AI assistants — Claude, Cursor, Windsurf, OpenClaw, VS Code Copilot, and any MCP-compatible client.
 
 ```bash
 # Install and run
@@ -301,7 +319,7 @@ mcp-server
 
 ## Security
 
-certctl is designed with a security-first architecture. Agents generate ECDSA P-256 keys locally — private keys never touch the control plane. API key auth is enforced by default with SHA-256 hashing and constant-time comparison. CORS is deny-by-default. All connector scripts are validated against shell injection. The network scanner filters reserved IP ranges (SSRF protection). Scheduler loops use atomic idempotency guards. Every API call is recorded to an immutable audit trail with actor attribution, SHA-256 body hash, and latency tracking. See the [Architecture Guide](docs/architecture.md) for the full security model.
+certctl is designed with a security-first architecture. Agents generate ECDSA P-256 keys locally — private keys never touch the control plane. API key auth is enforced by default with SHA-256 hashing and constant-time comparison. CORS is deny-by-default. All connector scripts are validated against shell injection. The network scanner filters reserved IP ranges (SSRF protection). Scheduler loops use atomic idempotency guards. Every API call is recorded to an immutable audit trail with actor attribution, SHA-256 body hash, and latency tracking. Issuer and target credentials are encrypted at rest with AES-256-GCM. See the [Architecture Guide](docs/architecture.md) for the full security model.
 
 ## Development
 
@@ -313,7 +331,7 @@ govulncheck ./...       # Vulnerability scan
 make docker-up          # Start Docker Compose stack
 ```
 
-CI runs on every push: `go vet`, `go test -race`, `golangci-lint`, `govulncheck`, and per-layer coverage thresholds (service 55%, handler 60%, domain 40%, middleware 30%). Frontend CI runs TypeScript type checking, Vitest tests, and Vite production build.
+CI runs on every push: `go vet`, `go test -race`, `golangci-lint`, `govulncheck`, and per-layer coverage thresholds (service 55%, handler 60%, domain 40%, middleware 30%). Frontend CI runs TypeScript type checking, Vitest tests, and Vite production build. 1,668 Go test functions with 625+ subtests, plus frontend test suite.
 
 ## Roadmap
 
@@ -321,15 +339,13 @@ CI runs on every push: `go vet`, `go test -race`, `golangci-lint`, `govulncheck`
 Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector, agent-side key generation, API auth + rate limiting, React dashboard, CI pipeline with coverage gates, Docker images on GHCR.
 
 ### V2: Operational Maturity — Shipped
-30+ milestones, extensively tested with CI-enforced coverage gates. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9773), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
-
-Dynamic issuer and target configuration via GUI (no env var restarts), first-run onboarding wizard, Sectigo SCM, Google CAS, AWS ACM Private CA issuers, IIS (WinRM), F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, and Kubernetes Secrets target connectors.
+30+ milestones shipping enterprise-grade features for free. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01/EAB/ARI (RFC 9773)/profile selection, step-ca, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM PCA, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (WinRM), F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, Kubernetes Secrets targets. EST server (RFC 7030) and SCEP server (RFC 8894) enrollment protocols. RFC 5280 revocation with DER CRL + embedded OCSP responder. Certificate profiles, ownership tracking, team assignment, agent groups, interactive approval workflows. Filesystem and network certificate discovery with triage GUI. Dynamic issuer/target configuration via GUI with AES-256-GCM encrypted storage. First-run onboarding wizard. Post-deployment TLS verification. Certificate export (PEM/PKCS#12). S/MIME support. Prometheus metrics. Scheduled certificate digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. MCP server (80 tools), CLI (12 commands), Helm chart. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). 5 turnkey deployment examples. Agent install script. Migration guides from certbot, acme.sh, and cert-manager. See the [Feature Inventory](docs/features.md) for details.
 
 ### V3: certctl Pro
-Team access controls and identity provider integration (OIDC/SSO). Role-based access control with profile-gating. Event-driven architecture (NATS) with real-time operational views. Advanced search DSL, compliance and risk scoring, bulk fleet operations.
+Team access controls and identity provider integration. Role-based access control with profile-gating. Event-driven architecture with real-time operational views. Advanced search, compliance scoring, bulk fleet operations.
 
 ### V4+: Cloud & Scale
-Continuous TLS health monitoring, cloud secret manager discovery, Kubernetes cert-manager external issuer, cloud infrastructure targets, extended CA support (Entrust, GlobalSign, EJBCA), and platform-scale features (Terraform provider, multi-tenancy).
+Continuous TLS health monitoring, cloud secret manager discovery, Kubernetes cert-manager external issuer, cloud infrastructure targets, extended CA support, and platform-scale features.
 
 ## License
 
