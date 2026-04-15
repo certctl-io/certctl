@@ -1,4 +1,4 @@
-# Demo mode: pre-populated dashboard with 15 certificates, 5 agents, issuers, etc.
+# Demo mode: pre-populated dashboard with 32 certificates, 8 agents, 10 issuers, etc.
 # Use this to showcase certctl's dashboard with realistic data.
 #
 # Usage:

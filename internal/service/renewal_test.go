@@ -239,6 +239,77 @@ func TestCheckExpiringCertificates_SkipsRenewalInProgress(t *testing.T) {
 	}
 }
 
+func TestCheckExpiringCertificates_SkipsExpiredFailedRevoked(t *testing.T) {
+	ctx := context.Background()
+
+	// Test that certs in Expired, Failed, and Revoked states do not get renewal jobs
+	for _, tc := range []struct {
+		name   string
+		status domain.CertificateStatus
+	}{
+		{"Expired", domain.CertificateStatusExpired},
+		{"Failed", domain.CertificateStatusFailed},
+		{"Revoked", domain.CertificateStatusRevoked},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			certRepo := newMockCertificateRepository()
+			jobRepo := newMockJobRepository()
+			policyRepo := newMockRenewalPolicyRepository()
+			auditRepo := newMockAuditRepository()
+			notifRepo := newMockNotificationRepository()
+
+			auditSvc := NewAuditService(auditRepo)
+			notifSvc := NewNotificationService(notifRepo, map[string]Notifier{})
+
+			issuerRegistry := NewIssuerRegistry(slog.Default())
+			issuerRegistry.Set("iss-test", &mockIssuerConnector{})
+
+			svc := NewRenewalService(certRepo, jobRepo, policyRepo, nil, auditSvc, notifSvc, issuerRegistry, "server")
+
+			cert := &domain.ManagedCertificate{
+				ID:              "mc-" + strings.ToLower(string(tc.status)),
+				Name:            "Test " + string(tc.status),
+				CommonName:      "test.example.com",
+				SANs:            []string{},
+				OwnerID:         "owner-1",
+				TeamID:          "team-1",
+				IssuerID:        "iss-test",
+				RenewalPolicyID: "rp-standard",
+				Status:          tc.status,
+				ExpiresAt:       time.Now().AddDate(0, 0, 10),
+				Tags:            make(map[string]string),
+				CreatedAt:       time.Now(),
+				UpdatedAt:       time.Now(),
+			}
+			certRepo.AddCert(cert)
+
+			policy := &domain.RenewalPolicy{
+				ID:                  "rp-standard",
+				Name:                "Standard",
+				RenewalWindowDays:   30,
+				AutoRenew:           true,
+				MaxRetries:          3,
+				RetryInterval:       300,
+				AlertThresholdsDays: []int{30, 14, 7, 0},
+				CreatedAt:           time.Now(),
+				UpdatedAt:           time.Now(),
+			}
+			policyRepo.AddPolicy(policy)
+
+			err := svc.CheckExpiringCertificates(ctx)
+			if err != nil {
+				t.Fatalf("CheckExpiringCertificates failed: %v", err)
+			}
+
+			for _, job := range jobRepo.Jobs {
+				if job.Type == domain.JobTypeRenewal {
+					t.Errorf("should not create renewal job for cert with %s status", tc.status)
+				}
+			}
+		})
+	}
+}
+
 func TestCheckExpiringCertificates_UpdatesStatusToExpiring(t *testing.T) {
 	t.Helper()
 	ctx := context.Background()

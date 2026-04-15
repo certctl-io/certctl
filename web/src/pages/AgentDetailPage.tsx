@@ -61,7 +61,7 @@ export default function AgentDetailPage() {
     );
   }
 
-  const health = agent.status || heartbeatStatus(agent.last_heartbeat);
+  const health = agent.status || heartbeatStatus(agent.last_heartbeat_at);
 
   return (
     <>
@@ -82,10 +82,10 @@ export default function AgentDetailPage() {
             <InfoRow label="IP Address" value={<span className="font-mono text-xs">{agent.ip_address || '—'}</span>} />
             <InfoRow label="Version" value={agent.version || '—'} />
             <InfoRow label="Last Heartbeat" value={
-              agent.last_heartbeat ? (
+              agent.last_heartbeat_at ? (
                 <span>
-                  {timeAgo(agent.last_heartbeat)}
-                  <span className="text-ink-faint ml-2 text-xs">{formatDateTime(agent.last_heartbeat)}</span>
+                  {timeAgo(agent.last_heartbeat_at)}
+                  <span className="text-ink-faint ml-2 text-xs">{formatDateTime(agent.last_heartbeat_at)}</span>
                 </span>
               ) : '—'
             } />

@@ -136,8 +136,17 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 	policyCache := make(map[string]*domain.RenewalPolicy)
 
 	for _, cert := range expiring {
-		// Skip if already renewing or archived
-		if cert.Status == domain.CertificateStatusRenewalInProgress || cert.Status == domain.CertificateStatusArchived {
+		// Skip certs in terminal or non-renewable states:
+		// - RenewalInProgress: already being renewed
+		// - Archived: no longer managed
+		// - Revoked: intentionally revoked, should not be auto-renewed
+		// - Failed: requires manual intervention (the failure cause hasn't been resolved)
+		// - Expired: requires manual review (why did it expire without renewal?)
+		if cert.Status == domain.CertificateStatusRenewalInProgress ||
+			cert.Status == domain.CertificateStatusArchived ||
+			cert.Status == domain.CertificateStatusRevoked ||
+			cert.Status == domain.CertificateStatusFailed ||
+			cert.Status == domain.CertificateStatusExpired {
 			continue
 		}
 

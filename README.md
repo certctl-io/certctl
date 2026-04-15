@@ -110,7 +110,7 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | SSH (Agentless) | Beta | `SSH` |
 | Windows Cert Store | Implemented | `WinCertStore` |
 | Java Keystore | Implemented | `JavaKeystore` |
-| Kubernetes Secrets | Coming in 2.1 | `KubernetesSecrets` |
+| Kubernetes Secrets | Implemented | `KubernetesSecrets` |
 
 ### Notifiers
 | Notifier | Status | Type |
@@ -166,7 +166,7 @@ docker compose -f deploy/docker-compose.yml up -d --build
 
 Wait ~30 seconds, then open **http://localhost:8443** in your browser. The onboarding wizard walks you through connecting a CA, deploying an agent, and issuing your first certificate.
 
-**Want a pre-populated demo instead?** Add the demo override to see 32 certificates across 7 issuers, 8 agents, and 180 days of realistic history:
+**Want a pre-populated demo instead?** Add the demo override to see 32 certificates across 10 issuers, 8 agents, and 180 days of realistic history:
 
 ```bash
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
@@ -313,13 +313,13 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 ### V2: Operational Maturity — Shipped
 30+ milestones, extensively tested with CI-enforced coverage gates. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01, step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS targets. RFC 5280 revocation with CRL + OCSP. Certificate profiles, ownership tracking, approval workflows. Filesystem and network certificate discovery. Prometheus metrics, dashboard charts, agent fleet overview. EST server (RFC 7030), ACME ARI (RFC 9773), certificate export, S/MIME support, Helm chart, MCP server, CLI, scheduled digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). See the [Feature Inventory](docs/features.md) for details.
 
-**Coming in v2.1.0:** Dynamic issuer and target configuration via GUI (no env var restarts), first-run onboarding wizard.
+Dynamic issuer and target configuration via GUI (no env var restarts), first-run onboarding wizard, Sectigo SCM, Google CAS, AWS ACM Private CA issuers, IIS (WinRM), F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, and Kubernetes Secrets target connectors.
 
 ### V3: certctl Pro
 Team access controls and identity provider integration (OIDC/SSO). Role-based access control with profile-gating. Event-driven architecture (NATS) with real-time operational views. Advanced search DSL, compliance and risk scoring, bulk fleet operations.
 
 ### V4+: Cloud, Scale & Passive Discovery
-Passive network discovery (TLS listener), Kubernetes integration (cert-manager external issuer, Secrets target), cloud infrastructure targets (AWS ALB/ACM, Azure Key Vault), extended CA support (Entrust, GlobalSign, EJBCA), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
+Passive network discovery (TLS listener), Kubernetes cert-manager external issuer, cloud infrastructure targets (AWS ALB/CloudFront, Azure Key Vault/App Service), extended CA support (Entrust, GlobalSign, EJBCA), cloud secret manager discovery (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
 
 ## License
 

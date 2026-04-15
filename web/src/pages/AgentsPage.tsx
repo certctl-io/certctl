@@ -39,7 +39,7 @@ export default function AgentsPage() {
     {
       key: 'status',
       label: 'Health',
-      render: (a) => <StatusBadge status={a.status || heartbeatStatus(a.last_heartbeat)} />,
+      render: (a) => <StatusBadge status={a.status || heartbeatStatus(a.last_heartbeat_at)} />,
     },
     { key: 'hostname', label: 'Hostname', render: (a) => <span className="text-ink-muted font-mono text-xs">{a.hostname || '—'}</span> },
     { key: 'os', label: 'OS / Arch', render: (a) => <span className="text-ink-muted text-xs">{a.os && a.architecture ? `${a.os}/${a.architecture}` : a.os || '—'}</span> },
@@ -48,7 +48,7 @@ export default function AgentsPage() {
     {
       key: 'heartbeat',
       label: 'Last Heartbeat',
-      render: (a) => <span className="text-ink-muted text-xs">{timeAgo(a.last_heartbeat)}</span>,
+      render: (a) => <span className="text-ink-muted text-xs">{timeAgo(a.last_heartbeat_at)}</span>,
     },
   ];
 

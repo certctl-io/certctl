@@ -82,6 +82,9 @@ flowchart TB
         CA4["OpenSSL / Custom CA\n(script-based)"]
         CA6["Vault PKI\n(token auth, /sign API)"]
         CA7["DigiCert CertCentral\n(async order model)"]
+        CA8["Sectigo SCM\n(async order model)"]
+        CA9["Google CAS\n(OAuth2, sync)"]
+        CA10["AWS ACM PCA\n(sync issuance)"]
     end
 
     subgraph "Target Systems"
@@ -95,6 +98,9 @@ flowchart TB
         T2["F5 BIG-IP\n(proxy agent + iControl REST)"]
         T3["IIS\n(WinRM + local)"]
         T10["SSH\n(SFTP + reload)"]
+        T11["WinCertStore\n(PowerShell import)"]
+        T12["Java Keystore\n(keytool pipeline)"]
+        T13["Kubernetes Secrets\n(K8s API)"]
     end
 
     DASH --> API
@@ -102,7 +108,7 @@ flowchart TB
     SVC --> REPO
     REPO --> PG
     SCHED --> SVC
-    SVC -->|"Issue/Renew"| CA1 & CA2 & CA3 & CA4 & CA6 & CA7
+    SVC -->|"Issue/Renew"| CA1 & CA2 & CA3 & CA4 & CA6 & CA7 & CA8 & CA9 & CA10
 
     A1 & A2 & A3 -->|"CSR + Heartbeat"| API
     API -->|"Cert + Chain\n(NO private key)"| A1 & A2 & A3
@@ -122,7 +128,7 @@ The server exposes a REST API under `/api/v1/` and optionally serves the web das
 
 ### Agents
 
-Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
+Lightweight Go processes that run on or near your infrastructure. Agents generate ECDSA P-256 private keys locally, create CSRs, and submit them to the control plane for signing — private keys never leave agent infrastructure. Agents also handle certificate deployment to target systems (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, Kubernetes Secrets) and report job status. They communicate with the control plane via HTTP and authenticate with API keys.
 
 The agent runs two background loops: a heartbeat (every 60 seconds) to signal it's alive, and a work poll (every 30 seconds) to check for actionable jobs via `GET /api/v1/agents/{id}/work`. Jobs may be `AwaitingCSR` (agent needs to generate key + submit CSR) or `Deployment` (agent needs to deploy a certificate). Private keys are stored in `CERTCTL_KEY_DIR` (default `/var/lib/certctl/keys`) with 0600 permissions.
 
@@ -134,7 +140,7 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).
 
-**Current views** (21 pages): certificate inventory (list with multi-select bulk operations + "New Certificate" creation modal + detail with deployment status timeline, inline policy/profile editor, version history, deploy, revoke, archive, and trigger renewal actions), agent fleet (list + detail with system info + OS/architecture grouping with charts), job queue (status, retry, cancel, approve/reject for AwaitingApproval jobs), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range, actor, action filters + CSV/JSON export), policy management (rules with enable/disable toggle + delete + violations), issuers (list with test connection + delete), targets (list with 3-step configuration wizard + delete), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), short-lived credentials dashboard (TTL countdown, profile filtering, auto-refresh), discovered certificates triage (claim/dismiss unmanaged certs discovered by agents or network scans), network scan targets management (CRUD for network scan targets + Scan Now button), summary dashboard with charts (expiration heatmap, renewal success rate, status distribution, issuance rate), and login page.
+**Current views** (24 pages): certificate inventory (list with multi-select bulk operations + "New Certificate" creation modal + detail with deployment status timeline, inline policy/profile editor, version history, deploy, revoke, archive, and trigger renewal actions), agent fleet (list + detail with system info + OS/architecture grouping with charts), job queue (list + detail with verification section, timeline, audit events; approve/reject for AwaitingApproval jobs), notification inbox (threshold alert grouping, mark-as-read), audit trail (time range, actor, action filters + CSV/JSON export), policy management (rules with enable/disable toggle + delete + violations), issuers (catalog with 10 type cards + 3-step create wizard + detail with test connection), targets (list with 3-step configuration wizard + detail with deployment history), owners (list with team resolution + delete), teams (list with delete), agent groups (list with dynamic match criteria badges + enable/disable + delete), certificate profiles (list with crypto constraints), short-lived credentials dashboard (TTL countdown, profile filtering, auto-refresh), discovered certificates triage (claim/dismiss unmanaged certs discovered by agents or network scans), network scan targets management (CRUD + Scan Now button), summary dashboard with charts (expiration heatmap, renewal success rate, status distribution, issuance rate), digest preview and send, observability (health, metrics, Prometheus config), and login page.
 
 The dashboard includes an **ErrorBoundary component** for graceful error recovery — if a view crashes, the boundary catches the error and displays a user-friendly message instead of breaking the entire dashboard. It also includes a **demo mode** that activates when the API is unreachable — it renders realistic mock data for screenshots and offline presentations.
 
@@ -510,12 +516,13 @@ flowchart TB
         II["IssuerConnector Interface\nIssueCertificate() | RenewCertificate()\nRevokeCertificate() | GetOrderStatus()"]
         II --> LC["Local CA"]
         II --> ACME["ACME v2"]
-        II --> SC["step-ca"]
+        II --> SCA["step-ca"]
         II --> OC["OpenSSL / Custom CA"]
         II --> VP["Vault PKI"]
         II --> DC["DigiCert CertCentral"]
         II --> SG["Sectigo SCM"]
         II --> GC["Google CAS"]
+        II --> AP2["AWS ACM PCA"]
     end
 
     subgraph "Target Connectors"
@@ -530,7 +537,10 @@ flowchart TB
         TI --> PO["Postfix/Dovecot"]
         TI --> IIS["IIS"]
         TI --> F5["F5 BIG-IP"]
-        TI --> SC["SSH"]
+        TI --> SSH["SSH"]
+        TI --> WCS["WinCertStore"]
+        TI --> JKS["Java Keystore"]
+        TI --> K8S["K8s Secrets"]
     end
 
     subgraph "Notifier Connectors"
@@ -582,7 +592,7 @@ type Connector interface {
 }
 ```
 
-Built-in issuers: **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts), **Vault PKI** (HashiCorp Vault's PKI secrets engine via /sign API with token auth), and **DigiCert** (commercial CA via CertCentral REST API with async order processing). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required.
+Built-in issuers (9 connectors): **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts), **Vault PKI** (HashiCorp Vault's PKI secrets engine via /sign API with token auth), **DigiCert** (commercial CA via CertCentral REST API with async order processing), **Sectigo SCM** (async order model with 3-header auth), **Google CAS** (Cloud Certificate Authority Service with OAuth2 service account auth), and **AWS ACM Private CA** (synchronous issuance via ACM PCA API). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required.
 
 **ACME Renewal Information (ARI, RFC 9773):** The ACME connector supports CA-directed renewal timing via the `GetRenewalInfo()` method. Instead of using fixed thresholds (e.g., renew 30 days before expiry), the CA tells certctl when to renew by providing a `suggestedWindow` with start and end times. This is useful for distributing renewal load during maintenance windows and coordinating mass-revocation scenarios. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. Cert ID is computed as `base64url(SHA-256(DER cert))` per RFC 9773. If the CA doesn't support ARI (404 from the ARI endpoint), certctl automatically falls back to threshold-based renewal — no operator intervention required. Errors from the CA are logged as warnings.
 
@@ -602,11 +612,11 @@ type Connector interface {
 
 The `DeploymentRequest` struct carries the full material needed by the target system: the signed certificate, the CA chain, the agent-generated private key, target-specific configuration, and arbitrary metadata. The key field is populated by the agent from its local key store (`CERTCTL_KEY_DIR`) — it never originates from the control plane.
 
-Built-in targets: **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **Traefik** (file provider — writes cert/key to watched directory, Traefik auto-reloads), **Caddy** (dual-mode: admin API hot-reload or file-based), **Envoy** (file-based with optional SDS JSON config), **F5 BIG-IP** (proxy agent + iControl REST, transaction-based atomic SSL profile updates), **IIS** (dual-mode: agent-local PowerShell + proxy agent WinRM for agentless targets), **Postfix/Dovecot** (file write + service reload), **SSH** (agentless deployment via SSH/SFTP), **Windows Certificate Store** (PowerShell-based cert import, dual-mode local/WinRM), **Java Keystore** (PEM → PKCS#12 → keytool pipeline, JKS and PKCS12 formats).
+Built-in targets (14 connector types): **NGINX** (writes cert/chain/key files, validates with `nginx -t`, reloads), **Apache httpd** (writes cert/chain/key files, validates with `apachectl configtest`, graceful reload), **HAProxy** (combined PEM file with cert+chain+key, validates config, reloads via systemctl/signal), **Traefik** (file provider — writes cert/key to watched directory, Traefik auto-reloads), **Caddy** (dual-mode: admin API hot-reload or file-based), **Envoy** (file-based with optional SDS JSON config), **F5 BIG-IP** (proxy agent + iControl REST, transaction-based atomic SSL profile updates), **IIS** (dual-mode: agent-local PowerShell + proxy agent WinRM for agentless targets), **Postfix/Dovecot** (file write + service reload), **SSH** (agentless deployment via SSH/SFTP), **Windows Certificate Store** (PowerShell-based cert import, dual-mode local/WinRM), **Java Keystore** (PEM → PKCS#12 → keytool pipeline, JKS and PKCS12 formats), **Kubernetes Secrets** (deploys as `kubernetes.io/tls` Secrets via injectable K8sClient interface, in-cluster or kubeconfig auth).
 
 After deployment, agents can perform **post-deployment TLS verification**: the agent probes the live TLS endpoint using `crypto/tls.DialWithDialer` and compares the SHA-256 fingerprint of the served certificate against what was deployed. Results are reported via `POST /api/v1/jobs/{id}/verify` and stored on the job record. Verification is best-effort — failures don't block or rollback deployments.
 
-The SSH connector enables agentless deployment to any Linux/Unix server via SSH/SFTP, using the proxy agent pattern. Additional cloud, network, and Kubernetes target connectors are planned for future releases.
+The SSH connector enables agentless deployment to any Linux/Unix server via SSH/SFTP, using the proxy agent pattern. The Kubernetes Secrets connector deploys certificates as `kubernetes.io/tls` Secrets via an injectable K8sClient interface supporting both in-cluster and out-of-cluster auth.
 
 ### Notifier Connector
 
@@ -659,7 +669,7 @@ type ESTService interface {
 }
 ```
 
-**Issuer connector extension:** EST required adding `GetCACertPEM(ctx) (string, error)` to the issuer connector interface so the `/cacerts` endpoint can serve the CA chain. The Local CA connector returns its CA certificate PEM; ACME, step-ca, OpenSSL, Vault, and DigiCert connectors return errors (they don't expose a static CA chain — their chains are per-issuance).
+**Issuer connector extension:** EST required adding `GetCACertPEM(ctx) (string, error)` to the issuer connector interface so the `/cacerts` endpoint can serve the CA chain. The Local CA returns its CA certificate PEM; Vault PKI fetches via `GET /v1/{mount}/ca/pem`; Google CAS fetches via API; AWS ACM PCA retrieves via `GetCertificateAuthorityCertificate`. ACME, step-ca, OpenSSL, DigiCert, and Sectigo connectors return errors (they don't expose a static CA chain — their chains are per-issuance).
 
 **Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID.
 
@@ -782,7 +792,7 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications, discovered-certificates, discovery-scans, network-scan-targets, stats, metrics.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 99 endpoints across 23 resource domains (97 under `/api/v1/` + `/.well-known/est/` plus `/health` and `/ready`; includes auth, 7 discovery endpoints from M18b, 6 network scan endpoints from M21, Prometheus metrics from M22, 4 EST enrollment endpoints from M23, 2 digest endpoints from M29), all request/response schemas, and pagination conventions. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 97 operations across `/api/v1/` and `/.well-known/est/` (includes auth, 7 discovery endpoints, 6 network scan endpoints, Prometheus metrics, 4 EST enrollment endpoints, 2 digest endpoints, 2 verification endpoints, 2 export endpoints), all request/response schemas, and pagination conventions. The server also registers `/health` and `/ready` outside the OpenAPI spec, bringing the total route count to 107. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
@@ -978,13 +988,13 @@ certctl is extensively tested across eight layers with CI-enforced coverage gate
 
 **Frontend tests** (`web/src/api/`) — Vitest tests covering the full API client (all endpoint functions with fetch mocking), stats/metrics endpoints, utility functions, and auth flows. Test environment uses jsdom with `@testing-library/jest-dom` matchers.
 
-**Connector tests** (`internal/connector/`) — Issuer connectors (Local CA self-signed/sub-CA modes, ACME DNS-01/DNS-PERSIST-01, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS — all with httptest mock servers). Target connectors (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS with mock PowerShell executor, F5 BIG-IP with mock iControl client, Postfix/Dovecot, SSH with mock SSH client). Notifier connectors (Slack, Teams, PagerDuty, OpsGenie).
+**Connector tests** (`internal/connector/`) — Issuer connectors (Local CA self-signed/sub-CA modes, ACME DNS-01/DNS-PERSIST-01, step-ca, OpenSSL, Vault PKI, DigiCert, Sectigo, Google CAS, AWS ACM PCA — all with httptest mock servers or injectable interface mocks). Target connectors (NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS with mock PowerShell executor, F5 BIG-IP with mock iControl client, Postfix/Dovecot, SSH with mock SSH client, Windows Certificate Store with mock PowerShell executor, Java Keystore with mock command executor, Kubernetes Secrets with mock K8s client, shared certutil package). Notifier connectors (Slack, Teams, PagerDuty, OpsGenie).
 
 **Scheduler tests** (`internal/scheduler/scheduler_test.go`) — Idempotency guards (`sync/atomic.Bool`), `WaitForCompletion` success and timeout paths, and multi-loop concurrency safety.
 
 **Fuzz tests** (`internal/validation/`, `internal/domain/`) — Go native fuzz tests for command validation (`ValidateShellCommand`, `ValidateDomainName`, `ValidateACMEToken`) and revocation domain parsing.
 
-**CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs. Go: build, vet, `go test -race`, `golangci-lint` (11 linters), `govulncheck`, test with coverage, per-layer coverage threshold enforcement (service 60%, handler 60%, domain 40%, middleware 50%). Frontend: TypeScript type check, Vitest, Vite production build.
+**CI pipeline** (`.github/workflows/ci.yml`) — Two parallel jobs. Go: build, vet, `go test -race`, `golangci-lint` (11 linters), `govulncheck`, test with coverage, per-layer coverage threshold enforcement (service 55%, handler 60%, domain 40%, middleware 30%). Frontend: TypeScript type check, Vitest, Vite production build.
 
 For detailed test procedures, smoke tests, and the release sign-off checklist, see the [Testing Guide](testing-guide.md). For setting up the Docker Compose test environment with real CA backends, see [Test Environment](test-env.md).
 
