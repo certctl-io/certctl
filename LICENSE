@@ -6,13 +6,20 @@ Licensor:             Shankar Reddy
 Licensed Work:        certctl
                       The Licensed Work is (c) 2026 Shankar Reddy.
 Additional Use Grant: You may make use of the Licensed Work, provided that
-                      you may not use the Licensed Work for a Certificate
-                      Management Service. A "Certificate Management Service"
-                      is a commercial offering that allows third parties
-                      (other than your employees and contractors acting on
-                      your behalf) to access and/or use the Licensed Work's
-                      certificate lifecycle management functionality as part
-                      of a hosted or managed service.
+                      you may not use the Licensed Work for a Commercial
+                      Certificate Service. A "Commercial Certificate Service"
+                      is any product, service, or offering in which a third
+                      party (other than your employees and contractors
+                      acting on your behalf) accesses, uses, or benefits
+                      from the Licensed Work's certificate management
+                      functionality — including but not limited to lifecycle
+                      management, discovery, monitoring, alerting, renewal
+                      automation, deployment, and revocation — as part of
+                      or in connection with an offering for which
+                      compensation is received. This restriction applies
+                      regardless of whether the Licensed Work is hosted,
+                      managed, embedded, bundled, or integrated with
+                      another product or service.
 
 Change Date:          March 14, 2033
 

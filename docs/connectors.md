@@ -61,8 +61,8 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs (Local CA with sub-CA support, ACME with HTTP-01 + DNS-01 + DNS-PERSIST-01, step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert implemented; additional CA integrations planned)
-2. **Target Connector** — Deploys certificates to infrastructure (NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS, F5, SSH implemented; additional cloud and network targets planned)
+1. **Issuer Connector** — Obtains certificates from CAs. 9 built-in: Local CA (self-signed + sub-CA), ACME v2 (HTTP-01, DNS-01, DNS-PERSIST-01, ARI, EAB, profile selection), step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM Private CA
+2. **Target Connector** — Deploys certificates to infrastructure. 14 built-in: NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local + WinRM), F5 BIG-IP (proxy agent), SSH (agentless), Windows Certificate Store, Java Keystore, Kubernetes Secrets
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
@@ -428,18 +428,19 @@ AWS Certificate Manager Private Certificate Authority — managed private CA on 
 
 Location: `internal/connector/issuer/awsacmpca/awsacmpca.go`
 
-### Coming in V2.2+
+### Planned Issuers
 
 The following issuer connectors are planned for future releases:
 
-- **Entrust** — Enterprise CA via Entrust API
-- **AWS ACM Private CA** — AWS-managed private CA
+- **Entrust** — Enterprise CA via Entrust Certificate Services mTLS API
+- **GlobalSign** — GlobalSign Atlas HVCA REST API with mTLS + API key auth
+- **EJBCA** — Keyfactor EJBCA REST API with mTLS or OAuth2 auth
 
 Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 
 ### Building a Custom Issuer
 
-Here's the structure for a HashiCorp Vault PKI issuer:
+Here's a simplified example showing the connector pattern (using a hypothetical Vault-like CA):
 
 ```go
 package vault
@@ -962,9 +963,7 @@ The Java Keystore connector deploys certificates to JKS or PKCS#12 keystores via
 
 Location: `internal/connector/target/javakeystore/javakeystore.go`
 
-### Kubernetes Secrets (Coming in 2.1)
-
-> **Status:** Config validation, tests, UI, and Helm RBAC are implemented. The Kubernetes API client (`k8s.io/client-go`) integration is not yet wired — runtime deployment will be available in v2.1.0.
+### Kubernetes Secrets
 
 The Kubernetes Secrets connector deploys certificates as `kubernetes.io/tls` Secrets, compatible with Ingress controllers (nginx-ingress, Traefik, HAProxy), service meshes (Istio, Linkerd), and any Kubernetes workload that reads TLS Secrets.
 

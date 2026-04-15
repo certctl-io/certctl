@@ -70,9 +70,11 @@ For a detailed comparison with other competitors and enterprise platforms, see [
 
 - **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
 
-- **Multiple interfaces for different workflows.** REST API for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), EST server (RFC 7030) for device enrollment, Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
+- **Standards-based protocol support.** EST server (RFC 7030) for device and WiFi certificate enrollment. ACME ARI (RFC 9773) for CA-directed renewal timing. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email. DER-encoded X.509 CRL and embedded OCSP responder for revocation infrastructure.
 
-For the full capability breakdown — revocation infrastructure (CRL + OCSP), policy engine, certificate profiles, S/MIME support, approval workflows, and more — see the [Feature Inventory](docs/features.md).
+- **Multiple interfaces for different workflows.** REST API (107 routes) for automation, CLI for scripting, MCP server for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard (24 pages) for day-to-day operations.
+
+For the full capability breakdown, including the policy engine, certificate profiles, approval workflows, certificate export (PEM/PKCS#12), and more, see the [Feature Inventory](docs/features.md).
 
 ## Supported Integrations
 
@@ -84,13 +86,11 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | ACME EAB (ZeroSSL, Google Trust) | Implemented (auto-fetch EAB from ZeroSSL) | `ACME` |
 | step-ca | Implemented | `StepCA` |
 | OpenSSL / Custom CA | Implemented | `OpenSSL` |
-| Vault PKI | Beta | `VaultPKI` |
-| DigiCert CertCentral | Beta | `DigiCert` |
-| Sectigo SCM | Beta | `Sectigo` |
-| Google CAS | Beta | `GoogleCAS` |
-| AWS ACM Private CA | Beta | `AWSACMPCA` |
-
-**Vault PKI, DigiCert, Sectigo, Google CAS, and AWS ACM PCA connectors are in beta.** If you hit any bugs or unexpected behavior, please [open a GitHub issue](https://github.com/shankar0123/certctl/issues) -- we're actively testing these and want to hear from real users.
+| Vault PKI | Implemented | `VaultPKI` |
+| DigiCert CertCentral | Implemented | `DigiCert` |
+| Sectigo SCM | Implemented | `Sectigo` |
+| Google CAS | Implemented | `GoogleCAS` |
+| AWS ACM Private CA | Implemented | `AWSACMPCA` |
 
 **Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated today via the OpenSSL/Custom CA connector.
 
@@ -106,8 +106,8 @@ For the full capability breakdown — revocation infrastructure (CRL + OCSP), po
 | Postfix | Implemented | `Postfix` |
 | Dovecot | Implemented | `Dovecot` |
 | Microsoft IIS | Implemented (local + WinRM) | `IIS` |
-| F5 BIG-IP | Beta | `F5` |
-| SSH (Agentless) | Beta | `SSH` |
+| F5 BIG-IP | Implemented (proxy agent) | `F5` |
+| SSH (Agentless) | Implemented | `SSH` |
 | Windows Cert Store | Implemented | `WinCertStore` |
 | Java Keystore | Implemented | `JavaKeystore` |
 | Kubernetes Secrets | Implemented | `KubernetesSecrets` |
@@ -186,6 +186,16 @@ curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-a
 ```
 
 Detects your OS and architecture, downloads the binary, configures systemd (Linux) or launchd (macOS), and starts the agent. See [install-agent.sh](install-agent.sh) for details.
+
+### Helm Chart (Kubernetes)
+
+```bash
+helm install certctl deploy/helm/certctl/ \
+  --set server.apiKey=your-api-key \
+  --set postgres.password=your-db-password
+```
+
+Production-ready chart with Server Deployment, PostgreSQL StatefulSet, Agent DaemonSet, health probes, security contexts (non-root, read-only rootfs), and optional Ingress. See [values.yaml](deploy/helm/certctl/values.yaml) for all configuration options.
 
 ### Docker Pull
 
@@ -318,12 +328,12 @@ Dynamic issuer and target configuration via GUI (no env var restarts), first-run
 ### V3: certctl Pro
 Team access controls and identity provider integration (OIDC/SSO). Role-based access control with profile-gating. Event-driven architecture (NATS) with real-time operational views. Advanced search DSL, compliance and risk scoring, bulk fleet operations.
 
-### V4+: Cloud, Scale & Passive Discovery
-Passive network discovery (TLS listener), Kubernetes cert-manager external issuer, cloud infrastructure targets (AWS ALB/CloudFront, Azure Key Vault/App Service), extended CA support (Entrust, GlobalSign, EJBCA), cloud secret manager discovery (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager), and platform-scale features (Terraform provider, multi-tenancy, HSM support).
+### V4+: Cloud & Scale
+Continuous TLS health monitoring, cloud secret manager discovery, Kubernetes cert-manager external issuer, cloud infrastructure targets, extended CA support (Entrust, GlobalSign, EJBCA), and platform-scale features (Terraform provider, multi-tenancy).
 
 ## License
 
-Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not offer certctl as a managed/hosted certificate management service to third parties. The BSL 1.1 license converts automatically to Apache 2.0 on March 1, 2033, providing perpetual freedom.
+Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not use certctl's certificate management functionality as part of a commercial offering to third parties, whether hosted, managed, embedded, bundled, or integrated. The BSL 1.1 license converts automatically to Apache 2.0 on March 14, 2033.
 
 For licensing inquiries: certctl@proton.me
 
