@@ -146,51 +146,43 @@ All connectors are pluggable — build your own by implementing the [connector i
 
 **Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
 
-## Why certctl Exists
+## Why certctl
 
-Certificate lifecycle tooling today falls into two camps: expensive enterprise platforms (Venafi, Keyfactor, Sectigo) that cost six figures and take months to deploy, or single-purpose tools (cert-manager, certbot) that handle one slice of the problem. If you run a mixed infrastructure — some NGINX, some Apache, a few HAProxy nodes, IIS on Windows, maybe an F5 — and you need to manage certificates from multiple CAs, there's nothing self-hosted that covers the full lifecycle without vendor lock-in.
+Certificate lifecycle tooling falls into two camps: enterprise platforms (Venafi, Keyfactor) that cost six figures and take months to deploy, or single-purpose tools (certbot, cert-manager) that handle one slice of the problem. certctl fills the gap — full lifecycle automation, self-hosted, free, CA-agnostic, and target-agnostic. If you're running certbot cron jobs, manually renewing certs, or stitching together scripts across mixed infrastructure, certctl replaces all of that.
 
-certctl fills that gap. It's **CA-agnostic** — plug in any certificate authority: Let's Encrypt via ACME, Smallstep step-ca, HashiCorp Vault PKI, DigiCert CertCentral, Sectigo SCM, Google Cloud CAS, AWS ACM Private CA, your enterprise ADCS via sub-CA mode, or any custom CA through a shell script adapter. Run multiple issuers simultaneously for different certificate types.
+Built for **platform engineering and DevOps teams** managing 10–500+ certificates, **security and compliance teams** who need audit trails and policy enforcement for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 ([compliance mapping included](docs/compliance.md)), and **small teams without enterprise budgets** who need Venafi-grade automation for a 50-server environment. For a detailed comparison, see [Why certctl?](docs/why-certctl.md)
 
-It's **target-agnostic**. Agents deploy certificates to NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local PowerShell or remote WinRM), F5 BIG-IP (proxy agent), Windows Certificate Store, Java Keystores, Kubernetes Secrets, and any Linux/Unix server via SSH/SFTP — all using the same pluggable connector model. The control plane never initiates outbound connections — agents poll for work, which means certctl works behind firewalls, across network zones, and in air-gapped environments.
+**Architecture.** Go 1.25 control plane with handler→service→repository layering, PostgreSQL 16 backend (21 tables), and a pull-only deployment model — the server never initiates outbound connections. Agents poll for work. For network appliances and agentless servers, a proxy agent in the same network zone handles deployment via the target's API (WinRM, iControl REST, SSH/SFTP). Background scheduler runs 7 loops: renewal with ARI integration (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h), certificate digest (24h). See [Architecture Guide](docs/architecture.md) for full system diagrams.
 
-For a detailed comparison with other competitors and enterprise platforms, see [Why certctl?](docs/why-certctl.md)
+**Security-first.** Agents generate ECDSA P-256 keys locally — private keys never touch the control plane. API key auth enforced by default with SHA-256 hashing and constant-time comparison. CORS deny-by-default. Shell injection prevention on all connector scripts. SSRF protection (reserved IP filtering) on the network scanner. Atomic idempotency guards on scheduler loops. Issuer and target credentials encrypted at rest with AES-256-GCM. Every API call recorded to an immutable audit trail with actor attribution, body hash, and latency tracking. CI runs race detection, 11 linters, and vulnerability scanning on every commit.
 
-## Who Is This For
-
-**Platform engineering and DevOps teams** managing 10–500+ certificates across mixed infrastructure who need automated renewal, deployment, and a single dashboard for visibility. If you're currently running certbot cron jobs, manually renewing certs, or stitching together scripts — certctl replaces all of that.
-
-**Security and compliance teams** who need an immutable audit trail, certificate ownership tracking, policy enforcement, and evidence for SOC 2, PCI-DSS 4.0, or NIST SP 800-57 audits. certctl ships with [compliance mapping documentation](docs/compliance.md) for all three frameworks.
-
-**Small teams without enterprise budgets** who need the lifecycle automation that Venafi and Keyfactor provide but can't justify six-figure licensing for a 50-server environment.
+**Key design decisions.** TEXT primary keys — human-readable prefixed IDs (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resources at a glance in logs and queries. Idempotent migrations (`IF NOT EXISTS`, `ON CONFLICT DO NOTHING`) safe for repeated execution. Dynamic configuration via GUI with AES-256-GCM encrypted credential storage and env var backward compatibility. Handlers define their own service interfaces for clean dependency inversion.
 
 ## What It Does
 
-- **Certificates renew and deploy themselves.** The scheduler monitors expiration, creates renewal jobs, issues certificates through your CA, and deploys them to target servers — all without human intervention. ACME ARI (RFC 9773) lets your CA tell certctl exactly when to renew. Ready for 45-day and 6-day certificate lifetimes (SC-081v3 and Let's Encrypt shortlived profiles). ACME certificate profile selection (`tlsserver`, `shortlived`) supported.
+**Automated lifecycle.** Certificates renew and deploy themselves. The scheduler monitors expiration, issues through your CA, and deploys to targets — zero human intervention. ACME ARI (RFC 9773) lets the CA direct renewal timing. Ready for 47-day (SC-081v3) and 6-day (Let's Encrypt shortlived) certificate lifetimes.
 
-- **You see everything in one place.** 26-page operational dashboard shows every certificate across every server: status, ownership, expiration timeline, deployment history with rollback, discovery triage, network scan management, and real-time agent fleet health. Bulk operations (renew, revoke, reassign) work across selections. Short-lived credential dashboard with live TTL countdown.
+**Operational dashboard.** 26-page GUI covers the entire lifecycle: certificate inventory with bulk ops, deployment timeline with rollback, discovery triage, network scan management, agent fleet health, short-lived credential countdown, approval workflows, and observability metrics. Configure issuers and targets from the dashboard — no env var editing, no server restarts.
 
-- **Private keys never leave your servers.** Agents generate ECDSA P-256 keys locally and submit only the CSR. The control plane never touches private keys. Post-deployment TLS verification confirms the right certificate is actually being served by comparing SHA-256 fingerprints against the live TLS endpoint.
+**Private keys stay on your servers.** Agents generate ECDSA P-256 keys locally, submit only the CSR. The control plane never touches private keys. After deployment, agents probe the live TLS endpoint and compare SHA-256 fingerprints to confirm the right certificate is actually being served.
 
-- **Configure everything from the dashboard.** Issuers and targets are configured through the GUI — no env var editing or server restarts. AES-256-GCM encrypted credential storage. Test connection before saving. First-run onboarding wizard guides you through connecting a CA, deploying an agent, and issuing your first certificate.
+**Discovery.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without agents. Both feed into a triage workflow — claim, dismiss, or import what you find.
 
-- **Discover what you don't know about.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without requiring agents. Both feed into a triage workflow where you claim, dismiss, or import discovered certificates.
+**Policy engine.** Certificate profiles constrain key types, max TTL, and EKUs. Approval workflows pause jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
 
-- **Enforce policy and control access.** Certificate profiles constrain allowed key types, maximum TTL, and required EKUs. Interactive approval workflows pause renewal jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
+**Enrollment protocols.** EST server (RFC 7030) for device and WiFi enrollment. SCEP server (RFC 8894) for MDM platforms and network devices. S/MIME issuance with email protection EKU.
 
-- **Everything is auditable.** Immutable append-only audit trail records every lifecycle action, every API call (with actor attribution, SHA-256 body hash, latency), and every approval decision. Certificate digest emails deliver daily briefings. Prometheus metrics endpoint for Grafana dashboards.
+**Revocation.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder. RFC 5280 reason codes. Short-lived certs (TTL < 1 hour) are exempt — expiry is sufficient revocation.
 
-- **Standards-based enrollment protocols.** EST server (RFC 7030) for device and WiFi certificate enrollment. SCEP server (RFC 8894) for MDM platforms and network device enrollment. Both share a common PKCS#7 package and delegate to any configured issuer connector. S/MIME certificate issuance with email protection EKU for end-to-end encrypted email.
+**Audit and observability.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Prometheus metrics endpoint. Scheduled certificate digest emails.
 
-- **Full revocation infrastructure.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder with good/revoked/unknown status. RFC 5280 reason codes. Short-lived certificates (profile TTL < 1 hour) automatically exempt from CRL/OCSP — expiry is sufficient revocation.
+**Notifications.** Slack, Teams, PagerDuty, OpsGenie, SMTP, webhooks. Routed by certificate owner. Daily digest emails with stats and expiring certs.
 
-- **Certificate export.** Download certificates in PEM (JSON or file) and PKCS#12 formats. Private keys are never included — they live on agents only. Every export is recorded in the audit trail.
+**Multiple interfaces.** REST API (111 routes), CLI (12 commands), MCP server (80 tools for Claude, Cursor, Windsurf), Helm chart, web dashboard. Certificate export in PEM and PKCS#12.
 
-- **Multiple interfaces for different workflows.** REST API (111 routes) for automation, CLI (12 commands) for scripting, MCP server (80 tools) for AI assistants (Claude, Cursor, Windsurf), Helm chart for Kubernetes, and the web dashboard for day-to-day operations.
+**First-run onboarding.** Wizard guides you through connecting a CA, deploying an agent, and issuing your first certificate. Or start with the pre-populated demo — 32 certificates, 10 issuers, 180 days of history.
 
-- **Notification routing.** Slack, Microsoft Teams, PagerDuty, OpsGenie, email (SMTP), and webhooks. Notifications route by certificate owner email. Scheduled certificate digest emails with HTML template, stats grid, and expiring certs table.
-
-For the full capability breakdown, see the [Feature Inventory](docs/features.md).
+For the complete capability breakdown, see the [Feature Inventory](docs/features.md).
 
 ## Quick Start
 
@@ -256,19 +248,6 @@ Pick the scenario closest to your setup and have it running in 2 minutes.
 
 Each directory contains a `docker-compose.yml` and a `README.md` explaining the scenario, prerequisites, and customization.
 
-## Architecture
-
-**Control plane** (Go 1.25 net/http) → **PostgreSQL 16** (21 tables, TEXT primary keys) → **Agents** (key generation, CSR submission, cert deployment, TLS verification). For Windows servers without a local agent, a proxy agent in the same network zone handles deployment via WinRM. Background scheduler runs 7 loops: renewal checks with ARI integration (1h), job processing (30s), agent health (2m), notifications (1m), short-lived cert expiry (30s), network scanning (6h), certificate digest (24h). See [Architecture Guide](docs/architecture.md) for full system diagrams and data flow.
-
-### Key Design Decisions
-
-- **Private keys isolated from the control plane.** Agents generate ECDSA P-256 keys locally and submit CSRs (public key only). The server signs the CSR and returns the certificate — private keys never touch the control plane. Server-side keygen is available via `CERTCTL_KEYGEN_MODE=server` for demo/development only.
-- **TEXT primary keys, not UUIDs.** IDs are human-readable prefixed strings (`mc-api-prod`, `t-platform`, `o-alice`) so you can identify resource types at a glance in logs and queries.
-- **Handler → Service → Repository layering.** Handlers define their own service interfaces for clean dependency inversion. No global service singletons.
-- **Idempotent migrations.** All schema uses `IF NOT EXISTS` and seed data uses `ON CONFLICT (id) DO NOTHING`, safe for repeated execution.
-- **Pull-only deployment model.** The server never initiates outbound connections. Agents poll for work. Proxy agents handle network appliances (F5, IIS via WinRM) and agentless servers (SSH/SFTP).
-- **Dynamic configuration.** Issuers and targets can be configured via GUI with AES-256-GCM encrypted credential storage. Env var backward compatibility preserved — env-configured connectors seed the database on first boot.
-
 ## CLI
 
 ```bash
@@ -316,10 +295,6 @@ mcp-server
   }
 }
 ```
-
-## Security
-
-certctl is designed with a security-first architecture. Agents generate ECDSA P-256 keys locally — private keys never touch the control plane. API key auth is enforced by default with SHA-256 hashing and constant-time comparison. CORS is deny-by-default. All connector scripts are validated against shell injection. The network scanner filters reserved IP ranges (SSRF protection). Scheduler loops use atomic idempotency guards. Every API call is recorded to an immutable audit trail with actor attribution, SHA-256 body hash, and latency tracking. Issuer and target credentials are encrypted at rest with AES-256-GCM. See the [Architecture Guide](docs/architecture.md) for the full security model.
 
 ## Development
 
