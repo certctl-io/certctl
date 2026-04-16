@@ -2,11 +2,12 @@ package service
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/sha256"
+	"encoding/base64"
 	"encoding/hex"
 	"fmt"
 	"log/slog"
-	"math/rand"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -57,8 +58,11 @@ func (s *AgentService) Register(ctx context.Context, name string, hostname strin
 		return nil, "", fmt.Errorf("agent name and hostname are required")
 	}
 
-	// Generate API key
-	apiKey := generateAPIKey()
+	// Generate API key. crypto/rand failure is non-recoverable — propagate immediately.
+	apiKey, err := generateAPIKey()
+	if err != nil {
+		return nil, "", fmt.Errorf("failed to generate agent api key: %w", err)
+	}
 	apiKeyHash := hashAPIKey(apiKey)
 
 	now := time.Now()
@@ -380,7 +384,10 @@ func (s *AgentService) GetAgent(ctx context.Context, id string) (*domain.Agent, 
 // RegisterAgent creates and registers a new agent (handler interface method).
 func (s *AgentService) RegisterAgent(ctx context.Context, agent domain.Agent) (*domain.Agent, error) {
 	agent.ID = generateID("agent")
-	apiKey := generateAPIKey()
+	apiKey, err := generateAPIKey()
+	if err != nil {
+		return nil, fmt.Errorf("failed to generate agent api key: %w", err)
+	}
 	agent.APIKeyHash = hashAPIKey(apiKey)
 	agent.Status = domain.AgentStatusOnline
 	now := time.Now()
@@ -487,14 +494,17 @@ func (s *AgentService) CertificatePickup(ctx context.Context, agentID, certID st
 	return string(certPEM), nil
 }
 
-// generateAPIKey creates a random API key for an agent.
-func generateAPIKey() string {
-	const charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
+// generateAPIKey creates a cryptographically secure random API key for an agent.
+// It fills a 32-byte buffer from crypto/rand (256 bits of entropy) and encodes it with
+// base64.RawURLEncoding, yielding a 43-character URL-safe, unpadded ASCII string.
+// The plaintext key is shown to the caller exactly once; only its SHA-256 hash is stored.
+// Fixes C-1 (CWE-338: previously used math/rand, which is not cryptographically secure).
+func generateAPIKey() (string, error) {
 	b := make([]byte, 32)
-	for i := range b {
-		b[i] = charset[rand.Intn(len(charset))]
+	if _, err := rand.Read(b); err != nil {
+		return "", fmt.Errorf("generate agent api key: %w", err)
 	}
-	return string(b)
+	return base64.RawURLEncoding.EncodeToString(b), nil
 }
 
 // hashAPIKey hashes an API key using SHA256.

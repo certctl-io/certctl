@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/base64"
 	"log/slog"
 	"testing"
 	"time"
@@ -592,5 +593,46 @@ func TestListAgents(t *testing.T) {
 	}
 	if total != 2 {
 		t.Errorf("expected total 2, got %d", total)
+	}
+}
+
+// TestGenerateAPIKey_Properties is the core regression test for C-1 (CWE-338).
+// It verifies that generateAPIKey produces cryptographically random,
+// unpadded base64url-encoded, 32-byte (256-bit) keys that never collide
+// across consecutive calls. Exact length and alphabet are verified against
+// base64.RawURLEncoding so any silent change to entropy or encoding fails
+// fast.
+//
+// Note on the error branch: since Go 1.24 (issue #66821) crypto/rand.Read
+// treats entropy-source failures as fatal — the process is terminated
+// rather than returning an error. The defensive `if err != nil` branch
+// in generateAPIKey is therefore unreachable from tests on modern Go.
+// It is kept to preserve the documented (string, error) contract and
+// to remain correct on older Go toolchains or future changes.
+func TestGenerateAPIKey_Properties(t *testing.T) {
+	seen := make(map[string]struct{}, 64)
+	for i := 0; i < 64; i++ {
+		k, err := generateAPIKey()
+		if err != nil {
+			t.Fatalf("generateAPIKey failed: %v", err)
+		}
+		if k == "" {
+			t.Fatal("expected non-empty API key")
+		}
+		// base64.RawURLEncoding of 32 bytes yields exactly 43 chars.
+		if got, want := len(k), 43; got != want {
+			t.Fatalf("expected key length %d, got %d (%q)", want, got, k)
+		}
+		decoded, err := base64.RawURLEncoding.DecodeString(k)
+		if err != nil {
+			t.Fatalf("key %q not valid base64url: %v", k, err)
+		}
+		if len(decoded) != 32 {
+			t.Fatalf("expected 32 decoded bytes (256 bits entropy), got %d", len(decoded))
+		}
+		if _, dup := seen[k]; dup {
+			t.Fatalf("collision detected after %d calls; weak PRNG?", i+1)
+		}
+		seen[k] = struct{}{}
 	}
 }
