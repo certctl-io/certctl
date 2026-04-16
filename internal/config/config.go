@@ -641,7 +641,12 @@ type SCEPConfig struct {
 
 	// ChallengePassword is the shared secret used to authenticate SCEP enrollment requests.
 	// Clients include this in the PKCS#10 CSR challengePassword attribute.
-	// Required when SCEP is enabled.
+	//
+	// REQUIRED when Enabled is true. If SCEP is enabled and this value is empty,
+	// cmd/server/main.go's preflightSCEPChallengePassword check will refuse to
+	// start the server (H-2, CWE-306): an empty shared secret allowed any client
+	// that could reach /scep to enroll a CSR against the configured issuer. The
+	// service-layer PKCSReq path also rejects this configuration defense-in-depth.
 	ChallengePassword string
 }
 

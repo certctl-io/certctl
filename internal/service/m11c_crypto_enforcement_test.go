@@ -119,7 +119,10 @@ func TestESTService_MaxTTL_ForwardedToIssuer(t *testing.T) {
 
 func TestSCEPService_CryptoValidation_RejectsWeakKey(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
-	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	// H-2: SCEPService now requires a configured challenge password. Pass a
+	// matching client password so this test exercises the crypto-policy path
+	// rather than being short-circuited by the challenge-password guard.
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	// Profile requiring ECDSA P-384 minimum
 	profileRepo := newM11cProfileRepo()
@@ -136,7 +139,7 @@ func TestSCEPService_CryptoValidation_RejectsWeakKey(t *testing.T) {
 	// P-256 CSR should be rejected
 	csrPEM := generateCSRPEM(t, "device.example.com", nil)
 
-	_, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-001")
+	_, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-001")
 	if err == nil {
 		t.Fatal("expected rejection for ECDSA P-256 against P-384 minimum")
 	}
@@ -152,7 +155,8 @@ func TestSCEPService_CryptoValidation_AcceptsStrongKey(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
 	auditRepo := newMockAuditRepository()
 	auditSvc := NewAuditService(auditRepo)
-	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	// H-2: happy path exercises the authenticated branch.
+	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	profileRepo := newM11cProfileRepo()
 	profileRepo.profiles["prof-standard"] = &domain.CertificateProfile{
@@ -167,7 +171,7 @@ func TestSCEPService_CryptoValidation_AcceptsStrongKey(t *testing.T) {
 
 	csrPEM := generateCSRPEM(t, "device-ok.example.com", nil)
 
-	result, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-002")
+	result, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-002")
 	if err != nil {
 		t.Fatalf("expected success: %v", err)
 	}
@@ -179,7 +183,8 @@ func TestSCEPService_CryptoValidation_AcceptsStrongKey(t *testing.T) {
 func TestSCEPService_MaxTTL_ForwardedToIssuer(t *testing.T) {
 	capturingMock := &capturingIssuerConnector{}
 
-	svc := NewSCEPService("iss-local", capturingMock, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	// H-2: challenge password required for enrollment.
+	svc := NewSCEPService("iss-local", capturingMock, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	profileRepo := newM11cProfileRepo()
 	profileRepo.profiles["prof-device"] = &domain.CertificateProfile{
@@ -192,7 +197,7 @@ func TestSCEPService_MaxTTL_ForwardedToIssuer(t *testing.T) {
 
 	csrPEM := generateCSRPEM(t, "mdm-device.example.com", nil)
 
-	_, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-003")
+	_, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-003")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -341,12 +346,13 @@ func TestESTService_NoProfileRepo_PassesThrough(t *testing.T) {
 
 func TestSCEPService_NoProfileRepo_PassesThrough(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
-	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	// H-2: challenge password required for enrollment.
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 	svc.SetProfileID("nonexistent-profile")
 
 	csrPEM := generateCSRPEM(t, "no-profile-scep.example.com", nil)
 
-	result, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-004")
+	result, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-004")
 	if err != nil {
 		t.Fatalf("expected success when no profile repo set: %v", err)
 	}

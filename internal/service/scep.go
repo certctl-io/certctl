@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
 	"fmt"
@@ -68,14 +69,34 @@ func (s *SCEPService) GetCACert(ctx context.Context) (string, error) {
 // PKCSReq processes a SCEP enrollment request.
 // RFC 8894 Section 3.3.1: PKCSReq contains a PKCS#10 CSR for certificate enrollment.
 // The CSR PEM and challenge password are extracted by the handler from the PKCS#7 envelope.
+//
+// H-2 fix (CWE-306): the previous implementation skipped the shared-secret
+// check entirely when s.challengePassword was empty, meaning any unauthenticated
+// client that could reach /scep could enroll a CSR against the configured
+// issuer. Reject that configuration defense-in-depth even though main() already
+// refuses to start in the same state (see preflightSCEPChallengePassword). The
+// non-empty branch now uses crypto/subtle.ConstantTimeCompare to avoid leaking
+// the shared secret through a response-time side channel.
 func (s *SCEPService) PKCSReq(ctx context.Context, csrPEM string, challengePassword string, transactionID string) (*domain.SCEPEnrollResult, error) {
-	// Validate challenge password
-	if s.challengePassword != "" {
-		if challengePassword != s.challengePassword {
-			s.logger.Warn("SCEP enrollment rejected: invalid challenge password",
-				"transaction_id", transactionID)
-			return nil, fmt.Errorf("invalid challenge password")
-		}
+	// Defense-in-depth: refuse any enrollment when no shared secret is
+	// configured. The server-level pre-flight check in cmd/server/main.go
+	// normally prevents the service from being constructed in this state, but
+	// this branch also protects future call sites (tests, library reuse, a
+	// future REST-over-HTTPS wrapper) from silently accepting unauthenticated
+	// CSRs.
+	if s.challengePassword == "" {
+		s.logger.Warn("SCEP enrollment rejected: server has no challenge password configured",
+			"transaction_id", transactionID)
+		return nil, fmt.Errorf("SCEP challenge password not configured on server")
+	}
+	// Constant-time compare avoids leaking the configured secret through
+	// response-time variance. ConstantTimeCompare returns 1 only when both
+	// slices have equal length AND equal content; a mismatched-length input
+	// still takes the same path as a content mismatch.
+	if subtle.ConstantTimeCompare([]byte(challengePassword), []byte(s.challengePassword)) != 1 {
+		s.logger.Warn("SCEP enrollment rejected: invalid challenge password",
+			"transaction_id", transactionID)
+		return nil, fmt.Errorf("invalid challenge password")
 	}
 
 	return s.processEnrollment(ctx, csrPEM, transactionID, "scep_pkcsreq")

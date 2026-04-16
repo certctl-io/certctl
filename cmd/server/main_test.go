@@ -7,6 +7,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"os"
+	"strings"
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
@@ -536,5 +537,70 @@ func TestMain_ContextPropagation(t *testing.T) {
 
 	if w.Code != http.StatusOK {
 		t.Logf("Context value may not be propagated (status %d), this may be expected", w.Code)
+	}
+}
+
+// TestPreflightSCEPChallengePassword is the H-2 regression guard for the
+// startup pre-flight check. The helper MUST return a non-nil error whenever
+// SCEP is enabled with an empty challenge password — that configuration
+// previously allowed unauthenticated certificate enrollment (CWE-306).
+// Disabled-SCEP and configured-password cases must pass cleanly.
+func TestPreflightSCEPChallengePassword(t *testing.T) {
+	tests := []struct {
+		name              string
+		enabled           bool
+		challengePassword string
+		wantErr           bool
+		wantErrSubstring  string
+	}{
+		{
+			name:              "disabled_empty_password_ok",
+			enabled:           false,
+			challengePassword: "",
+			wantErr:           false,
+		},
+		{
+			name:              "disabled_with_password_ok",
+			enabled:           false,
+			challengePassword: "leftover-value",
+			wantErr:           false,
+		},
+		{
+			name:              "enabled_empty_password_rejected",
+			enabled:           true,
+			challengePassword: "",
+			wantErr:           true,
+			wantErrSubstring:  "CERTCTL_SCEP_CHALLENGE_PASSWORD",
+		},
+		{
+			name:              "enabled_with_password_ok",
+			enabled:           true,
+			challengePassword: "hunter2",
+			wantErr:           false,
+		},
+		{
+			name:              "enabled_single_char_password_ok",
+			enabled:           true,
+			challengePassword: "x",
+			wantErr:           false,
+		},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := preflightSCEPChallengePassword(tt.enabled, tt.challengePassword)
+			if tt.wantErr {
+				if err == nil {
+					t.Fatalf("expected error, got nil")
+				}
+				if tt.wantErrSubstring != "" && !strings.Contains(err.Error(), tt.wantErrSubstring) {
+					t.Errorf("expected error to mention %q, got: %v", tt.wantErrSubstring, err)
+				}
+				if !strings.Contains(err.Error(), "CWE-306") {
+					t.Errorf("expected error to cite CWE-306 for traceability, got: %v", err)
+				}
+			} else if err != nil {
+				t.Errorf("expected no error, got: %v", err)
+			}
+		})
 	}
 }

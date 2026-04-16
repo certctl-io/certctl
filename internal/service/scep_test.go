@@ -58,11 +58,13 @@ func TestSCEPService_PKCSReq_Success(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
 	auditRepo := newMockAuditRepository()
 	auditSvc := NewAuditService(auditRepo)
-	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	// H-2: SCEPService now requires a configured challenge password; the happy
+	// path exercises a matching client-submitted password.
+	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	csrPEM := generateCSRPEM(t, "device.example.com", []string{"device.example.com"})
 
-	result, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-001")
+	result, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-001")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -81,9 +83,9 @@ func TestSCEPService_PKCSReq_Success(t *testing.T) {
 
 func TestSCEPService_PKCSReq_InvalidCSR(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
-	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
-	_, err := svc.PKCSReq(context.Background(), "not-valid-pem", "", "txn-002")
+	_, err := svc.PKCSReq(context.Background(), "not-valid-pem", "secret123", "txn-002")
 	if err == nil {
 		t.Fatal("expected error for invalid CSR")
 	}
@@ -91,11 +93,11 @@ func TestSCEPService_PKCSReq_InvalidCSR(t *testing.T) {
 
 func TestSCEPService_PKCSReq_MissingCN(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
-	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	csrPEM := generateCSRPEM(t, "", []string{"test.example.com"})
 
-	_, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-003")
+	_, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-003")
 	if err == nil {
 		t.Fatal("expected error for missing CN")
 	}
@@ -106,11 +108,11 @@ func TestSCEPService_PKCSReq_MissingCN(t *testing.T) {
 
 func TestSCEPService_PKCSReq_IssuerError(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{Err: errors.New("issuance failed")}
-	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 
 	csrPEM := generateCSRPEM(t, "test.example.com", nil)
 
-	_, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-004")
+	_, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-004")
 	if err == nil {
 		t.Fatal("expected error")
 	}
@@ -151,19 +153,49 @@ func TestSCEPService_PKCSReq_ChallengePassword_Invalid(t *testing.T) {
 	}
 }
 
-func TestSCEPService_PKCSReq_ChallengePassword_NotRequired(t *testing.T) {
-	// When server has no challenge password configured, any value should be accepted
+// TestSCEPService_PKCSReq_ChallengePassword_EmptyServerConfigRejected is the
+// H-2 regression guard. Before the fix (internal/service/scep.go:72-79 skipped
+// the password check when s.challengePassword was empty), an unconfigured
+// server accepted any enrollment (CWE-306). The service now rejects PKCSReq
+// defense-in-depth even if main()'s pre-flight is somehow bypassed.
+func TestSCEPService_PKCSReq_ChallengePassword_EmptyServerConfigRejected(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
 	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
 
 	csrPEM := generateCSRPEM(t, "device.example.com", nil)
 
-	result, err := svc.PKCSReq(context.Background(), csrPEM, "any-value", "txn-007")
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	// Any client-submitted password (including empty) must be rejected when
+	// the server has no shared secret configured.
+	for _, clientPassword := range []string{"", "any-value", "guess"} {
+		_, err := svc.PKCSReq(context.Background(), csrPEM, clientPassword, "txn-empty")
+		if err == nil {
+			t.Fatalf("expected rejection when server challenge password is empty (client=%q)", clientPassword)
+		}
+		if !strings.Contains(err.Error(), "not configured") {
+			t.Errorf("expected 'not configured' in error, got: %v", err)
+		}
 	}
-	if result == nil {
-		t.Fatal("expected non-nil result")
+}
+
+// TestSCEPService_PKCSReq_ChallengePassword_ConstantTimeLengthIndependence
+// guards against regression from crypto/subtle.ConstantTimeCompare to a
+// short-circuiting byte compare. ConstantTimeCompare returns 0 whenever the
+// two slices differ in length OR content, so a same-prefix-but-longer input
+// must be rejected the same way as a completely different string.
+func TestSCEPService_PKCSReq_ChallengePassword_ConstantTimeLengthIndependence(t *testing.T) {
+	mockIssuer := &mockIssuerConnector{}
+	svc := NewSCEPService("iss-local", mockIssuer, nil, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
+
+	csrPEM := generateCSRPEM(t, "device.example.com", nil)
+
+	for _, bad := range []string{"secret", "secret12", "secret1234", "SECRET123", "wrong"} {
+		_, err := svc.PKCSReq(context.Background(), csrPEM, bad, "txn-ct")
+		if err == nil {
+			t.Fatalf("expected rejection for bad password %q", bad)
+		}
+		if !strings.Contains(err.Error(), "invalid challenge password") {
+			t.Errorf("expected 'invalid challenge password' for %q, got: %v", bad, err)
+		}
 	}
 }
 
@@ -171,12 +203,12 @@ func TestSCEPService_PKCSReq_WithProfile(t *testing.T) {
 	mockIssuer := &mockIssuerConnector{}
 	auditRepo := newMockAuditRepository()
 	auditSvc := NewAuditService(auditRepo)
-	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "")
+	svc := NewSCEPService("iss-local", mockIssuer, auditSvc, slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError})), "secret123")
 	svc.SetProfileID("profile-mdm-device")
 
 	csrPEM := generateCSRPEM(t, "device.example.com", nil)
 
-	result, err := svc.PKCSReq(context.Background(), csrPEM, "", "txn-008")
+	result, err := svc.PKCSReq(context.Background(), csrPEM, "secret123", "txn-008")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

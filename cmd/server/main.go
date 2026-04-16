@@ -483,6 +483,24 @@ func main() {
 
 	// Register SCEP (RFC 8894) handlers if enabled
 	if cfg.SCEP.Enabled {
+		// H-2 fix: fail closed at startup when SCEP is enabled without a
+		// challenge password configured. Previously the service-layer guard
+		// at internal/service/scep.go:72-79 skipped the password check when
+		// s.challengePassword == "", meaning any client that could reach the
+		// /scep endpoint could enroll an arbitrary CSR against the configured
+		// issuer (CWE-306, missing authentication for a critical function).
+		// Refuse to start instead: the operator must set
+		// CERTCTL_SCEP_CHALLENGE_PASSWORD (or disable SCEP) before the control
+		// plane can boot.
+		if err := preflightSCEPChallengePassword(cfg.SCEP.Enabled, cfg.SCEP.ChallengePassword); err != nil {
+			logger.Error(
+				"startup refused: SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is not set "+
+					"(would allow unauthenticated certificate enrollment, CWE-306). "+
+					"Set a non-empty challenge password or disable SCEP before restarting.",
+				"error", err,
+			)
+			os.Exit(1)
+		}
 		issuerConn, ok := issuerRegistry.Get(cfg.SCEP.IssuerID)
 		if !ok {
 			logger.Error("SCEP issuer not found in registry", "issuer_id", cfg.SCEP.IssuerID)
@@ -681,5 +699,25 @@ func main() {
 	}
 
 	logger.Info("certctl server stopped")
+}
+
+// preflightSCEPChallengePassword enforces the H-2 fix: if SCEP is enabled, a
+// non-empty challenge password MUST be configured. Returns a non-nil error
+// otherwise so the caller can refuse to start the control plane (CWE-306,
+// missing authentication for a critical function).
+//
+// This helper is extracted so the check can be unit tested without booting
+// the full server. The caller (main) is responsible for translating the
+// returned error into a structured log line and os.Exit(1).
+func preflightSCEPChallengePassword(enabled bool, challengePassword string) error {
+	if !enabled {
+		return nil
+	}
+	if challengePassword == "" {
+		return fmt.Errorf("SCEP enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty: " +
+			"SCEP enrollment would accept any client (CWE-306); " +
+			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
+	}
+	return nil
 }
 
