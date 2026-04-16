@@ -959,9 +959,9 @@ See `deploy/helm/certctl/values.yaml` for the full configuration reference and `
 
 For production, you would also add an ingress controller, TLS termination for the certctl API itself, and external PostgreSQL (RDS, Cloud SQL, etc.).
 
-## Discovery Data Flow (M18b + M21)
+## Discovery Data Flow (M18b + M21 + M50)
 
-Certificate discovery enables operators to build a complete inventory of existing certificates before managing them with certctl. There are two discovery modes that feed into the same pipeline:
+Certificate discovery enables operators to build a complete inventory of existing certificates before managing them with certctl. There are three discovery modes that feed into the same pipeline:
 
 ```mermaid
 flowchart TB
@@ -970,6 +970,7 @@ flowchart TB
         SCAN["Filesystem Scanner\n(CERTCTL_DISCOVERY_DIRS)"]
         SERVER["certctl-server\n(network discovery)"]
         NETSCAN["TLS Scanner\n(CIDR ranges + ports)"]
+        CLOUD["Cloud Discovery\n(AWS SM / Azure KV / GCP SM)"]
     end
 
     EXTRACT["Extract Metadata\n(CN, SANs, serial, issuer, expiry, fingerprint)"]
@@ -985,6 +986,7 @@ flowchart TB
     SCAN --> EXTRACT
     SERVER -->|"Scheduler loop\n(every 6h)"| NETSCAN
     NETSCAN -->|"crypto/tls.Dial\n50 goroutines"| EXTRACT
+    CLOUD -->|"Scheduler loop\n(every 6h)"| EXTRACT
     EXTRACT --> SERVICE
     SERVICE --> REPO
     REPO -->|"Dedup by fingerprint\n+ agent_id + source_path"| DB
@@ -1011,7 +1013,16 @@ flowchart TB
 5. **Sentinel agent** — Results submitted using `server-scanner` as virtual agent ID, with `source_path` set to `ip:port` and `source_format` set to `network`
 6. **Same pipeline** — Feeds into the same `DiscoveryService.ProcessDiscoveryReport()` as filesystem discovery — same dedup, same audit trail, same triage workflow
 
-**Common triage workflow (both sources):**
+**Cloud Secret Manager Discovery (M50):**
+
+1. **Pluggable sources** — Each cloud provider implements the `DiscoverySource` interface (Name, Type, Discover, ValidateConfig). Three built-in sources: AWS Secrets Manager, Azure Key Vault, GCP Secret Manager
+2. **CloudDiscoveryService orchestrator** — Iterates registered sources, calls `Discover()` on each, feeds reports into `ProcessDiscoveryReport()`. Errors from one source don't prevent other sources from running
+3. **Scheduler integration** — 9th scheduler loop (6h default), runs immediately on startup, `atomic.Bool` idempotency guard
+4. **Sentinel agents** — Each source uses its own sentinel agent ID (`cloud-aws-sm`, `cloud-azure-kv`, `cloud-gcp-sm`) for dedup and triage filtering
+5. **Source path format** — `aws-sm://{region}/{secret}`, `azure-kv://{cert-name}/{version}`, `gcp-sm://{project}/{secret}`
+6. **No new schema** — Reuses existing `discovered_certificates` and `discovery_scans` tables. Sentinel agent IDs leverage existing `(fingerprint_sha256, agent_id, source_path)` dedup constraint
+
+**Common triage workflow (all sources):**
 
 1. **Storage** — Records stored in `discovered_certificates` table with status = "Unmanaged"
 2. **Audit** — `discovery_scan_completed` event logged with agent ID, cert count, scan timestamp

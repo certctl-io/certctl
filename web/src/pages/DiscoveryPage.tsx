@@ -16,6 +16,22 @@ import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
 import type { DiscoveredCertificate, DiscoveryScan } from '../api/types';
 
+/** Map agent_id to a human-readable source type badge. */
+function sourceTypeBadge(agentId: string): { label: string; style: string } {
+  switch (agentId) {
+    case 'server-scanner':
+      return { label: 'Network', style: 'bg-blue-100 text-blue-800' };
+    case 'cloud-aws-sm':
+      return { label: 'AWS SM', style: 'bg-orange-100 text-orange-800' };
+    case 'cloud-azure-kv':
+      return { label: 'Azure KV', style: 'bg-sky-100 text-sky-800' };
+    case 'cloud-gcp-sm':
+      return { label: 'GCP SM', style: 'bg-green-100 text-green-800' };
+    default:
+      return { label: 'Filesystem', style: 'bg-gray-100 text-gray-800' };
+  }
+}
+
 function ClaimModal({ cert, onClose, onClaim }: { cert: DiscoveredCertificate; onClose: () => void; onClaim: (managedCertId: string) => void }) {
   const [managedCertId, setManagedCertId] = useState('');
   return (
@@ -180,12 +196,15 @@ export default function DiscoveryPage() {
     {
       key: 'source',
       label: 'Source',
-      render: (c) => (
-        <div>
-          <div className="font-mono text-xs text-ink-muted">{c.agent_id}</div>
-          <div className="text-xs text-ink-faint truncate max-w-[180px]" title={c.source_path}>{c.source_path}</div>
-        </div>
-      ),
+      render: (c) => {
+        const badge = sourceTypeBadge(c.agent_id);
+        return (
+          <div>
+            <span className={`inline-block px-1.5 py-0.5 rounded text-[10px] font-medium ${badge.style} mr-1`}>{badge.label}</span>
+            <div className="text-xs text-ink-faint truncate max-w-[180px] mt-0.5" title={c.source_path}>{c.source_path}</div>
+          </div>
+        );
+      },
     },
     {
       key: 'issuer',

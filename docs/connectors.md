@@ -1396,6 +1396,63 @@ When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs a 6th scheduler loop (
 - **Migration assessment** — Scan a network range before onboarding to certctl management
 - **Expiration monitoring** — Discover soon-to-expire certs on network endpoints before they cause outages
 
+## Cloud Secret Manager Discovery
+
+certctl extends the existing filesystem and network discovery pipeline to cloud secret managers. Certificates stored in cloud vaults are automatically discovered, inventoried, and available for triage in the Discovery page.
+
+Each cloud source runs as a pluggable `DiscoverySource` with its own sentinel agent ID. Discovered certificates flow through the same `ProcessDiscoveryReport` pipeline used by filesystem and network discovery — dedup by fingerprint, audit trail, status tracking.
+
+### AWS Secrets Manager
+
+Discovers certificates stored as secrets in AWS Secrets Manager. Filters by tag (`type=certificate` by default) and optional name prefix.
+
+| Variable | Description | Default |
+|---|---|---|
+| `CERTCTL_CLOUD_DISCOVERY_ENABLED` | Enable cloud discovery scheduler | `false` |
+| `CERTCTL_AWS_SM_DISCOVERY_ENABLED` | Enable AWS SM source | `false` |
+| `CERTCTL_AWS_SM_REGION` | AWS region (e.g., `us-east-1`) | — |
+| `CERTCTL_AWS_SM_TAG_FILTER` | Tag key=value filter | `type=certificate` |
+| `CERTCTL_AWS_SM_NAME_PREFIX` | Secret name prefix filter | — |
+
+Source path format: `aws-sm://{region}/{secret-name}`. Sentinel agent: `cloud-aws-sm`.
+
+### Azure Key Vault
+
+Discovers certificates from Azure Key Vault using OAuth2 client credentials authentication. No Azure SDK dependency — uses stdlib HTTP with Azure AD token exchange.
+
+| Variable | Description | Default |
+|---|---|---|
+| `CERTCTL_AZURE_KV_DISCOVERY_ENABLED` | Enable Azure KV source | `false` |
+| `CERTCTL_AZURE_KV_VAULT_URL` | Vault URL (e.g., `https://myvault.vault.azure.net`) | — |
+| `CERTCTL_AZURE_KV_TENANT_ID` | Azure AD tenant ID | — |
+| `CERTCTL_AZURE_KV_CLIENT_ID` | Azure AD application (client) ID | — |
+| `CERTCTL_AZURE_KV_CLIENT_SECRET` | Azure AD application secret | — |
+
+Source path format: `azure-kv://{cert-name}/{version}`. Sentinel agent: `cloud-azure-kv`.
+
+### GCP Secret Manager
+
+Discovers certificates stored in GCP Secret Manager. Filters by label (`type=certificate`). Uses JWT-based OAuth2 service account auth — no Google SDK dependency.
+
+| Variable | Description | Default |
+|---|---|---|
+| `CERTCTL_GCP_SM_DISCOVERY_ENABLED` | Enable GCP SM source | `false` |
+| `CERTCTL_GCP_SM_PROJECT` | GCP project ID | — |
+| `CERTCTL_GCP_SM_CREDENTIALS` | Path to service account JSON file | — |
+
+Source path format: `gcp-sm://{project}/{secret-name}`. Sentinel agent: `cloud-gcp-sm`.
+
+### Cloud Discovery Scheduler
+
+All enabled cloud sources run on a shared scheduler loop (9th loop). The interval is configurable:
+
+| Variable | Description | Default |
+|---|---|---|
+| `CERTCTL_CLOUD_DISCOVERY_ENABLED` | Master switch | `false` |
+| `CERTCTL_CLOUD_DISCOVERY_INTERVAL` | Scan interval | `6h` |
+
+The loop runs immediately on startup and then on each tick. Each source runs sequentially within the loop. Errors from one source do not prevent other sources from running.
+
 ## What's Next
 
 - [Architecture Guide](architecture.md) — Understanding the full system design

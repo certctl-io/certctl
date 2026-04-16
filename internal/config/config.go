@@ -34,9 +34,10 @@ type Config struct {
 	Entrust      EntrustConfig
 	GlobalSign   GlobalSignConfig
 	EJBCA        EJBCAConfig
-	Digest       DigestConfig
-	HealthCheck  HealthCheckConfig
-	Encryption   EncryptionConfig
+	Digest         DigestConfig
+	HealthCheck    HealthCheckConfig
+	Encryption     EncryptionConfig
+	CloudDiscovery CloudDiscoveryConfig
 }
 
 // AWSACMPCAConfig contains AWS ACM Private CA issuer connector configuration.
@@ -158,6 +159,84 @@ type EncryptionConfig struct {
 	// ConfigEncryptionKey is the passphrase used to derive AES-256-GCM keys for encrypting
 	// issuer config secrets in the database. If empty, configs are stored in plaintext (development only).
 	ConfigEncryptionKey string
+}
+
+// CloudDiscoveryConfig contains configuration for cloud secret manager discovery sources.
+// Each source is enabled by setting its required env var(s).
+type CloudDiscoveryConfig struct {
+	// Enabled controls whether cloud discovery sources run on a schedule.
+	// Default: false. Setting: CERTCTL_CLOUD_DISCOVERY_ENABLED.
+	Enabled bool
+
+	// Interval is the scheduler loop interval for cloud discovery.
+	// Default: 6 hours. Setting: CERTCTL_CLOUD_DISCOVERY_INTERVAL.
+	Interval time.Duration
+
+	// AWS Secrets Manager discovery
+	AWSSM AWSSecretsMgrDiscoveryConfig
+
+	// Azure Key Vault discovery
+	AzureKV AzureKVDiscoveryConfig
+
+	// GCP Secret Manager discovery
+	GCPSM GCPSecretMgrDiscoveryConfig
+}
+
+// AWSSecretsMgrDiscoveryConfig contains AWS Secrets Manager discovery settings.
+type AWSSecretsMgrDiscoveryConfig struct {
+	// Enabled controls whether AWS SM discovery is active.
+	// Default: false. Setting: CERTCTL_AWS_SM_DISCOVERY_ENABLED.
+	Enabled bool
+
+	// Region is the AWS region to scan (e.g., "us-east-1").
+	// Setting: CERTCTL_AWS_SM_REGION.
+	Region string
+
+	// TagFilter is the tag key=value used to identify certificate secrets.
+	// Default: "type=certificate". Setting: CERTCTL_AWS_SM_TAG_FILTER.
+	TagFilter string
+
+	// NamePrefix filters secrets by name prefix (optional).
+	// Setting: CERTCTL_AWS_SM_NAME_PREFIX.
+	NamePrefix string
+}
+
+// AzureKVDiscoveryConfig contains Azure Key Vault discovery settings.
+type AzureKVDiscoveryConfig struct {
+	// Enabled controls whether Azure KV discovery is active.
+	// Default: false. Setting: CERTCTL_AZURE_KV_DISCOVERY_ENABLED.
+	Enabled bool
+
+	// VaultURL is the Azure Key Vault URL (e.g., "https://myvault.vault.azure.net").
+	// Setting: CERTCTL_AZURE_KV_VAULT_URL.
+	VaultURL string
+
+	// TenantID is the Azure AD tenant ID.
+	// Setting: CERTCTL_AZURE_KV_TENANT_ID.
+	TenantID string
+
+	// ClientID is the Azure AD application (client) ID.
+	// Setting: CERTCTL_AZURE_KV_CLIENT_ID.
+	ClientID string
+
+	// ClientSecret is the Azure AD application secret.
+	// Setting: CERTCTL_AZURE_KV_CLIENT_SECRET.
+	ClientSecret string
+}
+
+// GCPSecretMgrDiscoveryConfig contains GCP Secret Manager discovery settings.
+type GCPSecretMgrDiscoveryConfig struct {
+	// Enabled controls whether GCP SM discovery is active.
+	// Default: false. Setting: CERTCTL_GCP_SM_DISCOVERY_ENABLED.
+	Enabled bool
+
+	// Project is the GCP project ID.
+	// Setting: CERTCTL_GCP_SM_PROJECT.
+	Project string
+
+	// Credentials is the path to the GCP service account JSON file.
+	// Setting: CERTCTL_GCP_SM_CREDENTIALS.
+	Credentials string
 }
 
 // NotifierConfig contains configuration for notification connectors.
@@ -841,6 +920,28 @@ func Load() (*Config, error) {
 		},
 		Encryption: EncryptionConfig{
 			ConfigEncryptionKey: getEnv("CERTCTL_CONFIG_ENCRYPTION_KEY", ""),
+		},
+		CloudDiscovery: CloudDiscoveryConfig{
+			Enabled:  getEnvBool("CERTCTL_CLOUD_DISCOVERY_ENABLED", false),
+			Interval: getEnvDuration("CERTCTL_CLOUD_DISCOVERY_INTERVAL", 6*time.Hour),
+			AWSSM: AWSSecretsMgrDiscoveryConfig{
+				Enabled:    getEnvBool("CERTCTL_AWS_SM_DISCOVERY_ENABLED", false),
+				Region:     getEnv("CERTCTL_AWS_SM_REGION", ""),
+				TagFilter:  getEnv("CERTCTL_AWS_SM_TAG_FILTER", "type=certificate"),
+				NamePrefix: getEnv("CERTCTL_AWS_SM_NAME_PREFIX", ""),
+			},
+			AzureKV: AzureKVDiscoveryConfig{
+				Enabled:      getEnvBool("CERTCTL_AZURE_KV_DISCOVERY_ENABLED", false),
+				VaultURL:     getEnv("CERTCTL_AZURE_KV_VAULT_URL", ""),
+				TenantID:     getEnv("CERTCTL_AZURE_KV_TENANT_ID", ""),
+				ClientID:     getEnv("CERTCTL_AZURE_KV_CLIENT_ID", ""),
+				ClientSecret: getEnv("CERTCTL_AZURE_KV_CLIENT_SECRET", ""),
+			},
+			GCPSM: GCPSecretMgrDiscoveryConfig{
+				Enabled:     getEnvBool("CERTCTL_GCP_SM_DISCOVERY_ENABLED", false),
+				Project:     getEnv("CERTCTL_GCP_SM_PROJECT", ""),
+				Credentials: getEnv("CERTCTL_GCP_SM_CREDENTIALS", ""),
+			},
 		},
 	}
 

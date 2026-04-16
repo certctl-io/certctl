@@ -18,6 +18,9 @@ import (
 	"github.com/shankar0123/certctl/internal/config"
 	"github.com/shankar0123/certctl/internal/crypto"
 	"github.com/shankar0123/certctl/internal/domain"
+	discoveryawssm "github.com/shankar0123/certctl/internal/connector/discovery/awssm"
+	discoveryazurekv "github.com/shankar0123/certctl/internal/connector/discovery/azurekv"
+	discoverygcpsm "github.com/shankar0123/certctl/internal/connector/discovery/gcpsm"
 	notifyemail "github.com/shankar0123/certctl/internal/connector/notifier/email"
 	notifyopsgenie "github.com/shankar0123/certctl/internal/connector/notifier/opsgenie"
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
@@ -211,6 +214,64 @@ func main() {
 		}
 	}
 
+	// Initialize cloud discovery sources (M50)
+	var cloudDiscoveryService *service.CloudDiscoveryService
+	if cfg.CloudDiscovery.Enabled {
+		cloudDiscoveryService = service.NewCloudDiscoveryService(discoveryService, logger)
+
+		// AWS Secrets Manager
+		if cfg.CloudDiscovery.AWSSM.Enabled {
+			awsSource := discoveryawssm.New(&cfg.CloudDiscovery.AWSSM, logger)
+			cloudDiscoveryService.RegisterSource(awsSource)
+			// Create sentinel agent for AWS SM
+			sentinelAWS := &domain.Agent{
+				ID:     service.SentinelAWSSecretsMgr,
+				Name:   "AWS Secrets Manager Discovery",
+				Status: domain.AgentStatusOnline,
+			}
+			if err := agentRepo.Create(context.Background(), sentinelAWS); err != nil {
+				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAWSSecretsMgr)
+			}
+		}
+
+		// Azure Key Vault
+		if cfg.CloudDiscovery.AzureKV.Enabled {
+			azureSource := discoveryazurekv.New(discoveryazurekv.Config{
+				VaultURL:     cfg.CloudDiscovery.AzureKV.VaultURL,
+				TenantID:     cfg.CloudDiscovery.AzureKV.TenantID,
+				ClientID:     cfg.CloudDiscovery.AzureKV.ClientID,
+				ClientSecret: cfg.CloudDiscovery.AzureKV.ClientSecret,
+			}, logger)
+			cloudDiscoveryService.RegisterSource(azureSource)
+			sentinelAzure := &domain.Agent{
+				ID:     service.SentinelAzureKeyVault,
+				Name:   "Azure Key Vault Discovery",
+				Status: domain.AgentStatusOnline,
+			}
+			if err := agentRepo.Create(context.Background(), sentinelAzure); err != nil {
+				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAzureKeyVault)
+			}
+		}
+
+		// GCP Secret Manager
+		if cfg.CloudDiscovery.GCPSM.Enabled {
+			gcpSource := discoverygcpsm.New(&cfg.CloudDiscovery.GCPSM, logger)
+			cloudDiscoveryService.RegisterSource(gcpSource)
+			sentinelGCP := &domain.Agent{
+				ID:     service.SentinelGCPSecretMgr,
+				Name:   "GCP Secret Manager Discovery",
+				Status: domain.AgentStatusOnline,
+			}
+			if err := agentRepo.Create(context.Background(), sentinelGCP); err != nil {
+				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelGCPSecretMgr)
+			}
+		}
+
+		logger.Info("cloud discovery enabled",
+			"sources", cloudDiscoveryService.SourceCount(),
+			"interval", cfg.CloudDiscovery.Interval.String())
+	}
+
 	logger.Info("initialized all services")
 
 	// Initialize stats and metrics services
@@ -316,6 +377,13 @@ func main() {
 		sched.SetHealthCheckService(healthCheckService)
 		sched.SetHealthCheckInterval(cfg.HealthCheck.CheckInterval)
 		logger.Info("health check scheduler enabled", "interval", cfg.HealthCheck.CheckInterval.String())
+	}
+	if cloudDiscoveryService != nil && cloudDiscoveryService.SourceCount() > 0 {
+		sched.SetCloudDiscoveryService(cloudDiscoveryService)
+		sched.SetCloudDiscoveryInterval(cfg.CloudDiscovery.Interval)
+		logger.Info("cloud discovery scheduler enabled",
+			"interval", cfg.CloudDiscovery.Interval.String(),
+			"sources", cloudDiscoveryService.SourceCount())
 	}
 
 	// Start scheduler

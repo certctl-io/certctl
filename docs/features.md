@@ -852,6 +852,31 @@ Server-side active TLS scanning of CIDR ranges. Concurrent probing with semaphor
 | `/api/v1/network-scan-targets/{id}` | DELETE | Delete |
 | `/api/v1/network-scan-targets/{id}/scan` | POST | Trigger immediate scan |
 
+### Cloud Secret Manager Discovery
+
+<!-- Source: internal/connector/discovery/awssm/, azurekv/, gcpsm/, internal/service/cloud_discovery.go -->
+
+Discovers certificates stored in cloud secret managers and brings them into the certctl inventory. Extends the existing discovery pipeline with pluggable `DiscoverySource` implementations. Each source runs as part of the 9th scheduler loop (6h default).
+
+**Supported sources:**
+
+- **AWS Secrets Manager** — filters by tag (`type=certificate`) and name prefix. Uses `aws-sdk-go-v2`. Sentinel agent: `cloud-aws-sm`
+- **Azure Key Vault** — OAuth2 client credentials auth, no Azure SDK. Lists certificates from vault. Sentinel agent: `cloud-azure-kv`
+- **GCP Secret Manager** — JWT-based OAuth2 service account auth, no Google SDK. Filters by label (`type=certificate`). Sentinel agent: `cloud-gcp-sm`
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_CLOUD_DISCOVERY_ENABLED` | `false` | Enable cloud discovery scheduler |
+| `CERTCTL_CLOUD_DISCOVERY_INTERVAL` | `6h` | Scheduler loop interval |
+| `CERTCTL_AWS_SM_DISCOVERY_ENABLED` | `false` | Enable AWS SM source |
+| `CERTCTL_AWS_SM_REGION` | — | AWS region |
+| `CERTCTL_AWS_SM_TAG_FILTER` | `type=certificate` | Tag filter for secrets |
+| `CERTCTL_AZURE_KV_DISCOVERY_ENABLED` | `false` | Enable Azure KV source |
+| `CERTCTL_AZURE_KV_VAULT_URL` | — | Key Vault URL |
+| `CERTCTL_GCP_SM_DISCOVERY_ENABLED` | `false` | Enable GCP SM source |
+| `CERTCTL_GCP_SM_PROJECT` | — | GCP project ID |
+| `CERTCTL_GCP_SM_CREDENTIALS` | — | Service account JSON path |
+
 ### Continuous TLS Health Monitoring
 
 <!-- Source: internal/domain/health_check.go, internal/service/health_check.go -->

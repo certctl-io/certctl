@@ -73,6 +73,13 @@ INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at
   ('server-scanner', 'Network Scanner (Server-Side)', 'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.0.14')
 ON CONFLICT (id) DO NOTHING;
 
+-- Sentinel agents for cloud discovery sources (M50)
+INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
+  ('cloud-aws-sm',   'AWS Secrets Manager Discovery',  'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.1.0'),
+  ('cloud-azure-kv', 'Azure Key Vault Discovery',      'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.1.0'),
+  ('cloud-gcp-sm',   'GCP Secret Manager Discovery',   'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.1.0')
+ON CONFLICT (id) DO NOTHING;
+
 -- ============================================================
 -- 5. Deployment Targets (8 targets across multiple connector types)
 -- ============================================================

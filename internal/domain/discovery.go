@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"context"
 	"time"
 )
 
@@ -110,4 +111,18 @@ type DiscoveredCertEntry struct {
 	PEMData           string   `json:"pem_data"`
 	SourcePath        string   `json:"source_path"`
 	SourceFormat      string   `json:"source_format"`
+}
+
+// DiscoverySource defines the interface for pluggable certificate discovery sources.
+// Each source (filesystem, network, cloud) implements this interface to discover
+// certificates from a specific backend and produce a DiscoveryReport.
+type DiscoverySource interface {
+	// Name returns a human-readable name for this discovery source (e.g., "AWS Secrets Manager").
+	Name() string
+	// Type returns a short type identifier (e.g., "aws-sm", "azure-kv", "gcp-sm").
+	Type() string
+	// Discover scans the source and returns a DiscoveryReport with found certificates.
+	Discover(ctx context.Context) (*DiscoveryReport, error)
+	// ValidateConfig checks that the source is properly configured.
+	ValidateConfig() error
 }
