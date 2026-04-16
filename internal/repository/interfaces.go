@@ -277,3 +277,45 @@ type OwnerRepository interface {
 	// Delete removes an owner.
 	Delete(ctx context.Context, id string) error
 }
+
+// HealthCheckRepository manages endpoint health check persistence.
+type HealthCheckRepository interface {
+	// Create stores a new health check.
+	Create(ctx context.Context, check *domain.EndpointHealthCheck) error
+	// Update modifies an existing health check.
+	Update(ctx context.Context, check *domain.EndpointHealthCheck) error
+	// Get retrieves a health check by ID.
+	Get(ctx context.Context, id string) (*domain.EndpointHealthCheck, error)
+	// Delete removes a health check.
+	Delete(ctx context.Context, id string) error
+	// List returns health checks matching the filter with pagination.
+	List(ctx context.Context, filter *HealthCheckFilter) ([]*domain.EndpointHealthCheck, int, error)
+	// ListDueForCheck returns health checks that need to be probed (interval exceeded).
+	ListDueForCheck(ctx context.Context) ([]*domain.EndpointHealthCheck, error)
+	// GetByEndpoint retrieves a health check by endpoint address.
+	GetByEndpoint(ctx context.Context, endpoint string) (*domain.EndpointHealthCheck, error)
+	// RecordHistory records a single probe result in history.
+	RecordHistory(ctx context.Context, entry *domain.HealthHistoryEntry) error
+	// GetHistory retrieves recent probe history for a health check.
+	GetHistory(ctx context.Context, healthCheckID string, limit int) ([]*domain.HealthHistoryEntry, error)
+	// PurgeHistory deletes history entries older than the specified time.
+	PurgeHistory(ctx context.Context, olderThan time.Time) (int64, error)
+	// GetSummary returns aggregate counts by health status.
+	GetSummary(ctx context.Context) (*domain.HealthCheckSummary, error)
+}
+
+// HealthCheckFilter contains filter parameters for health check queries.
+type HealthCheckFilter struct {
+	// Status filters by health status (healthy, degraded, down, cert_mismatch, unknown).
+	Status string
+	// CertificateID filters by managed certificate ID.
+	CertificateID string
+	// NetworkScanTargetID filters by network scan target ID.
+	NetworkScanTargetID string
+	// Enabled filters by enabled/disabled status (nil = all).
+	Enabled *bool
+	// Page is the page number (1-indexed).
+	Page int
+	// PerPage is the number of results per page.
+	PerPage int
+}

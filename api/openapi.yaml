@@ -62,6 +62,8 @@ tags:
     description: Certificate discovery — filesystem scanning by agents and network TLS probing
   - name: Network Scan
     description: Network scan target management for active TLS certificate discovery
+  - name: Health Monitoring
+    description: Continuous TLS endpoint health checks with status tracking and probe history
   - name: Digest
     description: Scheduled certificate digest email notifications
 
@@ -2388,6 +2390,256 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ─── Health Monitoring ─────────────────────────────────────────────
+  /api/v1/health-checks:
+    get:
+      tags: [Health Monitoring]
+      summary: List endpoint health checks
+      description: |
+        Lists all TLS endpoint health checks with optional filtering by status, certificate, or network scan target.
+        Includes current status, last probe results, and probe history summary.
+      operationId: listHealthChecks
+      parameters:
+        - name: status
+          in: query
+          schema:
+            type: string
+            enum: [Healthy, Degraded, Down, CertMismatch]
+          description: Filter by health status
+        - name: certificate_id
+          in: query
+          schema:
+            type: string
+          description: Filter by certificate ID
+        - name: network_scan_target_id
+          in: query
+          schema:
+            type: string
+          description: Filter by network scan target ID
+        - name: enabled
+          in: query
+          schema:
+            type: boolean
+          description: Filter by enabled/disabled state
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: List of health checks
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/EndpointHealthCheck"
+                  total:
+                    type: integer
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    post:
+      tags: [Health Monitoring]
+      summary: Create health check
+      description: Creates a new manual health check for an endpoint.
+      operationId: createHealthCheck
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [endpoint, check_interval_seconds]
+              properties:
+                endpoint:
+                  type: string
+                  description: "host:port to monitor"
+                  example: "api.example.com:443"
+                expected_fingerprint:
+                  type: string
+                  description: Expected certificate SHA-256 fingerprint (optional)
+                check_interval_seconds:
+                  type: integer
+                  minimum: 30
+                  description: Probe frequency in seconds (default 300)
+                timeout_ms:
+                  type: integer
+                  description: TLS connection timeout in milliseconds
+      responses:
+        "201":
+          description: Health check created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EndpointHealthCheck"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/health-checks/summary:
+    get:
+      tags: [Health Monitoring]
+      summary: Health check summary
+      description: Returns aggregate status counts for all health checks.
+      operationId: getHealthCheckSummary
+      responses:
+        "200":
+          description: Health check summary
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  healthy:
+                    type: integer
+                  degraded:
+                    type: integer
+                  down:
+                    type: integer
+                  cert_mismatch:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/health-checks/{id}:
+    get:
+      tags: [Health Monitoring]
+      summary: Get health check
+      operationId: getHealthCheck
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Health check detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EndpointHealthCheck"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      tags: [Health Monitoring]
+      summary: Update health check
+      description: Update thresholds, interval, or expected fingerprint.
+      operationId: updateHealthCheck
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                expected_fingerprint:
+                  type: string
+                check_interval_seconds:
+                  type: integer
+                timeout_ms:
+                  type: integer
+                enabled:
+                  type: boolean
+      responses:
+        "200":
+          description: Health check updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EndpointHealthCheck"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    delete:
+      tags: [Health Monitoring]
+      summary: Delete health check
+      operationId: deleteHealthCheck
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Health check deleted
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/health-checks/{id}/history:
+    get:
+      tags: [Health Monitoring]
+      summary: Get probe history
+      description: Returns historical probe records with status, response times, and errors.
+      operationId: getHealthCheckHistory
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - name: limit
+          in: query
+          schema:
+            type: integer
+            default: 100
+            minimum: 1
+            maximum: 1000
+          description: Max number of records to return
+      responses:
+        "200":
+          description: Probe history
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/HealthHistoryEntry"
+                  total:
+                    type: integer
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/health-checks/{id}/acknowledge:
+    post:
+      tags: [Health Monitoring]
+      summary: Acknowledge incident
+      description: Mark a health check incident as acknowledged by the operator.
+      operationId: acknowledgeHealthCheckIncident
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                acknowledged_by:
+                  type: string
+                  description: Operator name or ID
+      responses:
+        "200":
+          description: Incident acknowledged
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/EndpointHealthCheck"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ─── Digest ────────────────────────────────────────────────────────
   /api/v1/digest/preview:
     get:
@@ -3342,3 +3594,133 @@ components:
         timeout_ms:
           type: integer
           default: 5000
+
+    EndpointHealthCheck:
+      type: object
+      properties:
+        id:
+          type: string
+          description: Health check ID
+        endpoint:
+          type: string
+          description: "Target endpoint (host:port)"
+          example: "api.example.com:443"
+        certificate_id:
+          type: string
+          nullable: true
+          description: Associated managed certificate ID (if from deployment)
+        network_scan_target_id:
+          type: string
+          nullable: true
+          description: Associated network scan target ID (if auto-created)
+        expected_fingerprint:
+          type: string
+          nullable: true
+          description: Expected certificate SHA-256 fingerprint
+        status:
+          type: string
+          enum: [Healthy, Degraded, Down, CertMismatch]
+          description: Current health status
+        enabled:
+          type: boolean
+        check_interval_seconds:
+          type: integer
+          description: Frequency of TLS probes (seconds)
+        timeout_ms:
+          type: integer
+          description: TLS connection timeout (milliseconds)
+        consecutive_failures:
+          type: integer
+          description: Number of consecutive probe failures
+        last_checked_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last probe
+        last_success_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last successful probe
+        last_failure_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last failed probe
+        last_transition_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: Timestamp of last status transition
+        failure_reason:
+          type: string
+          nullable: true
+          description: Reason for last failure
+        acknowledged:
+          type: boolean
+          description: Whether the current status has been acknowledged
+        acknowledged_by:
+          type: string
+          nullable: true
+          description: Operator name who acknowledged (if applicable)
+        acknowledged_at:
+          type: string
+          format: date-time
+          nullable: true
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    HealthHistoryEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        health_check_id:
+          type: string
+        status:
+          type: string
+          enum: [Healthy, Degraded, Down, CertMismatch]
+        response_time_ms:
+          type: integer
+          nullable: true
+          description: Time to connect and complete TLS handshake (milliseconds)
+        observed_fingerprint:
+          type: string
+          nullable: true
+          description: SHA-256 fingerprint of certificate observed on endpoint
+        tls_version:
+          type: string
+          nullable: true
+          description: TLS version (e.g., TLSv1.3)
+        cipher_suite:
+          type: string
+          nullable: true
+          description: Cipher suite used in TLS handshake
+        cert_subject:
+          type: string
+          nullable: true
+          description: Subject DN of observed certificate
+        cert_issuer:
+          type: string
+          nullable: true
+          description: Issuer DN of observed certificate
+        cert_not_before:
+          type: string
+          format: date-time
+          nullable: true
+        cert_not_after:
+          type: string
+          format: date-time
+          nullable: true
+        failure_reason:
+          type: string
+          nullable: true
+          description: Error message if probe failed
+        checked_at:
+          type: string
+          format: date-time
+          description: Timestamp of this probe

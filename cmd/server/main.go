@@ -259,6 +259,29 @@ func main() {
 		}
 	}
 
+	// Initialize health check service (M48)
+	var healthCheckService *service.HealthCheckService
+	var healthCheckHandler *handler.HealthCheckHandler
+	if cfg.HealthCheck.Enabled {
+		healthCheckRepo := postgres.NewHealthCheckRepository(db)
+		healthCheckService = service.NewHealthCheckService(
+			healthCheckRepo,
+			auditService,
+			logger,
+			cfg.HealthCheck.MaxConcurrent,
+			time.Duration(cfg.HealthCheck.DefaultTimeout)*time.Millisecond,
+			cfg.HealthCheck.HistoryRetention,
+			cfg.HealthCheck.AutoCreate,
+		)
+		healthCheckHandler = handler.NewHealthCheckHandler(healthCheckService)
+		logger.Info("health check service enabled",
+			"interval", cfg.HealthCheck.CheckInterval.String(),
+			"max_concurrent", cfg.HealthCheck.MaxConcurrent)
+	} else {
+		// Create a no-op health check handler for route registration
+		healthCheckHandler = handler.NewHealthCheckHandler(nil)
+	}
+
 	logger.Info("initialized all handlers")
 
 	// Create context with cancellation
@@ -288,6 +311,11 @@ func main() {
 		sched.SetDigestService(digestService)
 		sched.SetDigestInterval(cfg.Digest.Interval)
 		logger.Info("digest scheduler enabled", "interval", cfg.Digest.Interval.String())
+	}
+	if healthCheckService != nil {
+		sched.SetHealthCheckService(healthCheckService)
+		sched.SetHealthCheckInterval(cfg.HealthCheck.CheckInterval)
+		logger.Info("health check scheduler enabled", "interval", cfg.HealthCheck.CheckInterval.String())
 	}
 
 	// Start scheduler
@@ -319,6 +347,7 @@ func main() {
 		Verification:  verificationHandler,
 		Export:        exportHandler,
 		Digest:        *digestHandler,
+		HealthChecks:  healthCheckHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

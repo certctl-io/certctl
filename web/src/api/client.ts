@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary } from './types';
 
 const BASE = '/api/v1';
 
@@ -432,3 +432,38 @@ export const getPrometheusMetrics = () => {
 
 // Health
 export const getHealth = () => fetchJSON<{ status: string }>('/health');
+
+// Health checks (M48)
+export const listHealthChecks = (params?: { status?: string; certificate_id?: string; enabled?: string; page?: number; per_page?: number }): Promise<PaginatedResponse<EndpointHealthCheck>> => {
+  const query = new URLSearchParams();
+  if (params?.status) query.set('status', params.status);
+  if (params?.certificate_id) query.set('certificate_id', params.certificate_id);
+  if (params?.enabled) query.set('enabled', params.enabled);
+  if (params?.page) query.set('page', String(params.page));
+  if (params?.per_page) query.set('per_page', String(params.per_page));
+  const qs = query.toString();
+  return fetchJSON<PaginatedResponse<EndpointHealthCheck>>(`${BASE}/health-checks${qs ? '?' + qs : ''}`);
+};
+
+export const getHealthCheck = (id: string) =>
+  fetchJSON<EndpointHealthCheck>(`${BASE}/health-checks/${id}`);
+
+export const createHealthCheck = (data: Partial<EndpointHealthCheck>) =>
+  fetchJSON<EndpointHealthCheck>(`${BASE}/health-checks`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateHealthCheck = (id: string, data: Partial<EndpointHealthCheck>) =>
+  fetchJSON<EndpointHealthCheck>(`${BASE}/health-checks/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteHealthCheck = (id: string) =>
+  fetchJSON<void>(`${BASE}/health-checks/${id}`, { method: 'DELETE' });
+
+export const getHealthCheckHistory = (id: string, limit?: number) => {
+  const query = limit ? `?limit=${limit}` : '';
+  return fetchJSON<HealthHistoryEntry[]>(`${BASE}/health-checks/${id}/history${query}`);
+};
+
+export const acknowledgeHealthCheck = (id: string) =>
+  fetchJSON<void>(`${BASE}/health-checks/${id}/acknowledge`, { method: 'POST', body: JSON.stringify({}) });
+
+export const getHealthCheckSummary = () =>
+  fetchJSON<HealthCheckSummary>(`${BASE}/health-checks/summary`);

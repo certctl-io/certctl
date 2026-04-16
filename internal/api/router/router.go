@@ -65,6 +65,7 @@ type HandlerRegistry struct {
 	Verification  handler.VerificationHandler
 	Export        handler.ExportHandler
 	Digest        handler.DigestHandler
+	HealthChecks  *handler.HealthCheckHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -226,6 +227,17 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Digest routes: /api/v1/digest
 	r.Register("GET /api/v1/digest/preview", http.HandlerFunc(reg.Digest.PreviewDigest))
 	r.Register("POST /api/v1/digest/send", http.HandlerFunc(reg.Digest.SendDigest))
+
+	// Health check routes: /api/v1/health-checks
+	// Summary endpoint must be registered before {id} routes
+	r.Register("GET /api/v1/health-checks/summary", http.HandlerFunc(reg.HealthChecks.GetHealthCheckSummary))
+	r.Register("GET /api/v1/health-checks", http.HandlerFunc(reg.HealthChecks.ListHealthChecks))
+	r.Register("POST /api/v1/health-checks", http.HandlerFunc(reg.HealthChecks.CreateHealthCheck))
+	r.Register("GET /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.GetHealthCheck))
+	r.Register("PUT /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.UpdateHealthCheck))
+	r.Register("DELETE /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.DeleteHealthCheck))
+	r.Register("GET /api/v1/health-checks/{id}/history", http.HandlerFunc(reg.HealthChecks.GetHealthCheckHistory))
+	r.Register("POST /api/v1/health-checks/{id}/acknowledge", http.HandlerFunc(reg.HealthChecks.AcknowledgeHealthCheck))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.

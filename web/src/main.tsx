@@ -25,6 +25,7 @@ import ShortLivedPage from './pages/ShortLivedPage';
 import AgentFleetPage from './pages/AgentFleetPage';
 import DiscoveryPage from './pages/DiscoveryPage';
 import NetworkScanPage from './pages/NetworkScanPage';
+import HealthMonitorPage from './pages/HealthMonitorPage';
 import DigestPage from './pages/DigestPage';
 import ObservabilityPage from './pages/ObservabilityPage';
 import JobDetailPage from './pages/JobDetailPage';
@@ -73,6 +74,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="short-lived" element={<ShortLivedPage />} />
                   <Route path="discovery" element={<DiscoveryPage />} />
                   <Route path="network-scans" element={<NetworkScanPage />} />
+                  <Route path="health-monitor" element={<HealthMonitorPage />} />
                   <Route path="digest" element={<DigestPage />} />
                   <Route path="observability" element={<ObservabilityPage />} />
                 </Route>

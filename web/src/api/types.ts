@@ -347,3 +347,54 @@ export interface MetricsResponse {
     measured_at: string;
   };
 }
+
+// Health check types (M48)
+export interface EndpointHealthCheck {
+  id: string;
+  endpoint: string;
+  certificate_id?: string;
+  network_scan_target_id?: string;
+  expected_fingerprint: string;
+  observed_fingerprint: string;
+  status: string;
+  consecutive_failures: number;
+  response_time_ms: number;
+  tls_version: string;
+  cipher_suite: string;
+  cert_subject: string;
+  cert_issuer: string;
+  cert_expiry?: string;
+  last_checked_at?: string;
+  last_success_at?: string;
+  last_failure_at?: string;
+  last_transition_at?: string;
+  failure_reason: string;
+  degraded_threshold: number;
+  down_threshold: number;
+  check_interval_seconds: number;
+  enabled: boolean;
+  acknowledged: boolean;
+  acknowledged_by?: string;
+  acknowledged_at?: string;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface HealthHistoryEntry {
+  id: string;
+  health_check_id: string;
+  status: string;
+  response_time_ms: number;
+  fingerprint: string;
+  failure_reason: string;
+  checked_at: string;
+}
+
+export interface HealthCheckSummary {
+  healthy: number;
+  degraded: number;
+  down: number;
+  cert_mismatch: number;
+  unknown: number;
+  total: number;
+}

@@ -166,7 +166,7 @@ Built for **platform engineering and DevOps teams** managing 10–500+ certifica
 
 **Private keys stay on your servers.** Agents generate ECDSA P-256 keys locally, submit only the CSR. The control plane never touches private keys. After deployment, agents probe the live TLS endpoint and compare SHA-256 fingerprints to confirm the right certificate is actually being served.
 
-**Discovery.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without agents. Both feed into a triage workflow — claim, dismiss, or import what you find.
+**Discovery.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without agents. Continuous TLS health monitoring tracks endpoint status (healthy/degraded/down/cert_mismatch) with configurable thresholds and historical probe data. All discovery modes feed into a triage workflow — claim, dismiss, or import what you find.
 
 **Policy engine.** Certificate profiles constrain key types, max TTL, and EKUs — with crypto policy enforcement that validates every CSR against profile rules before it reaches the issuer. MaxTTL caps are enforced per issuer connector. Approval workflows pause jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
 
@@ -174,7 +174,7 @@ Built for **platform engineering and DevOps teams** managing 10–500+ certifica
 
 **Revocation.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder. RFC 5280 reason codes. Short-lived certs (TTL < 1 hour) are exempt — expiry is sufficient revocation.
 
-**Audit and observability.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Prometheus metrics endpoint. Scheduled certificate digest emails.
+**Audit and observability.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Prometheus metrics endpoint. Scheduled certificate digest emails. Continuous endpoint health monitoring with state machine transitions and real-time alerts.
 
 **Notifications.** Slack, Teams, PagerDuty, OpsGenie, SMTP, webhooks. Routed by certificate owner. Daily digest emails with stats and expiring certs.
 

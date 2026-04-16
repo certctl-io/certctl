@@ -1018,6 +1018,30 @@ flowchart TB
 
 This data flow is pull-based and non-blocking. Agents discover at their own pace; the server stores results for later review. There's no pressure to claim or dismiss; operators can leave certificates in "Unmanaged" status indefinitely.
 
+## Continuous TLS Health Monitoring (M48)
+
+Beyond one-time discovery, certctl continuously monitors TLS endpoints for certificate health using a shared TLS probing package and a state-machine-driven health check service. Endpoints transition between states (Healthy → Degraded → Down) based on consecutive failures, and `cert_mismatch` status alerts when a deployed certificate is unexpectedly replaced.
+
+**Architecture:** Probing is extracted into a shared `internal/tlsprobe/` package used by both the network scanner (M21) and the health monitor. The `HealthCheckService` manages 8 API endpoints for CRUD operations and state transitions. A dedicated 8th scheduler loop runs every 60 seconds (configurable via `CERTCTL_HEALTH_CHECK_INTERVAL`). Individual health check targets have their own check intervals (default 300 seconds) — the scheduler queries only endpoints due for check via `ListDueForCheck()`. Results are stored with historical tracking for 30 days (configurable via `CERTCTL_HEALTH_CHECK_HISTORY_RETENTION`). State transitions trigger notifications (critical for down endpoints, warning for degraded, high for cert_mismatch).
+
+**State Machine:** Healthy → Degraded (configurable threshold, default 2 consecutive failures) → Down (default 5 failures). The `cert_mismatch` status is special — it fires whenever the observed certificate fingerprint differs from the expected (deployed) fingerprint, catching silent rollbacks and unauthorized cert replacements. Recovery from degraded/down transitions back to healthy and resets the failure counter.
+
+**API:** 8 endpoints for list (with filters: status, certificate_id, network_scan_target_id, enabled), get, create, update, delete, history (with limit param), acknowledge (incident marking), and summary (aggregate status counts).
+
+**Auto-Create:** When a deployment job completes with successful verification (M25), the system automatically creates a health check with the deployed certificate's fingerprint as the expected value. Network scan targets can also opt-in to auto-create health checks for discovered endpoints.
+
+**Configuration:**
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_HEALTH_CHECK_ENABLED` | `false` | Enable/disable the feature |
+| `CERTCTL_HEALTH_CHECK_INTERVAL` | `60s` | Scheduler tick interval |
+| `CERTCTL_HEALTH_CHECK_DEFAULT_INTERVAL` | `300s` | Default per-endpoint check interval (5 min) |
+| `CERTCTL_HEALTH_CHECK_DEFAULT_TIMEOUT` | `5000ms` | TLS connection timeout per probe |
+| `CERTCTL_HEALTH_CHECK_MAX_CONCURRENT` | `20` | Max concurrent TLS probes |
+| `CERTCTL_HEALTH_CHECK_HISTORY_RETENTION` | `30 days` | Purge probe history older than this |
+| `CERTCTL_HEALTH_CHECK_AUTO_CREATE` | `true` | Auto-create checks from deployments |
+
 ## Testing Strategy
 
 certctl is extensively tested across eight layers with CI-enforced coverage gates that act as regression floors. The goal is high-confidence regression prevention at the service and handler layers (where the most complex business logic lives), combined with integration tests that exercise the full request path from HTTP to database.

@@ -40,6 +40,11 @@ type DigestServicer interface {
 	ProcessDigest(ctx context.Context) error
 }
 
+// HealthCheckServicer defines the interface for endpoint TLS health monitoring used by the scheduler.
+type HealthCheckServicer interface {
+	RunHealthChecks(ctx context.Context) error
+}
+
 // Scheduler manages background jobs and periodic tasks for the certificate control plane.
 // It runs multiple concurrent loops for renewal checks, job processing, agent health checks,
 // and notification processing.
@@ -50,6 +55,7 @@ type Scheduler struct {
 	notificationService NotificationServicer
 	networkScanService  NetworkScanServicer
 	digestService       DigestServicer
+	healthCheckService  HealthCheckServicer
 	logger              *slog.Logger
 
 	// Configurable tick intervals
@@ -60,6 +66,7 @@ type Scheduler struct {
 	shortLivedExpiryCheckInterval   time.Duration
 	networkScanInterval             time.Duration
 	digestInterval                  time.Duration
+	healthCheckInterval             time.Duration
 
 	// Idempotency guards: prevent duplicate execution of slow jobs
 	renewalCheckRunning           atomic.Bool
@@ -69,6 +76,7 @@ type Scheduler struct {
 	shortLivedExpiryCheckRunning  atomic.Bool
 	networkScanRunning            atomic.Bool
 	digestRunning                 atomic.Bool
+	healthCheckRunning            atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -99,6 +107,7 @@ func NewScheduler(
 		shortLivedExpiryCheckInterval: 30 * time.Second,
 		networkScanInterval:           6 * time.Hour,
 		digestInterval:                24 * time.Hour,
+		healthCheckInterval:           60 * time.Second,
 	}
 }
 
@@ -143,6 +152,17 @@ func (s *Scheduler) SetShortLivedExpiryCheckInterval(d time.Duration) {
 	s.shortLivedExpiryCheckInterval = d
 }
 
+// SetHealthCheckService sets the health check service for the 8th scheduler loop.
+// Called after construction since health monitoring is optional.
+func (s *Scheduler) SetHealthCheckService(hcs HealthCheckServicer) {
+	s.healthCheckService = hcs
+}
+
+// SetHealthCheckInterval configures the interval for endpoint TLS health checks.
+func (s *Scheduler) SetHealthCheckInterval(d time.Duration) {
+	s.healthCheckInterval = d
+}
+
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
@@ -160,6 +180,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		if s.digestService != nil {
 			loopCount++
 		}
+		if s.healthCheckService != nil {
+			loopCount++
+		}
 		s.wg.Add(loopCount)
 
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
@@ -172,6 +195,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		}
 		if s.digestService != nil {
 			go func() { defer s.wg.Done(); s.digestLoop(ctx) }()
+		}
+		if s.healthCheckService != nil {
+			go func() { defer s.wg.Done(); s.healthCheckLoop(ctx) }()
 		}
 
 		// Signal that all loops are launched
@@ -514,6 +540,49 @@ func (s *Scheduler) runDigest(ctx context.Context) {
 			"interval", s.digestInterval.String())
 	} else {
 		s.logger.Debug("digest processor completed")
+	}
+}
+
+// healthCheckLoop runs every healthCheckInterval and performs endpoint TLS health checks.
+// Do NOT run immediately on start — health checks are frequent (60s default) and may be
+// resource-intensive. Wait for the first tick.
+// Uses atomic.Bool to prevent duplicate execution if the previous check is still running.
+func (s *Scheduler) healthCheckLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.healthCheckInterval)
+	defer ticker.Stop()
+
+	// Do NOT run immediately on start for health checks — wait for the first tick.
+	// Health checks are frequent and shouldn't fire on every restart.
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.healthCheckRunning.CompareAndSwap(false, true) {
+				s.logger.Debug("health check still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.healthCheckRunning.Store(false)
+				s.runHealthCheck(ctx)
+			}()
+		}
+	}
+}
+
+// runHealthCheck executes a single health check cycle with error recovery.
+func (s *Scheduler) runHealthCheck(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 5*time.Minute)
+	defer cancel()
+	if err := s.healthCheckService.RunHealthChecks(opCtx); err != nil {
+		s.logger.Error("health check run failed",
+			"error", err,
+			"interval", s.healthCheckInterval.String())
+	} else {
+		s.logger.Debug("health check completed")
 	}
 }
 

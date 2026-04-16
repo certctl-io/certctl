@@ -90,6 +90,14 @@ import {
   updateIssuer,
   updateTarget,
   getPolicy,
+  listHealthChecks,
+  getHealthCheck,
+  createHealthCheck,
+  updateHealthCheck,
+  deleteHealthCheck,
+  getHealthCheckHistory,
+  acknowledgeHealthCheck,
+  getHealthCheckSummary,
 } from './client';
 
 // Mock global fetch
@@ -1234,6 +1242,40 @@ describe('API Client', () => {
       mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'pol-1', name: 'Test' }));
       await getPolicy('pol-1');
       expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/policies/pol-1');
+    });
+  });
+
+  describe('Health Checks (M48)', () => {
+    it('listHealthChecks sends GET with optional filters', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      const result = await listHealthChecks({ status: 'degraded' });
+      expect(result.total).toBe(0);
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/health-checks');
+      expect(mockFetch.mock.calls[0][0]).toContain('status=degraded');
+    });
+
+    it('getHealthCheck sends GET with health check ID', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'hc-1', endpoint: 'example.com:443' }));
+      const result = await getHealthCheck('hc-1');
+      expect(result.id).toBe('hc-1');
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/health-checks/hc-1');
+    });
+
+    it('createHealthCheck sends POST with data', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'hc-1', endpoint: 'example.com:443' }));
+      const result = await createHealthCheck({ endpoint: 'example.com:443' });
+      expect(result.id).toBe('hc-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toContain('/api/v1/health-checks');
+      expect(init.method).toBe('POST');
+    });
+
+    it('getHealthCheckSummary sends GET to /health-checks/summary', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ healthy: 5, degraded: 1, down: 0, cert_mismatch: 0, unknown: 2, total: 8 }));
+      const result = await getHealthCheckSummary();
+      expect(result.healthy).toBe(5);
+      expect(result.total).toBe(8);
+      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/health-checks/summary');
     });
   });
 });

@@ -2,9 +2,6 @@ package service
 
 import (
 	"context"
-	"crypto/ecdsa"
-	"crypto/rsa"
-	"crypto/sha256"
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/pem"
@@ -16,6 +13,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/shankar0123/certctl/internal/tlsprobe"
 )
 
 // SentinelAgentID is the agent ID used for network-discovered certificates.
@@ -469,16 +467,15 @@ func (s *NetworkScanService) probeTLS(ctx context.Context, address string, timeo
 
 // tlsCertToEntry converts an x509.Certificate from a TLS handshake into a DiscoveredCertEntry.
 func tlsCertToEntry(cert *x509.Certificate, address string) domain.DiscoveredCertEntry {
-	// Compute SHA-256 fingerprint
-	fingerprintBytes := sha256.Sum256(cert.Raw)
-	fingerprint := fmt.Sprintf("%x", fingerprintBytes)
+	// Compute SHA-256 fingerprint using shared tlsprobe package
+	fingerprint := tlsprobe.CertFingerprint(cert)
 
 	// Encode as PEM
 	pemBlock := &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}
 	pemData := string(pem.EncodeToMemory(pemBlock))
 
-	// Key algorithm and size
-	keyAlg, keySize := tlsCertKeyInfo(cert)
+	// Key algorithm and size using shared tlsprobe package
+	keyAlg, keySize := tlsprobe.CertKeyInfo(cert)
 
 	return domain.DiscoveredCertEntry{
 		FingerprintSHA256: fingerprint,
@@ -495,22 +492,5 @@ func tlsCertToEntry(cert *x509.Certificate, address string) domain.DiscoveredCer
 		PEMData:           pemData,
 		SourcePath:        address,
 		SourceFormat:      "network",
-	}
-}
-
-// tlsCertKeyInfo extracts key algorithm name and size from a certificate.
-func tlsCertKeyInfo(cert *x509.Certificate) (string, int) {
-	switch pub := cert.PublicKey.(type) {
-	case *rsa.PublicKey:
-		return "RSA", pub.N.BitLen()
-	case *ecdsa.PublicKey:
-		return "ECDSA", pub.Curve.Params().BitSize
-	default:
-		switch cert.PublicKeyAlgorithm {
-		case x509.Ed25519:
-			return "Ed25519", 256
-		default:
-			return cert.PublicKeyAlgorithm.String(), 0
-		}
 	}
 }

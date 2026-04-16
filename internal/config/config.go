@@ -32,6 +32,7 @@ type Config struct {
 	GoogleCAS    GoogleCASConfig
 	AWSACMPCA    AWSACMPCAConfig
 	Digest       DigestConfig
+	HealthCheck  HealthCheckConfig
 	Encryption   EncryptionConfig
 }
 
@@ -317,6 +318,46 @@ type DigestConfig struct {
 	// If empty, digests are sent to all certificate owners.
 	// Setting: CERTCTL_DIGEST_RECIPIENTS environment variable.
 	Recipients []string
+}
+
+// HealthCheckConfig contains configuration for continuous TLS health monitoring (M48).
+type HealthCheckConfig struct {
+	// Enabled controls whether health checks are enabled.
+	// Default: false.
+	// Setting: CERTCTL_HEALTH_CHECK_ENABLED environment variable.
+	Enabled bool
+
+	// CheckInterval is the main scheduler loop interval for polling due checks.
+	// Default: 60 seconds. Each endpoint has its own check_interval_seconds.
+	// Setting: CERTCTL_HEALTH_CHECK_INTERVAL environment variable.
+	CheckInterval time.Duration
+
+	// DefaultInterval is the default probe interval in seconds for each endpoint (per-endpoint basis).
+	// Default: 300 seconds (5 minutes).
+	// Setting: CERTCTL_HEALTH_CHECK_DEFAULT_INTERVAL environment variable.
+	DefaultInterval int
+
+	// DefaultTimeout is the default TLS connection timeout in milliseconds.
+	// Default: 5000 milliseconds (5 seconds).
+	// Setting: CERTCTL_HEALTH_CHECK_DEFAULT_TIMEOUT environment variable.
+	DefaultTimeout int
+
+	// MaxConcurrent is the maximum number of concurrent TLS probes.
+	// Default: 20.
+	// Setting: CERTCTL_HEALTH_CHECK_MAX_CONCURRENT environment variable.
+	MaxConcurrent int
+
+	// HistoryRetention controls how long probe history records are kept.
+	// Default: 30 days. Older records are purged by the scheduler.
+	// Setting: CERTCTL_HEALTH_CHECK_HISTORY_RETENTION environment variable.
+	HistoryRetention time.Duration
+
+	// AutoCreate controls whether health checks are auto-created when:
+	// - A deployment job completes with verification success
+	// - A network scan target has health_check_enabled=true
+	// Default: true.
+	// Setting: CERTCTL_HEALTH_CHECK_AUTO_CREATE environment variable.
+	AutoCreate bool
 }
 
 // ACMEConfig contains ACME issuer connector configuration.
@@ -677,6 +718,15 @@ func Load() (*Config, error) {
 			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),
 			Interval:   getEnvDuration("CERTCTL_DIGEST_INTERVAL", 24*time.Hour),
 			Recipients: getEnvList("CERTCTL_DIGEST_RECIPIENTS", nil),
+		},
+		HealthCheck: HealthCheckConfig{
+			Enabled:          getEnvBool("CERTCTL_HEALTH_CHECK_ENABLED", false),
+			CheckInterval:    getEnvDuration("CERTCTL_HEALTH_CHECK_INTERVAL", 60*time.Second),
+			DefaultInterval:  getEnvInt("CERTCTL_HEALTH_CHECK_DEFAULT_INTERVAL", 300),
+			DefaultTimeout:   getEnvInt("CERTCTL_HEALTH_CHECK_DEFAULT_TIMEOUT", 5000),
+			MaxConcurrent:    getEnvInt("CERTCTL_HEALTH_CHECK_MAX_CONCURRENT", 20),
+			HistoryRetention: getEnvDuration("CERTCTL_HEALTH_CHECK_HISTORY_RETENTION", 30*24*time.Hour),
+			AutoCreate:       getEnvBool("CERTCTL_HEALTH_CHECK_AUTO_CREATE", true),
 		},
 		Encryption: EncryptionConfig{
 			ConfigEncryptionKey: getEnv("CERTCTL_CONFIG_ENCRYPTION_KEY", ""),

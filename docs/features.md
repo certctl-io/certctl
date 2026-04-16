@@ -801,6 +801,53 @@ Server-side active TLS scanning of CIDR ranges. Concurrent probing with semaphor
 | `/api/v1/network-scan-targets/{id}` | DELETE | Delete |
 | `/api/v1/network-scan-targets/{id}/scan` | POST | Trigger immediate scan |
 
+### Continuous TLS Health Monitoring
+
+<!-- Source: internal/domain/health_check.go, internal/service/health_check.go -->
+
+Beyond one-time discovery (M18b, M21), the health monitor continuously probes TLS endpoints and tracks certificate freshness. Uses the shared `internal/tlsprobe/` package (same as network scanner) to compare deployed certificate fingerprints against live endpoints, catching silent rollbacks and unauthorized replacements.
+
+**Status Transitions:**
+- `Healthy` — endpoint responding, certificate matches expected
+- `Degraded` — consecutive probe failures reach threshold (default 2)
+- `Down` — consecutive failures exceed degradation threshold (default 5)
+- `Cert_Mismatch` — observed cert fingerprint differs from expected (unauthorized replacement)
+
+**Auto-Create:** When a deployment completes successfully with TLS verification enabled (M25), certctl automatically creates a health check with the deployed certificate's fingerprint as the baseline.
+
+**Probe History:** Each probe stores: TLS version, cipher suite, response time, cert metadata (subject, issuer, validity), status, and error details. Retained for 30 days (configurable), then purged by the scheduler.
+
+**Alerts on State Transitions:**
+- Cert_Mismatch: HIGH severity (catches unauthorized changes)
+- Down: CRITICAL severity (service broken)
+- Degraded: WARNING severity (intermittent issues)
+- Recovery to Healthy: INFO severity (status update)
+
+**Configuration:**
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_HEALTH_CHECK_ENABLED` | `false` | Enable health monitoring |
+| `CERTCTL_HEALTH_CHECK_INTERVAL` | `60s` | Scheduler tick interval |
+| `CERTCTL_HEALTH_CHECK_DEFAULT_INTERVAL` | `300s` | Default per-endpoint check frequency |
+| `CERTCTL_HEALTH_CHECK_DEFAULT_TIMEOUT` | `5000ms` | TLS connection timeout per probe |
+| `CERTCTL_HEALTH_CHECK_MAX_CONCURRENT` | `20` | Max concurrent TLS probes |
+| `CERTCTL_HEALTH_CHECK_HISTORY_RETENTION` | `30 days` | Purge probe history older than this |
+| `CERTCTL_HEALTH_CHECK_AUTO_CREATE` | `true` | Auto-create checks from deployments |
+
+**Health Check API:**
+
+| Endpoint | Method | Description |
+|---|---|---|
+| `/api/v1/health-checks` | GET | List with `?status`, `?certificate_id`, `?network_scan_target_id`, `?enabled` filters + pagination |
+| `/api/v1/health-checks/{id}` | GET | Detail |
+| `/api/v1/health-checks` | POST | Create manual check (endpoint, expected_fingerprint, check_interval, timeout) |
+| `/api/v1/health-checks/{id}` | PUT | Update thresholds, interval, or expected fingerprint |
+| `/api/v1/health-checks/{id}` | DELETE | Delete |
+| `/api/v1/health-checks/{id}/history` | GET | Probe history with `?limit` param |
+| `/api/v1/health-checks/{id}/acknowledge` | POST | Mark incident as acknowledged by operator |
+| `/api/v1/health-checks/summary` | GET | Aggregate counts by status (Healthy, Degraded, Down, Cert_Mismatch) |
+
 ---
 
 ## Ownership and Teams
