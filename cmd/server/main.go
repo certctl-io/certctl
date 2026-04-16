@@ -274,6 +274,9 @@ func main() {
 
 	logger.Info("initialized all services")
 
+	// Initialize bulk revocation service
+	bulkRevocationService := service.NewBulkRevocationService(revocationSvc, certificateRepo, auditService, logger)
+
 	// Initialize stats and metrics services
 	statsService := service.NewStatsService(certificateRepo, jobRepo, agentRepo)
 	logger.Info("initialized stats service")
@@ -300,6 +303,8 @@ func main() {
 	verificationHandler := handler.NewVerificationHandler(verificationService)
 	exportService := service.NewExportService(certificateRepo, auditService)
 	exportHandler := handler.NewExportHandler(exportService)
+
+	bulkRevocationHandler := handler.NewBulkRevocationHandler(bulkRevocationService)
 
 	// Initialize digest service (requires email notifier)
 	var digestService *service.DigestService
@@ -415,7 +420,8 @@ func main() {
 		Verification:  verificationHandler,
 		Export:        exportHandler,
 		Digest:        *digestHandler,
-		HealthChecks:  healthCheckHandler,
+		HealthChecks:     healthCheckHandler,
+		BulkRevocation:   bulkRevocationHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

@@ -288,6 +288,7 @@ Each section includes:
   - Certificate owner (email)
   - Configured webhooks (if you have a SIEM that subscribes)
   - Slack/Teams channels (if notifiers are configured)
+- **Bulk Revocation for Fleet-Wide Incidents** (V2.2) — `POST /api/v1/certificates/bulk-revoke` with filter criteria (profile, owner, agent, issuer) revokes all matching certificates in a single operation. Essential for incident response: key compromise affecting multiple certs, CA distrust events, decommissioning a team's infrastructure. Each bulk revocation creates individual jobs reusing the existing revocation pipeline, ensuring audit trail and notifications for every certificate.
 - **Short-Lived Cert Exemption** — Certificates with TTL < 1 hour (configured in profile) skip CRL/OCSP publication. Expiry is the revocation mechanism for short-lived certs (e.g., Kubernetes pod certs, session tokens).
 - **Deployment Rollback** — If a revoked cert is still deployed (shouldn't happen, but race conditions exist), operators can manually redeploy a previous version via the GUI. Rollback is audited.
 
@@ -302,7 +303,6 @@ Each section includes:
 
 **V3 Enhancement**:
 
-- **Bulk Revocation** — Revoke all certs issued by a specific profile, owner, or agent in a single API call (useful for large-scale incidents like CA compromise)
 - **Revocation Automation** — Trigger revocation based on external events (e.g., employee termination, security breach alert from CT Log monitoring)
 
 **Operator Responsibility**:

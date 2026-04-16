@@ -130,6 +130,8 @@ func handleCerts(client *cli.Client, args []string) error {
 			reason = subArgs[2]
 		}
 		return client.RevokeCertificate(id, reason)
+	case "bulk-revoke":
+		return client.BulkRevokeCertificates(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: certs %s\n", subcommand)
 		return nil

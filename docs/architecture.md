@@ -467,6 +467,10 @@ The revocation is recorded in the `certificate_revocations` table (separate from
 
 Short-lived certificates (those with profile TTL < 1 hour) return "good" from OCSP and are excluded from CRL — their rapid expiry is treated as sufficient revocation.
 
+#### Bulk Revocation
+
+For compliance events requiring fleet-wide revocation (key compromise, CA distrust, mass decommission), certctl supports bulk revocation by filter criteria. The `POST /api/v1/certificates/bulk-revoke` endpoint accepts filter parameters (profile_id, owner_id, agent_id, issuer_id) and creates individual revocation jobs for each matching certificate. Bulk revocation reuses the same 7-step single-cert flow for each certificate — no new issuer notification or audit mechanics. The operation is idempotent: revoking an already-revoked certificate is a no-op. Partial failures are tolerated — if one certificate fails to revoke (e.g., issuer unavailable), the operation continues for remaining certs and returns a summary. A single `bulk_revocation_initiated` audit event logs the operation with filter criteria, operator actor, and summary (total requested, succeeded, failed counts). Audit events for individual certificate revocations record the operator identity separately. The GUI bulk revoke button on the certificates list filters by visible selections and displays an affected-cert count modal before confirmation.
+
 ### 4. Automatic Renewal
 
 The control plane runs a scheduler with seven background loops:
@@ -846,6 +850,8 @@ The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml`
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 
+**Bulk Operations:** `POST /api/v1/certificates/bulk-revoke` — Bulk revocation by filter criteria (profile_id, owner_id, agent_id, issuer_id). Creates individual revocation jobs for matching certificates, with partial-failure tolerance and a summary audit event.
+
 **Enhanced Query Features (M20):** Certificate list endpoints support additional query capabilities beyond basic pagination:
 
 - **Sorting**: `?sort=notAfter` (ascending) or `?sort=-createdAt` (descending). Whitelist: notAfter, expiresAt, createdAt, updatedAt, commonName, name, status, environment.
@@ -1063,9 +1069,9 @@ Beyond one-time discovery, certctl continuously monitors TLS endpoints for certi
 
 certctl is extensively tested across eight layers with CI-enforced coverage gates that act as regression floors. The goal is high-confidence regression prevention at the service and handler layers (where the most complex business logic lives), combined with integration tests that exercise the full request path from HTTP to database.
 
-**Service layer unit tests** (`internal/service/*_test.go`) — Mock-based tests across all service files covering certificate CRUD, revocation (all RFC 5280 reason codes, OCSP/CRL generation), agent lifecycle, job state machine, policy evaluation, renewal/issuance flow (both keygen modes), notification deduplication, team/owner/agent group CRUD, issuer service CRUD with connection testing, and the issuer connector adapter. Mock repositories are simple structs with function fields — no heavy mocking frameworks.
+**Service layer unit tests** (`internal/service/*_test.go`) — Mock-based tests across all service files covering certificate CRUD, revocation (all RFC 5280 reason codes, OCSP/CRL generation, bulk revocation by filter with partial-failure tolerance), agent lifecycle, job state machine, policy evaluation, renewal/issuance flow (both keygen modes), notification deduplication, team/owner/agent group CRUD, issuer service CRUD with connection testing, and the issuer connector adapter. Mock repositories are simple structs with function fields — no heavy mocking frameworks.
 
-**Handler layer tests** (`internal/api/handler/*_test.go`) — Every handler file has a corresponding test file using Go's `httptest` package: certificates (including revocation, DER CRL, OCSP), agents, jobs (including approve/reject), notifications, policies, profiles, issuers, targets, agent groups, teams, owners, discovery, network scan, verification, export, EST, digest, stats, and metrics. Tests cover the happy path, input validation, error propagation, method-not-allowed, and pagination.
+**Handler layer tests** (`internal/api/handler/*_test.go`) — Every handler file has a corresponding test file using Go's `httptest` package: certificates (including revocation, bulk revocation by profile/owner/agent/issuer, DER CRL, OCSP), agents, jobs (including approve/reject), notifications, policies, profiles, issuers, targets, agent groups, teams, owners, discovery, network scan, verification, export, EST, digest, stats, and metrics. Tests cover the happy path, input validation, error propagation, method-not-allowed, pagination, and bulk operation partial-failure scenarios.
 
 **Integration tests** (`internal/integration/`) — Three test files exercising the full stack from HTTP request through router, handler, service, and repository layers. `lifecycle_test.go` covers the complete certificate lifecycle (team/owner creation through deployment and status reporting). `negative_test.go` covers error paths, endpoint validation, and revocation scenarios. `e2e_test.go` exercises cross-milestone features end-to-end (agent metadata, profiles, issuer registry, GUI operations, stats, revocation, notifications, enhanced query API).
 

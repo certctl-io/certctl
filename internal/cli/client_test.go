@@ -112,6 +112,43 @@ func TestClient_RevokeCertificate(t *testing.T) {
 	}
 }
 
+func TestClient_BulkRevokeCertificates(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/certificates/bulk-revoke" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+
+		// Verify request body contains expected fields
+		var body map[string]interface{}
+		json.NewDecoder(r.Body).Decode(&body)
+		if body["reason"] != "keyCompromise" {
+			t.Errorf("expected reason keyCompromise, got %v", body["reason"])
+		}
+		if body["profile_id"] != "prof-tls" {
+			t.Errorf("expected profile_id prof-tls, got %v", body["profile_id"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(map[string]interface{}{
+			"total_matched": 3,
+			"total_revoked": 2,
+			"total_skipped": 1,
+			"total_failed":  0,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", "table")
+	err := client.BulkRevokeCertificates([]string{
+		"--reason", "keyCompromise",
+		"--profile-id", "prof-tls",
+	})
+	if err != nil {
+		t.Fatalf("BulkRevokeCertificates failed: %v", err)
+	}
+}
+
 func TestClient_ListAgents(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != "GET" || r.URL.Path != "/api/v1/agents" {

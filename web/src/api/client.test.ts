@@ -11,6 +11,7 @@ import {
   updateCertificate,
   archiveCertificate,
   revokeCertificate,
+  bulkRevokeCertificates,
   exportCertificatePEM,
   downloadCertificatePEM,
   exportCertificatePKCS12,
@@ -287,6 +288,15 @@ describe('API Client', () => {
       expect(url).toBe('/api/v1/certificates/mc-test/revoke');
       expect(init.method).toBe('POST');
       expect(JSON.parse(init.body)).toEqual({ reason: 'keyCompromise' });
+    });
+
+    it('bulkRevokeCertificates sends POST with criteria', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ total_matched: 3, total_revoked: 2, total_skipped: 1, total_failed: 0 }));
+      await bulkRevokeCertificates({ reason: 'keyCompromise', profile_id: 'prof-tls', certificate_ids: ['mc-1', 'mc-2'] });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates/bulk-revoke');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body)).toEqual({ reason: 'keyCompromise', profile_id: 'prof-tls', certificate_ids: ['mc-1', 'mc-2'] });
     });
   });
 

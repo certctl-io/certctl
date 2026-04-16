@@ -103,7 +103,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		Health:        healthHandler,
 		Discovery:     discoveryHandler,
 		NetworkScan:   networkScanHandler,
-		Verification:  verificationHandler,
+		Verification:    verificationHandler,
+		BulkRevocation:  handler.BulkRevocationHandler{},
 	})
 	r.RegisterESTHandlers(estHandler)
 

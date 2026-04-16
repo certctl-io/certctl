@@ -198,6 +198,65 @@ func (c *Client) RevokeCertificate(id, reason string) error {
 	return nil
 }
 
+// BulkRevokeCertificates revokes certificates matching filter criteria.
+func (c *Client) BulkRevokeCertificates(args []string) error {
+	fs := flag.NewFlagSet("certs bulk-revoke", flag.ContinueOnError)
+	reason := fs.String("reason", "unspecified", "RFC 5280 revocation reason")
+	profileID := fs.String("profile-id", "", "Revoke certs matching this profile")
+	ownerID := fs.String("owner-id", "", "Revoke certs owned by this owner")
+	agentID := fs.String("agent-id", "", "Revoke certs deployed via this agent")
+	issuerID := fs.String("issuer-id", "", "Revoke certs issued by this issuer")
+	teamID := fs.String("team-id", "", "Revoke certs owned by team members")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	body := map[string]interface{}{
+		"reason": *reason,
+	}
+	if *profileID != "" {
+		body["profile_id"] = *profileID
+	}
+	if *ownerID != "" {
+		body["owner_id"] = *ownerID
+	}
+	if *agentID != "" {
+		body["agent_id"] = *agentID
+	}
+	if *issuerID != "" {
+		body["issuer_id"] = *issuerID
+	}
+	if *teamID != "" {
+		body["team_id"] = *teamID
+	}
+
+	// Remaining positional args are certificate IDs
+	if fs.NArg() > 0 {
+		body["certificate_ids"] = fs.Args()
+	}
+
+	resp, err := c.do("POST", "/api/v1/certificates/bulk-revoke", nil, body)
+	if err != nil {
+		return err
+	}
+
+	var result map[string]interface{}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return fmt.Errorf("parsing response: %w", err)
+	}
+
+	if c.format == "json" {
+		return c.outputJSON(result)
+	}
+
+	fmt.Printf("Bulk revocation complete:\n")
+	fmt.Printf("  Matched: %v\n", result["total_matched"])
+	fmt.Printf("  Revoked: %v\n", result["total_revoked"])
+	fmt.Printf("  Skipped: %v\n", result["total_skipped"])
+	fmt.Printf("  Failed:  %v\n", result["total_failed"])
+	return nil
+}
+
 // ListAgents lists all agents.
 func (c *Client) ListAgents(args []string) error {
 	fs := flag.NewFlagSet("agents list", flag.ContinueOnError)

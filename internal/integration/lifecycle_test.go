@@ -113,7 +113,8 @@ func TestCertificateLifecycle(t *testing.T) {
 		Health:        healthHandler,
 		Discovery:     discoveryHandler,
 		NetworkScan:   networkScanHandler,
-		Verification:  verificationHandler,
+		Verification:    verificationHandler,
+		BulkRevocation:  handler.BulkRevocationHandler{},
 	})
 	r.RegisterESTHandlers(estHandler)
 

@@ -175,7 +175,7 @@ Built for **platform engineering and DevOps teams** managing 10–500+ certifica
 
 **Enrollment protocols.** EST server (RFC 7030) for device and WiFi enrollment. SCEP server (RFC 8894) for MDM platforms and network devices. S/MIME issuance with email protection EKU.
 
-**Revocation.** DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder. RFC 5280 reason codes. Short-lived certs (TTL < 1 hour) are exempt — expiry is sufficient revocation.
+**Revocation.** Single and bulk revocation (by profile, owner, agent, or issuer). DER-encoded X.509 CRL per issuer, signed by the issuing CA. Embedded OCSP responder. RFC 5280 reason codes. Short-lived certs (TTL < 1 hour) are exempt — expiry is sufficient revocation.
 
 **Audit and observability.** Immutable append-only audit trail records every lifecycle action, every API call, and every approval decision. Prometheus metrics endpoint. Scheduled certificate digest emails. Continuous endpoint health monitoring with state machine transitions and real-time alerts.
 
@@ -320,7 +320,7 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 30+ milestones shipping enterprise-grade features for free. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01/EAB/ARI (RFC 9773)/profile selection, step-ca, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM PCA, Entrust, GlobalSign, EJBCA, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (WinRM), F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, Kubernetes Secrets targets. EST server (RFC 7030) and SCEP server (RFC 8894) enrollment protocols. RFC 5280 revocation with DER CRL + embedded OCSP responder. Certificate profiles, ownership tracking, team assignment, agent groups, interactive approval workflows. Filesystem, network, and cloud secret manager (AWS SM, Azure KV, GCP SM) certificate discovery with triage GUI. Dynamic issuer/target configuration via GUI with AES-256-GCM encrypted storage. First-run onboarding wizard. Post-deployment TLS verification. Certificate export (PEM/PKCS#12). S/MIME support. Prometheus metrics. Scheduled certificate digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. MCP server (80 tools), CLI (12 commands), Helm chart. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). 5 turnkey deployment examples. Agent install script. Migration guides from certbot, acme.sh, and cert-manager. See the [Feature Inventory](docs/features.md) for details.
 
 ### V3: certctl Pro
-Team access controls and identity provider integration. Role-based access control with profile-gating. Event-driven architecture with real-time operational views. Advanced search, compliance scoring, bulk fleet operations.
+Team access controls and identity provider integration. Role-based access control with profile-gating. Event-driven architecture with real-time operational views. Advanced search, compliance scoring, and HSM/TPM integration.
 
 ### V4+: Cloud & Scale
 Kubernetes cert-manager external issuer, cloud infrastructure targets, extended CA support, and platform-scale features.

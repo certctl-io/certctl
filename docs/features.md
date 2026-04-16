@@ -182,6 +182,52 @@ Configurable per-policy thresholds stored as `alert_thresholds_days` JSONB (defa
 
 Revocation is a 7-step process: validate eligibility → get serial → update status → record in `certificate_revocations` table → notify issuer (best-effort) → audit → send notification.
 
+### Bulk Revocation
+
+`POST /api/v1/certificates/bulk-revoke` revokes multiple certificates matching filter criteria in a single operation.
+
+**Filter criteria** (at least one required):
+
+- `profile_id` — revoke all certs issued with this profile
+- `owner_id` — revoke all certs owned by this owner
+- `agent_id` — revoke all certs deployed to this agent
+- `issuer_id` — revoke all certs from this issuer
+- `team_id` — revoke all certs owned by members of this team
+- `certificate_ids` — array of specific cert IDs to revoke
+
+**Request body** example:
+
+```json
+{
+  "reason": "keyCompromise",
+  "profile_id": "prof-staging",
+  "team_id": "team-platform"
+}
+```
+
+**Response:**
+
+```json
+{
+  "job_id": "job-bulk-rev-123",
+  "criteria": {
+    "reason": "keyCompromise",
+    "profile_id": "prof-staging",
+    "team_id": "team-platform"
+  },
+  "affected_count": 47,
+  "status": "Pending"
+}
+```
+
+**Behavior:**
+
+- Individual revocation jobs created for each matching cert (reuses existing revocation flow)
+- Progress tracked via job system (job status: Pending → Running → Completed)
+- Partial failures tolerated — if 47 certs match but 3 fail, the other 44 still revoke
+- Audit trail: single `bulk_revocation_initiated` event logs the criteria and actor
+- Optional `--reason` defaults to `unspecified` if omitted
+
 ### CRL Endpoints
 
 - `GET /api/v1/crl` — JSON-formatted CRL (version, entries array, total count, timestamp)
@@ -1110,7 +1156,7 @@ Same pattern as issuer configuration:
 | Page | Route | Description |
 |---|---|---|
 | Dashboard | `/` | Summary stats, 4 charts (status donut, expiration heatmap, renewal trends, issuance rate) |
-| Certificates | `/certificates` | List with bulk ops (renew, revoke, reassign owner), multi-select |
+| Certificates | `/certificates` | List with bulk ops (renew, revoke by filter criteria, reassign owner), multi-select. Bulk revoke via server-side filter API, not client-side sequential calls. |
 | Certificate Detail | `/certificates/:id` | Versions, deployment timeline, inline policy editor, export buttons |
 | Agents | `/agents` | List with OS/arch metadata |
 | Agent Detail | `/agents/:id` | System info, heartbeat status, capabilities, recent jobs |
@@ -1163,6 +1209,7 @@ Latching state prevents refetch-driven dismissal. `localStorage` dismissal key: 
 | `certs get ID` | Certificate details |
 | `certs renew ID` | Trigger renewal |
 | `certs revoke ID` | Revoke (with `--reason`) |
+| `certs bulk-revoke` | Bulk revoke by filter criteria (see below) |
 | `agents list` | List agents |
 | `agents get ID` | Agent details |
 | `jobs list` | List jobs |
@@ -1179,6 +1226,39 @@ Latching state prevents refetch-driven dismissal. `localStorage` dismissal key: 
 | `--server` | `CERTCTL_SERVER_URL` | `http://localhost:8443` | Server URL |
 | `--api-key` | `CERTCTL_API_KEY` | (none) | API key |
 | `--format` | (none) | `table` | Output: `table` or `json` |
+
+### Bulk Revocation Command
+
+`certs bulk-revoke` revokes multiple certificates matching filter criteria.
+
+**Usage:** `certs bulk-revoke [CERT_IDs...] [flags]`
+
+**Flags:**
+
+| Flag | Description |
+|---|---|
+| `--reason` | RFC 5280 revocation reason (`keyCompromise`, `caCompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `privilegeWithdrawn`, `unspecified` — default). |
+| `--profile-id` | Revoke all certs with this profile ID |
+| `--owner-id` | Revoke all certs owned by this owner |
+| `--agent-id` | Revoke all certs deployed to this agent |
+| `--issuer-id` | Revoke all certs issued by this issuer |
+| `--team-id` | Revoke all certs owned by members of this team |
+
+**Examples:**
+
+```bash
+# Revoke certs with specific IDs (positional args)
+certctl-cli certs bulk-revoke mc-api-prod mc-web-prod --reason keyCompromise
+
+# Revoke by profile
+certctl-cli certs bulk-revoke --profile-id prof-staging --reason cessationOfOperation
+
+# Revoke by team
+certctl-cli certs bulk-revoke --team-id team-platform --reason superseded
+
+# Revoke by issuer (all certs from one CA)
+certctl-cli certs bulk-revoke --issuer-id iss-letsencrypt --reason caCompromise
+```
 
 ---
 

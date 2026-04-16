@@ -182,6 +182,38 @@ func registerCertificateTools(s *gomcp.Server, c *Client) {
 		}
 		return textResult(data)
 	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_bulk_revoke_certificates",
+		Description: "Bulk revoke certificates matching filter criteria. At least one criterion (profile_id, owner_id, agent_id, issuer_id, team_id, or certificate_ids) is required. Returns counts of matched, revoked, skipped, and failed certificates.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input BulkRevokeCertificatesInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]interface{}{
+			"reason": input.Reason,
+		}
+		if input.ProfileID != "" {
+			body["profile_id"] = input.ProfileID
+		}
+		if input.OwnerID != "" {
+			body["owner_id"] = input.OwnerID
+		}
+		if input.AgentID != "" {
+			body["agent_id"] = input.AgentID
+		}
+		if input.IssuerID != "" {
+			body["issuer_id"] = input.IssuerID
+		}
+		if input.TeamID != "" {
+			body["team_id"] = input.TeamID
+		}
+		if len(input.CertificateIDs) > 0 {
+			body["certificate_ids"] = input.CertificateIDs
+		}
+		data, err := c.Post("/api/v1/certificates/bulk-revoke", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
 }
 
 // ── CRL & OCSP ──────────────────────────────────────────────────────

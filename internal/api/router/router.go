@@ -65,7 +65,8 @@ type HandlerRegistry struct {
 	Verification  handler.VerificationHandler
 	Export        handler.ExportHandler
 	Digest        handler.DigestHandler
-	HealthChecks  *handler.HealthCheckHandler
+	HealthChecks     *handler.HealthCheckHandler
+	BulkRevocation   handler.BulkRevocationHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -91,6 +92,8 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/auth/check", http.HandlerFunc(reg.Health.AuthCheck))
 
 	// Certificates routes: /api/v1/certificates
+	// Bulk revoke must be registered before {id} routes to avoid path conflict
+	r.Register("POST /api/v1/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevoke))
 	r.Register("GET /api/v1/certificates", http.HandlerFunc(reg.Certificates.ListCertificates))
 	r.Register("POST /api/v1/certificates", http.HandlerFunc(reg.Certificates.CreateCertificate))
 	r.Register("GET /api/v1/certificates/{id}", http.HandlerFunc(reg.Certificates.GetCertificate))

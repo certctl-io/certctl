@@ -62,6 +62,16 @@ type RevokeCertificateInput struct {
 	Reason string `json:"reason,omitempty" jsonschema:"RFC 5280 reason: unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn"`
 }
 
+type BulkRevokeCertificatesInput struct {
+	Reason         string   `json:"reason" jsonschema:"RFC 5280 reason: unspecified, keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, privilegeWithdrawn"`
+	ProfileID      string   `json:"profile_id,omitempty" jsonschema:"Revoke all certs matching this profile ID"`
+	OwnerID        string   `json:"owner_id,omitempty" jsonschema:"Revoke all certs owned by this owner"`
+	AgentID        string   `json:"agent_id,omitempty" jsonschema:"Revoke all certs deployed via this agent"`
+	IssuerID       string   `json:"issuer_id,omitempty" jsonschema:"Revoke all certs issued by this issuer"`
+	TeamID         string   `json:"team_id,omitempty" jsonschema:"Revoke all certs owned by members of this team"`
+	CertificateIDs []string `json:"certificate_ids,omitempty" jsonschema:"Explicit list of certificate IDs to revoke"`
+}
+
 type ListVersionsInput struct {
 	ID string `json:"id" jsonschema:"Certificate ID"`
 	ListParams

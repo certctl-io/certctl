@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getProfiles, getIssuers } from '../api/client';
+import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -188,25 +188,24 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
 
 function BulkRevokeModal({ ids, onClose, onSuccess }: { ids: string[]; onClose: () => void; onSuccess: () => void }) {
   const [reason, setReason] = useState('unspecified');
-  const [progress, setProgress] = useState(0);
   const [error, setError] = useState('');
   const [running, setRunning] = useState(false);
+  const [result, setResult] = useState<{ total_matched: number; total_revoked: number; total_skipped: number; total_failed: number; errors?: { certificate_id: string; error: string }[] } | null>(null);
 
   const handleRevoke = async () => {
     setRunning(true);
     setError('');
-    let succeeded = 0;
-    for (const id of ids) {
-      try {
-        await revokeCertificate(id, reason);
-        succeeded++;
-        setProgress(succeeded);
-      } catch (err) {
-        setError(`Failed on ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        break;
+    try {
+      const res = await bulkRevokeCertificates({ reason, certificate_ids: ids });
+      setResult(res);
+      if (res.total_failed === 0) {
+        onSuccess();
       }
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Bulk revocation failed');
+    } finally {
+      setRunning(false);
     }
-    if (!error) onSuccess();
   };
 
   return (
@@ -217,32 +216,38 @@ function BulkRevokeModal({ ids, onClose, onSuccess }: { ids: string[]; onClose: 
           Revoke {ids.length} certificate{ids.length > 1 ? 's' : ''}. This cannot be undone.
         </p>
         {error && <div className="bg-red-50 border border-red-200 text-red-700 rounded px-3 py-2 text-sm mb-3">{error}</div>}
-        {running && (
-          <div className="mb-3">
-            <div className="flex justify-between text-xs text-ink-muted mb-1">
-              <span>Progress</span>
-              <span>{progress}/{ids.length}</span>
+        {result && (
+          <div className="mb-3 bg-gray-50 border border-gray-200 rounded px-3 py-2 text-sm">
+            <div className="grid grid-cols-2 gap-1">
+              <span className="text-ink-muted">Matched:</span><span className="font-medium">{result.total_matched}</span>
+              <span className="text-ink-muted">Revoked:</span><span className="font-medium text-red-600">{result.total_revoked}</span>
+              <span className="text-ink-muted">Skipped:</span><span className="font-medium text-yellow-600">{result.total_skipped}</span>
+              <span className="text-ink-muted">Failed:</span><span className="font-medium text-red-700">{result.total_failed}</span>
             </div>
-            <div className="w-full bg-surface-border rounded-full h-2">
-              <div className="bg-red-500 h-2 rounded-full transition-all" style={{ width: `${(progress / ids.length) * 100}%` }} />
-            </div>
+            {result.errors && result.errors.length > 0 && (
+              <div className="mt-2 text-xs text-red-600">
+                {result.errors.map((e, i) => <div key={i}>{e.certificate_id}: {e.error}</div>)}
+              </div>
+            )}
           </div>
         )}
         <label className="text-xs text-ink-muted block mb-2">Revocation Reason (RFC 5280)</label>
         <select value={reason} onChange={e => setReason(e.target.value)}
           className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink mb-4"
-          disabled={running}
+          disabled={running || result !== null}
         >
           {REVOCATION_REASONS.map(r => (
             <option key={r.value} value={r.value}>{r.label}</option>
           ))}
         </select>
         <div className="flex justify-end gap-3">
-          <button onClick={onClose} className="btn btn-ghost text-sm" disabled={running}>Cancel</button>
-          <button onClick={handleRevoke} disabled={running}
-            className="btn text-sm bg-red-600 hover:bg-red-500 text-white disabled:opacity-50">
-            {running ? `Revoking (${progress}/${ids.length})...` : `Revoke ${ids.length} Certificates`}
-          </button>
+          <button onClick={onClose} className="btn btn-ghost text-sm">{result ? 'Close' : 'Cancel'}</button>
+          {!result && (
+            <button onClick={handleRevoke} disabled={running}
+              className="btn text-sm bg-red-600 hover:bg-red-500 text-white disabled:opacity-50">
+              {running ? 'Revoking...' : `Revoke ${ids.length} Certificates`}
+            </button>
+          )}
         </div>
       </div>
     </div>

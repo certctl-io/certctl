@@ -272,13 +272,16 @@ NIST SP 800-57 Part 3 covers revocation (Section 2.5) when keys are suspected co
 - OCSP responder queries revocation table in real-time
 - Short-lived certificate exemption: certs with TTL < 1 hour skip CRL/OCSP (expiry is sufficient revocation)
 
+**Bulk Revocation for Large-Scale Compromise Response** (V2.2) — NIST SP 800-57 Part 3 emphasizes rapid revocation when keys are compromised. `POST /api/v1/certificates/bulk-revoke` revokes all certificates matching filter criteria (profile, owner, agent, issuer) in a single operation. This enables operators to execute fleet-wide revocation for key compromise events affecting multiple certificates. Each bulk revocation creates individual jobs reusing the existing revocation pipeline, ensuring every certificate is recorded in the audit trail with the incident reason.
+
 **Revocation Audit Trail**
 All revocation events logged:
-- Event type: `certificate_revoked`
+- Event type: `certificate_revoked` or `bulk_revocation_initiated` (for fleet operations)
 - Actor: authenticated user or service
-- Reason code: RFC 5280 enum
+- Reason code: RFC 5280 enum (or incident justification for bulk operations)
 - Timestamp: RFC3339
 - Issuer notification status: success or error reason
+- Filter criteria: profile_id, owner_id, agent_id, issuer_id (for bulk revocation)
 
 ## Alignment Summary Table
 
@@ -301,9 +304,11 @@ All revocation events logged:
 - [x] RFC 5280 revocation support
 - [x] Immutable audit trail
 
+### V2.2 (Planned: 2026)
+- Bulk revocation by profile/owner/agent/issuer (fleet-level revocation for incident response)
+
 ### V3 (Planned: 2026)
 - Role-based access control (limit revocation/approval to authorized operators)
-- Bulk revocation by profile/owner/agent (fleet-level revocation policy)
 
 ### V3 Pro (Planned)
 - HSM support for CA key storage and agent key storage (TPM 2.0, PKCS#11)

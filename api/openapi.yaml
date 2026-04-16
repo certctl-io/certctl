@@ -381,6 +381,34 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ─── Bulk Revocation ─────────────────────────────────────────────────
+  /api/v1/certificates/bulk-revoke:
+    post:
+      tags: [Certificates]
+      summary: Bulk revoke certificates
+      description: |
+        Revokes all certificates matching the given filter criteria. At least one criterion
+        is required (safety guard against accidental mass revocation). Reuses the single-cert
+        revocation flow per certificate with partial-failure tolerance.
+      operationId: bulkRevokeCertificates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRevokeRequest"
+      responses:
+        "200":
+          description: Bulk revocation result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkRevokeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ─── Certificate Export ──────────────────────────────────────────────
   /api/v1/certificates/{id}/export/pem:
     get:
@@ -2891,6 +2919,59 @@ components:
         - cessationOfOperation
         - certificateHold
         - privilegeWithdrawn
+
+    BulkRevokeRequest:
+      type: object
+      required: [reason]
+      properties:
+        reason:
+          $ref: "#/components/schemas/RevocationReason"
+        profile_id:
+          type: string
+          description: Revoke all certificates matching this profile
+        owner_id:
+          type: string
+          description: Revoke all certificates owned by this owner
+        agent_id:
+          type: string
+          description: Revoke all certificates deployed via this agent
+        issuer_id:
+          type: string
+          description: Revoke all certificates issued by this issuer
+        team_id:
+          type: string
+          description: Revoke all certificates owned by members of this team
+        certificate_ids:
+          type: array
+          items:
+            type: string
+          description: Explicit list of certificate IDs to revoke
+
+    BulkRevokeResult:
+      type: object
+      properties:
+        total_matched:
+          type: integer
+          description: Number of certificates matching the criteria
+        total_revoked:
+          type: integer
+          description: Number of certificates successfully revoked
+        total_skipped:
+          type: integer
+          description: Number of certificates skipped (already revoked or archived)
+        total_failed:
+          type: integer
+          description: Number of certificates that failed to revoke
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              certificate_id:
+                type: string
+              error:
+                type: string
+          description: Per-certificate error details for failed revocations
 
     # ─── Issuers ─────────────────────────────────────────────────────
     IssuerType:

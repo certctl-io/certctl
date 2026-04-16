@@ -95,6 +95,30 @@ export const revokeCertificate = (id: string, reason: string) =>
     body: JSON.stringify({ reason }),
   });
 
+export interface BulkRevokeCriteria {
+  reason: string;
+  profile_id?: string;
+  owner_id?: string;
+  agent_id?: string;
+  issuer_id?: string;
+  team_id?: string;
+  certificate_ids?: string[];
+}
+
+export interface BulkRevokeResult {
+  total_matched: number;
+  total_revoked: number;
+  total_skipped: number;
+  total_failed: number;
+  errors?: { certificate_id: string; error: string }[];
+}
+
+export const bulkRevokeCertificates = (criteria: BulkRevokeCriteria) =>
+  fetchJSON<BulkRevokeResult>(`${BASE}/certificates/bulk-revoke`, {
+    method: 'POST',
+    body: JSON.stringify(criteria),
+  });
+
 // Certificate Export
 export const exportCertificatePEM = (id: string) =>
   fetchJSON<{ cert_pem: string; chain_pem: string; full_pem: string }>(`${BASE}/certificates/${id}/export/pem`);

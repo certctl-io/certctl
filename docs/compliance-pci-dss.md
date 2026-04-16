@@ -93,8 +93,10 @@ Your QSA will request evidence that your certificate and key management systems 
 - **Certificate Status Tracking** — Four statuses: Active (deployed, not yet expired), Expiring (within threshold, awaiting renewal), Expired (past not-after date), Revoked (revoked via RFC 5280 revocation API). Dashboard charts show status distribution.
 
 - **Revocation Infrastructure** (M15a, M15b):
+  - Revocation API: `POST /api/v1/certificates/{id}/revoke` with RFC 5280 reason codes
   - CRL endpoint: `GET /api/v1/crl` (JSON format) or `GET /api/v1/crl/{issuer_id}` (DER X.509 CRL, 24h validity, signed by issuing CA)
   - OCSP responder: `GET /api/v1/ocsp/{issuer_id}/{serial}` (returns DER-encoded OCSP response: good/revoked/unknown)
+  - Bulk revocation (V2.2): `POST /api/v1/certificates/bulk-revoke` with filter criteria (profile, owner, agent, issuer) for fleet-wide incident response
   - Short-lived cert exemption: certs with TTL < 1 hour skip CRL/OCSP (expiry is sufficient revocation)
 
 - **Stats API** (M14) — Real-time visibility:
@@ -330,6 +332,8 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
   - CRL: `GET /api/v1/crl` (JSON format) or `GET /api/v1/crl/{issuer_id}` (DER X.509, signed by CA, 24h validity)
   - OCSP: `GET /api/v1/ocsp/{issuer_id}/{serial}` (returns revoked status for clients validating certificate chain)
   - Clients checking certificate status via OCSP or CRL see revoked status within 24 hours.
+
+- **Bulk Revocation for Incident Response** (V2.2) — `POST /api/v1/certificates/bulk-revoke` with filter criteria (profile, owner, agent, issuer) revokes all matching certificates in a single operation. PCI-DSS Req 4 requires rapid response to data transmission security incidents — bulk revocation enables operators to revoke an entire certificate set (e.g., all certs used by a compromised team or endpoint) in minutes rather than hours.
 
 - **Private Key Destruction on Agent** — When certificate renewed or revoked:
   - Agent removes old private key file from `CERTCTL_KEY_DIR` when new certificate deployed.
