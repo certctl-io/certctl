@@ -225,6 +225,16 @@ Named enrollment profiles defining crypto constraints and certificate properties
 - Required SANs
 - Permitted Extended Key Usages (EKUs)
 
+### Crypto Policy Enforcement (M11c)
+
+<!-- Source: internal/service/crypto_validation.go (ValidateCSRAgainstProfile), internal/service/renewal.go (resolveMaxTTL) -->
+
+CSR validation is enforced at all five issuance paths: server-side renewal, agent-CSR renewal, agent fallback CSR submission, EST enrollment, and SCEP enrollment. When a certificate profile defines `AllowedKeyAlgorithms`, every incoming CSR is checked against the profile's rules — if the key algorithm or minimum size doesn't match, the request is rejected before reaching the issuer connector.
+
+**MaxTTL enforcement** caps certificate validity at the profile's configured maximum. Behavior varies by issuer: the Local CA, Vault PKI, and step-ca enforce the cap directly (capping `NotAfter` or overriding TTL). OpenSSL logs an advisory warning. ACME, DigiCert, Sectigo, Google CAS, and AWS ACM PCA pass through because the CA controls validity. MaxTTL is resolved from the certificate profile at each issuance call site via `resolveMaxTTL()`.
+
+**Key metadata persistence** — when a certificate version is created from a CSR, the key algorithm (RSA, ECDSA, Ed25519) and key size (in bits) are extracted from the CSR and stored in the `certificate_versions` table (`key_algorithm`, `key_size` columns) for post-hoc compliance auditing.
+
 ### Supported EKUs
 
 <!-- Source: internal/connector/issuer/local/local.go (ekuNameToX509 map) -->

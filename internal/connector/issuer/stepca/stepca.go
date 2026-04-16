@@ -201,10 +201,19 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		CsrPEM: request.CSRPEM,
 		OTT:    ott,
 	}
-	if c.config.ValidityDays > 0 {
+	if c.config.ValidityDays > 0 || request.MaxTTLSeconds > 0 {
 		now := time.Now()
 		signReq.NotBefore = now
-		signReq.NotAfter = now.AddDate(0, 0, c.config.ValidityDays)
+		if c.config.ValidityDays > 0 {
+			signReq.NotAfter = now.AddDate(0, 0, c.config.ValidityDays)
+		}
+		// Cap validity to MaxTTLSeconds if profile specifies a maximum
+		if request.MaxTTLSeconds > 0 {
+			maxNotAfter := now.Add(time.Duration(request.MaxTTLSeconds) * time.Second)
+			if signReq.NotAfter.IsZero() || maxNotAfter.Before(signReq.NotAfter) {
+				signReq.NotAfter = maxNotAfter
+			}
+		}
 	}
 
 	body, err := json.Marshal(signReq)
@@ -266,9 +275,10 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		"san_count", len(request.SANs))
 
 	return c.IssueCertificate(ctx, issuer.IssuanceRequest{
-		CommonName: request.CommonName,
-		SANs:       request.SANs,
-		CSRPEM:     request.CSRPEM,
+		CommonName:    request.CommonName,
+		SANs:          request.SANs,
+		CSRPEM:        request.CSRPEM,
+		MaxTTLSeconds: request.MaxTTLSeconds,
 	})
 }
 

@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // ESTService implements the EST (RFC 7030) enrollment protocol.
@@ -20,6 +21,7 @@ type ESTService struct {
 	auditService *AuditService
 	logger       *slog.Logger
 	profileID    string // optional: constrain enrollments to a specific profile
+	profileRepo  repository.CertificateProfileRepository
 }
 
 // NewESTService creates a new ESTService for the given issuer connector.
@@ -35,6 +37,11 @@ func NewESTService(issuerID string, issuer IssuerConnector, auditService *AuditS
 // SetProfileID constrains EST enrollments to a specific certificate profile.
 func (s *ESTService) SetProfileID(profileID string) {
 	s.profileID = profileID
+}
+
+// SetProfileRepo sets the profile repository for crypto policy enforcement during enrollment.
+func (s *ESTService) SetProfileRepo(repo repository.CertificateProfileRepository) {
+	s.profileRepo = repo
 }
 
 // GetCACerts returns the PEM-encoded CA certificate chain for this EST server.
@@ -109,15 +116,38 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 		sans = append(sans, uri.String())
 	}
 
+	// Validate CSR key algorithm/size against profile (crypto policy enforcement)
+	var profile *domain.CertificateProfile
+	var ekus []string
+	if s.profileID != "" && s.profileRepo != nil {
+		if p, profileErr := s.profileRepo.Get(ctx, s.profileID); profileErr == nil && p != nil {
+			profile = p
+			ekus = profile.AllowedEKUs
+		}
+	}
+	if _, csrErr := ValidateCSRAgainstProfile(csrPEM, profile); csrErr != nil {
+		s.logger.Error("EST enrollment rejected: crypto policy violation",
+			"action", auditAction,
+			"common_name", commonName,
+			"error", csrErr)
+		return nil, fmt.Errorf("EST enrollment rejected: %w", csrErr)
+	}
+
 	s.logger.Info("EST enrollment request",
 		"action", auditAction,
 		"common_name", commonName,
 		"sans", strings.Join(sans, ","),
 		"issuer", s.issuerID)
 
+	// Resolve MaxTTL from profile
+	var maxTTLSeconds int
+	if profile != nil {
+		maxTTLSeconds = profile.MaxTTLSeconds
+	}
+
 	// Issue the certificate via the configured issuer connector
-	// EST enrollments use default EKUs (nil = serverAuth + clientAuth fallback in connector)
-	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, nil)
+	// EST enrollments use profile EKUs if available, otherwise default (serverAuth + clientAuth fallback)
+	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
 	if err != nil {
 		s.logger.Error("EST enrollment failed",
 			"action", auditAction,

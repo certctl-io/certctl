@@ -148,6 +148,14 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		"common_name", request.CommonName,
 		"san_count", len(request.SANs))
 
+	// MaxTTLSeconds is advisory for script-based issuers — the sign script controls validity.
+	// Log a warning so operators know the profile TTL cap isn't enforced server-side.
+	if request.MaxTTLSeconds > 0 {
+		c.logger.Warn("MaxTTLSeconds specified but OpenSSL/custom CA delegates signing to external script; TTL cap is advisory only",
+			"max_ttl_seconds", request.MaxTTLSeconds,
+			"common_name", request.CommonName)
+	}
+
 	// Write CSR to a temporary file
 	csrFile, err := c.writeTempFile([]byte(request.CSRPEM), "csr-")
 	if err != nil {

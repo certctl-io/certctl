@@ -9,6 +9,7 @@ import (
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // SCEPService implements the SCEP (RFC 8894) enrollment protocol.
@@ -20,6 +21,7 @@ type SCEPService struct {
 	auditService      *AuditService
 	logger            *slog.Logger
 	profileID         string // optional: constrain enrollments to a specific profile
+	profileRepo       repository.CertificateProfileRepository
 	challengePassword string // shared secret for enrollment authentication
 }
 
@@ -37,6 +39,11 @@ func NewSCEPService(issuerID string, issuer IssuerConnector, auditService *Audit
 // SetProfileID constrains SCEP enrollments to a specific certificate profile.
 func (s *SCEPService) SetProfileID(profileID string) {
 	s.profileID = profileID
+}
+
+// SetProfileRepo sets the profile repository for crypto policy enforcement during enrollment.
+func (s *SCEPService) SetProfileRepo(repo repository.CertificateProfileRepository) {
+	s.profileRepo = repo
 }
 
 // GetCACaps returns the capabilities of this SCEP server.
@@ -111,6 +118,24 @@ func (s *SCEPService) processEnrollment(ctx context.Context, csrPEM string, tran
 		sans = append(sans, uri.String())
 	}
 
+	// Validate CSR key algorithm/size against profile (crypto policy enforcement)
+	var profile *domain.CertificateProfile
+	var ekus []string
+	if s.profileID != "" && s.profileRepo != nil {
+		if p, profileErr := s.profileRepo.Get(ctx, s.profileID); profileErr == nil && p != nil {
+			profile = p
+			ekus = profile.AllowedEKUs
+		}
+	}
+	if _, csrErr := ValidateCSRAgainstProfile(csrPEM, profile); csrErr != nil {
+		s.logger.Error("SCEP enrollment rejected: crypto policy violation",
+			"action", auditAction,
+			"common_name", commonName,
+			"transaction_id", transactionID,
+			"error", csrErr)
+		return nil, fmt.Errorf("SCEP enrollment rejected: %w", csrErr)
+	}
+
 	s.logger.Info("SCEP enrollment request",
 		"action", auditAction,
 		"common_name", commonName,
@@ -118,9 +143,15 @@ func (s *SCEPService) processEnrollment(ctx context.Context, csrPEM string, tran
 		"transaction_id", transactionID,
 		"issuer", s.issuerID)
 
+	// Resolve MaxTTL from profile
+	var maxTTLSeconds int
+	if profile != nil {
+		maxTTLSeconds = profile.MaxTTLSeconds
+	}
+
 	// Issue the certificate via the configured issuer connector
-	// SCEP enrollments use default EKUs (nil = serverAuth + clientAuth fallback in connector)
-	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, nil)
+	// SCEP enrollments use profile EKUs if available, otherwise default (serverAuth + clientAuth fallback)
+	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
 	if err != nil {
 		s.logger.Error("SCEP enrollment failed",
 			"action", auditAction,

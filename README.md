@@ -168,7 +168,7 @@ Built for **platform engineering and DevOps teams** managing 10–500+ certifica
 
 **Discovery.** Agents scan filesystems for existing PEM/DER certificates. The network scanner probes TLS endpoints across CIDR ranges without agents. Both feed into a triage workflow — claim, dismiss, or import what you find.
 
-**Policy engine.** Certificate profiles constrain key types, max TTL, and EKUs. Approval workflows pause jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
+**Policy engine.** Certificate profiles constrain key types, max TTL, and EKUs — with crypto policy enforcement that validates every CSR against profile rules before it reaches the issuer. MaxTTL caps are enforced per issuer connector. Approval workflows pause jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
 
 **Enrollment protocols.** EST server (RFC 7030) for device and WiFi enrollment. SCEP server (RFC 8894) for MDM platforms and network devices. S/MIME issuance with email protection EKU.
 

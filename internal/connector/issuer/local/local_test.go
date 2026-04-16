@@ -870,6 +870,156 @@ func TestGenerateCRL_SubCA(t *testing.T) {
 	t.Log("SubCA CRL generated successfully")
 }
 
+// M11c: MaxTTL enforcement tests
+
+func TestIssueCertificate_MaxTTL_CapsValidity(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 365, // would normally be 1 year
+	}
+	connector := local.New(config, logger)
+
+	_, csrPEM, err := generateTestCSR("maxttl.example.com")
+	if err != nil {
+		t.Fatalf("Failed to generate CSR: %v", err)
+	}
+
+	// MaxTTLSeconds = 3600 (1 hour) should cap the 365-day validity
+	req := issuer.IssuanceRequest{
+		CommonName:    "maxttl.example.com",
+		SANs:          []string{"maxttl.example.com"},
+		CSRPEM:        csrPEM,
+		MaxTTLSeconds: 3600,
+	}
+
+	result, err := connector.IssueCertificate(ctx, req)
+	if err != nil {
+		t.Fatalf("IssueCertificate failed: %v", err)
+	}
+
+	// Cert validity should be ~1 hour, not 365 days
+	duration := result.NotAfter.Sub(result.NotBefore)
+	if duration > 2*time.Hour {
+		t.Errorf("expected validity ≤1h, got %v", duration)
+	}
+	if duration < 30*time.Minute {
+		t.Errorf("expected validity ≥30m, got %v (too short)", duration)
+	}
+
+	t.Logf("MaxTTL capped: validity=%v (NotBefore=%v, NotAfter=%v)", duration, result.NotBefore, result.NotAfter)
+}
+
+func TestIssueCertificate_MaxTTL_ZeroMeansNoCap(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	_, csrPEM, err := generateTestCSR("nocap.example.com")
+	if err != nil {
+		t.Fatalf("Failed to generate CSR: %v", err)
+	}
+
+	req := issuer.IssuanceRequest{
+		CommonName:    "nocap.example.com",
+		SANs:          []string{"nocap.example.com"},
+		CSRPEM:        csrPEM,
+		MaxTTLSeconds: 0, // no cap
+	}
+
+	result, err := connector.IssueCertificate(ctx, req)
+	if err != nil {
+		t.Fatalf("IssueCertificate failed: %v", err)
+	}
+
+	// Should get ~30 days as configured
+	duration := result.NotAfter.Sub(result.NotBefore)
+	if duration < 29*24*time.Hour {
+		t.Errorf("expected ~30 day validity without MaxTTL cap, got %v", duration)
+	}
+
+	t.Logf("No MaxTTL cap: validity=%v", duration)
+}
+
+func TestIssueCertificate_MaxTTL_LargerThanValidityDays_NoCap(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 30,
+	}
+	connector := local.New(config, logger)
+
+	_, csrPEM, err := generateTestCSR("larger.example.com")
+	if err != nil {
+		t.Fatalf("Failed to generate CSR: %v", err)
+	}
+
+	// MaxTTL = 365 days, but ValidityDays = 30. The shorter one wins.
+	req := issuer.IssuanceRequest{
+		CommonName:    "larger.example.com",
+		SANs:          []string{"larger.example.com"},
+		CSRPEM:        csrPEM,
+		MaxTTLSeconds: 365 * 24 * 3600, // 365 days
+	}
+
+	result, err := connector.IssueCertificate(ctx, req)
+	if err != nil {
+		t.Fatalf("IssueCertificate failed: %v", err)
+	}
+
+	// Should still be ~30 days (ValidityDays wins when shorter)
+	duration := result.NotAfter.Sub(result.NotBefore)
+	if duration > 31*24*time.Hour {
+		t.Errorf("expected ~30 day validity (ValidityDays wins), got %v", duration)
+	}
+
+	t.Logf("MaxTTL larger than ValidityDays: validity=%v (ValidityDays wins)", duration)
+}
+
+func TestRenewCertificate_MaxTTL_CapsValidity(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	config := &local.Config{
+		CACommonName: "Test CA",
+		ValidityDays: 365,
+	}
+	connector := local.New(config, logger)
+
+	_, csrPEM, err := generateTestCSR("renew-maxttl.example.com")
+	if err != nil {
+		t.Fatalf("Failed to generate CSR: %v", err)
+	}
+
+	req := issuer.RenewalRequest{
+		CommonName:    "renew-maxttl.example.com",
+		SANs:          []string{"renew-maxttl.example.com"},
+		CSRPEM:        csrPEM,
+		MaxTTLSeconds: 7200, // 2 hours
+	}
+
+	result, err := connector.RenewCertificate(ctx, req)
+	if err != nil {
+		t.Fatalf("RenewCertificate failed: %v", err)
+	}
+
+	duration := result.NotAfter.Sub(result.NotBefore)
+	if duration > 3*time.Hour {
+		t.Errorf("expected validity ≤2h for renewal MaxTTL, got %v", duration)
+	}
+
+	t.Logf("Renewal MaxTTL capped: validity=%v", duration)
+}
+
 func TestSignOCSPResponse_SubCA(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
 	ctx := context.Background()

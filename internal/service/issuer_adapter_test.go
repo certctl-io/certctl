@@ -140,7 +140,7 @@ func TestIssuerConnectorAdapter_IssueCertificate_Success(t *testing.T) {
 
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	result, err := adapter.IssueCertificate(ctx, "example.com", []string{"www.example.com"}, "-----BEGIN CERTIFICATE REQUEST-----\nCSR\n-----END CERTIFICATE REQUEST-----", nil)
+	result, err := adapter.IssueCertificate(ctx, "example.com", []string{"www.example.com"}, "-----BEGIN CERTIFICATE REQUEST-----\nCSR\n-----END CERTIFICATE REQUEST-----", nil, 0)
 
 	if err != nil {
 		t.Fatalf("IssueCertificate failed: %v", err)
@@ -177,7 +177,7 @@ func TestIssuerConnectorAdapter_IssueCertificate_Error(t *testing.T) {
 
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	result, err := adapter.IssueCertificate(ctx, "example.com", []string{}, "csr", nil)
+	result, err := adapter.IssueCertificate(ctx, "example.com", []string{}, "csr", nil, 0)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -211,7 +211,7 @@ func TestIssuerConnectorAdapter_IssueCertificate_RequestTranslation(t *testing.T
 	sans := []string{"www.test.example.com", "api.test.example.com"}
 	csrPEM := "-----BEGIN CERTIFICATE REQUEST-----\nCSR\n-----END CERTIFICATE REQUEST-----"
 
-	_, err := adapter.IssueCertificate(ctx, commonName, sans, csrPEM, nil)
+	_, err := adapter.IssueCertificate(ctx, commonName, sans, csrPEM, nil, 0)
 
 	if err != nil {
 		t.Fatalf("IssueCertificate failed: %v", err)
@@ -261,7 +261,7 @@ func TestIssuerConnectorAdapter_RenewCertificate_Success(t *testing.T) {
 
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	result, err := adapter.RenewCertificate(ctx, "example.com", []string{"www.example.com"}, "-----BEGIN CERTIFICATE REQUEST-----\nCSR\n-----END CERTIFICATE REQUEST-----", nil)
+	result, err := adapter.RenewCertificate(ctx, "example.com", []string{"www.example.com"}, "-----BEGIN CERTIFICATE REQUEST-----\nCSR\n-----END CERTIFICATE REQUEST-----", nil, 0)
 
 	if err != nil {
 		t.Fatalf("RenewCertificate failed: %v", err)
@@ -298,7 +298,7 @@ func TestIssuerConnectorAdapter_RenewCertificate_Error(t *testing.T) {
 
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	result, err := adapter.RenewCertificate(ctx, "example.com", []string{}, "csr", nil)
+	result, err := adapter.RenewCertificate(ctx, "example.com", []string{}, "csr", nil, 0)
 
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -332,7 +332,7 @@ func TestIssuerConnectorAdapter_RenewCertificate_RequestTranslation(t *testing.T
 	sans := []string{"www.renew.example.com"}
 	csrPEM := "-----BEGIN CERTIFICATE REQUEST-----\nRENEW-CSR\n-----END CERTIFICATE REQUEST-----"
 
-	_, err := adapter.RenewCertificate(ctx, commonName, sans, csrPEM, nil)
+	_, err := adapter.RenewCertificate(ctx, commonName, sans, csrPEM, nil, 0)
 
 	if err != nil {
 		t.Fatalf("RenewCertificate failed: %v", err)

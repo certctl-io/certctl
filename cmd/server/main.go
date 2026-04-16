@@ -328,6 +328,7 @@ func main() {
 			os.Exit(1)
 		}
 		estService := service.NewESTService(cfg.EST.IssuerID, issuerConn, auditService, logger)
+		estService.SetProfileRepo(profileRepo)
 		if cfg.EST.ProfileID != "" {
 			estService.SetProfileID(cfg.EST.ProfileID)
 		}
@@ -347,6 +348,7 @@ func main() {
 			os.Exit(1)
 		}
 		scepService := service.NewSCEPService(cfg.SCEP.IssuerID, issuerConn, auditService, logger, cfg.SCEP.ChallengePassword)
+		scepService.SetProfileRepo(profileRepo)
 		if cfg.SCEP.ProfileID != "" {
 			scepService.SetProfileID(cfg.SCEP.ProfileID)
 		}

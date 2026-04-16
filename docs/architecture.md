@@ -393,7 +393,11 @@ sequenceDiagram
     Note over A: Agent deploys using locally-held private key
 ```
 
-**Profile enforcement:** If the certificate is assigned to a profile (`certificate_profile_id`), the profile's `allowed_key_algorithms` and `max_validity_days` constraints are checked during CSR validation. A CSR with a disallowed key type or a validity period exceeding the profile maximum is rejected before reaching the issuer connector.
+**Profile enforcement (M11c):** Crypto policy enforcement is wired into all four issuance paths: renewal (server-side and agent CSR), agent fallback CSR signing, EST enrollment (RFC 7030), and SCEP enrollment (RFC 8894). At each path, the service layer resolves the certificate's profile and calls `ValidateCSRAgainstProfile()` to check the CSR key algorithm and minimum key size against the profile's `allowed_key_algorithms` rules. A CSR with a disallowed key type or insufficient key size is rejected before reaching the issuer connector.
+
+**MaxTTL enforcement:** When a profile specifies `max_ttl_seconds`, the value is forwarded through the service-layer `IssuerConnector` interface to the connector layer via `MaxTTLSeconds` on `IssuanceRequest` and `RenewalRequest`. Each issuer connector enforces the cap according to its capabilities: the Local CA caps `NotAfter` directly, Vault overrides its TTL string, step-ca caps `NotAfter` with zero-value handling, and OpenSSL logs an advisory warning (script-based signing can't enforce server-side). For CAs that control validity themselves (ACME, DigiCert, Sectigo, Google CAS, AWS ACM PCA), MaxTTLSeconds passes through but the CA makes the final decision.
+
+**Key metadata persistence:** Certificate versions record `key_algorithm` and `key_size` extracted from the CSR during issuance. This metadata enables post-hoc auditing — operators can verify that all issued certificates comply with the key requirements in effect at the time of issuance.
 
 #### Server-Side Key Generation (Demo Only)
 

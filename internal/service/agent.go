@@ -165,14 +165,29 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 		// Fallback: direct issuer signing (no AwaitingCSR job — ad-hoc CSR submission)
 		connector, ok := s.issuerRegistry.Get(cert.IssuerID)
 		if ok {
-			// Resolve EKUs from the certificate profile if available
+			// Resolve profile for EKU resolution and crypto policy enforcement
 			var ekus []string
+			var profile *domain.CertificateProfile
 			if cert.CertificateProfileID != "" && s.profileRepo != nil {
-				if profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && profile != nil {
+				if p, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && p != nil {
+					profile = p
 					ekus = profile.AllowedEKUs
 				}
 			}
-			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM), ekus)
+
+			// Validate CSR key algorithm/size against profile (crypto policy enforcement)
+			csrInfo, csrErr := ValidateCSRAgainstProfile(string(csrPEM), profile)
+			if csrErr != nil {
+				return fmt.Errorf("CSR validation failed: %w", csrErr)
+			}
+
+			// Resolve MaxTTL from profile
+			var maxTTLSeconds int
+			if profile != nil {
+				maxTTLSeconds = profile.MaxTTLSeconds
+			}
+
+			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM), ekus, maxTTLSeconds)
 			if err != nil {
 				return fmt.Errorf("issuer signing failed: %w", err)
 			}
@@ -187,6 +202,10 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 				PEMChain:          result.CertPEM + "\n" + result.ChainPEM,
 				CSRPEM:            string(csrPEM),
 				CreatedAt:         time.Now(),
+			}
+			if csrInfo != nil {
+				version.KeyAlgorithm = csrInfo.KeyAlgorithm
+				version.KeySize = csrInfo.KeySize
 			}
 
 			if err := s.certRepo.CreateVersion(ctx, version); err != nil {

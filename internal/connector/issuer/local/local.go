@@ -184,8 +184,8 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
-	// Generate certificate with EKUs from request
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs)
+	// Generate certificate with EKUs and MaxTTL from request
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -242,8 +242,8 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
-	// Generate certificate with EKUs from request
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs)
+	// Generate certificate with EKUs and MaxTTL from request
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -468,7 +468,8 @@ func parsePrivateKey(block *pem.Block) (crypto.Signer, error) {
 // generateCertificate creates an X.509 certificate signed by the local CA.
 // It uses the CSR subject and adds any additional SANs from the request.
 // If ekus is non-empty, those EKUs are used instead of the default serverAuth+clientAuth.
-func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string, ekus []string) (*x509.Certificate, string, string, error) {
+// If maxTTLSeconds > 0, the certificate validity is capped to that duration.
+func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string, ekus []string, maxTTLSeconds int) (*x509.Certificate, string, string, error) {
 	// Generate random serial number
 	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 159))
 	if err != nil {
@@ -512,11 +513,21 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 
 	// Create certificate template
 	now := time.Now()
+	notAfter := now.AddDate(0, 0, c.config.ValidityDays)
+
+	// Cap validity to MaxTTLSeconds if profile specifies a maximum
+	if maxTTLSeconds > 0 {
+		maxNotAfter := now.Add(time.Duration(maxTTLSeconds) * time.Second)
+		if maxNotAfter.Before(notAfter) {
+			notAfter = maxNotAfter
+		}
+	}
+
 	template := &x509.Certificate{
 		SerialNumber:   serialNum,
 		Subject:        csr.Subject,
 		NotBefore:      now,
-		NotAfter:       now.AddDate(0, 0, c.config.ValidityDays),
+		NotAfter:       notAfter,
 		KeyUsage:       keyUsage,
 		ExtKeyUsage:    resolvedEKUs,
 		DNSNames:       dnsNames,

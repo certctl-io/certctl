@@ -9,6 +9,7 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 )
 
+
 func TestRegisterAgent(t *testing.T) {
 	ctx := context.Background()
 	agentRepo := &mockAgentRepo{
@@ -484,7 +485,7 @@ func TestSubmitCSR(t *testing.T) {
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
-	csrPEM := "-----BEGIN CERTIFICATE REQUEST-----\ntest-csr\n-----END CERTIFICATE REQUEST-----"
+	csrPEM := generateTestCSR(t, "ECDSA", 256)
 	err := agentService.SubmitCSR(ctx, "agent-001", "cert-001", []byte(csrPEM))
 	if err != nil {
 		t.Fatalf("SubmitCSR failed: %v", err)

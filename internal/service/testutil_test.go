@@ -713,7 +713,7 @@ type mockIssuerConnector struct {
 	getRenewalInfoErr    error
 }
 
-func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error) {
+func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -730,11 +730,11 @@ func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName s
 	}, nil
 }
 
-func (m *mockIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error) {
+func (m *mockIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
 	if m.Err != nil {
 		return nil, m.Err
 	}
-	return m.IssueCertificate(ctx, commonName, sans, csrPEM, ekus)
+	return m.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
 }
 
 func (m *mockIssuerConnector) RevokeCertificate(ctx context.Context, serial string, reason string) error {

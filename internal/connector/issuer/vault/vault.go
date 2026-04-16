@@ -160,11 +160,17 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		"common_name", request.CommonName,
 		"san_count", len(request.SANs))
 
+	// Determine TTL — cap to MaxTTLSeconds from profile if specified
+	ttl := c.config.TTL
+	if request.MaxTTLSeconds > 0 {
+		ttl = fmt.Sprintf("%ds", request.MaxTTLSeconds)
+	}
+
 	// Build the sign request body
 	signBody := map[string]interface{}{
 		"csr":         request.CSRPEM,
 		"common_name": request.CommonName,
-		"ttl":         c.config.TTL,
+		"ttl":         ttl,
 	}
 
 	if len(request.SANs) > 0 {
@@ -267,10 +273,11 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		"san_count", len(request.SANs))
 
 	return c.IssueCertificate(ctx, issuer.IssuanceRequest{
-		CommonName: request.CommonName,
-		SANs:       request.SANs,
-		CSRPEM:     request.CSRPEM,
-		EKUs:       request.EKUs,
+		CommonName:    request.CommonName,
+		SANs:          request.SANs,
+		CSRPEM:        request.CSRPEM,
+		EKUs:          request.EKUs,
+		MaxTTLSeconds: request.MaxTTLSeconds,
 	})
 }
 

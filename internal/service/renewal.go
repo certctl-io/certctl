@@ -43,9 +43,11 @@ func (s *RenewalService) SetTargetRepo(repo repository.TargetRepository) {
 // inversion. Use IssuerConnectorAdapter to bridge between the two.
 type IssuerConnector interface {
 	// IssueCertificate issues a new certificate using the provided CSR PEM.
-	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error)
+	// maxTTLSeconds caps the certificate validity period (0 = no cap, use issuer default).
+	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error)
 	// RenewCertificate renews a certificate using the provided CSR PEM.
-	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string) (*IssuanceResult, error)
+	// maxTTLSeconds caps the certificate validity period (0 = no cap, use issuer default).
+	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error)
 	// RevokeCertificate revokes a certificate by serial number with an optional reason.
 	RevokeCertificate(ctx context.Context, serial string, reason string) error
 	// GenerateCRL generates a DER-encoded X.509 CRL from the given revocation entries.
@@ -444,16 +446,18 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		Bytes: x509.MarshalPKCS1PrivateKey(privKey),
 	}))
 
-	// Resolve EKUs from the certificate profile
+	// Resolve EKUs and MaxTTL from the certificate profile
 	var ekus []string
+	var maxTTLSeconds int
 	if cert.CertificateProfileID != "" && s.profileRepo != nil {
 		if profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && profile != nil {
 			ekus = profile.AllowedEKUs
+			maxTTLSeconds = profile.MaxTTLSeconds
 		}
 	}
 
 	// Call issuer connector to renew
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer renewal failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
@@ -560,14 +564,18 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	// Resolve EKUs from the certificate profile (for S/MIME, email certs, etc.)
+	// Resolve EKUs and MaxTTL from the certificate profile (for S/MIME, email certs, etc.)
 	var ekus []string
-	if profile != nil && len(profile.AllowedEKUs) > 0 {
-		ekus = profile.AllowedEKUs
+	var maxTTLSeconds int
+	if profile != nil {
+		if len(profile.AllowedEKUs) > 0 {
+			ekus = profile.AllowedEKUs
+		}
+		maxTTLSeconds = profile.MaxTTLSeconds
 	}
 
 	// Sign the agent-submitted CSR via issuer
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer signing failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {

@@ -159,6 +159,8 @@ The Local CA issuer signs certificates using Go's `crypto/x509` library. It supp
 
 **Extended Key Usage (EKU) support (M27):** The Local CA respects EKU constraints from certificate profiles and adjusts key usage flags accordingly. For S/MIME certificates (emailProtection EKU), it uses `DigitalSignature | ContentCommitment` instead of the TLS default. For TLS certificates (serverAuth/clientAuth EKU), it uses `DigitalSignature | KeyEncipherment`. This enables support for multiple certificate types — TLS, S/MIME, code signing, timestamping — from a single CA.
 
+**MaxTTL enforcement (M11c):** When a certificate profile defines a maximum TTL, the Local CA caps the `NotAfter` field to `min(validity_days, maxTTL)`. This ensures certificates never exceed the profile's configured lifetime regardless of the issuer's `validity_days` setting.
+
 Configuration:
 ```json
 {
@@ -287,6 +289,8 @@ The connector is registered in the issuer registry under `iss-stepca`. step-ca a
 
 **Note:** step-ca-issued certificates rely on step-ca's own CRL/OCSP infrastructure. certctl's local CRL/OCSP endpoints (`GET /api/v1/crl/{issuer_id}` and `GET /api/v1/ocsp/{issuer_id}/{serial}`) are populated from step-ca's revocation data if available, but clients should validate against step-ca's endpoints for the authoritative status.
 
+**MaxTTL enforcement (M11c):** When a certificate profile defines a maximum TTL, the step-ca connector caps the `NotAfter` field to ensure the issued certificate does not exceed the profile limit, regardless of the step-ca provisioner's own maximum.
+
 Location: `internal/connector/issuer/stepca/stepca.go`
 
 ### OpenSSL / Custom CA
@@ -342,6 +346,8 @@ The Vault PKI connector integrates with HashiCorp Vault's PKI secrets engine usi
 The connector is registered in the issuer registry under `iss-vault`. Vault issues certificates synchronously via the `/v1/{mount}/sign/{role}` API with `X-Vault-Token` header authentication. The issued certificate is parsed to extract serial number, validity dates, and chain information.
 
 **Note:** CRL and OCSP are managed by Vault itself. Clients should validate certificate status against Vault's own CRL/OCSP endpoints (`GET /v1/{mount}/crl` and Vault's OCSP responder). certctl does not generate local CRL/OCSP for Vault-issued certificates. Revocation is recorded locally but Vault is the authoritative source.
+
+**MaxTTL enforcement (M11c):** When a certificate profile defines a maximum TTL, the Vault connector overrides the TTL string in the signing request to ensure the issued certificate does not exceed the profile limit. This is applied before Vault's own role-level max TTL.
 
 Location: `internal/connector/issuer/vault/vault.go`
 

@@ -51,10 +51,11 @@ type RenewalInfoResult struct {
 
 // IssuanceRequest contains the parameters for issuing a new certificate.
 type IssuanceRequest struct {
-	CommonName string   `json:"common_name"`
-	SANs       []string `json:"sans"`
-	CSRPEM     string   `json:"csr_pem"`
-	EKUs       []string `json:"ekus,omitempty"` // e.g., "serverAuth", "clientAuth", "emailProtection"
+	CommonName    string   `json:"common_name"`
+	SANs          []string `json:"sans"`
+	CSRPEM        string   `json:"csr_pem"`
+	EKUs          []string `json:"ekus,omitempty"`           // e.g., "serverAuth", "clientAuth", "emailProtection"
+	MaxTTLSeconds int      `json:"max_ttl_seconds,omitempty"` // 0 = no cap (use issuer default)
 }
 
 // IssuanceResult contains the result of a successful certificate issuance.
@@ -69,11 +70,12 @@ type IssuanceResult struct {
 
 // RenewalRequest contains the parameters for renewing a certificate.
 type RenewalRequest struct {
-	CommonName string   `json:"common_name"`
-	SANs       []string `json:"sans"`
-	CSRPEM     string   `json:"csr_pem"`
-	EKUs       []string `json:"ekus,omitempty"` // e.g., "serverAuth", "clientAuth", "emailProtection"
-	OrderID    *string  `json:"order_id,omitempty"`
+	CommonName    string   `json:"common_name"`
+	SANs          []string `json:"sans"`
+	CSRPEM        string   `json:"csr_pem"`
+	EKUs          []string `json:"ekus,omitempty"`           // e.g., "serverAuth", "clientAuth", "emailProtection"
+	MaxTTLSeconds int      `json:"max_ttl_seconds,omitempty"` // 0 = no cap (use issuer default)
+	OrderID       *string  `json:"order_id,omitempty"`
 }
 
 // RevocationRequest contains the parameters for revoking a certificate.
