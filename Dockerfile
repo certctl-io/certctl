@@ -6,7 +6,9 @@ FROM node:20-alpine AS frontend
 WORKDIR /app/web
 
 COPY web/ .
-RUN npm ci --include=dev && npm run build
+RUN npm ci --include=dev || npm ci --include=dev && \
+    node_modules/.bin/tsc --version && \
+    npm run build
 
 # Stage 2: Build Go binary
 FROM golang:1.25-alpine AS builder
