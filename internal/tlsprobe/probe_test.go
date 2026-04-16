@@ -118,12 +118,6 @@ func TestCertKeyInfo_ECDSA(t *testing.T) {
 	}
 }
 
-// Helper: createTestCert creates a self-signed test certificate with RSA key.
-func createTestCert(t *testing.T, cn string) *x509.Certificate {
-	cert, _ := createTestCertWithKey(t, cn, "rsa")
-	return cert
-}
-
 // Helper: createTestCertWithKey creates a test certificate with specified key type.
 func createTestCertWithKey(t *testing.T, cn, keyType string) (*x509.Certificate, interface{}) {
 	var privKey interface{}
