@@ -89,7 +89,45 @@ func main() {
 		encryptionKey = crypto.DeriveKey(cfg.Encryption.ConfigEncryptionKey)
 		logger.Info("config encryption enabled (AES-256-GCM)")
 	} else {
-		logger.Warn("CERTCTL_CONFIG_ENCRYPTION_KEY not set — issuer configs stored in plaintext (not recommended for production)")
+		// C-2 fix: fail closed at startup when database-sourced issuer or target
+		// rows exist without a configured encryption key. Previously the server
+		// would emit a one-line warning and silently persist new GUI-created
+		// configs as plaintext (CWE-311). Refuse to start instead: the operator
+		// must either configure CERTCTL_CONFIG_ENCRYPTION_KEY or remove the
+		// vulnerable rows before the control plane can boot.
+		ctx := context.Background()
+		dbIssuers, ierr := issuerRepo.List(ctx)
+		if ierr != nil {
+			logger.Error("startup check: failed to list issuers", "error", ierr)
+			os.Exit(1)
+		}
+		dbTargets, terr := targetRepo.List(ctx)
+		if terr != nil {
+			logger.Error("startup check: failed to list targets", "error", terr)
+			os.Exit(1)
+		}
+		var dbIssuerCount, dbTargetCount int
+		for _, iss := range dbIssuers {
+			if iss != nil && iss.Source == "database" {
+				dbIssuerCount++
+			}
+		}
+		for _, tgt := range dbTargets {
+			if tgt != nil && tgt.Source == "database" {
+				dbTargetCount++
+			}
+		}
+		if dbIssuerCount > 0 || dbTargetCount > 0 {
+			logger.Error(
+				"startup refused: CERTCTL_CONFIG_ENCRYPTION_KEY is not set but database-sourced configs exist "+
+					"(would expose sensitive fields as plaintext, CWE-311). "+
+					"Set the encryption key or remove the affected rows before restarting.",
+				"database_sourced_issuers", dbIssuerCount,
+				"database_sourced_targets", dbTargetCount,
+			)
+			os.Exit(1)
+		}
+		logger.Warn("CERTCTL_CONFIG_ENCRYPTION_KEY not set — env-seeded issuers will be stored in plaintext; GUI-created issuers and targets will be rejected until a key is configured")
 	}
 
 	issuerRegistry := service.NewIssuerRegistry(logger)

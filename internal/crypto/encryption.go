@@ -6,11 +6,28 @@ import (
 	"crypto/cipher"
 	"crypto/rand"
 	"crypto/sha256"
+	"errors"
 	"fmt"
 	"io"
 
 	"golang.org/x/crypto/pbkdf2"
 )
+
+// ErrEncryptionKeyRequired is returned by EncryptIfKeySet and DecryptIfKeySet when
+// the caller provides an empty key but the data on the wire requires protection.
+//
+// Historically these helpers silently returned plaintext when no key was configured,
+// which produced a data-at-rest confidentiality bypass (CWE-311): sensitive fields
+// in dynamically-configured issuer and target records (source='database') were
+// persisted to PostgreSQL without any encryption whenever the operator forgot to
+// set CERTCTL_CONFIG_ENCRYPTION_KEY. Callers could not distinguish the encrypted
+// and plaintext branches at runtime, so the only visible signal was a warning
+// line emitted once at startup.
+//
+// The fix is to fail closed: EncryptIfKeySet/DecryptIfKeySet now require a key
+// whenever they are invoked on sensitive material, and the server refuses to
+// start if any source='database' rows already exist without a configured key.
+var ErrEncryptionKeyRequired = errors.New("crypto: CERTCTL_CONFIG_ENCRYPTION_KEY is required to encrypt or decrypt sensitive config")
 
 // Encrypt encrypts plaintext using AES-256-GCM with a random 12-byte nonce prepended to the output.
 // The key must be exactly 32 bytes (AES-256). Returns [12-byte nonce][ciphertext+tag].
@@ -81,11 +98,17 @@ func DeriveKey(passphrase string) []byte {
 	return pbkdf2.Key([]byte(passphrase), salt, 100000, 32, sha256.New)
 }
 
-// EncryptIfKeySet encrypts plaintext if a key is provided, otherwise returns plaintext unchanged.
-// This supports the development/demo fallback where encryption isn't configured.
+// EncryptIfKeySet encrypts plaintext with the supplied 32-byte AES-256 key.
+//
+// The second return value is always true when err == nil — the "wasEncrypted"
+// flag is retained for source-compatibility with callers that previously used it
+// to log provenance. Callers MUST handle err: passing an empty key now returns
+// ErrEncryptionKeyRequired rather than silently emitting plaintext. See the
+// package-level ErrEncryptionKeyRequired documentation for the history behind
+// this behavior change.
 func EncryptIfKeySet(plaintext []byte, key []byte) ([]byte, bool, error) {
 	if len(key) == 0 {
-		return plaintext, false, nil
+		return nil, false, ErrEncryptionKeyRequired
 	}
 	encrypted, err := Encrypt(plaintext, key)
 	if err != nil {
@@ -94,10 +117,17 @@ func EncryptIfKeySet(plaintext []byte, key []byte) ([]byte, bool, error) {
 	return encrypted, true, nil
 }
 
-// DecryptIfKeySet decrypts ciphertext if a key is provided, otherwise returns ciphertext unchanged.
+// DecryptIfKeySet decrypts ciphertext with the supplied 32-byte AES-256 key.
+//
+// Passing an empty key now returns ErrEncryptionKeyRequired. Callers that
+// legitimately store plaintext (e.g. env-seeded source='env' rows that keep
+// the raw JSON in the unencrypted `config` column) must branch on the presence
+// of the ciphertext themselves rather than relying on this helper to silently
+// pass bytes through. See the package-level ErrEncryptionKeyRequired
+// documentation for the history behind this behavior change.
 func DecryptIfKeySet(ciphertext []byte, key []byte) ([]byte, error) {
 	if len(key) == 0 {
-		return ciphertext, nil
+		return nil, ErrEncryptionKeyRequired
 	}
 	return Decrypt(ciphertext, key)
 }

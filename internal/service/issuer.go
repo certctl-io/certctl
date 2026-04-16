@@ -327,8 +327,20 @@ func (s *IssuerService) SeedFromEnvVars(ctx context.Context, cfg *config.Config)
 	seeds := s.buildEnvVarSeeds(cfg)
 	seeded := 0
 	for _, seed := range seeds {
-		// Encrypt the config if key is set
-		if len(seed.Config) > 0 {
+		// Encrypt the config only when an encryption key is configured.
+		//
+		// Env-seeded issuers carry Source="env" and are reconstructable on every
+		// boot from process environment, so persisting their config in plaintext
+		// adds no new exposure: the same bytes already live in the operator's
+		// deployment manifest. When no key is configured we therefore leave
+		// EncryptedConfig nil and keep the raw JSON in the `config` column —
+		// IssuerRegistry.Rebuild falls through to `cfg.Config` when there is no
+		// ciphertext to decrypt, so registry load still works.
+		//
+		// Database-sourced rows (Source="database") never reach this branch:
+		// they are created through the GUI/API write paths, which require the
+		// encryption key and fail closed via crypto.ErrEncryptionKeyRequired.
+		if len(seed.Config) > 0 && len(s.encryptionKey) > 0 {
 			encrypted, _, encErr := crypto.EncryptIfKeySet([]byte(seed.Config), s.encryptionKey)
 			if encErr != nil {
 				s.logger.Error("failed to encrypt seed config", "id", seed.ID, "error", encErr)

@@ -66,7 +66,12 @@ func TestCertificateLifecycle(t *testing.T) {
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
-	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, nil, slog.Default())
+	// 32-byte AES-256 test key — C-2 remediation makes IssuerService fail closed
+	// without a configured CERTCTL_CONFIG_ENCRYPTION_KEY. Happy-path CRUD tests
+	// must supply a real key so the encrypt path runs instead of returning
+	// ErrEncryptionKeyRequired.
+	testEncryptionKey := []byte("0123456789abcdef0123456789abcdef")
+	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, testEncryptionKey, slog.Default())
 
 	// Initialize handlers
 	certificateHandler := handler.NewCertificateHandler(certificateService)

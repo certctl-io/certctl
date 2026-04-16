@@ -18,7 +18,7 @@ func newTestTargetService() (*TargetService, *mockTargetRepo, *mockAuditRepo, *m
 	auditSvc := NewAuditService(auditRepo)
 	agentRepo := &mockAgentRepo{Agents: make(map[string]*domain.Agent), HeartbeatUpdates: make(map[string]time.Time)}
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelError}))
-	return NewTargetService(targetRepo, auditSvc, agentRepo, nil, logger), targetRepo, auditRepo, agentRepo
+	return NewTargetService(targetRepo, auditSvc, agentRepo, testEncryptionKey, logger), targetRepo, auditRepo, agentRepo
 }
 
 func TestTargetService_List_Success(t *testing.T) {

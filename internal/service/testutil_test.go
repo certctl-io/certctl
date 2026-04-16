@@ -12,6 +12,13 @@ import (
 
 var errNotFound = errors.New("not found")
 
+// testEncryptionKey is a deterministic 32-byte AES-256 key for unit tests that
+// exercise IssuerService/TargetService write paths. After the C-2 remediation
+// these services fail closed when no key is configured, so happy-path tests
+// must supply a real key. Using a constant keeps wire-format assertions stable
+// across runs and avoids flaky PBKDF2 timing.
+var testEncryptionKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes
+
 // mockCertRepo is a test implementation of CertificateRepository
 type mockCertRepo struct {
 	Certs              map[string]*domain.ManagedCertificate

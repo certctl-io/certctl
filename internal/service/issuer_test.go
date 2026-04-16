@@ -217,7 +217,7 @@ func TestIssuerService_Create(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 	config := map[string]interface{}{"endpoint": "https://acme.example.com/v2/new-account"}
 	configJSON, _ := json.Marshal(config)
@@ -342,7 +342,7 @@ func TestIssuerService_Update(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 	config := map[string]interface{}{"endpoint": "https://acme.example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -568,7 +568,7 @@ func TestIssuerService_CreateIssuer_HandlerInterface(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 	config := map[string]interface{}{"url": "https://example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -680,7 +680,7 @@ func TestIssuerService_Create_LowercaseType(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 	config := map[string]interface{}{"endpoint": "https://acme.example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -710,7 +710,7 @@ func TestIssuerService_CreateIssuer_LowercaseType(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 	config := map[string]interface{}{"url": "https://example.com"}
 	configJSON, _ := json.Marshal(config)
@@ -752,7 +752,7 @@ func TestIssuerService_Create_M49Types(t *testing.T) {
 			auditService := NewAuditService(auditRepo)
 
 			registry := NewIssuerRegistry(slog.Default())
-			service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+			service := NewIssuerService(repo, auditService, registry, testEncryptionKey, slog.Default())
 
 			config := map[string]interface{}{"api_url": "https://example.com"}
 			configJSON, _ := json.Marshal(config)
