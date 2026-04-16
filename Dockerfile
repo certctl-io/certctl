@@ -5,11 +5,8 @@ FROM node:20-alpine AS frontend
 
 WORKDIR /app/web
 
-COPY web/package.json web/package-lock.json ./
-RUN npm ci --include=dev
-
 COPY web/ .
-RUN npm run build
+RUN npm ci --include=dev && npm run build
 
 # Stage 2: Build Go binary
 FROM golang:1.25-alpine AS builder
