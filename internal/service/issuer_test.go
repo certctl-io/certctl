@@ -614,3 +614,160 @@ func TestIssuerService_DeleteIssuer_HandlerInterface(t *testing.T) {
 		t.Fatalf("DeleteIssuer failed: %v", err)
 	}
 }
+
+// TestNormalizeIssuerType tests case-insensitive issuer type normalization.
+func TestNormalizeIssuerType(t *testing.T) {
+	tests := []struct {
+		input    domain.IssuerType
+		expected domain.IssuerType
+	}{
+		// Canonical values pass through unchanged
+		{domain.IssuerTypeACME, domain.IssuerTypeACME},
+		{domain.IssuerTypeGenericCA, domain.IssuerTypeGenericCA},
+		{domain.IssuerTypeStepCA, domain.IssuerTypeStepCA},
+		{domain.IssuerTypeVault, domain.IssuerTypeVault},
+		{domain.IssuerTypeDigiCert, domain.IssuerTypeDigiCert},
+		{domain.IssuerTypeSectigo, domain.IssuerTypeSectigo},
+		{domain.IssuerTypeGoogleCAS, domain.IssuerTypeGoogleCAS},
+		{domain.IssuerTypeAWSACMPCA, domain.IssuerTypeAWSACMPCA},
+		{domain.IssuerTypeEntrust, domain.IssuerTypeEntrust},
+		{domain.IssuerTypeGlobalSign, domain.IssuerTypeGlobalSign},
+		{domain.IssuerTypeEJBCA, domain.IssuerTypeEJBCA},
+
+		// Lowercase aliases (the actual bug: old frontends send these)
+		{"acme", domain.IssuerTypeACME},
+		{"local", domain.IssuerTypeGenericCA},
+		{"local_ca", domain.IssuerTypeGenericCA},
+		{"stepca", domain.IssuerTypeStepCA},
+		{"openssl", domain.IssuerTypeOpenSSL},
+		{"vaultpki", domain.IssuerTypeVault},
+		{"digicert", domain.IssuerTypeDigiCert},
+		{"sectigo", domain.IssuerTypeSectigo},
+		{"googlecas", domain.IssuerTypeGoogleCAS},
+		{"awsacmpca", domain.IssuerTypeAWSACMPCA},
+		{"entrust", domain.IssuerTypeEntrust},
+		{"globalsign", domain.IssuerTypeGlobalSign},
+		{"ejbca", domain.IssuerTypeEJBCA},
+
+		// Mixed case
+		{"Acme", domain.IssuerTypeACME},
+		{"STEPCA", domain.IssuerTypeStepCA},
+		{"vaultPKI", domain.IssuerTypeVault},
+		{"GenericCA", domain.IssuerTypeGenericCA},
+		{"genericca", domain.IssuerTypeGenericCA},
+
+		// Unknown types pass through for validation to reject
+		{"FakeCA", "FakeCA"},
+		{"", ""},
+	}
+
+	for _, tt := range tests {
+		t.Run(string(tt.input), func(t *testing.T) {
+			result := normalizeIssuerType(tt.input)
+			if result != tt.expected {
+				t.Errorf("normalizeIssuerType(%q) = %q, want %q", tt.input, result, tt.expected)
+			}
+		})
+	}
+}
+
+// TestIssuerService_Create_LowercaseType tests that Create normalizes lowercase type strings.
+func TestIssuerService_Create_LowercaseType(t *testing.T) {
+	ctx := context.Background()
+
+	repo := newMockIssuerRepository()
+	auditRepo := newMockAuditRepository()
+	auditService := NewAuditService(auditRepo)
+
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+
+	config := map[string]interface{}{"endpoint": "https://acme.example.com"}
+	configJSON, _ := json.Marshal(config)
+
+	issuer := &domain.Issuer{
+		Name:    "Test Lowercase ACME",
+		Type:    "acme", // lowercase — this is the bug from issue #7
+		Config:  configJSON,
+		Enabled: true,
+	}
+
+	err := service.Create(ctx, issuer, "user-test")
+	if err != nil {
+		t.Fatalf("Create with lowercase 'acme' should succeed, got: %v", err)
+	}
+
+	// Verify the type was normalized to canonical form
+	if issuer.Type != domain.IssuerTypeACME {
+		t.Errorf("expected type to be normalized to %q, got %q", domain.IssuerTypeACME, issuer.Type)
+	}
+}
+
+// TestIssuerService_CreateIssuer_LowercaseType tests handler interface path with lowercase type.
+func TestIssuerService_CreateIssuer_LowercaseType(t *testing.T) {
+	repo := newMockIssuerRepository()
+	auditRepo := newMockAuditRepository()
+	auditService := NewAuditService(auditRepo)
+
+	registry := NewIssuerRegistry(slog.Default())
+	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+
+	config := map[string]interface{}{"url": "https://example.com"}
+	configJSON, _ := json.Marshal(config)
+
+	issuer := domain.Issuer{
+		Name:    "Lowercase StepCA Test",
+		Type:    "stepca", // lowercase
+		Config:  configJSON,
+		Enabled: true,
+	}
+
+	result, err := service.CreateIssuer(issuer)
+	if err != nil {
+		t.Fatalf("CreateIssuer with lowercase 'stepca' should succeed, got: %v", err)
+	}
+
+	if result.Type != domain.IssuerTypeStepCA {
+		t.Errorf("expected type to be normalized to %q, got %q", domain.IssuerTypeStepCA, result.Type)
+	}
+}
+
+// TestIssuerService_Create_M49Types tests that M49 issuer types (Entrust, GlobalSign, EJBCA) are accepted.
+func TestIssuerService_Create_M49Types(t *testing.T) {
+	ctx := context.Background()
+
+	m49Types := []struct {
+		name       string
+		issuerType domain.IssuerType
+	}{
+		{"Entrust", domain.IssuerTypeEntrust},
+		{"GlobalSign", domain.IssuerTypeGlobalSign},
+		{"EJBCA", domain.IssuerTypeEJBCA},
+	}
+
+	for _, tt := range m49Types {
+		t.Run(tt.name, func(t *testing.T) {
+			repo := newMockIssuerRepository()
+			auditRepo := newMockAuditRepository()
+			auditService := NewAuditService(auditRepo)
+
+			registry := NewIssuerRegistry(slog.Default())
+			service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+
+			config := map[string]interface{}{"api_url": "https://example.com"}
+			configJSON, _ := json.Marshal(config)
+
+			issuer := &domain.Issuer{
+				Name:    "Test " + tt.name,
+				Type:    tt.issuerType,
+				Config:  configJSON,
+				Enabled: true,
+			}
+
+			err := service.Create(ctx, issuer, "user-test")
+			if err != nil {
+				t.Fatalf("Create with type %q should succeed, got: %v", tt.issuerType, err)
+			}
+		})
+	}
+}

@@ -29,84 +29,84 @@ func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.L
 	}
 
 	switch issuerType {
-	case "local", "GenericCA":
+	case "local", "local_ca", "GenericCA", "genericca":
 		var cfg local.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid Local CA config: %w", err)
 		}
 		return local.New(&cfg, logger), nil
 
-	case "ACME":
+	case "ACME", "acme":
 		var cfg acme.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid ACME config: %w", err)
 		}
 		return acme.New(&cfg, logger), nil
 
-	case "StepCA":
+	case "StepCA", "stepca":
 		var cfg stepca.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid step-ca config: %w", err)
 		}
 		return stepca.New(&cfg, logger), nil
 
-	case "OpenSSL":
+	case "OpenSSL", "openssl":
 		var cfg openssl.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid OpenSSL config: %w", err)
 		}
 		return openssl.New(&cfg, logger), nil
 
-	case "VaultPKI":
+	case "VaultPKI", "vaultpki":
 		var cfg vault.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid Vault PKI config: %w", err)
 		}
 		return vault.New(&cfg, logger), nil
 
-	case "DigiCert":
+	case "DigiCert", "digicert":
 		var cfg digicert.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid DigiCert config: %w", err)
 		}
 		return digicert.New(&cfg, logger), nil
 
-	case "Sectigo":
+	case "Sectigo", "sectigo":
 		var cfg sectigo.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid Sectigo config: %w", err)
 		}
 		return sectigo.New(&cfg, logger), nil
 
-	case "GoogleCAS":
+	case "GoogleCAS", "googlecas":
 		var cfg googlecas.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid Google CAS config: %w", err)
 		}
 		return googlecas.New(&cfg, logger), nil
 
-	case "AWSACMPCA":
+	case "AWSACMPCA", "awsacmpca":
 		var cfg awsacmpca.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid AWS ACM PCA config: %w", err)
 		}
 		return awsacmpca.New(&cfg, logger), nil
 
-	case "Entrust":
+	case "Entrust", "entrust":
 		var cfg entrust.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid Entrust config: %w", err)
 		}
 		return entrust.New(&cfg, logger), nil
 
-	case "GlobalSign":
+	case "GlobalSign", "globalsign":
 		var cfg globalsign.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid GlobalSign config: %w", err)
 		}
 		return globalsign.New(&cfg, logger), nil
 
-	case "EJBCA":
+	case "EJBCA", "ejbca":
 		var cfg ejbca.Config
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid EJBCA config: %w", err)

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"log/slog"
 	"os"
+	"strings"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/config"
@@ -82,15 +83,53 @@ func (s *IssuerService) Get(ctx context.Context, id string) (*domain.Issuer, err
 
 // validIssuerTypes is the set of allowed issuer types for validation.
 var validIssuerTypes = map[domain.IssuerType]bool{
-	domain.IssuerTypeACME:      true,
-	domain.IssuerTypeGenericCA: true,
-	domain.IssuerTypeStepCA:    true,
-	domain.IssuerTypeOpenSSL:   true,
-	domain.IssuerTypeVault:     true,
-	domain.IssuerTypeDigiCert:  true,
-	domain.IssuerTypeSectigo:   true,
-	domain.IssuerTypeGoogleCAS: true,
-	domain.IssuerTypeAWSACMPCA: true,
+	domain.IssuerTypeACME:       true,
+	domain.IssuerTypeGenericCA:  true,
+	domain.IssuerTypeStepCA:     true,
+	domain.IssuerTypeOpenSSL:    true,
+	domain.IssuerTypeVault:      true,
+	domain.IssuerTypeDigiCert:   true,
+	domain.IssuerTypeSectigo:    true,
+	domain.IssuerTypeGoogleCAS:  true,
+	domain.IssuerTypeAWSACMPCA:  true,
+	domain.IssuerTypeEntrust:    true,
+	domain.IssuerTypeGlobalSign: true,
+	domain.IssuerTypeEJBCA:      true,
+}
+
+// issuerTypeAliases maps lowercase and legacy type strings to their canonical
+// domain.IssuerType constants. This allows older frontends and curl users to
+// send case-insensitive type strings (e.g., "acme" instead of "ACME").
+var issuerTypeAliases = map[string]domain.IssuerType{
+	"acme":       domain.IssuerTypeACME,
+	"local":      domain.IssuerTypeGenericCA,
+	"local_ca":   domain.IssuerTypeGenericCA,
+	"genericca":  domain.IssuerTypeGenericCA,
+	"stepca":     domain.IssuerTypeStepCA,
+	"openssl":    domain.IssuerTypeOpenSSL,
+	"vaultpki":   domain.IssuerTypeVault,
+	"digicert":   domain.IssuerTypeDigiCert,
+	"sectigo":    domain.IssuerTypeSectigo,
+	"googlecas":  domain.IssuerTypeGoogleCAS,
+	"awsacmpca":  domain.IssuerTypeAWSACMPCA,
+	"entrust":    domain.IssuerTypeEntrust,
+	"globalsign": domain.IssuerTypeGlobalSign,
+	"ejbca":      domain.IssuerTypeEJBCA,
+}
+
+// normalizeIssuerType maps a raw type string to its canonical domain.IssuerType.
+// It first checks exact match in validIssuerTypes (fast path for correctly-cased
+// input), then falls back to case-insensitive alias lookup.
+func normalizeIssuerType(t domain.IssuerType) domain.IssuerType {
+	// Fast path: already canonical
+	if validIssuerTypes[t] {
+		return t
+	}
+	// Slow path: case-insensitive lookup
+	if canonical, ok := issuerTypeAliases[strings.ToLower(string(t))]; ok {
+		return canonical
+	}
+	return t // Return as-is; validation will reject it
 }
 
 // isValidIssuerType checks if a type string is a known issuer type.
@@ -103,6 +142,7 @@ func (s *IssuerService) Create(ctx context.Context, iss *domain.Issuer, actor st
 	if iss.Name == "" {
 		return fmt.Errorf("issuer name is required")
 	}
+	iss.Type = normalizeIssuerType(iss.Type)
 	if !isValidIssuerType(iss.Type) {
 		return fmt.Errorf("unsupported issuer type: %s", iss.Type)
 	}
@@ -601,6 +641,7 @@ func (s *IssuerService) GetIssuer(id string) (*domain.Issuer, error) {
 
 // CreateIssuer creates a new issuer (handler interface method).
 func (s *IssuerService) CreateIssuer(iss domain.Issuer) (*domain.Issuer, error) {
+	iss.Type = normalizeIssuerType(iss.Type)
 	if !isValidIssuerType(iss.Type) {
 		return nil, fmt.Errorf("unsupported issuer type: %s", iss.Type)
 	}
