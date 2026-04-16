@@ -36,6 +36,10 @@ gantt
         47 days                :crit, 2020-01-01, 47d
 ```
 
+> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
+
+**Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
+
 ## Documentation
 
 | Guide | Description |
@@ -144,10 +148,6 @@ All connectors are pluggable — build your own by implementing the [connector i
 </table>
 
 **[See all screenshots →](docs/screenshots/)**
-
-> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
-
-**Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
 
 ## Why certctl
 
