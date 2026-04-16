@@ -703,10 +703,10 @@ func TestRevocationRepository_CRUD(t *testing.T) {
 		t.Fatalf("Idempotent create failed: %v", err)
 	}
 
-	// GetBySerial
-	got, err := repo.GetBySerial(ctx, "DEADBEEF01")
+	// GetByIssuerAndSerial — lookups are scoped to (issuer_id, serial) per RFC 5280 §5.2.3.
+	got, err := repo.GetByIssuerAndSerial(ctx, issuerID, "DEADBEEF01")
 	if err != nil {
-		t.Fatalf("GetBySerial failed: %v", err)
+		t.Fatalf("GetByIssuerAndSerial failed: %v", err)
 	}
 	if got.Reason != "keyCompromise" {
 		t.Errorf("Reason = %q, want %q", got.Reason, "keyCompromise")
@@ -734,9 +734,113 @@ func TestRevocationRepository_CRUD(t *testing.T) {
 	if err := repo.MarkIssuerNotified(ctx, "rev-test-1"); err != nil {
 		t.Fatalf("MarkIssuerNotified failed: %v", err)
 	}
-	got, _ = repo.GetBySerial(ctx, "DEADBEEF01")
+	got, _ = repo.GetByIssuerAndSerial(ctx, issuerID, "DEADBEEF01")
 	if !got.IssuerNotified {
 		t.Error("expected IssuerNotified=true after marking")
+	}
+}
+
+// TestRevocationRepository_CrossIssuerSerialCollision verifies that the same
+// serial number can coexist under two different issuers — RFC 5280 §5.2.3
+// defines serial uniqueness only within a single CA, and certctl supports
+// multi-issuer deployments where serial collisions across issuers are
+// legitimate (e.g., Local CA serial 0x01 and Vault PKI serial 0x01).
+//
+// This test locks in the behavior change from migration 000012: the unique
+// index is on (issuer_id, serial_number), not on serial_number alone.
+func TestRevocationRepository_CrossIssuerSerialCollision(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewRevocationRepository(db)
+	certRepo := postgres.NewCertificateRepository(db)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Microsecond)
+
+	// First issuer + cert + revocation with serial "CAFEBABE01".
+	ownerID1, teamID1, issuerID1, policyID1 := insertCertPrereqsRaw(t, db, ctx, "dup-a")
+	cert1 := &domain.ManagedCertificate{
+		ID: "mc-dup-a", Name: "dup-a", CommonName: "a.example.com",
+		SANs: []string{}, OwnerID: ownerID1, TeamID: teamID1,
+		IssuerID: issuerID1, RenewalPolicyID: policyID1,
+		Status:    domain.CertificateStatusRevoked,
+		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := certRepo.Create(ctx, cert1); err != nil {
+		t.Fatalf("Create cert1 failed: %v", err)
+	}
+	if err := repo.Create(ctx, &domain.CertificateRevocation{
+		ID: "rev-dup-a", CertificateID: "mc-dup-a", SerialNumber: "CAFEBABE01",
+		Reason: "keyCompromise", RevokedBy: "admin", RevokedAt: now,
+		IssuerID: issuerID1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create revocation under issuer1 failed: %v", err)
+	}
+
+	// Second issuer + cert + revocation with the SAME serial "CAFEBABE01".
+	// Under the pre-000012 global-unique index this would silently drop via
+	// ON CONFLICT DO NOTHING. Under the new (issuer_id, serial_number) scope
+	// it must succeed.
+	ownerID2, teamID2, issuerID2, policyID2 := insertCertPrereqsRaw(t, db, ctx, "dup-b")
+	cert2 := &domain.ManagedCertificate{
+		ID: "mc-dup-b", Name: "dup-b", CommonName: "b.example.com",
+		SANs: []string{}, OwnerID: ownerID2, TeamID: teamID2,
+		IssuerID: issuerID2, RenewalPolicyID: policyID2,
+		Status:    domain.CertificateStatusRevoked,
+		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
+		CreatedAt: now, UpdatedAt: now,
+	}
+	if err := certRepo.Create(ctx, cert2); err != nil {
+		t.Fatalf("Create cert2 failed: %v", err)
+	}
+	if err := repo.Create(ctx, &domain.CertificateRevocation{
+		ID: "rev-dup-b", CertificateID: "mc-dup-b", SerialNumber: "CAFEBABE01",
+		Reason: "superseded", RevokedBy: "admin", RevokedAt: now,
+		IssuerID: issuerID2, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Create revocation under issuer2 failed (cross-issuer duplicate serial must be allowed): %v", err)
+	}
+
+	// Both revocations must be retrievable under their respective issuers.
+	revA, err := repo.GetByIssuerAndSerial(ctx, issuerID1, "CAFEBABE01")
+	if err != nil {
+		t.Fatalf("GetByIssuerAndSerial(issuer1) failed: %v", err)
+	}
+	if revA.ID != "rev-dup-a" || revA.Reason != "keyCompromise" {
+		t.Errorf("issuer1 lookup returned wrong row: id=%q reason=%q", revA.ID, revA.Reason)
+	}
+
+	revB, err := repo.GetByIssuerAndSerial(ctx, issuerID2, "CAFEBABE01")
+	if err != nil {
+		t.Fatalf("GetByIssuerAndSerial(issuer2) failed: %v", err)
+	}
+	if revB.ID != "rev-dup-b" || revB.Reason != "superseded" {
+		t.Errorf("issuer2 lookup returned wrong row: id=%q reason=%q", revB.ID, revB.Reason)
+	}
+
+	// ListAll should see both revocations.
+	all, err := repo.ListAll(ctx)
+	if err != nil {
+		t.Fatalf("ListAll failed: %v", err)
+	}
+	if len(all) != 2 {
+		t.Errorf("len(all) = %d, want 2 (cross-issuer duplicate serials)", len(all))
+	}
+
+	// Same-issuer idempotency guard still works (ON CONFLICT DO NOTHING on
+	// (issuer_id, serial_number) — re-inserting the same (issuer, serial)
+	// pair must not error and must not duplicate the row).
+	if err := repo.Create(ctx, &domain.CertificateRevocation{
+		ID: "rev-dup-a-repeat", CertificateID: "mc-dup-a", SerialNumber: "CAFEBABE01",
+		Reason: "superseded", RevokedBy: "admin", RevokedAt: now,
+		IssuerID: issuerID1, CreatedAt: now,
+	}); err != nil {
+		t.Fatalf("Idempotent create under same issuer failed: %v", err)
+	}
+	all, _ = repo.ListAll(ctx)
+	if len(all) != 2 {
+		t.Errorf("len(all) after idempotent re-insert = %d, want 2", len(all))
 	}
 }
 

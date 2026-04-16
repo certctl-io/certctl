@@ -117,8 +117,10 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 	// Short-lived cert exemption: if the cert's profile has TTL < 1 hour,
 	// always return "good" — expiry is sufficient revocation for short-lived certs.
 	if s.profileRepo != nil && s.certRepo != nil {
-		// Look up cert by serial through revocation table
-		rev, _ := s.revocationRepo.GetBySerial(context.Background(), serialHex)
+		// Look up cert by (issuer_id, serial) — per RFC 5280 §5.2.3, serial numbers
+		// are unique only within a single issuer. The OCSP URL path carries issuer_id,
+		// so we scope the lookup to avoid cross-issuer collisions.
+		rev, _ := s.revocationRepo.GetByIssuerAndSerial(context.Background(), issuerID, serialHex)
 		if rev != nil {
 			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
 			if err == nil && cert.CertificateProfileID != "" {
@@ -135,8 +137,8 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 		}
 	}
 
-	// Check if this serial is revoked
-	rev, err := s.revocationRepo.GetBySerial(context.Background(), serialHex)
+	// Check if this (issuer_id, serial) is revoked — RFC 5280 §5.2.3 scoping.
+	rev, err := s.revocationRepo.GetByIssuerAndSerial(context.Background(), issuerID, serialHex)
 	if err != nil {
 		// Not revoked — return "good" status
 		return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{

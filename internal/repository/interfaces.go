@@ -31,10 +31,15 @@ type CertificateRepository interface {
 
 // RevocationRepository defines operations for managing certificate revocations.
 type RevocationRepository interface {
-	// Create records a new certificate revocation.
+	// Create records a new certificate revocation. Uniqueness is scoped to
+	// (issuer_id, serial_number) per RFC 5280 §5.2.3, so duplicate serials
+	// across different issuers are permitted.
 	Create(ctx context.Context, revocation *domain.CertificateRevocation) error
-	// GetBySerial retrieves a revocation by serial number.
-	GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error)
+	// GetByIssuerAndSerial retrieves a revocation by the (issuer_id, serial_number)
+	// pair. Callers (OCSP, CRL generation) always know the issuer because
+	// protocol endpoints carry it in the request path; RFC 5280 §5.2.3 guarantees
+	// uniqueness only within a single issuer.
+	GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.CertificateRevocation, error)
 	// ListAll returns all revocations, ordered by revocation time (for CRL generation).
 	ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error)
 	// ListByCertificate returns all revocations for a certificate.

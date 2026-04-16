@@ -929,9 +929,9 @@ func (m *mockRevocationRepo) Create(ctx context.Context, revocation *domain.Cert
 	return nil
 }
 
-func (m *mockRevocationRepo) GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error) {
+func (m *mockRevocationRepo) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.CertificateRevocation, error) {
 	for _, r := range m.Revocations {
-		if r.SerialNumber == serial {
+		if r.IssuerID == issuerID && r.SerialNumber == serial {
 			return r, nil
 		}
 	}

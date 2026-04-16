@@ -19,13 +19,18 @@ func NewRevocationRepository(db *sql.DB) *RevocationRepository {
 }
 
 // Create records a new certificate revocation.
+//
+// Uniqueness is scoped to (issuer_id, serial_number) per RFC 5280 §5.2.3.
+// Serial numbers are only unique within an issuer, so certctl supports
+// collisions across different issuer connectors. The composite ON CONFLICT
+// target matches migration 000012's unique index.
 func (r *RevocationRepository) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO certificate_revocations (
 			id, certificate_id, serial_number, reason, revoked_by, revoked_at,
 			issuer_id, issuer_notified, created_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-		ON CONFLICT (serial_number) DO NOTHING
+		ON CONFLICT (issuer_id, serial_number) DO NOTHING
 	`, revocation.ID, revocation.CertificateID, revocation.SerialNumber,
 		revocation.Reason, revocation.RevokedBy, revocation.RevokedAt,
 		revocation.IssuerID, revocation.IssuerNotified, revocation.CreatedAt)
@@ -37,20 +42,24 @@ func (r *RevocationRepository) Create(ctx context.Context, revocation *domain.Ce
 	return nil
 }
 
-// GetBySerial retrieves a revocation by serial number.
-func (r *RevocationRepository) GetBySerial(ctx context.Context, serial string) (*domain.CertificateRevocation, error) {
+// GetByIssuerAndSerial retrieves a revocation by the (issuer_id, serial) pair.
+//
+// Per RFC 5280 §5.2.3, serial numbers are unique only within a single issuer.
+// Callers (OCSP handlers, CRL generation) always know the issuer because the
+// OCSP URL carries it as a path parameter and CRLs are generated per-issuer.
+func (r *RevocationRepository) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.CertificateRevocation, error) {
 	var rev domain.CertificateRevocation
 	err := r.db.QueryRowContext(ctx, `
 		SELECT id, certificate_id, serial_number, reason, revoked_by, revoked_at,
 		       issuer_id, issuer_notified, created_at
 		FROM certificate_revocations
-		WHERE serial_number = $1
-	`, serial).Scan(&rev.ID, &rev.CertificateID, &rev.SerialNumber,
+		WHERE issuer_id = $1 AND serial_number = $2
+	`, issuerID, serial).Scan(&rev.ID, &rev.CertificateID, &rev.SerialNumber,
 		&rev.Reason, &rev.RevokedBy, &rev.RevokedAt,
 		&rev.IssuerID, &rev.IssuerNotified, &rev.CreatedAt)
 
 	if err != nil {
-		return nil, fmt.Errorf("failed to get revocation by serial: %w", err)
+		return nil, fmt.Errorf("failed to get revocation by issuer and serial: %w", err)
 	}
 
 	return &rev, nil
