@@ -81,7 +81,10 @@ const (
 	IssuerTypeDigiCert  IssuerType = "DigiCert"
 	IssuerTypeSectigo   IssuerType = "Sectigo"
 	IssuerTypeGoogleCAS IssuerType = "GoogleCAS"
-	IssuerTypeAWSACMPCA IssuerType = "AWSACMPCA"
+	IssuerTypeAWSACMPCA  IssuerType = "AWSACMPCA"
+	IssuerTypeEntrust    IssuerType = "Entrust"
+	IssuerTypeGlobalSign IssuerType = "GlobalSign"
+	IssuerTypeEJBCA      IssuerType = "EJBCA"
 )
 
 // TargetType represents the type of deployment target.

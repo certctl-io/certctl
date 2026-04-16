@@ -48,7 +48,10 @@ INSERT INTO issuers (id, name, type, config, enabled, created_at, updated_at) VA
   ('iss-digicert', 'DigiCert CertCentral',  'DigiCert',    '{"base_url": "https://www.digicert.com/services/v2", "product_type": "ssl_basic"}', true, NOW() - INTERVAL '15 days', NOW() - INTERVAL '15 days'),
   ('iss-sectigo',  'Sectigo SCM',           'Sectigo',     '{"base_url": "https://cert-manager.com/api", "cert_type": 423, "term": 365}', true, NOW() - INTERVAL '10 days', NOW() - INTERVAL '10 days'),
   ('iss-googlecas','Google CAS',            'GoogleCAS',   '{"project": "demo-project", "location": "us-central1", "ca_pool": "demo-pool"}', false, NOW() - INTERVAL '5 days', NOW() - INTERVAL '5 days'),
-  ('iss-awsacmpca','AWS ACM Private CA',    'AWSACMPCA',   '{"region": "us-east-1", "ca_arn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/demo", "signing_algorithm": "SHA256WITHRSA", "validity_days": 365}', false, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days')
+  ('iss-awsacmpca','AWS ACM Private CA',    'AWSACMPCA',   '{"region": "us-east-1", "ca_arn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/demo", "signing_algorithm": "SHA256WITHRSA", "validity_days": 365}', false, NOW() - INTERVAL '3 days', NOW() - INTERVAL '3 days'),
+  ('iss-entrust',  'Entrust CA',            'Entrust',     '{"api_url": "https://api.managed.entrust.com/v1/", "ca_id": "demo-ca-id"}', false, NOW() - INTERVAL '2 days', NOW() - INTERVAL '2 days'),
+  ('iss-globalsign','GlobalSign Atlas',      'GlobalSign',  '{"api_url": "https://emea.api.hvca.globalsign.com:8443/v2/"}', false, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day'),
+  ('iss-ejbca',    'EJBCA Enterprise',       'EJBCA',       '{"api_url": "https://ejbca.internal:8443/ejbca/ejbca-rest-api/v1", "auth_mode": "mtls", "ca_name": "DemoCA"}', false, NOW() - INTERVAL '1 day', NOW() - INTERVAL '1 day')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================

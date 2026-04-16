@@ -9,6 +9,9 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/awsacmpca"
 	"github.com/shankar0123/certctl/internal/connector/issuer/digicert"
+	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
+	"github.com/shankar0123/certctl/internal/connector/issuer/entrust"
+	"github.com/shankar0123/certctl/internal/connector/issuer/globalsign"
 	"github.com/shankar0123/certctl/internal/connector/issuer/googlecas"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
 	"github.com/shankar0123/certctl/internal/connector/issuer/openssl"
@@ -88,6 +91,27 @@ func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.L
 			return nil, fmt.Errorf("invalid AWS ACM PCA config: %w", err)
 		}
 		return awsacmpca.New(&cfg, logger), nil
+
+	case "Entrust":
+		var cfg entrust.Config
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("invalid Entrust config: %w", err)
+		}
+		return entrust.New(&cfg, logger), nil
+
+	case "GlobalSign":
+		var cfg globalsign.Config
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("invalid GlobalSign config: %w", err)
+		}
+		return globalsign.New(&cfg, logger), nil
+
+	case "EJBCA":
+		var cfg ejbca.Config
+		if err := json.Unmarshal(configJSON, &cfg); err != nil {
+			return nil, fmt.Errorf("invalid EJBCA config: %w", err)
+		}
+		return ejbca.New(&cfg, logger), nil
 
 	default:
 		return nil, fmt.Errorf("unknown issuer type: %q", issuerType)

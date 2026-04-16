@@ -46,11 +46,15 @@ export const typeLabels: Record<string, string> = {
   DigiCert: 'DigiCert',
   Sectigo: 'Sectigo SCM',
   GoogleCAS: 'Google CAS',
+  AWSACMPCA: 'AWS ACM PCA',
+  Entrust: 'Entrust',
+  GlobalSign: 'GlobalSign',
+  EJBCA: 'EJBCA',
 };
 
 /**
- * All supported issuer types + 2 "Coming Soon" stubs.
- * Order: most common first, coming-soon last.
+ * All supported issuer types.
+ * Order: most common first, enterprise/commercial last.
  */
 export const issuerTypes: IssuerTypeConfig[] = [
   {
@@ -168,12 +172,46 @@ export const issuerTypes: IssuerTypeConfig[] = [
     ],
   },
   {
-    id: 'entrust',
+    id: 'Entrust',
     name: 'Entrust',
-    description: 'Entrust Certificate Services \u2014 coming soon',
-    icon: '\uD83D\uDCE6',
-    configFields: [],
-    comingSoon: true,
+    description: 'Entrust Certificate Services with mTLS client certificate auth',
+    icon: '\uD83D\uDD10',
+    configFields: [
+      { key: 'api_url', label: 'API URL', placeholder: 'https://api.managed.entrust.com/v1/', required: true },
+      { key: 'client_cert_path', label: 'Client Certificate Path', placeholder: '/path/to/client.crt', required: true },
+      { key: 'client_key_path', label: 'Client Key Path', placeholder: '/path/to/client.key', required: true, sensitive: true },
+      { key: 'ca_id', label: 'CA ID', placeholder: 'CA identifier from Entrust', required: true },
+      { key: 'profile_id', label: 'Profile ID (optional)', placeholder: 'Enrollment profile ID', required: false },
+    ],
+  },
+  {
+    id: 'GlobalSign',
+    name: 'GlobalSign',
+    description: 'GlobalSign Atlas HVCA with mTLS + API key/secret auth',
+    icon: '\uD83C\uDF10',
+    configFields: [
+      { key: 'api_url', label: 'API URL', placeholder: 'https://emea.api.hvca.globalsign.com:8443/v2/', required: true },
+      { key: 'api_key', label: 'API Key', placeholder: 'GlobalSign API key', required: true, sensitive: true },
+      { key: 'api_secret', label: 'API Secret', placeholder: 'GlobalSign API secret', required: true, type: 'password', sensitive: true },
+      { key: 'client_cert_path', label: 'Client Certificate Path', placeholder: '/path/to/client.crt', required: true },
+      { key: 'client_key_path', label: 'Client Key Path', placeholder: '/path/to/client.key', required: true, sensitive: true },
+    ],
+  },
+  {
+    id: 'EJBCA',
+    name: 'EJBCA',
+    description: 'Keyfactor EJBCA with mTLS or OAuth2 auth',
+    icon: '\uD83D\uDD11',
+    configFields: [
+      { key: 'api_url', label: 'API URL', placeholder: 'https://ejbca.example.com:8443/ejbca/ejbca-rest-api/v1', required: true },
+      { key: 'auth_mode', label: 'Auth Mode', type: 'select', options: ['mtls', 'oauth2'], required: false, defaultValue: 'mtls' },
+      { key: 'client_cert_path', label: 'Client Certificate Path', placeholder: '/path/to/client.crt', required: false },
+      { key: 'client_key_path', label: 'Client Key Path', placeholder: '/path/to/client.key', required: false, sensitive: true },
+      { key: 'token', label: 'OAuth2 Token', placeholder: 'Bearer token (for oauth2 mode)', required: false, type: 'password', sensitive: true },
+      { key: 'ca_name', label: 'CA Name', placeholder: 'EJBCA CA name', required: true },
+      { key: 'cert_profile', label: 'Certificate Profile', placeholder: 'EJBCA cert profile (optional)', required: false },
+      { key: 'ee_profile', label: 'End Entity Profile', placeholder: 'EJBCA EE profile (optional)', required: false },
+    ],
   },
 ];
 

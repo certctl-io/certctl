@@ -503,6 +503,69 @@ func (s *IssuerService) buildEnvVarSeeds(cfg *config.Config) []*domain.Issuer {
 		})
 	}
 
+	// Conditional: Entrust — only seed if API URL is set
+	if cfg.Entrust.APIUrl != "" {
+		seeds = append(seeds, &domain.Issuer{
+			ID:   "iss-entrust",
+			Name: "Entrust",
+			Type: domain.IssuerTypeEntrust,
+			Config: mustJSON(map[string]interface{}{
+				"api_url":          cfg.Entrust.APIUrl,
+				"client_cert_path": cfg.Entrust.ClientCertPath,
+				"client_key_path":  cfg.Entrust.ClientKeyPath,
+				"ca_id":            cfg.Entrust.CAId,
+				"profile_id":       cfg.Entrust.ProfileId,
+			}),
+			Enabled:   true,
+			Source:    "env",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
+	// Conditional: GlobalSign — only seed if API URL and API key are set
+	if cfg.GlobalSign.APIUrl != "" && cfg.GlobalSign.APIKey != "" {
+		seeds = append(seeds, &domain.Issuer{
+			ID:   "iss-globalsign",
+			Name: "GlobalSign Atlas",
+			Type: domain.IssuerTypeGlobalSign,
+			Config: mustJSON(map[string]interface{}{
+				"api_url":          cfg.GlobalSign.APIUrl,
+				"api_key":          cfg.GlobalSign.APIKey,
+				"api_secret":       cfg.GlobalSign.APISecret,
+				"client_cert_path": cfg.GlobalSign.ClientCertPath,
+				"client_key_path":  cfg.GlobalSign.ClientKeyPath,
+			}),
+			Enabled:   true,
+			Source:    "env",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
+	// Conditional: EJBCA — only seed if API URL and CA name are set
+	if cfg.EJBCA.APIUrl != "" && cfg.EJBCA.CAName != "" {
+		seeds = append(seeds, &domain.Issuer{
+			ID:   "iss-ejbca",
+			Name: "EJBCA",
+			Type: domain.IssuerTypeEJBCA,
+			Config: mustJSON(map[string]interface{}{
+				"api_url":          cfg.EJBCA.APIUrl,
+				"auth_mode":        cfg.EJBCA.AuthMode,
+				"client_cert_path": cfg.EJBCA.ClientCertPath,
+				"client_key_path":  cfg.EJBCA.ClientKeyPath,
+				"token":            cfg.EJBCA.Token,
+				"ca_name":          cfg.EJBCA.CAName,
+				"cert_profile":     cfg.EJBCA.CertProfile,
+				"ee_profile":       cfg.EJBCA.EEProfile,
+			}),
+			Enabled:   true,
+			Source:    "env",
+			CreatedAt: now,
+			UpdatedAt: now,
+		})
+	}
+
 	return seeds
 }
 

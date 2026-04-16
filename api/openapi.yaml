@@ -2895,7 +2895,7 @@ components:
     # ─── Issuers ─────────────────────────────────────────────────────
     IssuerType:
       type: string
-      enum: [ACME, GenericCA, StepCA, VaultPKI, DigiCert, Sectigo, GoogleCAS, AWSACMPCA]
+      enum: [ACME, GenericCA, StepCA, VaultPKI, DigiCert, Sectigo, GoogleCAS, AWSACMPCA, Entrust, GlobalSign, EJBCA]
 
     Issuer:
       type: object

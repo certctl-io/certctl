@@ -31,6 +31,9 @@ type Config struct {
 	Sectigo      SectigoConfig
 	GoogleCAS    GoogleCASConfig
 	AWSACMPCA    AWSACMPCAConfig
+	Entrust      EntrustConfig
+	GlobalSign   GlobalSignConfig
+	EJBCA        EJBCAConfig
 	Digest       DigestConfig
 	HealthCheck  HealthCheckConfig
 	Encryption   EncryptionConfig
@@ -64,6 +67,90 @@ type AWSACMPCAConfig struct {
 	// Used for constrained subordinate CAs or custom certificate profiles.
 	// Setting: CERTCTL_AWS_PCA_TEMPLATE_ARN environment variable.
 	TemplateArn string
+}
+
+// EntrustConfig contains Entrust Certificate Services issuer connector configuration.
+// Entrust uses mTLS client certificate authentication.
+type EntrustConfig struct {
+	// APIUrl is the Entrust CA Gateway base URL.
+	// Setting: CERTCTL_ENTRUST_API_URL environment variable.
+	APIUrl string
+
+	// ClientCertPath is the path to the mTLS client certificate PEM file.
+	// Setting: CERTCTL_ENTRUST_CLIENT_CERT_PATH environment variable.
+	ClientCertPath string
+
+	// ClientKeyPath is the path to the mTLS client private key PEM file.
+	// Setting: CERTCTL_ENTRUST_CLIENT_KEY_PATH environment variable.
+	ClientKeyPath string
+
+	// CAId is the Entrust CA identifier.
+	// Setting: CERTCTL_ENTRUST_CA_ID environment variable.
+	CAId string
+
+	// ProfileId is the optional enrollment profile identifier.
+	// Setting: CERTCTL_ENTRUST_PROFILE_ID environment variable.
+	ProfileId string
+}
+
+// GlobalSignConfig contains GlobalSign Atlas HVCA issuer connector configuration.
+// GlobalSign uses mTLS client certificate authentication plus API key/secret headers.
+type GlobalSignConfig struct {
+	// APIUrl is the GlobalSign Atlas HVCA base URL (region-aware).
+	// Setting: CERTCTL_GLOBALSIGN_API_URL environment variable.
+	APIUrl string
+
+	// APIKey is the GlobalSign API key.
+	// Setting: CERTCTL_GLOBALSIGN_API_KEY environment variable.
+	APIKey string
+
+	// APISecret is the GlobalSign API secret.
+	// Setting: CERTCTL_GLOBALSIGN_API_SECRET environment variable.
+	APISecret string
+
+	// ClientCertPath is the path to the mTLS client certificate PEM file.
+	// Setting: CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH environment variable.
+	ClientCertPath string
+
+	// ClientKeyPath is the path to the mTLS client private key PEM file.
+	// Setting: CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH environment variable.
+	ClientKeyPath string
+}
+
+// EJBCAConfig contains EJBCA (Keyfactor) issuer connector configuration.
+// EJBCA supports dual authentication: mTLS or OAuth2 Bearer token.
+type EJBCAConfig struct {
+	// APIUrl is the EJBCA REST API base URL.
+	// Setting: CERTCTL_EJBCA_API_URL environment variable.
+	APIUrl string
+
+	// AuthMode selects the authentication method: "mtls" or "oauth2". Default: "mtls".
+	// Setting: CERTCTL_EJBCA_AUTH_MODE environment variable.
+	AuthMode string
+
+	// ClientCertPath is the path to the mTLS client certificate PEM file (required when auth_mode=mtls).
+	// Setting: CERTCTL_EJBCA_CLIENT_CERT_PATH environment variable.
+	ClientCertPath string
+
+	// ClientKeyPath is the path to the mTLS client private key PEM file (required when auth_mode=mtls).
+	// Setting: CERTCTL_EJBCA_CLIENT_KEY_PATH environment variable.
+	ClientKeyPath string
+
+	// Token is the OAuth2 Bearer token (required when auth_mode=oauth2).
+	// Setting: CERTCTL_EJBCA_TOKEN environment variable.
+	Token string
+
+	// CAName is the EJBCA CA name. Required.
+	// Setting: CERTCTL_EJBCA_CA_NAME environment variable.
+	CAName string
+
+	// CertProfile is the optional EJBCA certificate profile name.
+	// Setting: CERTCTL_EJBCA_CERT_PROFILE environment variable.
+	CertProfile string
+
+	// EEProfile is the optional EJBCA end-entity profile name.
+	// Setting: CERTCTL_EJBCA_EE_PROFILE environment variable.
+	EEProfile string
 }
 
 // EncryptionConfig contains configuration for encrypting sensitive data at rest.
@@ -702,6 +789,30 @@ func Load() (*Config, error) {
 			SigningAlgorithm: getEnv("CERTCTL_AWS_PCA_SIGNING_ALGORITHM", "SHA256WITHRSA"),
 			ValidityDays:     getEnvInt("CERTCTL_AWS_PCA_VALIDITY_DAYS", 365),
 			TemplateArn:      getEnv("CERTCTL_AWS_PCA_TEMPLATE_ARN", ""),
+		},
+		Entrust: EntrustConfig{
+			APIUrl:         getEnv("CERTCTL_ENTRUST_API_URL", ""),
+			ClientCertPath: getEnv("CERTCTL_ENTRUST_CLIENT_CERT_PATH", ""),
+			ClientKeyPath:  getEnv("CERTCTL_ENTRUST_CLIENT_KEY_PATH", ""),
+			CAId:           getEnv("CERTCTL_ENTRUST_CA_ID", ""),
+			ProfileId:      getEnv("CERTCTL_ENTRUST_PROFILE_ID", ""),
+		},
+		GlobalSign: GlobalSignConfig{
+			APIUrl:         getEnv("CERTCTL_GLOBALSIGN_API_URL", ""),
+			APIKey:         getEnv("CERTCTL_GLOBALSIGN_API_KEY", ""),
+			APISecret:      getEnv("CERTCTL_GLOBALSIGN_API_SECRET", ""),
+			ClientCertPath: getEnv("CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH", ""),
+			ClientKeyPath:  getEnv("CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH", ""),
+		},
+		EJBCA: EJBCAConfig{
+			APIUrl:         getEnv("CERTCTL_EJBCA_API_URL", ""),
+			AuthMode:       getEnv("CERTCTL_EJBCA_AUTH_MODE", "mtls"),
+			ClientCertPath: getEnv("CERTCTL_EJBCA_CLIENT_CERT_PATH", ""),
+			ClientKeyPath:  getEnv("CERTCTL_EJBCA_CLIENT_KEY_PATH", ""),
+			Token:          getEnv("CERTCTL_EJBCA_TOKEN", ""),
+			CAName:         getEnv("CERTCTL_EJBCA_CA_NAME", ""),
+			CertProfile:    getEnv("CERTCTL_EJBCA_CERT_PROFILE", ""),
+			EEProfile:      getEnv("CERTCTL_EJBCA_EE_PROFILE", ""),
 		},
 		ACME: ACMEConfig{
 			DirectoryURL:           getEnv("CERTCTL_ACME_DIRECTORY_URL", ""),

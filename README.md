@@ -73,6 +73,9 @@ gantt
 | Sectigo SCM | `Sectigo` | 3-header auth, DV/OV/EV, collect-not-ready graceful handling |
 | Google Cloud CAS | `GoogleCAS` | OAuth2 service account, synchronous issuance, CA pool selection |
 | AWS ACM Private CA | `AWSACMPCA` | Synchronous issuance, configurable signing algorithm/template ARN |
+| Entrust Certificate Services | `Entrust` | mTLS client certificate auth, synchronous/approval-pending issuance |
+| GlobalSign Atlas HVCA | `GlobalSign` | mTLS + API key/secret dual auth, serial-based tracking |
+| EJBCA (Keyfactor) | `EJBCA` | Dual auth (mTLS or OAuth2), self-hosted open-source CA |
 
 **Note:** ADCS integration is handled via the Local CA's sub-CA mode — certctl operates as a subordinate CA with its signing certificate issued by ADCS. Any CA with a shell-accessible signing interface can be integrated via the OpenSSL/Custom CA connector.
 

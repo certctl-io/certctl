@@ -231,7 +231,7 @@ Named enrollment profiles defining crypto constraints and certificate properties
 
 CSR validation is enforced at all five issuance paths: server-side renewal, agent-CSR renewal, agent fallback CSR submission, EST enrollment, and SCEP enrollment. When a certificate profile defines `AllowedKeyAlgorithms`, every incoming CSR is checked against the profile's rules — if the key algorithm or minimum size doesn't match, the request is rejected before reaching the issuer connector.
 
-**MaxTTL enforcement** caps certificate validity at the profile's configured maximum. Behavior varies by issuer: the Local CA, Vault PKI, and step-ca enforce the cap directly (capping `NotAfter` or overriding TTL). OpenSSL logs an advisory warning. ACME, DigiCert, Sectigo, Google CAS, and AWS ACM PCA pass through because the CA controls validity. MaxTTL is resolved from the certificate profile at each issuance call site via `resolveMaxTTL()`.
+**MaxTTL enforcement** caps certificate validity at the profile's configured maximum. Behavior varies by issuer: the Local CA, Vault PKI, and step-ca enforce the cap directly (capping `NotAfter` or overriding TTL). OpenSSL logs an advisory warning. ACME, DigiCert, Sectigo, Google CAS, AWS ACM PCA, Entrust, GlobalSign, and EJBCA pass through because the CA controls validity. MaxTTL is resolved from the certificate profile at each issuance call site via `resolveMaxTTL()`.
 
 **Key metadata persistence** — when a certificate version is created from a CSR, the key algorithm (RSA, ECDSA, Ed25519) and key size (in bits) are extracted from the CSR and stored in the `certificate_versions` table (`key_algorithm`, `key_size` columns) for post-hoc compliance auditing.
 
@@ -278,9 +278,9 @@ Policies can be scoped to agent groups via `agent_group_id` foreign key. Violati
 
 ## Issuer Connectors
 
-<!-- Source: internal/domain/connector.go (9 IssuerType constants), internal/connector/issuer/ -->
+<!-- Source: internal/domain/connector.go (12 IssuerType constants), internal/connector/issuer/ -->
 
-9 issuer connectors implementing the `issuer.Connector` interface. All support `ValidateConfig`, `IssueCertificate`, `RenewCertificate`, `RevokeCertificate`, `GetOrderStatus`, `GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`, `GetRenewalInfo`.
+12 issuer connectors implementing the `issuer.Connector` interface. All support `ValidateConfig`, `IssueCertificate`, `RenewCertificate`, `RevokeCertificate`, `GetOrderStatus`, `GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`, `GetRenewalInfo`.
 
 ### Local CA
 
@@ -432,6 +432,57 @@ Synchronous issuance via `IssueCertificate` + `GetCertificate` AWS APIs. Injecta
 | `CERTCTL_AWS_PCA_TEMPLATE_ARN` | (none) | Optional template ARN |
 
 Revocation with RFC 5280 reason mapping. CRL/OCSP delegated to AWS.
+
+### Entrust Certificate Services
+
+<!-- Source: internal/connector/issuer/entrust/entrust.go -->
+
+Entrust CA Gateway REST API with mTLS client certificate auth. Synchronous or approval-pending issuance.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_ENTRUST_API_URL` | (required) | Entrust CA Gateway base URL |
+| `CERTCTL_ENTRUST_CLIENT_CERT_PATH` | (required) | Path to mTLS client certificate PEM |
+| `CERTCTL_ENTRUST_CLIENT_KEY_PATH` | (required) | Path to mTLS client private key PEM |
+| `CERTCTL_ENTRUST_CA_ID` | (required) | Certificate Authority ID |
+| `CERTCTL_ENTRUST_PROFILE_ID` | (none) | Optional enrollment profile ID |
+
+mTLS authentication via `tls.LoadX509KeyPair()`. Issuance returns PEM immediately (200) or tracking ID for approval-pending orders (201). CRL/OCSP delegated to Entrust.
+
+### GlobalSign Atlas HVCA
+
+<!-- Source: internal/connector/issuer/globalsign/globalsign.go -->
+
+GlobalSign Atlas High Volume CA with dual auth: mTLS + API key/secret headers. Region-aware base URLs.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_GLOBALSIGN_API_URL` | (required) | Atlas HVCA API URL (region-specific) |
+| `CERTCTL_GLOBALSIGN_API_KEY` | (required) | API key |
+| `CERTCTL_GLOBALSIGN_API_SECRET` | (required) | API secret |
+| `CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH` | (required) | Path to mTLS client certificate PEM |
+| `CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH` | (required) | Path to mTLS client private key PEM |
+
+Serial-based certificate tracking. CRL/OCSP delegated to GlobalSign.
+
+### EJBCA (Keyfactor)
+
+<!-- Source: internal/connector/issuer/ejbca/ejbca.go -->
+
+Keyfactor EJBCA REST API for self-hosted CAs. Dual auth: mTLS (default) or OAuth2 Bearer token.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_EJBCA_API_URL` | (required) | EJBCA REST API base URL |
+| `CERTCTL_EJBCA_AUTH_MODE` | `mtls` | Auth mode: `mtls` or `oauth2` |
+| `CERTCTL_EJBCA_CLIENT_CERT_PATH` | (mTLS) | Client certificate path |
+| `CERTCTL_EJBCA_CLIENT_KEY_PATH` | (mTLS) | Client key path |
+| `CERTCTL_EJBCA_TOKEN` | (OAuth2) | Bearer token |
+| `CERTCTL_EJBCA_CA_NAME` | (required) | EJBCA CA name |
+| `CERTCTL_EJBCA_CERT_PROFILE` | (none) | Certificate profile |
+| `CERTCTL_EJBCA_EE_PROFILE` | (none) | End-entity profile |
+
+PKCS#10 enrollment via base64-encoded CSR. Revocation requires issuer DN + serial (stored as composite OrderID). CRL/OCSP delegated to EJBCA instance.
 
 ### EST Server (RFC 7030)
 

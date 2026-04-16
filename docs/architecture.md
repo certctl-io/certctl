@@ -85,6 +85,9 @@ flowchart TB
         CA8["Sectigo SCM\n(async order model)"]
         CA9["Google CAS\n(OAuth2, sync)"]
         CA10["AWS ACM PCA\n(sync issuance)"]
+        CA11["Entrust\n(mTLS, sync/async)"]
+        CA12["GlobalSign Atlas\n(mTLS + API key)"]
+        CA13["EJBCA\n(mTLS or OAuth2)"]
     end
 
     subgraph "Target Systems"
@@ -527,6 +530,9 @@ flowchart TB
         II --> SG["Sectigo SCM"]
         II --> GC["Google CAS"]
         II --> AP2["AWS ACM PCA"]
+        II --> EN["Entrust"]
+        II --> GS["GlobalSign Atlas"]
+        II --> EJ["EJBCA"]
     end
 
     subgraph "Target Connectors"

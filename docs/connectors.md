@@ -434,15 +434,74 @@ AWS Certificate Manager Private Certificate Authority — managed private CA on 
 
 Location: `internal/connector/issuer/awsacmpca/awsacmpca.go`
 
-### Planned Issuers
+### Built-in: Entrust Certificate Services
 
-The following issuer connectors are planned for future releases:
+Entrust CA Gateway REST API with mutual TLS (mTLS) client certificate authentication. Supports synchronous issuance (200 OK with PEM) and approval-pending flows (201 Accepted with async polling).
 
-- **Entrust** — Enterprise CA via Entrust Certificate Services mTLS API
-- **GlobalSign** — GlobalSign Atlas HVCA REST API with mTLS + API key auth
-- **EJBCA** — Keyfactor EJBCA REST API with mTLS or OAuth2 auth
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `CERTCTL_ENTRUST_API_URL` | Yes | — | Entrust CA Gateway base URL |
+| `CERTCTL_ENTRUST_CLIENT_CERT_PATH` | Yes | — | Path to mTLS client certificate PEM |
+| `CERTCTL_ENTRUST_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
+| `CERTCTL_ENTRUST_CA_ID` | Yes | — | Certificate Authority ID (from `GET /certificate-authorities`) |
+| `CERTCTL_ENTRUST_PROFILE_ID` | No | — | Optional enrollment profile ID |
 
-Note: ADCS (Active Directory Certificate Services) integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
+**Authentication:** Mutual TLS — the client certificate and key are loaded via `tls.LoadX509KeyPair()` and attached to the HTTP transport. No API key or token required.
+
+**Issuance model:** Enrollment via `POST /v1/certificate-authorities/{caId}/enrollments`. Returns 200 with PEM immediately for auto-approved enrollments, or 201 Accepted with a tracking ID for approval-pending orders. `GetOrderStatus` polls the enrollment endpoint.
+
+**Note:** CRL and OCSP are managed by Entrust. certctl records revocations locally and notifies Entrust via `PUT /v1/certificate-authorities/{caId}/certificates/{serial}/revoke`.
+
+Location: `internal/connector/issuer/entrust/entrust.go`
+
+### Built-in: GlobalSign Atlas HVCA
+
+GlobalSign Atlas High Volume CA REST API with dual authentication: mTLS for the TLS handshake and API key/secret headers for request authorization. Region-aware base URLs (EMEA, APAC, Americas).
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `CERTCTL_GLOBALSIGN_API_URL` | Yes | — | Atlas HVCA API URL (region-specific) |
+| `CERTCTL_GLOBALSIGN_API_KEY` | Yes | — | API key for request authentication |
+| `CERTCTL_GLOBALSIGN_API_SECRET` | Yes | — | API secret for request authentication |
+| `CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH` | Yes | — | Path to mTLS client certificate PEM |
+| `CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
+
+**Authentication:** Dual — mTLS client certificate for TLS handshake plus `X-API-Key` and `X-API-Secret` headers on every request.
+
+**Issuance model:** `POST /v2/certificates` returns a serial number. Certificate PEM is available after validation completes. Typically resolves within seconds for DV. `GetOrderStatus` polls the certificate endpoint.
+
+**Note:** CRL and OCSP are managed by GlobalSign. certctl records revocations locally and notifies GlobalSign via `PUT /v2/certificates/{serial}/revoke`.
+
+Location: `internal/connector/issuer/globalsign/globalsign.go`
+
+### Built-in: EJBCA (Keyfactor)
+
+EJBCA REST API for self-hosted open-source and enterprise CAs. Supports dual authentication: mTLS (default) or OAuth2 Bearer token, selectable via configuration.
+
+| Setting | Required | Default | Description |
+|---------|----------|---------|-------------|
+| `CERTCTL_EJBCA_API_URL` | Yes | — | EJBCA REST API base URL |
+| `CERTCTL_EJBCA_AUTH_MODE` | No | `mtls` | Auth mode: `mtls` or `oauth2` |
+| `CERTCTL_EJBCA_CLIENT_CERT_PATH` | mTLS | — | Path to client certificate PEM (mTLS mode) |
+| `CERTCTL_EJBCA_CLIENT_KEY_PATH` | mTLS | — | Path to client key PEM (mTLS mode) |
+| `CERTCTL_EJBCA_TOKEN` | OAuth2 | — | Bearer token (oauth2 mode) |
+| `CERTCTL_EJBCA_CA_NAME` | Yes | — | EJBCA CA name |
+| `CERTCTL_EJBCA_CERT_PROFILE` | No | — | EJBCA certificate profile |
+| `CERTCTL_EJBCA_EE_PROFILE` | No | — | EJBCA end-entity profile |
+
+**Authentication:** Configurable via `auth_mode`. In mTLS mode, client certificate and key are loaded for the TLS handshake. In OAuth2 mode, the token is sent as `Authorization: Bearer {token}`.
+
+**Issuance model:** `POST /v1/certificate/pkcs10enroll` with base64-encoded CSR. Returns base64-encoded certificate PEM. EJBCA 9.3+ creates end-entity and issues cert in a single call. Approval-pending enrollments return 201.
+
+**Revocation note:** EJBCA requires both issuer DN and serial number for revocation. The connector stores these as a composite `OrderID` in `issuer_dn::serial` format.
+
+**Note:** CRL and OCSP are managed by the EJBCA instance. certctl records revocations locally and notifies EJBCA via `PUT /v1/certificate/{issuer_dn}/{serial}/revoke`.
+
+Location: `internal/connector/issuer/ejbca/ejbca.go`
+
+### ADCS Integration
+
+Active Directory Certificate Services integration is handled via the **sub-CA mode** of the Local CA issuer, not as a separate connector. certctl operates as a subordinate CA with its signing certificate issued by ADCS, so all certctl-issued certs chain to the enterprise ADCS root. See the Local CA section above.
 
 ### Building a Custom Issuer
 
