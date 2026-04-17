@@ -14,7 +14,14 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/notifier"
+	"github.com/shankar0123/certctl/internal/validation"
 )
+
+// webhookClientTimeout bounds every outbound webhook request and its
+// resolution/dial phase. Kept as a package-level constant so the timeout is
+// shared by the transport dialer and the http.Client, and so tests can reason
+// about it without plumbing configuration.
+const webhookClientTimeout = 30 * time.Second
 
 // Config represents the webhook notifier configuration.
 type Config struct {
@@ -25,20 +32,69 @@ type Config struct {
 
 // Connector implements the notifier.Connector interface for webhook notifications.
 // It sends alert and event notifications via HTTP POST with optional HMAC signing.
+//
+// validateURL is injected so that the production constructor (New) installs the
+// strict validation.ValidateSafeURL guard while newForTest can install a
+// permissive validator. This is the only way to keep the production SSRF
+// defence unconditionally on in real code while still allowing tests to point
+// at httptest loopback servers. Without this seam, every test using
+// httptest.NewServer would be blocked by the guard's loopback rejection — that
+// is the correct behaviour in production but makes legitimate unit tests
+// impossible to write. The test seam is unexported so no external caller can
+// use it to disable the guard.
 type Connector struct {
-	config *Config
-	logger *slog.Logger
-	client *http.Client
+	config      *Config
+	logger      *slog.Logger
+	client      *http.Client
+	validateURL func(string) error
 }
 
 // New creates a new webhook notifier with the given configuration and logger.
+//
+// The returned connector uses an http.Transport whose DialContext is hardened
+// by validation.SafeHTTPDialContext. That guard re-resolves the target host
+// at dial time and refuses any connection whose resolved address lies in a
+// reserved range (loopback, cloud-metadata link-local, multicast, broadcast,
+// unspecified, IPv6 link-local/multicast). This is the authoritative SSRF
+// defence; validation.ValidateSafeURL inside ValidateConfig/postWebhook is a
+// fast early diagnostic. The two layers together defeat both misconfigured
+// URLs and DNS-rebinding attacks where a name's resolved address changes
+// between validation and dial.
 func New(config *Config, logger *slog.Logger) *Connector {
+	transport := &http.Transport{
+		DialContext:           validation.SafeHTTPDialContext(webhookClientTimeout),
+		TLSHandshakeTimeout:   10 * time.Second,
+		ResponseHeaderTimeout: 10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+		ForceAttemptHTTP2:     true,
+	}
 	return &Connector{
 		config: config,
 		logger: logger,
 		client: &http.Client{
-			Timeout: 30 * time.Second,
+			Timeout:   webhookClientTimeout,
+			Transport: transport,
 		},
+		validateURL: validation.ValidateSafeURL,
+	}
+}
+
+// newForTest is an unexported constructor used exclusively by the webhook
+// package's own tests. It installs a permissive URL validator and the stdlib
+// default transport so tests can point the connector at httptest loopback
+// servers (127.0.0.1), which the production SafeHTTPDialContext guard would
+// correctly reject. Production callers cannot reach this constructor because
+// it is unexported; only same-package tests (package webhook) can use it.
+// The SSRF-rejection tests that verify the guard itself still call New so
+// they exercise the real, strict validator.
+func newForTest(config *Config, logger *slog.Logger) *Connector {
+	return &Connector{
+		config: config,
+		logger: logger,
+		client: &http.Client{
+			Timeout: webhookClientTimeout,
+		},
+		validateURL: func(string) error { return nil },
 	}
 }
 
@@ -52,6 +108,18 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 
 	if cfg.URL == "" {
 		return fmt.Errorf("webhook url is required")
+	}
+
+	// SSRF guard (CWE-918). Reject reserved-address URLs before issuing any
+	// outbound HTTP — this catches the obvious 127.0.0.1 / ::1 /
+	// 169.254.169.254 / 0.0.0.0 cases at config-ingestion time and produces
+	// a clear operator-facing error. The authoritative, TOCTOU-safe check
+	// still runs at dial time inside SafeHTTPDialContext. Routed through
+	// c.validateURL so newForTest can install a permissive validator for
+	// same-package unit tests; production New always wires
+	// validation.ValidateSafeURL here.
+	if err := c.validateURL(cfg.URL); err != nil {
+		return fmt.Errorf("webhook url rejected: %w", err)
 	}
 
 	c.logger.Info("validating webhook configuration", "url", cfg.URL)
@@ -150,7 +218,17 @@ func (c *Connector) SendEvent(ctx context.Context, event notifier.Event) error {
 // postWebhook sends a payload to the webhook URL with proper headers and signing.
 // If a secret is configured, it signs the payload using HMAC-SHA256 and includes
 // the signature in the X-Signature header.
+//
+// The URL is re-validated here even though ValidateConfig already accepted it:
+// configuration can be mutated in place, reloaded dynamically, or set directly
+// by tests that bypass ValidateConfig, so this call is a defence-in-depth
+// guard that fails closed before any outbound request is built. Authoritative
+// DNS-rebinding defence still runs at dial time via SafeHTTPDialContext.
 func (c *Connector) postWebhook(ctx context.Context, payload interface{}) error {
+	if err := c.validateURL(c.config.URL); err != nil {
+		return fmt.Errorf("webhook url rejected: %w", err)
+	}
+
 	// Marshal payload to JSON
 	jsonData, err := json.Marshal(payload)
 	if err != nil {

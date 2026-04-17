@@ -32,7 +32,7 @@ func TestWebhook_ValidateConfig_ValidURL(t *testing.T) {
 
 	// Create a new logger (or use test logger)
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	err := conn.ValidateConfig(context.Background(), rawConfig)
 	if err != nil {
@@ -47,7 +47,7 @@ func TestWebhook_ValidateConfig_MissingURL(t *testing.T) {
 
 	rawConfig, _ := json.Marshal(cfg)
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	err := conn.ValidateConfig(context.Background(), rawConfig)
 	if err == nil {
@@ -96,7 +96,7 @@ func TestWebhook_SendAlert_Success(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	alert := notifier.Alert{
 		ID:        "alert-123",
@@ -160,7 +160,7 @@ func TestWebhook_SendAlert_HMACSignature(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	alert := notifier.Alert{
 		ID:        "alert-456",
@@ -199,7 +199,7 @@ func TestWebhook_SendAlert_NoSignatureWithoutSecret(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	alert := notifier.Alert{
 		ID:        "alert-789",
@@ -239,7 +239,7 @@ func TestWebhook_SendAlert_CustomHeaders(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	alert := notifier.Alert{
 		ID:        "alert-custom",
@@ -276,7 +276,7 @@ func TestWebhook_SendAlert_HTTPError(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	alert := notifier.Alert{
 		ID:        "alert-error",
@@ -318,7 +318,7 @@ func TestWebhook_SendEvent_Success(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	certID := "mc-api-prod"
 	event := notifier.Event{
@@ -367,7 +367,7 @@ func TestWebhook_SendEvent_WithoutCertificateID(t *testing.T) {
 	}
 
 	logger := newTestLogger()
-	conn := New(cfg, logger)
+	conn := newForTest(cfg, logger)
 
 	event := notifier.Event{
 		ID:        "event-456",
@@ -386,6 +386,130 @@ func TestWebhook_SendEvent_WithoutCertificateID(t *testing.T) {
 	// Ensure certificate_id is not in payload when nil
 	if _, hasKey := receivedPayload["certificate_id"]; hasKey && receivedPayload["certificate_id"] != nil {
 		t.Errorf("expected no certificate_id in payload, got %v", receivedPayload["certificate_id"])
+	}
+}
+
+// The SSRF tests below exercise the CWE-918 guard added alongside H-4. Each
+// case pairs a reserved-address URL with the call surface that should reject
+// it. ValidateConfig is the early-fail path; SendAlert/SendEvent reach the
+// same guard via postWebhook and are the defence-in-depth that still rejects
+// even when ValidateConfig was bypassed (e.g. dynamic config reload mutating
+// c.config.URL in place).
+
+func TestWebhook_ValidateConfig_RejectsReservedURLs(t *testing.T) {
+	// These must all fail at config-ingestion time without ever opening a
+	// socket — the reserved-address filter is the whole point of H-4.
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"loopback v4", "http://127.0.0.1/hook"},
+		{"loopback v4 with port", "http://127.0.0.1:8080/"},
+		{"loopback v6 bracketed", "http://[::1]/hook"},
+		{"AWS metadata", "http://169.254.169.254/latest/meta-data/"},
+		{"generic link-local", "http://169.254.1.2/"},
+		{"unspecified v4", "http://0.0.0.0/"},
+		{"unspecified v6", "http://[::]/"},
+		{"IPv6 link-local", "http://[fe80::1]/"},
+		{"multicast", "https://224.0.0.5/"},
+		{"broadcast", "http://255.255.255.255/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{URL: tc.url}
+			rawConfig, _ := json.Marshal(cfg)
+			conn := New(cfg, newTestLogger())
+
+			err := conn.ValidateConfig(context.Background(), rawConfig)
+			if err == nil {
+				t.Fatalf("ValidateConfig(%q) returned nil, want SSRF rejection", tc.url)
+			}
+			if !strings.Contains(err.Error(), "reserved") && !strings.Contains(err.Error(), "rejected") {
+				t.Errorf("expected reserved/rejected error, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestWebhook_ValidateConfig_RejectsDangerousSchemes(t *testing.T) {
+	// Only http(s) is a legitimate webhook transport. Every other scheme is
+	// an SSRF amplifier (file, gopher, ftp, javascript, data, ldap, dict,
+	// jar) and must be refused at config time.
+	cases := []struct {
+		name string
+		url  string
+	}{
+		{"file", "file:///etc/passwd"},
+		{"gopher", "gopher://example.com/_x"},
+		{"ftp", "ftp://example.com/"},
+		{"javascript", "javascript:alert(1)"},
+		{"data", "data:text/plain;base64,SGVsbG8="},
+		{"ldap", "ldap://example.com/"},
+		{"dict", "dict://example.com:2628/d:foo"},
+		{"jar", "jar:http://example.com/foo.jar!/"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{URL: tc.url}
+			rawConfig, _ := json.Marshal(cfg)
+			conn := New(cfg, newTestLogger())
+
+			err := conn.ValidateConfig(context.Background(), rawConfig)
+			if err == nil {
+				t.Fatalf("ValidateConfig(%q) returned nil, want scheme rejection", tc.url)
+			}
+			if !strings.Contains(err.Error(), "rejected") && !strings.Contains(err.Error(), "scheme") {
+				t.Errorf("expected scheme/rejected error, got %q", err.Error())
+			}
+		})
+	}
+}
+
+func TestWebhook_SendAlert_RejectsReservedURLInPostWebhook(t *testing.T) {
+	// Simulate config drift: URL was legitimate at ValidateConfig time but
+	// has since been rewritten to an SSRF target. postWebhook must catch
+	// this on every call without ever hitting the wire.
+	cfg := &Config{URL: "http://169.254.169.254/latest/meta-data/"}
+	conn := New(cfg, newTestLogger())
+
+	alert := notifier.Alert{
+		ID:        "alert-ssrf",
+		Type:      "test",
+		Severity:  "info",
+		Subject:   "Test",
+		Message:   "Test",
+		Recipient: "ops@example.com",
+		CreatedAt: time.Now(),
+	}
+
+	err := conn.SendAlert(context.Background(), alert)
+	if err == nil {
+		t.Fatal("SendAlert returned nil, want SSRF rejection from postWebhook")
+	}
+	if !strings.Contains(err.Error(), "reserved") && !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("expected reserved/rejected error, got %q", err.Error())
+	}
+}
+
+func TestWebhook_SendEvent_RejectsReservedURLInPostWebhook(t *testing.T) {
+	cfg := &Config{URL: "http://[::1]:9/webhook"}
+	conn := New(cfg, newTestLogger())
+
+	event := notifier.Event{
+		ID:        "event-ssrf",
+		Type:      "test",
+		Subject:   "Test",
+		Body:      "Test",
+		Recipient: "ops@example.com",
+		CreatedAt: time.Now(),
+	}
+
+	err := conn.SendEvent(context.Background(), event)
+	if err == nil {
+		t.Fatal("SendEvent returned nil, want SSRF rejection from postWebhook")
+	}
+	if !strings.Contains(err.Error(), "reserved") && !strings.Contains(err.Error(), "rejected") {
+		t.Errorf("expected reserved/rejected error, got %q", err.Error())
 	}
 }
 

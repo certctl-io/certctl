@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // mockNetworkScanRepo for testing
@@ -248,9 +249,9 @@ func TestIsReservedIP_Loopback(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {
-			result := isReservedIP(net.ParseIP(tt.ip))
+			result := validation.IsReservedIP(net.ParseIP(tt.ip))
 			if result != tt.expected {
-				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+				t.Errorf("validation.IsReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 			}
 		})
 	}
@@ -269,9 +270,9 @@ func TestIsReservedIP_LinkLocal(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {
-			result := isReservedIP(net.ParseIP(tt.ip))
+			result := validation.IsReservedIP(net.ParseIP(tt.ip))
 			if result != tt.expected {
-				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+				t.Errorf("validation.IsReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 			}
 		})
 	}
@@ -289,18 +290,18 @@ func TestIsReservedIP_Multicast(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {
-			result := isReservedIP(net.ParseIP(tt.ip))
+			result := validation.IsReservedIP(net.ParseIP(tt.ip))
 			if result != tt.expected {
-				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+				t.Errorf("validation.IsReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 			}
 		})
 	}
 }
 
 func TestIsReservedIP_Broadcast(t *testing.T) {
-	result := isReservedIP(net.ParseIP("255.255.255.255"))
+	result := validation.IsReservedIP(net.ParseIP("255.255.255.255"))
 	if !result {
-		t.Errorf("isReservedIP(255.255.255.255) = %v, expected true", result)
+		t.Errorf("validation.IsReservedIP(255.255.255.255) = %v, expected true", result)
 	}
 }
 
@@ -320,9 +321,9 @@ func TestIsReservedIP_AllowsPrivateRanges(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.desc, func(t *testing.T) {
-			result := isReservedIP(net.ParseIP(tt.ip))
+			result := validation.IsReservedIP(net.ParseIP(tt.ip))
 			if result != tt.expected {
-				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+				t.Errorf("validation.IsReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 			}
 		})
 	}
@@ -340,9 +341,9 @@ func TestIsReservedIP_AllowsPublic(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.ip, func(t *testing.T) {
-			result := isReservedIP(net.ParseIP(tt.ip))
+			result := validation.IsReservedIP(net.ParseIP(tt.ip))
 			if result != tt.expected {
-				t.Errorf("isReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
+				t.Errorf("validation.IsReservedIP(%s) = %v, expected %v", tt.ip, result, tt.expected)
 			}
 		})
 	}

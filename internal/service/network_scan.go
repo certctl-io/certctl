@@ -14,6 +14,7 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
 	"github.com/shankar0123/certctl/internal/tlsprobe"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // SentinelAgentID is the agent ID used for network-discovered certificates.
@@ -318,51 +319,27 @@ func (s *NetworkScanService) expandEndpoints(cidrs []string, ports []int64) []st
 	return endpoints
 }
 
-// isReservedCIDR checks if an IP address falls within reserved ranges that should not be scanned.
-// Filters out loopback, link-local (including cloud metadata), and multicast ranges.
-// Does NOT filter RFC 1918 ranges since certctl is self-hosted and internal networks are a primary use case.
-func isReservedIP(ip net.IP) bool {
-	// Loopback: 127.0.0.0/8
-	if ip.IsLoopback() {
-		return true
-	}
-
-	// Link-local: 169.254.0.0/16 (includes cloud metadata 169.254.169.254)
-	if linkLocal := net.ParseIP("169.254.0.0"); linkLocal != nil {
-		if _, linkLocalNet, _ := net.ParseCIDR("169.254.0.0/16"); linkLocalNet != nil {
-			if linkLocalNet.Contains(ip) {
-				return true
-			}
-		}
-	}
-
-	// Multicast: 224.0.0.0/4
-	if multicast := net.ParseIP("224.0.0.0"); multicast != nil {
-		if _, multicastNet, _ := net.ParseCIDR("224.0.0.0/4"); multicastNet != nil {
-			if multicastNet.Contains(ip) {
-				return true
-			}
-		}
-	}
-
-	// Broadcast: 255.255.255.255
-	if ip.String() == "255.255.255.255" {
-		return true
-	}
-
-	return false
-}
+// The reserved-IP filter used by expandCIDR previously lived here as an
+// unexported isReservedIP helper. It has been moved to
+// internal/validation.IsReservedIP so the webhook notifier can share a single
+// authoritative implementation (H-4, CWE-918). The behaviour is
+// byte-identical with the previous helper — RFC 1918 is intentionally NOT
+// filtered, matching certctl's self-hosted design. If you change the
+// validation package's IsReservedIP, you are changing the network-scanner's
+// behaviour; audit both code paths together.
 
 // expandCIDR expands a CIDR notation or single IP into a list of IPs.
 // Limits expansion to /20 (4096 IPs) to prevent accidental huge scans.
-// Filters out reserved IP ranges to prevent SSRF attacks.
+// Filters out reserved IP ranges (via validation.IsReservedIP) to prevent
+// SSRF amplification via network-scan targets pointed at cloud metadata or
+// loopback.
 func expandCIDR(cidr string) []string {
 	// Try as CIDR first
 	ip, ipNet, err := net.ParseCIDR(cidr)
 	if err != nil {
 		// Try as single IP
 		if singleIP := net.ParseIP(cidr); singleIP != nil {
-			if isReservedIP(singleIP) {
+			if validation.IsReservedIP(singleIP) {
 				return nil
 			}
 			return []string{singleIP.String()}
@@ -380,7 +357,7 @@ func expandCIDR(cidr string) []string {
 	var ips []string
 	for ip := ip.Mask(ipNet.Mask); ipNet.Contains(ip); incrementIP(ip) {
 		// Skip reserved IPs
-		if isReservedIP(ip) {
+		if validation.IsReservedIP(ip) {
 			continue
 		}
 
