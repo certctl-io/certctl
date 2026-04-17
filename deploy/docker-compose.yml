@@ -36,6 +36,16 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile
+      # Proxy propagation (M-4, Issue #9) — forwards host shell's proxy env
+      # vars into the Docker build so the Node frontend stage and Go module
+      # download can reach the public registries behind corporate proxies.
+      # Defaults to empty; omit the variables from the host environment for
+      # un-proxied builds and the behaviour is byte-identical to the pre-fix
+      # tree.
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
     container_name: certctl-server
     depends_on:
       postgres:
@@ -75,6 +85,15 @@ services:
     build:
       context: ..
       dockerfile: Dockerfile.agent
+      # Proxy propagation (M-4, Issue #9) — forwards host shell's proxy env
+      # vars into the Docker build so the Go module download stage can reach
+      # the public Go module proxy behind corporate proxies. Defaults to
+      # empty; omit the variables from the host environment for un-proxied
+      # builds and the behaviour is byte-identical to the pre-fix tree.
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
     container_name: certctl-agent
     depends_on:
       certctl-server:

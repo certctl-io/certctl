@@ -107,6 +107,16 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/shankar0123/certctl-server:latest
+          # Proxy propagation (M-4, Issue #9) — forwards runner-level proxy
+          # secrets into the Docker build so self-hosted runners behind
+          # corporate proxies can reach public registries. GitHub-hosted
+          # runners don't need proxies, so the secrets are optional and
+          # resolve to empty strings when unset — byte-identical to the
+          # pre-fix behaviour for the public-runner path.
+          build-args: |
+            HTTP_PROXY=${{ secrets.HTTP_PROXY }}
+            HTTPS_PROXY=${{ secrets.HTTPS_PROXY }}
+            NO_PROXY=${{ secrets.NO_PROXY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
@@ -119,6 +129,13 @@ jobs:
           tags: |
             ${{ env.REGISTRY }}/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
             ${{ env.REGISTRY }}/shankar0123/certctl-agent:latest
+          # Proxy propagation (M-4, Issue #9) — see server-image step for
+          # rationale. Empty secrets resolve to empty build args, leaving
+          # the un-proxied code path byte-identical to the pre-fix tree.
+          build-args: |
+            HTTP_PROXY=${{ secrets.HTTP_PROXY }}
+            HTTPS_PROXY=${{ secrets.HTTPS_PROXY }}
+            NO_PROXY=${{ secrets.NO_PROXY }}
           cache-from: type=gha
           cache-to: type=gha,mode=max
 

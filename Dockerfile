@@ -3,6 +3,22 @@
 # Stage 1: Build frontend
 FROM node:20-alpine AS frontend
 
+# Proxy propagation (M-4, Issue #9) — defaulted to empty so un-proxied builds
+# behave identically to the pre-fix tree. When `HTTP_PROXY`/`HTTPS_PROXY`/
+# `NO_PROXY` are forwarded via `docker build --build-arg` (or compose
+# `build.args`), they are re-exported as ENV with both upper- and lower-case
+# names because npm/apk/curl read the lowercase variants while Go, Node, and
+# most HTTP libraries read the uppercase ones.
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG NO_PROXY=
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    no_proxy=${NO_PROXY}
+
 WORKDIR /app/web
 
 COPY web/ .
@@ -12,6 +28,17 @@ RUN npm ci --include=dev || npm ci --include=dev && \
 
 # Stage 2: Build Go binary
 FROM golang:1.25-alpine AS builder
+
+# Proxy propagation (M-4, Issue #9) — see Stage 1 rationale.
+ARG HTTP_PROXY=
+ARG HTTPS_PROXY=
+ARG NO_PROXY=
+ENV HTTP_PROXY=${HTTP_PROXY} \
+    HTTPS_PROXY=${HTTPS_PROXY} \
+    NO_PROXY=${NO_PROXY} \
+    http_proxy=${HTTP_PROXY} \
+    https_proxy=${HTTPS_PROXY} \
+    no_proxy=${NO_PROXY}
 
 RUN apk add --no-cache git ca-certificates tzdata
 
