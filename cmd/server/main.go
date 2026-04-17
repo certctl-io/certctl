@@ -589,7 +589,7 @@ func main() {
 		bodyLimitMiddleware,
 		corsMiddleware,
 		authMiddleware,
-		auditMiddleware,
+		auditMiddleware.Middleware,
 	}
 
 	// Add rate limiter if enabled
@@ -606,7 +606,7 @@ func main() {
 			rateLimiter,
 			corsMiddleware,
 			authMiddleware,
-			auditMiddleware,
+			auditMiddleware.Middleware,
 		}
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
 	}
@@ -722,6 +722,17 @@ func main() {
 	logger.Info("shutting down HTTP server")
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
 		logger.Error("HTTP server shutdown error", "error", err)
+	}
+
+	// Drain in-flight audit-recording goroutines before closing the DB pool.
+	// The audit middleware spawns one goroutine per non-excluded request; those
+	// goroutines run detached from the request context and write to the
+	// audit_events table via the same *sql.DB. Without this drain, SIGTERM
+	// would close the DB pool while recordings were mid-flight, silently
+	// dropping audit events (M-1, CWE-662 / CWE-400).
+	logger.Info("flushing audit middleware in-flight recordings")
+	if err := auditMiddleware.Flush(shutdownCtx); err != nil {
+		logger.Warn("audit middleware flush did not complete in time", "error", err)
 	}
 
 	// Close database connection
