@@ -359,6 +359,25 @@ func (c *Connector) loadCAFromDisk() error {
 		return fmt.Errorf("loaded CA certificate does not have KeyUsageCertSign")
 	}
 
+	// Validate CA certificate validity window (M-5, CWE-672).
+	// An expired or not-yet-valid sub-CA produces child certificates that any
+	// RFC 5280 path-validator will reject. Fail closed at load time so operators
+	// learn about it at startup, not at 3am when a renewal cycle silently
+	// starts minting broken certs. See audit finding M-5.
+	now := time.Now()
+	if now.After(caCert.NotAfter) {
+		return fmt.Errorf("CA certificate %q has expired (not_after=%s, now=%s)",
+			caCert.Subject.CommonName,
+			caCert.NotAfter.UTC().Format(time.RFC3339),
+			now.UTC().Format(time.RFC3339))
+	}
+	if now.Before(caCert.NotBefore) {
+		return fmt.Errorf("CA certificate %q is not yet valid (not_before=%s, now=%s)",
+			caCert.Subject.CommonName,
+			caCert.NotBefore.UTC().Format(time.RFC3339),
+			now.UTC().Format(time.RFC3339))
+	}
+
 	// Load CA private key (supports RSA and ECDSA)
 	keyPEM, err := os.ReadFile(c.config.CAKeyPath)
 	if err != nil {

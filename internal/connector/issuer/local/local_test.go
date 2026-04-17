@@ -14,6 +14,7 @@ import (
 	"math/big"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -360,6 +361,114 @@ func TestSubCAMode(t *testing.T) {
 		t.Logf("Correctly rejected non-CA cert: %v", err)
 	})
 
+	t.Run("SubCA_ExpiredCert_IsRejected", func(t *testing.T) {
+		// Sub-CA expired 1 hour ago. M-5: loadCAFromDisk must fail closed
+		// instead of minting child certs that immediately fail path validation
+		// at every relying party (CWE-672).
+		notBefore := time.Now().AddDate(-1, 0, 0)
+		notAfter := time.Now().Add(-1 * time.Hour)
+		certPath, keyPath := generateTestSubCAWithValidity(t, "rsa", notBefore, notAfter)
+
+		config := &local.Config{
+			ValidityDays: 30,
+			CACertPath:   certPath,
+			CAKeyPath:    keyPath,
+		}
+		connector := local.New(config, logger)
+
+		_, csrPEM, err := generateTestCSR("app.internal.corp")
+		if err != nil {
+			t.Fatalf("Failed to generate CSR: %v", err)
+		}
+		req := issuer.IssuanceRequest{
+			CommonName: "app.internal.corp",
+			CSRPEM:     csrPEM,
+		}
+
+		_, err = connector.IssueCertificate(ctx, req)
+		if err == nil {
+			t.Fatal("Expected error when loading expired sub-CA; got nil")
+		}
+		if !strings.Contains(err.Error(), "expired") {
+			t.Errorf("Expected error to mention 'expired'; got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "Test Sub-CA") {
+			t.Errorf("Expected error to include CA subject CN 'Test Sub-CA'; got: %v", err)
+		}
+		t.Logf("Correctly rejected expired sub-CA: %v", err)
+	})
+
+	t.Run("SubCA_NotYetValid_IsRejected", func(t *testing.T) {
+		// Sub-CA is not valid for another hour (clock skew or operator error
+		// pushing a pre-production CA into prod). M-5: loadCAFromDisk must
+		// fail closed.
+		notBefore := time.Now().Add(1 * time.Hour)
+		notAfter := time.Now().AddDate(5, 0, 0)
+		certPath, keyPath := generateTestSubCAWithValidity(t, "rsa", notBefore, notAfter)
+
+		config := &local.Config{
+			ValidityDays: 30,
+			CACertPath:   certPath,
+			CAKeyPath:    keyPath,
+		}
+		connector := local.New(config, logger)
+
+		_, csrPEM, err := generateTestCSR("app.internal.corp")
+		if err != nil {
+			t.Fatalf("Failed to generate CSR: %v", err)
+		}
+		req := issuer.IssuanceRequest{
+			CommonName: "app.internal.corp",
+			CSRPEM:     csrPEM,
+		}
+
+		_, err = connector.IssueCertificate(ctx, req)
+		if err == nil {
+			t.Fatal("Expected error when loading not-yet-valid sub-CA; got nil")
+		}
+		if !strings.Contains(err.Error(), "not yet valid") {
+			t.Errorf("Expected error to mention 'not yet valid'; got: %v", err)
+		}
+		if !strings.Contains(err.Error(), "Test Sub-CA") {
+			t.Errorf("Expected error to include CA subject CN 'Test Sub-CA'; got: %v", err)
+		}
+		t.Logf("Correctly rejected not-yet-valid sub-CA: %v", err)
+	})
+
+	t.Run("SubCA_BarelyValid_IsAccepted", func(t *testing.T) {
+		// Sub-CA valid from 1 minute ago to 1 hour from now. Edge case:
+		// proves the M-5 window check doesn't over-reject CAs that are
+		// legitimately live but close to the boundaries.
+		notBefore := time.Now().Add(-1 * time.Minute)
+		notAfter := time.Now().Add(1 * time.Hour)
+		certPath, keyPath := generateTestSubCAWithValidity(t, "rsa", notBefore, notAfter)
+
+		config := &local.Config{
+			ValidityDays: 30,
+			CACertPath:   certPath,
+			CAKeyPath:    keyPath,
+		}
+		connector := local.New(config, logger)
+
+		_, csrPEM, err := generateTestCSR("app.internal.corp")
+		if err != nil {
+			t.Fatalf("Failed to generate CSR: %v", err)
+		}
+		req := issuer.IssuanceRequest{
+			CommonName: "app.internal.corp",
+			CSRPEM:     csrPEM,
+		}
+
+		result, err := connector.IssueCertificate(ctx, req)
+		if err != nil {
+			t.Fatalf("Barely-valid sub-CA was wrongly rejected: %v", err)
+		}
+		if result.CertPEM == "" {
+			t.Error("CertPEM is empty")
+		}
+		t.Logf("Correctly accepted barely-valid sub-CA: serial=%s", result.Serial)
+	})
+
 	t.Run("SubCA_RenewCertificate", func(t *testing.T) {
 		certPath, keyPath := generateTestSubCA(t, "rsa")
 		defer os.Remove(certPath)
@@ -396,8 +505,16 @@ func TestSubCAMode(t *testing.T) {
 }
 
 // generateTestSubCA creates a self-signed CA cert+key pair and writes them to temp files.
-// keyType can be "rsa" or "ecdsa".
+// keyType can be "rsa" or "ecdsa". Validity window is [now, now+5y].
 func generateTestSubCA(t *testing.T, keyType string) (certPath, keyPath string) {
+	t.Helper()
+	return generateTestSubCAWithValidity(t, keyType, time.Now(), time.Now().AddDate(5, 0, 0))
+}
+
+// generateTestSubCAWithValidity creates a self-signed CA cert+key pair with an
+// explicit NotBefore/NotAfter window. Used by M-5 tests that exercise expired
+// and not-yet-valid CA rejection in loadCAFromDisk.
+func generateTestSubCAWithValidity(t *testing.T, keyType string, notBefore, notAfter time.Time) (certPath, keyPath string) {
 	t.Helper()
 	tmpDir := t.TempDir()
 	certPath = filepath.Join(tmpDir, "ca.pem")
@@ -445,8 +562,8 @@ func generateTestSubCA(t *testing.T, keyType string) (certPath, keyPath string) 
 			CommonName:   "Test Sub-CA",
 			Organization: []string{"CertCtl Test"},
 		},
-		NotBefore:             time.Now(),
-		NotAfter:              time.Now().AddDate(5, 0, 0),
+		NotBefore:             notBefore,
+		NotAfter:              notAfter,
 		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
 		BasicConstraintsValid: true,
 		IsCA:                  true,
