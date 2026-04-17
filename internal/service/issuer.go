@@ -577,17 +577,21 @@ func (s *IssuerService) buildEnvVarSeeds(cfg *config.Config) []*domain.Issuer {
 
 	// Conditional: GlobalSign — only seed if API URL and API key are set
 	if cfg.GlobalSign.APIUrl != "" && cfg.GlobalSign.APIKey != "" {
+		globalSignConfig := map[string]interface{}{
+			"api_url":          cfg.GlobalSign.APIUrl,
+			"api_key":          cfg.GlobalSign.APIKey,
+			"api_secret":       cfg.GlobalSign.APISecret,
+			"client_cert_path": cfg.GlobalSign.ClientCertPath,
+			"client_key_path":  cfg.GlobalSign.ClientKeyPath,
+		}
+		if cfg.GlobalSign.ServerCAPath != "" {
+			globalSignConfig["server_ca_path"] = cfg.GlobalSign.ServerCAPath
+		}
 		seeds = append(seeds, &domain.Issuer{
-			ID:   "iss-globalsign",
-			Name: "GlobalSign Atlas",
-			Type: domain.IssuerTypeGlobalSign,
-			Config: mustJSON(map[string]interface{}{
-				"api_url":          cfg.GlobalSign.APIUrl,
-				"api_key":          cfg.GlobalSign.APIKey,
-				"api_secret":       cfg.GlobalSign.APISecret,
-				"client_cert_path": cfg.GlobalSign.ClientCertPath,
-				"client_key_path":  cfg.GlobalSign.ClientKeyPath,
-			}),
+			ID:        "iss-globalsign",
+			Name:      "GlobalSign Atlas",
+			Type:      domain.IssuerTypeGlobalSign,
+			Config:    mustJSON(globalSignConfig),
 			Enabled:   true,
 			Source:    "env",
 			CreatedAt: now,

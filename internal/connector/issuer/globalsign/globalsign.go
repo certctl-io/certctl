@@ -34,6 +34,7 @@ import (
 	"io"
 	"log/slog"
 	"net/http"
+	"os"
 	"strings"
 	"time"
 
@@ -64,6 +65,14 @@ type Config struct {
 	// Must match the certificate in ClientCertPath.
 	// Required. Set via CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH environment variable.
 	ClientKeyPath string `json:"client_key_path"`
+
+	// ServerCAPath is the filesystem path to a PEM file containing the CA
+	// certificate(s) used to verify the GlobalSign Atlas HVCA API server certificate.
+	// Optional. If empty, the system trust store is used. This option exists for
+	// private/lab deployments of GlobalSign Atlas that terminate TLS with an
+	// internal CA not present in the host's default trust bundle.
+	// Set via CERTCTL_GLOBALSIGN_SERVER_CA_PATH environment variable.
+	ServerCAPath string `json:"server_ca_path,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for GlobalSign Atlas HVCA.
@@ -153,14 +162,12 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("failed to load GlobalSign client certificate: %w", err)
 	}
 
-	// Create an mTLS client for validation
-	tlsConfig := &tls.Config{
-		Certificates: []tls.Certificate{cert},
-		// InsecureSkipVerify=true allows testing against self-signed server certs.
-		// In production, GlobalSign's API uses a proper certificate chain.
-		// This matches the pattern used by other connectors (F5, network scanner, etc.)
-		// that also need to bypass hostname verification for internal/lab environments.
-		InsecureSkipVerify: true,
+	// Build a verifying mTLS TLS config. If ServerCAPath is set, that PEM
+	// bundle is used as the trust anchor for the server certificate;
+	// otherwise the system trust store is used. TLS 1.2 is the minimum.
+	tlsConfig, err := buildServerTLSConfig(&cfg, cert)
+	if err != nil {
+		return fmt.Errorf("failed to build GlobalSign TLS config: %w", err)
 	}
 
 	validationClient := &http.Client{
@@ -225,9 +232,9 @@ func (c *Connector) getHTTPClient(ctx context.Context) (*http.Client, error) {
 		return nil, fmt.Errorf("failed to load GlobalSign client certificate: %w", err)
 	}
 
-	tlsConfig := &tls.Config{
-		Certificates:       []tls.Certificate{cert},
-		InsecureSkipVerify: true,
+	tlsConfig, err := buildServerTLSConfig(c.config, cert)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build GlobalSign TLS config: %w", err)
 	}
 
 	return &http.Client{
@@ -236,6 +243,38 @@ func (c *Connector) getHTTPClient(ctx context.Context) (*http.Client, error) {
 		},
 		Timeout: 30 * time.Second,
 	}, nil
+}
+
+// buildServerTLSConfig returns a TLS configuration for the GlobalSign Atlas
+// HVCA API client. It always verifies the server certificate. When
+// cfg.ServerCAPath is set, the PEM bundle at that path is used as the
+// trust anchor (enables pinning a private/lab CA); otherwise the host's
+// system trust store is used. TLS 1.2 is the minimum protocol version.
+//
+// This helper is the single source of truth for both the ValidateConfig
+// probe client and the steady-state getHTTPClient production client, so
+// any future TLS policy change applies uniformly.
+func buildServerTLSConfig(cfg *Config, clientCert tls.Certificate) (*tls.Config, error) {
+	tlsConfig := &tls.Config{
+		Certificates: []tls.Certificate{clientCert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	if cfg.ServerCAPath != "" {
+		caPEM, err := os.ReadFile(cfg.ServerCAPath)
+		if err != nil {
+			return nil, fmt.Errorf("failed to read server CA bundle at %s: %w", cfg.ServerCAPath, err)
+		}
+
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("no valid PEM certificates found in server CA bundle at %s", cfg.ServerCAPath)
+		}
+
+		tlsConfig.RootCAs = pool
+	}
+
+	return tlsConfig, nil
 }
 
 // IssueCertificate submits a certificate order to GlobalSign Atlas HVCA.

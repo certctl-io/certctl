@@ -465,8 +465,11 @@ GlobalSign Atlas High Volume CA REST API with dual authentication: mTLS for the 
 | `CERTCTL_GLOBALSIGN_API_SECRET` | Yes | — | API secret for request authentication |
 | `CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH` | Yes | — | Path to mTLS client certificate PEM |
 | `CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
+| `CERTCTL_GLOBALSIGN_SERVER_CA_PATH` | No | system trust store | PEM bundle used to verify the Atlas API server certificate. Set this for private/lab Atlas deployments whose server TLS chain is not in the host's default trust bundle. |
 
 **Authentication:** Dual — mTLS client certificate for TLS handshake plus `X-API-Key` and `X-API-Secret` headers on every request.
+
+**TLS verification:** The connector always verifies the server certificate. When `server_ca_path` is set, the PEM bundle at that path is used as the trust anchor; otherwise the host's system trust store is used. TLS 1.2 is the minimum protocol version.
 
 **Issuance model:** `POST /v2/certificates` returns a serial number. Certificate PEM is available after validation completes. Typically resolves within seconds for DV. `GetOrderStatus` polls the certificate endpoint.
 

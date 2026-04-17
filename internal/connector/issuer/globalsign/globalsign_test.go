@@ -4,7 +4,6 @@ import (
 	"context"
 	"crypto/rand"
 	"crypto/rsa"
-	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -161,11 +160,7 @@ func TestGlobalSignConnector(t *testing.T) {
 		testCertPEM, _ := generateTestCert(t)
 		testChainPEM, _ := generateTestCert(t)
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v2/certificates" && r.Method == http.MethodPost {
@@ -223,11 +218,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	})
 
 	t.Run("IssueCertificate_Pending", func(t *testing.T) {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v2/certificates" && r.Method == http.MethodPost {
@@ -271,11 +262,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	})
 
 	t.Run("IssueCertificate_Error", func(t *testing.T) {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v2/certificates" && r.Method == http.MethodPost {
@@ -312,11 +299,7 @@ func TestGlobalSignConnector(t *testing.T) {
 		testCertPEM, _ := generateTestCert(t)
 		testChainPEM, _ := generateTestCert(t)
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/v2/certificates/12345") && r.Method == http.MethodGet {
@@ -356,11 +339,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	})
 
 	t.Run("GetOrderStatus_Pending", func(t *testing.T) {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/v2/certificates/98765") && r.Method == http.MethodGet {
@@ -401,11 +380,7 @@ func TestGlobalSignConnector(t *testing.T) {
 		testCertPEM, _ := generateTestCert(t)
 		testChainPEM, _ := generateTestCert(t)
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if r.URL.Path == "/v2/certificates" && r.Method == http.MethodPost {
@@ -448,11 +423,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	})
 
 	t.Run("RevokeCertificate_Success", func(t *testing.T) {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/v2/certificates/") && strings.HasSuffix(r.URL.Path, "/revoke") && r.Method == http.MethodPut {
@@ -492,11 +463,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	})
 
 	t.Run("RevokeCertificate_Error", func(t *testing.T) {
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			if strings.HasPrefix(r.URL.Path, "/v2/certificates/") && strings.HasSuffix(r.URL.Path, "/revoke") && r.Method == http.MethodPut {
@@ -532,11 +499,7 @@ func TestGlobalSignConnector(t *testing.T) {
 		testChainPEM, _ := generateTestCert(t)
 		authHeadersChecked := 0
 
-		httpClient := &http.Client{
-			Transport: &http.Transport{
-				TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-			},
-		}
+		httpClient := &http.Client{}
 
 		mockServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			// Check for auth headers on every request
@@ -581,6 +544,177 @@ func TestGlobalSignConnector(t *testing.T) {
 			t.Errorf("Auth headers not found on request")
 		}
 		t.Logf("Auth headers verified on %d request(s)", authHeadersChecked)
+	})
+}
+
+// TestGlobalSign_ServerTLSConfig exercises the server-side TLS verification
+// policy added by H-5. The connector must always verify the GlobalSign Atlas
+// HVCA API server certificate: by default against the host's system trust
+// store, and when ServerCAPath is set, against the pinned PEM bundle at that
+// path. InsecureSkipVerify is no longer reachable from any production code path.
+func TestGlobalSign_ServerTLSConfig(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+
+	// writeClientMTLS generates a throwaway client cert+key pair and writes them
+	// to disk. ValidateConfig requires valid ClientCertPath / ClientKeyPath files
+	// before it reaches the server-CA validation path under test.
+	writeClientMTLS := func(t *testing.T) (certPath, keyPath string) {
+		t.Helper()
+		certPEM, keyPEM := generateTestCert(t)
+		dir := t.TempDir()
+		certPath = dir + "/client-cert.pem"
+		keyPath = dir + "/client-key.pem"
+		if err := os.WriteFile(certPath, []byte(certPEM), 0600); err != nil {
+			t.Fatalf("failed to write client cert: %v", err)
+		}
+		if err := os.WriteFile(keyPath, []byte(keyPEM), 0600); err != nil {
+			t.Fatalf("failed to write client key: %v", err)
+		}
+		return certPath, keyPath
+	}
+
+	// certToPEM re-encodes a parsed certificate as a PEM block for trust-store
+	// pinning. httptest.NewTLSServer.Certificate() returns the server's self-
+	// signed cert; pinning that cert trusts exactly that one server.
+	certToPEM := func(t *testing.T, cert *x509.Certificate) string {
+		t.Helper()
+		return string(pem.EncodeToMemory(&pem.Block{
+			Type:  "CERTIFICATE",
+			Bytes: cert.Raw,
+		}))
+	}
+
+	t.Run("PinnedCA_TrustsExpectedServer", func(t *testing.T) {
+		// Mock Atlas API served over HTTPS with a self-signed cert. We pin
+		// that cert's PEM as the client's trust anchor; the validation probe
+		// should succeed because the pinned pool contains the server's issuer.
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			if r.URL.Path == "/v2/certificates" && r.Method == http.MethodGet {
+				if r.Header.Get("ApiKey") == "gs-test-key" && r.Header.Get("ApiSecret") == "gs-test-secret" {
+					w.WriteHeader(http.StatusOK)
+					w.Write([]byte(`{"certificates":[]}`))
+					return
+				}
+				w.WriteHeader(http.StatusForbidden)
+				return
+			}
+			http.NotFound(w, r)
+		}))
+		defer srv.Close()
+
+		caPEM := certToPEM(t, srv.Certificate())
+		caPath := t.TempDir() + "/atlas-ca.pem"
+		if err := os.WriteFile(caPath, []byte(caPEM), 0600); err != nil {
+			t.Fatalf("failed to write pinned CA: %v", err)
+		}
+
+		clientCert, clientKey := writeClientMTLS(t)
+		config := globalsign.Config{
+			APIUrl:         srv.URL,
+			APIKey:         "gs-test-key",
+			APISecret:      "gs-test-secret",
+			ClientCertPath: clientCert,
+			ClientKeyPath:  clientKey,
+			ServerCAPath:   caPath,
+		}
+
+		connector := globalsign.New(&config, logger)
+		rawConfig, _ := json.Marshal(config)
+		if err := connector.ValidateConfig(ctx, rawConfig); err != nil {
+			t.Fatalf("ValidateConfig with pinned CA should succeed, got: %v", err)
+		}
+	})
+
+	t.Run("PinnedCA_RejectsUntrustedServer", func(t *testing.T) {
+		// Mock server presents its own self-signed cert; we pin an UNRELATED
+		// cert as the trust anchor. The TLS handshake must fail before any
+		// request is sent — this is exactly what H-5 remediates.
+		srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			w.WriteHeader(http.StatusOK)
+		}))
+		defer srv.Close()
+
+		unrelatedPEM, _ := generateTestCert(t)
+		caPath := t.TempDir() + "/unrelated-ca.pem"
+		if err := os.WriteFile(caPath, []byte(unrelatedPEM), 0600); err != nil {
+			t.Fatalf("failed to write unrelated CA: %v", err)
+		}
+
+		clientCert, clientKey := writeClientMTLS(t)
+		config := globalsign.Config{
+			APIUrl:         srv.URL,
+			APIKey:         "gs-test-key",
+			APISecret:      "gs-test-secret",
+			ClientCertPath: clientCert,
+			ClientKeyPath:  clientKey,
+			ServerCAPath:   caPath,
+		}
+
+		connector := globalsign.New(&config, logger)
+		rawConfig, _ := json.Marshal(config)
+		err := connector.ValidateConfig(ctx, rawConfig)
+		if err == nil {
+			t.Fatal("ValidateConfig must fail when the server cert is not signed by the pinned CA")
+		}
+		// The failure must originate from TLS verification, not from any other path.
+		if !strings.Contains(err.Error(), "x509") &&
+			!strings.Contains(err.Error(), "certificate") &&
+			!strings.Contains(err.Error(), "unknown authority") {
+			t.Errorf("expected TLS verification error, got: %v", err)
+		}
+		t.Logf("Untrusted server cert correctly rejected: %v", err)
+	})
+
+	t.Run("ServerCAPath_MissingFile", func(t *testing.T) {
+		clientCert, clientKey := writeClientMTLS(t)
+		config := globalsign.Config{
+			APIUrl:         "https://example.invalid",
+			APIKey:         "gs-test-key",
+			APISecret:      "gs-test-secret",
+			ClientCertPath: clientCert,
+			ClientKeyPath:  clientKey,
+			ServerCAPath:   "/nonexistent/path/to/ca.pem",
+		}
+
+		connector := globalsign.New(&config, logger)
+		rawConfig, _ := json.Marshal(config)
+		err := connector.ValidateConfig(ctx, rawConfig)
+		if err == nil {
+			t.Fatal("ValidateConfig must fail when ServerCAPath points to a missing file")
+		}
+		if !strings.Contains(err.Error(), "failed to read server CA bundle") {
+			t.Errorf("expected 'failed to read server CA bundle' error, got: %v", err)
+		}
+		t.Logf("Missing server CA file correctly rejected: %v", err)
+	})
+
+	t.Run("ServerCAPath_InvalidPEM", func(t *testing.T) {
+		clientCert, clientKey := writeClientMTLS(t)
+		badCAPath := t.TempDir() + "/garbage.pem"
+		if err := os.WriteFile(badCAPath, []byte("this is not a PEM certificate at all"), 0600); err != nil {
+			t.Fatalf("failed to write garbage file: %v", err)
+		}
+
+		config := globalsign.Config{
+			APIUrl:         "https://example.invalid",
+			APIKey:         "gs-test-key",
+			APISecret:      "gs-test-secret",
+			ClientCertPath: clientCert,
+			ClientKeyPath:  clientKey,
+			ServerCAPath:   badCAPath,
+		}
+
+		connector := globalsign.New(&config, logger)
+		rawConfig, _ := json.Marshal(config)
+		err := connector.ValidateConfig(ctx, rawConfig)
+		if err == nil {
+			t.Fatal("ValidateConfig must fail when ServerCAPath contains no valid PEM certificates")
+		}
+		if !strings.Contains(err.Error(), "no valid PEM certificates") {
+			t.Errorf("expected 'no valid PEM certificates' error, got: %v", err)
+		}
+		t.Logf("Invalid PEM correctly rejected: %v", err)
 	})
 }
 

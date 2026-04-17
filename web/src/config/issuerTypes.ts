@@ -195,6 +195,7 @@ export const issuerTypes: IssuerTypeConfig[] = [
       { key: 'api_secret', label: 'API Secret', placeholder: 'GlobalSign API secret', required: true, type: 'password', sensitive: true },
       { key: 'client_cert_path', label: 'Client Certificate Path', placeholder: '/path/to/client.crt', required: true },
       { key: 'client_key_path', label: 'Client Key Path', placeholder: '/path/to/client.key', required: true, sensitive: true },
+      { key: 'server_ca_path', label: 'Server CA Path (optional)', placeholder: '/path/to/atlas-ca.pem', required: false },
     ],
   },
   {

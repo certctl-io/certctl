@@ -116,6 +116,14 @@ type GlobalSignConfig struct {
 	// ClientKeyPath is the path to the mTLS client private key PEM file.
 	// Setting: CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH environment variable.
 	ClientKeyPath string
+
+	// ServerCAPath is the optional path to a PEM file containing the CA
+	// certificate(s) used to verify the GlobalSign Atlas HVCA API server
+	// certificate. If empty, the system trust store is used. Set this
+	// for private/lab Atlas deployments whose server TLS chain is not
+	// present in the host's default trust bundle.
+	// Setting: CERTCTL_GLOBALSIGN_SERVER_CA_PATH environment variable.
+	ServerCAPath string
 }
 
 // EJBCAConfig contains EJBCA (Keyfactor) issuer connector configuration.
@@ -887,6 +895,7 @@ func Load() (*Config, error) {
 			APISecret:      getEnv("CERTCTL_GLOBALSIGN_API_SECRET", ""),
 			ClientCertPath: getEnv("CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH", ""),
 			ClientKeyPath:  getEnv("CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH", ""),
+			ServerCAPath:   getEnv("CERTCTL_GLOBALSIGN_SERVER_CA_PATH", ""),
 		},
 		EJBCA: EJBCAConfig{
 			APIUrl:         getEnv("CERTCTL_EJBCA_API_URL", ""),
