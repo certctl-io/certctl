@@ -602,6 +602,19 @@ func (m *mockAgentRepo) Create(ctx context.Context, agent *domain.Agent) error {
 	return nil
 }
 
+func (m *mockAgentRepo) CreateIfNotExists(ctx context.Context, agent *domain.Agent) (bool, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CreateErr != nil {
+		return false, m.CreateErr
+	}
+	if _, exists := m.Agents[agent.ID]; exists {
+		return false, nil
+	}
+	m.Agents[agent.ID] = agent
+	return true, nil
+}
+
 func (m *mockAgentRepo) Update(ctx context.Context, agent *domain.Agent) error {
 	m.mu.Lock()
 	defer m.mu.Unlock()

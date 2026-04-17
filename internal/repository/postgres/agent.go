@@ -70,7 +70,9 @@ func (r *AgentRepository) Get(ctx context.Context, id string) (*domain.Agent, er
 	return agent, nil
 }
 
-// Create stores a new agent
+// Create stores a new agent. Duplicate-key errors surface to the caller —
+// real-agent registration paths rely on this to detect collisions. Use
+// CreateIfNotExists for sentinel/bootstrap paths where re-inserts are expected.
 func (r *AgentRepository) Create(ctx context.Context, agent *domain.Agent) error {
 	if agent.ID == "" {
 		agent.ID = uuid.New().String()
@@ -90,6 +92,44 @@ func (r *AgentRepository) Create(ctx context.Context, agent *domain.Agent) error
 	}
 
 	return nil
+}
+
+// CreateIfNotExists creates an agent only if the ID doesn't already exist.
+// Used for sentinel agents (server-scanner, cloud-aws-sm, cloud-azure-kv,
+// cloud-gcp-sm) on first boot AND on every subsequent restart/upgrade — the
+// pre-M-6 code used plain INSERT, swallowed the duplicate-key error, and so
+// silently swallowed every other database failure too (CWE-662 /
+// CWE-209-adjacent). ON CONFLICT (id) DO NOTHING + RETURNING id +
+// sql.ErrNoRows distinguishes "row already existed" (created=false, err=nil)
+// from genuine errors (connectivity, permission, constraint violations
+// other than the id primary key) which still surface. Returns true if the
+// row was newly inserted, false if a row with the same ID already existed.
+func (r *AgentRepository) CreateIfNotExists(ctx context.Context, agent *domain.Agent) (bool, error) {
+	if agent.ID == "" {
+		agent.ID = uuid.New().String()
+	}
+
+	var id string
+	err := r.db.QueryRowContext(ctx, `
+		INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash,
+		                    os, architecture, ip_address, version)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)
+		ON CONFLICT (id) DO NOTHING
+		RETURNING id
+	`, agent.ID, agent.Name, agent.Hostname, agent.Status, agent.LastHeartbeatAt,
+		agent.RegisteredAt, agent.APIKeyHash,
+		agent.OS, agent.Architecture, agent.IPAddress, agent.Version).Scan(&id)
+
+	if err != nil {
+		if err == sql.ErrNoRows {
+			// ON CONFLICT DO NOTHING — a row with this ID already existed.
+			return false, nil
+		}
+		return false, fmt.Errorf("failed to create agent: %w", err)
+	}
+
+	agent.ID = id
+	return true, nil
 }
 
 // Update modifies an existing agent

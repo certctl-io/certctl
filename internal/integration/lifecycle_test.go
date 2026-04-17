@@ -772,6 +772,14 @@ func (m *mockAgentRepository) Create(ctx context.Context, agent *domain.Agent) e
 	return nil
 }
 
+func (m *mockAgentRepository) CreateIfNotExists(ctx context.Context, agent *domain.Agent) (bool, error) {
+	if _, exists := m.agents[agent.ID]; exists {
+		return false, nil
+	}
+	m.agents[agent.ID] = agent
+	return true, nil
+}
+
 func (m *mockAgentRepository) Update(ctx context.Context, agent *domain.Agent) error {
 	m.agents[agent.ID] = agent
 	return nil

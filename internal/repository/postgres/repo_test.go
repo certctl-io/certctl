@@ -457,6 +457,193 @@ func TestAgentRepository_Delete_NotFound(t *testing.T) {
 	}
 }
 
+// TestAgentRepository_CreateIfNotExists_FirstInsert verifies that a brand-new
+// sentinel agent row is inserted and the helper reports created=true (M-6).
+func TestAgentRepository_CreateIfNotExists_FirstInsert(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewAgentRepository(db)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Microsecond)
+	agent := &domain.Agent{
+		ID:           "server-scanner",
+		Name:         "Network Scanner (Server-Side)",
+		Status:       domain.AgentStatusOnline,
+		RegisteredAt: now,
+	}
+
+	created, err := repo.CreateIfNotExists(ctx, agent)
+	if err != nil {
+		t.Fatalf("CreateIfNotExists failed: %v", err)
+	}
+	if !created {
+		t.Error("created = false on first insert, want true")
+	}
+
+	got, err := repo.Get(ctx, "server-scanner")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Name != "Network Scanner (Server-Side)" {
+		t.Errorf("Name = %q, want %q", got.Name, "Network Scanner (Server-Side)")
+	}
+}
+
+// TestAgentRepository_CreateIfNotExists_Idempotent verifies that a second
+// call with the same ID returns created=false and err=nil without mutating
+// the existing row — the core M-6 upgrade/restart scenario (CWE-662).
+func TestAgentRepository_CreateIfNotExists_Idempotent(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewAgentRepository(db)
+	ctx := context.Background()
+
+	now := time.Now().Truncate(time.Microsecond)
+	first := &domain.Agent{
+		ID:           "cloud-aws-sm",
+		Name:         "AWS Secrets Manager Discovery",
+		Status:       domain.AgentStatusOnline,
+		RegisteredAt: now,
+	}
+	created, err := repo.CreateIfNotExists(ctx, first)
+	if err != nil {
+		t.Fatalf("first CreateIfNotExists failed: %v", err)
+	}
+	if !created {
+		t.Fatal("first created = false, want true")
+	}
+
+	// Second call with the same ID but a different name must be a no-op.
+	second := &domain.Agent{
+		ID:           "cloud-aws-sm",
+		Name:         "Overwritten Name Should Not Persist",
+		Status:       domain.AgentStatusOffline,
+		RegisteredAt: now.Add(time.Hour),
+	}
+	created, err = repo.CreateIfNotExists(ctx, second)
+	if err != nil {
+		t.Fatalf("second CreateIfNotExists failed: %v", err)
+	}
+	if created {
+		t.Error("second created = true, want false (row already existed)")
+	}
+
+	// Row must still reflect the original insert.
+	got, err := repo.Get(ctx, "cloud-aws-sm")
+	if err != nil {
+		t.Fatalf("Get failed: %v", err)
+	}
+	if got.Name != "AWS Secrets Manager Discovery" {
+		t.Errorf("Name = %q, want %q (ON CONFLICT DO NOTHING must preserve original row)", got.Name, "AWS Secrets Manager Discovery")
+	}
+	if got.Status != domain.AgentStatusOnline {
+		t.Errorf("Status = %q, want %q", got.Status, domain.AgentStatusOnline)
+	}
+}
+
+// TestAgentRepository_CreateIfNotExists_ConcurrentRace fires N concurrent
+// inserts for the same sentinel ID. Exactly one goroutine must see
+// created=true; every other must see created=false and err=nil. No panics,
+// no duplicate rows, no swallowed errors. This is the scenario that the
+// pre-M-6 plain-INSERT path masked with a blanket error log.
+func TestAgentRepository_CreateIfNotExists_ConcurrentRace(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewAgentRepository(db)
+	ctx := context.Background()
+
+	const N = 16
+	now := time.Now().Truncate(time.Microsecond)
+
+	var (
+		wg           sync.WaitGroup
+		createdCount int64
+		errorCount   int64
+	)
+	wg.Add(N)
+	for i := 0; i < N; i++ {
+		go func() {
+			defer wg.Done()
+			agent := &domain.Agent{
+				ID:           "cloud-gcp-sm",
+				Name:         "GCP Secret Manager Discovery",
+				Status:       domain.AgentStatusOnline,
+				RegisteredAt: now,
+			}
+			created, err := repo.CreateIfNotExists(ctx, agent)
+			if err != nil {
+				atomic.AddInt64(&errorCount, 1)
+				t.Errorf("CreateIfNotExists returned error: %v", err)
+				return
+			}
+			if created {
+				atomic.AddInt64(&createdCount, 1)
+			}
+		}()
+	}
+	wg.Wait()
+
+	if errorCount != 0 {
+		t.Fatalf("errorCount = %d, want 0", errorCount)
+	}
+	if createdCount != 1 {
+		t.Errorf("createdCount = %d, want exactly 1 (only one goroutine may win the insert)", createdCount)
+	}
+
+	// Exactly one row must exist.
+	agents, err := repo.List(ctx)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	count := 0
+	for _, a := range agents {
+		if a.ID == "cloud-gcp-sm" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("row count for cloud-gcp-sm = %d, want 1", count)
+	}
+}
+
+// TestAgentRepository_CreateIfNotExists_GenericErrorSurfaces verifies that
+// failures other than the primary-key duplicate (the only collision
+// ON CONFLICT (id) absorbs) propagate to the caller instead of being
+// swallowed. This is the security property that M-6 restores: the
+// pre-fix plain-INSERT path logged every error at Debug level, so a
+// connectivity or permission failure would vanish into the log without
+// the server surfacing a problem on startup (CWE-662 / CWE-209-adjacent).
+//
+// Uses a pre-cancelled context to force QueryRowContext to fail with
+// context.Canceled — a non-duplicate error class that must surface.
+// Does NOT close the shared sql.DB (that would break sibling tests).
+func TestAgentRepository_CreateIfNotExists_GenericErrorSurfaces(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewAgentRepository(db)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel() // pre-cancel so the driver round-trip fails immediately.
+
+	agent := &domain.Agent{
+		ID:           "server-scanner",
+		Name:         "Network Scanner (Server-Side)",
+		Status:       domain.AgentStatusOnline,
+		RegisteredAt: time.Now(),
+	}
+	created, err := repo.CreateIfNotExists(ctx, agent)
+	if err == nil {
+		t.Fatal("expected error on cancelled context, got nil (error would have been swallowed pre-M-6)")
+	}
+	if created {
+		t.Error("created = true on failure, want false")
+	}
+	if err == sql.ErrNoRows {
+		t.Error("got sql.ErrNoRows, want a real connection/context error (ErrNoRows is the duplicate-row sentinel)")
+	}
+}
+
 // ============================================================
 // Issuer Repository Tests
 // ============================================================
