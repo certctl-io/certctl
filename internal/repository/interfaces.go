@@ -90,8 +90,18 @@ type AgentRepository interface {
 	List(ctx context.Context) ([]*domain.Agent, error)
 	// Get retrieves an agent by ID.
 	Get(ctx context.Context, id string) (*domain.Agent, error)
-	// Create stores a new agent.
+	// Create stores a new agent. Callers that want duplicate-key errors surfaced
+	// (e.g. real-agent registration) must use this method; sentinel/bootstrap
+	// paths that expect the row to already exist on restart should call
+	// CreateIfNotExists instead (M-6, CWE-662).
 	Create(ctx context.Context, agent *domain.Agent) error
+	// CreateIfNotExists creates an agent only if the ID doesn't already exist
+	// (INSERT ... ON CONFLICT (id) DO NOTHING). Returns true if the row was
+	// newly inserted, false if a row with the same ID already existed. Used
+	// by the sentinel-agent bootstrap path in cmd/server/main.go so restarts
+	// and upgrades are idempotent without swallowing unrelated database
+	// failures (M-6, CWE-662).
+	CreateIfNotExists(ctx context.Context, agent *domain.Agent) (bool, error)
 	// Update modifies an existing agent.
 	Update(ctx context.Context, agent *domain.Agent) error
 	// Delete removes an agent.

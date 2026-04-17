@@ -253,9 +253,15 @@ func main() {
 			Name:   "Network Scanner (Server-Side)",
 			Status: domain.AgentStatusOnline,
 		}
-		if err := agentRepo.Create(context.Background(), sentinelAgent); err != nil {
-			// Ignore duplicate key errors (agent already exists)
-			logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAgentID)
+		// M-6: use CreateIfNotExists so duplicate rows on restart/upgrade are
+		// idempotent without swallowing unrelated DB failures (CWE-662).
+		created, err := agentRepo.CreateIfNotExists(context.Background(), sentinelAgent)
+		if err != nil {
+			logger.Error("sentinel agent creation failed", "id", service.SentinelAgentID, "error", err)
+		} else if created {
+			logger.Info("sentinel agent created", "id", service.SentinelAgentID)
+		} else {
+			logger.Debug("sentinel agent already exists", "id", service.SentinelAgentID)
 		}
 	}
 
@@ -274,8 +280,14 @@ func main() {
 				Name:   "AWS Secrets Manager Discovery",
 				Status: domain.AgentStatusOnline,
 			}
-			if err := agentRepo.Create(context.Background(), sentinelAWS); err != nil {
-				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAWSSecretsMgr)
+			// M-6: idempotent create (CWE-662).
+			created, err := agentRepo.CreateIfNotExists(context.Background(), sentinelAWS)
+			if err != nil {
+				logger.Error("sentinel agent creation failed", "id", service.SentinelAWSSecretsMgr, "error", err)
+			} else if created {
+				logger.Info("sentinel agent created", "id", service.SentinelAWSSecretsMgr)
+			} else {
+				logger.Debug("sentinel agent already exists", "id", service.SentinelAWSSecretsMgr)
 			}
 		}
 
@@ -293,8 +305,14 @@ func main() {
 				Name:   "Azure Key Vault Discovery",
 				Status: domain.AgentStatusOnline,
 			}
-			if err := agentRepo.Create(context.Background(), sentinelAzure); err != nil {
-				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelAzureKeyVault)
+			// M-6: idempotent create (CWE-662).
+			created, err := agentRepo.CreateIfNotExists(context.Background(), sentinelAzure)
+			if err != nil {
+				logger.Error("sentinel agent creation failed", "id", service.SentinelAzureKeyVault, "error", err)
+			} else if created {
+				logger.Info("sentinel agent created", "id", service.SentinelAzureKeyVault)
+			} else {
+				logger.Debug("sentinel agent already exists", "id", service.SentinelAzureKeyVault)
 			}
 		}
 
@@ -307,8 +325,14 @@ func main() {
 				Name:   "GCP Secret Manager Discovery",
 				Status: domain.AgentStatusOnline,
 			}
-			if err := agentRepo.Create(context.Background(), sentinelGCP); err != nil {
-				logger.Debug("sentinel agent creation", "status", "exists or created", "id", service.SentinelGCPSecretMgr)
+			// M-6: idempotent create (CWE-662).
+			created, err := agentRepo.CreateIfNotExists(context.Background(), sentinelGCP)
+			if err != nil {
+				logger.Error("sentinel agent creation failed", "id", service.SentinelGCPSecretMgr, "error", err)
+			} else if created {
+				logger.Info("sentinel agent created", "id", service.SentinelGCPSecretMgr)
+			} else {
+				logger.Debug("sentinel agent already exists", "id", service.SentinelGCPSecretMgr)
 			}
 		}
 
