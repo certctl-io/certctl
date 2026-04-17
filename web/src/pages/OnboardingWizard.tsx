@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  getIssuers, getAgents, getProfiles,
+  getIssuers, getAgents, getProfiles, getOwners,
   createIssuer, testIssuerConnection,
   createCertificate, triggerRenewal,
   getApiKey,
@@ -404,12 +404,14 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
   const [sans, setSans] = useState('');
   const [issuerId, setIssuerId] = useState(createdIssuerId || '');
   const [profileId, setProfileId] = useState('');
+  const [ownerId, setOwnerId] = useState('');
   const [error, setError] = useState('');
   const [created, setCreated] = useState(false);
 
   const { data: issuers } = useQuery({ queryKey: ['issuers'], queryFn: () => getIssuers() });
   const { data: profiles } = useQuery({ queryKey: ['profiles'], queryFn: () => getProfiles() });
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => getAgents() });
+  const { data: owners } = useQuery({ queryKey: ['owners'], queryFn: () => getOwners() });
 
   const hasAgents = (agents?.data?.length ?? 0) > 0;
 
@@ -421,6 +423,7 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
         sans: sanList,
         issuer_id: issuerId,
         certificate_profile_id: profileId || undefined,
+        owner_id: ownerId,
         environment: 'production',
       });
       // Trigger issuance
@@ -521,6 +524,29 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
             </select>
           </div>
         </div>
+
+        <div>
+          <label className="block text-sm font-medium text-ink mb-2">
+            Owner <span className="text-red-600">*</span>
+          </label>
+          <select
+            value={ownerId}
+            onChange={e => setOwnerId(e.target.value)}
+            className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
+          >
+            <option value="">Select owner...</option>
+            {owners?.data?.map(o => (
+              <option key={o.id} value={o.id}>
+                {o.name}{o.email ? ` (${o.email})` : ''}
+              </option>
+            ))}
+          </select>
+          {(owners?.data?.length ?? 0) === 0 && (
+            <p className="mt-1 text-xs text-ink-muted">
+              No owners yet — create one from the <Link to="/owners" className="underline hover:text-ink">Owners page</Link> first, then return here.
+            </p>
+          )}
+        </div>
       </div>
 
       {/* Discovery hint */}
@@ -547,7 +573,7 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
         onSkip={onSkip}
         onNext={() => createMutation.mutate()}
         nextLabel={createMutation.isPending ? 'Creating...' : 'Issue Certificate'}
-        nextDisabled={!commonName || !issuerId || createMutation.isPending}
+        nextDisabled={!commonName || !issuerId || !ownerId || createMutation.isPending}
       />
     </div>
   );
