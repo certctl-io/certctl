@@ -45,11 +45,11 @@ jobs:
         run: govulncheck ./...
 
       - name: Race Detection
-        run: go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -timeout 300s
+        run: go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... ./internal/crypto/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -timeout 300s
 
       - name: Go Test with Coverage
         run: |
-          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -cover -coverprofile=coverage.out
+          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -cover -coverprofile=coverage.out
 
       - name: Check Coverage Thresholds
         run: |
@@ -73,6 +73,13 @@ jobs:
           MIDDLEWARE_COV=$(go tool cover -func=coverage.out | grep 'internal/api/middleware' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
           echo "Middleware layer coverage: ${MIDDLEWARE_COV}%"
 
+          # Check crypto package coverage (target: 85%+)
+          # M-8 rationale: encryption primitives are a security-critical gate.
+          # v2 format, key-derivation, fallback, and fail-closed sentinel paths
+          # all need exhaustive coverage to avoid silent regressions (CWE-916 / CWE-329).
+          CRYPTO_COV=$(go tool cover -func=coverage.out | grep 'internal/crypto' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "Crypto package coverage: ${CRYPTO_COV}%"
+
           # Fail if thresholds not met
           if [ "$(echo "$SERVICE_COV < 55" | bc -l)" -eq 1 ]; then
             echo "::error::Service layer coverage ${SERVICE_COV}% is below 55% threshold"
@@ -88,6 +95,10 @@ jobs:
           fi
           if [ "$(echo "$MIDDLEWARE_COV < 30" | bc -l)" -eq 1 ]; then
             echo "::error::Middleware layer coverage ${MIDDLEWARE_COV}% is below 30% threshold"
+            exit 1
+          fi
+          if [ "$(echo "$CRYPTO_COV < 85" | bc -l)" -eq 1 ]; then
+            echo "::error::Crypto package coverage ${CRYPTO_COV}% is below 85% threshold"
             exit 1
           fi
           echo "Coverage thresholds passed!"

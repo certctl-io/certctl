@@ -12,12 +12,15 @@ import (
 
 var errNotFound = errors.New("not found")
 
-// testEncryptionKey is a deterministic 32-byte AES-256 key for unit tests that
+// testEncryptionKey is a deterministic passphrase for unit tests that
 // exercise IssuerService/TargetService write paths. After the C-2 remediation
 // these services fail closed when no key is configured, so happy-path tests
-// must supply a real key. Using a constant keeps wire-format assertions stable
-// across runs and avoids flaky PBKDF2 timing.
-var testEncryptionKey = []byte("0123456789abcdef0123456789abcdef") // 32 bytes
+// must supply a real passphrase. M-8 reshaped the type from []byte to string
+// because services now hold the raw passphrase and delegate PBKDF2 to
+// crypto.EncryptIfKeySet / crypto.DecryptIfKeySet (which apply a fresh random
+// salt per ciphertext). Using a constant keeps wire-format assertions stable
+// across runs.
+var testEncryptionKey = "0123456789abcdef0123456789abcdef"
 
 // mockCertRepo is a test implementation of CertificateRepository
 type mockCertRepo struct {

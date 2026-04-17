@@ -50,7 +50,7 @@ func TestIssuerService_List(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	issuers, total, err := service.List(ctx, 1, 2)
 
@@ -87,7 +87,7 @@ func TestIssuerService_List_DefaultPagination(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	// Call with invalid page and perPage
 	issuers, total, err := service.List(ctx, 0, 0)
@@ -115,7 +115,7 @@ func TestIssuerService_List_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	_, _, err := service.List(ctx, 1, 50)
 
@@ -137,7 +137,7 @@ func TestIssuerService_List_EmptyResult(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	issuers, total, err := service.List(ctx, 1, 50)
 
@@ -173,7 +173,7 @@ func TestIssuerService_Get(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	retrieved, err := service.Get(ctx, "iss-acme-prod")
 
@@ -199,7 +199,7 @@ func TestIssuerService_Get_NotFound(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	_, err := service.Get(ctx, "nonexistent-issuer")
 
@@ -280,7 +280,7 @@ func TestIssuerService_Create_EmptyName(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "",
@@ -314,7 +314,7 @@ func TestIssuerService_Create_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "Test Issuer",
@@ -387,7 +387,7 @@ func TestIssuerService_Update_EmptyName(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	issuer := &domain.Issuer{
 		Name:    "",
@@ -415,7 +415,7 @@ func TestIssuerService_Delete(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	err := service.Delete(ctx, "iss-to-delete", "user-frank")
 
@@ -447,7 +447,7 @@ func TestIssuerService_Delete_RepositoryError(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	err := service.Delete(ctx, "iss-bad-id", "user-grace")
 
@@ -482,7 +482,7 @@ func TestIssuerService_TestConnection_Success(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	svc := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	svc := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	err := svc.TestConnectionWithContext(ctx, "iss-test-conn")
 
@@ -500,7 +500,7 @@ func TestIssuerService_TestConnection_NotFound(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	err := service.TestConnectionWithContext(ctx, "nonexistent-issuer")
 
@@ -540,7 +540,7 @@ func TestIssuerService_ListIssuers_HandlerInterface(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	issuers, total, err := service.ListIssuers(1, 50)
 
@@ -606,7 +606,7 @@ func TestIssuerService_DeleteIssuer_HandlerInterface(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	err := service.DeleteIssuer("iss-handler-delete")
 

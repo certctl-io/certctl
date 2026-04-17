@@ -72,7 +72,12 @@ func (r *IssuerRegistry) Len() int {
 // For each enabled issuer, it decrypts the config (if encryption key is set),
 // instantiates a connector via the factory, wraps it in an adapter, and
 // atomically swaps the entire map.
-func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey []byte) error {
+//
+// The encryption passphrase is passed as a string; per-ciphertext salt derivation
+// for v2 blobs is performed inside [crypto.DecryptIfKeySet]. Empty passphrase
+// fails closed via [crypto.ErrEncryptionKeyRequired] when encrypted configs
+// are encountered. See M-8 in certctl-audit-report.md.
+func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey string) error {
 	newIssuers := make(map[string]IssuerConnector)
 	var errors []string
 

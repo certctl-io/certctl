@@ -26,7 +26,7 @@ func TestBuildEnvVarSeeds_ACMEConfig(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	// Call buildEnvVarSeeds (unexported method, but testable from same package)
 	seeds := service.buildEnvVarSeeds(cfg)
@@ -82,7 +82,7 @@ func TestBuildEnvVarSeeds_VaultConfig(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	seeds := service.buildEnvVarSeeds(cfg)
 
@@ -136,7 +136,7 @@ func TestBuildEnvVarSeeds_NoConfig(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	seeds := service.buildEnvVarSeeds(cfg)
 
@@ -186,7 +186,7 @@ func TestBuildEnvVarSeeds_MultipleConfigs(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	seeds := service.buildEnvVarSeeds(cfg)
 
@@ -232,7 +232,7 @@ func TestSeedFromEnvVars_Empty(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	// Call SeedFromEnvVars on empty repo
 	service.SeedFromEnvVars(ctx, cfg)
@@ -280,7 +280,7 @@ func TestSeedFromEnvVars_AlreadyExists(t *testing.T) {
 	auditRepo := newMockAuditRepository()
 	auditService := NewAuditService(auditRepo)
 
-	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), nil, slog.Default())
+	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
 	// Get count before seeding
 	beforeSeeding, _ := repo.List(ctx)
@@ -328,7 +328,7 @@ func TestBuildRegistry_Success(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	// Call BuildRegistry
 	err := service.BuildRegistry(ctx)
@@ -351,7 +351,7 @@ func TestBuildRegistry_EmptyDatabase(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 
 	registry := NewIssuerRegistry(slog.Default())
-	service := NewIssuerService(repo, auditService, registry, nil, slog.Default())
+	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
 	// Call BuildRegistry on empty database
 	err := service.BuildRegistry(ctx)

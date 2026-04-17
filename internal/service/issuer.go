@@ -17,20 +17,27 @@ import (
 )
 
 // IssuerService provides business logic for certificate issuer management.
+//
+// The encryptionKey field holds the raw passphrase (not a pre-derived 32-byte
+// key). Per-ciphertext salt derivation is performed inside
+// [crypto.EncryptIfKeySet] / [crypto.DecryptIfKeySet] on each call. See M-8
+// in certctl-audit-report.md.
 type IssuerService struct {
 	issuerRepo    repository.IssuerRepository
 	auditService  *AuditService
 	registry      *IssuerRegistry
-	encryptionKey []byte
+	encryptionKey string
 	logger        *slog.Logger
 }
 
-// NewIssuerService creates a new issuer service.
+// NewIssuerService creates a new issuer service. The encryptionKey is the raw
+// passphrase; it MUST NOT be pre-derived via crypto.DeriveKey (that was the
+// v1 behavior, replaced in M-8 with per-ciphertext random salt).
 func NewIssuerService(
 	issuerRepo repository.IssuerRepository,
 	auditService *AuditService,
 	registry *IssuerRegistry,
-	encryptionKey []byte,
+	encryptionKey string,
 	logger *slog.Logger,
 ) *IssuerService {
 	return &IssuerService{

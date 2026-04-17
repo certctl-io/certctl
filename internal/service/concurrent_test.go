@@ -194,7 +194,7 @@ func TestConcurrentTargetCRUD(t *testing.T) {
 		Targets: make(map[string]*domain.DeploymentTarget),
 	}
 
-	targetSvc := NewTargetService(mockTargetRepo, nil, nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	targetSvc := NewTargetService(mockTargetRepo, nil, nil, "", slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	var mu sync.Mutex
 	createdTargets := make([]string, 0)
@@ -403,7 +403,7 @@ func TestConcurrentMixedOperations(t *testing.T) {
 	// Setup services
 	auditSvc := &AuditService{auditRepo: mockAuditRepo}
 	certSvc := NewCertificateService(mockCertRepo, nil, auditSvc)
-	targetSvc := NewTargetService(mockTargetRepo, auditSvc, nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	targetSvc := NewTargetService(mockTargetRepo, auditSvc, nil, "", slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	var wg sync.WaitGroup
 	errChan := make(chan error, 30)

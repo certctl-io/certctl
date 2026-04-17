@@ -36,20 +36,27 @@ func isValidTargetType(t domain.TargetType) bool {
 }
 
 // TargetService provides business logic for deployment target management.
+//
+// The encryptionKey field holds the raw passphrase (not a pre-derived 32-byte
+// key). Per-ciphertext salt derivation is performed inside
+// [crypto.EncryptIfKeySet] / [crypto.DecryptIfKeySet] on each call. See M-8
+// in certctl-audit-report.md.
 type TargetService struct {
 	targetRepo    repository.TargetRepository
 	agentRepo     repository.AgentRepository
 	auditService  *AuditService
-	encryptionKey []byte
+	encryptionKey string
 	logger        *slog.Logger
 }
 
-// NewTargetService creates a new target service.
+// NewTargetService creates a new target service. The encryptionKey is the raw
+// passphrase; it MUST NOT be pre-derived via crypto.DeriveKey (that was the
+// v1 behavior, replaced in M-8 with per-ciphertext random salt).
 func NewTargetService(
 	targetRepo repository.TargetRepository,
 	auditService *AuditService,
 	agentRepo repository.AgentRepository,
-	encryptionKey []byte,
+	encryptionKey string,
 	logger *slog.Logger,
 ) *TargetService {
 	return &TargetService{

@@ -16,7 +16,6 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
 	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/crypto"
 	"github.com/shankar0123/certctl/internal/domain"
 	discoveryawssm "github.com/shankar0123/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/shankar0123/certctl/internal/connector/discovery/azurekv"
@@ -82,12 +81,20 @@ func main() {
 	logger.Info("initialized all repositories")
 
 	// Initialize dynamic issuer registry.
-	// Issuers are loaded from the database (with AES-GCM encrypted config).
+	// Issuers are loaded from the database (with AES-256-GCM encrypted config).
 	// On first boot with an empty database, env var issuers are seeded automatically.
-	var encryptionKey []byte
-	if cfg.Encryption.ConfigEncryptionKey != "" {
-		encryptionKey = crypto.DeriveKey(cfg.Encryption.ConfigEncryptionKey)
-		logger.Info("config encryption enabled (AES-256-GCM)")
+	//
+	// M-8 (CWE-916 / CWE-329): the encryption passphrase is passed as a raw
+	// string into IssuerService / TargetService / IssuerRegistry. Each call to
+	// crypto.EncryptIfKeySet generates a fresh 16-byte PBKDF2 salt and emits a
+	// v2 blob (magic 0x02 || salt || nonce || sealed). Decryption auto-detects
+	// v1 legacy blobs (no magic) and falls back to the fixed v1 salt for
+	// backward compatibility; v1 blobs transparently upgrade to v2 on next
+	// write. DO NOT pre-derive the key here with crypto.DeriveKey — that was
+	// the v1 fixed-salt behaviour that M-8 removes.
+	encryptionKey := cfg.Encryption.ConfigEncryptionKey
+	if encryptionKey != "" {
+		logger.Info("config encryption enabled (AES-256-GCM, per-ciphertext PBKDF2 salt)")
 	} else {
 		// C-2 fix: fail closed at startup when database-sourced issuer or target
 		// rows exist without a configured encryption key. Previously the server

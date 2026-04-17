@@ -142,7 +142,7 @@ func TestTargetService_ListWithCancelledContext(t *testing.T) {
 	mockTargetRepo := &mockTargetRepo{
 		Targets: make(map[string]*domain.DeploymentTarget),
 	}
-	targetSvc := NewTargetService(mockTargetRepo, nil, nil, nil, slog.New(slog.NewTextHandler(os.Stderr, nil)))
+	targetSvc := NewTargetService(mockTargetRepo, nil, nil, "", slog.New(slog.NewTextHandler(os.Stderr, nil)))
 
 	_, _, err := targetSvc.List(ctx, 1, 50)
 

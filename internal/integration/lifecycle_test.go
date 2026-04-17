@@ -70,7 +70,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	// without a configured CERTCTL_CONFIG_ENCRYPTION_KEY. Happy-path CRUD tests
 	// must supply a real key so the encrypt path runs instead of returning
 	// ErrEncryptionKeyRequired.
-	testEncryptionKey := []byte("0123456789abcdef0123456789abcdef")
+	testEncryptionKey := "0123456789abcdef0123456789abcdef"
 	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, testEncryptionKey, slog.Default())
 
 	// Initialize handlers

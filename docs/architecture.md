@@ -808,6 +808,34 @@ All shell-facing inputs (connector scripts, domain names, ACME tokens) are valid
 
 All incoming HTTP request bodies are capped by `http.MaxBytesReader` middleware (default 1MB, configurable via `CERTCTL_MAX_BODY_SIZE`). Requests exceeding the limit receive a 413 Request Entity Too Large response. The middleware is positioned before authentication in the chain so oversized payloads are rejected early, before any auth processing or database work occurs. Requests without bodies (GET, HEAD, nil body) skip the limit check.
 
+### Config Encryption at Rest
+
+Dynamic issuer and target configurations (rows with `source='database'`) contain credentials — ACME EAB HMACs, Vault tokens, DigiCert/Sectigo API keys, SSH private keys, WinRM passwords, F5 BIG-IP passwords, and similar. These are sealed at rest in PostgreSQL via `internal/crypto/encryption.go` using AES-256-GCM with a key derived from the operator passphrase `CERTCTL_CONFIG_ENCRYPTION_KEY` through PBKDF2-SHA256 (100,000 rounds, 32-byte output).
+
+**v2 wire format (current, M-8 remediation, CWE-916 / CWE-329):**
+
+```
+magic(0x02) || salt(16) || nonce(12) || ciphertext+tag
+```
+
+Every call to `EncryptIfKeySet` draws 16 fresh bytes from `crypto/rand` as the PBKDF2 salt, so the derived AES-256 key is distinct per ciphertext and per re-encryption. The salt is stored alongside the ciphertext; decryption reads the magic byte, splits out the salt, re-derives the key, and verifies the AEAD tag.
+
+**v1 legacy format (read-only):**
+
+```
+nonce(12) || ciphertext+tag
+```
+
+Pre-M-8 blobs were sealed with a package-level fixed salt `"certctl-config-encryption-v1"`. `DecryptIfKeySet` preserves the v1 read path unchanged — a blob whose first byte is not `0x02`, or whose v2 AEAD verification fails (including the 1/256 case where a v1 nonce happens to begin with `0x02`), falls through to a v1 attempt against the legacy fixed salt. v1 blobs are never written by the post-M-8 code path; they re-seal as v2 naturally on the next UPDATE through the normal service CRUD flow. No operator migration ceremony is required.
+
+**Fail-closed behavior (C-2 sentinel, CWE-311):** both `EncryptIfKeySet` and `DecryptIfKeySet` return `ErrEncryptionKeyRequired` when invoked with an empty passphrase. The server refuses to start if any `source='database'` rows already exist without `CERTCTL_CONFIG_ENCRYPTION_KEY` set.
+
+**Low-level primitives preserved byte-identical.** `Encrypt`, `Decrypt`, and `DeriveKey` are kept bit-stable so v1 fixtures on disk remain decryptable unchanged and so callers outside the config-encryption path (none today, but the symbols are exported) do not see a breaking change. The new per-ciphertext salt path is reached via the helper `deriveKeyWithSalt(passphrase, salt)`.
+
+**Passphrase plumbing.** Services (`IssuerService`, `TargetService`, `IssuerRegistry`) hold the operator passphrase as a raw `string` and delegate PBKDF2 to the crypto package per ciphertext. This replaces the pre-M-8 design that pre-derived a single `[]byte` key at service construction and reused it for every row, which was the direct consequence of the fixed-salt KDF.
+
+**Coverage gate.** CI enforces `internal/crypto/...` coverage ≥ 85% (observed 86.7%) — the encryption primitives are a security-critical gate, and the v2 format plus v1 fallback plus C-2 sentinel paths all need exhaustive coverage to avoid silent regressions.
+
 ### CORS
 
 CORS uses a **deny-by-default** posture: when `CERTCTL_CORS_ORIGINS` is empty, no CORS headers are set and only same-origin requests can read responses. Operators must explicitly configure allowed origins. This prevents accidental exposure of the API to cross-origin requests in production.
