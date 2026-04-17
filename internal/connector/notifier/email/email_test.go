@@ -138,7 +138,10 @@ func TestEmail_FormatMessage_RFC822Headers(t *testing.T) {
 	subject := "Test Subject"
 	body := "Test Body"
 
-	message := conn.formatEmailMessage(from, to, subject, body)
+	message, err := conn.formatEmailMessage(from, to, subject, body)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	messageStr := string(message)
 
 	if !strings.Contains(messageStr, "From: "+from) {
@@ -177,7 +180,10 @@ func TestEmail_FormatHTMLEmailMessage_Headers(t *testing.T) {
 	subject := "HTML Test"
 	htmlBody := "<html><body><h1>Test</h1></body></html>"
 
-	message := conn.formatHTMLEmailMessage(from, to, subject, htmlBody)
+	message, err := conn.formatHTMLEmailMessage(from, to, subject, htmlBody)
+	if err != nil {
+		t.Fatalf("expected nil error, got %v", err)
+	}
 	messageStr := string(message)
 
 	if !strings.Contains(messageStr, "From: "+from) {
@@ -197,6 +203,67 @@ func TestEmail_FormatHTMLEmailMessage_Headers(t *testing.T) {
 	}
 	if !strings.Contains(messageStr, htmlBody) {
 		t.Errorf("expected HTML body, got %s", messageStr)
+	}
+}
+
+// TestEmail_FormatEmailMessage_RejectsCRLFInjection exercises the CRLF
+// sanitizer (CWE-113). A subject containing "\r\nBcc: ..." must be rejected
+// rather than silently stripped — authentication-relevant headers are
+// security-critical and silent mutation masks malicious intent.
+func TestEmail_FormatEmailMessage_RejectsCRLFInjection(t *testing.T) {
+	cfg := &Config{
+		SMTPHost:    "smtp.example.com",
+		SMTPPort:    587,
+		FromAddress: "sender@example.com",
+	}
+	logger := newTestLogger()
+	conn := New(cfg, logger)
+
+	cases := []struct {
+		name          string
+		from, to, sub string
+		wantField     string
+	}{
+		{"CRLF in Subject", "sender@example.com", "recipient@example.com", "hello\r\nBcc: attacker@example.com", "Subject"},
+		{"LF in To", "sender@example.com", "recipient@example.com\nBcc: x@y", "ok", "To"},
+		{"CR in From", "sender@example.com\rExtra: header", "recipient@example.com", "ok", "From"},
+		{"NUL in Subject", "sender@example.com", "recipient@example.com", "hi\x00there", "Subject"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := conn.formatEmailMessage(tc.from, tc.to, tc.sub, "body")
+			if err == nil {
+				t.Fatal("expected injection error, got nil")
+			}
+			if !strings.Contains(err.Error(), tc.wantField) {
+				t.Errorf("expected error to mention field %q, got %q", tc.wantField, err.Error())
+			}
+		})
+	}
+}
+
+// TestEmail_FormatHTMLEmailMessage_RejectsCRLFInjection mirrors the plain-text
+// test for the HTML codepath used by the digest service.
+func TestEmail_FormatHTMLEmailMessage_RejectsCRLFInjection(t *testing.T) {
+	cfg := &Config{
+		SMTPHost:    "smtp.example.com",
+		SMTPPort:    587,
+		FromAddress: "sender@example.com",
+	}
+	logger := newTestLogger()
+	conn := New(cfg, logger)
+
+	_, err := conn.formatHTMLEmailMessage(
+		"sender@example.com",
+		"recipient@example.com",
+		"digest\r\nBcc: attacker@example.com",
+		"<p>hi</p>",
+	)
+	if err == nil {
+		t.Fatal("expected CRLF injection error, got nil")
+	}
+	if !strings.Contains(err.Error(), "Subject") {
+		t.Errorf("expected error to mention Subject field, got %q", err.Error())
 	}
 }
 

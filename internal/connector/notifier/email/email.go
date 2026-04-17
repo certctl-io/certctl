@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/notifier"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the email notifier configuration.
@@ -123,7 +124,22 @@ func (c *Connector) SendEvent(ctx context.Context, event notifier.Event) error {
 
 // sendEmail sends an email message using the configured SMTP server.
 // It handles both TLS and plain authentication modes.
+//
+// Header values (From, To, Subject) are validated up-front to reject CR, LF,
+// and NUL characters. This blocks SMTP header injection (CWE-113) and also
+// prevents injection into the SMTP envelope commands MAIL FROM and RCPT TO,
+// since net/smtp does not sanitize those inputs itself.
 func (c *Connector) sendEmail(ctx context.Context, to, subject, body string) error {
+	if err := validation.ValidateHeaderValue("From", c.config.FromAddress); err != nil {
+		return fmt.Errorf("invalid sender: %w", err)
+	}
+	if err := validation.ValidateHeaderValue("To", to); err != nil {
+		return fmt.Errorf("invalid recipient: %w", err)
+	}
+	if err := validation.ValidateHeaderValue("Subject", subject); err != nil {
+		return fmt.Errorf("invalid subject: %w", err)
+	}
+
 	addr := net.JoinHostPort(c.config.SMTPHost, strconv.Itoa(c.config.SMTPPort))
 
 	// Connect to SMTP server
@@ -182,8 +198,13 @@ func (c *Connector) sendEmail(ctx context.Context, to, subject, body string) err
 	}
 	defer wc.Close()
 
-	// Format and write email headers and body
-	message := c.formatEmailMessage(c.config.FromAddress, to, subject, body)
+	// Format and write email headers and body. The format function
+	// re-validates header values as defense-in-depth; the early-return
+	// above should have already caught any injection attempt.
+	message, err := c.formatEmailMessage(c.config.FromAddress, to, subject, body)
+	if err != nil {
+		return fmt.Errorf("failed to format message: %w", err)
+	}
 	if _, err := wc.Write(message); err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
@@ -197,7 +218,22 @@ func (c *Connector) sendEmail(ctx context.Context, to, subject, body string) err
 
 // sendHTMLEmail sends an HTML email message using the configured SMTP server.
 // Used by the digest service for rich HTML digest emails.
+//
+// Header values (From, To, Subject) are validated up-front to reject CR, LF,
+// and NUL characters. This blocks SMTP header injection (CWE-113) and also
+// prevents injection into the SMTP envelope commands MAIL FROM and RCPT TO,
+// since net/smtp does not sanitize those inputs itself.
 func (c *Connector) sendHTMLEmail(ctx context.Context, to, subject, htmlBody string) error {
+	if err := validation.ValidateHeaderValue("From", c.config.FromAddress); err != nil {
+		return fmt.Errorf("invalid sender: %w", err)
+	}
+	if err := validation.ValidateHeaderValue("To", to); err != nil {
+		return fmt.Errorf("invalid recipient: %w", err)
+	}
+	if err := validation.ValidateHeaderValue("Subject", subject); err != nil {
+		return fmt.Errorf("invalid subject: %w", err)
+	}
+
 	addr := net.JoinHostPort(c.config.SMTPHost, strconv.Itoa(c.config.SMTPPort))
 
 	var auth smtp.Auth
@@ -250,7 +286,12 @@ func (c *Connector) sendHTMLEmail(ctx context.Context, to, subject, htmlBody str
 	}
 	defer wc.Close()
 
-	message := c.formatHTMLEmailMessage(c.config.FromAddress, to, subject, htmlBody)
+	// The format function re-validates header values as defense-in-depth;
+	// the early-return above should have already caught any injection attempt.
+	message, err := c.formatHTMLEmailMessage(c.config.FromAddress, to, subject, htmlBody)
+	if err != nil {
+		return fmt.Errorf("failed to format message: %w", err)
+	}
 	if _, err := wc.Write(message); err != nil {
 		return fmt.Errorf("failed to write message: %w", err)
 	}
@@ -263,7 +304,20 @@ func (c *Connector) sendHTMLEmail(ctx context.Context, to, subject, htmlBody str
 }
 
 // formatEmailMessage formats an email message with standard headers.
-func (c *Connector) formatEmailMessage(from, to, subject, body string) []byte {
+// It rejects any header value containing CR, LF, or NUL bytes to prevent
+// SMTP header injection (CWE-113). See internal/validation.ValidateHeaderValue.
+// The body is not validated — CR/LF in the body is legitimate content, and
+// SMTP dot-stuffing / length framing are handled by net/smtp.
+func (c *Connector) formatEmailMessage(from, to, subject, body string) ([]byte, error) {
+	if err := validation.ValidateHeaderValue("From", from); err != nil {
+		return nil, err
+	}
+	if err := validation.ValidateHeaderValue("To", to); err != nil {
+		return nil, err
+	}
+	if err := validation.ValidateHeaderValue("Subject", subject); err != nil {
+		return nil, err
+	}
 	message := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n%s",
 		from,
@@ -272,11 +326,24 @@ func (c *Connector) formatEmailMessage(from, to, subject, body string) []byte {
 		time.Now().Format(time.RFC1123Z),
 		body,
 	)
-	return []byte(message)
+	return []byte(message), nil
 }
 
 // formatHTMLEmailMessage formats an HTML email message with MIME headers.
-func (c *Connector) formatHTMLEmailMessage(from, to, subject, htmlBody string) []byte {
+// It rejects any header value containing CR, LF, or NUL bytes to prevent
+// SMTP header injection (CWE-113). See internal/validation.ValidateHeaderValue.
+// The HTML body is not validated at this layer — CR/LF in HTML content is
+// legitimate, and SMTP dot-stuffing / length framing are handled by net/smtp.
+func (c *Connector) formatHTMLEmailMessage(from, to, subject, htmlBody string) ([]byte, error) {
+	if err := validation.ValidateHeaderValue("From", from); err != nil {
+		return nil, err
+	}
+	if err := validation.ValidateHeaderValue("To", to); err != nil {
+		return nil, err
+	}
+	if err := validation.ValidateHeaderValue("Subject", subject); err != nil {
+		return nil, err
+	}
 	message := fmt.Sprintf(
 		"From: %s\r\nTo: %s\r\nSubject: %s\r\nDate: %s\r\nMIME-Version: 1.0\r\nContent-Type: text/html; charset=utf-8\r\n\r\n%s",
 		from,
@@ -285,7 +352,7 @@ func (c *Connector) formatHTMLEmailMessage(from, to, subject, htmlBody string) [
 		time.Now().Format(time.RFC1123Z),
 		htmlBody,
 	)
-	return []byte(message)
+	return []byte(message), nil
 }
 
 // formatAlertBody formats an alert notification as email body text.
