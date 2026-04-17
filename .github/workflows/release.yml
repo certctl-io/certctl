@@ -7,40 +7,30 @@ on:
 
 env:
   REGISTRY: ghcr.io
-  GO_VERSION: '1.22'
+  # Keep in lock-step with .github/workflows/ci.yml (M-3).
+  GO_VERSION: '1.25.9'
+  IMAGE_NAMESPACE: shankar0123
 
 jobs:
-  # Cross-compile agent and server binaries for multiple platforms
+  # ----------------------------------------------------------------------
+  # build-binaries (M-3): matrix build every (binary × OS × arch) tuple.
+  # For each tuple we produce: the binary, a SPDX-JSON SBOM, a keyless
+  # Cosign signature + certificate bundle, and a single-line sha256sum
+  # file. All artefacts are uploaded to a workflow-scoped artifact; the
+  # aggregate-checksums job fans them back in for release upload.
+  # ----------------------------------------------------------------------
   build-binaries:
-    name: Build Cross-Platform Binaries
+    name: Build ${{ matrix.binary }} (${{ matrix.os }}/${{ matrix.arch }})
     runs-on: ubuntu-latest
     permissions:
-      contents: write
-
+      contents: read
+      id-token: write  # Cosign keyless OIDC identity token
     strategy:
+      fail-fast: false
       matrix:
-        include:
-          # Agent binaries (4 platforms)
-          - os: linux
-            arch: amd64
-            binary: agent
-          - os: linux
-            arch: arm64
-            binary: agent
-          - os: darwin
-            arch: amd64
-            binary: agent
-          - os: darwin
-            arch: arm64
-            binary: agent
-          # Server binaries (2 platforms)
-          - os: linux
-            arch: amd64
-            binary: server
-          - os: linux
-            arch: arm64
-            binary: server
-
+        binary: [agent, server, cli, mcp-server]
+        os: [linux, darwin]
+        arch: [amd64, arm64]
     steps:
       - uses: actions/checkout@v4
 
@@ -51,35 +41,171 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
-      - name: Build ${{ matrix.binary }} binary (${{ matrix.os }}-${{ matrix.arch }})
+      - name: Build binary
+        id: build
         env:
           GOOS: ${{ matrix.os }}
           GOARCH: ${{ matrix.arch }}
-          CGO_ENABLED: 0
+          CGO_ENABLED: '0'
+          VERSION: ${{ steps.version.outputs.VERSION }}
         run: |
+          set -euo pipefail
           OUTPUT_NAME="certctl-${{ matrix.binary }}-${{ matrix.os }}-${{ matrix.arch }}"
-          go build -ldflags="-w -s -X main.Version=${{ steps.version.outputs.VERSION }}" \
+          mkdir -p dist
+          go build \
+            -trimpath \
+            -ldflags="-w -s -X main.Version=${VERSION}" \
             -o "dist/${OUTPUT_NAME}" \
             "./cmd/${{ matrix.binary }}"
           ls -lh "dist/${OUTPUT_NAME}"
+          echo "output_name=${OUTPUT_NAME}" >> "$GITHUB_OUTPUT"
 
-      - name: Upload binaries to release
+      - name: Generate SBOM (SPDX-JSON)
+        uses: anchore/sbom-action@e22c389904149dbc22b58101806040fa8d37a610  # v0.24.0
+        with:
+          file: dist/${{ steps.build.outputs.output_name }}
+          format: spdx-json
+          output-file: dist/${{ steps.build.outputs.output_name }}.sbom.spdx.json
+          upload-artifact: false
+          upload-release-assets: false
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
+
+      - name: Keyless-sign binary with Cosign
+        env:
+          OUTPUT_NAME: ${{ steps.build.outputs.output_name }}
+        run: |
+          set -euo pipefail
+          cosign sign-blob \
+            --yes \
+            --output-signature "dist/${OUTPUT_NAME}.sig" \
+            --output-certificate "dist/${OUTPUT_NAME}.pem" \
+            "dist/${OUTPUT_NAME}"
+
+      - name: Compute SHA-256 sidecar
+        env:
+          OUTPUT_NAME: ${{ steps.build.outputs.output_name }}
+        run: |
+          set -euo pipefail
+          cd dist
+          sha256sum "${OUTPUT_NAME}" > "${OUTPUT_NAME}.sha256"
+          cat "${OUTPUT_NAME}.sha256"
+
+      - name: Upload build artefacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: binary-${{ steps.build.outputs.output_name }}
+          path: |
+            dist/${{ steps.build.outputs.output_name }}
+            dist/${{ steps.build.outputs.output_name }}.sig
+            dist/${{ steps.build.outputs.output_name }}.pem
+            dist/${{ steps.build.outputs.output_name }}.sbom.spdx.json
+            dist/${{ steps.build.outputs.output_name }}.sha256
+          if-no-files-found: error
+          retention-days: 7
+
+  # ----------------------------------------------------------------------
+  # aggregate-checksums (M-3): fan in every matrix artefact, produce a
+  # single checksums.txt (sha256sum format, compatible with `sha256sum
+  # -c`), sign it with Cosign, upload everything to the GitHub Release,
+  # and emit a base64-encoded hash manifest for the SLSA generator.
+  # ----------------------------------------------------------------------
+  aggregate-checksums:
+    name: Aggregate checksums & sign
+    runs-on: ubuntu-latest
+    needs: [build-binaries]
+    permissions:
+      contents: write
+      id-token: write  # Cosign keyless OIDC identity token
+    outputs:
+      hashes: ${{ steps.hashes.outputs.hashes }}
+    steps:
+      - name: Download binary artefacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: binary-*
+          path: artifacts
+          merge-multiple: true
+
+      - name: Aggregate SHA-256 sums
+        id: hashes
+        run: |
+          set -euo pipefail
+          cd artifacts
+          : > checksums.txt
+          for f in certctl-*; do
+            case "$f" in
+              *.sig|*.pem|*.sbom.spdx.json|*.sha256|checksums.txt)
+                continue ;;
+            esac
+            sha256sum "$f" >> checksums.txt
+          done
+          echo "=== checksums.txt ==="
+          cat checksums.txt
+          # base64 hashes (single line, no wrapping) for SLSA generator.
+          HASHES=$(base64 -w0 < checksums.txt)
+          echo "hashes=${HASHES}" >> "$GITHUB_OUTPUT"
+
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
+
+      - name: Keyless-sign checksums.txt
+        run: |
+          set -euo pipefail
+          cd artifacts
+          cosign sign-blob \
+            --yes \
+            --output-signature checksums.txt.sig \
+            --output-certificate checksums.txt.pem \
+            checksums.txt
+
+      - name: Upload artefacts to GitHub Release
         uses: softprops/action-gh-release@v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
-            dist/certctl-agent-*
-            dist/certctl-server-*
+            artifacts/certctl-*
+            artifacts/checksums.txt
+            artifacts/checksums.txt.sig
+            artifacts/checksums.txt.pem
 
-  # Build and push Docker images
+  # ----------------------------------------------------------------------
+  # provenance-binaries (M-3): SLSA Level 3 provenance for every binary.
+  # The SLSA generic generator reusable workflow runs in a hermetic
+  # workflow run, producing multiple.intoto.jsonl from the base64 hash
+  # manifest and uploading it as a release asset.
+  # ----------------------------------------------------------------------
+  provenance-binaries:
+    name: SLSA provenance (binaries)
+    needs: [aggregate-checksums]
+    permissions:
+      actions: read
+      id-token: write
+      contents: write
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    with:
+      base64-subjects: "${{ needs.aggregate-checksums.outputs.hashes }}"
+      upload-assets: true
+      provenance-name: multiple.intoto.jsonl
+
+  # ----------------------------------------------------------------------
+  # build-and-push-docker: push container images to GHCR with native
+  # SLSA L3 provenance (mode=max) and SBOM attestations emitted by
+  # docker/build-push-action@v6, plus a keyless Cosign signature on the
+  # image digest for identity-bound verification. The M-4 proxy-propagation
+  # build-args block is retained verbatim — M-3 only adds supply-chain
+  # steps; it never touches M-4 wiring.
+  # ----------------------------------------------------------------------
   build-and-push-docker:
     name: Build & Push Docker Images
     runs-on: ubuntu-latest
     permissions:
       contents: write
       packages: write
+      id-token: write  # Cosign keyless OIDC identity token
 
     steps:
       - uses: actions/checkout@v4
@@ -93,20 +219,24 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
+      - name: Install Cosign
+        uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
+
       - name: Build and push server image
+        id: server-push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile
           push: true
           tags: |
-            ${{ env.REGISTRY }}/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
-            ${{ env.REGISTRY }}/shankar0123/certctl-server:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-server:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-server:latest
           # Proxy propagation (M-4, Issue #9) — forwards runner-level proxy
           # secrets into the Docker build so self-hosted runners behind
           # corporate proxies can reach public registries. GitHub-hosted
@@ -117,18 +247,31 @@ jobs:
             HTTP_PROXY=${{ secrets.HTTP_PROXY }}
             HTTPS_PROXY=${{ secrets.HTTPS_PROXY }}
             NO_PROXY=${{ secrets.NO_PROXY }}
+          # Supply-chain hardening (M-3): emit native SLSA L3 provenance
+          # and SBOM attestations bound to the image manifest.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Keyless-sign server image with Cosign
+        env:
+          DIGEST: ${{ steps.server-push.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-server
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
       - name: Build and push agent image
+        id: agent-push
         uses: docker/build-push-action@v6
         with:
           context: .
           file: ./Dockerfile.agent
           push: true
           tags: |
-            ${{ env.REGISTRY }}/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
-            ${{ env.REGISTRY }}/shankar0123/certctl-agent:latest
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-agent:${{ steps.version.outputs.VERSION }}
+            ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-agent:latest
           # Proxy propagation (M-4, Issue #9) — see server-image step for
           # rationale. Empty secrets resolve to empty build args, leaving
           # the un-proxied code path byte-identical to the pre-fix tree.
@@ -136,14 +279,30 @@ jobs:
             HTTP_PROXY=${{ secrets.HTTP_PROXY }}
             HTTPS_PROXY=${{ secrets.HTTPS_PROXY }}
             NO_PROXY=${{ secrets.NO_PROXY }}
+          # Supply-chain hardening (M-3): emit native SLSA L3 provenance
+          # and SBOM attestations bound to the image manifest.
+          provenance: mode=max
+          sbom: true
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
-  # Create release notes with all artifacts
+      - name: Keyless-sign agent image with Cosign
+        env:
+          DIGEST: ${{ steps.agent-push.outputs.digest }}
+          IMAGE: ${{ env.REGISTRY }}/${{ env.IMAGE_NAMESPACE }}/certctl-agent
+        run: |
+          set -euo pipefail
+          cosign sign --yes "${IMAGE}@${DIGEST}"
+
+  # ----------------------------------------------------------------------
+  # create-release: stamp the release body. The actual asset uploads are
+  # handled by aggregate-checksums (binaries, SBOMs, sigs, certs,
+  # checksums.txt + signature) and the SLSA generator (multiple.intoto.jsonl).
+  # ----------------------------------------------------------------------
   create-release:
     name: Create Release Notes
     runs-on: ubuntu-latest
-    needs: [build-binaries, build-and-push-docker]
+    needs: [build-binaries, aggregate-checksums, provenance-binaries, build-and-push-docker]
     permissions:
       contents: write
 
@@ -152,7 +311,7 @@ jobs:
 
       - name: Extract version from tag
         id: version
-        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> $GITHUB_OUTPUT
+        run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Create release with notes
         uses: softprops/action-gh-release@v2
@@ -214,6 +373,76 @@ jobs:
 
             - **Linux x86_64**: `certctl-server-linux-amd64`
             - **Linux ARM64**: `certctl-server-linux-arm64`
+            - **macOS x86_64**: `certctl-server-darwin-amd64`
+            - **macOS ARM64 (Apple Silicon)**: `certctl-server-darwin-arm64`
+
+            ## CLI & MCP Server Binaries
+
+            The `certctl-cli` (REST API wrapper) and `certctl-mcp-server` (Model Context
+            Protocol bridge) binaries ship for all four platforms as well:
+
+            - `certctl-cli-{linux,darwin}-{amd64,arm64}`
+            - `certctl-mcp-server-{linux,darwin}-{amd64,arm64}`
+
+            ## Verifying this release
+
+            Every binary, `checksums.txt`, and container image is signed with Cosign
+            keyless OIDC. Each binary ships with a SPDX-JSON SBOM. Binaries are covered
+            by SLSA Level 3 provenance; container images carry native SLSA L3 provenance
+            and SBOM attestations (docker/build-push-action `provenance: mode=max`,
+            `sbom: true`) in addition to a Cosign signature on the digest.
+
+            **1. Verify SHA-256 checksums:**
+
+            ```bash
+            sha256sum -c checksums.txt
+            ```
+
+            **2. Verify the Cosign signature on checksums.txt (keyless OIDC):**
+
+            ```bash
+            cosign verify-blob \
+              --certificate checksums.txt.pem \
+              --signature checksums.txt.sig \
+              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              checksums.txt
+            ```
+
+            Replace `checksums.txt` with any individual binary name to verify that
+            artefact directly (each binary ships with its own `.sig` + `.pem` sidecar).
+
+            **3. Verify SLSA Level 3 provenance (binaries):**
+
+            ```bash
+            slsa-verifier verify-artifact \
+              --provenance-path multiple.intoto.jsonl \
+              --source-uri github.com/shankar0123/certctl \
+              --source-tag ${{ steps.version.outputs.VERSION }} \
+              certctl-agent-linux-amd64
+            ```
+
+            **4. Verify container image signature and attestations:**
+
+            ```bash
+            IMAGE=ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
+            cosign verify \
+              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$IMAGE"
+
+            # SBOM attestation (SPDX-JSON) emitted by docker/build-push-action
+            cosign verify-attestation --type spdxjson \
+              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$IMAGE"
+
+            # SLSA provenance attestation (mode=max)
+            cosign verify-attestation --type slsaprovenance \
+              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+              --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+              "$IMAGE"
+            ```
 
             ## Helm Chart
 

@@ -237,6 +237,72 @@ docker pull shankar0123.docker.scarf.sh/certctl-server
 docker pull shankar0123.docker.scarf.sh/certctl-agent
 ```
 
+## Verifying this release
+
+Every `v*` tag publishes signed, attested release artefacts. Binaries
+(`certctl-agent`, `certctl-server`, `certctl-cli`, `certctl-mcp-server` for
+`linux|darwin × amd64|arm64`) ship alongside a `checksums.txt`, per-binary
+SPDX-JSON SBOMs, Cosign signatures, and SLSA Level 3 provenance. Container
+images on `ghcr.io/shankar0123/certctl-{server,agent}` are built with
+`docker/build-push-action` `provenance: mode=max` + `sbom: true` and are
+additionally signed with Cosign at the image digest.
+
+All signatures use Cosign keyless OIDC; the signing identity is the
+release workflow running on a signed tag.
+
+**1. Verify SHA-256 checksums:**
+
+```bash
+sha256sum -c checksums.txt
+```
+
+**2. Verify the Cosign signature on `checksums.txt`:**
+
+```bash
+cosign verify-blob \
+  --certificate checksums.txt.pem \
+  --signature checksums.txt.sig \
+  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  checksums.txt
+```
+
+Every individual binary has its own `.sig` + `.pem` sidecar; swap
+`checksums.txt` for any binary name to verify it directly.
+
+**3. Verify SLSA Level 3 provenance on a binary:**
+
+```bash
+slsa-verifier verify-artifact \
+  --provenance-path multiple.intoto.jsonl \
+  --source-uri github.com/shankar0123/certctl \
+  --source-tag v2.1.0 \
+  certctl-agent-linux-amd64
+```
+
+**4. Verify a container image signature and its SBOM / provenance attestations:**
+
+```bash
+IMAGE=ghcr.io/shankar0123/certctl-server:v2.1.0
+
+cosign verify \
+  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  "$IMAGE"
+
+# SBOM attestation (SPDX-JSON, emitted by docker/build-push-action)
+cosign verify-attestation --type spdxjson \
+  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  "$IMAGE"
+
+# SLSA provenance attestation (docker/build-push-action `provenance: mode=max`)
+cosign verify-attestation --type slsaprovenance \
+  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+  --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+  "$IMAGE"
+```
+
 ## Examples
 
 Pick the scenario closest to your setup and have it running in 2 minutes.
