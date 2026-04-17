@@ -284,8 +284,13 @@ func (s *AgentService) GetPendingWork(ctx context.Context, agentID string) ([]*d
 		return nil, fmt.Errorf("failed to fetch agent: %w", err)
 	}
 
-	// Return only jobs assigned to this agent (via agent_id or target→agent relationship)
-	return s.jobRepo.ListPendingByAgentID(ctx, agentID)
+	// Atomically claim jobs assigned to this agent. H-6 (CWE-362) remediation:
+	// ClaimPendingByAgentID uses SELECT ... FOR UPDATE SKIP LOCKED so concurrent poll
+	// requests (duplicate agents, retry storms, or a lagging long-poll) never observe
+	// the same Pending deployment row. Pending deployments are flipped to Running inside
+	// the claim transaction; AwaitingCSR jobs keep their state since CSR submission is
+	// the state-machine trigger for their next transition.
+	return s.jobRepo.ClaimPendingByAgentID(ctx, agentID)
 }
 
 // ReportJobStatus updates a job's status based on agent feedback.

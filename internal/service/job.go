@@ -35,11 +35,18 @@ func NewJobService(
 
 // ProcessPendingJobs fetches and processes all pending jobs.
 // It routes jobs to the appropriate service based on job type and handles errors gracefully.
+//
+// Concurrency (H-6 CWE-362): jobs are claimed via ClaimPendingJobs which uses
+// SELECT ... FOR UPDATE SKIP LOCKED and flips Pending → Running atomically. Concurrent
+// scheduler replicas in HA deployments will therefore never observe the same Pending row,
+// and the subsequent UpdateStatus(Running) calls inside the downstream service methods are
+// idempotent against the pre-flipped state.
 func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
-	// Fetch pending jobs
-	pendingJobs, err := s.jobRepo.ListByStatus(ctx, domain.JobStatusPending)
+	// Claim pending jobs atomically (H-6 remediation: was ListByStatus which had no row lock).
+	// Empty jobType matches all types; zero limit means unlimited (preserves prior semantics).
+	pendingJobs, err := s.jobRepo.ClaimPendingJobs(ctx, "", 0)
 	if err != nil {
-		return fmt.Errorf("failed to list pending jobs: %w", err)
+		return fmt.Errorf("failed to claim pending jobs: %w", err)
 	}
 
 	if len(pendingJobs) == 0 {

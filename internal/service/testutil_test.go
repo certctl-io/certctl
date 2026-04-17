@@ -278,6 +278,56 @@ func (m *mockJobRepo) ListPendingByAgentID(ctx context.Context, agentID string) 
 	return result, nil
 }
 
+// ClaimPendingJobs simulates the H-6 atomic claim semantics: matching rows are transitioned
+// Pending → Running before being returned. The in-memory mock has no concurrency primitives
+// beyond the existing mutex, which is sufficient for single-goroutine service tests.
+func (m *mockJobRepo) ClaimPendingJobs(ctx context.Context, jobType domain.JobType, limit int) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	var claimed []*domain.Job
+	for _, j := range m.Jobs {
+		if j.Status != domain.JobStatusPending {
+			continue
+		}
+		if jobType != "" && j.Type != jobType {
+			continue
+		}
+		j.Status = domain.JobStatusRunning
+		claimed = append(claimed, j)
+		if limit > 0 && len(claimed) >= limit {
+			break
+		}
+	}
+	return claimed, nil
+}
+
+// ClaimPendingByAgentID simulates the H-6 per-agent claim: Pending deployment rows scoped
+// to the agent flip to Running; AwaitingCSR rows are returned but keep their state.
+func (m *mockJobRepo) ClaimPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	var result []*domain.Job
+	for _, j := range m.Jobs {
+		if j.AgentID == nil || *j.AgentID != agentID {
+			continue
+		}
+		switch {
+		case j.Status == domain.JobStatusPending && j.Type == domain.JobTypeDeployment:
+			j.Status = domain.JobStatusRunning
+			result = append(result, j)
+		case j.Status == domain.JobStatusAwaitingCSR:
+			result = append(result, j)
+		}
+	}
+	return result, nil
+}
+
 func (m *mockJobRepo) AddJob(job *domain.Job) {
 	m.mu.Lock()
 	defer m.mu.Unlock()

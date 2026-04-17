@@ -682,6 +682,46 @@ func (m *mockJobRepository) ListPendingByAgentID(ctx context.Context, agentID st
 	return result, nil
 }
 
+// ClaimPendingJobs mirrors the production H-6 semantics: Pending jobs of the given type
+// (or any type when jobType is empty) flip to Running before being returned. limit <= 0
+// means unlimited.
+func (m *mockJobRepository) ClaimPendingJobs(ctx context.Context, jobType domain.JobType, limit int) ([]*domain.Job, error) {
+	var claimed []*domain.Job
+	for _, j := range m.jobs {
+		if j.Status != domain.JobStatusPending {
+			continue
+		}
+		if jobType != "" && j.Type != jobType {
+			continue
+		}
+		j.Status = domain.JobStatusRunning
+		claimed = append(claimed, j)
+		if limit > 0 && len(claimed) >= limit {
+			break
+		}
+	}
+	return claimed, nil
+}
+
+// ClaimPendingByAgentID mirrors the production H-6 semantics: Pending deployment rows for
+// the agent flip to Running; AwaitingCSR rows are returned with state preserved.
+func (m *mockJobRepository) ClaimPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error) {
+	var result []*domain.Job
+	for _, j := range m.jobs {
+		if j.AgentID == nil || *j.AgentID != agentID {
+			continue
+		}
+		switch {
+		case j.Status == domain.JobStatusPending && j.Type == domain.JobTypeDeployment:
+			j.Status = domain.JobStatusRunning
+			result = append(result, j)
+		case j.Status == domain.JobStatusAwaitingCSR:
+			result = append(result, j)
+		}
+	}
+	return result, nil
+}
+
 type mockAuditRepository struct {
 	events []*domain.AuditEvent
 }

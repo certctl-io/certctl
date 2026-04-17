@@ -120,10 +120,20 @@ type JobRepository interface {
 	ListByCertificate(ctx context.Context, certID string) ([]*domain.Job, error)
 	// UpdateStatus updates a job's status and optional error message.
 	UpdateStatus(ctx context.Context, id string, status domain.JobStatus, errMsg string) error
-	// GetPendingJobs returns jobs not yet processed of a specific type.
+	// GetPendingJobs returns jobs not yet processed of a specific type. Prefer ClaimPendingJobs in
+	// production paths where concurrent schedulers may race — see H-6 (CWE-362) remediation.
 	GetPendingJobs(ctx context.Context, jobType domain.JobType) ([]*domain.Job, error)
 	// ListPendingByAgentID returns pending deployment jobs and AwaitingCSR jobs for a specific agent.
+	// Prefer ClaimPendingByAgentID in production paths — see H-6 (CWE-362) remediation.
 	ListPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error)
+	// ClaimPendingJobs atomically claims up to `limit` Pending jobs and transitions them to Running
+	// using SELECT FOR UPDATE SKIP LOCKED inside a transaction. An empty jobType matches any type;
+	// limit <= 0 means no limit. H-6 (CWE-362) race remediation.
+	ClaimPendingJobs(ctx context.Context, jobType domain.JobType, limit int) ([]*domain.Job, error)
+	// ClaimPendingByAgentID atomically claims pending deployment jobs for an agent (flipping them
+	// to Running) and locks AwaitingCSR jobs against concurrent observers (leaving state intact,
+	// since the CSR-submission path drives the next transition). H-6 (CWE-362) race remediation.
+	ClaimPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error)
 }
 
 // RenewalPolicyRepository defines operations for managing renewal policies.
