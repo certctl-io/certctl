@@ -148,7 +148,14 @@ func (s *DiscoveryService) GetDiscovered(ctx context.Context, id string) (*domai
 }
 
 // ClaimDiscovered links a discovered certificate to a managed certificate.
-func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string) error {
+// The actor parameter names the authenticated identity that initiated the
+// claim and is recorded on the audit event. Callers in the handler layer pass
+// resolveActor(ctx); service-to-service callers pass a descriptive sentinel
+// (e.g., "system"). Empty actor falls back to "api" (the same safe sentinel
+// resolveActor uses when no auth context is present), never to "operator" —
+// hardcoding "operator" was M-005, a coverage-gap closure where audit records
+// failed to identify who actually performed the triage action.
+func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string, actor string) error {
 	if managedCertID == "" {
 		return fmt.Errorf("managed_certificate_id is required")
 	}
@@ -168,8 +175,12 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 		return fmt.Errorf("failed to update discovered certificate status: %w", err)
 	}
 
+	if actor == "" {
+		actor = "api"
+	}
+
 	// Audit trail
-	if err := s.auditService.RecordEvent(ctx, "operator", domain.ActorTypeUser,
+	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"discovery_cert_claimed", "discovered_certificate", id,
 		map[string]interface{}{
 			"managed_certificate_id": managedCertID,
@@ -182,14 +193,19 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 	return nil
 }
 
-// DismissDiscovered marks a discovered certificate as dismissed.
-func (s *DiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
+// DismissDiscovered marks a discovered certificate as dismissed. See
+// ClaimDiscovered for the actor contract — same rules apply (M-005).
+func (s *DiscoveryService) DismissDiscovered(ctx context.Context, id string, actor string) error {
 	if err := s.discoveryRepo.UpdateDiscoveredStatus(ctx, id, domain.DiscoveryStatusDismissed, ""); err != nil {
 		return fmt.Errorf("failed to dismiss discovered certificate: %w", err)
 	}
 
+	if actor == "" {
+		actor = "api"
+	}
+
 	// Audit trail
-	if err := s.auditService.RecordEvent(ctx, "operator", domain.ActorTypeUser,
+	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
 		"discovery_cert_dismissed", "discovered_certificate", id, nil); err != nil {
 		slog.Error("failed to record audit event", "error", err)
 	}

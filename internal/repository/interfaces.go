@@ -27,6 +27,13 @@ type CertificateRepository interface {
 	GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error)
 	// GetLatestVersion returns the most recent certificate version for a certificate.
 	GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error)
+	// GetByIssuerAndSerial retrieves a certificate by the (issuer_id, serial_number)
+	// pair via a JOIN on certificate_versions. Callers (OCSP, revocation lookup)
+	// always know the issuer because protocol endpoints carry it in the request
+	// path; RFC 5280 §5.2.3 guarantees serial uniqueness only within a single
+	// issuer. Returns sql.ErrNoRows when no match exists so callers can
+	// distinguish "unknown cert" from a real repository error.
+	GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error)
 }
 
 // RevocationRepository defines operations for managing certificate revocations.

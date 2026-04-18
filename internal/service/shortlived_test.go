@@ -198,6 +198,10 @@ func (m *mockCertRepoWithGetError) GetLatestVersion(ctx context.Context, certID 
 	return nil, nil
 }
 
+func (m *mockCertRepoWithGetError) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error) {
+	return nil, nil
+}
+
 func (m *mockCertRepoWithGetError) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
 	return nil, m.GetExpiringCertificatesErr
 }

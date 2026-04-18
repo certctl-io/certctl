@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"encoding/base64"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -267,6 +268,38 @@ func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.Man
 			return nil, fmt.Errorf("certificate not found")
 		}
 		return nil, fmt.Errorf("failed to query certificate: %w", err)
+	}
+
+	return cert, nil
+}
+
+// GetByIssuerAndSerial retrieves a certificate by the (issuer_id, serial_number)
+// pair via a JOIN on certificate_versions. Per RFC 5280 §5.2.3, serial numbers
+// are unique only within a single issuer — callers that know the issuer (OCSP,
+// CRL generation, revocation lookup) use this method to scope lookups
+// correctly. Returns sql.ErrNoRows when no match exists so callers can
+// distinguish "unknown cert" (return OCSP status unknown) from a real
+// repository error.
+func (r *CertificateRepository) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT mc.id, mc.name, mc.common_name, mc.sans, mc.environment, mc.owner_id, mc.team_id,
+		       mc.issuer_id, mc.renewal_policy_id, mc.certificate_profile_id, mc.status, mc.expires_at,
+		       mc.tags, mc.last_renewal_at, mc.last_deployment_at, mc.revoked_at, mc.revocation_reason,
+		       mc.created_at, mc.updated_at
+		FROM managed_certificates mc
+		JOIN certificate_versions cv ON cv.certificate_id = mc.id
+		WHERE mc.issuer_id = $1 AND cv.serial_number = $2
+		LIMIT 1
+	`, issuerID, serial)
+
+	cert, err := r.scanCertificate(ctx, row)
+	if err != nil {
+		// scanCertificate wraps sql.ErrNoRows via %w, so surface the bare
+		// sentinel here for callers that branch on it with errors.Is.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, sql.ErrNoRows
+		}
+		return nil, fmt.Errorf("failed to query certificate by issuer+serial: %w", err)
 	}
 
 	return cert, nil

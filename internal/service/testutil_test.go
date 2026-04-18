@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"database/sql"
 	"errors"
 	"sync"
 	"time"
@@ -127,6 +128,26 @@ func (m *mockCertRepo) GetLatestVersion(ctx context.Context, certID string) (*do
 		return nil, errNotFound
 	}
 	return versions[len(versions)-1], nil
+}
+
+// GetByIssuerAndSerial emulates the PostgreSQL JOIN:
+// SELECT mc.* FROM managed_certificates mc JOIN certificate_versions cv
+// ON cv.certificate_id = mc.id WHERE mc.issuer_id = $1 AND cv.serial_number = $2.
+// Returns sql.ErrNoRows (the sentinel the real repo surfaces) when no match
+// exists, so callers that branch on errors.Is(err, sql.ErrNoRows) behave the
+// same in-memory as they do against PostgreSQL.
+func (m *mockCertRepo) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error) {
+	for _, cert := range m.Certs {
+		if cert.IssuerID != issuerID {
+			continue
+		}
+		for _, v := range m.Versions[cert.ID] {
+			if v.SerialNumber == serial {
+				return cert, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
 }
 
 func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
@@ -784,6 +805,9 @@ type mockIssuerConnector struct {
 	Err                error
 	getRenewalInfoResult *RenewalInfoResult
 	getRenewalInfoErr    error
+	// LastOCSPSignRequest captures the last request passed to SignOCSPResponse.
+	// Tests use this to assert CertStatus (0=good, 1=revoked, 2=unknown).
+	LastOCSPSignRequest *OCSPSignRequest
 }
 
 func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
@@ -825,6 +849,9 @@ func (m *mockIssuerConnector) GenerateCRL(ctx context.Context, entries []CRLEntr
 }
 
 func (m *mockIssuerConnector) SignOCSPResponse(ctx context.Context, req OCSPSignRequest) ([]byte, error) {
+	// Capture the request for test assertions (e.g., CertStatus verification)
+	reqCopy := req
+	m.LastOCSPSignRequest = &reqCopy
 	if m.Err != nil {
 		return nil, m.Err
 	}

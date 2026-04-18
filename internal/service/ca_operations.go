@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"database/sql"
+	"errors"
 	"fmt"
 	"log/slog"
 	"math/big"
@@ -139,23 +141,49 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 
 	// Check if this (issuer_id, serial) is revoked — RFC 5280 §5.2.3 scoping.
 	rev, err := s.revocationRepo.GetByIssuerAndSerial(ctx, issuerID, serialHex)
-	if err != nil {
-		// Not revoked — return "good" status
+	if err == nil && rev != nil {
+		// Revoked
 		return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
-			CertSerial: serial,
-			CertStatus: 0, // good
-			ThisUpdate: now,
-			NextUpdate: now.Add(1 * time.Hour),
+			CertSerial:       serial,
+			CertStatus:       1, // revoked
+			RevokedAt:        rev.RevokedAt,
+			RevocationReason: domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
+			ThisUpdate:       now,
+			NextUpdate:       now.Add(1 * time.Hour),
 		})
 	}
 
-	// Revoked
+	// Not revoked. Per RFC 6960 §2.2, we must only return "good" for a
+	// certificate that was actually issued by this CA. Verify the
+	// (issuer_id, serial) tuple maps to a real certificate in inventory
+	// before asserting "good"; otherwise return "unknown". This closes the
+	// coverage gap where forged/guessed serials would be accepted as valid
+	// because they had no revocation row (M-004).
+	if s.certRepo != nil {
+		cert, certErr := s.certRepo.GetByIssuerAndSerial(ctx, issuerID, serialHex)
+		if certErr != nil || cert == nil {
+			if certErr != nil && !errors.Is(certErr, sql.ErrNoRows) {
+				// Real repository failure — log but still fail closed with "unknown"
+				// rather than leaking a bogus "good" assertion.
+				slog.Warn("OCSP cert lookup failed; returning unknown",
+					"issuer_id", issuerID,
+					"serial", serialHex,
+					"error", certErr)
+			}
+			return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
+				CertSerial: serial,
+				CertStatus: 2, // unknown
+				ThisUpdate: now,
+				NextUpdate: now.Add(1 * time.Hour),
+			})
+		}
+	}
+
+	// Known cert, not revoked — return "good"
 	return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
-		CertSerial:       serial,
-		CertStatus:       1, // revoked
-		RevokedAt:        rev.RevokedAt,
-		RevocationReason: domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
-		ThisUpdate:       now,
-		NextUpdate:       now.Add(1 * time.Hour),
+		CertSerial: serial,
+		CertStatus: 0, // good
+		ThisUpdate: now,
+		NextUpdate: now.Add(1 * time.Hour),
 	})
 }

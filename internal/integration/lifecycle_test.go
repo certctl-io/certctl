@@ -3,6 +3,7 @@ package integration
 import (
 	"bytes"
 	"context"
+	"database/sql"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -584,6 +585,24 @@ func (m *mockCertificateRepository) GetLatestVersion(ctx context.Context, certID
 		return nil, fmt.Errorf("no versions found")
 	}
 	return versions[len(versions)-1], nil
+}
+
+// GetByIssuerAndSerial emulates the PostgreSQL JOIN that scopes cert lookup to
+// (issuer_id, serial). Returns sql.ErrNoRows when no match exists so callers
+// that branch on errors.Is(err, sql.ErrNoRows) (notably the OCSP handler's
+// M-004 "unknown" fallback) behave the same in-memory as against PostgreSQL.
+func (m *mockCertificateRepository) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error) {
+	for _, cert := range m.certs {
+		if cert.IssuerID != issuerID {
+			continue
+		}
+		for _, v := range m.versions[cert.ID] {
+			if v.SerialNumber == serial {
+				return cert, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
 }
 
 type mockJobRepository struct {
@@ -1301,11 +1320,11 @@ func (m *mockDiscoveryService) GetDiscovered(ctx context.Context, id string) (*d
 	return nil, fmt.Errorf("not found")
 }
 
-func (m *mockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string) error {
+func (m *mockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string, actor string) error {
 	return nil
 }
 
-func (m *mockDiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
+func (m *mockDiscoveryService) DismissDiscovered(ctx context.Context, id string, actor string) error {
 	return nil
 }
 

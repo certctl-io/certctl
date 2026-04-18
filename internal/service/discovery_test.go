@@ -381,7 +381,7 @@ func TestClaimDiscovered_Success(t *testing.T) {
 	}
 	certRepo.AddCert(managedCert)
 
-	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "mc-prod-1")
+	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "mc-prod-1", "alice@corp")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -423,7 +423,7 @@ func TestClaimDiscovered_MissingManagedCertID(t *testing.T) {
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
-	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "")
+	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "", "test-actor")
 	if err == nil {
 		t.Fatal("expected error for empty managed_certificate_id")
 	}
@@ -442,7 +442,7 @@ func TestClaimDiscovered_ManagedCertNotFound(t *testing.T) {
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
-	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "nonexistent-cert")
+	err := svc.ClaimDiscovered(context.Background(), "dcert-1", "nonexistent-cert", "test-actor")
 	if err == nil {
 		t.Fatal("expected error for nonexistent managed certificate")
 	}
@@ -464,7 +464,7 @@ func TestDismissDiscovered_Success(t *testing.T) {
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
-	err := svc.DismissDiscovered(context.Background(), "dcert-1")
+	err := svc.DismissDiscovered(context.Background(), "dcert-1", "bob@corp")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -497,8 +497,178 @@ func TestDismissDiscovered_NotFound(t *testing.T) {
 	svc, discoveryRepo, _, _ := newDiscoveryTestService()
 
 	discoveryRepo.UpdateStatusErr = errNotFound
-	err := svc.DismissDiscovered(context.Background(), "nonexistent")
+	err := svc.DismissDiscovered(context.Background(), "nonexistent", "test-actor")
 	if err == nil {
 		t.Fatal("expected error for nonexistent cert")
+	}
+}
+
+// M-005 regression: caller-supplied actor must propagate onto the
+// discovery_cert_claimed audit event so the trail identifies who performed
+// triage (pre-M-005 the service hardcoded "operator").
+func TestDiscoveryService_ClaimDiscovered_AuditActor(t *testing.T) {
+	svc, discoveryRepo, certRepo, auditRepo := newDiscoveryTestService()
+
+	now := time.Now()
+	discoveredCert := &domain.DiscoveredCertificate{
+		ID:                "dcert-1",
+		CommonName:        "example.com",
+		FingerprintSHA256: "abc123",
+		Status:            domain.DiscoveryStatusUnmanaged,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	discoveryRepo.Discovered[discoveredCert.ID] = discoveredCert
+
+	managedCert := &domain.ManagedCertificate{
+		ID:         "mc-prod-1",
+		CommonName: "example.com",
+		Status:     domain.CertificateStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	certRepo.AddCert(managedCert)
+
+	if err := svc.ClaimDiscovered(context.Background(), "dcert-1", "mc-prod-1", "alice@corp"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	// Locate the discovery_cert_claimed audit event and assert actor propagation.
+	var claimEvent *domain.AuditEvent
+	for _, e := range auditRepo.Events {
+		if e.Action == "discovery_cert_claimed" {
+			claimEvent = e
+			break
+		}
+	}
+	if claimEvent == nil {
+		t.Fatal("expected discovery_cert_claimed audit event to be recorded")
+	}
+	if claimEvent.Actor != "alice@corp" {
+		t.Errorf("expected audit actor to be caller-supplied 'alice@corp', got %q", claimEvent.Actor)
+	}
+	if claimEvent.Actor == "operator" {
+		t.Error("audit actor must not be hardcoded 'operator' (M-005 regression)")
+	}
+}
+
+// M-005 regression symmetric pair for DismissDiscovered.
+func TestDiscoveryService_DismissDiscovered_AuditActor(t *testing.T) {
+	svc, discoveryRepo, _, auditRepo := newDiscoveryTestService()
+
+	now := time.Now()
+	cert := &domain.DiscoveredCertificate{
+		ID:         "dcert-1",
+		CommonName: "example.com",
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	discoveryRepo.Discovered[cert.ID] = cert
+
+	if err := svc.DismissDiscovered(context.Background(), "dcert-1", "bob@corp"); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var dismissEvent *domain.AuditEvent
+	for _, e := range auditRepo.Events {
+		if e.Action == "discovery_cert_dismissed" {
+			dismissEvent = e
+			break
+		}
+	}
+	if dismissEvent == nil {
+		t.Fatal("expected discovery_cert_dismissed audit event to be recorded")
+	}
+	if dismissEvent.Actor != "bob@corp" {
+		t.Errorf("expected audit actor to be caller-supplied 'bob@corp', got %q", dismissEvent.Actor)
+	}
+	if dismissEvent.Actor == "operator" {
+		t.Error("audit actor must not be hardcoded 'operator' (M-005 regression)")
+	}
+}
+
+// M-005 regression: when the caller passes an empty actor (e.g., the handler's
+// resolveActor helper returns "" because no auth context is present), the
+// service must fall back to the safe sentinel "api" — never to the pre-M-005
+// hardcoded "operator".
+func TestDiscoveryService_ClaimDiscovered_EmptyActorFallsBackToAPI(t *testing.T) {
+	svc, discoveryRepo, certRepo, auditRepo := newDiscoveryTestService()
+
+	now := time.Now()
+	discoveredCert := &domain.DiscoveredCertificate{
+		ID:                "dcert-1",
+		CommonName:        "example.com",
+		FingerprintSHA256: "abc123",
+		Status:            domain.DiscoveryStatusUnmanaged,
+		CreatedAt:         now,
+		UpdatedAt:         now,
+	}
+	discoveryRepo.Discovered[discoveredCert.ID] = discoveredCert
+
+	managedCert := &domain.ManagedCertificate{
+		ID:         "mc-prod-1",
+		CommonName: "example.com",
+		Status:     domain.CertificateStatusActive,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	certRepo.AddCert(managedCert)
+
+	if err := svc.ClaimDiscovered(context.Background(), "dcert-1", "mc-prod-1", ""); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var claimEvent *domain.AuditEvent
+	for _, e := range auditRepo.Events {
+		if e.Action == "discovery_cert_claimed" {
+			claimEvent = e
+			break
+		}
+	}
+	if claimEvent == nil {
+		t.Fatal("expected discovery_cert_claimed audit event to be recorded")
+	}
+	if claimEvent.Actor != "api" {
+		t.Errorf("expected empty actor to fall back to 'api', got %q", claimEvent.Actor)
+	}
+	if claimEvent.Actor == "operator" {
+		t.Error("audit actor must not be hardcoded 'operator' (M-005 regression)")
+	}
+}
+
+// M-005 regression symmetric pair for DismissDiscovered empty-actor fallback.
+func TestDiscoveryService_DismissDiscovered_EmptyActorFallsBackToAPI(t *testing.T) {
+	svc, discoveryRepo, _, auditRepo := newDiscoveryTestService()
+
+	now := time.Now()
+	cert := &domain.DiscoveredCertificate{
+		ID:         "dcert-1",
+		CommonName: "example.com",
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}
+	discoveryRepo.Discovered[cert.ID] = cert
+
+	if err := svc.DismissDiscovered(context.Background(), "dcert-1", ""); err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+
+	var dismissEvent *domain.AuditEvent
+	for _, e := range auditRepo.Events {
+		if e.Action == "discovery_cert_dismissed" {
+			dismissEvent = e
+			break
+		}
+	}
+	if dismissEvent == nil {
+		t.Fatal("expected discovery_cert_dismissed audit event to be recorded")
+	}
+	if dismissEvent.Actor != "api" {
+		t.Errorf("expected empty actor to fall back to 'api', got %q", dismissEvent.Actor)
+	}
+	if dismissEvent.Actor == "operator" {
+		t.Error("audit actor must not be hardcoded 'operator' (M-005 regression)")
 	}
 }

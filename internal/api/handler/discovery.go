@@ -11,12 +11,17 @@ import (
 )
 
 // DiscoveryService defines the interface used by the discovery handler.
+// ClaimDiscovered and DismissDiscovered accept an explicit actor parameter so
+// the handler can flow the authenticated named-key identity into the audit
+// trail (M-005). Services that call these methods from non-request contexts
+// pass a descriptive sentinel (e.g., "system") or "" (which falls back to
+// "api").
 type DiscoveryService interface {
 	ProcessDiscoveryReport(ctx context.Context, report *domain.DiscoveryReport) (*domain.DiscoveryScan, error)
 	ListDiscovered(ctx context.Context, agentID, status string, page, perPage int) ([]*domain.DiscoveredCertificate, int, error)
 	GetDiscovered(ctx context.Context, id string) (*domain.DiscoveredCertificate, error)
-	ClaimDiscovered(ctx context.Context, id string, managedCertID string) error
-	DismissDiscovered(ctx context.Context, id string) error
+	ClaimDiscovered(ctx context.Context, id string, managedCertID string, actor string) error
+	DismissDiscovered(ctx context.Context, id string, actor string) error
 	ListScans(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error)
 	GetScan(ctx context.Context, id string) (*domain.DiscoveryScan, error)
 	GetDiscoverySummary(ctx context.Context) (map[string]int, error)
@@ -142,7 +147,7 @@ func (h DiscoveryHandler) ClaimDiscovered(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	if err := h.svc.ClaimDiscovered(r.Context(), id, body.ManagedCertificateID); err != nil {
+	if err := h.svc.ClaimDiscovered(r.Context(), id, body.ManagedCertificateID, resolveActor(r.Context())); err != nil {
 		Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to claim certificate: %v", err))
 		return
 	}
@@ -166,7 +171,7 @@ func (h DiscoveryHandler) DismissDiscovered(w http.ResponseWriter, r *http.Reque
 		return
 	}
 
-	if err := h.svc.DismissDiscovered(r.Context(), id); err != nil {
+	if err := h.svc.DismissDiscovered(r.Context(), id, resolveActor(r.Context())); err != nil {
 		Error(w, http.StatusInternalServerError, fmt.Sprintf("failed to dismiss certificate: %v", err))
 		return
 	}

@@ -19,8 +19,8 @@ type MockDiscoveryService struct {
 	ProcessDiscoveryReportFn func(ctx context.Context, report *domain.DiscoveryReport) (*domain.DiscoveryScan, error)
 	ListDiscoveredFn         func(ctx context.Context, agentID, status string, page, perPage int) ([]*domain.DiscoveredCertificate, int, error)
 	GetDiscoveredFn          func(ctx context.Context, id string) (*domain.DiscoveredCertificate, error)
-	ClaimDiscoveredFn        func(ctx context.Context, id string, managedCertID string) error
-	DismissDiscoveredFn      func(ctx context.Context, id string) error
+	ClaimDiscoveredFn        func(ctx context.Context, id string, managedCertID string, actor string) error
+	DismissDiscoveredFn      func(ctx context.Context, id string, actor string) error
 	ListScansFn              func(ctx context.Context, agentID string, page, perPage int) ([]*domain.DiscoveryScan, int, error)
 	GetScanFn                func(ctx context.Context, id string) (*domain.DiscoveryScan, error)
 	GetDiscoverySummaryFn    func(ctx context.Context) (map[string]int, error)
@@ -47,16 +47,16 @@ func (m *MockDiscoveryService) GetDiscovered(ctx context.Context, id string) (*d
 	return nil, nil
 }
 
-func (m *MockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string) error {
+func (m *MockDiscoveryService) ClaimDiscovered(ctx context.Context, id string, managedCertID string, actor string) error {
 	if m.ClaimDiscoveredFn != nil {
-		return m.ClaimDiscoveredFn(ctx, id, managedCertID)
+		return m.ClaimDiscoveredFn(ctx, id, managedCertID, actor)
 	}
 	return nil
 }
 
-func (m *MockDiscoveryService) DismissDiscovered(ctx context.Context, id string) error {
+func (m *MockDiscoveryService) DismissDiscovered(ctx context.Context, id string, actor string) error {
 	if m.DismissDiscoveredFn != nil {
-		return m.DismissDiscoveredFn(ctx, id)
+		return m.DismissDiscoveredFn(ctx, id, actor)
 	}
 	return nil
 }
@@ -352,7 +352,7 @@ func TestGetDiscovered_NotFound(t *testing.T) {
 // Test ClaimDiscovered - success case
 func TestClaimDiscovered_Success(t *testing.T) {
 	mock := &MockDiscoveryService{
-		ClaimDiscoveredFn: func(ctx context.Context, id string, managedCertID string) error {
+		ClaimDiscoveredFn: func(ctx context.Context, id string, managedCertID string, actor string) error {
 			if id == "dcert-1" && managedCertID == "mc-prod-1" {
 				return nil
 			}
@@ -411,7 +411,7 @@ func TestClaimDiscovered_MissingManagedCertID(t *testing.T) {
 // Test ClaimDiscovered - discovered cert not found
 func TestClaimDiscovered_NotFound(t *testing.T) {
 	mock := &MockDiscoveryService{
-		ClaimDiscoveredFn: func(ctx context.Context, id string, managedCertID string) error {
+		ClaimDiscoveredFn: func(ctx context.Context, id string, managedCertID string, actor string) error {
 			return fmt.Errorf("discovered certificate not found")
 		},
 	}
@@ -438,7 +438,7 @@ func TestClaimDiscovered_NotFound(t *testing.T) {
 // Test DismissDiscovered - success case
 func TestDismissDiscovered_Success(t *testing.T) {
 	mock := &MockDiscoveryService{
-		DismissDiscoveredFn: func(ctx context.Context, id string) error {
+		DismissDiscoveredFn: func(ctx context.Context, id string, actor string) error {
 			if id == "dcert-1" {
 				return nil
 			}
@@ -614,7 +614,7 @@ func TestGetDiscoverySummary_MethodNotAllowed(t *testing.T) {
 // Test DismissDiscovered - service error
 func TestDismissDiscovered_ServiceError(t *testing.T) {
 	mock := &MockDiscoveryService{
-		DismissDiscoveredFn: func(ctx context.Context, id string) error {
+		DismissDiscoveredFn: func(ctx context.Context, id string, actor string) error {
 			return fmt.Errorf("database error")
 		},
 	}
