@@ -71,8 +71,8 @@ func (s *CertificateService) List(ctx context.Context, filter *repository.Certif
 
 // ListCertificatesWithFilter returns a list of certificates with advanced filtering (M20).
 // This method supports the new M20 filters and returns domain.ManagedCertificate (not pointers).
-func (s *CertificateService) ListCertificatesWithFilter(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
-	certs, total, err := s.certRepo.List(context.Background(), filter)
+func (s *CertificateService) ListCertificatesWithFilter(ctx context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+	certs, total, err := s.certRepo.List(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list certificates with filter: %w", err)
 	}
@@ -206,10 +206,10 @@ func (s *CertificateService) GetVersions(ctx context.Context, certID string) ([]
 	return versions, nil
 }
 
-// TriggerRenewalWithActor initiates a renewal job if the certificate is eligible.
+// TriggerRenewal initiates a renewal job if the certificate is eligible.
 // Creates a Renewal job (or Issuance for new certs) so the scheduler's job processor
 // can pick it up and route it through the issuer connector.
-func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID string, actor string) error {
+func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, actor string) error {
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch certificate: %w", err)
@@ -283,8 +283,11 @@ func (s *CertificateService) TriggerRenewalWithActor(ctx context.Context, certID
 	return nil
 }
 
-// TriggerDeploymentWithActor creates deployment jobs for all targets of a certificate.
-func (s *CertificateService) TriggerDeploymentWithActor(ctx context.Context, certID string, actor string) error {
+// TriggerDeployment creates deployment jobs for all targets of a certificate.
+// The targetID parameter is accepted from the handler interface but currently unused;
+// deployment coordination happens per-certificate across all of its targets.
+func (s *CertificateService) TriggerDeployment(ctx context.Context, certID string, targetID string, actor string) error {
+	_ = targetID
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch certificate: %w", err)
@@ -306,7 +309,7 @@ func (s *CertificateService) TriggerDeploymentWithActor(ctx context.Context, cer
 }
 
 // ListCertificates returns paginated certificates with optional filtering (handler interface method).
-func (s *CertificateService) ListCertificates(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
+func (s *CertificateService) ListCertificates(ctx context.Context, status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -325,7 +328,7 @@ func (s *CertificateService) ListCertificates(status, environment, ownerID, team
 		PerPage:     perPage,
 	}
 
-	certs, total, err := s.certRepo.List(context.Background(), filter)
+	certs, total, err := s.certRepo.List(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list certificates: %w", err)
 	}
@@ -341,12 +344,12 @@ func (s *CertificateService) ListCertificates(status, environment, ownerID, team
 }
 
 // GetCertificate returns a single certificate (handler interface method).
-func (s *CertificateService) GetCertificate(id string) (*domain.ManagedCertificate, error) {
-	return s.certRepo.Get(context.Background(), id)
+func (s *CertificateService) GetCertificate(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
+	return s.certRepo.Get(ctx, id)
 }
 
 // CreateCertificate creates a new certificate (handler interface method).
-func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+func (s *CertificateService) CreateCertificate(ctx context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 	if cert.ID == "" {
 		cert.ID = generateID("cert")
 	}
@@ -365,16 +368,14 @@ func (s *CertificateService) CreateCertificate(cert domain.ManagedCertificate) (
 	if cert.Tags == nil {
 		cert.Tags = make(map[string]string)
 	}
-	if err := s.certRepo.Create(context.Background(), &cert); err != nil {
+	if err := s.certRepo.Create(ctx, &cert); err != nil {
 		return nil, fmt.Errorf("failed to create certificate: %w", err)
 	}
 	return &cert, nil
 }
 
 // UpdateCertificate modifies a certificate (handler interface method).
-func (s *CertificateService) UpdateCertificate(id string, patch domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
-	ctx := context.Background()
-
+func (s *CertificateService) UpdateCertificate(ctx context.Context, id string, patch domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 	// Fetch existing certificate so partial updates don't zero out fields
 	existing, err := s.certRepo.Get(ctx, id)
 	if err != nil {
@@ -425,12 +426,12 @@ func (s *CertificateService) UpdateCertificate(id string, patch domain.ManagedCe
 }
 
 // ArchiveCertificate marks a certificate as archived (handler interface method).
-func (s *CertificateService) ArchiveCertificate(id string) error {
-	return s.certRepo.Archive(context.Background(), id)
+func (s *CertificateService) ArchiveCertificate(ctx context.Context, id string) error {
+	return s.certRepo.Archive(ctx, id)
 }
 
 // GetCertificateVersions returns certificate versions (handler interface method).
-func (s *CertificateService) GetCertificateVersions(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+func (s *CertificateService) GetCertificateVersions(ctx context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -438,7 +439,7 @@ func (s *CertificateService) GetCertificateVersions(certID string, page, perPage
 		perPage = 50
 	}
 
-	versions, err := s.certRepo.ListVersions(context.Background(), certID)
+	versions, err := s.certRepo.ListVersions(ctx, certID)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list certificate versions: %w", err)
 	}
@@ -463,24 +464,8 @@ func (s *CertificateService) GetCertificateVersions(certID string, page, perPage
 	return result, total, nil
 }
 
-// TriggerRenewal initiates renewal (handler interface method).
-func (s *CertificateService) TriggerRenewal(certID string) error {
-	return s.TriggerRenewalWithActor(context.Background(), certID, "api")
-}
-
-// TriggerDeployment triggers deployment (handler interface method).
-func (s *CertificateService) TriggerDeployment(certID string, targetID string) error {
-	return s.TriggerDeploymentWithActor(context.Background(), certID, "api")
-}
-
-// RevokeCertificate revokes a certificate with the given reason (handler interface method).
-func (s *CertificateService) RevokeCertificate(certID string, reason string) error {
-	return s.RevokeCertificateWithActor(context.Background(), certID, reason, "api")
-}
-
-// RevokeCertificateWithActor performs revocation with actor tracking.
-// Delegates to RevocationSvc.
-func (s *CertificateService) RevokeCertificateWithActor(ctx context.Context, certID string, reason string, actor string) error {
+// RevokeCertificate performs revocation with actor tracking. Delegates to RevocationSvc.
+func (s *CertificateService) RevokeCertificate(ctx context.Context, certID string, reason string, actor string) error {
 	if s.revSvc == nil {
 		return fmt.Errorf("revocation service not configured")
 	}
@@ -489,35 +474,35 @@ func (s *CertificateService) RevokeCertificateWithActor(ctx context.Context, cer
 
 // GetRevokedCertificates returns all revoked certificate records (for CRL generation).
 // Delegates to RevocationSvc.
-func (s *CertificateService) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
+func (s *CertificateService) GetRevokedCertificates(ctx context.Context) ([]*domain.CertificateRevocation, error) {
 	if s.revSvc == nil {
 		return nil, fmt.Errorf("revocation service not configured")
 	}
-	return s.revSvc.GetRevokedCertificates()
+	return s.revSvc.GetRevokedCertificates(ctx)
 }
 
 // GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
 // Delegates to CAOperationsSvc.
-func (s *CertificateService) GenerateDERCRL(issuerID string) ([]byte, error) {
+func (s *CertificateService) GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error) {
 	if s.caSvc == nil {
 		return nil, fmt.Errorf("CA operations service not configured")
 	}
-	return s.caSvc.GenerateDERCRL(issuerID)
+	return s.caSvc.GenerateDERCRL(ctx, issuerID)
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
 // Delegates to CAOperationsSvc.
-func (s *CertificateService) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
+func (s *CertificateService) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
 	if s.caSvc == nil {
 		return nil, fmt.Errorf("CA operations service not configured")
 	}
-	return s.caSvc.GetOCSPResponse(issuerID, serialHex)
+	return s.caSvc.GetOCSPResponse(ctx, issuerID, serialHex)
 }
 
 // GetCertificateDeployments returns all deployment targets for a certificate (M20).
-func (s *CertificateService) GetCertificateDeployments(certID string) ([]domain.DeploymentTarget, error) {
+func (s *CertificateService) GetCertificateDeployments(ctx context.Context, certID string) ([]domain.DeploymentTarget, error) {
 	// Verify certificate exists
-	_, err := s.certRepo.Get(context.Background(), certID)
+	_, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return nil, fmt.Errorf("certificate not found: %w", err)
 	}
@@ -527,7 +512,7 @@ func (s *CertificateService) GetCertificateDeployments(certID string) ([]domain.
 	}
 
 	// Get targets from repository
-	targets, err := s.targetRepo.ListByCertificate(context.Background(), certID)
+	targets, err := s.targetRepo.ListByCertificate(ctx, certID)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list deployment targets: %w", err)
 	}

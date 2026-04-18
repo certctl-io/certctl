@@ -151,9 +151,9 @@ func (s *RevocationSvc) RevokeCertificateWithActor(ctx context.Context, certID s
 }
 
 // GetRevokedCertificates returns all revoked certificate records (for CRL generation).
-func (s *RevocationSvc) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
+func (s *RevocationSvc) GetRevokedCertificates(ctx context.Context) ([]*domain.CertificateRevocation, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
-	return s.revocationRepo.ListAll(context.Background())
+	return s.revocationRepo.ListAll(ctx)
 }

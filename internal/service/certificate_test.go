@@ -294,7 +294,7 @@ func TestTriggerRenewal(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 
-	err := certService.TriggerRenewalWithActor(ctx, "cert-001", "user-1")
+	err := certService.TriggerRenewal(ctx, "cert-001", "user-1")
 	if err != nil {
 		t.Fatalf("TriggerRenewal failed: %v", err)
 	}
@@ -333,13 +333,14 @@ func TestTriggerRenewal_Archived(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 
-	err := certService.TriggerRenewalWithActor(ctx, "cert-001", "user-1")
+	err := certService.TriggerRenewal(ctx, "cert-001", "user-1")
 	if err == nil {
 		t.Fatal("expected error for archived certificate")
 	}
 }
 
 func TestListCertificates(t *testing.T) {
+	ctx := context.Background()
 	now := time.Now()
 	cert1 := &domain.ManagedCertificate{
 		ID:         "cert-001",
@@ -369,7 +370,7 @@ func TestListCertificates(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 
-	certs, total, err := certService.ListCertificates("", "", "", "", "", 1, 50)
+	certs, total, err := certService.ListCertificates(ctx, "", "", "", "", "", 1, 50)
 	if err != nil {
 		t.Fatalf("ListCertificates failed: %v", err)
 	}

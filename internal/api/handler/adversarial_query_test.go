@@ -19,6 +19,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"fmt"
 	"net/http"
 	"net/http/httptest"
@@ -76,7 +77,7 @@ func TestListCertificates_PaginationAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+			mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 				// Sanity: page/perPage on the filter must never be negative
 				// and perPage must never exceed 500 after parsing.
 				if filter.Page < 1 {
@@ -133,7 +134,7 @@ func TestListCertificates_SortAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+			mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 				return []domain.ManagedCertificate{}, 0, nil
 			}
 
@@ -175,7 +176,7 @@ func TestListCertificates_FieldsAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+			mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 				return []domain.ManagedCertificate{}, 0, nil
 			}
 
@@ -219,7 +220,7 @@ func TestListCertificates_TimeRangeAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+			mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 				return []domain.ManagedCertificate{}, 0, nil
 			}
 
@@ -263,7 +264,7 @@ func TestListCertificates_CursorAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+			mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 				return []domain.ManagedCertificate{}, 0, nil
 			}
 
@@ -314,7 +315,7 @@ func TestListCertificates_FilterInjection(t *testing.T) {
 				}()
 
 				handler, mock := newCertHandlerWithMock()
-				mock.ListCertificatesWithFilterFn = func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+				mock.ListCertificatesWithFilterFn = func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 					return []domain.ManagedCertificate{}, 0, nil
 				}
 
@@ -374,7 +375,7 @@ func TestCreateCertificate_BodyAbuse(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.CreateCertificateFn = func(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+			mock.CreateCertificateFn = func(_ context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 				// If we ever reach this, the handler accepted a malformed
 				// body. Return a sentinel that passes but flag it.
 				c := cert
@@ -419,7 +420,7 @@ func TestCreateCertificate_HugeBody(t *testing.T) {
 	sb.WriteString(`]}`)
 
 	handler, mock := newCertHandlerWithMock()
-	mock.CreateCertificateFn = func(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+	mock.CreateCertificateFn = func(_ context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 		c := cert
 		c.ID = "mc-huge"
 		return &c, nil
@@ -476,7 +477,7 @@ func TestRevokeCertificate_ReasonAbuse(t *testing.T) {
 			handler, mock := newCertHandlerWithMock()
 			// The mock always returns "invalid revocation reason" so we
 			// verify the handler's errMsg→status mapping turns it into a 400.
-			mock.RevokeCertificateFn = func(id string, reason string) error {
+			mock.RevokeCertificateFn = func(_ context.Context, id string, reason string, _ string) error {
 				// The service uses domain.IsValidRevocationReason. If we got
 				// through to here with something bogus, simulate a real
 				// service error.
@@ -500,7 +501,7 @@ func TestRevokeCertificate_ReasonAbuse(t *testing.T) {
 // service error message, which is fragile — this test catches regressions.
 func TestRevokeCertificate_AlreadyRevoked(t *testing.T) {
 	handler, mock := newCertHandlerWithMock()
-	mock.RevokeCertificateFn = func(id string, reason string) error {
+	mock.RevokeCertificateFn = func(_ context.Context, id string, reason string, _ string) error {
 		return fmt.Errorf("cannot revoke: certificate is already revoked")
 	}
 
@@ -520,7 +521,7 @@ func TestRevokeCertificate_AlreadyRevoked(t *testing.T) {
 // TestRevokeCertificate_NotFound verifies 404 mapping.
 func TestRevokeCertificate_NotFound(t *testing.T) {
 	handler, mock := newCertHandlerWithMock()
-	mock.RevokeCertificateFn = func(id string, reason string) error {
+	mock.RevokeCertificateFn = func(_ context.Context, id string, reason string, _ string) error {
 		return fmt.Errorf("certificate not found")
 	}
 
