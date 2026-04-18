@@ -79,10 +79,14 @@ jobs:
           OUTPUT_NAME: ${{ steps.build.outputs.output_name }}
         run: |
           set -euo pipefail
+          # Cosign v3.0 (shipped by cosign-installer@v4.1.1 default
+          # cosign-release=v3.0.5) removed --output-signature/--output-certificate
+          # on sign-blob. The replacement is --bundle, which emits a unified
+          # Sigstore bundle (signature + cert chain + Rekor inclusion proof) as
+          # a single .sigstore.json artefact. M-11.
           cosign sign-blob \
             --yes \
-            --output-signature "dist/${OUTPUT_NAME}.sig" \
-            --output-certificate "dist/${OUTPUT_NAME}.pem" \
+            --bundle "dist/${OUTPUT_NAME}.sigstore.json" \
             "dist/${OUTPUT_NAME}"
 
       - name: Compute SHA-256 sidecar
@@ -100,8 +104,7 @@ jobs:
           name: binary-${{ steps.build.outputs.output_name }}
           path: |
             dist/${{ steps.build.outputs.output_name }}
-            dist/${{ steps.build.outputs.output_name }}.sig
-            dist/${{ steps.build.outputs.output_name }}.pem
+            dist/${{ steps.build.outputs.output_name }}.sigstore.json
             dist/${{ steps.build.outputs.output_name }}.sbom.spdx.json
             dist/${{ steps.build.outputs.output_name }}.sha256
           if-no-files-found: error
@@ -138,7 +141,7 @@ jobs:
           : > checksums.txt
           for f in certctl-*; do
             case "$f" in
-              *.sig|*.pem|*.sbom.spdx.json|*.sha256|checksums.txt)
+              *.sigstore.json|*.sbom.spdx.json|*.sha256|checksums.txt)
                 continue ;;
             esac
             sha256sum "$f" >> checksums.txt
@@ -156,10 +159,11 @@ jobs:
         run: |
           set -euo pipefail
           cd artifacts
+          # Cosign v3.0 --bundle replaces the removed v2 flag pair
+          # --output-signature / --output-certificate. See M-11.
           cosign sign-blob \
             --yes \
-            --output-signature checksums.txt.sig \
-            --output-certificate checksums.txt.pem \
+            --bundle checksums.txt.sigstore.json \
             checksums.txt
 
       - name: Upload artefacts to GitHub Release
@@ -169,8 +173,7 @@ jobs:
           files: |
             artifacts/certctl-*
             artifacts/checksums.txt
-            artifacts/checksums.txt.sig
-            artifacts/checksums.txt.pem
+            artifacts/checksums.txt.sigstore.json
 
   # ----------------------------------------------------------------------
   # provenance-binaries (M-3): SLSA Level 3 provenance for every binary.
@@ -402,15 +405,15 @@ jobs:
 
             ```bash
             cosign verify-blob \
-              --certificate checksums.txt.pem \
-              --signature checksums.txt.sig \
+              --bundle checksums.txt.sigstore.json \
               --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               checksums.txt
             ```
 
             Replace `checksums.txt` with any individual binary name to verify that
-            artefact directly (each binary ships with its own `.sig` + `.pem` sidecar).
+            artefact directly (each binary ships with its own `.sigstore.json`
+            bundle, e.g. `cosign verify-blob --bundle certctl-agent-linux-amd64.sigstore.json …`).
 
             **3. Verify SLSA Level 3 provenance (binaries):**
 
