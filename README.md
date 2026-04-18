@@ -260,15 +260,17 @@ sha256sum -c checksums.txt
 
 ```bash
 cosign verify-blob \
-  --certificate checksums.txt.pem \
-  --signature checksums.txt.sig \
+  --bundle checksums.txt.sigstore.json \
   --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 ```
 
-Every individual binary has its own `.sig` + `.pem` sidecar; swap
-`checksums.txt` for any binary name to verify it directly.
+Every individual binary ships with its own `.sigstore.json` bundle
+(unified Sigstore bundle containing signature, certificate chain, and
+Rekor inclusion proof). Swap `checksums.txt` for any binary name and
+point `--bundle` at the matching `<binary>.sigstore.json` to verify it
+directly.
 
 **3. Verify SLSA Level 3 provenance on a binary:**
 
