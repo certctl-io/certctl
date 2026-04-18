@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -21,42 +22,42 @@ type MockPolicyService struct {
 	ListViolationsFn func(policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error)
 }
 
-func (m *MockPolicyService) ListPolicies(page, perPage int) ([]domain.PolicyRule, int64, error) {
+func (m *MockPolicyService) ListPolicies(_ context.Context, page, perPage int) ([]domain.PolicyRule, int64, error) {
 	if m.ListPoliciesFn != nil {
 		return m.ListPoliciesFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockPolicyService) GetPolicy(id string) (*domain.PolicyRule, error) {
+func (m *MockPolicyService) GetPolicy(_ context.Context, id string) (*domain.PolicyRule, error) {
 	if m.GetPolicyFn != nil {
 		return m.GetPolicyFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyService) CreatePolicy(policy domain.PolicyRule) (*domain.PolicyRule, error) {
+func (m *MockPolicyService) CreatePolicy(_ context.Context, policy domain.PolicyRule) (*domain.PolicyRule, error) {
 	if m.CreatePolicyFn != nil {
 		return m.CreatePolicyFn(policy)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyService) UpdatePolicy(id string, policy domain.PolicyRule) (*domain.PolicyRule, error) {
+func (m *MockPolicyService) UpdatePolicy(_ context.Context, id string, policy domain.PolicyRule) (*domain.PolicyRule, error) {
 	if m.UpdatePolicyFn != nil {
 		return m.UpdatePolicyFn(id, policy)
 	}
 	return nil, nil
 }
 
-func (m *MockPolicyService) DeletePolicy(id string) error {
+func (m *MockPolicyService) DeletePolicy(_ context.Context, id string) error {
 	if m.DeletePolicyFn != nil {
 		return m.DeletePolicyFn(id)
 	}
 	return nil
 }
 
-func (m *MockPolicyService) ListViolations(policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error) {
+func (m *MockPolicyService) ListViolations(_ context.Context, policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error) {
 	if m.ListViolationsFn != nil {
 		return m.ListViolationsFn(policyID, page, perPage)
 	}

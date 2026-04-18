@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,11 +13,11 @@ import (
 
 // OwnerService defines the service interface for owner operations.
 type OwnerService interface {
-	ListOwners(page, perPage int) ([]domain.Owner, int64, error)
-	GetOwner(id string) (*domain.Owner, error)
-	CreateOwner(owner domain.Owner) (*domain.Owner, error)
-	UpdateOwner(id string, owner domain.Owner) (*domain.Owner, error)
-	DeleteOwner(id string) error
+	ListOwners(ctx context.Context, page, perPage int) ([]domain.Owner, int64, error)
+	GetOwner(ctx context.Context, id string) (*domain.Owner, error)
+	CreateOwner(ctx context.Context, owner domain.Owner) (*domain.Owner, error)
+	UpdateOwner(ctx context.Context, id string, owner domain.Owner) (*domain.Owner, error)
+	DeleteOwner(ctx context.Context, id string) error
 }
 
 // OwnerHandler handles HTTP requests for owner operations.
@@ -53,7 +54,7 @@ func (h OwnerHandler) ListOwners(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	owners, total, err := h.svc.ListOwners(page, perPage)
+	owners, total, err := h.svc.ListOwners(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list owners", requestID)
 		return
@@ -87,7 +88,7 @@ func (h OwnerHandler) GetOwner(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	owner, err := h.svc.GetOwner(id)
+	owner, err := h.svc.GetOwner(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Owner not found", requestID)
 		return
@@ -122,7 +123,7 @@ func (h OwnerHandler) CreateOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreateOwner(owner)
+	created, err := h.svc.CreateOwner(r.Context(), owner)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create owner", requestID)
 		return
@@ -155,7 +156,7 @@ func (h OwnerHandler) UpdateOwner(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.UpdateOwner(id, owner)
+	updated, err := h.svc.UpdateOwner(r.Context(), id, owner)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update owner", requestID)
 		return
@@ -182,7 +183,7 @@ func (h OwnerHandler) DeleteOwner(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	if err := h.svc.DeleteOwner(id); err != nil {
+	if err := h.svc.DeleteOwner(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
 			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete owner: certificates are still assigned to this owner", requestID)
 		} else if strings.Contains(err.Error(), "not found") {

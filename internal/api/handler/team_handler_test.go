@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,35 +21,35 @@ type MockTeamService struct {
 	DeleteTeamFn func(id string) error
 }
 
-func (m *MockTeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error) {
+func (m *MockTeamService) ListTeams(_ context.Context, page, perPage int) ([]domain.Team, int64, error) {
 	if m.ListTeamsFn != nil {
 		return m.ListTeamsFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockTeamService) GetTeam(id string) (*domain.Team, error) {
+func (m *MockTeamService) GetTeam(_ context.Context, id string) (*domain.Team, error) {
 	if m.GetTeamFn != nil {
 		return m.GetTeamFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockTeamService) CreateTeam(team domain.Team) (*domain.Team, error) {
+func (m *MockTeamService) CreateTeam(_ context.Context, team domain.Team) (*domain.Team, error) {
 	if m.CreateTeamFn != nil {
 		return m.CreateTeamFn(team)
 	}
 	return nil, nil
 }
 
-func (m *MockTeamService) UpdateTeam(id string, team domain.Team) (*domain.Team, error) {
+func (m *MockTeamService) UpdateTeam(_ context.Context, id string, team domain.Team) (*domain.Team, error) {
 	if m.UpdateTeamFn != nil {
 		return m.UpdateTeamFn(id, team)
 	}
 	return nil, nil
 }
 
-func (m *MockTeamService) DeleteTeam(id string) error {
+func (m *MockTeamService) DeleteTeam(_ context.Context, id string) error {
 	if m.DeleteTeamFn != nil {
 		return m.DeleteTeamFn(id)
 	}

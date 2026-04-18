@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,12 +13,12 @@ import (
 
 // PolicyService defines the service interface for policy rule operations.
 type PolicyService interface {
-	ListPolicies(page, perPage int) ([]domain.PolicyRule, int64, error)
-	GetPolicy(id string) (*domain.PolicyRule, error)
-	CreatePolicy(policy domain.PolicyRule) (*domain.PolicyRule, error)
-	UpdatePolicy(id string, policy domain.PolicyRule) (*domain.PolicyRule, error)
-	DeletePolicy(id string) error
-	ListViolations(policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error)
+	ListPolicies(ctx context.Context, page, perPage int) ([]domain.PolicyRule, int64, error)
+	GetPolicy(ctx context.Context, id string) (*domain.PolicyRule, error)
+	CreatePolicy(ctx context.Context, policy domain.PolicyRule) (*domain.PolicyRule, error)
+	UpdatePolicy(ctx context.Context, id string, policy domain.PolicyRule) (*domain.PolicyRule, error)
+	DeletePolicy(ctx context.Context, id string) error
+	ListViolations(ctx context.Context, policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error)
 }
 
 // PolicyHandler handles HTTP requests for policy rule operations.
@@ -54,7 +55,7 @@ func (h PolicyHandler) ListPolicies(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	policies, total, err := h.svc.ListPolicies(page, perPage)
+	policies, total, err := h.svc.ListPolicies(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list policies", requestID)
 		return
@@ -88,7 +89,7 @@ func (h PolicyHandler) GetPolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	policy, err := h.svc.GetPolicy(id)
+	policy, err := h.svc.GetPolicy(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Policy not found", requestID)
 		return
@@ -127,7 +128,7 @@ func (h PolicyHandler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreatePolicy(policy)
+	created, err := h.svc.CreatePolicy(r.Context(), policy)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create policy", requestID)
 		return
@@ -174,7 +175,7 @@ func (h PolicyHandler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	updated, err := h.svc.UpdatePolicy(id, policy)
+	updated, err := h.svc.UpdatePolicy(r.Context(), id, policy)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update policy", requestID)
 		return
@@ -201,7 +202,7 @@ func (h PolicyHandler) DeletePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	if err := h.svc.DeletePolicy(id); err != nil {
+	if err := h.svc.DeletePolicy(r.Context(), id); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete policy", requestID)
 		return
 	}
@@ -242,7 +243,7 @@ func (h PolicyHandler) ListViolations(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	violations, total, err := h.svc.ListViolations(policyID, page, perPage)
+	violations, total, err := h.svc.ListViolations(r.Context(), policyID, page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list violations", requestID)
 		return

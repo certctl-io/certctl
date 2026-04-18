@@ -126,7 +126,7 @@ func (s *TeamService) Delete(ctx context.Context, id string, actor string) error
 }
 
 // ListTeams returns paginated teams (handler interface method).
-func (s *TeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error) {
+func (s *TeamService) ListTeams(ctx context.Context, page, perPage int) ([]domain.Team, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -134,7 +134,7 @@ func (s *TeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error)
 		perPage = 50
 	}
 
-	teams, err := s.teamRepo.List(context.Background())
+	teams, err := s.teamRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list teams: %w", err)
 	}
@@ -151,12 +151,12 @@ func (s *TeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error)
 }
 
 // GetTeam returns a single team (handler interface method).
-func (s *TeamService) GetTeam(id string) (*domain.Team, error) {
-	return s.teamRepo.Get(context.Background(), id)
+func (s *TeamService) GetTeam(ctx context.Context, id string) (*domain.Team, error) {
+	return s.teamRepo.Get(ctx, id)
 }
 
 // CreateTeam creates a new team (handler interface method).
-func (s *TeamService) CreateTeam(team domain.Team) (*domain.Team, error) {
+func (s *TeamService) CreateTeam(ctx context.Context, team domain.Team) (*domain.Team, error) {
 	if team.ID == "" {
 		team.ID = generateID("team")
 	}
@@ -167,22 +167,22 @@ func (s *TeamService) CreateTeam(team domain.Team) (*domain.Team, error) {
 	if team.UpdatedAt.IsZero() {
 		team.UpdatedAt = now
 	}
-	if err := s.teamRepo.Create(context.Background(), &team); err != nil {
+	if err := s.teamRepo.Create(ctx, &team); err != nil {
 		return nil, fmt.Errorf("failed to create team: %w", err)
 	}
 	return &team, nil
 }
 
 // UpdateTeam modifies a team (handler interface method).
-func (s *TeamService) UpdateTeam(id string, team domain.Team) (*domain.Team, error) {
+func (s *TeamService) UpdateTeam(ctx context.Context, id string, team domain.Team) (*domain.Team, error) {
 	team.ID = id
-	if err := s.teamRepo.Update(context.Background(), &team); err != nil {
+	if err := s.teamRepo.Update(ctx, &team); err != nil {
 		return nil, fmt.Errorf("failed to update team: %w", err)
 	}
 	return &team, nil
 }
 
 // DeleteTeam removes a team (handler interface method).
-func (s *TeamService) DeleteTeam(id string) error {
-	return s.teamRepo.Delete(context.Background(), id)
+func (s *TeamService) DeleteTeam(ctx context.Context, id string) error {
+	return s.teamRepo.Delete(ctx, id)
 }

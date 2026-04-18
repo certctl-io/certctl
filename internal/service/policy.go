@@ -230,7 +230,7 @@ func (s *PolicyService) ListViolationsWithContext(ctx context.Context, filter *r
 }
 
 // ListPolicies returns paginated policies (handler interface method).
-func (s *PolicyService) ListPolicies(page, perPage int) ([]domain.PolicyRule, int64, error) {
+func (s *PolicyService) ListPolicies(ctx context.Context, page, perPage int) ([]domain.PolicyRule, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -238,7 +238,7 @@ func (s *PolicyService) ListPolicies(page, perPage int) ([]domain.PolicyRule, in
 		perPage = 50
 	}
 
-	rules, err := s.policyRepo.ListRules(context.Background())
+	rules, err := s.policyRepo.ListRules(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list policies: %w", err)
 	}
@@ -264,12 +264,12 @@ func (s *PolicyService) ListPolicies(page, perPage int) ([]domain.PolicyRule, in
 }
 
 // GetPolicy returns a single policy (handler interface method).
-func (s *PolicyService) GetPolicy(id string) (*domain.PolicyRule, error) {
-	return s.policyRepo.GetRule(context.Background(), id)
+func (s *PolicyService) GetPolicy(ctx context.Context, id string) (*domain.PolicyRule, error) {
+	return s.policyRepo.GetRule(ctx, id)
 }
 
 // CreatePolicy creates a new policy (handler interface method).
-func (s *PolicyService) CreatePolicy(policy domain.PolicyRule) (*domain.PolicyRule, error) {
+func (s *PolicyService) CreatePolicy(ctx context.Context, policy domain.PolicyRule) (*domain.PolicyRule, error) {
 	if policy.ID == "" {
 		policy.ID = generateID("rule")
 	}
@@ -277,30 +277,30 @@ func (s *PolicyService) CreatePolicy(policy domain.PolicyRule) (*domain.PolicyRu
 		policy.CreatedAt = time.Now()
 	}
 
-	if err := s.policyRepo.CreateRule(context.Background(), &policy); err != nil {
+	if err := s.policyRepo.CreateRule(ctx, &policy); err != nil {
 		return nil, fmt.Errorf("failed to create policy: %w", err)
 	}
 	return &policy, nil
 }
 
 // UpdatePolicy modifies a policy (handler interface method).
-func (s *PolicyService) UpdatePolicy(id string, policy domain.PolicyRule) (*domain.PolicyRule, error) {
+func (s *PolicyService) UpdatePolicy(ctx context.Context, id string, policy domain.PolicyRule) (*domain.PolicyRule, error) {
 	policy.ID = id
 	policy.UpdatedAt = time.Now()
 
-	if err := s.policyRepo.UpdateRule(context.Background(), &policy); err != nil {
+	if err := s.policyRepo.UpdateRule(ctx, &policy); err != nil {
 		return nil, fmt.Errorf("failed to update policy: %w", err)
 	}
 	return &policy, nil
 }
 
 // DeletePolicy removes a policy (handler interface method).
-func (s *PolicyService) DeletePolicy(id string) error {
-	return s.policyRepo.DeleteRule(context.Background(), id)
+func (s *PolicyService) DeletePolicy(ctx context.Context, id string) error {
+	return s.policyRepo.DeleteRule(ctx, id)
 }
 
 // ListViolations returns policy violations with pagination (handler interface method).
-func (s *PolicyService) ListViolations(policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error) {
+func (s *PolicyService) ListViolations(ctx context.Context, policyID string, page, perPage int) ([]domain.PolicyViolation, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -313,7 +313,7 @@ func (s *PolicyService) ListViolations(policyID string, page, perPage int) ([]do
 		PerPage:    1000, // Get all violations for the policy
 	}
 
-	violations, err := s.policyRepo.ListViolations(context.Background(), filter)
+	violations, err := s.policyRepo.ListViolations(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list violations: %w", err)
 	}

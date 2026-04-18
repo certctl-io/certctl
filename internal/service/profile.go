@@ -28,7 +28,7 @@ func NewProfileService(
 }
 
 // ListProfiles returns all profiles (handler interface method).
-func (s *ProfileService) ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error) {
+func (s *ProfileService) ListProfiles(ctx context.Context, page, perPage int) ([]domain.CertificateProfile, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -36,7 +36,7 @@ func (s *ProfileService) ListProfiles(page, perPage int) ([]domain.CertificatePr
 		perPage = 50
 	}
 
-	profiles, err := s.profileRepo.List(context.Background())
+	profiles, err := s.profileRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list profiles: %w", err)
 	}
@@ -53,12 +53,12 @@ func (s *ProfileService) ListProfiles(page, perPage int) ([]domain.CertificatePr
 }
 
 // GetProfile returns a single profile (handler interface method).
-func (s *ProfileService) GetProfile(id string) (*domain.CertificateProfile, error) {
-	return s.profileRepo.Get(context.Background(), id)
+func (s *ProfileService) GetProfile(ctx context.Context, id string) (*domain.CertificateProfile, error) {
+	return s.profileRepo.Get(ctx, id)
 }
 
 // CreateProfile creates a new profile with validation (handler interface method).
-func (s *ProfileService) CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (s *ProfileService) CreateProfile(ctx context.Context, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	if err := validateProfile(&profile); err != nil {
 		return nil, err
 	}
@@ -82,12 +82,12 @@ func (s *ProfileService) CreateProfile(profile domain.CertificateProfile) (*doma
 		profile.AllowedEKUs = domain.DefaultEKUs()
 	}
 
-	if err := s.profileRepo.Create(context.Background(), &profile); err != nil {
+	if err := s.profileRepo.Create(ctx, &profile); err != nil {
 		return nil, fmt.Errorf("failed to create profile: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(context.WithoutCancel(ctx), "api", domain.ActorTypeUser,
 			"create_profile", "certificate_profile", profile.ID, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
@@ -97,18 +97,18 @@ func (s *ProfileService) CreateProfile(profile domain.CertificateProfile) (*doma
 }
 
 // UpdateProfile modifies an existing profile (handler interface method).
-func (s *ProfileService) UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (s *ProfileService) UpdateProfile(ctx context.Context, id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	if err := validateProfile(&profile); err != nil {
 		return nil, err
 	}
 
 	profile.ID = id
-	if err := s.profileRepo.Update(context.Background(), &profile); err != nil {
+	if err := s.profileRepo.Update(ctx, &profile); err != nil {
 		return nil, fmt.Errorf("failed to update profile: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(context.WithoutCancel(ctx), "api", domain.ActorTypeUser,
 			"update_profile", "certificate_profile", id, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}
@@ -118,13 +118,13 @@ func (s *ProfileService) UpdateProfile(id string, profile domain.CertificateProf
 }
 
 // DeleteProfile removes a profile (handler interface method).
-func (s *ProfileService) DeleteProfile(id string) error {
-	if err := s.profileRepo.Delete(context.Background(), id); err != nil {
+func (s *ProfileService) DeleteProfile(ctx context.Context, id string) error {
+	if err := s.profileRepo.Delete(ctx, id); err != nil {
 		return fmt.Errorf("failed to delete profile: %w", err)
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(context.Background(), "api", domain.ActorTypeUser,
+		if auditErr := s.auditService.RecordEvent(context.WithoutCancel(ctx), "api", domain.ActorTypeUser,
 			"delete_profile", "certificate_profile", id, nil); auditErr != nil {
 			slog.Error("failed to record audit event", "error", auditErr)
 		}

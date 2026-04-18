@@ -126,7 +126,7 @@ func (s *OwnerService) Delete(ctx context.Context, id string, actor string) erro
 }
 
 // ListOwners returns paginated owners (handler interface method).
-func (s *OwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, error) {
+func (s *OwnerService) ListOwners(ctx context.Context, page, perPage int) ([]domain.Owner, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -134,7 +134,7 @@ func (s *OwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, err
 		perPage = 50
 	}
 
-	owners, err := s.ownerRepo.List(context.Background())
+	owners, err := s.ownerRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list owners: %w", err)
 	}
@@ -151,12 +151,12 @@ func (s *OwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, err
 }
 
 // GetOwner returns a single owner (handler interface method).
-func (s *OwnerService) GetOwner(id string) (*domain.Owner, error) {
-	return s.ownerRepo.Get(context.Background(), id)
+func (s *OwnerService) GetOwner(ctx context.Context, id string) (*domain.Owner, error) {
+	return s.ownerRepo.Get(ctx, id)
 }
 
 // CreateOwner creates a new owner (handler interface method).
-func (s *OwnerService) CreateOwner(owner domain.Owner) (*domain.Owner, error) {
+func (s *OwnerService) CreateOwner(ctx context.Context, owner domain.Owner) (*domain.Owner, error) {
 	if owner.ID == "" {
 		owner.ID = generateID("owner")
 	}
@@ -167,22 +167,22 @@ func (s *OwnerService) CreateOwner(owner domain.Owner) (*domain.Owner, error) {
 	if owner.UpdatedAt.IsZero() {
 		owner.UpdatedAt = now
 	}
-	if err := s.ownerRepo.Create(context.Background(), &owner); err != nil {
+	if err := s.ownerRepo.Create(ctx, &owner); err != nil {
 		return nil, fmt.Errorf("failed to create owner: %w", err)
 	}
 	return &owner, nil
 }
 
 // UpdateOwner modifies an owner (handler interface method).
-func (s *OwnerService) UpdateOwner(id string, owner domain.Owner) (*domain.Owner, error) {
+func (s *OwnerService) UpdateOwner(ctx context.Context, id string, owner domain.Owner) (*domain.Owner, error) {
 	owner.ID = id
-	if err := s.ownerRepo.Update(context.Background(), &owner); err != nil {
+	if err := s.ownerRepo.Update(ctx, &owner); err != nil {
 		return nil, fmt.Errorf("failed to update owner: %w", err)
 	}
 	return &owner, nil
 }
 
 // DeleteOwner removes an owner (handler interface method).
-func (s *OwnerService) DeleteOwner(id string) error {
-	return s.ownerRepo.Delete(context.Background(), id)
+func (s *OwnerService) DeleteOwner(ctx context.Context, id string) error {
+	return s.ownerRepo.Delete(ctx, id)
 }
