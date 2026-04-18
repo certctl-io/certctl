@@ -610,7 +610,7 @@ func registerPolicyTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_create_policy",
-		Description: "Create a new policy rule. Requires name and type.",
+		Description: "Create a new policy rule. Requires name and type. Optional severity (Warning, Error, Critical) defaults to Warning.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreatePolicyInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/policies", input)
 		if err != nil {
@@ -621,7 +621,7 @@ func registerPolicyTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_update_policy",
-		Description: "Update a policy rule's name, type, configuration, or enabled status.",
+		Description: "Update a policy rule's name, type, configuration, enabled status, or severity.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input UpdatePolicyInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Put("/api/v1/policies/"+input.ID, input)
 		if err != nil {

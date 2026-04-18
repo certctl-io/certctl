@@ -168,19 +168,21 @@ type RejectJobInput struct {
 // ── Policies ────────────────────────────────────────────────────────
 
 type CreatePolicyInput struct {
-	ID      string      `json:"id,omitempty" jsonschema:"Policy ID"`
-	Name    string      `json:"name" jsonschema:"Policy display name"`
-	Type    string      `json:"type" jsonschema:"Policy type: AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime"`
-	Config  interface{} `json:"config,omitempty" jsonschema:"Policy-specific configuration"`
-	Enabled bool        `json:"enabled,omitempty" jsonschema:"Whether the policy is enabled"`
+	ID       string      `json:"id,omitempty" jsonschema:"Policy ID"`
+	Name     string      `json:"name" jsonschema:"Policy display name"`
+	Type     string      `json:"type" jsonschema:"Policy type: AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime"`
+	Config   interface{} `json:"config,omitempty" jsonschema:"Policy-specific configuration"`
+	Enabled  bool        `json:"enabled,omitempty" jsonschema:"Whether the policy is enabled"`
+	Severity string      `json:"severity,omitempty" jsonschema:"Violation severity: Warning, Error, or Critical (default: Warning)"`
 }
 
 type UpdatePolicyInput struct {
-	ID      string      `json:"id" jsonschema:"Policy ID to update"`
-	Name    string      `json:"name,omitempty" jsonschema:"Policy display name"`
-	Type    string      `json:"type,omitempty" jsonschema:"Policy type"`
-	Config  interface{} `json:"config,omitempty" jsonschema:"Policy-specific configuration"`
-	Enabled *bool       `json:"enabled,omitempty" jsonschema:"Whether the policy is enabled"`
+	ID       string      `json:"id" jsonschema:"Policy ID to update"`
+	Name     string      `json:"name,omitempty" jsonschema:"Policy display name"`
+	Type     string      `json:"type,omitempty" jsonschema:"Policy type"`
+	Config   interface{} `json:"config,omitempty" jsonschema:"Policy-specific configuration"`
+	Enabled  *bool       `json:"enabled,omitempty" jsonschema:"Whether the policy is enabled"`
+	Severity string      `json:"severity,omitempty" jsonschema:"Violation severity: Warning, Error, or Critical"`
 }
 
 type ListViolationsInput struct {

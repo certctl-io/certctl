@@ -12,6 +12,7 @@ type PolicyRule struct {
 	Type      PolicyType      `json:"type"`
 	Config    json.RawMessage `json:"config"`
 	Enabled   bool            `json:"enabled"`
+	Severity  PolicySeverity  `json:"severity"`
 	CreatedAt time.Time       `json:"created_at"`
 	UpdatedAt time.Time       `json:"updated_at"`
 }

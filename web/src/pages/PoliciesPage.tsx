@@ -6,21 +6,39 @@ import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
-import type { PolicyRule } from '../api/types';
+import {
+  POLICY_TYPES,
+  POLICY_SEVERITIES,
+  type PolicyRule,
+  type PolicyType,
+  type PolicySeverity,
+} from '../api/types';
 
-const severityStyles: Record<string, string> = {
-  low: 'badge-info',
-  medium: 'badge-warning',
-  high: 'badge-danger',
-  critical: 'badge-danger',
+/**
+ * Severity → badge style. Keyed on the backend's TitleCase PolicySeverity
+ * enum values (D-006). The pre-fix map keyed on `low`/`medium`/`high`/`critical`
+ * which never matched the backend's `Warning`/`Error`/`Critical`, so every
+ * existing rule fell through to the `badge-neutral` default.
+ */
+const severityStyles: Record<PolicySeverity, string> = {
+  Warning: 'badge-warning',
+  Error: 'badge-danger',
+  Critical: 'badge-danger',
 };
 
-const severityDots: Record<string, string> = {
-  low: 'bg-emerald-500',
-  medium: 'bg-amber-500',
-  high: 'bg-orange-500',
-  critical: 'bg-red-500',
+const severityDots: Record<PolicySeverity, string> = {
+  Warning: 'bg-amber-500',
+  Error: 'bg-orange-500',
+  Critical: 'bg-red-500',
 };
+
+/**
+ * Convert TitleCase enum value to a human-readable label for display.
+ * "AllowedIssuers" → "Allowed Issuers"
+ */
+function humanize(s: string): string {
+  return s.replace(/([A-Z])/g, ' $1').trim();
+}
 
 interface CreatePolicyModalProps {
   isOpen: boolean;
@@ -32,8 +50,8 @@ interface CreatePolicyModalProps {
 
 function CreatePolicyModal({ isOpen, onClose, onSuccess, isLoading, error }: CreatePolicyModalProps) {
   const [name, setName] = useState('');
-  const [type, setType] = useState('key_algorithm');
-  const [severity, setSeverity] = useState('medium');
+  const [type, setType] = useState<PolicyType>(POLICY_TYPES[0]);
+  const [severity, setSeverity] = useState<PolicySeverity>('Warning');
   const [configStr, setConfigStr] = useState('{}');
   const [enabled, setEnabled] = useState(true);
 
@@ -43,8 +61,8 @@ function CreatePolicyModal({ isOpen, onClose, onSuccess, isLoading, error }: Cre
     const config = JSON.parse(configStr);
     await createPolicy({ name: name.trim(), type, severity, config, enabled });
     setName('');
-    setType('key_algorithm');
-    setSeverity('medium');
+    setType(POLICY_TYPES[0]);
+    setSeverity('Warning');
     setConfigStr('{}');
     setEnabled(true);
     onSuccess();
@@ -72,27 +90,24 @@ function CreatePolicyModal({ isOpen, onClose, onSuccess, isLoading, error }: Cre
             <label className="block text-sm font-medium text-ink mb-1">Type *</label>
             <select
               value={type}
-              onChange={e => setType(e.target.value)}
+              onChange={e => setType(e.target.value as PolicyType)}
               className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
             >
-              <option value="key_algorithm">Key Algorithm</option>
-              <option value="cert_lifetime">Certificate Lifetime</option>
-              <option value="san_pattern">SAN Pattern</option>
-              <option value="key_usage">Key Usage</option>
-              <option value="revocation_check">Revocation Check</option>
+              {POLICY_TYPES.map(t => (
+                <option key={t} value={t}>{humanize(t)}</option>
+              ))}
             </select>
           </div>
           <div>
             <label className="block text-sm font-medium text-ink mb-1">Severity *</label>
             <select
               value={severity}
-              onChange={e => setSeverity(e.target.value)}
+              onChange={e => setSeverity(e.target.value as PolicySeverity)}
               className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
             >
-              <option value="low">Low</option>
-              <option value="medium">Medium</option>
-              <option value="high">High</option>
-              <option value="critical">Critical</option>
+              {POLICY_SEVERITIES.map(s => (
+                <option key={s} value={s}>{s}</option>
+              ))}
             </select>
           </div>
           <div>
@@ -182,7 +197,7 @@ export default function PoliciesPage() {
         </div>
       ),
     },
-    { key: 'type', label: 'Type', render: (p) => <span className="text-sm text-ink">{p.type.replace(/_/g, ' ')}</span> },
+    { key: 'type', label: 'Type', render: (p) => <span className="text-sm text-ink">{humanize(p.type)}</span> },
     {
       key: 'severity',
       label: 'Severity',
@@ -248,8 +263,8 @@ export default function PoliciesPage() {
           </div>
           {Object.entries(bySeverity).map(([sev, count]) => (
             <div key={sev} className="flex items-center gap-1.5">
-              <div className={`w-2 h-2 rounded-full ${severityDots[sev] || 'bg-slate-400'}`} />
-              <span className="text-xs text-ink capitalize">{sev}</span>
+              <div className={`w-2 h-2 rounded-full ${severityDots[sev as PolicySeverity] || 'bg-slate-400'}`} />
+              <span className="text-xs text-ink">{sev}</span>
               <span className="text-xs text-ink-faint">{count}</span>
             </div>
           ))}

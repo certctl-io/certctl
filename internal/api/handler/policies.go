@@ -127,6 +127,17 @@ func (h PolicyHandler) CreatePolicy(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 		return
 	}
+	// Severity is optional on create; default matches the DB default.
+	// Any explicit value must pass the TitleCase allowlist; the DB CHECK
+	// constraint enforces the same set, but catching it here gives a 400
+	// with a clear message instead of a 500 on constraint violation.
+	if policy.Severity == "" {
+		policy.Severity = domain.PolicySeverityWarning
+	}
+	if err := ValidatePolicySeverity(policy.Severity); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
 
 	created, err := h.svc.CreatePolicy(r.Context(), policy)
 	if err != nil {
@@ -170,6 +181,12 @@ func (h PolicyHandler) UpdatePolicy(w http.ResponseWriter, r *http.Request) {
 	}
 	if policy.Type != "" {
 		if err := ValidatePolicyType(policy.Type); err != nil {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
+	}
+	if policy.Severity != "" {
+		if err := ValidatePolicySeverity(policy.Severity); err != nil {
 			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 			return
 		}

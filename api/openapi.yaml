@@ -3480,6 +3480,9 @@ components:
           description: Policy-specific configuration (varies by type)
         enabled:
           type: boolean
+        severity:
+          $ref: "#/components/schemas/PolicySeverity"
+          description: Severity level applied to violations of this rule. Defaults to Warning on create when omitted.
         created_at:
           type: string
           format: date-time

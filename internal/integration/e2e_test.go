@@ -158,7 +158,7 @@ func TestCrossResourceWorkflow(t *testing.T) {
 		payload := map[string]interface{}{
 			"name":        "Allowed Domains Policy",
 			"type":        "AllowedDomains",
-			"severity":    "High",
+			"severity":    "Error",
 			"config":      json.RawMessage(`{"domains": ["example.com", "*.example.com"]}`),
 			"description": "Restrict issuance to example.com domains",
 		}

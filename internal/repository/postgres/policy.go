@@ -24,7 +24,7 @@ func NewPolicyRepository(db *sql.DB) *PolicyRepository {
 // ListRules returns all policy rules
 func (r *PolicyRepository) ListRules(ctx context.Context) ([]*domain.PolicyRule, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, name, type, config, enabled, created_at, updated_at
+		SELECT id, name, type, config, enabled, severity, created_at, updated_at
 		FROM policy_rules
 		ORDER BY created_at DESC
 	`)
@@ -38,7 +38,7 @@ func (r *PolicyRepository) ListRules(ctx context.Context) ([]*domain.PolicyRule,
 	for rows.Next() {
 		var rule domain.PolicyRule
 		if err := rows.Scan(&rule.ID, &rule.Name, &rule.Type, &rule.Config,
-			&rule.Enabled, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
+			&rule.Enabled, &rule.Severity, &rule.CreatedAt, &rule.UpdatedAt); err != nil {
 			return nil, fmt.Errorf("failed to scan policy rule: %w", err)
 		}
 		rules = append(rules, &rule)
@@ -55,11 +55,11 @@ func (r *PolicyRepository) ListRules(ctx context.Context) ([]*domain.PolicyRule,
 func (r *PolicyRepository) GetRule(ctx context.Context, id string) (*domain.PolicyRule, error) {
 	var rule domain.PolicyRule
 	err := r.db.QueryRowContext(ctx, `
-		SELECT id, name, type, config, enabled, created_at, updated_at
+		SELECT id, name, type, config, enabled, severity, created_at, updated_at
 		FROM policy_rules
 		WHERE id = $1
 	`, id).Scan(&rule.ID, &rule.Name, &rule.Type, &rule.Config,
-		&rule.Enabled, &rule.CreatedAt, &rule.UpdatedAt)
+		&rule.Enabled, &rule.Severity, &rule.CreatedAt, &rule.UpdatedAt)
 
 	if err != nil {
 		if err == sql.ErrNoRows {
@@ -78,11 +78,11 @@ func (r *PolicyRepository) CreateRule(ctx context.Context, rule *domain.PolicyRu
 	}
 
 	err := r.db.QueryRowContext(ctx, `
-		INSERT INTO policy_rules (id, name, type, config, enabled, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7)
+		INSERT INTO policy_rules (id, name, type, config, enabled, severity, created_at, updated_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
 		RETURNING id
 	`, rule.ID, rule.Name, rule.Type, rule.Config, rule.Enabled,
-		rule.CreatedAt, rule.UpdatedAt).Scan(&rule.ID)
+		rule.Severity, rule.CreatedAt, rule.UpdatedAt).Scan(&rule.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create policy rule: %w", err)
@@ -99,9 +99,10 @@ func (r *PolicyRepository) UpdateRule(ctx context.Context, rule *domain.PolicyRu
 			type = $2,
 			config = $3,
 			enabled = $4,
-			updated_at = $5
-		WHERE id = $6
-	`, rule.Name, rule.Type, rule.Config, rule.Enabled, rule.UpdatedAt, rule.ID)
+			severity = $5,
+			updated_at = $6
+		WHERE id = $7
+	`, rule.Name, rule.Type, rule.Config, rule.Enabled, rule.Severity, rule.UpdatedAt, rule.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update policy rule: %w", err)

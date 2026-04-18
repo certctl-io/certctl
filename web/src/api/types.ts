@@ -112,11 +112,37 @@ export interface AuditEvent {
   timestamp: string;
 }
 
+/**
+ * Policy rule type enum — pinned to the backend's TitleCase constants in
+ * internal/domain/policy.go. Historical note (D-005): the GUI previously sent
+ * lowercase values (`ownership`, `environment`, etc.) that the handler's
+ * ValidatePolicyType rejected with a 400. These tuples are the canonical
+ * source of truth for the dropdown options; the regression test in
+ * types.test.ts pins them so future drift is caught at CI time.
+ */
+export const POLICY_TYPES = [
+  'AllowedIssuers',
+  'AllowedDomains',
+  'RequiredMetadata',
+  'AllowedEnvironments',
+  'RenewalLeadTime',
+] as const;
+export type PolicyType = (typeof POLICY_TYPES)[number];
+
+/**
+ * Policy severity enum — pinned to the backend's PolicySeverity constants.
+ * The backend CHECK constraint on policy_rules.severity enforces the same
+ * allowlist (migration 000013). The 4-value `medium` option that used to
+ * appear in the GUI was never a valid backend value and has been removed.
+ */
+export const POLICY_SEVERITIES = ['Warning', 'Error', 'Critical'] as const;
+export type PolicySeverity = (typeof POLICY_SEVERITIES)[number];
+
 export interface PolicyRule {
   id: string;
   name: string;
-  type: string;
-  severity: string;
+  type: PolicyType;
+  severity: PolicySeverity;
   config: Record<string, unknown>;
   enabled: boolean;
   created_at: string;
@@ -127,7 +153,7 @@ export interface PolicyViolation {
   id: string;
   rule_id: string;
   certificate_id: string;
-  severity: string;
+  severity: PolicySeverity;
   message: string;
   created_at: string;
 }

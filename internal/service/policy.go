@@ -288,6 +288,20 @@ func (s *PolicyService) UpdatePolicy(ctx context.Context, id string, policy doma
 	policy.ID = id
 	policy.UpdatedAt = time.Now()
 
+	// Severity is NOT NULL with a CHECK constraint at the DB level
+	// (migration 000013). If the client omits severity on a PUT (zero-value
+	// empty string after json.Decode), preserve the existing severity rather
+	// than letting the CHECK reject the write. Preserves partial-update
+	// semantics for the new column without changing the pre-existing behavior
+	// for Name/Type, which is out of scope for D-005/D-006.
+	if policy.Severity == "" {
+		existing, err := s.policyRepo.GetRule(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to fetch existing rule for severity preservation: %w", err)
+		}
+		policy.Severity = existing.Severity
+	}
+
 	if err := s.policyRepo.UpdateRule(ctx, &policy); err != nil {
 		return nil, fmt.Errorf("failed to update policy: %w", err)
 	}
