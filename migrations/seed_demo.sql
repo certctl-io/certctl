@@ -478,13 +478,20 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================
 -- 13. Policy Violations
 -- ============================================================
+-- D-008: severity values rewritten to TitleCase canonicals (Warning/Error/Critical).
+-- Pre-D-008 these rows used lowercase strings ('critical', 'error', 'warning'). Those
+-- values were silently tolerated by the pre-D-008 engine, which hardcoded 'Warning'
+-- on every new violation regardless of the triggering rule's severity. D-008 rewires
+-- evaluateRule to copy rule.Severity into the violation AND migration 000014 adds a
+-- CHECK constraint enforcing the TitleCase allowlist at the DB level. Both paths now
+-- round-trip correctly against these demo rows.
 INSERT INTO policy_violations (id, certificate_id, rule_id, message, severity, created_at) VALUES
-  ('pv-001', 'mc-legacy-prod', 'pr-max-certificate-lifetime', 'Certificate has expired and exceeds maximum lifetime policy', 'critical', NOW() - INTERVAL '3 days'),
-  ('pv-002', 'mc-old-api',     'pr-max-certificate-lifetime', 'Certificate expired 15 days ago',                            'critical', NOW() - INTERVAL '15 days'),
-  ('pv-003', 'mc-vpn-prod',    'pr-min-renewal-window',       'Renewal failed within minimum renewal window',               'error',    NOW() - INTERVAL '3 days'),
-  ('pv-004', 'mc-mail-prod',   'pr-min-renewal-window',       'Certificate expiring in 5 days, below 14-day minimum window','warning',  NOW() - INTERVAL '20 minutes'),
-  ('pv-005', 'mc-wiki-prod',   'pr-max-certificate-lifetime', 'Certificate expired 7 days ago',                             'critical', NOW() - INTERVAL '7 days'),
-  ('pv-006', 'mc-compromised', 'pr-min-renewal-window',       'Certificate revoked due to key compromise',                  'critical', NOW() - INTERVAL '14 days')
+  ('pv-001', 'mc-legacy-prod', 'pr-max-certificate-lifetime', 'Certificate has expired and exceeds maximum lifetime policy', 'Critical', NOW() - INTERVAL '3 days'),
+  ('pv-002', 'mc-old-api',     'pr-max-certificate-lifetime', 'Certificate expired 15 days ago',                            'Critical', NOW() - INTERVAL '15 days'),
+  ('pv-003', 'mc-vpn-prod',    'pr-min-renewal-window',       'Renewal failed within minimum renewal window',               'Error',    NOW() - INTERVAL '3 days'),
+  ('pv-004', 'mc-mail-prod',   'pr-min-renewal-window',       'Certificate expiring in 5 days, below 14-day minimum window','Warning',  NOW() - INTERVAL '20 minutes'),
+  ('pv-005', 'mc-wiki-prod',   'pr-max-certificate-lifetime', 'Certificate expired 7 days ago',                             'Critical', NOW() - INTERVAL '7 days'),
+  ('pv-006', 'mc-compromised', 'pr-min-renewal-window',       'Certificate revoked due to key compromise',                  'Critical', NOW() - INTERVAL '14 days')
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================

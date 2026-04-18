@@ -34,6 +34,7 @@ describe('POLICY_TYPES', () => {
       'RequiredMetadata',
       'AllowedEnvironments',
       'RenewalLeadTime',
+      'CertificateLifetime',
     ]);
   });
 

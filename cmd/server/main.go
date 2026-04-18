@@ -145,6 +145,7 @@ func main() {
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
+	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notifierRegistry := make(map[string]service.Notifier)
 

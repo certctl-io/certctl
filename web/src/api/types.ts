@@ -126,6 +126,7 @@ export const POLICY_TYPES = [
   'RequiredMetadata',
   'AllowedEnvironments',
   'RenewalLeadTime',
+  'CertificateLifetime',
 ] as const;
 export type PolicyType = (typeof POLICY_TYPES)[number];
 

@@ -21,11 +21,12 @@ type PolicyRule struct {
 type PolicyType string
 
 const (
-	PolicyTypeAllowedIssuers      PolicyType = "AllowedIssuers"
-	PolicyTypeAllowedDomains      PolicyType = "AllowedDomains"
-	PolicyTypeRequiredMetadata    PolicyType = "RequiredMetadata"
-	PolicyTypeAllowedEnvironments PolicyType = "AllowedEnvironments"
-	PolicyTypeRenewalLeadTime     PolicyType = "RenewalLeadTime"
+	PolicyTypeAllowedIssuers       PolicyType = "AllowedIssuers"
+	PolicyTypeAllowedDomains       PolicyType = "AllowedDomains"
+	PolicyTypeRequiredMetadata     PolicyType = "RequiredMetadata"
+	PolicyTypeAllowedEnvironments  PolicyType = "AllowedEnvironments"
+	PolicyTypeRenewalLeadTime      PolicyType = "RenewalLeadTime"
+	PolicyTypeCertificateLifetime  PolicyType = "CertificateLifetime"
 )
 
 // PolicyViolation records an instance of a certificate violating a policy rule.
