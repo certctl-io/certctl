@@ -66,6 +66,12 @@ tags:
     description: Continuous TLS endpoint health checks with status tracking and probe history
   - name: Digest
     description: Scheduled certificate digest email notifications
+  - name: Verification
+    description: Post-deployment TLS endpoint fingerprint verification
+  - name: EST
+    description: Enrollment over Secure Transport (RFC 7030)
+  - name: SCEP
+    description: Simple Certificate Enrollment Protocol (RFC 8894)
 
 paths:
   # ─── Health & Auth ───────────────────────────────────────────────────
@@ -816,6 +822,28 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/targets/{id}/test:
+    post:
+      tags: [Targets]
+      summary: Test target connection
+      description: |
+        Checks target connectivity by verifying the assigned agent's heartbeat status
+        (agent reported within the last 5 minutes). Always returns HTTP 200 — the
+        connectivity result is reflected in the response body's `status` field
+        (`success` when the agent is reachable, `failed` otherwise).
+      operationId: testTargetConnection
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Connection test result (success or failed in body)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusMessageResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+
   # ─── Agents ──────────────────────────────────────────────────────────
   /api/v1/agents:
     get:
@@ -1174,6 +1202,66 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}/verify:
+    post:
+      tags: [Verification]
+      summary: Record post-deployment verification result
+      description: |
+        Agents submit the result of probing a deployed certificate's live TLS endpoint.
+        Compares the served certificate's SHA-256 fingerprint against the expected
+        fingerprint. Best-effort: failures are recorded on the job but do not roll
+        back the deployment.
+      operationId: verifyDeployment
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/VerifyDeploymentRequest"
+      responses:
+        "200":
+          description: Verification result recorded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  job_id:
+                    type: string
+                  verified:
+                    type: boolean
+                  verified_at:
+                    type: string
+                    format: date-time
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/jobs/{id}/verification:
+    get:
+      tags: [Verification]
+      summary: Get post-deployment verification status
+      description: |
+        Returns the stored verification result for a deployment job — expected
+        and observed SHA-256 fingerprints, verified flag, and timestamp.
+      operationId: getJobVerification
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Verification result for the job
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/VerificationResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -2718,6 +2806,238 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  # ─── EST (RFC 7030) ────────────────────────────────────────────────
+  /.well-known/est/cacerts:
+    get:
+      tags: [EST]
+      summary: EST CA certificates distribution
+      description: |
+        Returns the CA certificate chain used to verify certctl-issued certificates.
+        Response is a base64-encoded degenerate PKCS#7 SignedData (certs-only) per
+        RFC 7030 §4.1.3.
+      operationId: estCACerts
+      security: []
+      responses:
+        "200":
+          description: Base64-encoded PKCS#7 certs-only structure
+          headers:
+            Content-Transfer-Encoding:
+              schema:
+                type: string
+                example: base64
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: byte
+                description: "Base64-encoded PKCS#7 (smime-type=certs-only)"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /.well-known/est/simpleenroll:
+    post:
+      tags: [EST]
+      summary: EST simple enrollment
+      description: |
+        Enrolls a new certificate from a PKCS#10 CSR per RFC 7030 §4.2.1.
+        The CSR MAY be supplied as base64-encoded DER (EST standard wire format)
+        or as PEM for convenience. Returns a base64-encoded PKCS#7 certs-only
+        structure containing the issued certificate.
+      operationId: estSimpleEnroll
+      security: []
+      requestBody:
+        required: true
+        description: "Base64-encoded DER PKCS#10 CSR, or PEM-encoded CSR"
+        content:
+          application/pkcs10:
+            schema:
+              type: string
+              format: byte
+      responses:
+        "200":
+          description: Base64-encoded PKCS#7 cert-only response with issued certificate
+          headers:
+            Content-Transfer-Encoding:
+              schema:
+                type: string
+                example: base64
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: byte
+                description: "Base64-encoded PKCS#7 (smime-type=certs-only)"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "405":
+          description: Method not allowed (only POST accepted)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /.well-known/est/simplereenroll:
+    post:
+      tags: [EST]
+      summary: EST simple re-enrollment
+      description: |
+        Re-enrolls an existing certificate (same as simpleenroll in certctl's
+        implementation — re-enrollment is treated as a fresh issuance) per
+        RFC 7030 §4.2.2.
+      operationId: estSimpleReEnroll
+      security: []
+      requestBody:
+        required: true
+        description: "Base64-encoded DER PKCS#10 CSR, or PEM-encoded CSR"
+        content:
+          application/pkcs10:
+            schema:
+              type: string
+              format: byte
+      responses:
+        "200":
+          description: Base64-encoded PKCS#7 cert-only response with re-issued certificate
+          headers:
+            Content-Transfer-Encoding:
+              schema:
+                type: string
+                example: base64
+          content:
+            application/pkcs7-mime:
+              schema:
+                type: string
+                format: byte
+                description: "Base64-encoded PKCS#7 (smime-type=certs-only)"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "405":
+          description: Method not allowed (only POST accepted)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /.well-known/est/csrattrs:
+    get:
+      tags: [EST]
+      summary: EST CSR attributes
+      description: |
+        Returns attributes the EST client should include in its CSR per
+        RFC 7030 §4.5. certctl currently returns an empty attribute set
+        (HTTP 204) — profile-based constraints are enforced server-side
+        during enrollment rather than advertised here.
+      operationId: estCSRAttrs
+      security: []
+      responses:
+        "200":
+          description: Base64-encoded CsrAttrs (when non-empty)
+          headers:
+            Content-Transfer-Encoding:
+              schema:
+                type: string
+                example: base64
+          content:
+            application/csrattrs:
+              schema:
+                type: string
+                format: byte
+        "204":
+          description: No CSR attributes defined (empty response)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── SCEP (RFC 8894) ──────────────────────────────────────────────
+  /scep:
+    get:
+      tags: [SCEP]
+      summary: SCEP operation dispatch (GET)
+      description: |
+        Single SCEP entry point dispatched by the `operation` query parameter
+        per RFC 8894. GET is used for capability discovery (`GetCACaps`) and
+        CA certificate retrieval (`GetCACert`).
+      operationId: scepGet
+      security: []
+      parameters:
+        - name: operation
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [GetCACaps, GetCACert, PKIOperation]
+          description: SCEP operation selector
+        - name: message
+          in: query
+          required: false
+          schema:
+            type: string
+          description: Optional SCEP message parameter (base64-encoded for GET PKIOperation)
+      responses:
+        "200":
+          description: |
+            Success. Content-Type varies by operation:
+            - `GetCACaps` → `text/plain` capability list
+            - `GetCACert` (single cert) → `application/x-x509-ca-cert` (raw DER)
+            - `GetCACert` (chain) → `application/x-x509-ca-ra-cert` (PKCS#7)
+            - `PKIOperation` → `application/x-pki-message` (PKCS#7 SignedData)
+          content:
+            text/plain:
+              schema:
+                type: string
+                description: "SCEP capabilities (GetCACaps only)"
+            application/x-x509-ca-cert:
+              schema:
+                type: string
+                format: binary
+                description: "CA certificate DER (GetCACert single)"
+            application/x-x509-ca-ra-cert:
+              schema:
+                type: string
+                format: binary
+                description: "CA chain PKCS#7 (GetCACert chain)"
+            application/x-pki-message:
+              schema:
+                type: string
+                format: binary
+                description: "PKCS#7 SignedData response (PKIOperation)"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [SCEP]
+      summary: SCEP PKIOperation (POST)
+      description: |
+        SCEP enrollment / renewal / revocation request per RFC 8894.
+        Request body is a PKCS#7 SignedData envelope wrapping the PKCS#10 CSR
+        or a degenerate raw CSR (fallback). The challenge password in the CSR
+        attributes is validated against `CERTCTL_SCEP_CHALLENGE_PASSWORD` when
+        configured.
+      operationId: scepPost
+      security: []
+      parameters:
+        - name: operation
+          in: query
+          required: true
+          schema:
+            type: string
+            enum: [PKIOperation]
+      requestBody:
+        required: true
+        description: PKCS#7 SignedData envelope wrapping a PKCS#10 CSR (or raw CSR as fallback)
+        content:
+          application/x-pki-message:
+            schema:
+              type: string
+              format: binary
+      responses:
+        "200":
+          description: PKCS#7 SignedData PKIMessage response
+          content:
+            application/x-pki-message:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
 # ═══════════════════════════════════════════════════════════════════════
 components:
   securitySchemes:
@@ -3805,3 +4125,47 @@ components:
           type: string
           format: date-time
           description: Timestamp of this probe
+
+    # ─── Verification (M25) ──────────────────────────────────────────
+    VerifyDeploymentRequest:
+      type: object
+      required: [target_id, expected_fingerprint, actual_fingerprint, verified]
+      properties:
+        target_id:
+          type: string
+          description: Deployment target the agent probed
+        expected_fingerprint:
+          type: string
+          description: SHA-256 fingerprint of the certificate that should be served (hex, lowercase)
+        actual_fingerprint:
+          type: string
+          description: SHA-256 fingerprint observed on the live TLS endpoint (hex, lowercase)
+        verified:
+          type: boolean
+          description: True when expected and actual fingerprints match
+        error:
+          type: string
+          nullable: true
+          description: Error message when probe failed or fingerprints differ
+
+    VerificationResult:
+      type: object
+      properties:
+        job_id:
+          type: string
+        target_id:
+          type: string
+        expected_fingerprint:
+          type: string
+          description: SHA-256 fingerprint (hex) of the certificate deployed by this job
+        actual_fingerprint:
+          type: string
+          description: SHA-256 fingerprint (hex) observed on the live TLS endpoint
+        verified:
+          type: boolean
+        verified_at:
+          type: string
+          format: date-time
+        error:
+          type: string
+          description: Error message when verification failed
