@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,11 +13,11 @@ import (
 
 // TeamService defines the service interface for team operations.
 type TeamService interface {
-	ListTeams(page, perPage int) ([]domain.Team, int64, error)
-	GetTeam(id string) (*domain.Team, error)
-	CreateTeam(team domain.Team) (*domain.Team, error)
-	UpdateTeam(id string, team domain.Team) (*domain.Team, error)
-	DeleteTeam(id string) error
+	ListTeams(ctx context.Context, page, perPage int) ([]domain.Team, int64, error)
+	GetTeam(ctx context.Context, id string) (*domain.Team, error)
+	CreateTeam(ctx context.Context, team domain.Team) (*domain.Team, error)
+	UpdateTeam(ctx context.Context, id string, team domain.Team) (*domain.Team, error)
+	DeleteTeam(ctx context.Context, id string) error
 }
 
 // TeamHandler handles HTTP requests for team operations.
@@ -53,7 +54,7 @@ func (h TeamHandler) ListTeams(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	teams, total, err := h.svc.ListTeams(page, perPage)
+	teams, total, err := h.svc.ListTeams(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list teams", requestID)
 		return
@@ -87,7 +88,7 @@ func (h TeamHandler) GetTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	team, err := h.svc.GetTeam(id)
+	team, err := h.svc.GetTeam(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Team not found", requestID)
 		return
@@ -122,7 +123,7 @@ func (h TeamHandler) CreateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreateTeam(team)
+	created, err := h.svc.CreateTeam(r.Context(), team)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create team", requestID)
 		return
@@ -155,7 +156,7 @@ func (h TeamHandler) UpdateTeam(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.UpdateTeam(id, team)
+	updated, err := h.svc.UpdateTeam(r.Context(), id, team)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update team", requestID)
 		return
@@ -182,7 +183,7 @@ func (h TeamHandler) DeleteTeam(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	if err := h.svc.DeleteTeam(id); err != nil {
+	if err := h.svc.DeleteTeam(r.Context(), id); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete team", requestID)
 		return
 	}

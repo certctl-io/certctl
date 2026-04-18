@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,11 +13,11 @@ import (
 
 // ProfileService defines the service interface for certificate profile operations.
 type ProfileService interface {
-	ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error)
-	GetProfile(id string) (*domain.CertificateProfile, error)
-	CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error)
-	UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error)
-	DeleteProfile(id string) error
+	ListProfiles(ctx context.Context, page, perPage int) ([]domain.CertificateProfile, int64, error)
+	GetProfile(ctx context.Context, id string) (*domain.CertificateProfile, error)
+	CreateProfile(ctx context.Context, profile domain.CertificateProfile) (*domain.CertificateProfile, error)
+	UpdateProfile(ctx context.Context, id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error)
+	DeleteProfile(ctx context.Context, id string) error
 }
 
 // ProfileHandler handles HTTP requests for certificate profile operations.
@@ -53,7 +54,7 @@ func (h ProfileHandler) ListProfiles(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	profiles, total, err := h.svc.ListProfiles(page, perPage)
+	profiles, total, err := h.svc.ListProfiles(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list profiles", requestID)
 		return
@@ -85,7 +86,7 @@ func (h ProfileHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, err := h.svc.GetProfile(id)
+	profile, err := h.svc.GetProfile(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
 		return
@@ -120,7 +121,7 @@ func (h ProfileHandler) CreateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreateProfile(profile)
+	created, err := h.svc.CreateProfile(r.Context(), profile)
 	if err != nil {
 		// Check if it's a validation error from the service
 		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") ||
@@ -159,7 +160,7 @@ func (h ProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.UpdateProfile(id, profile)
+	updated, err := h.svc.UpdateProfile(r.Context(), id, profile)
 	if err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
@@ -193,7 +194,7 @@ func (h ProfileHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.DeleteProfile(id); err != nil {
+	if err := h.svc.DeleteProfile(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
 			return

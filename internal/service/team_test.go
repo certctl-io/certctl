@@ -544,7 +544,7 @@ func TestTeamService_ListTeams_HandlerInterface(t *testing.T) {
 		})
 	}
 
-	teams, total, err := teamService.ListTeams(1, 2)
+	teams, total, err := teamService.ListTeams(context.Background(), 1, 2)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -571,7 +571,7 @@ func TestTeamService_GetTeam_HandlerInterface(t *testing.T) {
 	}
 	mockTeamRepo.AddTeam(testTeam)
 
-	team, err := teamService.GetTeam("handler-team")
+	team, err := teamService.GetTeam(context.Background(), "handler-team")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -593,7 +593,7 @@ func TestTeamService_CreateTeam_HandlerInterface(t *testing.T) {
 		Description: "Created via handler",
 	}
 
-	result, err := teamService.CreateTeam(team)
+	result, err := teamService.CreateTeam(context.Background(), team)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -629,7 +629,7 @@ func TestTeamService_UpdateTeam_HandlerInterface(t *testing.T) {
 		Description: "Handler update",
 	}
 
-	result, err := teamService.UpdateTeam("handler-update-team", updateTeam)
+	result, err := teamService.UpdateTeam(context.Background(), "handler-update-team", updateTeam)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -656,7 +656,7 @@ func TestTeamService_DeleteTeam_HandlerInterface(t *testing.T) {
 		Name: "To Delete",
 	})
 
-	err := teamService.DeleteTeam("handler-delete-team")
+	err := teamService.DeleteTeam(context.Background(), "handler-delete-team")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

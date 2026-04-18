@@ -1077,70 +1077,70 @@ func (m *mockTargetService) TestConnection(ctx context.Context, id string) error
 
 type mockTeamService struct{}
 
-func (m *mockTeamService) ListTeams(page, perPage int) ([]domain.Team, int64, error) {
+func (m *mockTeamService) ListTeams(_ context.Context, page, perPage int) ([]domain.Team, int64, error) {
 	return []domain.Team{}, 0, nil
 }
 
-func (m *mockTeamService) GetTeam(id string) (*domain.Team, error) {
+func (m *mockTeamService) GetTeam(_ context.Context, id string) (*domain.Team, error) {
 	return nil, fmt.Errorf("team not found")
 }
 
-func (m *mockTeamService) CreateTeam(team domain.Team) (*domain.Team, error) {
+func (m *mockTeamService) CreateTeam(_ context.Context, team domain.Team) (*domain.Team, error) {
 	return &team, nil
 }
 
-func (m *mockTeamService) UpdateTeam(id string, team domain.Team) (*domain.Team, error) {
+func (m *mockTeamService) UpdateTeam(_ context.Context, id string, team domain.Team) (*domain.Team, error) {
 	team.ID = id
 	return &team, nil
 }
 
-func (m *mockTeamService) DeleteTeam(id string) error {
+func (m *mockTeamService) DeleteTeam(_ context.Context, id string) error {
 	return nil
 }
 
 type mockOwnerService struct{}
 
-func (m *mockOwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, error) {
+func (m *mockOwnerService) ListOwners(_ context.Context, page, perPage int) ([]domain.Owner, int64, error) {
 	return []domain.Owner{}, 0, nil
 }
 
-func (m *mockOwnerService) GetOwner(id string) (*domain.Owner, error) {
+func (m *mockOwnerService) GetOwner(_ context.Context, id string) (*domain.Owner, error) {
 	return nil, fmt.Errorf("owner not found")
 }
 
-func (m *mockOwnerService) CreateOwner(owner domain.Owner) (*domain.Owner, error) {
+func (m *mockOwnerService) CreateOwner(_ context.Context, owner domain.Owner) (*domain.Owner, error) {
 	return &owner, nil
 }
 
-func (m *mockOwnerService) UpdateOwner(id string, owner domain.Owner) (*domain.Owner, error) {
+func (m *mockOwnerService) UpdateOwner(_ context.Context, id string, owner domain.Owner) (*domain.Owner, error) {
 	owner.ID = id
 	return &owner, nil
 }
 
-func (m *mockOwnerService) DeleteOwner(id string) error {
+func (m *mockOwnerService) DeleteOwner(_ context.Context, id string) error {
 	return nil
 }
 
 type mockProfileService struct{}
 
-func (m *mockProfileService) ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error) {
+func (m *mockProfileService) ListProfiles(_ context.Context, page, perPage int) ([]domain.CertificateProfile, int64, error) {
 	return []domain.CertificateProfile{}, 0, nil
 }
 
-func (m *mockProfileService) GetProfile(id string) (*domain.CertificateProfile, error) {
+func (m *mockProfileService) GetProfile(_ context.Context, id string) (*domain.CertificateProfile, error) {
 	return nil, fmt.Errorf("profile not found")
 }
 
-func (m *mockProfileService) CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (m *mockProfileService) CreateProfile(_ context.Context, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	return &profile, nil
 }
 
-func (m *mockProfileService) UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (m *mockProfileService) UpdateProfile(_ context.Context, id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	profile.ID = id
 	return &profile, nil
 }
 
-func (m *mockProfileService) DeleteProfile(id string) error {
+func (m *mockProfileService) DeleteProfile(_ context.Context, id string) error {
 	return nil
 }
 

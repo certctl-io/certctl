@@ -376,7 +376,7 @@ func TestListPolicies(t *testing.T) {
 
 	policyService := NewPolicyService(policyRepo, auditService)
 
-	policies, total, err := policyService.ListPolicies(1, 50)
+	policies, total, err := policyService.ListPolicies(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("ListPolicies failed: %v", err)
 	}
@@ -407,7 +407,7 @@ func TestCreatePolicy(t *testing.T) {
 		CreatedAt: now,
 	}
 
-	created, err := policyService.CreatePolicy(policy)
+	created, err := policyService.CreatePolicy(context.Background(), policy)
 	if err != nil {
 		t.Fatalf("CreatePolicy failed: %v", err)
 	}

@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,35 +21,35 @@ type MockProfileService struct {
 	DeleteProfileFn func(id string) error
 }
 
-func (m *MockProfileService) ListProfiles(page, perPage int) ([]domain.CertificateProfile, int64, error) {
+func (m *MockProfileService) ListProfiles(_ context.Context, page, perPage int) ([]domain.CertificateProfile, int64, error) {
 	if m.ListProfilesFn != nil {
 		return m.ListProfilesFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockProfileService) GetProfile(id string) (*domain.CertificateProfile, error) {
+func (m *MockProfileService) GetProfile(_ context.Context, id string) (*domain.CertificateProfile, error) {
 	if m.GetProfileFn != nil {
 		return m.GetProfileFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockProfileService) CreateProfile(profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (m *MockProfileService) CreateProfile(_ context.Context, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	if m.CreateProfileFn != nil {
 		return m.CreateProfileFn(profile)
 	}
 	return nil, nil
 }
 
-func (m *MockProfileService) UpdateProfile(id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
+func (m *MockProfileService) UpdateProfile(_ context.Context, id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	if m.UpdateProfileFn != nil {
 		return m.UpdateProfileFn(id, profile)
 	}
 	return nil, nil
 }
 
-func (m *MockProfileService) DeleteProfile(id string) error {
+func (m *MockProfileService) DeleteProfile(_ context.Context, id string) error {
 	if m.DeleteProfileFn != nil {
 		return m.DeleteProfileFn(id)
 	}

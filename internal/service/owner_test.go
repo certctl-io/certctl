@@ -638,7 +638,7 @@ func TestOwnerService_ListOwners_HandlerInterface(t *testing.T) {
 
 	ownerService := NewOwnerService(ownerRepo, auditService)
 
-	owners, total, err := ownerService.ListOwners(1, 50)
+	owners, total, err := ownerService.ListOwners(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("ListOwners failed: %v", err)
 	}
@@ -678,7 +678,7 @@ func TestOwnerService_GetOwner_HandlerInterface(t *testing.T) {
 
 	ownerService := NewOwnerService(ownerRepo, auditService)
 
-	retrieved, err := ownerService.GetOwner("owner-001")
+	retrieved, err := ownerService.GetOwner(context.Background(), "owner-001")
 	if err != nil {
 		t.Fatalf("GetOwner failed: %v", err)
 	}
@@ -702,7 +702,7 @@ func TestOwnerService_CreateOwner_HandlerInterface(t *testing.T) {
 		TeamID: "team-001",
 	}
 
-	created, err := ownerService.CreateOwner(owner)
+	created, err := ownerService.CreateOwner(context.Background(), owner)
 	if err != nil {
 		t.Fatalf("CreateOwner failed: %v", err)
 	}
@@ -752,7 +752,7 @@ func TestOwnerService_UpdateOwner_HandlerInterface(t *testing.T) {
 		TeamID: "team-002",
 	}
 
-	updated, err := ownerService.UpdateOwner("owner-001", updatedOwner)
+	updated, err := ownerService.UpdateOwner(context.Background(), "owner-001", updatedOwner)
 	if err != nil {
 		t.Fatalf("UpdateOwner failed: %v", err)
 	}
@@ -798,7 +798,7 @@ func TestOwnerService_DeleteOwner_HandlerInterface(t *testing.T) {
 
 	ownerService := NewOwnerService(ownerRepo, auditService)
 
-	err := ownerService.DeleteOwner("owner-001")
+	err := ownerService.DeleteOwner(context.Background(), "owner-001")
 	if err != nil {
 		t.Fatalf("DeleteOwner failed: %v", err)
 	}

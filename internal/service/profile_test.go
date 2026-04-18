@@ -82,7 +82,7 @@ func TestProfileService_ListProfiles(t *testing.T) {
 	repo.AddProfile(&domain.CertificateProfile{ID: "prof-2", Name: "Internal mTLS", Enabled: true})
 
 	svc := NewProfileService(repo, nil)
-	profiles, total, err := svc.ListProfiles(1, 50)
+	profiles, total, err := svc.ListProfiles(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -98,7 +98,7 @@ func TestProfileService_ListProfiles_Empty(t *testing.T) {
 	repo := newMockProfileRepository()
 	svc := NewProfileService(repo, nil)
 
-	profiles, total, err := svc.ListProfiles(1, 50)
+	profiles, total, err := svc.ListProfiles(context.Background(), 1, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -115,7 +115,7 @@ func TestProfileService_ListProfiles_RepoError(t *testing.T) {
 	repo.ListErr = errors.New("db error")
 	svc := NewProfileService(repo, nil)
 
-	_, _, err := svc.ListProfiles(1, 50)
+	_, _, err := svc.ListProfiles(context.Background(), 1, 50)
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -126,7 +126,7 @@ func TestProfileService_GetProfile(t *testing.T) {
 	repo.AddProfile(&domain.CertificateProfile{ID: "prof-1", Name: "Standard TLS"})
 	svc := NewProfileService(repo, nil)
 
-	profile, err := svc.GetProfile("prof-1")
+	profile, err := svc.GetProfile(context.Background(), "prof-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -139,7 +139,7 @@ func TestProfileService_GetProfile_NotFound(t *testing.T) {
 	repo := newMockProfileRepository()
 	svc := NewProfileService(repo, nil)
 
-	_, err := svc.GetProfile("nonexistent")
+	_, err := svc.GetProfile(context.Background(), "nonexistent")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -156,7 +156,7 @@ func TestProfileService_CreateProfile_Defaults(t *testing.T) {
 		MaxTTLSeconds: 86400,
 	}
 
-	created, err := svc.CreateProfile(profile)
+	created, err := svc.CreateProfile(context.Background(), profile)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -258,7 +258,7 @@ func TestProfileService_CreateProfile_ValidationErrors(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			_, err := svc.CreateProfile(tt.profile)
+			_, err := svc.CreateProfile(context.Background(), tt.profile)
 			if err == nil {
 				t.Fatalf("expected error containing %q, got nil", tt.errMsg)
 			}
@@ -274,7 +274,7 @@ func TestProfileService_CreateProfile_RepoError(t *testing.T) {
 	repo.CreateErr = errors.New("db create failed")
 	svc := NewProfileService(repo, nil)
 
-	_, err := svc.CreateProfile(domain.CertificateProfile{Name: "Valid"})
+	_, err := svc.CreateProfile(context.Background(), domain.CertificateProfile{Name: "Valid"})
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -287,7 +287,7 @@ func TestProfileService_UpdateProfile(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewProfileService(repo, auditSvc)
 
-	updated, err := svc.UpdateProfile("prof-1", domain.CertificateProfile{
+	updated, err := svc.UpdateProfile(context.Background(), "prof-1", domain.CertificateProfile{
 		Name:          "Updated",
 		MaxTTLSeconds: 43200,
 	})
@@ -306,7 +306,7 @@ func TestProfileService_UpdateProfile_ValidationError(t *testing.T) {
 	repo := newMockProfileRepository()
 	svc := NewProfileService(repo, nil)
 
-	_, err := svc.UpdateProfile("prof-1", domain.CertificateProfile{Name: ""})
+	_, err := svc.UpdateProfile(context.Background(), "prof-1", domain.CertificateProfile{Name: ""})
 	if err == nil {
 		t.Fatal("expected validation error, got nil")
 	}
@@ -319,7 +319,7 @@ func TestProfileService_DeleteProfile(t *testing.T) {
 	auditSvc := NewAuditService(auditRepo)
 	svc := NewProfileService(repo, auditSvc)
 
-	err := svc.DeleteProfile("prof-1")
+	err := svc.DeleteProfile(context.Background(), "prof-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -333,7 +333,7 @@ func TestProfileService_DeleteProfile_RepoError(t *testing.T) {
 	repo.DeleteErr = errors.New("db delete failed")
 	svc := NewProfileService(repo, nil)
 
-	err := svc.DeleteProfile("prof-1")
+	err := svc.DeleteProfile(context.Background(), "prof-1")
 	if err == nil {
 		t.Fatal("expected error, got nil")
 	}
@@ -344,7 +344,7 @@ func TestProfileService_CreateProfile_ValidShortLived(t *testing.T) {
 	svc := NewProfileService(repo, nil)
 
 	// Short-lived with TTL under 1 hour should succeed
-	created, err := svc.CreateProfile(domain.CertificateProfile{
+	created, err := svc.CreateProfile(context.Background(), domain.CertificateProfile{
 		Name:            "CI Ephemeral",
 		AllowShortLived: true,
 		MaxTTLSeconds:   300, // 5 minutes

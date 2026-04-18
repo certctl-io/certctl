@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -20,35 +21,35 @@ type MockOwnerService struct {
 	DeleteOwnerFn func(id string) error
 }
 
-func (m *MockOwnerService) ListOwners(page, perPage int) ([]domain.Owner, int64, error) {
+func (m *MockOwnerService) ListOwners(_ context.Context, page, perPage int) ([]domain.Owner, int64, error) {
 	if m.ListOwnersFn != nil {
 		return m.ListOwnersFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockOwnerService) GetOwner(id string) (*domain.Owner, error) {
+func (m *MockOwnerService) GetOwner(_ context.Context, id string) (*domain.Owner, error) {
 	if m.GetOwnerFn != nil {
 		return m.GetOwnerFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockOwnerService) CreateOwner(owner domain.Owner) (*domain.Owner, error) {
+func (m *MockOwnerService) CreateOwner(_ context.Context, owner domain.Owner) (*domain.Owner, error) {
 	if m.CreateOwnerFn != nil {
 		return m.CreateOwnerFn(owner)
 	}
 	return nil, nil
 }
 
-func (m *MockOwnerService) UpdateOwner(id string, owner domain.Owner) (*domain.Owner, error) {
+func (m *MockOwnerService) UpdateOwner(_ context.Context, id string, owner domain.Owner) (*domain.Owner, error) {
 	if m.UpdateOwnerFn != nil {
 		return m.UpdateOwnerFn(id, owner)
 	}
 	return nil, nil
 }
 
-func (m *MockOwnerService) DeleteOwner(id string) error {
+func (m *MockOwnerService) DeleteOwner(_ context.Context, id string) error {
 	if m.DeleteOwnerFn != nil {
 		return m.DeleteOwnerFn(id)
 	}
