@@ -62,7 +62,7 @@ func TestRevokeCertificate_Success(t *testing.T) {
 	certRepo.Versions["cert-1"] = []*domain.CertificateVersion{version}
 
 	// Revoke
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-1", "keyCompromise", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-1", "keyCompromise", "admin")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestRevokeCertificate_DefaultReason(t *testing.T) {
 	}
 
 	// Revoke with empty reason — should default to "unspecified"
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-2", "", "api")
+	err := svc.RevokeCertificate(context.Background(), "cert-2", "", "api")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -158,7 +158,7 @@ func TestRevokeCertificate_AlreadyRevoked(t *testing.T) {
 	}
 	certRepo.AddCert(cert)
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-3", "superseded", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-3", "superseded", "admin")
 	if err == nil {
 		t.Fatal("expected error for already revoked certificate")
 	}
@@ -179,7 +179,7 @@ func TestRevokeCertificate_ArchivedCert(t *testing.T) {
 	}
 	certRepo.AddCert(cert)
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-4", "keyCompromise", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-4", "keyCompromise", "admin")
 	if err == nil {
 		t.Fatal("expected error for archived certificate")
 	}
@@ -200,7 +200,7 @@ func TestRevokeCertificate_InvalidReason(t *testing.T) {
 	}
 	certRepo.AddCert(cert)
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-5", "notAValidReason", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-5", "notAValidReason", "admin")
 	if err == nil {
 		t.Fatal("expected error for invalid reason")
 	}
@@ -212,7 +212,7 @@ func TestRevokeCertificate_InvalidReason(t *testing.T) {
 func TestRevokeCertificate_NotFound(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "nonexistent-cert", "keyCompromise", "admin")
+	err := svc.RevokeCertificate(context.Background(), "nonexistent-cert", "keyCompromise", "admin")
 	if err == nil {
 		t.Fatal("expected error for nonexistent certificate")
 	}
@@ -231,7 +231,7 @@ func TestRevokeCertificate_NoVersion(t *testing.T) {
 	certRepo.AddCert(cert)
 	// No versions added — should fail
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-6", "keyCompromise", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-6", "keyCompromise", "admin")
 	if err == nil {
 		t.Fatal("expected error when no certificate version exists")
 	}
@@ -258,7 +258,7 @@ func TestRevokeCertificate_WithIssuerNotification(t *testing.T) {
 		{ID: "ver-7", CertificateID: "cert-7", SerialNumber: "GHI789", CreatedAt: time.Now()},
 	}
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-7", "cessationOfOperation", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-7", "cessationOfOperation", "admin")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -293,7 +293,7 @@ func TestRevokeCertificate_WithNotificationService(t *testing.T) {
 		{ID: "ver-8", CertificateID: "cert-8", SerialNumber: "JKL012", CreatedAt: time.Now()},
 	}
 
-	err := svc.RevokeCertificateWithActor(context.Background(), "cert-8", "keyCompromise", "admin")
+	err := svc.RevokeCertificate(context.Background(), "cert-8", "keyCompromise", "admin")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -336,7 +336,7 @@ func TestRevokeCertificate_AllValidReasons(t *testing.T) {
 				{ID: "ver-" + reason, CertificateID: "cert-" + reason, SerialNumber: "SER-" + reason, CreatedAt: time.Now()},
 			}
 
-			err := svc.RevokeCertificateWithActor(context.Background(), "cert-"+reason, reason, "admin")
+			err := svc.RevokeCertificate(context.Background(), "cert-"+reason, reason, "admin")
 			if err != nil {
 				t.Fatalf("expected no error for reason %s, got: %v", reason, err)
 			}
@@ -358,7 +358,7 @@ func TestGetRevokedCertificates_Success(t *testing.T) {
 		{ID: "rev-2", CertificateID: "cert-2", SerialNumber: "SER-2", Reason: "superseded", RevokedAt: time.Now()},
 	}
 
-	revocations, err := svc.GetRevokedCertificates()
+	revocations, err := svc.GetRevokedCertificates(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -370,7 +370,7 @@ func TestGetRevokedCertificates_Success(t *testing.T) {
 func TestGetRevokedCertificates_Empty(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
-	revocations, err := svc.GetRevokedCertificates()
+	revocations, err := svc.GetRevokedCertificates(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -390,7 +390,7 @@ func TestGetRevokedCertificates_NoRepo(t *testing.T) {
 	svc := NewCertificateService(certRepo, policyService, auditService)
 	// Do NOT set revocation repo
 
-	_, err := svc.GetRevokedCertificates()
+	_, err := svc.GetRevokedCertificates(context.Background())
 	if err == nil {
 		t.Fatal("expected error when revocation repo not configured")
 	}
@@ -411,8 +411,8 @@ func TestRevokeCertificate_HandlerInterfaceMethod(t *testing.T) {
 		{ID: "ver-handler", CertificateID: "cert-handler", SerialNumber: "SER-HANDLER", CreatedAt: time.Now()},
 	}
 
-	// Test the handler interface method (no actor param)
-	err := svc.RevokeCertificate("cert-handler", "superseded")
+	// Test the handler interface method (actor collapsed to required positional arg per D-2)
+	err := svc.RevokeCertificate(context.Background(), "cert-handler", "superseded", "api")
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}
@@ -449,7 +449,7 @@ func TestGenerateDERCRL_Success(t *testing.T) {
 		},
 	}
 
-	crl, err := svc.GenerateDERCRL("iss-local")
+	crl, err := svc.GenerateDERCRL(context.Background(), "iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -472,7 +472,7 @@ func TestGenerateDERCRL_EmptyCRL(t *testing.T) {
 	// No revoked certs for this issuer
 	revocationRepo.Revocations = []*domain.CertificateRevocation{}
 
-	crl, err := svc.GenerateDERCRL("iss-local")
+	crl, err := svc.GenerateDERCRL(context.Background(), "iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -493,7 +493,7 @@ func TestGenerateDERCRL_IssuerNotFound(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Try to generate CRL for unknown issuer
-	crl, err := svc.GenerateDERCRL("iss-unknown")
+	crl, err := svc.GenerateDERCRL(context.Background(), "iss-unknown")
 
 	// Should return error or nil CRL depending on implementation
 	if crl != nil && err == nil {
@@ -527,7 +527,7 @@ func TestGetOCSPResponse_Good(t *testing.T) {
 	certRepo.Versions["cert-ocsp-good"] = []*domain.CertificateVersion{version}
 
 	// Request OCSP response for good cert
-	resp, err := svc.GetOCSPResponse("iss-local", "OCSP-GOOD-001")
+	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-GOOD-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -580,7 +580,7 @@ func TestGetOCSPResponse_Revoked(t *testing.T) {
 	}
 
 	// Request OCSP response for revoked cert
-	resp, err := svc.GetOCSPResponse("iss-local", "OCSP-REVOKED-001")
+	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-REVOKED-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -597,7 +597,7 @@ func TestGetOCSPResponse_Unknown(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response for unknown cert
-	resp, err := svc.GetOCSPResponse("iss-local", "UNKNOWN-SERIAL")
+	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "UNKNOWN-SERIAL")
 
 	if err != nil {
 		t.Fatalf("expected no error (should return unknown status), got: %v", err)
@@ -615,7 +615,7 @@ func TestGetOCSPResponse_IssuerNotFound(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response for unknown issuer
-	resp, err := svc.GetOCSPResponse("iss-unknown", "SOME-SERIAL")
+	resp, err := svc.GetOCSPResponse(context.Background(), "iss-unknown", "SOME-SERIAL")
 
 	// Should return error since issuer doesn't exist
 	if err == nil && resp != nil {
@@ -629,7 +629,7 @@ func TestGetOCSPResponse_InvalidSerial(t *testing.T) {
 	svc, _, _, _ := newRevocationTestService()
 
 	// Request OCSP response with invalid serial format
-	resp, err := svc.GetOCSPResponse("iss-local", "")
+	resp, err := svc.GetOCSPResponse(context.Background(), "iss-local", "")
 
 	if err == nil && resp != nil {
 		// Empty serial might return unknown status; that's ok

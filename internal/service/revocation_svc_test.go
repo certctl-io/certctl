@@ -122,7 +122,7 @@ func TestRevocationSvc_GetRevokedCertificates_Success(t *testing.T) {
 		{ID: "rev-2", CertificateID: "cert-2", SerialNumber: "SER-2", Reason: "superseded", RevokedAt: time.Now()},
 	}
 
-	revocations, err := revSvc.GetRevokedCertificates()
+	revocations, err := revSvc.GetRevokedCertificates(context.Background())
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
 	}

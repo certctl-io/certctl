@@ -17,116 +17,116 @@ import (
 
 // MockCertificateService is a mock implementation of CertificateService interface.
 type MockCertificateService struct {
-	ListCertificatesFn           func(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error)
-	ListCertificatesWithFilterFn func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error)
-	GetCertificateFn             func(id string) (*domain.ManagedCertificate, error)
-	CreateCertificateFn          func(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
-	UpdateCertificateFn          func(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
-	ArchiveCertificateFn         func(id string) error
-	GetCertificateVersionsFn     func(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
-	TriggerRenewalFn             func(certID string) error
-	TriggerDeploymentFn          func(certID string, targetID string) error
-	RevokeCertificateFn          func(certID string, reason string) error
-	GetRevokedCertificatesFn     func() ([]*domain.CertificateRevocation, error)
-	GenerateDERCRLFn             func(issuerID string) ([]byte, error)
-	GetOCSPResponseFn            func(issuerID string, serialHex string) ([]byte, error)
-	GetCertificateDeploymentsFn  func(certID string) ([]domain.DeploymentTarget, error)
+	ListCertificatesFn           func(ctx context.Context, status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error)
+	ListCertificatesWithFilterFn func(ctx context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error)
+	GetCertificateFn             func(ctx context.Context, id string) (*domain.ManagedCertificate, error)
+	CreateCertificateFn          func(ctx context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
+	UpdateCertificateFn          func(ctx context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
+	ArchiveCertificateFn         func(ctx context.Context, id string) error
+	GetCertificateVersionsFn     func(ctx context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
+	TriggerRenewalFn             func(ctx context.Context, certID string, actor string) error
+	TriggerDeploymentFn          func(ctx context.Context, certID string, targetID string, actor string) error
+	RevokeCertificateFn          func(ctx context.Context, certID string, reason string, actor string) error
+	GetRevokedCertificatesFn     func(ctx context.Context) ([]*domain.CertificateRevocation, error)
+	GenerateDERCRLFn             func(ctx context.Context, issuerID string) ([]byte, error)
+	GetOCSPResponseFn            func(ctx context.Context, issuerID string, serialHex string) ([]byte, error)
+	GetCertificateDeploymentsFn  func(ctx context.Context, certID string) ([]domain.DeploymentTarget, error)
 }
 
-func (m *MockCertificateService) ListCertificates(status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
+func (m *MockCertificateService) ListCertificates(ctx context.Context, status, environment, ownerID, teamID, issuerID string, page, perPage int) ([]domain.ManagedCertificate, int64, error) {
 	if m.ListCertificatesFn != nil {
-		return m.ListCertificatesFn(status, environment, ownerID, teamID, issuerID, page, perPage)
+		return m.ListCertificatesFn(ctx, status, environment, ownerID, teamID, issuerID, page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockCertificateService) GetCertificate(id string) (*domain.ManagedCertificate, error) {
+func (m *MockCertificateService) GetCertificate(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
 	if m.GetCertificateFn != nil {
-		return m.GetCertificateFn(id)
+		return m.GetCertificateFn(ctx, id)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) CreateCertificate(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+func (m *MockCertificateService) CreateCertificate(ctx context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 	if m.CreateCertificateFn != nil {
-		return m.CreateCertificateFn(cert)
+		return m.CreateCertificateFn(ctx, cert)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) UpdateCertificate(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+func (m *MockCertificateService) UpdateCertificate(ctx context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 	if m.UpdateCertificateFn != nil {
-		return m.UpdateCertificateFn(id, cert)
+		return m.UpdateCertificateFn(ctx, id, cert)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) ArchiveCertificate(id string) error {
+func (m *MockCertificateService) ArchiveCertificate(ctx context.Context, id string) error {
 	if m.ArchiveCertificateFn != nil {
-		return m.ArchiveCertificateFn(id)
+		return m.ArchiveCertificateFn(ctx, id)
 	}
 	return nil
 }
 
-func (m *MockCertificateService) GetCertificateVersions(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+func (m *MockCertificateService) GetCertificateVersions(ctx context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
 	if m.GetCertificateVersionsFn != nil {
-		return m.GetCertificateVersionsFn(certID, page, perPage)
+		return m.GetCertificateVersionsFn(ctx, certID, page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockCertificateService) TriggerRenewal(certID string) error {
+func (m *MockCertificateService) TriggerRenewal(ctx context.Context, certID string, actor string) error {
 	if m.TriggerRenewalFn != nil {
-		return m.TriggerRenewalFn(certID)
+		return m.TriggerRenewalFn(ctx, certID, actor)
 	}
 	return nil
 }
 
-func (m *MockCertificateService) TriggerDeployment(certID string, targetID string) error {
+func (m *MockCertificateService) TriggerDeployment(ctx context.Context, certID string, targetID string, actor string) error {
 	if m.TriggerDeploymentFn != nil {
-		return m.TriggerDeploymentFn(certID, targetID)
+		return m.TriggerDeploymentFn(ctx, certID, targetID, actor)
 	}
 	return nil
 }
 
-func (m *MockCertificateService) RevokeCertificate(certID string, reason string) error {
+func (m *MockCertificateService) RevokeCertificate(ctx context.Context, certID string, reason string, actor string) error {
 	if m.RevokeCertificateFn != nil {
-		return m.RevokeCertificateFn(certID, reason)
+		return m.RevokeCertificateFn(ctx, certID, reason, actor)
 	}
 	return nil
 }
 
-func (m *MockCertificateService) GetRevokedCertificates() ([]*domain.CertificateRevocation, error) {
+func (m *MockCertificateService) GetRevokedCertificates(ctx context.Context) ([]*domain.CertificateRevocation, error) {
 	if m.GetRevokedCertificatesFn != nil {
-		return m.GetRevokedCertificatesFn()
+		return m.GetRevokedCertificatesFn(ctx)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) GenerateDERCRL(issuerID string) ([]byte, error) {
+func (m *MockCertificateService) GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error) {
 	if m.GenerateDERCRLFn != nil {
-		return m.GenerateDERCRLFn(issuerID)
+		return m.GenerateDERCRLFn(ctx, issuerID)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
+func (m *MockCertificateService) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
 	if m.GetOCSPResponseFn != nil {
-		return m.GetOCSPResponseFn(issuerID, serialHex)
+		return m.GetOCSPResponseFn(ctx, issuerID, serialHex)
 	}
 	return nil, nil
 }
 
-func (m *MockCertificateService) ListCertificatesWithFilter(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+func (m *MockCertificateService) ListCertificatesWithFilter(ctx context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 	if m.ListCertificatesWithFilterFn != nil {
-		return m.ListCertificatesWithFilterFn(filter)
+		return m.ListCertificatesWithFilterFn(ctx, filter)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockCertificateService) GetCertificateDeployments(certID string) ([]domain.DeploymentTarget, error) {
+func (m *MockCertificateService) GetCertificateDeployments(ctx context.Context, certID string) ([]domain.DeploymentTarget, error) {
 	if m.GetCertificateDeploymentsFn != nil {
-		return m.GetCertificateDeploymentsFn(certID)
+		return m.GetCertificateDeploymentsFn(ctx, certID)
 	}
 	return nil, nil
 }
@@ -158,7 +158,7 @@ func TestListCertificates_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.Page == 1 && filter.PerPage == 50 {
 				return []domain.ManagedCertificate{cert1, cert2}, 2, nil
 			}
@@ -197,7 +197,7 @@ func TestListCertificates_Success(t *testing.T) {
 // Test ListCertificates - with filters
 func TestListCertificates_WithFilters(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.Status == "Active" && filter.Environment == "prod" {
 				return []domain.ManagedCertificate{}, 0, nil
 			}
@@ -236,7 +236,7 @@ func TestListCertificates_MethodNotAllowed(t *testing.T) {
 // Test ListCertificates - service error
 func TestListCertificates_ServiceError(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			return nil, 0, ErrMockServiceFailed
 		},
 	}
@@ -266,7 +266,7 @@ func TestGetCertificate_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		GetCertificateFn: func(id string) (*domain.ManagedCertificate, error) {
+		GetCertificateFn: func(_ context.Context, id string) (*domain.ManagedCertificate, error) {
 			if id == "mc-prod-001" {
 				return cert, nil
 			}
@@ -298,7 +298,7 @@ func TestGetCertificate_Success(t *testing.T) {
 // Test GetCertificate - not found
 func TestGetCertificate_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GetCertificateFn: func(id string) (*domain.ManagedCertificate, error) {
+		GetCertificateFn: func(_ context.Context, id string) (*domain.ManagedCertificate, error) {
 			return nil, ErrMockNotFound
 		},
 	}
@@ -345,7 +345,7 @@ func TestCreateCertificate_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		CreateCertificateFn: func(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+		CreateCertificateFn: func(_ context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 			return created, nil
 		},
 	}
@@ -403,7 +403,7 @@ func TestCreateCertificate_InvalidBody(t *testing.T) {
 // Test CreateCertificate - service error
 func TestCreateCertificate_ServiceError(t *testing.T) {
 	mock := &MockCertificateService{
-		CreateCertificateFn: func(cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+		CreateCertificateFn: func(_ context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 			return nil, ErrMockServiceFailed
 		},
 	}
@@ -445,7 +445,7 @@ func TestUpdateCertificate_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		UpdateCertificateFn: func(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+		UpdateCertificateFn: func(_ context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 			if id == "mc-prod-001" {
 				return updated, nil
 			}
@@ -501,7 +501,7 @@ func TestUpdateCertificate_InvalidBody(t *testing.T) {
 // Test ArchiveCertificate - success case
 func TestArchiveCertificate_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		ArchiveCertificateFn: func(id string) error {
+		ArchiveCertificateFn: func(_ context.Context, id string) error {
 			if id == "mc-prod-001" {
 				return nil
 			}
@@ -524,7 +524,7 @@ func TestArchiveCertificate_Success(t *testing.T) {
 // Test ArchiveCertificate - not found
 func TestArchiveCertificate_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		ArchiveCertificateFn: func(id string) error {
+		ArchiveCertificateFn: func(_ context.Context, id string) error {
 			return ErrMockNotFound
 		},
 	}
@@ -554,7 +554,7 @@ func TestGetCertificateVersions_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		GetCertificateVersionsFn: func(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+		GetCertificateVersionsFn: func(_ context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
 			if certID == "mc-prod-001" {
 				return []domain.CertificateVersion{ver1}, 1, nil
 			}
@@ -586,7 +586,7 @@ func TestGetCertificateVersions_Success(t *testing.T) {
 // Test GetCertificateVersions - not found
 func TestGetCertificateVersions_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GetCertificateVersionsFn: func(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+		GetCertificateVersionsFn: func(_ context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
 			return nil, 0, ErrMockNotFound
 		},
 	}
@@ -606,7 +606,7 @@ func TestGetCertificateVersions_NotFound(t *testing.T) {
 // Test TriggerRenewal - success case
 func TestTriggerRenewal_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerRenewalFn: func(certID string) error {
+		TriggerRenewalFn: func(_ context.Context, certID string, _ string) error {
 			if certID == "mc-prod-001" {
 				return nil
 			}
@@ -638,7 +638,7 @@ func TestTriggerRenewal_Success(t *testing.T) {
 // Test TriggerRenewal - service error
 func TestTriggerRenewal_ServiceError(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerRenewalFn: func(certID string) error {
+		TriggerRenewalFn: func(_ context.Context, certID string, _ string) error {
 			return ErrMockServiceFailed
 		},
 	}
@@ -658,7 +658,7 @@ func TestTriggerRenewal_ServiceError(t *testing.T) {
 // Test TriggerDeployment - success case
 func TestTriggerDeployment_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerDeploymentFn: func(certID string, targetID string) error {
+		TriggerDeploymentFn: func(_ context.Context, certID string, targetID string, _ string) error {
 			if certID == "mc-prod-001" {
 				return nil
 			}
@@ -695,7 +695,7 @@ func TestTriggerDeployment_Success(t *testing.T) {
 // Test TriggerDeployment - without target ID
 func TestTriggerDeployment_NoTargetID(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerDeploymentFn: func(certID string, targetID string) error {
+		TriggerDeploymentFn: func(_ context.Context, certID string, targetID string, _ string) error {
 			// Should accept empty targetID (deploy to all)
 			return nil
 		},
@@ -716,7 +716,7 @@ func TestTriggerDeployment_NoTargetID(t *testing.T) {
 // Test ListCertificates - invalid page parameter
 func TestListCertificates_InvalidPageParam(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			// Should default to page 1
 			if filter.Page == 1 {
 				return []domain.ManagedCertificate{}, 0, nil
@@ -740,7 +740,7 @@ func TestListCertificates_InvalidPageParam(t *testing.T) {
 // Test ListCertificates - per_page exceeds max
 func TestListCertificates_PerPageExceedsMax(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			// Should cap perPage at 500
 			if filter.PerPage == 50 { // defaults to 50 if > 500
 				return []domain.ManagedCertificate{}, 0, nil
@@ -765,7 +765,7 @@ func TestListCertificates_PerPageExceedsMax(t *testing.T) {
 
 func TestRevokeCertificate_Handler_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			if certID != "mc-prod-001" {
 				t.Errorf("expected certID mc-prod-001, got %s", certID)
 			}
@@ -798,7 +798,7 @@ func TestRevokeCertificate_Handler_Success(t *testing.T) {
 
 func TestRevokeCertificate_Handler_NoBody(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			// Empty reason is OK — service defaults to "unspecified"
 			return nil
 		},
@@ -818,7 +818,7 @@ func TestRevokeCertificate_Handler_NoBody(t *testing.T) {
 
 func TestRevokeCertificate_Handler_AlreadyRevoked(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			return fmt.Errorf("certificate is already revoked")
 		},
 	}
@@ -839,7 +839,7 @@ func TestRevokeCertificate_Handler_AlreadyRevoked(t *testing.T) {
 
 func TestRevokeCertificate_Handler_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			return fmt.Errorf("failed to fetch certificate: not found")
 		},
 	}
@@ -858,7 +858,7 @@ func TestRevokeCertificate_Handler_NotFound(t *testing.T) {
 
 func TestRevokeCertificate_Handler_InvalidReason(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			return fmt.Errorf("invalid revocation reason: badReason")
 		},
 	}
@@ -922,7 +922,7 @@ func TestRevokeCertificate_Handler_EmptyID(t *testing.T) {
 
 func TestRevokeCertificate_Handler_CannotRevokeArchived(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			return fmt.Errorf("cannot revoke archived certificate")
 		},
 	}
@@ -941,7 +941,7 @@ func TestRevokeCertificate_Handler_CannotRevokeArchived(t *testing.T) {
 
 func TestRevokeCertificate_Handler_ServerError(t *testing.T) {
 	mock := &MockCertificateService{
-		RevokeCertificateFn: func(certID string, reason string) error {
+		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
 			return fmt.Errorf("database connection lost")
 		},
 	}
@@ -962,7 +962,7 @@ func TestRevokeCertificate_Handler_ServerError(t *testing.T) {
 
 func TestGetCRL_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
 			return []*domain.CertificateRevocation{
 				{
 					ID:            "rev-1",
@@ -1022,7 +1022,7 @@ func TestGetCRL_Success(t *testing.T) {
 
 func TestGetCRL_Empty(t *testing.T) {
 	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
 			return nil, nil
 		},
 	}
@@ -1047,7 +1047,7 @@ func TestGetCRL_Empty(t *testing.T) {
 
 func TestGetCRL_ServiceError(t *testing.T) {
 	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func() ([]*domain.CertificateRevocation, error) {
+		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
 			return nil, fmt.Errorf("revocation repository not configured")
 		},
 	}
@@ -1083,7 +1083,7 @@ func TestGetCRL_MethodNotAllowed(t *testing.T) {
 func TestGetDERCRL_Success(t *testing.T) {
 	derCRLData := []byte{0x30, 0x82, 0x01, 0x00} // Mock DER CRL bytes
 	mock := &MockCertificateService{
-		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+		GenerateDERCRLFn: func(_ context.Context, issuerID string) ([]byte, error) {
 			if issuerID == "iss-local" {
 				return derCRLData, nil
 			}
@@ -1111,7 +1111,7 @@ func TestGetDERCRL_Success(t *testing.T) {
 
 func TestGetDERCRL_IssuerNotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+		GenerateDERCRLFn: func(_ context.Context, issuerID string) ([]byte, error) {
 			return nil, fmt.Errorf("issuer not found")
 		},
 	}
@@ -1130,7 +1130,7 @@ func TestGetDERCRL_IssuerNotFound(t *testing.T) {
 
 func TestGetDERCRL_NotSupported(t *testing.T) {
 	mock := &MockCertificateService{
-		GenerateDERCRLFn: func(issuerID string) ([]byte, error) {
+		GenerateDERCRLFn: func(_ context.Context, issuerID string) ([]byte, error) {
 			return nil, fmt.Errorf("issuer does not support CRL generation")
 		},
 	}
@@ -1165,7 +1165,7 @@ func TestGetDERCRL_MethodNotAllowed(t *testing.T) {
 func TestHandleOCSP_Success(t *testing.T) {
 	ocspResponseBytes := []byte{0x30, 0x82, 0x02, 0x00} // Mock OCSP response
 	mock := &MockCertificateService{
-		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
 			if issuerID == "iss-local" && serialHex == "12345" {
 				return ocspResponseBytes, nil
 			}
@@ -1206,7 +1206,7 @@ func TestHandleOCSP_MissingSerial(t *testing.T) {
 
 func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
 			return nil, fmt.Errorf("issuer not found")
 		},
 	}
@@ -1225,7 +1225,7 @@ func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 
 func TestHandleOCSP_CertNotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GetOCSPResponseFn: func(issuerID string, serialHex string) ([]byte, error) {
+		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
 			return nil, fmt.Errorf("certificate not found")
 		},
 	}
@@ -1261,7 +1261,7 @@ func TestHandleOCSP_MethodNotAllowed(t *testing.T) {
 // TestListCertificates_SortParam tests sort parameter parsing and passing to service.
 func TestListCertificates_SortParam(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			// Handler strips the '-' prefix and sets SortDesc = true
 			if filter.Sort != "notAfter" || !filter.SortDesc {
 				t.Errorf("expected sort=notAfter desc=true, got sort=%s desc=%v", filter.Sort, filter.SortDesc)
@@ -1284,7 +1284,7 @@ func TestListCertificates_SortParam(t *testing.T) {
 // TestListCertificates_SortParam_Ascending tests sort parameter without '-' prefix (ascending).
 func TestListCertificates_SortParam_Ascending(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.Sort != "createdAt" || filter.SortDesc {
 				t.Errorf("expected sort=createdAt desc=false, got sort=%s desc=%v", filter.Sort, filter.SortDesc)
 			}
@@ -1309,7 +1309,7 @@ func TestListCertificates_TimeRangeFilters(t *testing.T) {
 	after := time.Now().AddDate(0, 0, -90)
 
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.ExpiresBefore == nil {
 				t.Error("expected ExpiresBefore to be set")
 			}
@@ -1339,7 +1339,7 @@ func TestListCertificates_CreatedAfterFilter(t *testing.T) {
 	past := time.Now().AddDate(-1, 0, 0)
 
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.CreatedAfter == nil {
 				t.Error("expected CreatedAfter to be set")
 			}
@@ -1369,7 +1369,7 @@ func TestListCertificates_CursorPagination(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			return []domain.ManagedCertificate{cert}, 1, nil
 		},
 	}
@@ -1409,7 +1409,7 @@ func TestListCertificates_SparseFields(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if len(filter.Fields) != 2 {
 				t.Errorf("expected 2 fields, got %d", len(filter.Fields))
 			}
@@ -1456,7 +1456,7 @@ func TestListCertificates_SparseFields(t *testing.T) {
 // TestListCertificates_ProfileFilter tests profile_id filter.
 func TestListCertificates_ProfileFilter(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.ProfileID != "prof-standard" {
 				t.Errorf("expected ProfileID=prof-standard, got %s", filter.ProfileID)
 			}
@@ -1479,7 +1479,7 @@ func TestListCertificates_ProfileFilter(t *testing.T) {
 // TestListCertificates_AgentIDFilter tests agent_id filter.
 func TestListCertificates_AgentIDFilter(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.AgentID != "agent-prod-001" {
 				t.Errorf("expected AgentID=agent-prod-001, got %s", filter.AgentID)
 			}
@@ -1502,7 +1502,7 @@ func TestListCertificates_AgentIDFilter(t *testing.T) {
 // TestListCertificates_CombinedFilters tests multiple filters together.
 func TestListCertificates_CombinedFilters(t *testing.T) {
 	mock := &MockCertificateService{
-		ListCertificatesWithFilterFn: func(filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
+		ListCertificatesWithFilterFn: func(_ context.Context, filter *repository.CertificateFilter) ([]domain.ManagedCertificate, int, error) {
 			if filter.Status != "Active" || filter.Environment != "production" || filter.ProfileID != "prof-standard" {
 				t.Error("expected all filters to be set")
 			}
@@ -1540,7 +1540,7 @@ func TestGetCertificateDeployments_Success(t *testing.T) {
 	}
 
 	mock := &MockCertificateService{
-		GetCertificateDeploymentsFn: func(certID string) ([]domain.DeploymentTarget, error) {
+		GetCertificateDeploymentsFn: func(_ context.Context, certID string) ([]domain.DeploymentTarget, error) {
 			if certID != "mc-prod-001" {
 				return nil, ErrMockNotFound
 			}
@@ -1576,7 +1576,7 @@ func TestGetCertificateDeployments_Success(t *testing.T) {
 // TestGetCertificateDeployments_NotFound tests 404 for nonexistent certificate.
 func TestGetCertificateDeployments_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
-		GetCertificateDeploymentsFn: func(certID string) ([]domain.DeploymentTarget, error) {
+		GetCertificateDeploymentsFn: func(_ context.Context, certID string) ([]domain.DeploymentTarget, error) {
 			return nil, fmt.Errorf("certificate not found")
 		},
 	}
@@ -1596,7 +1596,7 @@ func TestGetCertificateDeployments_NotFound(t *testing.T) {
 // TestGetCertificateDeployments_Empty tests successful response with no deployments.
 func TestGetCertificateDeployments_Empty(t *testing.T) {
 	mock := &MockCertificateService{
-		GetCertificateDeploymentsFn: func(certID string) ([]domain.DeploymentTarget, error) {
+		GetCertificateDeploymentsFn: func(_ context.Context, certID string) ([]domain.DeploymentTarget, error) {
 			if certID == "mc-no-deployments" {
 				return []domain.DeploymentTarget{}, nil
 			}

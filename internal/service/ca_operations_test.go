@@ -3,6 +3,7 @@
 package service
 
 import (
+	"context"
 	"log/slog"
 	"testing"
 	"time"
@@ -48,7 +49,7 @@ func TestCAOperationsSvc_GenerateDERCRL_Success(t *testing.T) {
 		},
 	}
 
-	crl, err := caSvc.GenerateDERCRL("iss-local")
+	crl, err := caSvc.GenerateDERCRL(context.Background(), "iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -71,7 +72,7 @@ func TestCAOperationsSvc_GenerateDERCRL_EmptyCRL(t *testing.T) {
 	// No revoked certs for this issuer
 	revocationRepo.Revocations = []*domain.CertificateRevocation{}
 
-	crl, err := caSvc.GenerateDERCRL("iss-local")
+	crl, err := caSvc.GenerateDERCRL(context.Background(), "iss-local")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -112,7 +113,7 @@ func TestCAOperationsSvc_GetOCSPResponse_Good(t *testing.T) {
 	certRepo.Versions["cert-ocsp-good"] = []*domain.CertificateVersion{version}
 
 	// Request OCSP response for good cert
-	resp, err := caSvc.GetOCSPResponse("iss-local", "OCSP-GOOD-001")
+	resp, err := caSvc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-GOOD-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)
@@ -165,7 +166,7 @@ func TestCAOperationsSvc_GetOCSPResponse_Revoked(t *testing.T) {
 	}
 
 	// Request OCSP response for revoked cert
-	resp, err := caSvc.GetOCSPResponse("iss-local", "OCSP-REVOKED-001")
+	resp, err := caSvc.GetOCSPResponse(context.Background(), "iss-local", "OCSP-REVOKED-001")
 
 	if err != nil {
 		t.Fatalf("expected no error, got: %v", err)

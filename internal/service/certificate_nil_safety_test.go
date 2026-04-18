@@ -34,7 +34,7 @@ func TestCertificateService_RevokeCertificate_RevocationSvcNil(t *testing.T) {
 	certRepo.AddCert(cert)
 
 	// Call RevokeCertificateWithActor with nil RevocationSvc
-	err := certService.RevokeCertificateWithActor(context.Background(), "cert-1", "keyCompromise", "admin")
+	err := certService.RevokeCertificate(context.Background(), "cert-1", "keyCompromise", "admin")
 
 	// Assert: Should return error, NOT panic
 	if err == nil {
@@ -64,7 +64,7 @@ func TestCertificateService_GenerateDERCRL_CAOpsSvcNil(t *testing.T) {
 	// Note: NOT calling certService.SetCAOperationsSvc(...)
 
 	// Call GenerateDERCRL with nil CAOperationsSvc
-	_, err := certService.GenerateDERCRL("iss-local")
+	_, err := certService.GenerateDERCRL(context.Background(), "iss-local")
 
 	// Assert: Should return error, NOT panic
 	if err == nil {
@@ -94,7 +94,7 @@ func TestCertificateService_GetOCSPResponse_CAOpsSvcNil(t *testing.T) {
 	// Note: NOT calling certService.SetCAOperationsSvc(...)
 
 	// Call GetOCSPResponse with nil CAOperationsSvc
-	_, err := certService.GetOCSPResponse("iss-local", "serial123")
+	_, err := certService.GetOCSPResponse(context.Background(), "iss-local", "serial123")
 
 	// Assert: Should return error, NOT panic
 	if err == nil {
@@ -124,7 +124,7 @@ func TestCertificateService_GetRevokedCertificates_RevocationSvcNil(t *testing.T
 	// Note: NOT calling certService.SetRevocationSvc(...)
 
 	// Call GetRevokedCertificates with nil RevocationSvc
-	_, err := certService.GetRevokedCertificates()
+	_, err := certService.GetRevokedCertificates(context.Background())
 
 	// Assert: Should return error, NOT panic
 	if err == nil {
@@ -177,7 +177,7 @@ func TestCertificateService_GetCertificateDeployments_Success(t *testing.T) {
 	targetRepo.AddTarget(target2)
 
 	// Call GetCertificateDeployments
-	deployments, err := certService.GetCertificateDeployments("cert-1")
+	deployments, err := certService.GetCertificateDeployments(context.Background(), "cert-1")
 
 	// Assert: Should return deployment list successfully
 	if err != nil {
@@ -218,7 +218,7 @@ func TestCertificateService_GetCertificateDeployments_RepositoryError(t *testing
 	certRepo.AddCert(cert)
 
 	// Call GetCertificateDeployments with repo error
-	_, err := certService.GetCertificateDeployments("cert-1")
+	_, err := certService.GetCertificateDeployments(context.Background(), "cert-1")
 
 	// Assert: Should return error, NOT panic
 	if err == nil {
@@ -247,7 +247,7 @@ func TestCertificateService_GetCertificateDeployments_CertNotFound(t *testing.T)
 	certService.SetTargetRepo(targetRepo)
 
 	// Call GetCertificateDeployments with nonexistent certificate
-	_, err := certService.GetCertificateDeployments("nonexistent-cert")
+	_, err := certService.GetCertificateDeployments(context.Background(), "nonexistent-cert")
 
 	// Assert: Should return error
 	if err == nil {
@@ -283,7 +283,7 @@ func TestCertificateService_GetCertificateDeployments_NilTargetRepo(t *testing.T
 	certRepo.AddCert(cert)
 
 	// Call GetCertificateDeployments with nil TargetRepo
-	deployments, err := certService.GetCertificateDeployments("cert-1")
+	deployments, err := certService.GetCertificateDeployments(context.Background(), "cert-1")
 
 	// Assert: Should return empty list gracefully (not panic)
 	if err != nil {
@@ -337,19 +337,19 @@ func TestCertificateService_Multiple_NilSafetyChecks(t *testing.T) {
 	revSvc.SetIssuerRegistry(registry)
 
 	// Test 1: RevokeCertificateWithActor should succeed (RevocationSvc is set)
-	errRevoke := certService.RevokeCertificateWithActor(context.Background(), "cert-1", "keyCompromise", "admin")
+	errRevoke := certService.RevokeCertificate(context.Background(), "cert-1", "keyCompromise", "admin")
 	if errRevoke != nil {
 		t.Fatalf("RevokeCertificateWithActor failed unexpectedly: %v", errRevoke)
 	}
 
 	// Test 2: GenerateDERCRL should fail gracefully (CAOperationsSvc is nil)
-	_, errCRL := certService.GenerateDERCRL("iss-local")
+	_, errCRL := certService.GenerateDERCRL(context.Background(), "iss-local")
 	if errCRL == nil {
 		t.Fatal("GenerateDERCRL expected error, got nil")
 	}
 
 	// Test 3: GetOCSPResponse should fail gracefully (CAOperationsSvc is nil)
-	_, errOCSP := certService.GetOCSPResponse("iss-local", "ABC123")
+	_, errOCSP := certService.GetOCSPResponse(context.Background(), "iss-local", "ABC123")
 	if errOCSP == nil {
 		t.Fatal("GetOCSPResponse expected error, got nil")
 	}

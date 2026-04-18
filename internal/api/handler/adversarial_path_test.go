@@ -27,6 +27,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -120,7 +121,7 @@ func TestGetCertificate_PathInjection(t *testing.T) {
 			handler, mock := newCertHandlerWithMock()
 			// Force a 404 so we can distinguish "service was called" from
 			// "parser accepted the ID"; a 200 with null body is also fine.
-			mock.GetCertificateFn = func(id string) (*domain.ManagedCertificate, error) {
+			mock.GetCertificateFn = func(_ context.Context, id string) (*domain.ManagedCertificate, error) {
 				return nil, ErrMockNotFound
 			}
 
@@ -156,7 +157,7 @@ func TestUpdateCertificate_PathInjection(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.UpdateCertificateFn = func(id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+			mock.UpdateCertificateFn = func(_ context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
 				return nil, ErrMockNotFound
 			}
 
@@ -184,7 +185,7 @@ func TestArchiveCertificate_PathInjection(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.ArchiveCertificateFn = func(id string) error { return ErrMockNotFound }
+			mock.ArchiveCertificateFn = func(_ context.Context, id string) error { return ErrMockNotFound }
 
 			req := httptest.NewRequest(http.MethodDelete, "/api/v1/certificates/x", nil)
 			req.URL.Path = "/api/v1/certificates/" + tc.input
@@ -227,7 +228,7 @@ func TestGetCertificateVersions_MultiSegment(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.GetCertificateVersionsFn = func(certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
+			mock.GetCertificateVersionsFn = func(_ context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error) {
 				return []domain.CertificateVersion{}, 0, nil
 			}
 
@@ -277,7 +278,7 @@ func TestHandleOCSP_MultiSegment(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.GetOCSPResponseFn = func(issuerID, serialHex string) ([]byte, error) {
+			mock.GetOCSPResponseFn = func(_ context.Context, issuerID, serialHex string) ([]byte, error) {
 				return nil, ErrMockNotFound
 			}
 
@@ -311,7 +312,7 @@ func TestGetDERCRL_IssuerPathInjection(t *testing.T) {
 			}()
 
 			handler, mock := newCertHandlerWithMock()
-			mock.GenerateDERCRLFn = func(issuerID string) ([]byte, error) {
+			mock.GenerateDERCRLFn = func(_ context.Context, issuerID string) ([]byte, error) {
 				return nil, ErrMockNotFound
 			}
 

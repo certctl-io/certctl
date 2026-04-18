@@ -41,7 +41,7 @@ func (s *CAOperationsSvc) SetIssuerRegistry(registry *IssuerRegistry) {
 
 // GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
 // Short-lived certificates (profile TTL < 1 hour) are excluded from the CRL.
-func (s *CAOperationsSvc) GenerateDERCRL(issuerID string) ([]byte, error) {
+func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
@@ -54,7 +54,7 @@ func (s *CAOperationsSvc) GenerateDERCRL(issuerID string) ([]byte, error) {
 		return nil, fmt.Errorf("issuer not found: %s", issuerID)
 	}
 
-	revocations, err := s.revocationRepo.ListAll(context.Background())
+	revocations, err := s.revocationRepo.ListAll(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("failed to list revocations: %w", err)
 	}
@@ -69,9 +69,9 @@ func (s *CAOperationsSvc) GenerateDERCRL(issuerID string) ([]byte, error) {
 
 		// Check short-lived exemption: look up the cert's profile
 		if s.profileRepo != nil && s.certRepo != nil {
-			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
+			cert, err := s.certRepo.Get(ctx, rev.CertificateID)
 			if err == nil && cert.CertificateProfileID != "" {
-				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
+				profile, err := s.profileRepo.Get(ctx, cert.CertificateProfileID)
 				if err == nil && profile.IsShortLived() {
 					slog.Debug("skipping short-lived cert from CRL",
 						"certificate_id", rev.CertificateID,
@@ -92,11 +92,11 @@ func (s *CAOperationsSvc) GenerateDERCRL(issuerID string) ([]byte, error) {
 		})
 	}
 
-	return issuerConn.GenerateCRL(context.Background(), entries)
+	return issuerConn.GenerateCRL(ctx, entries)
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
-func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]byte, error) {
+func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
@@ -120,13 +120,13 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 		// Look up cert by (issuer_id, serial) — per RFC 5280 §5.2.3, serial numbers
 		// are unique only within a single issuer. The OCSP URL path carries issuer_id,
 		// so we scope the lookup to avoid cross-issuer collisions.
-		rev, _ := s.revocationRepo.GetByIssuerAndSerial(context.Background(), issuerID, serialHex)
+		rev, _ := s.revocationRepo.GetByIssuerAndSerial(ctx, issuerID, serialHex)
 		if rev != nil {
-			cert, err := s.certRepo.Get(context.Background(), rev.CertificateID)
+			cert, err := s.certRepo.Get(ctx, rev.CertificateID)
 			if err == nil && cert.CertificateProfileID != "" {
-				profile, err := s.profileRepo.Get(context.Background(), cert.CertificateProfileID)
+				profile, err := s.profileRepo.Get(ctx, cert.CertificateProfileID)
 				if err == nil && profile.IsShortLived() {
-					return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+					return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
 						CertSerial: serial,
 						CertStatus: 0, // good — short-lived exemption
 						ThisUpdate: now,
@@ -138,10 +138,10 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 	}
 
 	// Check if this (issuer_id, serial) is revoked — RFC 5280 §5.2.3 scoping.
-	rev, err := s.revocationRepo.GetByIssuerAndSerial(context.Background(), issuerID, serialHex)
+	rev, err := s.revocationRepo.GetByIssuerAndSerial(ctx, issuerID, serialHex)
 	if err != nil {
 		// Not revoked — return "good" status
-		return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+		return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
 			CertSerial: serial,
 			CertStatus: 0, // good
 			ThisUpdate: now,
@@ -150,7 +150,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(issuerID string, serialHex string) ([]
 	}
 
 	// Revoked
-	return issuerConn.SignOCSPResponse(context.Background(), OCSPSignRequest{
+	return issuerConn.SignOCSPResponse(ctx, OCSPSignRequest{
 		CertSerial:       serial,
 		CertStatus:       1, // revoked
 		RevokedAt:        rev.RevokedAt,
