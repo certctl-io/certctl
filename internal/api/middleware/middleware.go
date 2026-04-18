@@ -122,10 +122,15 @@ type AuthConfig struct {
 	Secret string // The raw API key or comma-separated list of valid API keys
 }
 
-// NewAuth creates an authentication middleware based on config.
-// When Type is "none", all requests pass through (demo/development mode).
-// When Type is "api-key", requests must include a valid Bearer token.
-// Named keys are supported via []NamedAPIKey input.
+// NewAuthWithNamedKeys creates an authentication middleware that validates
+// Bearer tokens against a set of named API keys. Each key carries a name
+// (propagated as the actor via context) and an admin flag (consulted by
+// authorization gates such as bulk revocation).
+//
+// When namedKeys is empty the returned middleware is a no-op pass-through,
+// which is used in demo/development mode (CERTCTL_AUTH_TYPE=none). When one
+// or more keys are provided, requests must include a matching Bearer token
+// or they are rejected with 401.
 func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handler {
 	if len(namedKeys) == 0 {
 		return func(next http.Handler) http.Handler {
