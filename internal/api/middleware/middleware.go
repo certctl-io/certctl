@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"crypto/subtle"
 	"encoding/hex"
+	"fmt"
 	"log"
 	"log/slog"
 	"net/http"
@@ -78,10 +79,17 @@ func NewLogging(logger *slog.Logger) func(http.Handler) http.Handler {
 // Recovery middleware recovers from panics and returns a 500 error.
 func Recovery(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		ctx := r.Context()
 		defer func() {
 			if err := recover(); err != nil {
-				requestID := getRequestID(r.Context())
-				log.Printf("[%s] PANIC: %v", requestID, err)
+				requestID := getRequestID(ctx)
+				// Use slog.ErrorContext so the panic log carries the same
+				// request-scoped trace/auth metadata as normal request logs
+				// (M-2 / D-3 — preserve ctx propagation on the panic path).
+				slog.ErrorContext(ctx, "panic recovered in HTTP handler",
+					"request_id", requestID,
+					"panic", fmt.Sprintf("%v", err),
+				)
 				http.Error(w, `{"error":"Internal Server Error"}`, http.StatusInternalServerError)
 			}
 		}()

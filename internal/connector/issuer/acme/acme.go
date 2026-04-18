@@ -547,7 +547,11 @@ func (c *Connector) solveAuthorizationsHTTP01(ctx context.Context, authzURLs []s
 		return fmt.Errorf("failed to start challenge server: %w", err)
 	}
 	defer func() {
-		shutdownCtx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+		// Derive the challenge-server shutdown context from the parent ctx so
+		// values (trace IDs, deadlines) propagate, but detach from its
+		// cancellation so Shutdown always gets its full budget even when the
+		// parent was cancelled (M-2 / D-3).
+		shutdownCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
 		defer cancel()
 		_ = srv.Shutdown(shutdownCtx)
 		c.logger.Debug("challenge server stopped")
