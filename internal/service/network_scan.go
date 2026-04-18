@@ -235,21 +235,19 @@ func (s *NetworkScanService) scanTarget(ctx context.Context, target *domain.Netw
 	timeout := time.Duration(target.TimeoutMs) * time.Millisecond
 	results := s.scanEndpoints(ctx, endpoints, timeout)
 
-	// Collect discovered cert entries
-	var entries []domain.DiscoveredCertEntry
-	var scanErrors []string
-	for _, result := range results {
-		if result.Error != "" {
-			// Only log connection errors at debug level (many hosts won't have TLS)
-			if s.logger != nil {
-				s.logger.Debug("scan endpoint error",
-					"address", result.Address,
-					"error", result.Error)
-			}
-			continue
-		}
-		entries = append(entries, result.Certs...)
-	}
+	// Collect discovered cert entries and per-endpoint errors.
+	//
+	// M-9 (operator-observability): before this fix, scanErrors was declared
+	// but never appended to, so the "errors" count in the summary Info log
+	// and the Errors field on the DiscoveryReport were always zero/nil —
+	// silently hiding per-endpoint failures from operators and from the
+	// downstream scan history record. Per-endpoint failures are still logged
+	// at Debug (sweep scans generate high connection-refused noise by design
+	// — most hosts in a CIDR won't have TLS on the probed port), but the
+	// aggregate count and the report's Errors field now reflect reality so
+	// operators can see, via the scan summary and the stored scan record,
+	// how many endpoints failed without having to enable Debug logging.
+	entries, scanErrors := s.collectScanResults(results)
 
 	scanDuration := time.Since(startTime)
 	if s.logger != nil {
@@ -383,6 +381,44 @@ func incrementIP(ip net.IP) {
 			break
 		}
 	}
+}
+
+// collectScanResults partitions per-endpoint scan results into discovered
+// certificate entries and a list of per-endpoint error strings.
+//
+// M-9 (operator-observability): the summary Info log and the DiscoveryReport
+// both report the count of endpoints that failed to probe. Before this helper
+// existed, the caller accumulated entries but never populated the errors
+// slice, so the aggregate error count was always zero and the scan record's
+// Errors field was always nil — silently hiding per-endpoint failures.
+//
+// Per-endpoint errors remain logged at Debug (sweep scans generate high
+// connection-refused noise by design — most hosts in a CIDR won't have TLS
+// on the probed port). Aggregation surfaces the count at Info, preserving
+// Debug-level detail for operators who want it without creating log spam
+// at default verbosity.
+func (s *NetworkScanService) collectScanResults(results []domain.NetworkScanResult) ([]domain.DiscoveredCertEntry, []string) {
+	var entries []domain.DiscoveredCertEntry
+	var scanErrors []string
+	for _, result := range results {
+		if result.Error != "" {
+			// Debug-level is intentional: a sweep scan of a /24 typically
+			// produces 200+ connection-refused results, and logging each
+			// at Warn would create log spam at default verbosity. The
+			// aggregate count in the Info-level scan-completed log surfaces
+			// the failure volume to operators; Debug provides the detail
+			// when diagnosing a specific endpoint.
+			if s.logger != nil {
+				s.logger.Debug("scan endpoint error",
+					"address", result.Address,
+					"error", result.Error)
+			}
+			scanErrors = append(scanErrors, fmt.Sprintf("%s: %s", result.Address, result.Error))
+			continue
+		}
+		entries = append(entries, result.Certs...)
+	}
+	return entries, scanErrors
 }
 
 // scanEndpoints probes TLS endpoints concurrently and returns results.

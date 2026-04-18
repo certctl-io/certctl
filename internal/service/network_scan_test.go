@@ -491,3 +491,113 @@ func TestExpandCIDR_SingleLinkLocalIP(t *testing.T) {
 		t.Errorf("expected empty for cloud metadata IP, got %v", ips)
 	}
 }
+
+// TestCollectScanResults_AggregatesErrors is the M-9 regression guard:
+// per-endpoint probe failures must accumulate into the errors slice so the
+// summary Info log and the DiscoveryReport reflect the true failure count.
+// Before the M-9 fix, scanErrors was declared but never appended to, so the
+// aggregate count was always zero and the scan record's Errors field was
+// always nil — silently hiding per-endpoint failures from operators.
+func TestCollectScanResults_AggregatesErrors(t *testing.T) {
+	svc := &NetworkScanService{}
+	results := []domain.NetworkScanResult{
+		{Address: "203.0.113.1:443", Error: "connection refused"},
+		{Address: "203.0.113.2:443", Certs: []domain.DiscoveredCertEntry{
+			{CommonName: "example.com"},
+		}},
+		{Address: "203.0.113.3:443", Error: "tls handshake failure"},
+		{Address: "203.0.113.4:443", Certs: []domain.DiscoveredCertEntry{
+			{CommonName: "internal.example.com"},
+		}},
+		{Address: "203.0.113.5:443", Error: "i/o timeout"},
+	}
+
+	entries, errs := svc.collectScanResults(results)
+
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries (one per successful probe), got %d", len(entries))
+	}
+	if len(errs) != 3 {
+		t.Fatalf("expected 3 error strings (one per failed probe), got %d: %v", len(errs), errs)
+	}
+
+	// Each error string must be non-empty and include the endpoint address so
+	// the scan record lets operators correlate failures back to endpoints
+	// without needing Debug logging enabled.
+	for i, e := range errs {
+		if e == "" {
+			t.Errorf("error[%d]: expected non-empty error string", i)
+		}
+	}
+
+	// Spot-check that address is threaded through the error strings.
+	if want := "203.0.113.1:443"; errs[0] == "" || errs[0][:len(want)] != want {
+		t.Errorf("errs[0] should start with %q, got %q", want, errs[0])
+	}
+	if want := "203.0.113.3:443"; errs[1] == "" || errs[1][:len(want)] != want {
+		t.Errorf("errs[1] should start with %q, got %q", want, errs[1])
+	}
+	if want := "203.0.113.5:443"; errs[2] == "" || errs[2][:len(want)] != want {
+		t.Errorf("errs[2] should start with %q, got %q", want, errs[2])
+	}
+}
+
+// TestCollectScanResults_AllSuccess exercises the happy path: a scan where
+// every endpoint returned certificates. The errors slice must be nil (not an
+// empty non-nil slice) so the downstream DiscoveryReport.Errors field stays
+// nil as well, preserving the JSON-omitempty behavior that callers rely on.
+func TestCollectScanResults_AllSuccess(t *testing.T) {
+	svc := &NetworkScanService{}
+	results := []domain.NetworkScanResult{
+		{Address: "203.0.113.10:443", Certs: []domain.DiscoveredCertEntry{
+			{CommonName: "a.example.com"},
+		}},
+		{Address: "203.0.113.11:443", Certs: []domain.DiscoveredCertEntry{
+			{CommonName: "b.example.com"},
+		}},
+	}
+
+	entries, errs := svc.collectScanResults(results)
+
+	if len(entries) != 2 {
+		t.Errorf("expected 2 entries, got %d", len(entries))
+	}
+	if errs != nil {
+		t.Errorf("expected nil errors slice on all-success, got %v", errs)
+	}
+}
+
+// TestCollectScanResults_AllFailed exercises the worst-case sweep: every
+// endpoint failed to probe. Entries must be nil, and every failure must be
+// recorded in the errors slice so the scan record is complete.
+func TestCollectScanResults_AllFailed(t *testing.T) {
+	svc := &NetworkScanService{}
+	results := []domain.NetworkScanResult{
+		{Address: "203.0.113.20:443", Error: "connection refused"},
+		{Address: "203.0.113.21:443", Error: "connection refused"},
+		{Address: "203.0.113.22:443", Error: "connection refused"},
+	}
+
+	entries, errs := svc.collectScanResults(results)
+
+	if entries != nil {
+		t.Errorf("expected nil entries on all-failed, got %v", entries)
+	}
+	if len(errs) != 3 {
+		t.Errorf("expected 3 error strings, got %d: %v", len(errs), errs)
+	}
+}
+
+// TestCollectScanResults_Empty guards against a degenerate empty-input case
+// (scanEndpoints returns no results, e.g. if ctx was cancelled before the
+// first probe ran). Both return slices must be nil.
+func TestCollectScanResults_Empty(t *testing.T) {
+	svc := &NetworkScanService{}
+	entries, errs := svc.collectScanResults(nil)
+	if entries != nil {
+		t.Errorf("expected nil entries for empty input, got %v", entries)
+	}
+	if errs != nil {
+		t.Errorf("expected nil errors for empty input, got %v", errs)
+	}
+}
