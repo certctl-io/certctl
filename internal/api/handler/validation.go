@@ -71,10 +71,11 @@ func ValidatePolicyType(policyType interface{}) error {
 		"RequiredMetadata":    true,
 		"AllowedEnvironments": true,
 		"RenewalLeadTime":     true,
+		"CertificateLifetime": true,
 	}
 	typeStr := fmt.Sprintf("%v", policyType)
 	if !validTypes[typeStr] {
-		return ValidationError{Field: "type", Message: "type must be one of: AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime"}
+		return ValidationError{Field: "type", Message: "type must be one of: AllowedIssuers, AllowedDomains, RequiredMetadata, AllowedEnvironments, RenewalLeadTime, CertificateLifetime"}
 	}
 	return nil
 }

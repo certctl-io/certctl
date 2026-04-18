@@ -12,19 +12,25 @@ VALUES (
   '[30, 14, 7, 0]'::jsonb
 ) ON CONFLICT (id) DO NOTHING;
 
--- Policy rules: Require owner assignment
--- Severity differentiated per rule to demonstrate the field means something
--- (D-006). The backend CHECK constraint (migration 000013) enforces the
--- TitleCase allowlist Warning/Error/Critical. Type-value drift
--- (ownership/environment/lifetime/renewal_window vs. the engine's TitleCase
--- canonicals) is tracked separately in d/D-008 and intentionally left
--- unchanged in this commit.
+-- Policy rules: Require owner assignment, bound environments, cap lifetime,
+-- and enforce a renewal lead-time.
+--
+-- Severity is differentiated per rule (D-006) and the types are now the
+-- TitleCase canonicals the engine actually recognizes (D-008). Pre-D-008 the
+-- types were lowercase strings (`ownership`, `environment`, `lifetime`,
+-- `renewal_window`) that the engine silently dropped through to its
+-- default-case error path — the rules looked alive in the GUI but did not
+-- enforce anything. The backend CHECK constraint (migration 000013) enforces
+-- the TitleCase severity allowlist Warning/Error/Critical. Configs are also
+-- reshaped to match the D-008 per-arm schemas so the rules actually exercise
+-- the config-consuming paths instead of falling back to the missing-field
+-- placeholders.
 INSERT INTO policy_rules (id, name, type, config, enabled, severity)
 VALUES (
   'pr-require-owner',
   'require-owner',
-  'ownership',
-  '{"requirement": "owner_id must be set"}'::jsonb,
+  'RequiredMetadata',
+  '{"required_keys": ["owner"]}'::jsonb,
   true,
   'Warning'
 ) ON CONFLICT (id) DO NOTHING;
@@ -34,7 +40,7 @@ INSERT INTO policy_rules (id, name, type, config, enabled, severity)
 VALUES (
   'pr-allowed-environments',
   'allowed-environments',
-  'environment',
+  'AllowedEnvironments',
   '{"allowed": ["production", "staging", "development"]}'::jsonb,
   true,
   'Error'
@@ -45,19 +51,19 @@ INSERT INTO policy_rules (id, name, type, config, enabled, severity)
 VALUES (
   'pr-max-certificate-lifetime',
   'max-certificate-lifetime',
-  'lifetime',
+  'CertificateLifetime',
   '{"max_days": 90}'::jsonb,
   true,
   'Critical'
 ) ON CONFLICT (id) DO NOTHING;
 
--- Policy rules: Minimum renewal window
+-- Policy rules: Minimum renewal window (renew at least 14 days before expiry)
 INSERT INTO policy_rules (id, name, type, config, enabled, severity)
 VALUES (
   'pr-min-renewal-window',
   'min-renewal-window',
-  'renewal_window',
-  '{"min_days": 14}'::jsonb,
+  'RenewalLeadTime',
+  '{"lead_time_days": 14}'::jsonb,
   true,
   'Warning'
 ) ON CONFLICT (id) DO NOTHING;
