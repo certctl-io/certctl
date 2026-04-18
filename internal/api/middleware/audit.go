@@ -132,6 +132,15 @@ func (a *AuditMiddleware) Middleware(next http.Handler) http.Handler {
 		path := r.URL.Path
 		status := wrapped.statusCode
 
+		// Derive a detached context that preserves request-scoped values
+		// (trace IDs, auth info carried via context keys) but is not cancelled
+		// when the HTTP server finalizes the request. Using r.Context()
+		// directly would cause the async audit write to observe ctx.Done()
+		// as soon as the response completes; using context.Background() would
+		// discard useful observability metadata. WithoutCancel gives us both
+		// (M-2 / D-3).
+		auditCtx := context.WithoutCancel(r.Context())
+
 		// Record audit event asynchronously (best-effort, don't block response).
 		// SECURITY: We intentionally use r.URL.Path (not r.URL.String() or r.RequestURI)
 		// to prevent query parameters from being recorded in the immutable audit trail.
@@ -147,7 +156,7 @@ func (a *AuditMiddleware) Middleware(next http.Handler) http.Handler {
 		go func() {
 			defer a.wg.Done()
 			if err := a.recorder.RecordAPICall(
-				context.Background(),
+				auditCtx,
 				method,
 				path,
 				actor,
