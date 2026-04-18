@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,8 +12,8 @@ import (
 
 // AuditService defines the service interface for audit event operations.
 type AuditService interface {
-	ListAuditEvents(page, perPage int) ([]domain.AuditEvent, int64, error)
-	GetAuditEvent(id string) (*domain.AuditEvent, error)
+	ListAuditEvents(ctx context.Context, page, perPage int) ([]domain.AuditEvent, int64, error)
+	GetAuditEvent(ctx context.Context, id string) (*domain.AuditEvent, error)
 }
 
 // AuditHandler handles HTTP requests for audit event operations.
@@ -49,7 +50,7 @@ func (h AuditHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	events, total, err := h.svc.ListAuditEvents(page, perPage)
+	events, total, err := h.svc.ListAuditEvents(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list audit events", requestID)
 		return
@@ -83,7 +84,7 @@ func (h AuditHandler) GetAuditEvent(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	event, err := h.svc.GetAuditEvent(id)
+	event, err := h.svc.GetAuditEvent(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Audit event not found", requestID)
 		return

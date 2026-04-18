@@ -370,7 +370,7 @@ func TestListNotifications(t *testing.T) {
 	}
 
 	// List with pagination
-	notifs, total, err := svc.ListNotifications(1, 3)
+	notifs, total, err := svc.ListNotifications(context.Background(), 1, 3)
 	if err != nil {
 		t.Fatalf("ListNotifications failed: %v", err)
 	}
@@ -404,7 +404,7 @@ func TestMarkAsRead(t *testing.T) {
 	notifRepo.AddNotification(notif)
 
 	// Mark as read
-	err := svc.MarkAsRead(notif.ID)
+	err := svc.MarkAsRead(context.Background(), notif.ID)
 	if err != nil {
 		t.Fatalf("MarkAsRead failed: %v", err)
 	}
@@ -434,7 +434,7 @@ func TestGetNotification(t *testing.T) {
 	notifRepo.AddNotification(notif)
 
 	// Get the notification
-	retrieved, err := svc.GetNotification(notif.ID)
+	retrieved, err := svc.GetNotification(context.Background(), notif.ID)
 	if err != nil {
 		t.Fatalf("GetNotification failed: %v", err)
 	}

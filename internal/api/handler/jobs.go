@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -13,11 +14,11 @@ import (
 
 // JobService defines the service interface for job operations.
 type JobService interface {
-	ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error)
-	GetJob(id string) (*domain.Job, error)
-	CancelJob(id string) error
-	ApproveJob(id string) error
-	RejectJob(id string, reason string) error
+	ListJobs(ctx context.Context, status, jobType string, page, perPage int) ([]domain.Job, int64, error)
+	GetJob(ctx context.Context, id string) (*domain.Job, error)
+	CancelJob(ctx context.Context, id string) error
+	ApproveJob(ctx context.Context, id string) error
+	RejectJob(ctx context.Context, id string, reason string) error
 }
 
 // JobHandler handles HTTP requests for job operations.
@@ -57,7 +58,7 @@ func (h JobHandler) ListJobs(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	jobs, total, err := h.svc.ListJobs(status, jobType, page, perPage)
+	jobs, total, err := h.svc.ListJobs(r.Context(), status, jobType, page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list jobs", requestID)
 		return
@@ -91,7 +92,7 @@ func (h JobHandler) GetJob(w http.ResponseWriter, r *http.Request) {
 	}
 	id = parts[0]
 
-	job, err := h.svc.GetJob(id)
+	job, err := h.svc.GetJob(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 		return
@@ -119,7 +120,7 @@ func (h JobHandler) CancelJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := parts[0]
 
-	if err := h.svc.CancelJob(jobID); err != nil {
+	if err := h.svc.CancelJob(r.Context(), jobID); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to cancel job", requestID)
 		return
 	}
@@ -149,7 +150,7 @@ func (h JobHandler) ApproveJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := parts[0]
 
-	if err := h.svc.ApproveJob(jobID); err != nil {
+	if err := h.svc.ApproveJob(r.Context(), jobID); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return
@@ -193,7 +194,7 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.svc.RejectJob(jobID, body.Reason); err != nil {
+	if err := h.svc.RejectJob(r.Context(), jobID, body.Reason); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return

@@ -99,7 +99,7 @@ func TestCancelJob(t *testing.T) {
 
 	jobService := newTestJobService(jobRepo)
 
-	err := jobService.CancelJobWithContext(ctx, "job-001")
+	err := jobService.CancelJob(ctx, "job-001")
 	if err != nil {
 		t.Fatalf("CancelJob failed: %v", err)
 	}
@@ -129,13 +129,15 @@ func TestCancelJob_AlreadyCompleted(t *testing.T) {
 
 	jobService := newTestJobService(jobRepo)
 
-	err := jobService.CancelJobWithContext(ctx, "job-001")
+	err := jobService.CancelJob(ctx, "job-001")
 	if err == nil {
 		t.Fatal("expected error for completed job")
 	}
 }
 
 func TestGetJob(t *testing.T) {
+	ctx := context.Background()
+
 	now := time.Now()
 	job := &domain.Job{
 		ID:            "job-001",
@@ -153,7 +155,7 @@ func TestGetJob(t *testing.T) {
 
 	jobService := newTestJobService(jobRepo)
 
-	retrieved, err := jobService.GetJob("job-001")
+	retrieved, err := jobService.GetJob(ctx, "job-001")
 	if err != nil {
 		t.Fatalf("GetJob failed: %v", err)
 	}
@@ -167,6 +169,8 @@ func TestGetJob(t *testing.T) {
 }
 
 func TestListJobs(t *testing.T) {
+	ctx := context.Background()
+
 	now := time.Now()
 	job1 := &domain.Job{
 		ID:            "job-001",
@@ -192,7 +196,7 @@ func TestListJobs(t *testing.T) {
 
 	jobService := newTestJobService(jobRepo)
 
-	jobs, total, err := jobService.ListJobs("", "", 1, 50)
+	jobs, total, err := jobService.ListJobs(ctx, "", "", 1, 50)
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
 	}
@@ -206,6 +210,8 @@ func TestListJobs(t *testing.T) {
 }
 
 func TestListJobs_FilterByStatus(t *testing.T) {
+	ctx := context.Background()
+
 	now := time.Now()
 	job1 := &domain.Job{
 		ID:            "job-001",
@@ -231,7 +237,7 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 
 	jobService := newTestJobService(jobRepo)
 
-	jobs, total, err := jobService.ListJobs(string(domain.JobStatusPending), "", 1, 50)
+	jobs, total, err := jobService.ListJobs(ctx, string(domain.JobStatusPending), "", 1, 50)
 	if err != nil {
 		t.Fatalf("ListJobs failed: %v", err)
 	}

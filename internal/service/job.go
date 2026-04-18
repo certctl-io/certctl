@@ -189,8 +189,8 @@ func (s *JobService) GetJobStatus(ctx context.Context, jobID string) (*domain.Jo
 	return job, nil
 }
 
-// CancelJobWithContext cancels a pending or running job.
-func (s *JobService) CancelJobWithContext(ctx context.Context, jobID string) error {
+// CancelJob cancels a pending or running job (handler interface method).
+func (s *JobService) CancelJob(ctx context.Context, jobID string) error {
 	job, err := s.jobRepo.Get(ctx, jobID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch job: %w", err)
@@ -208,13 +208,8 @@ func (s *JobService) CancelJobWithContext(ctx context.Context, jobID string) err
 	return nil
 }
 
-// CancelJob cancels a job (handler interface method).
-func (s *JobService) CancelJob(id string) error {
-	return s.CancelJobWithContext(context.Background(), id)
-}
-
 // ListJobs returns paginated jobs with optional filtering (handler interface method).
-func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
+func (s *JobService) ListJobs(ctx context.Context, status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -222,7 +217,7 @@ func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]doma
 		perPage = 50
 	}
 
-	allJobs, err := s.jobRepo.List(context.Background())
+	allJobs, err := s.jobRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list jobs: %w", err)
 	}
@@ -263,14 +258,13 @@ func (s *JobService) ListJobs(status, jobType string, page, perPage int) ([]doma
 }
 
 // GetJob returns a single job (handler interface method).
-func (s *JobService) GetJob(id string) (*domain.Job, error) {
-	return s.jobRepo.Get(context.Background(), id)
+func (s *JobService) GetJob(ctx context.Context, id string) (*domain.Job, error) {
+	return s.jobRepo.Get(ctx, id)
 }
 
 // ApproveJob approves a renewal job that is awaiting approval.
 // Transitions the job from AwaitingApproval to Pending so the scheduler picks it up.
-func (s *JobService) ApproveJob(id string) error {
-	ctx := context.Background()
+func (s *JobService) ApproveJob(ctx context.Context, id string) error {
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("job not found: %w", err)
@@ -290,8 +284,7 @@ func (s *JobService) ApproveJob(id string) error {
 
 // RejectJob rejects a renewal job that is awaiting approval.
 // Transitions the job to Cancelled with a rejection reason.
-func (s *JobService) RejectJob(id string, reason string) error {
-	ctx := context.Background()
+func (s *JobService) RejectJob(ctx context.Context, id string, reason string) error {
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("job not found: %w", err)

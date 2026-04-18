@@ -319,7 +319,7 @@ func (s *NotificationService) GetNotificationHistory(ctx context.Context, certID
 }
 
 // ListNotifications returns paginated notifications (handler interface method).
-func (s *NotificationService) ListNotifications(page, perPage int) ([]domain.NotificationEvent, int64, error) {
+func (s *NotificationService) ListNotifications(ctx context.Context, page, perPage int) ([]domain.NotificationEvent, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -332,7 +332,7 @@ func (s *NotificationService) ListNotifications(page, perPage int) ([]domain.Not
 		PerPage: perPage,
 	}
 
-	notifications, err := s.notifRepo.List(context.Background(), filter)
+	notifications, err := s.notifRepo.List(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list notifications: %w", err)
 	}
@@ -349,12 +349,12 @@ func (s *NotificationService) ListNotifications(page, perPage int) ([]domain.Not
 }
 
 // GetNotification returns a single notification (handler interface method).
-func (s *NotificationService) GetNotification(id string) (*domain.NotificationEvent, error) {
+func (s *NotificationService) GetNotification(ctx context.Context, id string) (*domain.NotificationEvent, error) {
 	filter := &repository.NotificationFilter{
 		PerPage: 1,
 	}
 
-	notifications, err := s.notifRepo.List(context.Background(), filter)
+	notifications, err := s.notifRepo.List(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get notification: %w", err)
 	}
@@ -370,6 +370,6 @@ func (s *NotificationService) GetNotification(id string) (*domain.NotificationEv
 }
 
 // MarkAsRead marks a notification as read (handler interface method).
-func (s *NotificationService) MarkAsRead(id string) error {
-	return s.notifRepo.UpdateStatus(context.Background(), id, "read", time.Now())
+func (s *NotificationService) MarkAsRead(ctx context.Context, id string) error {
+	return s.notifRepo.UpdateStatus(ctx, id, "read", time.Now())
 }

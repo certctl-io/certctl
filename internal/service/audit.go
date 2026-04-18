@@ -110,7 +110,7 @@ func (s *AuditService) ListByAction(ctx context.Context, action string, from, to
 }
 
 // ListAuditEvents returns paginated audit events (handler interface method).
-func (s *AuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, int64, error) {
+func (s *AuditService) ListAuditEvents(ctx context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -123,7 +123,7 @@ func (s *AuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, 
 		PerPage: perPage,
 	}
 
-	events, err := s.auditRepo.List(context.Background(), filter)
+	events, err := s.auditRepo.List(ctx, filter)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list audit events: %w", err)
 	}
@@ -143,13 +143,13 @@ func (s *AuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, 
 }
 
 // GetAuditEvent returns a single audit event (handler interface method).
-func (s *AuditService) GetAuditEvent(id string) (*domain.AuditEvent, error) {
+func (s *AuditService) GetAuditEvent(ctx context.Context, id string) (*domain.AuditEvent, error) {
 	filter := &repository.AuditFilter{
 		ResourceID: id,
 		PerPage:    1,
 	}
 
-	events, err := s.auditRepo.List(context.Background(), filter)
+	events, err := s.auditRepo.List(ctx, filter)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get audit event: %w", err)
 	}
