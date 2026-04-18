@@ -26,6 +26,7 @@ type JobService struct {
 	ownerRepo         repository.OwnerRepository
 	renewalService    *RenewalService
 	deploymentService *DeploymentService
+	auditService      *AuditService
 	logger            *slog.Logger
 }
 
@@ -52,6 +53,15 @@ func NewJobService(
 		deploymentService: deploymentService,
 		logger:            logger,
 	}
+}
+
+// SetAuditService wires an optional audit service for emitting lifecycle
+// events (e.g., scheduler-driven job_retry transitions recorded by
+// RetryFailedJobs). Construction keeps the audit dependency optional so
+// bootstrap/test wiring that doesn't exercise the retry path can omit it;
+// production wiring in cmd/server/main.go should always call this.
+func (s *JobService) SetAuditService(a *AuditService) {
+	s.auditService = a
 }
 
 // ProcessPendingJobs fetches and processes all pending jobs.
@@ -163,6 +173,16 @@ func (s *JobService) processValidationJob(ctx context.Context, job *domain.Job) 
 
 // RetryFailedJobs finds failed jobs and resets them for retry.
 // It only retries jobs that haven't exceeded max attempts.
+//
+// Audit trail (I-001): each successful Failed → Pending transition emits a
+// "job_retry" audit event with actor "system" (ActorTypeSystem), capturing
+// the old→new state and attempt counters so operators can reconstruct
+// scheduler-driven retry activity. The audit service is optional — callers
+// that haven't wired it via SetAuditService simply skip emission.
+//
+// maxRetries is retained for interface compatibility with
+// scheduler.JobServicer but is advisory: per-job eligibility is governed by
+// each job's own Attempts vs. MaxAttempts, not this parameter.
 func (s *JobService) RetryFailedJobs(ctx context.Context, maxRetries int) error {
 	s.logger.Debug("retrying failed jobs", "max_retries", maxRetries)
 
@@ -189,6 +209,21 @@ func (s *JobService) RetryFailedJobs(ctx context.Context, maxRetries int) error 
 				"job_id", job.ID,
 				"error", err)
 			continue
+		}
+
+		if s.auditService != nil {
+			if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+				"job_retry", "job", job.ID,
+				map[string]interface{}{
+					"old_status":   string(domain.JobStatusFailed),
+					"new_status":   string(domain.JobStatusPending),
+					"attempts":     job.Attempts,
+					"max_attempts": job.MaxAttempts,
+				}); auditErr != nil {
+				s.logger.Error("failed to record job retry audit event",
+					"job_id", job.ID,
+					"error", auditErr)
+			}
 		}
 
 		retriedCount++

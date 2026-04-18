@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"log/slog"
 	"os"
@@ -396,5 +397,182 @@ func TestRejectJob_SelfRejection_Permitted(t *testing.T) {
 	if jobRepo.StatusUpdates["job-self"] != domain.JobStatusCancelled {
 		t.Errorf("expected status Cancelled after rejection, got %s",
 			jobRepo.StatusUpdates["job-self"])
+	}
+}
+
+// --- I-001: scheduler-driven retry emits audit events ---
+//
+// These regression tests prove that RetryFailedJobs (a) transitions eligible
+// Failed jobs to Pending, (b) skips jobs that have exhausted their max
+// attempts, and (c) records a "job_retry" audit event per transition when the
+// audit service is wired. A separate variant (_NoAuditServiceOK) confirms the
+// nil-guard path so test/bootstrap wiring that skips the setter still works.
+
+// newTestJobServiceWithAudit wires the optional audit dependency onto the
+// standard test JobService so retry assertions can inspect recorded events.
+// Mirrors newTestJobServiceWithRepos but also returns the mock audit repo
+// holding any emitted events.
+func newTestJobServiceWithAudit(jobRepo *mockJobRepo) (*JobService, *mockAuditRepo) {
+	svc, _, _ := newTestJobServiceWithRepos(jobRepo)
+	auditRepo := &mockAuditRepo{}
+	svc.SetAuditService(NewAuditService(auditRepo))
+	return svc, auditRepo
+}
+
+func TestJobService_RetryFailedJobs_EligibleJobTransitionsAndAudits(t *testing.T) {
+	ctx := context.Background()
+
+	now := time.Now()
+	failed := &domain.Job{
+		ID:            "job-retry-1",
+		Type:          domain.JobTypeRenewal,
+		CertificateID: "cert-001",
+		Status:        domain.JobStatusFailed,
+		Attempts:      1,
+		MaxAttempts:   3,
+		CreatedAt:     now,
+		ScheduledAt:   now,
+	}
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{failed.ID: failed},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+
+	svc, auditRepo := newTestJobServiceWithAudit(jobRepo)
+
+	if err := svc.RetryFailedJobs(ctx, 3); err != nil {
+		t.Fatalf("RetryFailedJobs failed: %v", err)
+	}
+
+	if got := jobRepo.StatusUpdates[failed.ID]; got != domain.JobStatusPending {
+		t.Fatalf("expected job %s status Pending after retry, got %s", failed.ID, got)
+	}
+
+	if len(auditRepo.Events) != 1 {
+		t.Fatalf("expected 1 audit event, got %d", len(auditRepo.Events))
+	}
+
+	ev := auditRepo.Events[0]
+	if ev.Action != "job_retry" {
+		t.Errorf("expected action job_retry, got %s", ev.Action)
+	}
+	if ev.Actor != "system" {
+		t.Errorf("expected actor system, got %s", ev.Actor)
+	}
+	if ev.ActorType != domain.ActorTypeSystem {
+		t.Errorf("expected actor type System, got %s", ev.ActorType)
+	}
+	if ev.ResourceType != "job" {
+		t.Errorf("expected resource type job, got %s", ev.ResourceType)
+	}
+	if ev.ResourceID != failed.ID {
+		t.Errorf("expected resource ID %s, got %s", failed.ID, ev.ResourceID)
+	}
+
+	// Details are stored as json.RawMessage — decode and verify the state
+	// transition + attempt counters were captured.
+	var details map[string]interface{}
+	if err := json.Unmarshal(ev.Details, &details); err != nil {
+		t.Fatalf("failed to decode audit event details: %v", err)
+	}
+	if got, want := details["old_status"], string(domain.JobStatusFailed); got != want {
+		t.Errorf("expected details.old_status=%s, got %v", want, got)
+	}
+	if got, want := details["new_status"], string(domain.JobStatusPending); got != want {
+		t.Errorf("expected details.new_status=%s, got %v", want, got)
+	}
+	// JSON numerics round-trip as float64.
+	if got, want := details["attempts"], float64(1); got != want {
+		t.Errorf("expected details.attempts=%v, got %v", want, got)
+	}
+	if got, want := details["max_attempts"], float64(3); got != want {
+		t.Errorf("expected details.max_attempts=%v, got %v", want, got)
+	}
+}
+
+func TestJobService_RetryFailedJobs_SkipsJobsAtMaxAttempts(t *testing.T) {
+	ctx := context.Background()
+
+	now := time.Now()
+	// Eligible: Attempts=0, MaxAttempts=3.
+	eligible := &domain.Job{
+		ID:            "job-retry-eligible",
+		Type:          domain.JobTypeRenewal,
+		CertificateID: "cert-001",
+		Status:        domain.JobStatusFailed,
+		Attempts:      0,
+		MaxAttempts:   3,
+		CreatedAt:     now,
+		ScheduledAt:   now,
+	}
+	// Exhausted: Attempts >= MaxAttempts must be skipped.
+	exhausted := &domain.Job{
+		ID:            "job-retry-exhausted",
+		Type:          domain.JobTypeDeployment,
+		CertificateID: "cert-002",
+		Status:        domain.JobStatusFailed,
+		Attempts:      3,
+		MaxAttempts:   3,
+		CreatedAt:     now,
+		ScheduledAt:   now,
+	}
+	jobRepo := &mockJobRepo{
+		Jobs: map[string]*domain.Job{
+			eligible.ID:  eligible,
+			exhausted.ID: exhausted,
+		},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+
+	svc, auditRepo := newTestJobServiceWithAudit(jobRepo)
+
+	if err := svc.RetryFailedJobs(ctx, 3); err != nil {
+		t.Fatalf("RetryFailedJobs failed: %v", err)
+	}
+
+	if got := jobRepo.StatusUpdates[eligible.ID]; got != domain.JobStatusPending {
+		t.Errorf("expected eligible job to transition to Pending, got %s", got)
+	}
+	if _, flipped := jobRepo.StatusUpdates[exhausted.ID]; flipped {
+		t.Errorf("expected exhausted job to be skipped, but status was updated")
+	}
+
+	if len(auditRepo.Events) != 1 {
+		t.Fatalf("expected 1 audit event (only for eligible job), got %d", len(auditRepo.Events))
+	}
+	if auditRepo.Events[0].ResourceID != eligible.ID {
+		t.Errorf("expected audit event for eligible job %s, got %s",
+			eligible.ID, auditRepo.Events[0].ResourceID)
+	}
+}
+
+func TestJobService_RetryFailedJobs_NoAuditServiceOK(t *testing.T) {
+	ctx := context.Background()
+
+	now := time.Now()
+	failed := &domain.Job{
+		ID:            "job-retry-no-audit",
+		Type:          domain.JobTypeRenewal,
+		CertificateID: "cert-001",
+		Status:        domain.JobStatusFailed,
+		Attempts:      0,
+		MaxAttempts:   3,
+		CreatedAt:     now,
+		ScheduledAt:   now,
+	}
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{failed.ID: failed},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+
+	// Intentionally skip SetAuditService: the nil-guard must prevent a panic
+	// and still transition the job.
+	svc := newTestJobService(jobRepo)
+
+	if err := svc.RetryFailedJobs(ctx, 3); err != nil {
+		t.Fatalf("RetryFailedJobs failed without audit wiring: %v", err)
+	}
+	if got := jobRepo.StatusUpdates[failed.ID]; got != domain.JobStatusPending {
+		t.Errorf("expected status Pending after retry, got %s", got)
 	}
 }

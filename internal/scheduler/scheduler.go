@@ -16,8 +16,16 @@ type RenewalServicer interface {
 }
 
 // JobServicer defines the interface for job processing used by the scheduler.
+//
+// RetryFailedJobs was added to close coverage gap I-001: JobService.RetryFailedJobs
+// existed and was unit-tested but had no runtime caller prior to this loop being
+// wired. The scheduler now drives it on an independent tick so failed jobs whose
+// attempt counter is below MaxAttempts are periodically reset to Pending for the
+// job processor to pick up again. maxRetries is advisory (per-job gating uses
+// each job's own Attempts/MaxAttempts fields).
 type JobServicer interface {
 	ProcessPendingJobs(ctx context.Context) error
+	RetryFailedJobs(ctx context.Context, maxRetries int) error
 }
 
 // AgentServicer defines the interface for agent health checks used by the scheduler.
@@ -67,6 +75,7 @@ type Scheduler struct {
 	// Configurable tick intervals
 	renewalCheckInterval            time.Duration
 	jobProcessorInterval            time.Duration
+	jobRetryInterval                time.Duration
 	agentHealthCheckInterval        time.Duration
 	notificationProcessInterval     time.Duration
 	shortLivedExpiryCheckInterval   time.Duration
@@ -78,6 +87,7 @@ type Scheduler struct {
 	// Idempotency guards: prevent duplicate execution of slow jobs
 	renewalCheckRunning           atomic.Bool
 	jobProcessorRunning           atomic.Bool
+	jobRetryRunning               atomic.Bool
 	agentHealthCheckRunning       atomic.Bool
 	notificationProcessRunning    atomic.Bool
 	shortLivedExpiryCheckRunning  atomic.Bool
@@ -110,6 +120,7 @@ func NewScheduler(
 		// Default intervals
 		renewalCheckInterval:          1 * time.Hour,
 		jobProcessorInterval:          30 * time.Second,
+		jobRetryInterval:              5 * time.Minute,
 		agentHealthCheckInterval:      2 * time.Minute,
 		notificationProcessInterval:   1 * time.Minute,
 		shortLivedExpiryCheckInterval: 30 * time.Second,
@@ -139,6 +150,13 @@ func (s *Scheduler) SetRenewalCheckInterval(d time.Duration) {
 // SetJobProcessorInterval configures the interval for job processing.
 func (s *Scheduler) SetJobProcessorInterval(d time.Duration) {
 	s.jobProcessorInterval = d
+}
+
+// SetJobRetryInterval configures the interval for the failed-job retry loop
+// (coverage gap I-001). Defaults to 5 minutes; honors
+// CERTCTL_SCHEDULER_RETRY_INTERVAL when wired from config.
+func (s *Scheduler) SetJobRetryInterval(d time.Duration) {
+	s.jobRetryInterval = d
 }
 
 // SetAgentHealthCheckInterval configures the interval for agent health checks.
@@ -193,7 +211,10 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 
 		// Track all loop goroutines in the WaitGroup so WaitForCompletion
 		// blocks until they've fully exited (prevents test races).
-		loopCount := 5
+		// Base count is 6: renewal, job processor, job retry (I-001),
+		// agent health, notification, short-lived expiry. Optional loops
+		// (network scan, digest, health check, cloud discovery) add to this.
+		loopCount := 6
 		if s.networkScanService != nil {
 			loopCount++
 		}
@@ -210,6 +231,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.jobProcessorLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.jobRetryLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.agentHealthCheckLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.notificationProcessLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.shortLivedExpiryCheckLoop(ctx) }()
@@ -331,6 +353,63 @@ func (s *Scheduler) runJobProcessor(ctx context.Context) {
 			"interval", s.jobProcessorInterval.String())
 	} else {
 		s.logger.Debug("job processor completed")
+	}
+}
+
+// jobRetryLoop runs every jobRetryInterval and transitions eligible Failed jobs
+// back to Pending so the job processor can pick them up again. Closes coverage
+// gap I-001 — JobService.RetryFailedJobs had no runtime caller prior to this
+// loop being wired. Runs immediately on start, then every interval.
+// Uses atomic.Bool to prevent duplicate execution if the previous retry sweep
+// is still running.
+func (s *Scheduler) jobRetryLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.jobRetryInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start (with idempotency guard)
+	s.jobRetryRunning.Store(true)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.jobRetryRunning.Store(false)
+		s.runJobRetry(ctx)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.jobRetryRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("job retry still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.jobRetryRunning.Store(false)
+				s.runJobRetry(ctx)
+			}()
+		}
+	}
+}
+
+// runJobRetry executes a single failed-job retry cycle with error recovery.
+// Uses the same 2-minute per-tick timeout as runJobProcessor; RetryFailedJobs
+// issues one SELECT and one UPDATE per eligible job (cheap), so this headroom
+// covers very large failure backlogs without starving the loop.
+func (s *Scheduler) runJobRetry(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	// maxRetries is advisory at the service layer (per-job gating uses each
+	// job's own Attempts/MaxAttempts). Passing 3 matches the conventional
+	// default seen across the codebase's job creation paths.
+	if err := s.jobService.RetryFailedJobs(opCtx, 3); err != nil {
+		s.logger.Error("job retry failed",
+			"error", err,
+			"interval", s.jobRetryInterval.String())
+	} else {
+		s.logger.Debug("job retry completed")
 	}
 }
 

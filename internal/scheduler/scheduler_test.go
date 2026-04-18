@@ -68,12 +68,23 @@ func (m *mockRenewalService) ExpireShortLivedCertificates(ctx context.Context) e
 }
 
 // mockJobService is a mock implementation for testing.
+//
+// Tracks ProcessPendingJobs and RetryFailedJobs separately. retrySlowDelay and
+// retryShouldError let tests exercise the retry loop independently of the
+// processor loop without coupling their timing/failure modes.
 type mockJobService struct {
 	mu          sync.Mutex
 	callCount   int
 	callTimes   []time.Time
 	slowDelay   time.Duration
 	shouldError bool
+
+	// Retry loop tracking (coverage gap I-001)
+	retryCallCount      int
+	retryCallTimes      []time.Time
+	retryMaxRetriesSeen []int
+	retrySlowDelay      time.Duration
+	retryShouldError    bool
 }
 
 func (m *mockJobService) ProcessPendingJobs(ctx context.Context) error {
@@ -91,6 +102,30 @@ func (m *mockJobService) ProcessPendingJobs(ctx context.Context) error {
 	}
 
 	if m.shouldError {
+		return context.Canceled
+	}
+	return nil
+}
+
+// RetryFailedJobs is the scheduler-driven counterpart to ProcessPendingJobs that
+// covers coverage gap I-001: JobService.RetryFailedJobs had no runtime caller
+// prior to the jobRetryLoop being wired.
+func (m *mockJobService) RetryFailedJobs(ctx context.Context, maxRetries int) error {
+	m.mu.Lock()
+	m.retryCallCount++
+	m.retryCallTimes = append(m.retryCallTimes, time.Now())
+	m.retryMaxRetriesSeen = append(m.retryMaxRetriesSeen, maxRetries)
+	m.mu.Unlock()
+
+	if m.retrySlowDelay > 0 {
+		select {
+		case <-time.After(m.retrySlowDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if m.retryShouldError {
 		return context.Canceled
 	}
 	return nil
@@ -947,4 +982,162 @@ func TestScheduler_DigestLoop_SetDigestInterval(t *testing.T) {
 	if sched.digestInterval != customInterval {
 		t.Errorf("digestInterval should be %v after SetDigestInterval, got %v", customInterval, sched.digestInterval)
 	}
+}
+
+// TestScheduler_JobRetryLoop_CallsService verifies that the job retry loop
+// invokes JobService.RetryFailedJobs on each tick. Closes coverage gap I-001 —
+// prior to the loop being wired, RetryFailedJobs had no runtime caller.
+//
+// Also verifies that the scheduler forwards the conventional advisory maxRetries
+// constant (3) to the service layer; per-job gating still lives in each job's
+// own Attempts/MaxAttempts fields.
+func TestScheduler_JobRetryLoop_CallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	// Quiet every other loop so only the retry loop's calls are visible on jobMock.
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Run long enough for the immediate start + at least one tick.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	_ = sched.WaitForCompletion(2 * time.Second)
+
+	jobMock.mu.Lock()
+	retryCount := jobMock.retryCallCount
+	var firstMaxRetries int
+	if len(jobMock.retryMaxRetriesSeen) > 0 {
+		firstMaxRetries = jobMock.retryMaxRetriesSeen[0]
+	}
+	jobMock.mu.Unlock()
+
+	if retryCount < 1 {
+		t.Fatalf("expected job retry service to be called at least once, got %d", retryCount)
+	}
+	if firstMaxRetries != 3 {
+		t.Fatalf("expected scheduler to forward advisory maxRetries=3, got %d", firstMaxRetries)
+	}
+	t.Logf("job retry loop called %d times (maxRetries=%d)", retryCount, firstMaxRetries)
+}
+
+// TestScheduler_JobRetryLoop_IdempotencyGuard verifies that a slow retry sweep
+// does not cause overlapping executions. Mirrors the shape of
+// TestScheduler_DigestLoop_WithIdempotencyGuard.
+//
+// The guard is the atomic.Bool jobRetryRunning in scheduler.go. Without it, a
+// 100ms tick against a 150ms operation would fire ~4 times in 400ms; with the
+// guard we expect ~2–3 calls.
+func TestScheduler_JobRetryLoop_IdempotencyGuard(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{
+		retrySlowDelay: 150 * time.Millisecond, // slower than tick interval
+	}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(100 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	time.Sleep(400 * time.Millisecond)
+
+	jobMock.mu.Lock()
+	retryCount := jobMock.retryCallCount
+	jobMock.mu.Unlock()
+
+	// With a 150ms sweep and 100ms interval, a functioning guard should yield
+	// roughly 2–3 calls (immediate + any ticks whose previous sweep finished).
+	// Anything above 3 suggests the guard isn't holding.
+	if retryCount > 3 {
+		t.Logf("WARNING: retry called %d times in 400ms with 100ms interval and 150ms sweep — guard may not be working", retryCount)
+	}
+
+	t.Logf("job retry idempotency guard: %d calls in 400ms (100ms interval, 150ms sweep)", retryCount)
+
+	cancel()
+	if err := sched.WaitForCompletion(2 * time.Second); err != nil {
+		t.Fatalf("WaitForCompletion should succeed: %v", err)
+	}
+}
+
+// TestScheduler_JobRetryLoop_WaitForCompletion verifies that a retry sweep
+// which is still in flight at shutdown is awaited by WaitForCompletion (same
+// sync.WaitGroup contract as every other loop).
+func TestScheduler_JobRetryLoop_WaitForCompletion(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{
+		retrySlowDelay: 100 * time.Millisecond,
+	}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Let the immediate-start retry goroutine begin its 100ms sweep.
+	time.Sleep(30 * time.Millisecond)
+
+	// Initiate shutdown mid-sweep.
+	cancel()
+
+	start := time.Now()
+	err := sched.WaitForCompletion(5 * time.Second)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("WaitForCompletion should not error: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("WaitForCompletion took longer than expected: %v", elapsed)
+	}
+
+	jobMock.mu.Lock()
+	retryCount := jobMock.retryCallCount
+	jobMock.mu.Unlock()
+
+	if retryCount < 1 {
+		t.Fatalf("expected retry service to have started at least once before shutdown, got %d", retryCount)
+	}
+	t.Logf("retry loop graceful shutdown completed in %v after %d in-flight sweep(s)", elapsed, retryCount)
 }

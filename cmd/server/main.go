@@ -225,6 +225,9 @@ func main() {
 	renewalService.SetTargetRepo(targetRepo)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, certificateRepo, ownerRepo, renewalService, deploymentService, logger)
+	// I-001: emit "job_retry" audit events when the scheduler resets Failed→Pending.
+	// SetAuditService is optional — JobService falls back to nil-guarded no-op if unwired.
+	jobService.SetAuditService(auditService)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	agentService.SetProfileRepo(profileRepo)
 	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, encryptionKey, logger)
@@ -438,6 +441,10 @@ func main() {
 	// Configure scheduler intervals from config
 	sched.SetRenewalCheckInterval(cfg.Scheduler.RenewalCheckInterval)
 	sched.SetJobProcessorInterval(cfg.Scheduler.JobProcessorInterval)
+	// I-001: drive the failed-job retry loop. Runs on start + every RetryInterval
+	// (default 5m, CERTCTL_SCHEDULER_RETRY_INTERVAL). Kept adjacent to the job
+	// processor setter because they share the JobServicer dependency.
+	sched.SetJobRetryInterval(cfg.Scheduler.RetryInterval)
 	sched.SetAgentHealthCheckInterval(cfg.Scheduler.AgentHealthCheckInterval)
 	sched.SetNotificationProcessInterval(cfg.Scheduler.NotificationProcessInterval)
 	if cfg.NetworkScan.Enabled {

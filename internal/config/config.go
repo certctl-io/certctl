@@ -707,6 +707,14 @@ type SchedulerConfig struct {
 	// Default: 1 minute. Minimum: 1 second. Sends notifications to Slack, Teams, PagerDuty, etc.
 	// Setting: CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL environment variable.
 	NotificationProcessInterval time.Duration
+
+	// RetryInterval is how often the scheduler retries failed jobs whose Attempts
+	// counter is below MaxAttempts. Default: 5 minutes. Minimum: 1 second.
+	// Transitions eligible Failed jobs back to Pending so the job processor can
+	// pick them up again (closes coverage gap I-001 — JobService.RetryFailedJobs
+	// had no caller prior to this loop being wired).
+	// Setting: CERTCTL_SCHEDULER_RETRY_INTERVAL environment variable.
+	RetryInterval time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -807,6 +815,7 @@ func Load() (*Config, error) {
 			JobProcessorInterval:        getEnvDuration("CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL", 30*time.Second),
 			AgentHealthCheckInterval:    getEnvDuration("CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL", 2*time.Minute),
 			NotificationProcessInterval: getEnvDuration("CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL", 1*time.Minute),
+			RetryInterval:               getEnvDuration("CERTCTL_SCHEDULER_RETRY_INTERVAL", 5*time.Minute),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
@@ -1072,6 +1081,10 @@ func (c *Config) Validate() error {
 
 	if c.Scheduler.NotificationProcessInterval < 1*time.Second {
 		return fmt.Errorf("notification process interval must be at least 1 second")
+	}
+
+	if c.Scheduler.RetryInterval < 1*time.Second {
+		return fmt.Errorf("retry interval must be at least 1 second")
 	}
 
 	return nil
