@@ -1036,8 +1036,8 @@ type mockTargetService struct {
 	auditService *service.AuditService
 }
 
-func (m *mockTargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
-	targets, err := m.targetRepo.List(context.Background())
+func (m *mockTargetService) ListTargets(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+	targets, err := m.targetRepo.List(ctx)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -1048,30 +1048,30 @@ func (m *mockTargetService) ListTargets(page, perPage int) ([]domain.DeploymentT
 	return result, int64(len(result)), nil
 }
 
-func (m *mockTargetService) GetTarget(id string) (*domain.DeploymentTarget, error) {
-	return m.targetRepo.Get(context.Background(), id)
+func (m *mockTargetService) GetTarget(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
+	return m.targetRepo.Get(ctx, id)
 }
 
-func (m *mockTargetService) CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
-	if err := m.targetRepo.Create(context.Background(), &target); err != nil {
+func (m *mockTargetService) CreateTarget(ctx context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+	if err := m.targetRepo.Create(ctx, &target); err != nil {
 		return nil, err
 	}
 	return &target, nil
 }
 
-func (m *mockTargetService) UpdateTarget(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+func (m *mockTargetService) UpdateTarget(ctx context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 	target.ID = id
-	if err := m.targetRepo.Update(context.Background(), &target); err != nil {
+	if err := m.targetRepo.Update(ctx, &target); err != nil {
 		return nil, err
 	}
 	return &target, nil
 }
 
-func (m *mockTargetService) DeleteTarget(id string) error {
-	return m.targetRepo.Delete(context.Background(), id)
+func (m *mockTargetService) DeleteTarget(ctx context.Context, id string) error {
+	return m.targetRepo.Delete(ctx, id)
 }
 
-func (m *mockTargetService) TestTargetConnection(id string) error {
+func (m *mockTargetService) TestConnection(ctx context.Context, id string) error {
 	return nil // No-op for integration tests
 }
 

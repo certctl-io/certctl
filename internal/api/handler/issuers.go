@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"net/http"
@@ -13,12 +14,12 @@ import (
 
 // IssuerService defines the service interface for issuer operations.
 type IssuerService interface {
-	ListIssuers(page, perPage int) ([]domain.Issuer, int64, error)
-	GetIssuer(id string) (*domain.Issuer, error)
-	CreateIssuer(issuer domain.Issuer) (*domain.Issuer, error)
-	UpdateIssuer(id string, issuer domain.Issuer) (*domain.Issuer, error)
-	DeleteIssuer(id string) error
-	TestConnection(id string) error
+	ListIssuers(ctx context.Context, page, perPage int) ([]domain.Issuer, int64, error)
+	GetIssuer(ctx context.Context, id string) (*domain.Issuer, error)
+	CreateIssuer(ctx context.Context, issuer domain.Issuer) (*domain.Issuer, error)
+	UpdateIssuer(ctx context.Context, id string, issuer domain.Issuer) (*domain.Issuer, error)
+	DeleteIssuer(ctx context.Context, id string) error
+	TestConnection(ctx context.Context, id string) error
 }
 
 // IssuerHandler handles HTTP requests for issuer operations.
@@ -61,7 +62,7 @@ func (h IssuerHandler) ListIssuers(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	issuers, total, err := h.svc.ListIssuers(page, perPage)
+	issuers, total, err := h.svc.ListIssuers(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list issuers", requestID)
 		return
@@ -93,7 +94,7 @@ func (h IssuerHandler) GetIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issuer, err := h.svc.GetIssuer(id)
+	issuer, err := h.svc.GetIssuer(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Issuer not found", requestID)
 		return
@@ -132,7 +133,7 @@ func (h IssuerHandler) CreateIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreateIssuer(issuer)
+	created, err := h.svc.CreateIssuer(r.Context(), issuer)
 	if err != nil {
 		h.logger.Error("failed to create issuer", "error", err, "name", issuer.Name, "type", issuer.Type)
 		errMsg := err.Error()
@@ -174,7 +175,7 @@ func (h IssuerHandler) UpdateIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.UpdateIssuer(id, issuer)
+	updated, err := h.svc.UpdateIssuer(r.Context(), id, issuer)
 	if err != nil {
 		h.logger.Error("failed to update issuer", "error", err, "id", id)
 		errMsg := err.Error()
@@ -208,7 +209,7 @@ func (h IssuerHandler) DeleteIssuer(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.DeleteIssuer(id); err != nil {
+	if err := h.svc.DeleteIssuer(r.Context(), id); err != nil {
 		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
 			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete issuer: certificates are still using this issuer", requestID)
 		} else if strings.Contains(err.Error(), "not found") {
@@ -241,7 +242,7 @@ func (h IssuerHandler) TestConnection(w http.ResponseWriter, r *http.Request) {
 	}
 	issuerID := parts[0]
 
-	if err := h.svc.TestConnection(issuerID); err != nil {
+	if err := h.svc.TestConnection(r.Context(), issuerID); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Connection test failed", requestID)
 		return
 	}

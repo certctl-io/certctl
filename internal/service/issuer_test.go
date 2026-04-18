@@ -484,10 +484,10 @@ func TestIssuerService_TestConnection_Success(t *testing.T) {
 
 	svc := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
-	err := svc.TestConnectionWithContext(ctx, "iss-test-conn")
+	err := svc.TestConnection(ctx, "iss-test-conn")
 
 	if err != nil {
-		t.Fatalf("TestConnectionWithContext failed: %v", err)
+		t.Fatalf("TestConnection failed: %v", err)
 	}
 }
 
@@ -502,7 +502,7 @@ func TestIssuerService_TestConnection_NotFound(t *testing.T) {
 	registry := NewIssuerRegistry(slog.Default())
 	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
-	err := service.TestConnectionWithContext(ctx, "nonexistent-issuer")
+	err := service.TestConnection(ctx, "nonexistent-issuer")
 
 	if err == nil {
 		t.Fatal("expected error for nonexistent issuer")
@@ -542,7 +542,8 @@ func TestIssuerService_ListIssuers_HandlerInterface(t *testing.T) {
 
 	service := NewIssuerService(repo, auditService, NewIssuerRegistry(slog.Default()), "", slog.Default())
 
-	issuers, total, err := service.ListIssuers(1, 50)
+	ctx := context.Background()
+	issuers, total, err := service.ListIssuers(ctx, 1, 50)
 
 	if err != nil {
 		t.Fatalf("ListIssuers failed: %v", err)
@@ -580,7 +581,8 @@ func TestIssuerService_CreateIssuer_HandlerInterface(t *testing.T) {
 		Enabled: true,
 	}
 
-	result, err := service.CreateIssuer(issuer)
+	ctx := context.Background()
+	result, err := service.CreateIssuer(ctx, issuer)
 
 	if err != nil {
 		t.Fatalf("CreateIssuer failed: %v", err)
@@ -608,7 +610,8 @@ func TestIssuerService_DeleteIssuer_HandlerInterface(t *testing.T) {
 	registry := NewIssuerRegistry(slog.Default())
 	service := NewIssuerService(repo, auditService, registry, "", slog.Default())
 
-	err := service.DeleteIssuer("iss-handler-delete")
+	ctx := context.Background()
+	err := service.DeleteIssuer(ctx, "iss-handler-delete")
 
 	if err != nil {
 		t.Fatalf("DeleteIssuer failed: %v", err)
@@ -722,7 +725,8 @@ func TestIssuerService_CreateIssuer_LowercaseType(t *testing.T) {
 		Enabled: true,
 	}
 
-	result, err := service.CreateIssuer(issuer)
+	ctx := context.Background()
+	result, err := service.CreateIssuer(ctx, issuer)
 	if err != nil {
 		t.Fatalf("CreateIssuer with lowercase 'stepca' should succeed, got: %v", err)
 	}

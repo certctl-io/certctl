@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -15,52 +16,52 @@ import (
 
 // MockIssuerService is a mock implementation of IssuerService interface.
 type MockIssuerService struct {
-	ListIssuersFn    func(page, perPage int) ([]domain.Issuer, int64, error)
-	GetIssuerFn      func(id string) (*domain.Issuer, error)
-	CreateIssuerFn   func(issuer domain.Issuer) (*domain.Issuer, error)
-	UpdateIssuerFn   func(id string, issuer domain.Issuer) (*domain.Issuer, error)
-	DeleteIssuerFn   func(id string) error
-	TestConnectionFn func(id string) error
+	ListIssuersFn    func(ctx context.Context, page, perPage int) ([]domain.Issuer, int64, error)
+	GetIssuerFn      func(ctx context.Context, id string) (*domain.Issuer, error)
+	CreateIssuerFn   func(ctx context.Context, issuer domain.Issuer) (*domain.Issuer, error)
+	UpdateIssuerFn   func(ctx context.Context, id string, issuer domain.Issuer) (*domain.Issuer, error)
+	DeleteIssuerFn   func(ctx context.Context, id string) error
+	TestConnectionFn func(ctx context.Context, id string) error
 }
 
-func (m *MockIssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, error) {
+func (m *MockIssuerService) ListIssuers(ctx context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
 	if m.ListIssuersFn != nil {
-		return m.ListIssuersFn(page, perPage)
+		return m.ListIssuersFn(ctx, page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockIssuerService) GetIssuer(id string) (*domain.Issuer, error) {
+func (m *MockIssuerService) GetIssuer(ctx context.Context, id string) (*domain.Issuer, error) {
 	if m.GetIssuerFn != nil {
-		return m.GetIssuerFn(id)
+		return m.GetIssuerFn(ctx, id)
 	}
 	return nil, nil
 }
 
-func (m *MockIssuerService) CreateIssuer(issuer domain.Issuer) (*domain.Issuer, error) {
+func (m *MockIssuerService) CreateIssuer(ctx context.Context, issuer domain.Issuer) (*domain.Issuer, error) {
 	if m.CreateIssuerFn != nil {
-		return m.CreateIssuerFn(issuer)
+		return m.CreateIssuerFn(ctx, issuer)
 	}
 	return nil, nil
 }
 
-func (m *MockIssuerService) UpdateIssuer(id string, issuer domain.Issuer) (*domain.Issuer, error) {
+func (m *MockIssuerService) UpdateIssuer(ctx context.Context, id string, issuer domain.Issuer) (*domain.Issuer, error) {
 	if m.UpdateIssuerFn != nil {
-		return m.UpdateIssuerFn(id, issuer)
+		return m.UpdateIssuerFn(ctx, id, issuer)
 	}
 	return nil, nil
 }
 
-func (m *MockIssuerService) DeleteIssuer(id string) error {
+func (m *MockIssuerService) DeleteIssuer(ctx context.Context, id string) error {
 	if m.DeleteIssuerFn != nil {
-		return m.DeleteIssuerFn(id)
+		return m.DeleteIssuerFn(ctx, id)
 	}
 	return nil
 }
 
-func (m *MockIssuerService) TestConnection(id string) error {
+func (m *MockIssuerService) TestConnection(ctx context.Context, id string) error {
 	if m.TestConnectionFn != nil {
-		return m.TestConnectionFn(id)
+		return m.TestConnectionFn(ctx, id)
 	}
 	return nil
 }
@@ -85,7 +86,7 @@ func TestListIssuers_Success(t *testing.T) {
 	}
 
 	mock := &MockIssuerService{
-		ListIssuersFn: func(page, perPage int) ([]domain.Issuer, int64, error) {
+		ListIssuersFn: func(_ context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
 			return []domain.Issuer{iss1, iss2}, 2, nil
 		},
 	}
@@ -113,7 +114,7 @@ func TestListIssuers_Success(t *testing.T) {
 func TestListIssuers_Pagination(t *testing.T) {
 	var capturedPage, capturedPerPage int
 	mock := &MockIssuerService{
-		ListIssuersFn: func(page, perPage int) ([]domain.Issuer, int64, error) {
+		ListIssuersFn: func(_ context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
 			capturedPage = page
 			capturedPerPage = perPage
 			return []domain.Issuer{}, 0, nil
@@ -137,7 +138,7 @@ func TestListIssuers_Pagination(t *testing.T) {
 
 func TestListIssuers_ServiceError(t *testing.T) {
 	mock := &MockIssuerService{
-		ListIssuersFn: func(page, perPage int) ([]domain.Issuer, int64, error) {
+		ListIssuersFn: func(_ context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
 			return nil, 0, ErrMockServiceFailed
 		},
 	}
@@ -169,7 +170,7 @@ func TestListIssuers_MethodNotAllowed(t *testing.T) {
 func TestGetIssuer_Success(t *testing.T) {
 	now := time.Now()
 	mock := &MockIssuerService{
-		GetIssuerFn: func(id string) (*domain.Issuer, error) {
+		GetIssuerFn: func(_ context.Context, id string) (*domain.Issuer, error) {
 			return &domain.Issuer{
 				ID:        id,
 				Name:      "Local CA",
@@ -195,7 +196,7 @@ func TestGetIssuer_Success(t *testing.T) {
 
 func TestGetIssuer_NotFound(t *testing.T) {
 	mock := &MockIssuerService{
-		GetIssuerFn: func(id string) (*domain.Issuer, error) {
+		GetIssuerFn: func(_ context.Context, id string) (*domain.Issuer, error) {
 			return nil, ErrMockNotFound
 		},
 	}
@@ -228,7 +229,7 @@ func TestGetIssuer_EmptyID(t *testing.T) {
 func TestCreateIssuer_Success(t *testing.T) {
 	now := time.Now()
 	mock := &MockIssuerService{
-		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+		CreateIssuerFn: func(_ context.Context, issuer domain.Issuer) (*domain.Issuer, error) {
 			issuer.ID = "iss-new"
 			issuer.CreatedAt = now
 			issuer.UpdatedAt = now
@@ -328,7 +329,7 @@ func TestCreateIssuer_NameTooLong(t *testing.T) {
 
 func TestCreateIssuer_DuplicateName(t *testing.T) {
 	mock := &MockIssuerService{
-		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+		CreateIssuerFn: func(_ context.Context, issuer domain.Issuer) (*domain.Issuer, error) {
 			return nil, fmt.Errorf("failed to create issuer: duplicate key value violates unique constraint \"issuers_name_key\"")
 		},
 	}
@@ -361,7 +362,7 @@ func TestCreateIssuer_DuplicateName(t *testing.T) {
 
 func TestCreateIssuer_UnsupportedType(t *testing.T) {
 	mock := &MockIssuerService{
-		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+		CreateIssuerFn: func(_ context.Context, issuer domain.Issuer) (*domain.Issuer, error) {
 			return nil, fmt.Errorf("unsupported issuer type: FakeCA")
 		},
 	}
@@ -394,7 +395,7 @@ func TestCreateIssuer_UnsupportedType(t *testing.T) {
 
 func TestCreateIssuer_GenericServiceError(t *testing.T) {
 	mock := &MockIssuerService{
-		CreateIssuerFn: func(issuer domain.Issuer) (*domain.Issuer, error) {
+		CreateIssuerFn: func(_ context.Context, issuer domain.Issuer) (*domain.Issuer, error) {
 			return nil, fmt.Errorf("failed to encrypt config: cipher error")
 		},
 	}
@@ -419,7 +420,7 @@ func TestCreateIssuer_GenericServiceError(t *testing.T) {
 
 func TestUpdateIssuer_DuplicateName(t *testing.T) {
 	mock := &MockIssuerService{
-		UpdateIssuerFn: func(id string, issuer domain.Issuer) (*domain.Issuer, error) {
+		UpdateIssuerFn: func(_ context.Context, id string, issuer domain.Issuer) (*domain.Issuer, error) {
 			return nil, fmt.Errorf("failed to update issuer: duplicate key value violates unique constraint")
 		},
 	}
@@ -445,7 +446,7 @@ func TestUpdateIssuer_DuplicateName(t *testing.T) {
 func TestDeleteIssuer_Success(t *testing.T) {
 	var deletedID string
 	mock := &MockIssuerService{
-		DeleteIssuerFn: func(id string) error {
+		DeleteIssuerFn: func(_ context.Context, id string) error {
 			deletedID = id
 			return nil
 		},
@@ -468,7 +469,7 @@ func TestDeleteIssuer_Success(t *testing.T) {
 
 func TestDeleteIssuer_ServiceError(t *testing.T) {
 	mock := &MockIssuerService{
-		DeleteIssuerFn: func(id string) error {
+		DeleteIssuerFn: func(_ context.Context, id string) error {
 			return ErrMockServiceFailed
 		},
 	}
@@ -487,7 +488,7 @@ func TestDeleteIssuer_ServiceError(t *testing.T) {
 
 func TestTestConnection_Success(t *testing.T) {
 	mock := &MockIssuerService{
-		TestConnectionFn: func(id string) error {
+		TestConnectionFn: func(_ context.Context, id string) error {
 			return nil
 		},
 	}
@@ -514,7 +515,7 @@ func TestTestConnection_Success(t *testing.T) {
 
 func TestTestConnection_Failure(t *testing.T) {
 	mock := &MockIssuerService{
-		TestConnectionFn: func(id string) error {
+		TestConnectionFn: func(_ context.Context, id string) error {
 			return ErrMockServiceFailed
 		},
 	}

@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"strconv"
@@ -12,12 +13,12 @@ import (
 
 // TargetService defines the service interface for deployment target operations.
 type TargetService interface {
-	ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error)
-	GetTarget(id string) (*domain.DeploymentTarget, error)
-	CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	UpdateTarget(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	DeleteTarget(id string) error
-	TestTargetConnection(id string) error
+	ListTargets(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error)
+	GetTarget(ctx context.Context, id string) (*domain.DeploymentTarget, error)
+	CreateTarget(ctx context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	UpdateTarget(ctx context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	DeleteTarget(ctx context.Context, id string) error
+	TestConnection(ctx context.Context, id string) error
 }
 
 // TargetHandler handles HTTP requests for deployment target operations.
@@ -54,7 +55,7 @@ func (h TargetHandler) ListTargets(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	targets, total, err := h.svc.ListTargets(page, perPage)
+	targets, total, err := h.svc.ListTargets(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list targets", requestID)
 		return
@@ -86,7 +87,7 @@ func (h TargetHandler) GetTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	target, err := h.svc.GetTarget(id)
+	target, err := h.svc.GetTarget(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Target not found", requestID)
 		return
@@ -125,7 +126,7 @@ func (h TargetHandler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	created, err := h.svc.CreateTarget(target)
+	created, err := h.svc.CreateTarget(r.Context(), target)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create target", requestID)
 		return
@@ -158,7 +159,7 @@ func (h TargetHandler) UpdateTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	updated, err := h.svc.UpdateTarget(id, target)
+	updated, err := h.svc.UpdateTarget(r.Context(), id, target)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update target", requestID)
 		return
@@ -183,7 +184,7 @@ func (h TargetHandler) DeleteTarget(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := h.svc.DeleteTarget(id); err != nil {
+	if err := h.svc.DeleteTarget(r.Context(), id); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete target", requestID)
 		return
 	}
@@ -210,7 +211,7 @@ func (h TargetHandler) TestTargetConnection(w http.ResponseWriter, r *http.Reque
 	}
 	id := parts[0]
 
-	if err := h.svc.TestTargetConnection(id); err != nil {
+	if err := h.svc.TestConnection(r.Context(), id); err != nil {
 		JSON(w, http.StatusOK, map[string]interface{}{
 			"status":  "failed",
 			"message": err.Error(),
