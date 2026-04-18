@@ -176,13 +176,13 @@ func TestAgentService_HeartbeatWithCancelledContext(t *testing.T) {
 		nil, // renewalService
 	)
 
-	err := agentSvc.HeartbeatWithContext(ctx, "agent-1", &domain.AgentMetadata{})
+	err := agentSvc.Heartbeat(ctx, "agent-1", &domain.AgentMetadata{})
 
 	// Service should handle cancelled context
 	if err == nil || ctx.Err() == context.Canceled {
 		return
 	}
-	t.Logf("HeartbeatWithContext with cancelled context returned: %v", err)
+	t.Logf("Heartbeat with cancelled context returned: %v", err)
 }
 
 // Test with timeout context (should trigger deadline exceeded)
@@ -229,11 +229,11 @@ func TestAgentService_HeartbeatWithDeadlineExceeded(t *testing.T) {
 
 	time.Sleep(10 * time.Millisecond) // Ensure deadline is exceeded
 
-	err := agentSvc.HeartbeatWithContext(ctx, "agent-1", &domain.AgentMetadata{})
+	err := agentSvc.Heartbeat(ctx, "agent-1", &domain.AgentMetadata{})
 
 	// Service should handle deadline exceeded
 	if err == nil || ctx.Err() == context.DeadlineExceeded {
 		return
 	}
-	t.Logf("HeartbeatWithContext with deadline exceeded returned: %v", err)
+	t.Logf("Heartbeat with deadline exceeded returned: %v", err)
 }

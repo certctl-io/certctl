@@ -92,7 +92,7 @@ func TestHeartbeat(t *testing.T) {
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
-	err := agentService.HeartbeatWithContext(ctx, "agent-001", nil)
+	err := agentService.Heartbeat(ctx, "agent-001", nil)
 	if err != nil {
 		t.Fatalf("Heartbeat failed: %v", err)
 	}
@@ -125,7 +125,7 @@ func TestHeartbeat_NotFound(t *testing.T) {
 
 	agentService := NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, nil)
 
-	err := agentService.HeartbeatWithContext(ctx, "nonexistent", nil)
+	err := agentService.Heartbeat(ctx, "nonexistent", nil)
 	if err == nil {
 		t.Fatal("expected error for nonexistent agent")
 	}

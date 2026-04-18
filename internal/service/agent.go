@@ -91,8 +91,8 @@ func (s *AgentService) Register(ctx context.Context, name string, hostname strin
 	return agent, apiKey, nil
 }
 
-// HeartbeatWithContext updates an agent's last seen time, status, and metadata.
-func (s *AgentService) HeartbeatWithContext(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error {
+// Heartbeat updates an agent's last seen time, status, and metadata.
+func (s *AgentService) Heartbeat(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error {
 	agent, err := s.agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch agent: %w", err)
@@ -112,12 +112,6 @@ func (s *AgentService) HeartbeatWithContext(ctx context.Context, agentID string,
 	}
 
 	return nil
-}
-
-// Heartbeat updates agent heartbeat (handler interface method).
-// Note: This method is called from handlers which have a context; callers should prefer HeartbeatWithContext.
-func (s *AgentService) Heartbeat(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error {
-	return s.HeartbeatWithContext(ctx, agentID, metadata)
 }
 
 // SubmitCSR validates and processes a Certificate Signing Request from an agent.

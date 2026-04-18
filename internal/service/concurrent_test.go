@@ -159,7 +159,7 @@ func TestConcurrentAgentHeartbeats(t *testing.T) {
 				Architecture: "x86_64",
 			}
 
-			err := agentSvc.HeartbeatWithContext(ctx, agentID, metadata)
+			err := agentSvc.Heartbeat(ctx, agentID, metadata)
 			if err != nil {
 				errChan <- fmt.Errorf("goroutine %d: failed heartbeat for agent %s: %w", idx, agentID, err)
 				return
