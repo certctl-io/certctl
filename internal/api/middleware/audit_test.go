@@ -269,8 +269,9 @@ func TestAuditLog_ExtractsAuthenticatedActor(t *testing.T) {
 	}))
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/certificates/mc-1", nil)
-	// Simulate auth middleware having set the user in context
-	ctx := context.WithValue(req.Context(), UserKey{}, "api-key-user")
+	// Simulate auth middleware having set the named-key identity in context
+	// (post-M-002: actor is the named-key name, not the old "api-key-user").
+	ctx := context.WithValue(req.Context(), UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()
@@ -284,8 +285,8 @@ func TestAuditLog_ExtractsAuthenticatedActor(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 audit call, got %d", len(calls))
 	}
-	if calls[0].Actor != "api-key-user" {
-		t.Errorf("expected actor api-key-user, got %s", calls[0].Actor)
+	if calls[0].Actor != "ops-admin" {
+		t.Errorf("expected actor ops-admin, got %s", calls[0].Actor)
 	}
 	if calls[0].Method != "DELETE" {
 		t.Errorf("expected method DELETE, got %s", calls[0].Method)

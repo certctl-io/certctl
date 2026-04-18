@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"strconv"
@@ -10,6 +11,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // JobService defines the service interface for job operations.
@@ -17,8 +19,13 @@ type JobService interface {
 	ListJobs(ctx context.Context, status, jobType string, page, perPage int) ([]domain.Job, int64, error)
 	GetJob(ctx context.Context, id string) (*domain.Job, error)
 	CancelJob(ctx context.Context, id string) error
-	ApproveJob(ctx context.Context, id string) error
-	RejectJob(ctx context.Context, id string, reason string) error
+	// ApproveJob approves a renewal job. actor is the named-key identity
+	// resolved from the auth middleware; the service returns ErrSelfApproval
+	// (mapped to 403) when actor matches the certificate owner.
+	ApproveJob(ctx context.Context, id, actor string) error
+	// RejectJob rejects a renewal job. actor is the named-key identity
+	// recorded for audit attribution; no not-self restriction.
+	RejectJob(ctx context.Context, id, reason, actor string) error
 }
 
 // JobHandler handles HTTP requests for job operations.
@@ -150,7 +157,16 @@ func (h JobHandler) ApproveJob(w http.ResponseWriter, r *http.Request) {
 	}
 	jobID := parts[0]
 
-	if err := h.svc.ApproveJob(r.Context(), jobID); err != nil {
+	actor := resolveActor(r.Context())
+
+	if err := h.svc.ApproveJob(r.Context(), jobID, actor); err != nil {
+		// M-003: self-approval by the certificate owner is forbidden.
+		if errors.Is(err, service.ErrSelfApproval) {
+			ErrorWithRequestID(w, http.StatusForbidden,
+				"Self-approval is forbidden: the certificate owner cannot approve their own renewal",
+				requestID)
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return
@@ -194,7 +210,9 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	if err := h.svc.RejectJob(r.Context(), jobID, body.Reason); err != nil {
+	actor := resolveActor(r.Context())
+
+	if err := h.svc.RejectJob(r.Context(), jobID, body.Reason, actor); err != nil {
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return

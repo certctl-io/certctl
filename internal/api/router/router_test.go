@@ -138,10 +138,9 @@ func TestRegisterHandlers_RoutesDispatch(t *testing.T) {
 		// Export
 		{"GET", "/api/v1/certificates/mc-test/export/pem"},
 
-		// CRL & OCSP
-		{"GET", "/api/v1/crl"},
-		{"GET", "/api/v1/crl/iss-local"},
-		{"GET", "/api/v1/ocsp/iss-local/12345"},
+		// NOTE: CRL/OCSP moved out of /api/v1/* in M-006. They are now served
+		// unauthenticated at /.well-known/pki/* via RegisterPKIHandlers and
+		// are verified in TestRegisterPKIHandlers_AllPaths below.
 
 		// Issuers
 		{"GET", "/api/v1/issuers"},
@@ -331,6 +330,60 @@ func TestRegisterESTHandlers_AllPaths(t *testing.T) {
 			}
 			if w.Code == http.StatusMethodNotAllowed {
 				t.Errorf("EST route %s %s returned 405", tc.method, tc.path)
+			}
+		})
+	}
+}
+
+// TestRegisterPKIHandlers_AllPaths verifies that RegisterPKIHandlers registers
+// the two RFC-compliant unauthenticated endpoints relocated in M-006:
+//
+//   - GET /.well-known/pki/crl/{issuer_id}    (RFC 5280 §5 DER CRL)
+//   - GET /.well-known/pki/ocsp/{issuer_id}/{serial}  (RFC 6960 §2.1 OCSP)
+//
+// Registration and middleware gating are complementary: this test proves the
+// router matches the path; the unauthenticated contract is enforced separately
+// by cmd/server/main.go's finalHandler routing /.well-known/pki/* through the
+// noAuthHandler.
+func TestRegisterPKIHandlers_AllPaths(t *testing.T) {
+	r := New()
+
+	// Zero-value CertificateHandler will panic on real calls; the only thing
+	// this test is verifying is that the route dispatches (i.e. the URL
+	// pattern is registered), so catch the downstream panic.
+	recoverMW := func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			defer func() {
+				if rv := recover(); rv != nil {
+					w.WriteHeader(http.StatusOK)
+				}
+			}()
+			next.ServeHTTP(w, r)
+		})
+	}
+
+	r.RegisterPKIHandlers(handler.CertificateHandler{})
+	testHandler := recoverMW(r)
+
+	routes := []struct {
+		method string
+		path   string
+	}{
+		{"GET", "/.well-known/pki/crl/iss-local"},
+		{"GET", "/.well-known/pki/ocsp/iss-local/01ABCDEF"},
+	}
+
+	for _, tc := range routes {
+		t.Run(tc.method+" "+tc.path, func(t *testing.T) {
+			req := httptest.NewRequest(tc.method, tc.path, nil)
+			w := httptest.NewRecorder()
+			testHandler.ServeHTTP(w, req)
+
+			if w.Code == http.StatusNotFound {
+				t.Errorf("PKI route %s %s returned 404 — route not registered", tc.method, tc.path)
+			}
+			if w.Code == http.StatusMethodNotAllowed {
+				t.Errorf("PKI route %s %s returned 405", tc.method, tc.path)
 			}
 		})
 	}

@@ -286,9 +286,11 @@ curl -s -X POST http://localhost:8443/api/v1/certificates/$CERT_ID/revoke \
 
 Supported RFC 5280 reason codes: `unspecified`, `keyCompromise`, `caCompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `privilegeWithdrawn`.
 
-Confirm via CRL:
+Confirm via the unauthenticated DER CRL (RFC 5280 §5, RFC 8615):
 ```bash
-curl -s http://localhost:8443/api/v1/crl | jq .
+# Fetch the CRL without any API key — relying parties shouldn't need one.
+curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
+openssl crl -inform der -in /tmp/crl.der -noout -text | head -40
 ```
 
 ### Interactive approval workflow

@@ -1018,127 +1018,13 @@ func TestRevokeCertificate_Handler_ServerError(t *testing.T) {
 	}
 }
 
-// === CRL Handler Tests ===
-
-func TestGetCRL_Success(t *testing.T) {
-	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
-			return []*domain.CertificateRevocation{
-				{
-					ID:            "rev-1",
-					CertificateID: "cert-1",
-					SerialNumber:  "ABC123",
-					Reason:        "keyCompromise",
-					RevokedAt:     time.Date(2026, 3, 20, 10, 0, 0, 0, time.UTC),
-				},
-				{
-					ID:            "rev-2",
-					CertificateID: "cert-2",
-					SerialNumber:  "DEF456",
-					Reason:        "superseded",
-					RevokedAt:     time.Date(2026, 3, 21, 14, 30, 0, 0, time.UTC),
-				},
-			}, nil
-		},
-	}
-
-	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-
-	handler.GetCRL(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-
-	if resp["version"] != float64(1) {
-		t.Errorf("expected version 1, got %v", resp["version"])
-	}
-	if resp["total"] != float64(2) {
-		t.Errorf("expected total 2, got %v", resp["total"])
-	}
-
-	entries, ok := resp["entries"].([]interface{})
-	if !ok {
-		t.Fatal("expected entries to be an array")
-	}
-	if len(entries) != 2 {
-		t.Errorf("expected 2 entries, got %d", len(entries))
-	}
-
-	entry1 := entries[0].(map[string]interface{})
-	if entry1["serial_number"] != "ABC123" {
-		t.Errorf("expected serial ABC123, got %v", entry1["serial_number"])
-	}
-	if entry1["revocation_reason"] != "keyCompromise" {
-		t.Errorf("expected reason keyCompromise, got %v", entry1["revocation_reason"])
-	}
-}
-
-func TestGetCRL_Empty(t *testing.T) {
-	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
-			return nil, nil
-		},
-	}
-
-	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-
-	handler.GetCRL(w, req)
-
-	if w.Code != http.StatusOK {
-		t.Errorf("expected status %d, got %d", http.StatusOK, w.Code)
-	}
-
-	var resp map[string]interface{}
-	json.NewDecoder(w.Body).Decode(&resp)
-	if resp["total"] != float64(0) {
-		t.Errorf("expected total 0, got %v", resp["total"])
-	}
-}
-
-func TestGetCRL_ServiceError(t *testing.T) {
-	mock := &MockCertificateService{
-		GetRevokedCertificatesFn: func(_ context.Context) ([]*domain.CertificateRevocation, error) {
-			return nil, fmt.Errorf("revocation repository not configured")
-		},
-	}
-
-	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl", nil)
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-
-	handler.GetCRL(w, req)
-
-	if w.Code != http.StatusInternalServerError {
-		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
-	}
-}
-
-func TestGetCRL_MethodNotAllowed(t *testing.T) {
-	mock := &MockCertificateService{}
-	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/crl", nil)
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-
-	handler.GetCRL(w, req)
-
-	if w.Code != http.StatusMethodNotAllowed {
-		t.Errorf("expected status %d, got %d", http.StatusMethodNotAllowed, w.Code)
-	}
-}
-
-// M15b: DER CRL and OCSP Handler Tests
+// === CRL and OCSP Handler Tests (RFC 5280 / RFC 6960, served under /.well-known/pki/) ===
+//
+// M-006 relocated these endpoints from /api/v1/crl* and /api/v1/ocsp/* to the
+// RFC-compliant /.well-known/pki/ namespace and deleted the non-standard JSON
+// CRL endpoint. The DER-encoded X.509 CRL (application/pkix-crl) and the
+// DER-encoded OCSP response (application/ocsp-response) are the only wire
+// formats certctl supports for revocation data.
 
 func TestGetDERCRL_Success(t *testing.T) {
 	derCRLData := []byte{0x30, 0x82, 0x01, 0x00} // Mock DER CRL bytes
@@ -1152,7 +1038,7 @@ func TestGetDERCRL_Success(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/iss-local", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/crl/iss-local", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1167,6 +1053,9 @@ func TestGetDERCRL_Success(t *testing.T) {
 	if len(responseBody) == 0 {
 		t.Error("expected non-empty response body")
 	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/pkix-crl" {
+		t.Errorf("expected Content-Type application/pkix-crl, got %q", ct)
+	}
 }
 
 func TestGetDERCRL_IssuerNotFound(t *testing.T) {
@@ -1177,7 +1066,7 @@ func TestGetDERCRL_IssuerNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/nonexistent", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/crl/nonexistent", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1196,7 +1085,7 @@ func TestGetDERCRL_NotSupported(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/iss-acme", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/crl/iss-acme", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1211,7 +1100,7 @@ func TestGetDERCRL_NotSupported(t *testing.T) {
 func TestGetDERCRL_MethodNotAllowed(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/crl/iss-local", nil)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/crl/iss-local", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1234,7 +1123,7 @@ func TestHandleOCSP_Success(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/12345", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/ocsp/iss-local/12345", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1248,12 +1137,15 @@ func TestHandleOCSP_Success(t *testing.T) {
 	if len(responseBody) == 0 {
 		t.Error("expected non-empty OCSP response body")
 	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/ocsp-response" {
+		t.Errorf("expected Content-Type application/ocsp-response, got %q", ct)
+	}
 }
 
 func TestHandleOCSP_MissingSerial(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/ocsp/iss-local/", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1272,7 +1164,7 @@ func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/nonexistent/ABC123", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/ocsp/nonexistent/ABC123", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1291,7 +1183,7 @@ func TestHandleOCSP_CertNotFound(t *testing.T) {
 	}
 
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/ocsp/iss-local/UNKNOWN", nil)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/ocsp/iss-local/UNKNOWN", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 
@@ -1305,7 +1197,7 @@ func TestHandleOCSP_CertNotFound(t *testing.T) {
 func TestHandleOCSP_MethodNotAllowed(t *testing.T) {
 	mock := &MockCertificateService{}
 	handler := NewCertificateHandler(mock)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/ocsp/iss-local/12345", nil)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local/12345", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
 

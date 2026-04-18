@@ -2,6 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
 import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getTeams, getPolicies, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
+import { useAuth } from '../components/AuthProvider';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -366,6 +367,10 @@ function BulkReassignModal({ ids, onClose, onSuccess }: { ids: string[]; onClose
 export default function CertificatesPage() {
   const navigate = useNavigate();
   const queryClient = useQueryClient();
+  // M-003: bulk revocation is admin-only. The backend rejects non-admin callers
+  // with 403, but we also hide the button in the GUI to avoid a misleading
+  // affordance. Authoritative gate remains server-side.
+  const { admin } = useAuth();
   const [statusFilter, setStatusFilter] = useState('');
   const [envFilter, setEnvFilter] = useState('');
   const [issuerFilter, setIssuerFilter] = useState('');
@@ -467,10 +472,12 @@ export default function CertificatesPage() {
                 ? `Renewing (${bulkRenewProgress.done}/${bulkRenewProgress.total})...`
                 : 'Trigger Renewal'}
             </button>
-            <button onClick={() => setShowBulkRevoke(true)}
-              className="btn btn-ghost text-xs text-amber-400 hover:text-amber-300 border border-amber-600/50">
-              Revoke
-            </button>
+            {admin && (
+              <button onClick={() => setShowBulkRevoke(true)}
+                className="btn btn-ghost text-xs text-amber-400 hover:text-amber-300 border border-amber-600/50">
+                Revoke
+              </button>
+            )}
             <button onClick={() => setShowBulkReassign(true)}
               className="btn btn-ghost text-xs text-brand-400 hover:text-brand-300 border border-brand-600/50">
               Reassign Owner

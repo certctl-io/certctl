@@ -26,6 +26,7 @@
 package integration_test
 
 import (
+	"crypto/x509"
 	"database/sql"
 	"encoding/json"
 	"io"
@@ -596,13 +597,37 @@ func TestQA(t *testing.T) {
 			}
 		})
 
-		t.Run("CRL_JSON", func(t *testing.T) {
-			code, body := c.bodyStr(t, "GET", "/api/v1/crl", "")
-			if code != 200 {
-				t.Fatalf("CRL = %d", code)
+		// M-006: The non-standard JSON CRL endpoint was removed. RFC 5280 §5
+		// defines only the DER wire format, now served unauthenticated at
+		// `/.well-known/pki/crl/{issuer_id}` per RFC 8615. Use a plain
+		// http.Get — no Bearer — to prove the endpoint is reachable by
+		// relying parties with no API credentials.
+		t.Run("CRL_DER_Unauthenticated", func(t *testing.T) {
+			resp, err := http.Get(qaServerURL + "/.well-known/pki/crl/iss-local")
+			if err != nil {
+				t.Fatalf("GET DER CRL: %v", err)
 			}
-			if !strings.Contains(body, "entries") {
-				t.Fatalf("CRL response missing entries field")
+			defer resp.Body.Close()
+			if resp.StatusCode != 200 {
+				b, _ := io.ReadAll(resp.Body)
+				t.Fatalf("CRL = %d (body=%s)", resp.StatusCode, string(b))
+			}
+			if ct := resp.Header.Get("Content-Type"); ct != "application/pkix-crl" {
+				t.Errorf("Content-Type: got %q, want %q", ct, "application/pkix-crl")
+			}
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read CRL body: %v", err)
+			}
+			if len(body) == 0 {
+				t.Fatal("CRL body empty")
+			}
+			crl, err := x509.ParseRevocationList(body)
+			if err != nil {
+				t.Fatalf("parse DER CRL: %v", err)
+			}
+			if len(crl.RevokedCertificateEntries) < 1 {
+				t.Fatalf("CRL entries: got %d, want >= 1", len(crl.RevokedCertificateEntries))
 			}
 		})
 	})

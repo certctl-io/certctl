@@ -217,24 +217,19 @@ func registerCertificateTools(s *gomcp.Server, c *Client) {
 }
 
 // ── CRL & OCSP ──────────────────────────────────────────────────────
+//
+// M-006 relocation: CRL and OCSP are served unauthenticated under the
+// RFC 8615 `.well-known/pki/*` namespace (RFC 5280 §5 for CRL, RFC 6960
+// §2.1 for OCSP) so relying parties can retrieve them without a certctl
+// API key. The non-standard JSON CRL tool (`certctl_get_crl`) has been
+// removed — RFC 5280 defines only the DER wire format.
 
 func registerCRLOCSPTools(s *gomcp.Server, c *Client) {
 	gomcp.AddTool(s, &gomcp.Tool{
-		Name:        "certctl_get_crl",
-		Description: "Get the Certificate Revocation List in JSON format. Lists all revoked certificate serial numbers with reasons and timestamps.",
-	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
-		data, err := c.Get("/api/v1/crl", nil)
-		if err != nil {
-			return errorResult(err)
-		}
-		return textResult(data)
-	})
-
-	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_get_der_crl",
-		Description: "Get DER-encoded X.509 CRL for a specific issuer. Returns binary CRL data signed by the issuing CA.",
+		Description: "Get DER-encoded X.509 CRL for a specific issuer (RFC 5280). Served unauthenticated at /.well-known/pki/crl/{issuer_id}. Returns binary CRL data signed by the issuing CA.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetDERCRLInput) (*gomcp.CallToolResult, any, error) {
-		raw, contentType, err := c.GetRaw("/api/v1/crl/" + input.IssuerID)
+		raw, contentType, err := c.GetRaw("/.well-known/pki/crl/" + input.IssuerID)
 		if err != nil {
 			return errorResult(err)
 		}
@@ -247,9 +242,9 @@ func registerCRLOCSPTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_ocsp_check",
-		Description: "Check OCSP status for a certificate by issuer ID and hex serial number. Returns good, revoked, or unknown.",
+		Description: "Check OCSP status for a certificate by issuer ID and hex serial number (RFC 6960). Served unauthenticated at /.well-known/pki/ocsp/{issuer_id}/{serial}. Returns good, revoked, or unknown.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input OCSPInput) (*gomcp.CallToolResult, any, error) {
-		raw, contentType, err := c.GetRaw("/api/v1/ocsp/" + input.IssuerID + "/" + input.Serial)
+		raw, contentType, err := c.GetRaw("/.well-known/pki/ocsp/" + input.IssuerID + "/" + input.Serial)
 		if err != nil {
 			return errorResult(err)
 		}

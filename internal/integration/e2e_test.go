@@ -517,12 +517,18 @@ func TestNotificationEndpoints(t *testing.T) {
 	})
 }
 
-// TestCRLEndpoint exercises the CRL listing endpoint (M15a).
+// TestCRLEndpoint exercises the RFC 5280 DER-encoded CRL endpoint served
+// unauthenticated at /.well-known/pki/crl/{issuer_id} (M-006 relocation from
+// the pre-M-006 JSON CRL at /api/v1/crl, which was removed entirely because
+// RFC 5280 §5 defines only the DER wire format).
 func TestCRLEndpoint(t *testing.T) {
 	server, _, _, _ := setupTestServer(t)
 
-	t.Run("GetCRL_JSON", func(t *testing.T) {
-		resp, err := http.Get(server.URL + "/api/v1/crl")
+	t.Run("GetDERCRL_Unauthenticated", func(t *testing.T) {
+		// Intentionally no Authorization header — relying parties can't present
+		// a certctl API key, so the PKI endpoints are exposed under the
+		// RFC 8615 `.well-known` namespace with auth bypassed.
+		resp, err := http.Get(server.URL + "/.well-known/pki/crl/iss-local")
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -531,15 +537,17 @@ func TestCRLEndpoint(t *testing.T) {
 			bodyBytes, _ := io.ReadAll(resp.Body)
 			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
 		}
-		var crl map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&crl)
-		if crl["version"] == nil {
-			t.Error("expected version field in CRL response")
+		if ct := resp.Header.Get("Content-Type"); ct != "application/pkix-crl" {
+			t.Errorf("expected Content-Type application/pkix-crl, got %s", ct)
 		}
-		if crl["entries"] == nil {
-			t.Error("expected entries field in CRL response")
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read body failed: %v", err)
 		}
-		t.Logf("CRL response: version=%v, entries_count=%v", crl["version"], crl["total"])
+		if len(body) == 0 {
+			t.Error("expected non-empty DER CRL body")
+		}
+		t.Logf("DER CRL response: %d bytes", len(body))
 	})
 }
 

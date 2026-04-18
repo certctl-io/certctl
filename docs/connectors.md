@@ -155,7 +155,7 @@ The Local CA issuer signs certificates using Go's `crypto/x509` library. It supp
 
 **Sub-CA mode:** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. Supports RSA, ECDSA, and PKCS#8 key formats. If the paths are not set, falls back to self-signed mode. The loaded certificate must have `IsCA=true` and `KeyUsageCertSign`.
 
-**CRL and OCSP support (M15b):** The Local CA supports DER-encoded X.509 CRL generation via `GET /api/v1/crl/{issuer_id}` with 24-hour validity. An embedded OCSP responder at `GET /api/v1/ocsp/{issuer_id}/{serial}` returns signed OCSP responses for issued certificates (good/revoked/unknown status). Certificates with profile TTL < 1 hour automatically skip CRL/OCSP — expiry is treated as sufficient revocation for short-lived credentials.
+**CRL and OCSP support (M15b):** The Local CA supports DER-encoded X.509 CRL generation served unauthenticated at `GET /.well-known/pki/crl/{issuer_id}` (RFC 5280 §5, RFC 8615, `Content-Type: application/pkix-crl`) with 24-hour validity. An embedded OCSP responder at `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (RFC 6960, `Content-Type: application/ocsp-response`) returns signed OCSP responses for issued certificates (good/revoked/unknown status). Both endpoints are reachable by relying parties with no certctl API credentials, which is how standard TLS clients, browsers, and hardware appliances consume these resources. Certificates with profile TTL < 1 hour automatically skip CRL/OCSP — expiry is treated as sufficient revocation for short-lived credentials.
 
 **Extended Key Usage (EKU) support (M27):** The Local CA respects EKU constraints from certificate profiles and adjusts key usage flags accordingly. For S/MIME certificates (emailProtection EKU), it uses `DigitalSignature | ContentCommitment` instead of the TLS default. For TLS certificates (serverAuth/clientAuth EKU), it uses `DigitalSignature | KeyEncipherment`. This enables support for multiple certificate types — TLS, S/MIME, code signing, timestamping — from a single CA.
 
@@ -287,7 +287,7 @@ Environment variables:
 
 The connector is registered in the issuer registry under `iss-stepca`. step-ca also works with the existing ACME connector (point `iss-acme-*` at step-ca's ACME directory URL for ACME-based issuance).
 
-**Note:** step-ca-issued certificates rely on step-ca's own CRL/OCSP infrastructure. certctl's local CRL/OCSP endpoints (`GET /api/v1/crl/{issuer_id}` and `GET /api/v1/ocsp/{issuer_id}/{serial}`) are populated from step-ca's revocation data if available, but clients should validate against step-ca's endpoints for the authoritative status.
+**Note:** step-ca-issued certificates rely on step-ca's own CRL/OCSP infrastructure. certctl's local CRL/OCSP endpoints (`GET /.well-known/pki/crl/{issuer_id}` and `GET /.well-known/pki/ocsp/{issuer_id}/{serial}`, served unauthenticated per RFC 5280 §5 / RFC 6960 / RFC 8615) are populated from step-ca's revocation data if available, but clients should validate against step-ca's endpoints for the authoritative status.
 
 **MaxTTL enforcement (M11c):** When a certificate profile defines a maximum TTL, the step-ca connector caps the `NotAfter` field to ensure the issued certificate does not exceed the profile limit, regardless of the step-ca provisioner's own maximum.
 

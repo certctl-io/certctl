@@ -411,7 +411,9 @@ func (h CertificateHandler) TriggerRenewal(w http.ResponseWriter, r *http.Reques
 	}
 	certID := parts[0]
 
-	if err := h.svc.TriggerRenewal(r.Context(), certID, "api"); err != nil {
+	actor := resolveActor(r.Context())
+
+	if err := h.svc.TriggerRenewal(r.Context(), certID, actor); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
@@ -467,7 +469,9 @@ func (h CertificateHandler) TriggerDeployment(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if err := h.svc.TriggerDeployment(r.Context(), certID, req.TargetID, "api"); err != nil {
+	actor := resolveActor(r.Context())
+
+	if err := h.svc.TriggerDeployment(r.Context(), certID, req.TargetID, actor); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to trigger deployment", requestID)
 		return
 	}
@@ -509,7 +513,9 @@ func (h CertificateHandler) RevokeCertificate(w http.ResponseWriter, r *http.Req
 		}
 	}
 
-	if err := h.svc.RevokeCertificate(r.Context(), certID, req.Reason, "api"); err != nil {
+	actor := resolveActor(r.Context())
+
+	if err := h.svc.RevokeCertificate(r.Context(), certID, req.Reason, actor); err != nil {
 		// Distinguish between client errors and server errors
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "already revoked") ||
@@ -529,49 +535,12 @@ func (h CertificateHandler) RevokeCertificate(w http.ResponseWriter, r *http.Req
 	JSON(w, http.StatusOK, map[string]string{"status": "revoked"})
 }
 
-// GetCRL returns the Certificate Revocation List as structured JSON.
-// GET /api/v1/crl
-// Note: DER-encoded X.509 CRL generation (requiring CA key access) is planned for M15b
-// alongside the embedded OCSP responder. This endpoint provides the same data in JSON format.
-func (h CertificateHandler) GetCRL(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodGet {
-		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
-		return
-	}
-
-	requestID := middleware.GetRequestID(r.Context())
-
-	revocations, err := h.svc.GetRevokedCertificates(r.Context())
-	if err != nil {
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate CRL", requestID)
-		return
-	}
-
-	type CRLEntry struct {
-		SerialNumber     string `json:"serial_number"`
-		RevocationDate   string `json:"revocation_date"`
-		RevocationReason string `json:"revocation_reason"`
-	}
-
-	entries := make([]CRLEntry, 0, len(revocations))
-	for _, rev := range revocations {
-		entries = append(entries, CRLEntry{
-			SerialNumber:     rev.SerialNumber,
-			RevocationDate:   rev.RevokedAt.Format("2006-01-02T15:04:05Z"),
-			RevocationReason: rev.Reason,
-		})
-	}
-
-	JSON(w, http.StatusOK, map[string]interface{}{
-		"version":      1,
-		"entries":      entries,
-		"total":        len(entries),
-		"generated_at": time.Now().UTC().Format("2006-01-02T15:04:05Z"),
-	})
-}
-
 // GetDERCRL returns a DER-encoded X.509 CRL signed by the specified issuer.
-// GET /api/v1/crl/{issuer_id}
+// GET /.well-known/pki/crl/{issuer_id}
+//
+// RFC 5280 § 5. Served unauthenticated under the /.well-known/pki/ namespace so
+// relying parties (browsers, OpenSSL, OCSP stapling sidecars) can fetch the CRL
+// without presenting certctl API credentials.
 func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 	requestID, _ := r.Context().Value("request_id").(string)
 
@@ -580,7 +549,7 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	issuerID := strings.TrimPrefix(r.URL.Path, "/api/v1/crl/")
+	issuerID := strings.TrimPrefix(r.URL.Path, "/.well-known/pki/crl/")
 	if issuerID == "" {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Issuer ID is required", requestID)
 		return
@@ -608,8 +577,11 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 }
 
 // HandleOCSP processes OCSP requests.
-// GET /api/v1/ocsp/{issuer_id}/{serial_hex}
-// For simplicity, use GET with path params instead of binary POST.
+// GET /.well-known/pki/ocsp/{issuer_id}/{serial_hex}
+//
+// RFC 6960. Served unauthenticated under the /.well-known/pki/ namespace. For
+// simplicity we accept GET with path params rather than the binary POST body
+// form — the response is a valid DER-encoded OCSP response either way.
 func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 	requestID, _ := r.Context().Value("request_id").(string)
 
@@ -618,8 +590,8 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract issuer_id and serial from path: /api/v1/ocsp/{issuer_id}/{serial_hex}
-	path := strings.TrimPrefix(r.URL.Path, "/api/v1/ocsp/")
+	// Extract issuer_id and serial from path: /.well-known/pki/ocsp/{issuer_id}/{serial_hex}
+	path := strings.TrimPrefix(r.URL.Path, "/.well-known/pki/ocsp/")
 	parts := strings.SplitN(path, "/", 2)
 	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Issuer ID and serial number are required", requestID)

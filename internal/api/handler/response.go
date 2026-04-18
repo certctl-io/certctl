@@ -1,13 +1,33 @@
 package handler
 
 import (
+	"context"
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
 	"time"
+
+	"github.com/shankar0123/certctl/internal/api/middleware"
 )
+
+// resolveActor extracts the authenticated named-key identity from the request
+// context for audit-trail attribution. Returns the named-key name when set by
+// the auth middleware, or "api" as a safe sentinel when the auth middleware
+// did not populate the context (e.g., AUTH_TYPE=none, or internal/system calls
+// that bypass auth).
+//
+// Post-M-002: this is the single source of truth for handler-layer actor
+// resolution. Handlers must NOT hardcode string literals like "api-key-user"
+// or "api" — always go through this helper so the named-key identity flows to
+// services and the audit trail.
+func resolveActor(ctx context.Context) string {
+	if user := middleware.GetUser(ctx); user != "" {
+		return user
+	}
+	return "api"
+}
 
 // PagedResponse represents a paginated API response.
 type PagedResponse struct {

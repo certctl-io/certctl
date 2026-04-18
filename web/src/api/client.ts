@@ -51,12 +51,22 @@ export const getAuthInfo = () =>
   fetch(`${BASE}/auth/info`, { headers: { 'Content-Type': 'application/json' } })
     .then(r => r.json() as Promise<{ auth_type: string; required: boolean }>);
 
+// AuthCheckResponse mirrors the /auth/check handler payload. Post-M-003 it
+// surfaces `user` (named-key identity) and `admin` (named-key admin flag) so
+// the GUI can gate admin-only affordances. When CERTCTL_AUTH_TYPE=none the
+// backend returns {user: "", admin: false}.
+export interface AuthCheckResponse {
+  status: string;
+  user: string;
+  admin: boolean;
+}
+
 export const checkAuth = (key: string) =>
   fetch(`${BASE}/auth/check`, {
     headers: { 'Content-Type': 'application/json', 'Authorization': `Bearer ${key}` },
   }).then(r => {
     if (!r.ok) throw new Error('Invalid API key');
-    return r.json() as Promise<{ status: string }>;
+    return r.json() as Promise<AuthCheckResponse>;
   });
 
 // Certificates
@@ -152,14 +162,14 @@ export const getCertificateDeployments = (id: string, params: Record<string, str
   return fetchJSON<PaginatedResponse<Job>>(`${BASE}/certificates/${id}/deployments?${qs}`);
 };
 
-// CRL / OCSP
-export const getCRL = () =>
-  fetchJSON<{ version: number; entries: unknown[]; total: number; generated_at: string }>(`${BASE}/crl`);
-
+// OCSP (RFC 6960) — served unauthenticated under /.well-known/pki/ per RFC 8615
+// (M-006 relocation). The legacy JSON CRL endpoint (`GET /api/v1/crl`) was
+// removed entirely; relying parties fetch the DER-encoded CRL directly from
+// `/.well-known/pki/crl/{issuer_id}` (no GUI wrapper — binary download only).
 export const getOCSPStatus = (issuerId: string, serial: string) => {
-  const headers: Record<string, string> = {};
-  if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;
-  return fetch(`${BASE}/ocsp/${issuerId}/${serial}`, { headers })
+  // No Authorization header — the OCSP responder is intentionally unauthenticated
+  // so relying parties without certctl API keys can check revocation status.
+  return fetch(`/.well-known/pki/ocsp/${issuerId}/${serial}`)
     .then(r => {
       if (!r.ok) throw new Error(`OCSP request failed: ${r.status}`);
       return r.arrayBuffer();

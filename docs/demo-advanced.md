@@ -724,22 +724,24 @@ curl -s -X POST $API/api/v1/certificates/mc-demo-payments/revoke \
 6. Creates an audit trail entry
 7. Sends revocation notifications via configured channels
 
-Check the CRL (Certificate Revocation List):
+Check the CRL (Certificate Revocation List) — served unauthenticated under the RFC 8615 well-known namespace so relying parties without a certctl API key can still verify revocation (RFC 5280 §5):
 
 ```bash
-# JSON-formatted CRL
-curl -s $API/api/v1/crl | jq .
-
-# DER-encoded X.509 CRL for the local CA (binary — pipe to openssl for inspection)
-curl -s $API/api/v1/crl/iss-local -o /tmp/crl.der
+# DER-encoded X.509 CRL for the local CA (binary — pipe to openssl for inspection).
+# Note: no -H "Authorization: Bearer ..." — the endpoint is deliberately
+# unauthenticated. Content-Type is application/pkix-crl.
+curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
 openssl crl -inform DER -in /tmp/crl.der -text -noout
 ```
 
-Check OCSP status:
+Check OCSP status (RFC 6960, also unauthenticated, `application/ocsp-response`):
 
 ```bash
-# Replace SERIAL with the actual serial number from the certificate version
-curl -s $API/api/v1/ocsp/iss-local/SERIAL | jq .
+# Replace SERIAL with the actual serial number from the certificate version.
+# The embedded OCSP responder returns a signed DER response — parse it with
+# `openssl ocsp -respin` or similar tooling.
+curl -s http://localhost:8443/.well-known/pki/ocsp/iss-local/SERIAL -o /tmp/ocsp.der
+openssl ocsp -respin /tmp/ocsp.der -noverify -resp_text | head -40
 ```
 
 **Why RFC 5280 reason codes:** The reason code isn't just metadata — it tells clients *why* the certificate was revoked. A `keyCompromise` revocation means the private key was exposed and the certificate should be distrusted immediately. A `superseded` revocation means a newer certificate replaced it — less urgent. CRLs and OCSP responses include the reason code so client software can make informed trust decisions.

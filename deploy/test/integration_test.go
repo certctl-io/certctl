@@ -195,16 +195,11 @@ type metricsResponse struct {
 	Uptime  float64                `json:"uptime_seconds"`
 }
 
-// crlResponse for the CRL endpoint.
-type crlResponse struct {
-	Version int `json:"version"`
-	Total   int `json:"total"`
-	Entries []struct {
-		Serial    string `json:"serial_number"`
-		Reason    string `json:"reason"`
-		RevokedAt string `json:"revoked_at"`
-	} `json:"entries"`
-}
+// M-006: The non-standard JSON CRL endpoint (`GET /api/v1/crl`) was removed.
+// RFC 5280 §5 defines only the DER wire format, which is now served
+// unauthenticated at `/.well-known/pki/crl/{issuer_id}` per RFC 8615.
+// The `crlResponse` Go struct that used to decode the JSON envelope is gone;
+// Phase 7 parses the DER bytes directly via `x509.ParseRevocationList`.
 
 // ---------------------------------------------------------------------------
 // PostgreSQL test helper
@@ -728,18 +723,41 @@ func TestIntegrationSuite(t *testing.T) {
 			t.Fatalf("revocation response unexpected: %s", body)
 		}
 
-		// Check CRL
-		t.Run("CRL", func(t *testing.T) {
-			resp, err := c.Get("/api/v1/crl")
+		// Check DER CRL served unauthenticated under /.well-known/pki/ per
+		// RFC 5280 §5 + RFC 8615 (M-006). Use a plain http.Get — no Bearer
+		// token — to prove the endpoint is reachable by relying parties that
+		// have no certctl API credentials.
+		t.Run("CRL_DER_Unauthenticated", func(t *testing.T) {
+			resp, err := http.Get(serverURL + "/.well-known/pki/crl/iss-local")
 			if err != nil {
-				t.Fatalf("GET CRL: %v", err)
+				t.Fatalf("GET DER CRL: %v", err)
 			}
-			var crl crlResponse
-			if err := decodeJSON(resp, &crl); err != nil {
-				t.Fatalf("decode CRL: %v", err)
+			defer resp.Body.Close()
+
+			if resp.StatusCode != http.StatusOK {
+				body, _ := io.ReadAll(resp.Body)
+				t.Fatalf("unexpected status: got %d, want 200 (body=%s)", resp.StatusCode, string(body))
 			}
-			if crl.Total < 1 {
-				t.Fatalf("CRL total: got %d, want >= 1", crl.Total)
+			if ct := resp.Header.Get("Content-Type"); ct != "application/pkix-crl" {
+				t.Errorf("Content-Type: got %q, want %q", ct, "application/pkix-crl")
+			}
+
+			body, err := io.ReadAll(resp.Body)
+			if err != nil {
+				t.Fatalf("read CRL body: %v", err)
+			}
+			if len(body) == 0 {
+				t.Fatal("CRL body empty")
+			}
+
+			// Parse the DER bytes as an X.509 CRL (RFC 5280) and verify the
+			// just-revoked certificate is listed.
+			crl, err := x509.ParseRevocationList(body)
+			if err != nil {
+				t.Fatalf("parse DER CRL: %v", err)
+			}
+			if len(crl.RevokedCertificateEntries) < 1 {
+				t.Fatalf("CRL entries: got %d, want >= 1", len(crl.RevokedCertificateEntries))
 			}
 		})
 

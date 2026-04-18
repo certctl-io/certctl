@@ -115,7 +115,7 @@ func (a *AuditMiddleware) Middleware(next http.Handler) http.Handler {
 
 		// Extract actor from auth context
 		actor := "anonymous"
-		if user, ok := GetUser(r.Context()); ok && user != "" {
+		if user := GetUser(r.Context()); user != "" {
 			actor = user
 		}
 

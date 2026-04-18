@@ -109,12 +109,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/certificates/{id}/export/pem", http.HandlerFunc(reg.Export.ExportPEM))
 	r.Register("POST /api/v1/certificates/{id}/export/pkcs12", http.HandlerFunc(reg.Export.ExportPKCS12))
 
-	// CRL endpoints: /api/v1/crl (JSON) and /api/v1/crl/{issuer_id} (DER)
-	r.Register("GET /api/v1/crl", http.HandlerFunc(reg.Certificates.GetCRL))
-	r.Register("GET /api/v1/crl/{issuer_id}", http.HandlerFunc(reg.Certificates.GetDERCRL))
-
-	// OCSP responder: /api/v1/ocsp/{issuer_id}/{serial}
-	r.Register("GET /api/v1/ocsp/{issuer_id}/{serial}", http.HandlerFunc(reg.Certificates.HandleOCSP))
+	// NOTE: RFC 5280 CRL and RFC 6960 OCSP endpoints are registered separately
+	// via RegisterPKIHandlers under /.well-known/pki/ so relying parties can
+	// fetch them without presenting certctl API credentials. The legacy
+	// /api/v1/crl and /api/v1/ocsp paths have been retired (see M-006).
 
 	// Issuers routes: /api/v1/issuers
 	r.Register("GET /api/v1/issuers", http.HandlerFunc(reg.Issuers.ListIssuers))
@@ -260,6 +258,21 @@ func (r *Router) RegisterSCEPHandlers(scep handler.SCEPHandler) {
 	// SCEP uses a single path; the handler dispatches on ?operation= query param
 	r.Register("GET /scep", http.HandlerFunc(scep.HandleSCEP))
 	r.Register("POST /scep", http.HandlerFunc(scep.HandleSCEP))
+}
+
+// RegisterPKIHandlers sets up RFC 5280 CRL and RFC 6960 OCSP routes under
+// /.well-known/pki/. These endpoints are intentionally unauthenticated so
+// relying parties (browsers, OpenSSL, OCSP stapling sidecars, mTLS clients)
+// can fetch revocation data without presenting certctl API credentials.
+// The response bodies are DER-encoded and carry the IANA-registered content
+// types application/pkix-crl and application/ocsp-response.
+//
+// Precedent: EST (RFC 7030) and SCEP (RFC 8894) follow the same pattern —
+// standards-defined wire formats served via a dedicated router registration
+// that cmd/server wires into a no-auth middleware chain.
+func (r *Router) RegisterPKIHandlers(pki handler.CertificateHandler) {
+	r.Register("GET /.well-known/pki/crl/{issuer_id}", http.HandlerFunc(pki.GetDERCRL))
+	r.Register("GET /.well-known/pki/ocsp/{issuer_id}/{serial}", http.HandlerFunc(pki.HandleOCSP))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

@@ -247,26 +247,30 @@ func TestGetCertificateVersions_MultiSegment(t *testing.T) {
 }
 
 // TestHandleOCSP_MultiSegment exercises the OCSP responder's 2-segment path
-// parser (/api/v1/ocsp/{issuer_id}/{serial_hex}). Each leg is attacker-
-// controlled and the serial can be arbitrary length. This is a key adversarial
-// surface because the serial is passed directly to the CA-operations service,
-// which is expected to treat it as an opaque identifier.
+// parser (/.well-known/pki/ocsp/{issuer_id}/{serial_hex}). Each leg is
+// attacker-controlled and the serial can be arbitrary length. This is a key
+// adversarial surface because the serial is passed directly to the
+// CA-operations service, which is expected to treat it as an opaque
+// identifier.
+//
+// M-006 relocation: these paths were previously served at /api/v1/ocsp/*;
+// under RFC 8615 and RFC 6960 they now live under /.well-known/pki/ocsp/*.
 func TestHandleOCSP_MultiSegment(t *testing.T) {
 	cases := []struct {
 		name string
 		path string
 	}{
-		{"missing_serial", "/api/v1/ocsp/iss-local"},
-		{"missing_both", "/api/v1/ocsp/"},
-		{"empty_issuer", "/api/v1/ocsp//01ABCDEF"},
-		{"empty_serial", "/api/v1/ocsp/iss-local/"},
-		{"traversal_issuer", "/api/v1/ocsp/..%2F..%2Fetc/passwd/01"},
-		{"null_byte_serial", "/api/v1/ocsp/iss-local/01\x00FF"},
-		{"sql_injection_serial", "/api/v1/ocsp/iss-local/01'; DROP TABLE--"},
-		{"negative_hex_serial", "/api/v1/ocsp/iss-local/-1"},
-		{"unicode_serial", "/api/v1/ocsp/iss-local/01\u2010FF"},
-		{"extremely_long_serial", "/api/v1/ocsp/iss-local/" + strings.Repeat("F", 10000)},
-		{"extra_segments", "/api/v1/ocsp/iss-local/01FF/extra/segments"},
+		{"missing_serial", "/.well-known/pki/ocsp/iss-local"},
+		{"missing_both", "/.well-known/pki/ocsp/"},
+		{"empty_issuer", "/.well-known/pki/ocsp//01ABCDEF"},
+		{"empty_serial", "/.well-known/pki/ocsp/iss-local/"},
+		{"traversal_issuer", "/.well-known/pki/ocsp/..%2F..%2Fetc/passwd/01"},
+		{"null_byte_serial", "/.well-known/pki/ocsp/iss-local/01\x00FF"},
+		{"sql_injection_serial", "/.well-known/pki/ocsp/iss-local/01'; DROP TABLE--"},
+		{"negative_hex_serial", "/.well-known/pki/ocsp/iss-local/-1"},
+		{"unicode_serial", "/.well-known/pki/ocsp/iss-local/01\u2010FF"},
+		{"extremely_long_serial", "/.well-known/pki/ocsp/iss-local/" + strings.Repeat("F", 10000)},
+		{"extra_segments", "/.well-known/pki/ocsp/iss-local/01FF/extra/segments"},
 	}
 
 	for _, tc := range cases {
@@ -301,7 +305,9 @@ func TestHandleOCSP_MultiSegment(t *testing.T) {
 	}
 }
 
-// TestGetDERCRL_IssuerPathInjection exercises /api/v1/crl/{issuer_id}.
+// TestGetDERCRL_IssuerPathInjection exercises
+// /.well-known/pki/crl/{issuer_id} (RFC 5280 CRL; M-006 relocation from
+// /api/v1/crl/{issuer_id}).
 func TestGetDERCRL_IssuerPathInjection(t *testing.T) {
 	for _, tc := range adversarialPathInputs() {
 		t.Run(tc.name, func(t *testing.T) {
@@ -316,8 +322,8 @@ func TestGetDERCRL_IssuerPathInjection(t *testing.T) {
 				return nil, ErrMockNotFound
 			}
 
-			req := httptest.NewRequest(http.MethodGet, "/api/v1/crl/x", nil)
-			req.URL.Path = "/api/v1/crl/" + tc.input
+			req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/crl/x", nil)
+			req.URL.Path = "/.well-known/pki/crl/" + tc.input
 			req = req.WithContext(contextWithRequestID())
 
 			w := httptest.NewRecorder()

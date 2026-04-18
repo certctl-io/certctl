@@ -378,7 +378,7 @@ func TestToolEndToEnd_GetRawBinary(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL, "test-key")
-	data, ct, err := client.GetRaw("/api/v1/crl/iss-local")
+	data, ct, err := client.GetRaw("/.well-known/pki/crl/iss-local")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

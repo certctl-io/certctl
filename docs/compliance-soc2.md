@@ -282,8 +282,8 @@ Each section includes:
   - `certificateHold` — temporary revocation (can be "unhold" by reissue)
   - `privilegeWithdrawn` — access rights revoked
   Revocation is **immediate** (no approval workflow). The certificate is marked `Revoked` in inventory, an audit event is logged, and optional issuer notification is best-effort. All revoked certs are excluded from active deployments.
-- **CRL Endpoint** — `GET /api/v1/crl` returns a JSON-formatted Certificate Revocation List (serial, reason, timestamp for each revoked cert). `GET /api/v1/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA (useful for legacy clients that don't support OCSP).
-- **OCSP Responder** — `GET /api/v1/ocsp/{issuer_id}/{serial}` returns a signed OCSP response indicating whether a cert is good, revoked, or unknown. Clients (browsers, TLS libraries) query this endpoint to verify cert validity in real-time.
+- **CRL Endpoint** — `GET /.well-known/pki/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA (RFC 5280 §5, RFC 8615, `Content-Type: application/pkix-crl`), served unauthenticated for relying parties that don't hold certctl API credentials.
+- **OCSP Responder** — `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` returns a signed OCSP response indicating whether a cert is good, revoked, or unknown (RFC 6960, `Content-Type: application/ocsp-response`). Also unauthenticated. Clients (browsers, TLS libraries) query this endpoint to verify cert validity in real-time.
 - **Revocation Notifications** — When a cert is revoked, notifications are sent to:
   - Certificate owner (email)
   - Configured webhooks (if you have a SIEM that subscribes)
@@ -460,8 +460,8 @@ Each section includes:
 | | Notification Routing | Email, Slack, Teams, PagerDuty, OpsGenie | ✅ | ✅ | Configure notifiers, on-call integration |
 | | Deployment Rollback | Redeploy previous cert version via GUI | ✅ | ✅ | Audit rollback decisions |
 | **CC7.3** Incident Response | Revocation API (RFC 5280 reasons) | `POST /api/v1/certificates/{id}/revoke` | ✅ | Enhanced (bulk revocation) | Establish incident response policy |
-| | CRL Endpoint (JSON + DER) | `GET /api/v1/crl`, `GET /api/v1/crl/{issuer_id}` | ✅ | ✅ | Ensure CRL/OCSP accessible to all clients |
-| | OCSP Responder | `GET /api/v1/ocsp/{issuer_id}/{serial}` | ✅ | ✅ | Test revocation in staging |
+| | CRL Endpoint (DER, RFC 5280 §5) | `GET /.well-known/pki/crl/{issuer_id}` (unauthenticated, `application/pkix-crl`) | ✅ | ✅ | Ensure CRL/OCSP accessible to all clients without API keys |
+| | OCSP Responder (RFC 6960) | `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (unauthenticated, `application/ocsp-response`) | ✅ | ✅ | Test revocation in staging |
 | | Revocation Notifications | Email, webhook, Slack/Teams on revocation | ✅ | ✅ | Integrate into on-call, document justification separately |
 | | Short-Lived Cert Exemption | TTL < 1h skip CRL/OCSP | ✅ | ✅ | Configure profiles appropriately |
 | **CC7.4** Risk Mitigation | Renewal Job Tracking | Job state machine (Pending → Running → Completed/Failed) | ✅ | ✅ | Monitor renewal success rate |

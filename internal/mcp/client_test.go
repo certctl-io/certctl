@@ -203,7 +203,7 @@ func TestClient_GetRaw(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "test-key")
-	data, contentType, err := c.GetRaw("/api/v1/crl/iss-local")
+	data, contentType, err := c.GetRaw("/.well-known/pki/crl/iss-local")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -223,7 +223,7 @@ func TestClient_GetRaw_Error(t *testing.T) {
 	defer server.Close()
 
 	c := NewClient(server.URL, "test-key")
-	_, _, err := c.GetRaw("/api/v1/crl/nonexistent")
+	_, _, err := c.GetRaw("/.well-known/pki/crl/nonexistent")
 	if err == nil {
 		t.Fatal("expected error for 404 response")
 	}

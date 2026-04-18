@@ -64,7 +64,8 @@ func TestCertificateLifecycle(t *testing.T) {
 	certificateService.SetTargetRepo(targetRepo)
 	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
-	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
+	ownerRepo := newMockOwnerRepository()
+	jobService := service.NewJobService(jobRepo, certRepo, ownerRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	// 32-byte AES-256 test key — C-2 remediation makes IssuerService fail closed
 	// without a configured CERTCTL_CONFIG_ENCRYPTION_KEY. Happy-path CRUD tests
@@ -860,6 +861,48 @@ func (m *mockTargetRepository) Delete(ctx context.Context, id string) error {
 
 func (m *mockTargetRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.DeploymentTarget, error) {
 	return m.List(ctx)
+}
+
+// mockOwnerRepository satisfies repository.OwnerRepository for the M-003
+// not-self approval wiring. Tests that don't care about owner lookup get an
+// empty map (Get returns errNotFound, which checkNotSelf permits).
+type mockOwnerRepository struct {
+	owners map[string]*domain.Owner
+}
+
+func newMockOwnerRepository() *mockOwnerRepository {
+	return &mockOwnerRepository{owners: make(map[string]*domain.Owner)}
+}
+
+func (m *mockOwnerRepository) List(ctx context.Context) ([]*domain.Owner, error) {
+	var out []*domain.Owner
+	for _, o := range m.owners {
+		out = append(out, o)
+	}
+	return out, nil
+}
+
+func (m *mockOwnerRepository) Get(ctx context.Context, id string) (*domain.Owner, error) {
+	o, ok := m.owners[id]
+	if !ok {
+		return nil, fmt.Errorf("owner not found")
+	}
+	return o, nil
+}
+
+func (m *mockOwnerRepository) Create(ctx context.Context, o *domain.Owner) error {
+	m.owners[o.ID] = o
+	return nil
+}
+
+func (m *mockOwnerRepository) Update(ctx context.Context, o *domain.Owner) error {
+	m.owners[o.ID] = o
+	return nil
+}
+
+func (m *mockOwnerRepository) Delete(ctx context.Context, id string) error {
+	delete(m.owners, id)
+	return nil
 }
 
 type mockNotificationRepository struct {

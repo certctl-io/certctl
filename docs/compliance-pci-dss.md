@@ -92,10 +92,10 @@ Your QSA will request evidence that your certificate and key management systems 
 
 - **Certificate Status Tracking** — Four statuses: Active (deployed, not yet expired), Expiring (within threshold, awaiting renewal), Expired (past not-after date), Revoked (revoked via RFC 5280 revocation API). Dashboard charts show status distribution.
 
-- **Revocation Infrastructure** (M15a, M15b):
+- **Revocation Infrastructure** (M15a, M15b, M-006):
   - Revocation API: `POST /api/v1/certificates/{id}/revoke` with RFC 5280 reason codes
-  - CRL endpoint: `GET /api/v1/crl` (JSON format) or `GET /api/v1/crl/{issuer_id}` (DER X.509 CRL, 24h validity, signed by issuing CA)
-  - OCSP responder: `GET /api/v1/ocsp/{issuer_id}/{serial}` (returns DER-encoded OCSP response: good/revoked/unknown)
+  - CRL endpoint: `GET /.well-known/pki/crl/{issuer_id}` — DER X.509 CRL, 24h validity, signed by issuing CA, served unauthenticated (RFC 5280 §5, RFC 8615, `Content-Type: application/pkix-crl`)
+  - OCSP responder: `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` — DER-encoded OCSP response (good/revoked/unknown), served unauthenticated (RFC 6960, `Content-Type: application/ocsp-response`)
   - Bulk revocation (V2.2): `POST /api/v1/certificates/bulk-revoke` with filter criteria (profile, owner, agent, issuer) for fleet-wide incident response
   - Short-lived cert exemption: certs with TTL < 1 hour skip CRL/OCSP (expiry is sufficient revocation)
 
@@ -109,7 +109,7 @@ Your QSA will request evidence that your certificate and key management systems 
 - Discovered certificate report: `GET /api/v1/discovered-certificates` JSON export showing all certs on systems, fingerprints, and status.
 - Managed certificate inventory: `GET /api/v1/certificates` with filters (`?status=Expiring` for upcoming renewals).
 - Expiration alert configuration: policy JSON showing `alert_thresholds_days` for each environment.
-- CRL/OCSP availability proof: HTTP GET requests to `/api/v1/crl` and `/api/v1/ocsp/{issuer}/{serial}` with signed responses.
+- CRL/OCSP availability proof: unauthenticated HTTP GET requests to `/.well-known/pki/crl/{issuer_id}` (DER, `application/pkix-crl`) and `/.well-known/pki/ocsp/{issuer_id}/{serial}` (DER, `application/ocsp-response`) with signed responses.
 - Audit trail for certificate creation/renewal/revocation: `GET /api/v1/audit?type=certificate_issued,certificate_renewed,certificate_revoked`.
 - Dashboard charts showing expiration timeline, renewal success trends, status distribution.
 
@@ -328,9 +328,10 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
   - Issuer notified (best-effort; ACME lacks standard revocation, Local CA skips issuer step).
   - Revocation notifications sent to owner via email/webhook/Slack/Teams/PagerDuty.
 
-- **CRL and OCSP Publication** (M15b) — Revoked certificates published in:
-  - CRL: `GET /api/v1/crl` (JSON format) or `GET /api/v1/crl/{issuer_id}` (DER X.509, signed by CA, 24h validity)
-  - OCSP: `GET /api/v1/ocsp/{issuer_id}/{serial}` (returns revoked status for clients validating certificate chain)
+- **CRL and OCSP Publication** (M15b, M-006) — Revoked certificates published in:
+  - CRL: `GET /.well-known/pki/crl/{issuer_id}` (DER X.509 signed by CA, 24h validity, RFC 5280 §5 + RFC 8615, `Content-Type: application/pkix-crl`)
+  - OCSP: `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (returns revoked status for clients validating certificate chain, RFC 6960, `Content-Type: application/ocsp-response`)
+  - Both endpoints are served unauthenticated so relying parties (browsers, TLS appliances) without certctl API keys can verify revocation — this is the RFC-compliant PKI model.
   - Clients checking certificate status via OCSP or CRL see revoked status within 24 hours.
 
 - **Bulk Revocation for Incident Response** (V2.2) — `POST /api/v1/certificates/bulk-revoke` with filter criteria (profile, owner, agent, issuer) revokes all matching certificates in a single operation. PCI-DSS Req 4 requires rapid response to data transmission security incidents — bulk revocation enables operators to revoke an entire certificate set (e.g., all certs used by a compromised team or endpoint) in minutes rather than hours.
@@ -342,8 +343,8 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 
 **Evidence You Can Provide**:
 - Revocation requests: `GET /api/v1/audit?type=certificate_revoked` with RFC 5280 reason codes.
-- CRL publication: HTTP GET `/api/v1/crl` and parse JSON to show revoked serial numbers and timestamps.
-- OCSP responder validation: Query `GET /api/v1/ocsp/{issuer}/{serial}` for a known-revoked cert; response includes `revoked` status.
+- CRL publication: HTTP GET `/.well-known/pki/crl/{issuer_id}` (unauthenticated) returns a DER X.509 CRL — parse with `openssl crl -inform der -noout -text` to show revoked serial numbers, reasons, and timestamps.
+- OCSP responder validation: Query `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (unauthenticated) for a known-revoked cert; response includes `revoked` status and can be parsed with `openssl ocsp` tooling.
 - Audit trail: Certificate status transitions (Active → Revoked) recorded in `audit_events`.
 
 **Operator Responsibility**:
@@ -721,12 +722,12 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 | PCI-DSS Requirement | certctl Feature | API/UI Evidence | Database/Config | Audit Trail | Status |
 |---|---|---|---|---|---|
 | **4.2.1** Strong Crypto | TLS cert issuance, ACME/step-ca/Local CA, RSA 2048+/ECDSA P-256 | `GET /api/v1/certificates` (key_type, key_size) | Certificate profiles | `GET /api/v1/audit?type=certificate_issued` | Available |
-| **4.2.2** Cert Inventory & Validation | Managed cert CRUD, discovery (M18b), expiration alerting, CRL/OCSP | `GET /api/v1/certificates`, `GET /api/v1/discovered-certificates`, `GET /api/v1/crl`, `GET /api/v1/ocsp/{issuer}/{serial}` | `managed_certificates`, `discovered_certificates` tables | `GET /api/v1/audit?type=certificate_*` | Available |
+| **4.2.2** Cert Inventory & Validation | Managed cert CRUD, discovery (M18b), expiration alerting, CRL/OCSP | `GET /api/v1/certificates`, `GET /api/v1/discovered-certificates`, `GET /.well-known/pki/crl/{issuer_id}`, `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (both unauthenticated, RFC 5280 / RFC 6960) | `managed_certificates`, `discovered_certificates` tables | `GET /api/v1/audit?type=certificate_*` | Available |
 | **3.6** Key Documentation | Profiles, owner/team tracking, issuer config, audit trail | `GET /api/v1/profiles`, `GET /api/v1/issuers`, certificate detail with owner/team | Profiles, certificate owner/team fields, issuer config | `GET /api/v1/audit?resource_type=certificate` | Available |
 | **3.7.1** Key Generation | Agent-side ECDSA P-256, server keygen (demo only) | Agent logs, renewal job detail, CSR audit | `CERTCTL_KEYGEN_MODE=agent` (config), job_type=AwaitingCSR | `GET /api/v1/audit?type=certificate_issued` with CSR hash | Available |
 | **3.7.2** Key Storage | Agent `/var/lib/certctl/keys` (0600), env var secrets, .env excluded | Deployment manifest (env var refs), agent key dir listing | `.env` file (git-ignored), `CERTCTL_KEY_DIR`, `CERTCTL_CA_KEY_PATH` | No API audit (keys off-platform) | Available |
 | **3.7.3** Key Rotation | Auto renewal, expiration thresholds, renewal jobs | Dashboard renewal trends, `GET /api/v1/jobs?type=Renewal`, certificate versions | Renewal policies, certificate version history | `GET /api/v1/audit?type=certificate_renewed` | Available |
-| **3.7.4** Key Destruction | Revocation API (RFC 5280), CRL/OCSP, private key cleanup | `POST /api/v1/certificates/{id}/revoke`, `GET /api/v1/crl`, OCSP endpoint | `certificate_revocations` table, CRL publication | `GET /api/v1/audit?type=certificate_revoked` | Available |
+| **3.7.4** Key Destruction | Revocation API (RFC 5280), CRL/OCSP, private key cleanup | `POST /api/v1/certificates/{id}/revoke`, unauthenticated `GET /.well-known/pki/crl/{issuer_id}` and `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` | `certificate_revocations` table, CRL publication | `GET /api/v1/audit?type=certificate_revoked` | Available |
 | **8.3** Strong Authentication | API key (SHA-256 hash, TLS), GUI login, 401 redirect | GUI login screenshot, API key auth header, TLS cert | API key hash in database | `GET /api/v1/audit` showing API calls | Available |
 | **8.6** Acct Management | Credentials out of source, .env excluded, env var config | Code review (no hardcoded secrets), `.gitignore` check | Deployment manifests showing env var refs only | No account lifecycle audit (outside scope) | Available in part |
 | **10.2** Audit Logging | API audit middleware (M19), certificate lifecycle events | `GET /api/v1/audit` with filter/pagination | `audit_events` table (every API call) | Real-time via API | Available |

@@ -56,7 +56,8 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	certificateService.SetCAOperationsSvc(caOperationsSvc)
 	renewalService := service.NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notificationService, issuerRegistry, "server")
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notificationService)
-	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
+	ownerRepo := newMockOwnerRepository()
+	jobService := service.NewJobService(jobRepo, certRepo, ownerRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	// 32-byte AES-256 test key — C-2 remediation makes IssuerService fail closed
 	// without a configured CERTCTL_CONFIG_ENCRYPTION_KEY. Happy-path CRUD tests
@@ -112,6 +113,10 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 		BulkRevocation:  handler.BulkRevocationHandler{},
 	})
 	r.RegisterESTHandlers(estHandler)
+	// M-006: CRL + OCSP live under /.well-known/pki/ (RFC 5280 + RFC 6960 + RFC 8615).
+	// The negative_test integration suite exercises the DER CRL at this path with
+	// no Authorization header to verify the relying-party contract.
+	r.RegisterPKIHandlers(certificateHandler)
 
 	server := httptest.NewServer(r)
 	t.Cleanup(func() { server.Close() })
@@ -789,8 +794,14 @@ func TestRevocationEndpoints(t *testing.T) {
 		}
 	})
 
-	t.Run("GetCRL_Success", func(t *testing.T) {
-		resp, err := http.Get(server.URL + "/api/v1/crl")
+	// M-006: the non-standard JSON CRL at GET /api/v1/crl was removed entirely.
+	// RFC 5280 §5 defines only the DER wire format, which is now served
+	// unauthenticated under /.well-known/pki/crl/{issuer_id} (RFC 8615) so
+	// relying parties can fetch revocation data without a certctl API key.
+	// We verify the contract by requesting with no Authorization header and
+	// asserting DER content-type + a non-empty body.
+	t.Run("GetDERCRL_Unauthenticated", func(t *testing.T) {
+		resp, err := http.Get(server.URL + "/.well-known/pki/crl/iss-local")
 		if err != nil {
 			t.Fatalf("request failed: %v", err)
 		}
@@ -801,17 +812,17 @@ func TestRevocationEndpoints(t *testing.T) {
 			t.Fatalf("expected 200, got %d: %s", resp.StatusCode, string(bodyBytes))
 		}
 
-		var crl map[string]interface{}
-		json.NewDecoder(resp.Body).Decode(&crl)
-
-		if crl["version"] != float64(1) {
-			t.Errorf("expected CRL version 1, got %v", crl["version"])
+		ct := resp.Header.Get("Content-Type")
+		if ct != "application/pkix-crl" {
+			t.Errorf("expected Content-Type application/pkix-crl, got %s", ct)
 		}
 
-		// Should have at least 1 entry from the revocation above
-		total, _ := crl["total"].(float64)
-		if total < 1 {
-			t.Errorf("expected at least 1 CRL entry, got %v", total)
+		body, err := io.ReadAll(resp.Body)
+		if err != nil {
+			t.Fatalf("read body failed: %v", err)
+		}
+		if len(body) == 0 {
+			t.Error("expected non-empty DER CRL body")
 		}
 	})
 }

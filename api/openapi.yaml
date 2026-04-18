@@ -29,7 +29,11 @@ tags:
   - name: Certificates
     description: Certificate lifecycle — CRUD, versions, renewal, deployment, revocation
   - name: CRL & OCSP
-    description: Certificate revocation list and OCSP responder
+    description: |
+      Certificate revocation list (RFC 5280) and OCSP responder (RFC 6960).
+      Served unauthenticated under `/.well-known/pki/*` (RFC 8615) so
+      relying parties can retrieve revocation status without a certctl
+      API key.
   - name: Issuers
     description: CA issuer connector management (Local CA, ACME, step-ca)
   - name: Targets
@@ -493,50 +497,28 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
-  # ─── CRL & OCSP ─────────────────────────────────────────────────────
-  /api/v1/crl:
+  # ─── PKI (CRL & OCSP, RFC 5280 / 6960 / 8615) ──────────────────────
+  #
+  # Relying parties (browsers, OpenSSL clients, OCSP stapling sidecars,
+  # mTLS clients) cannot present a certctl Bearer token, so these two
+  # endpoints are unauthenticated and live under the RFC 8615
+  # `.well-known` namespace. They were previously mounted at
+  # /api/v1/crl/{issuer_id} and /api/v1/ocsp/{issuer_id}/{serial}; those
+  # paths were removed in M-006.
+  #
+  # The non-standard JSON CRL endpoint (GET /api/v1/crl) was also
+  # removed — RFC 5280 defines only the DER wire format.
+  /.well-known/pki/crl/{issuer_id}:
     get:
       tags: [CRL & OCSP]
-      summary: Get JSON CRL
-      description: Returns all revoked certificates in JSON format.
-      operationId: getCRL
-      responses:
-        "200":
-          description: JSON CRL
-          content:
-            application/json:
-              schema:
-                type: object
-                properties:
-                  version:
-                    type: integer
-                    example: 1
-                  entries:
-                    type: array
-                    items:
-                      type: object
-                      properties:
-                        serial_number:
-                          type: string
-                        revocation_date:
-                          type: string
-                          format: date-time
-                        revocation_reason:
-                          type: string
-                  total:
-                    type: integer
-                  generated_at:
-                    type: string
-                    format: date-time
-        "500":
-          $ref: "#/components/responses/InternalError"
-
-  /api/v1/crl/{issuer_id}:
-    get:
-      tags: [CRL & OCSP]
-      summary: Get DER-encoded X.509 CRL
-      description: Returns a proper DER-encoded CRL signed by the issuing CA. 24-hour validity.
+      summary: Get DER-encoded X.509 CRL (RFC 5280)
+      description: |
+        Returns a DER-encoded CRL signed by the issuing CA (RFC 5280 §5),
+        served unauthenticated per RFC 8615 `.well-known` semantics so
+        relying parties can retrieve it without a certctl API key.
+        Validity is 24 hours.
       operationId: getDERCRL
+      security: []
       parameters:
         - name: issuer_id
           in: path
@@ -560,12 +542,17 @@ paths:
         "501":
           description: Issuer does not support CRL generation
 
-  /api/v1/ocsp/{issuer_id}/{serial}:
+  /.well-known/pki/ocsp/{issuer_id}/{serial}:
     get:
       tags: [CRL & OCSP]
-      summary: OCSP responder
-      description: Returns signed OCSP response (good/revoked/unknown) for the given serial number.
+      summary: OCSP responder (RFC 6960)
+      description: |
+        Returns a signed OCSP response (good/revoked/unknown) for the
+        given serial number per RFC 6960 §2.1, served unauthenticated
+        per RFC 8615 so relying parties and OCSP stapling sidecars can
+        query revocation status without a certctl API key.
       operationId: handleOCSP
+      security: []
       parameters:
         - name: issuer_id
           in: path

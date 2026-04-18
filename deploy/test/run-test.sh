@@ -608,13 +608,22 @@ else
   fail "Revocation failed" "$REVOKE_RESP"
 fi
 
-info "Checking CRL..."
-CRL_RESP=$(api_get "/api/v1/crl" 2>/dev/null || echo '{"total":0}')
-CRL_TOTAL=$(echo "$CRL_RESP" | python3 -c "import sys,json; print(json.load(sys.stdin).get('total',0))" 2>/dev/null || echo 0)
-if [ "$CRL_TOTAL" -ge 1 ]; then
-  pass "CRL contains $CRL_TOTAL revoked certificate(s)"
+info "Checking DER CRL under /.well-known/pki (RFC 5280 §5, RFC 8615)..."
+# The JSON CRL endpoint (`GET /api/v1/crl`) was removed in M-006. RFC 5280
+# defines only the DER wire format, now served unauthenticated at
+# `/.well-known/pki/crl/{issuer_id}`. Fetch without the Bearer header to
+# prove the endpoint is reachable by relying parties with no API key.
+CRL_TMP=$(mktemp)
+CRL_HEADERS=$(mktemp)
+CRL_HTTP_CODE=$(curl -s -o "$CRL_TMP" -D "$CRL_HEADERS" -w "%{http_code}" "${API_URL}/.well-known/pki/crl/iss-local" 2>/dev/null || echo "000")
+CRL_SIZE=$(wc -c < "$CRL_TMP" | tr -d ' ')
+CRL_CONTENT_TYPE=$(awk 'tolower($1)=="content-type:" { sub(/\r$/,"",$2); print tolower($2) }' "$CRL_HEADERS" | head -n1)
+rm -f "$CRL_TMP" "$CRL_HEADERS"
+
+if [ "$CRL_HTTP_CODE" = "200" ] && [ "$CRL_CONTENT_TYPE" = "application/pkix-crl" ] && [ "$CRL_SIZE" -gt 0 ]; then
+  pass "DER CRL served unauthenticated (HTTP 200, Content-Type application/pkix-crl, ${CRL_SIZE} bytes)"
 else
-  fail "CRL empty after revocation"
+  fail "DER CRL fetch failed: HTTP=$CRL_HTTP_CODE Content-Type=$CRL_CONTENT_TYPE size=$CRL_SIZE"
 fi
 
 CERT_STATUS=$(api_get "/api/v1/certificates/mc-local-test" | python3 -c "import sys,json; print(json.load(sys.stdin).get('status',''))" 2>/dev/null || echo "unknown")

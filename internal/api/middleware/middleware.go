@@ -22,6 +22,16 @@ type RequestIDKey struct{}
 // UserKey is the context key for storing authenticated user information.
 type UserKey struct{}
 
+// AdminKey is the context key for storing admin flag information.
+type AdminKey struct{}
+
+// NamedAPIKey represents a named API key with optional admin flag.
+type NamedAPIKey struct {
+	Name  string
+	Key   string
+	Admin bool
+}
+
 // RequestID middleware generates a unique request ID and adds it to the request context and response headers.
 func RequestID(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -115,32 +125,32 @@ type AuthConfig struct {
 // NewAuth creates an authentication middleware based on config.
 // When Type is "none", all requests pass through (demo/development mode).
 // When Type is "api-key", requests must include a valid Bearer token.
-// The Secret field supports a comma-separated list of valid API keys for
-// zero-downtime key rotation. Rotation workflow:
-//  1. Add new key to comma-separated list, restart server
-//  2. Update all agents/clients to use new key
-//  3. Remove old key from list, restart server
-func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
-	if cfg.Type == "none" {
+// Named keys are supported via []NamedAPIKey input.
+func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handler {
+	if len(namedKeys) == 0 {
 		return func(next http.Handler) http.Handler {
 			return next
 		}
 	}
 
 	// Pre-compute hashes of all valid keys for constant-time comparison.
-	// Supports comma-separated list for zero-downtime key rotation.
-	keys := strings.Split(cfg.Secret, ",")
-	var expectedHashes []string
-	for _, k := range keys {
-		k = strings.TrimSpace(k)
-		if k != "" {
-			expectedHashes = append(expectedHashes, HashAPIKey(k))
-		}
+	type keyEntry struct {
+		hash  string
+		name  string
+		admin bool
+	}
+	var entries []keyEntry
+	for _, nk := range namedKeys {
+		entries = append(entries, keyEntry{
+			hash:  HashAPIKey(nk.Key),
+			name:  nk.Name,
+			admin: nk.Admin,
+		})
 	}
 
 	// Warn if only one key is configured in production mode
-	if len(expectedHashes) == 1 {
-		slog.Warn("only one API key configured — consider adding a rotation key via comma-separated CERTCTL_AUTH_SECRET for zero-downtime rotation")
+	if len(entries) == 1 {
+		slog.Warn("only one API key configured — consider adding a rotation key for zero-downtime rotation")
 	}
 
 	return func(next http.Handler) http.Handler {
@@ -164,25 +174,58 @@ func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 			tokenHash := HashAPIKey(token)
 
 			// Check against all valid keys using constant-time comparison
-			authorized := false
-			for _, expectedHash := range expectedHashes {
-				if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(expectedHash)) == 1 {
-					authorized = true
+			var matched *keyEntry
+			for i := range entries {
+				if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(entries[i].hash)) == 1 {
+					matched = &entries[i]
 					break
 				}
 			}
 
-			if !authorized {
+			if matched == nil {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				http.Error(w, `{"error":"Invalid API key"}`, http.StatusUnauthorized)
 				return
 			}
 
-			// Store the authenticated identity in context
-			ctx := context.WithValue(r.Context(), UserKey{}, "api-key-user")
+			// Store the authenticated identity and admin flag in context
+			ctx := context.WithValue(r.Context(), UserKey{}, matched.name)
+			ctx = context.WithValue(ctx, AdminKey{}, matched.admin)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
+}
+
+// NewAuth is a legacy shim that converts a comma-separated Secret list into
+// synthesized legacy-key-N named entries and delegates to NewAuthWithNamedKeys.
+// It preserves the pre-M-002 behavior for callers that still pass raw AuthConfig
+// (primarily cmd/server/main_test.go). The synthesized actor is "legacy-key-N"
+// rather than the old hardcoded "api-key-user" so audit events carry
+// meaningful identity even on the legacy path.
+//
+// Deprecated: Use NewAuthWithNamedKeys with explicit NamedAPIKey entries.
+func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
+	if cfg.Type == "none" {
+		return func(next http.Handler) http.Handler {
+			return next
+		}
+	}
+
+	var namedKeys []NamedAPIKey
+	idx := 0
+	for _, k := range strings.Split(cfg.Secret, ",") {
+		k = strings.TrimSpace(k)
+		if k == "" {
+			continue
+		}
+		namedKeys = append(namedKeys, NamedAPIKey{
+			Name:  fmt.Sprintf("legacy-key-%d", idx),
+			Key:   k,
+			Admin: false,
+		})
+		idx++
+	}
+	return NewAuthWithNamedKeys(namedKeys)
 }
 
 // RateLimitConfig holds configuration for the rate limiter.
@@ -344,9 +387,20 @@ func getRequestID(ctx context.Context) string {
 }
 
 // GetUser extracts the authenticated user from context.
-func GetUser(ctx context.Context) (string, bool) {
+// Returns the name of the matched API key and whether it was found.
+func GetUser(ctx context.Context) string {
 	user, ok := ctx.Value(UserKey{}).(string)
-	return user, ok
+	if !ok {
+		return ""
+	}
+	return user
+}
+
+// IsAdmin extracts the admin flag from context.
+// Returns true if the authenticated user has admin privileges.
+func IsAdmin(ctx context.Context) bool {
+	admin, ok := ctx.Value(AdminKey{}).(bool)
+	return ok && admin
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.

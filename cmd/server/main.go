@@ -9,6 +9,7 @@ import (
 	"os"
 	"os/signal"
 	"strconv"
+	"strings"
 	"syscall"
 	"time"
 
@@ -223,7 +224,7 @@ func main() {
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
 	renewalService.SetTargetRepo(targetRepo)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
-	jobService := service.NewJobService(jobRepo, renewalService, deploymentService, logger)
+	jobService := service.NewJobService(jobRepo, certificateRepo, ownerRepo, renewalService, deploymentService, logger)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	agentService.SetProfileRepo(profileRepo)
 	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, encryptionKey, logger)
@@ -552,13 +553,63 @@ func main() {
 			"endpoints", "/scep?operation={GetCACaps,GetCACert,PKIOperation}")
 	}
 
+	// Register RFC 5280 CRL and RFC 6960 OCSP handlers under /.well-known/pki/.
+	// These are always enabled (no config gate) — revocation data must be
+	// reachable to relying parties for any cert certctl issues. The finalHandler
+	// routing gate below strips auth middleware for this prefix so browsers,
+	// OpenSSL, OCSP stapling sidecars, and mTLS clients can fetch without
+	// presenting certctl Bearer tokens.
+	apiRouter.RegisterPKIHandlers(certificateHandler)
+	logger.Info("PKI endpoints registered",
+		"endpoints", "/.well-known/pki/{crl/{issuer_id},ocsp/{issuer_id}/{serial}}")
+
 	logger.Info("registered all API handlers")
 
-	// Build middleware stack
-	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
-		Type:   cfg.Auth.Type,
-		Secret: cfg.Auth.Secret,
-	})
+	// Build middleware stack.
+	//
+	// Authentication unification (M-002): every authenticated request now
+	// carries a named actor in the request context so audit events record
+	// the real key identity instead of the hardcoded "api-key-user" string.
+	// Named keys come from CERTCTL_API_KEYS_NAMED (preferred). For backward
+	// compatibility CERTCTL_AUTH_SECRET is synthesized into legacy-key-N
+	// entries with Admin=false.
+	var namedKeys []middleware.NamedAPIKey
+	if cfg.Auth.Type != "none" {
+		// Translate typed config.NamedAPIKey -> middleware.NamedAPIKey. The
+		// two structs are field-compatible but live in different packages to
+		// preserve the config→middleware dependency direction.
+		for _, nk := range cfg.Auth.NamedKeys {
+			namedKeys = append(namedKeys, middleware.NamedAPIKey{
+				Name:  nk.Name,
+				Key:   nk.Key,
+				Admin: nk.Admin,
+			})
+		}
+		// Back-compat: if no named keys but legacy Secret is configured,
+		// synthesize named entries so the audit trail still attributes the
+		// action (instead of falling back to "api-key-user" / "anonymous").
+		if len(namedKeys) == 0 && cfg.Auth.Secret != "" {
+			parts := strings.Split(cfg.Auth.Secret, ",")
+			idx := 0
+			for _, p := range parts {
+				p = strings.TrimSpace(p)
+				if p == "" {
+					continue
+				}
+				namedKeys = append(namedKeys, middleware.NamedAPIKey{
+					Name:  fmt.Sprintf("legacy-key-%d", idx),
+					Key:   p,
+					Admin: false,
+				})
+				idx++
+			}
+			if len(namedKeys) > 0 {
+				logger.Warn("CERTCTL_AUTH_SECRET is deprecated — set CERTCTL_API_KEYS_NAMED for named actor attribution and admin gating",
+					"synthesized_keys", len(namedKeys))
+			}
+		}
+	}
+	authMiddleware := middleware.NewAuthWithNamedKeys(namedKeys)
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
@@ -654,6 +705,14 @@ func main() {
 				noAuthHandler.ServeHTTP(w, r)
 				return
 			}
+			// RFC 5280 CRL and RFC 6960 OCSP live under /.well-known/pki/ and
+			// MUST be served unauthenticated — relying parties (browsers,
+			// OpenSSL, OCSP stapling sidecars, mTLS clients) cannot present
+			// certctl Bearer tokens. See router.RegisterPKIHandlers.
+			if len(path) >= 16 && path[:16] == "/.well-known/pki" {
+				noAuthHandler.ServeHTTP(w, r)
+				return
+			}
 			// All other API and EST routes go through the full middleware stack (with auth)
 			if (len(path) >= 8 && path[:8] == "/api/v1/") ||
 				(len(path) >= 16 && path[:16] == "/.well-known/est") {
@@ -670,10 +729,15 @@ func main() {
 		})
 		logger.Info("dashboard available at /", "web_dir", webDir)
 	} else {
-		// No dashboard: route health/auth-info without auth, everything else through full stack
+		// No dashboard: route health/auth-info and /.well-known/pki without
+		// auth, everything else through full stack.
 		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			path := r.URL.Path
 			if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
+				noAuthHandler.ServeHTTP(w, r)
+				return
+			}
+			if len(path) >= 16 && path[:16] == "/.well-known/pki" {
 				noAuthHandler.ServeHTTP(w, r)
 				return
 			}

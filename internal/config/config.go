@@ -5,6 +5,7 @@ import (
 	"log/slog"
 	"os"
 	"strconv"
+	"strings"
 	"time"
 )
 
@@ -721,6 +722,19 @@ type LogConfig struct {
 	Format string
 }
 
+// NamedAPIKey represents a single named API key with an optional admin flag.
+// Named keys allow real actor attribution in the audit trail (M-002) and provide
+// the admin-gate basis for privileged endpoints like bulk revocation (M-003).
+type NamedAPIKey struct {
+	// Name is the identifier for the key (alphanumeric, hyphens, underscores).
+	// This value is recorded as the actor on every audit event the key authenticates.
+	Name string
+	// Key is the raw API-key secret the client presents as `Authorization: Bearer <key>`.
+	Key string
+	// Admin controls whether the key has admin privileges (bulk revocation, etc.).
+	Admin bool
+}
+
 // AuthConfig contains authentication configuration.
 type AuthConfig struct {
 	// Type sets the authentication mechanism for the REST API.
@@ -730,12 +744,19 @@ type AuthConfig struct {
 	// Setting: CERTCTL_AUTH_TYPE environment variable. Default: "api-key".
 	Type string
 
-	// Secret is the authentication secret (API key hash, JWT signing key, etc.).
-	// For "api-key": the base64-encoded API key to validate against.
-	// For "jwt": the secret used to verify JWT token signatures.
-	// For "none": ignored.
-	// Setting: CERTCTL_AUTH_SECRET environment variable. Required for "api-key" and "jwt".
+	// Secret is the legacy authentication secret (comma-separated API keys).
+	// DEPRECATED in favor of NamedKeys — retained for backward compatibility.
+	// When NamedKeys is empty and Secret is set, each comma-separated key is
+	// registered as a synthesized named key (legacy-key-0, legacy-key-1, ...)
+	// with actor attribution defaulting to "legacy-key-<index>".
+	// Setting: CERTCTL_AUTH_SECRET environment variable.
 	Secret string
+
+	// NamedKeys is the parsed set of named API keys. Populated from
+	// CERTCTL_API_KEYS_NAMED via ParseNamedAPIKeys during Load(). When
+	// non-empty, this takes precedence over the legacy Secret field.
+	// Setting: CERTCTL_API_KEYS_NAMED="name1:key1,name2:key2:admin"
+	NamedKeys []NamedAPIKey
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -794,6 +815,8 @@ func Load() (*Config, error) {
 		Auth: AuthConfig{
 			Type:   getEnv("CERTCTL_AUTH_TYPE", "api-key"),
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
+			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
+			// can surface parse errors alongside other config errors.
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:   getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
@@ -958,6 +981,14 @@ func Load() (*Config, error) {
 			},
 		},
 	}
+
+	// Parse CERTCTL_API_KEYS_NAMED for named key authentication (M-002).
+	// Parse errors surface here so invalid config fails fast at startup.
+	named, err := ParseNamedAPIKeys(getEnv("CERTCTL_API_KEYS_NAMED", ""))
+	if err != nil {
+		return nil, fmt.Errorf("parse CERTCTL_API_KEYS_NAMED: %w", err)
+	}
+	cfg.Auth.NamedKeys = named
 
 	if err := cfg.Validate(); err != nil {
 		return nil, err
@@ -1166,4 +1197,80 @@ func (c *Config) GetLogLevel() slog.Level {
 	default:
 		return slog.LevelInfo
 	}
+}
+
+// ParseNamedAPIKeys parses the CERTCTL_API_KEYS_NAMED environment variable.
+// Format: "name1:key1,name2:key2:admin,name3:key3"
+// The ":admin" suffix is optional; if present, the key has admin privileges.
+// Returns a typed []NamedAPIKey so main.go can pass it directly to the
+// middleware layer without type assertion gymnastics.
+func ParseNamedAPIKeys(input string) ([]NamedAPIKey, error) {
+	if input == "" {
+		return nil, nil
+	}
+
+	parts := splitComma(input)
+	var keys []NamedAPIKey
+	seen := make(map[string]bool)
+
+	for _, part := range parts {
+		part = trimSpace(part)
+		if part == "" {
+			continue
+		}
+
+		// Split by colon: name:key or name:key:admin
+		fields := strings.Split(part, ":")
+		if len(fields) < 2 || len(fields) > 3 {
+			return nil, fmt.Errorf("invalid named key format: %s (expected name:key or name:key:admin)", part)
+		}
+
+		name := trimSpace(fields[0])
+		key := trimSpace(fields[1])
+		admin := false
+
+		if len(fields) == 3 {
+			adminStr := trimSpace(fields[2])
+			if adminStr == "admin" {
+				admin = true
+			} else {
+				return nil, fmt.Errorf("invalid admin flag: %s (expected 'admin')", adminStr)
+			}
+		}
+
+		// Validate name format: alphanumeric, hyphens, underscores
+		if !isValidKeyName(name) {
+			return nil, fmt.Errorf("invalid key name: %s (must be alphanumeric, hyphens, underscores)", name)
+		}
+
+		if seen[name] {
+			return nil, fmt.Errorf("duplicate key name: %s", name)
+		}
+		seen[name] = true
+
+		if key == "" {
+			return nil, fmt.Errorf("empty key for name: %s", name)
+		}
+
+		keys = append(keys, NamedAPIKey{
+			Name:  name,
+			Key:   key,
+			Admin: admin,
+		})
+	}
+
+	return keys, nil
+}
+
+// isValidKeyName checks if a key name is valid (alphanumeric, hyphens, underscores).
+func isValidKeyName(s string) bool {
+	if len(s) == 0 {
+		return false
+	}
+	for _, c := range s {
+		if !((c >= 'a' && c <= 'z') || (c >= 'A' && c <= 'Z') || (c >= '0' && c <= '9') || c == '-' || c == '_') {
+			return false
+		}
+	}
+	return true
 }

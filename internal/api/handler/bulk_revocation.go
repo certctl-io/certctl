@@ -37,6 +37,11 @@ type bulkRevokeRequest struct {
 
 // BulkRevoke handles bulk certificate revocation.
 // POST /api/v1/certificates/bulk-revoke
+//
+// M-003: admin-only. Bulk revocation is a fleet-scale destructive operation —
+// a non-admin caller must not be able to invalidate certificates across
+// profiles/owners/agents. The gate is enforced here (before body parsing) so a
+// non-admin never sees its request criteria evaluated.
 func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -44,6 +49,16 @@ func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request
 	}
 
 	requestID := middleware.GetRequestID(r.Context())
+
+	// M-003: admin-only gate. Non-admin callers are rejected before any
+	// criteria/body processing to avoid leaking validation behavior to
+	// unauthorized actors.
+	if !middleware.IsAdmin(r.Context()) {
+		ErrorWithRequestID(w, http.StatusForbidden,
+			"Bulk revocation requires admin privileges",
+			requestID)
+		return
+	}
 
 	var req bulkRevokeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -78,11 +93,8 @@ func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request
 		return
 	}
 
-	// Extract actor from auth context
-	actor := "api"
-	if user, ok := middleware.GetUser(r.Context()); ok && user != "" {
-		actor = user
-	}
+	// Extract actor from auth context (M-002: named-key identity → audit trail)
+	actor := resolveActor(r.Context())
 
 	result, err := h.svc.BulkRevoke(r.Context(), criteria, req.Reason, actor)
 	if err != nil {

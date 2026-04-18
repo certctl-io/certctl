@@ -512,12 +512,15 @@ curl -s -X POST http://localhost:8443/api/v1/certificates/mc-local-test/revoke \
 
 ### Step 7b: Check the CRL (Certificate Revocation List)
 
+The CRL is a DER-encoded X.509 v2 CRL (RFC 5280 §5) served under the RFC 8615 well-known namespace. It is deliberately unauthenticated — relying parties that need to verify revocation don't have certctl API keys.
+
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/crl | python3 -m json.tool
+# No Authorization header — the endpoint is public by design.
+curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
+openssl crl -inform der -in /tmp/crl.der -noout -text | head -40
 ```
 
-**What you should see**: A list that includes the revoked certificate's serial number, the reason, and the timestamp.
+**What you should see**: `openssl` prints the CRL issuer DN, `This Update` / `Next Update` timestamps, and at least one entry whose `Serial Number` matches the cert you just revoked, with `CRL Reason Code: Superseded` (or whichever reason you passed in step 7a). The response's `Content-Type` header is `application/pkix-crl`.
 
 ### Step 7c: Check in the dashboard
 

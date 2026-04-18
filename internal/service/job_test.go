@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -12,12 +13,21 @@ import (
 
 // helper to build job service with proper constructor signatures
 func newTestJobService(jobRepo *mockJobRepo) *JobService {
+	svc, _, _ := newTestJobServiceWithRepos(jobRepo)
+	return svc
+}
+
+// newTestJobServiceWithRepos returns the service along with the cert+owner
+// repos so self-approval tests can seed owner linkage without rebuilding the
+// whole dependency graph.
+func newTestJobServiceWithRepos(jobRepo *mockJobRepo) (*JobService, *mockCertRepo, *mockOwnerRepo) {
 	logger := slog.New(slog.NewTextHandler(os.Stderr, &slog.HandlerOptions{Level: slog.LevelInfo}))
 
 	certRepo := &mockCertRepo{
 		Certs:    make(map[string]*domain.ManagedCertificate),
 		Versions: make(map[string][]*domain.CertificateVersion),
 	}
+	ownerRepo := newMockOwnerRepository()
 	renewalPolicyRepo := &mockRenewalPolicyRepo{
 		Policies: make(map[string]*domain.RenewalPolicy),
 	}
@@ -32,7 +42,7 @@ func newTestJobService(jobRepo *mockJobRepo) *JobService {
 	renewalService := NewRenewalService(certRepo, jobRepo, renewalPolicyRepo, nil, auditService, notifService, issuerRegistry, "server")
 	deploymentService := NewDeploymentService(jobRepo, targetRepo, agentRepo, certRepo, auditService, notifService)
 
-	return NewJobService(jobRepo, renewalService, deploymentService, logger)
+	return NewJobService(jobRepo, certRepo, ownerRepo, renewalService, deploymentService, logger), certRepo, ownerRepo
 }
 
 func TestProcessPendingJobs_Renewal(t *testing.T) {
@@ -247,5 +257,144 @@ func TestListJobs_FilterByStatus(t *testing.T) {
 	}
 	if total != 1 {
 		t.Errorf("expected total 1, got %d", total)
+	}
+}
+
+// --- M-003: not-self approval (separation of duties) ---
+//
+// These regression tests enforce that ApproveJob returns ErrSelfApproval when
+// the actor matches the certificate owner's Name or Email (case-insensitive).
+// Rejection is intentionally NOT gated — owners may cancel their own pending
+// renewals. Handlers map ErrSelfApproval to HTTP 403.
+
+// seedSelfApprovalFixtures populates the mock repos with a realistic
+// AwaitingApproval renewal job owned by "alice" and returns the service under
+// test. The cert points at owner "o-alice" so checkNotSelf has a full resolution
+// path.
+func seedSelfApprovalFixtures(t *testing.T) (*JobService, *mockJobRepo) {
+	t.Helper()
+
+	now := time.Now()
+	job := &domain.Job{
+		ID:            "job-self",
+		Type:          domain.JobTypeRenewal,
+		CertificateID: "cert-self",
+		Status:        domain.JobStatusAwaitingApproval,
+		CreatedAt:     now,
+		ScheduledAt:   now,
+	}
+	jobRepo := &mockJobRepo{
+		Jobs:          map[string]*domain.Job{job.ID: job},
+		StatusUpdates: make(map[string]domain.JobStatus),
+	}
+
+	svc, certRepo, ownerRepo := newTestJobServiceWithRepos(jobRepo)
+
+	certRepo.AddCert(&domain.ManagedCertificate{
+		ID:        "cert-self",
+		OwnerID:   "o-alice",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+	ownerRepo.AddOwner(&domain.Owner{
+		ID:        "o-alice",
+		Name:      "alice",
+		Email:     "alice@example.com",
+		CreatedAt: now,
+		UpdatedAt: now,
+	})
+
+	return svc, jobRepo
+}
+
+func TestApproveJob_SelfApprovalForbidden_NameMatch(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo := seedSelfApprovalFixtures(t)
+
+	err := svc.ApproveJob(ctx, "job-self", "alice")
+	if err == nil {
+		t.Fatal("expected ErrSelfApproval, got nil")
+	}
+	if !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("expected errors.Is(err, ErrSelfApproval), got %v", err)
+	}
+	if _, flipped := jobRepo.StatusUpdates["job-self"]; flipped {
+		t.Error("expected job status unchanged after self-approval block")
+	}
+}
+
+func TestApproveJob_SelfApprovalForbidden_EmailMatch(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo := seedSelfApprovalFixtures(t)
+
+	err := svc.ApproveJob(ctx, "job-self", "alice@example.com")
+	if err == nil {
+		t.Fatal("expected ErrSelfApproval, got nil")
+	}
+	if !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("expected errors.Is(err, ErrSelfApproval), got %v", err)
+	}
+	if _, flipped := jobRepo.StatusUpdates["job-self"]; flipped {
+		t.Error("expected job status unchanged after self-approval block")
+	}
+}
+
+func TestApproveJob_SelfApprovalForbidden_CaseInsensitive(t *testing.T) {
+	ctx := context.Background()
+	svc, _ := seedSelfApprovalFixtures(t)
+
+	// Uppercase name should still collide — the check must be case-insensitive.
+	if err := svc.ApproveJob(ctx, "job-self", "ALICE"); !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("expected ErrSelfApproval for uppercase name match, got %v", err)
+	}
+
+	// Mixed-case email should also collide.
+	if err := svc.ApproveJob(ctx, "job-self", "Alice@Example.COM"); !errors.Is(err, ErrSelfApproval) {
+		t.Fatalf("expected ErrSelfApproval for mixed-case email match, got %v", err)
+	}
+}
+
+func TestApproveJob_DifferentActor_Permitted(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo := seedSelfApprovalFixtures(t)
+
+	// A different named key must be allowed to approve.
+	if err := svc.ApproveJob(ctx, "job-self", "bob"); err != nil {
+		t.Fatalf("expected approval to succeed for non-owner actor, got %v", err)
+	}
+	if jobRepo.StatusUpdates["job-self"] != domain.JobStatusPending {
+		t.Errorf("expected status Pending after approval, got %s",
+			jobRepo.StatusUpdates["job-self"])
+	}
+}
+
+func TestApproveJob_EmptyActor_Permitted(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo := seedSelfApprovalFixtures(t)
+
+	// Empty actor represents an internal/system caller. The handler layer
+	// enforces authenticated-only, so this branch exists only for defensive
+	// in-process paths (scheduler-driven auto-approval, tests, etc.).
+	if err := svc.ApproveJob(ctx, "job-self", ""); err != nil {
+		t.Fatalf("expected empty actor to be permitted, got %v", err)
+	}
+	if jobRepo.StatusUpdates["job-self"] != domain.JobStatusPending {
+		t.Errorf("expected status Pending after approval, got %s",
+			jobRepo.StatusUpdates["job-self"])
+	}
+}
+
+func TestRejectJob_SelfRejection_Permitted(t *testing.T) {
+	ctx := context.Background()
+	svc, jobRepo := seedSelfApprovalFixtures(t)
+
+	// Owner must be able to reject their own pending renewal — M-003 scopes the
+	// not-self rule to approval only.
+	if err := svc.RejectJob(ctx, "job-self", "no longer needed", "alice"); err != nil {
+		t.Fatalf("expected owner to reject own job, got %v", err)
+	}
+	if jobRepo.StatusUpdates["job-self"] != domain.JobStatusCancelled {
+		t.Errorf("expected status Cancelled after rejection, got %s",
+			jobRepo.StatusUpdates["job-self"])
 	}
 }

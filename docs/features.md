@@ -228,14 +228,15 @@ Revocation is a 7-step process: validate eligibility → get serial → update s
 - Audit trail: single `bulk_revocation_initiated` event logs the criteria and actor
 - Optional `--reason` defaults to `unspecified` if omitted
 
-### CRL Endpoints
+### CRL Endpoint
 
-- `GET /api/v1/crl` — JSON-formatted CRL (version, entries array, total count, timestamp)
-- `GET /api/v1/crl/{issuer_id}` — DER-encoded X.509 CRL signed by issuing CA, 24-hour validity
+- `GET /.well-known/pki/crl/{issuer_id}` — DER-encoded X.509 CRL signed by the issuing CA, 24-hour validity (RFC 5280 §5 + RFC 8615). Served unauthenticated with `Content-Type: application/pkix-crl` so relying parties without certctl API credentials can fetch it.
+
+Prior non-standard JSON CRL and authenticated `/api/v1/crl*` paths were removed in M-006 — RFC 5280 defines only the DER wire format and relying parties do not have API keys.
 
 ### OCSP Responder
 
-`GET /api/v1/ocsp/{issuer_id}/{serial}` — signed OCSP responses (good/revoked/unknown). Signs with issuing CA key. Requires CA key access (Local CA, step-CA connectors).
+`GET /.well-known/pki/ocsp/{issuer_id}/{serial}` — signed OCSP responses (good/revoked/unknown) per RFC 6960. Served unauthenticated with `Content-Type: application/ocsp-response`. Signs with the issuing CA key; requires CA key access (Local CA, step-CA connectors).
 
 ### Short-Lived Certificate Exemption
 

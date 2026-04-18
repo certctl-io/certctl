@@ -1297,66 +1297,59 @@ curl -s -H "$AUTH" "$SERVER/api/v1/audit?per_page=5" | jq '[.items[] | select(.a
 
 ### 5.3 CRL & OCSP
 
-**Test 5.3.1 — JSON CRL endpoint**
+> **M-006 note:** The non-standard JSON CRL (`GET /api/v1/crl`) and the authenticated DER CRL (`GET /api/v1/crl/{issuer_id}`) and OCSP (`GET /api/v1/ocsp/{issuer_id}/{serial}`) paths were removed. Revocation-status distribution now lives under the RFC 8615 well-known namespace (`/.well-known/pki/crl/{issuer_id}` and `/.well-known/pki/ocsp/{issuer_id}/{serial}`), served unauthenticated because relying parties (browsers, TLS clients, hardware appliances) do not have certctl API keys.
+
+**Test 5.3.1 — DER CRL endpoint (RFC 5280 §5, unauthenticated)**
 
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/crl" | jq '{total: .total, entries_count: (.entries | length)}'
+curl -s -D - -o /tmp/crl.der "$SERVER/.well-known/pki/crl/iss-local" | grep -i "content-type"
+openssl crl -inform der -in /tmp/crl.der -noout -text | head -40
 ```
 
-**What:** Fetches the JSON-formatted Certificate Revocation List.
-**Why:** CRL is how relying parties check if a certificate has been revoked. The JSON CRL is the machine-readable API view.
-**Expected:** HTTP 200. `total` > 0 (we revoked several certs above). Entries array contains serial numbers.
-**PASS if** HTTP 200 and `total` > 0. **FAIL** if total = 0 or 500.
+**What:** Fetches the DER-encoded X.509 CRL for the local issuer without presenting any API credentials.
+**Why:** Relying parties (browsers, TLS libraries, network appliances) don't have certctl API keys. RFC 5280 §5 defines only the DER wire format, and RFC 8615 defines `.well-known/pki/*` as the relying-party namespace. The Content-Type must be `application/pkix-crl` and `openssl crl -inform der` must parse the body.
+**Expected:** `Content-Type: application/pkix-crl`, `openssl` prints a valid CRL with the revoked serials we created above.
+**PASS if** Content-Type matches and `openssl crl` parses the body. **FAIL** if JSON/HTML, 401/403, or parse error.
 
 ---
 
-**Test 5.3.2 — DER CRL endpoint**
+**Test 5.3.2 — OCSP: good response for non-revoked cert (RFC 6960, unauthenticated)**
 
 ```bash
-curl -s -D - -o /dev/null -H "$AUTH" "$SERVER/api/v1/crl/iss-local" | grep -i "content-type"
+curl -s -w "\nHTTP %{http_code}\n" "$SERVER/.well-known/pki/ocsp/iss-local/mc-api-prod" -o /tmp/ocsp.der
+openssl ocsp -respin /tmp/ocsp.der -noverify -text 2>/dev/null | head -20
 ```
 
-**What:** Fetches the DER-encoded X.509 CRL for the local issuer.
-**Why:** Standard CRL consumers (browsers, TLS libraries) expect DER-encoded CRLs, not JSON. The Content-Type must be correct.
-**Expected:** `Content-Type: application/pkix-crl`
-**PASS if** Content-Type is `application/pkix-crl`. **FAIL** if JSON or other.
+**What:** Queries the OCSP responder for a non-revoked certificate without any Authorization header.
+**Why:** OCSP is the real-time alternative to CRL. RFC 6960 relying parties do not authenticate to the responder, so the endpoint must be public and return `Content-Type: application/ocsp-response`.
+**Expected:** HTTP 200 with OCSP response indicating "good" status when `openssl ocsp -respin` parses the body.
+**PASS if** HTTP 200 and cert status prints "good". **FAIL** if 401/403/500 or "revoked"/"unknown".
 
 ---
 
-**Test 5.3.3 — OCSP: good response for non-revoked cert**
+**Test 5.3.3 — OCSP: revoked response for revoked cert (unauthenticated)**
 
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/ocsp/iss-local/mc-api-prod"
-```
-
-**What:** Queries the OCSP responder for a non-revoked certificate.
-**Why:** OCSP is the real-time alternative to CRL. A "good" response means the cert is valid.
-**Expected:** HTTP 200 with OCSP response indicating "good" status.
-**PASS if** HTTP 200. **FAIL** if 500.
-
----
-
-**Test 5.3.4 — OCSP: revoked response for revoked cert**
-
-```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/ocsp/iss-local/mc-test-full"
+curl -s -w "\nHTTP %{http_code}\n" "$SERVER/.well-known/pki/ocsp/iss-local/mc-test-full" -o /tmp/ocsp.der
+openssl ocsp -respin /tmp/ocsp.der -noverify -text 2>/dev/null | grep -i "cert status"
 ```
 
 **What:** Queries OCSP for a certificate we revoked earlier.
-**Why:** OCSP must return "revoked" status for revoked certs. If it still returns "good," relying parties will trust a compromised certificate.
+**Why:** OCSP must return "revoked" status for revoked certs. If it still returns "good," relying parties will trust a compromised certificate. Endpoint is unauthenticated per RFC 6960.
 **Expected:** HTTP 200 with OCSP response indicating "revoked" status.
-**PASS if** HTTP 200 and response indicates revoked. **FAIL** if response indicates "good".
+**PASS if** HTTP 200 and status prints "revoked". **FAIL** if status is "good".
 
 ---
 
-**Test 5.3.5 — OCSP: unknown serial**
+**Test 5.3.4 — OCSP: unknown serial (unauthenticated)**
 
 ```bash
-curl -s -w "\nHTTP %{http_code}\n" -H "$AUTH" "$SERVER/api/v1/ocsp/iss-local/nonexistent-serial"
+curl -s -w "\nHTTP %{http_code}\n" "$SERVER/.well-known/pki/ocsp/iss-local/nonexistent-serial" -o /tmp/ocsp.der
+openssl ocsp -respin /tmp/ocsp.der -noverify -text 2>/dev/null | grep -i "cert status"
 ```
 
 **What:** Queries OCSP for a serial number the server doesn't recognize.
-**Why:** OCSP must return "unknown" for serials it doesn't manage, not "good" (which would be a false positive).
+**Why:** OCSP must return "unknown" for serials it doesn't manage, not "good" (which would be a false positive). Endpoint is public per RFC 6960.
 **Expected:** HTTP 200 with OCSP "unknown" response, or HTTP 404.
 **PASS if** response is "unknown" or 404. **FAIL** if "good".
 
@@ -2102,9 +2095,10 @@ go test ./internal/connector/issuer/local/ -run "TestSubCA" -v
 **What:** In sub-CA mode, the DER CRL (Part 31.1) should be signed by the sub-CA key, not a self-signed root.
 
 ```bash
-# After starting in sub-CA mode and revoking a cert:
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/subca-crl.der
+# After starting in sub-CA mode and revoking a cert. The CRL is
+# published unauthenticated under the RFC 8615 well-known namespace
+# because relying parties don't carry certctl API keys.
+curl -s "http://localhost:8443/.well-known/pki/crl/iss-local" -o /tmp/subca-crl.der
 
 openssl crl -in /tmp/subca-crl.der -inform DER -noout -issuer
 ```
@@ -3706,23 +3700,24 @@ go test ./internal/service/ -run TestCSRRenewal -v
 
 **Why:** TLS clients need to verify that certificates haven't been revoked. Without OCSP/CRL, a compromised certificate remains trusted until it expires. The short-lived exemption avoids bloating the CRL with certs that expire before distribution.
 
-### 24.1: DER-Encoded CRL
+> **M-006 note:** CRL and OCSP are published at `GET /.well-known/pki/crl/{issuer_id}` (RFC 5280 §5, `application/pkix-crl`) and `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (RFC 6960, `application/ocsp-response`). Per RFC 8615, `.well-known/pki/*` is the relying-party namespace, and the endpoints are served **unauthenticated** — browsers, TLS libraries, and network appliances do not have certctl API keys. The legacy `GET /api/v1/crl`, `GET /api/v1/crl/{issuer_id}`, and `GET /api/v1/ocsp/{issuer_id}/{serial}` routes were removed.
 
-**What:** `GET /api/v1/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA. Content-Type is `application/pkix-crl`. The CRL has 24-hour validity.
+### 24.1: DER-Encoded CRL (unauthenticated)
 
-**Why:** This is the standard CRL format that browsers, TLS libraries, and LDAP directories consume. The existing JSON CRL at `GET /api/v1/crl` is certctl-specific; the DER CRL is interoperable.
+**What:** `GET /.well-known/pki/crl/{issuer_id}` returns a DER-encoded X.509 CRL signed by the issuing CA. Content-Type is `application/pkix-crl`. The CRL has 24-hour validity.
+
+**Why:** This is the RFC 5280 §5 wire format that browsers, TLS libraries, and LDAP directories consume. It must be reachable without any Authorization header so that relying parties — who have no certctl credentials — can fetch it.
 
 ```bash
-# Request DER CRL for the local issuer
-curl -s -D - -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/crl/iss-local" \
+# Request DER CRL for the local issuer. No Authorization header.
+curl -s -D - "http://localhost:8443/.well-known/pki/crl/iss-local" \
   -o /tmp/crl.der
 
 # Verify it's valid DER CRL with openssl
 openssl crl -in /tmp/crl.der -inform DER -noout -text
 ```
 
-**Expected:** 200 OK, Content-Type `application/pkix-crl`, Cache-Control `public, max-age=3600`.
+**Expected:** 200 OK, Content-Type `application/pkix-crl`.
 
 **PASS if:**
 - `openssl crl` parses the DER file successfully
@@ -3730,33 +3725,34 @@ openssl crl -in /tmp/crl.der -inform DER -noout -text
 - Validity period is present (thisUpdate / nextUpdate)
 - If any certs have been revoked, they appear in the revocation list with serial + reason
 
-**FAIL if:** Response is JSON (wrong endpoint), `openssl` rejects the DER format, or headers are wrong.
+**FAIL if:** Response is JSON (wrong endpoint), `openssl` rejects the DER format, headers are wrong, or the server returns 401/403 (auth must NOT be required).
 
 ### 24.2: DER CRL — Nonexistent Issuer
 
 ```bash
-curl -s -w "\n%{http_code}" -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/crl/iss-nonexistent"
+curl -s -w "\n%{http_code}" \
+  "http://localhost:8443/.well-known/pki/crl/iss-nonexistent"
 ```
 
 **Expected:** 404 Not Found.
 **PASS if** status code is 404 and body contains "not found".
 
-### 24.3: OCSP Responder — Good Status
+### 24.3: OCSP Responder — Good Status (unauthenticated)
 
-**What:** `GET /api/v1/ocsp/{issuer_id}/{serial}` returns a signed OCSP response. For a non-revoked certificate, the status is "good".
+**What:** `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` returns a signed OCSP response. For a non-revoked certificate, the status is "good".
 
-**Why:** OCSP is the real-time revocation check that TLS clients perform during the handshake. A "good" response tells the client the cert is still valid.
+**Why:** OCSP is the real-time RFC 6960 revocation check that TLS clients perform during the handshake. A "good" response tells the client the cert is still valid. Relying parties fetch this without API credentials.
 
 ```bash
-# First, get a certificate's serial number
+# First, get a certificate's serial number (this uses the authenticated API
+# because the operator has an API key — that is different from the relying
+# party fetching the OCSP response).
 SERIAL=$(curl -s -H "Authorization: Bearer $API_KEY" \
   "http://localhost:8443/api/v1/certificates/mc-api-prod" | jq -r '.latest_version.serial_number // empty')
 
-# If serial is available, query OCSP
+# Query OCSP without any Authorization header.
 if [ -n "$SERIAL" ]; then
-  curl -s -D - -H "Authorization: Bearer $API_KEY" \
-    "http://localhost:8443/api/v1/ocsp/iss-local/$SERIAL" \
+  curl -s -D - "http://localhost:8443/.well-known/pki/ocsp/iss-local/$SERIAL" \
     -o /tmp/ocsp.der
 
   # Parse OCSP response
@@ -3771,7 +3767,7 @@ fi
 - Certificate status is "good" for a non-revoked cert
 - Response is signed (producedAt timestamp present)
 
-**FAIL if:** Response is JSON, OCSP status is wrong, or `openssl` rejects the response.
+**FAIL if:** Response is JSON, OCSP status is wrong, `openssl` rejects the response, or the endpoint requires auth.
 
 ### 24.4: OCSP Responder — Revoked Status
 
@@ -3784,9 +3780,8 @@ curl -s -X POST -H "Authorization: Bearer $API_KEY" \
   -d '{"reason": "keyCompromise"}' \
   "http://localhost:8443/api/v1/certificates/$CERT_ID/revoke"
 
-# Then query OCSP
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/ocsp/iss-local/$SERIAL" \
+# Then query OCSP — unauthenticated.
+curl -s "http://localhost:8443/.well-known/pki/ocsp/iss-local/$SERIAL" \
   -o /tmp/ocsp-revoked.der
 
 openssl ocsp -respin /tmp/ocsp-revoked.der -text -noverify
@@ -3801,8 +3796,7 @@ openssl ocsp -respin /tmp/ocsp-revoked.der -text -noverify
 **What:** Querying a serial number that doesn't exist in the inventory returns an "unknown" OCSP status (not an error — this is the correct OCSP behavior per RFC 6960).
 
 ```bash
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/ocsp/iss-local/DEADBEEF" \
+curl -s "http://localhost:8443/.well-known/pki/ocsp/iss-local/DEADBEEF" \
   -o /tmp/ocsp-unknown.der
 
 openssl ocsp -respin /tmp/ocsp-unknown.der -text -noverify
@@ -3820,9 +3814,8 @@ openssl ocsp -respin /tmp/ocsp-unknown.der -text -noverify
 To test: revoke a cert that was issued under the `prof-short-lived` profile, then check the DER CRL. The revoked short-lived cert should NOT appear.
 
 ```bash
-# After revoking a short-lived cert (serial SHORT_SERIAL):
-curl -s -H "Authorization: Bearer $API_KEY" \
-  "http://localhost:8443/api/v1/crl/iss-local" -o /tmp/crl.der
+# After revoking a short-lived cert (serial SHORT_SERIAL). No auth needed.
+curl -s "http://localhost:8443/.well-known/pki/crl/iss-local" -o /tmp/crl.der
 
 openssl crl -in /tmp/crl.der -inform DER -text | grep -i "$SHORT_SERIAL"
 ```

@@ -72,3 +72,7 @@ SECURITY_REMEDIATION.md
 .DS_Store
 Thumbs.db
 mcp-server
+
+# Local Go build/module caches (session-scoped, never committed)
+/.gocache/
+/.gomodcache/

@@ -2,6 +2,8 @@ package handler
 
 import (
 	"net/http"
+
+	"github.com/shankar0123/certctl/internal/api/middleware"
 )
 
 // HealthHandler handles health and readiness check endpoints.
@@ -55,9 +57,23 @@ func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 	JSON(w, http.StatusOK, response)
 }
 
-// AuthCheck returns 200 if the request has valid auth credentials.
-// The auth middleware runs before this handler, so reaching here means auth passed.
+// AuthCheck returns 200 if the request has valid auth credentials, along with
+// the resolved named-key identity and admin flag so the GUI can gate
+// admin-only affordances (e.g., the bulk-revoke button).
+//
+// M-003 (Phase B.4): surface the admin flag so the frontend hides affordances
+// that would otherwise 403 at the server. This is a hint for UX only —
+// authorization remains enforced at the handler layer (bulk_revocation.go).
+//
+// The auth middleware runs before this handler, so reaching here means auth
+// passed. `user` falls back to an empty string when auth is disabled
+// (CERTCTL_AUTH_TYPE=none).
 // GET /api/v1/auth/check
 func (h HealthHandler) AuthCheck(w http.ResponseWriter, r *http.Request) {
-	JSON(w, http.StatusOK, map[string]string{"status": "authenticated"})
+	response := map[string]interface{}{
+		"status": "authenticated",
+		"user":   middleware.GetUser(r.Context()),
+		"admin":  middleware.IsAdmin(r.Context()),
+	}
+	JSON(w, http.StatusOK, response)
 }

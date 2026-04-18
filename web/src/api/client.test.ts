@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import {
   setApiKey,
   getApiKey,
+  checkAuth,
   getCertificates,
   getCertificate,
   getCertificateVersions,
@@ -86,7 +87,6 @@ import {
   getTarget,
   getPrometheusMetrics,
   getCertificateDeployments,
-  getCRL,
   getOCSPStatus,
   updateIssuer,
   updateTarget,
@@ -176,6 +176,46 @@ describe('API Client', () => {
       expect(listener).toHaveBeenCalled();
 
       window.removeEventListener('certctl:auth-required', listener);
+    });
+  });
+
+  // ─── checkAuth (M-003: surfaces user + admin) ──────
+
+  describe('checkAuth', () => {
+    // Post-M-003 /auth/check returns {status, user, admin}. The admin flag drives
+    // GUI gating of admin-only affordances (bulk revoke, etc.). Authoritative
+    // enforcement lives server-side — this test only pins the contract the
+    // AuthProvider depends on.
+    it('returns {status, user, admin} shape and sends Bearer token', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({ status: 'authenticated', user: 'ops-admin', admin: true }),
+      );
+
+      const resp = await checkAuth('test-api-key');
+
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/auth/check');
+      expect(init.headers['Authorization']).toBe('Bearer test-api-key');
+      expect(init.headers['Content-Type']).toBe('application/json');
+      expect(resp.status).toBe('authenticated');
+      expect(resp.user).toBe('ops-admin');
+      expect(resp.admin).toBe(true);
+    });
+
+    it('returns admin=false for non-admin callers', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({ status: 'authenticated', user: 'alice', admin: false }),
+      );
+
+      const resp = await checkAuth('alice-key');
+
+      expect(resp.user).toBe('alice');
+      expect(resp.admin).toBe(false);
+    });
+
+    it('throws on invalid API key', async () => {
+      mockFetch.mockReturnValueOnce(mockErrorResponse(401));
+      await expect(checkAuth('bad-key')).rejects.toThrow('Invalid API key');
     });
   });
 
@@ -1213,13 +1253,12 @@ describe('API Client', () => {
       expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/certificates/mc-1/deployments');
     });
 
-    it('getCRL sends GET to /crl', async () => {
-      mockFetch.mockReturnValueOnce(mockJsonResponse({ entries: [], total: 0 }));
-      await getCRL();
-      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/crl');
-    });
-
-    it('getOCSPStatus sends GET with issuer and serial', async () => {
+    // M-006: JSON CRL endpoint (`GET /api/v1/crl`) removed entirely — RFC 5280
+    // defines only the DER wire format, which is now served unauthenticated at
+    // `/.well-known/pki/crl/{issuer_id}` (fetched directly, no GUI wrapper).
+    // OCSP likewise relocated to `/.well-known/pki/ocsp/{issuer_id}/{serial}`
+    // per RFC 8615.
+    it('getOCSPStatus sends GET to /.well-known/pki/ocsp with issuer and serial', async () => {
       const buf = new ArrayBuffer(8);
       mockFetch.mockReturnValueOnce(
         Promise.resolve({
@@ -1229,7 +1268,7 @@ describe('API Client', () => {
         } as Response)
       );
       await getOCSPStatus('iss-local', 'ABC123');
-      expect(mockFetch.mock.calls[0][0]).toBe('/api/v1/ocsp/iss-local/ABC123');
+      expect(mockFetch.mock.calls[0][0]).toBe('/.well-known/pki/ocsp/iss-local/ABC123');
     });
 
     it('updateIssuer sends PUT with data', async () => {

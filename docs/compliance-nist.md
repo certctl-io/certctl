@@ -210,15 +210,17 @@ NIST SP 800-57 Part 1 Section 6.2 addresses secure key distribution to minimize 
   - Proxy agent executes deployment via appliance API
 
 **Revocation Distribution**
-- Certificate Revocation List (CRL) via `GET /api/v1/crl/{issuer_id}`
-  - Returns DER-encoded X.509 CRL signed by issuing CA
+- Certificate Revocation List (CRL) via `GET /.well-known/pki/crl/{issuer_id}` (RFC 5280 §5, RFC 8615)
+  - Returns DER-encoded X.509 CRL signed by issuing CA (`Content-Type: application/pkix-crl`)
   - 24-hour validity period
   - Includes all revoked serials, reasons, and revocation timestamps
+  - Served unauthenticated so relying parties without certctl API credentials can fetch it
   - Subject to URL caching; OCSP preferred for real-time revocation
-- OCSP via `GET /api/v1/ocsp/{issuer_id}/{serial}`
-  - Returns DER-encoded OCSP response (OCSPResponse ASN.1 structure)
+- OCSP via `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (RFC 6960)
+  - Returns DER-encoded OCSP response (OCSPResponse ASN.1 structure, `Content-Type: application/ocsp-response`)
   - Signed by issuing CA (or delegated OCSP signing cert)
   - Responds with good/revoked/unknown status
+  - Served unauthenticated — the RFC 6960 relying-party model does not assume API credentials
   - Real-time, more bandwidth-efficient than CRL polling
 
 ## Revocation and Compromise (NIST SP 800-57 Part 3)

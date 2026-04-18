@@ -2,31 +2,52 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
 )
 
+// ErrSelfApproval is returned by ApproveJob when the actor attempting to
+// approve a renewal job is the same person listed as the owner of the
+// underlying certificate. M-003 enforces separation of duties: the owner who
+// requested (or benefits from) the renewal must not be the same identity that
+// approves it. Handlers map this sentinel to HTTP 403 Forbidden.
+var ErrSelfApproval = errors.New("self-approval forbidden: actor is the owner of the certificate")
+
 // JobService manages job processing and status tracking.
 // It coordinates between the scheduler and various job-specific services.
 type JobService struct {
 	jobRepo           repository.JobRepository
+	certRepo          repository.CertificateRepository
+	ownerRepo         repository.OwnerRepository
 	renewalService    *RenewalService
 	deploymentService *DeploymentService
 	logger            *slog.Logger
 }
 
 // NewJobService creates a new job service.
+//
+// certRepo and ownerRepo are required for the M-003 not-self-approval check
+// in ApproveJob. Callers may pass nil for either to disable the check
+// (useful for tests that don't exercise the approval path); when nil, the
+// service logs a warning on the first approval attempt and permits the
+// transition. Production wiring must supply both.
 func NewJobService(
 	jobRepo repository.JobRepository,
+	certRepo repository.CertificateRepository,
+	ownerRepo repository.OwnerRepository,
 	renewalService *RenewalService,
 	deploymentService *DeploymentService,
 	logger *slog.Logger,
 ) *JobService {
 	return &JobService{
 		jobRepo:           jobRepo,
+		certRepo:          certRepo,
+		ownerRepo:         ownerRepo,
 		renewalService:    renewalService,
 		deploymentService: deploymentService,
 		logger:            logger,
@@ -264,7 +285,13 @@ func (s *JobService) GetJob(ctx context.Context, id string) (*domain.Job, error)
 
 // ApproveJob approves a renewal job that is awaiting approval.
 // Transitions the job from AwaitingApproval to Pending so the scheduler picks it up.
-func (s *JobService) ApproveJob(ctx context.Context, id string) error {
+//
+// actor is the named-key identity of the approver (from the auth middleware
+// via resolveActor). M-003: if actor matches the certificate owner's Name or
+// Email (case-insensitive), returns ErrSelfApproval to enforce separation of
+// duties. Callers must pass a non-empty actor; empty actor is treated as an
+// anonymous system caller and permitted (internal/system paths).
+func (s *JobService) ApproveJob(ctx context.Context, id, actor string) error {
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("job not found: %w", err)
@@ -274,17 +301,29 @@ func (s *JobService) ApproveJob(ctx context.Context, id string) error {
 		return fmt.Errorf("cannot approve job with status %s (must be AwaitingApproval)", job.Status)
 	}
 
+	if err := s.checkNotSelf(ctx, job, actor); err != nil {
+		return err
+	}
+
 	if err := s.jobRepo.UpdateStatus(ctx, id, domain.JobStatusPending, ""); err != nil {
 		return fmt.Errorf("failed to approve job: %w", err)
 	}
 
-	s.logger.Info("renewal job approved", "job_id", id, "certificate_id", job.CertificateID)
+	s.logger.Info("renewal job approved",
+		"job_id", id,
+		"certificate_id", job.CertificateID,
+		"actor", actor)
 	return nil
 }
 
 // RejectJob rejects a renewal job that is awaiting approval.
 // Transitions the job to Cancelled with a rejection reason.
-func (s *JobService) RejectJob(ctx context.Context, id string, reason string) error {
+//
+// actor is the named-key identity of the rejector (from the auth middleware
+// via resolveActor). Rejection is NOT subject to the not-self check — an
+// owner is permitted to cancel their own pending renewal. actor is recorded
+// on the log line for audit attribution.
+func (s *JobService) RejectJob(ctx context.Context, id, reason, actor string) error {
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("job not found: %w", err)
@@ -303,6 +342,67 @@ func (s *JobService) RejectJob(ctx context.Context, id string, reason string) er
 		return fmt.Errorf("failed to reject job: %w", err)
 	}
 
-	s.logger.Info("renewal job rejected", "job_id", id, "certificate_id", job.CertificateID, "reason", reason)
+	s.logger.Info("renewal job rejected",
+		"job_id", id,
+		"certificate_id", job.CertificateID,
+		"reason", reason,
+		"actor", actor)
+	return nil
+}
+
+// checkNotSelf enforces the M-003 separation-of-duties rule for renewal
+// approval: the actor approving a job may not be the owner of the underlying
+// certificate.
+//
+// Resolution rules:
+//   - Empty actor → permitted (internal/system caller; auth middleware already
+//     short-circuits anonymous users at the handler layer).
+//   - certRepo or ownerRepo nil → warn once, permit (test/bootstrap wiring).
+//   - Job has no certificate or certificate has no OwnerID → permitted (no
+//     owner to collide with).
+//   - Owner record not found → warn, permit (defensive: stale FK should not
+//     block operations).
+//   - Case-insensitive match against owner.Name OR owner.Email → returns
+//     ErrSelfApproval.
+func (s *JobService) checkNotSelf(ctx context.Context, job *domain.Job, actor string) error {
+	if actor == "" {
+		return nil
+	}
+	if s.certRepo == nil || s.ownerRepo == nil {
+		s.logger.Warn("not-self approval check skipped: cert/owner repo not wired",
+			"job_id", job.ID, "actor", actor)
+		return nil
+	}
+	if job.CertificateID == "" {
+		return nil
+	}
+
+	cert, err := s.certRepo.Get(ctx, job.CertificateID)
+	if err != nil {
+		s.logger.Warn("not-self approval check: certificate lookup failed",
+			"job_id", job.ID, "certificate_id", job.CertificateID, "error", err)
+		return nil
+	}
+	if cert == nil || cert.OwnerID == "" {
+		return nil
+	}
+
+	owner, err := s.ownerRepo.Get(ctx, cert.OwnerID)
+	if err != nil || owner == nil {
+		s.logger.Warn("not-self approval check: owner lookup failed",
+			"job_id", job.ID, "owner_id", cert.OwnerID, "error", err)
+		return nil
+	}
+
+	actorLower := strings.ToLower(actor)
+	if strings.ToLower(owner.Name) == actorLower || strings.ToLower(owner.Email) == actorLower {
+		s.logger.Warn("self-approval blocked",
+			"job_id", job.ID,
+			"certificate_id", job.CertificateID,
+			"owner_id", owner.ID,
+			"actor", actor)
+		return ErrSelfApproval
+	}
+
 	return nil
 }
