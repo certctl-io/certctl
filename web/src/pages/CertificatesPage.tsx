@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
+import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getTeams, getPolicies, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -35,8 +35,27 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
     queryKey: ['issuers'],
     queryFn: () => getIssuers(),
   });
+  // C-001: owner_id, team_id, and renewal_policy_id are required by the
+  // server (handler in internal/api/handler/certificates.go) and by OpenAPI.
+  // Load the catalog so the user selects valid FKs instead of typing free-text
+  // IDs that would 400 at the server.
+  const { data: ownersResp } = useQuery({
+    queryKey: ['owners', 'form'],
+    queryFn: () => getOwners({ per_page: '500' }),
+  });
+  const { data: teamsResp } = useQuery({
+    queryKey: ['teams', 'form'],
+    queryFn: () => getTeams({ per_page: '500' }),
+  });
+  const { data: policiesResp } = useQuery({
+    queryKey: ['renewal-policies', 'form'],
+    queryFn: () => getPolicies({ per_page: '500' }),
+  });
   const profiles = profilesResp?.data || [];
   const issuers = issuersResp?.data || [];
+  const owners = ownersResp?.data || [];
+  const teams = teamsResp?.data || [];
+  const policies = policiesResp?.data || [];
 
   const selectedProfile = profiles.find(p => p.id === form.certificate_profile_id);
   const ttlLabel = selectedProfile
@@ -143,24 +162,36 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
               </select>
             </div>
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Policy</label>
-              <input value={form.renewal_policy_id} onChange={e => setForm(f => ({ ...f, renewal_policy_id: e.target.value }))}
-                className={inputClass}
-                placeholder="rp-standard" />
+              <label className="text-xs text-ink-muted block mb-1">Policy *</label>
+              <select value={form.renewal_policy_id} onChange={e => setForm(f => ({ ...f, renewal_policy_id: e.target.value }))}
+                className={selectClass}>
+                <option value="">Select policy...</option>
+                {policies.map(p => (
+                  <option key={p.id} value={p.id}>{p.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div className="grid grid-cols-2 gap-3">
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Owner</label>
-              <input value={form.owner_id} onChange={e => setForm(f => ({ ...f, owner_id: e.target.value }))}
-                className={inputClass}
-                placeholder="o-alice" />
+              <label className="text-xs text-ink-muted block mb-1">Owner *</label>
+              <select value={form.owner_id} onChange={e => setForm(f => ({ ...f, owner_id: e.target.value }))}
+                className={selectClass}>
+                <option value="">Select owner...</option>
+                {owners.map(o => (
+                  <option key={o.id} value={o.id}>{o.name} ({o.email})</option>
+                ))}
+              </select>
             </div>
             <div>
-              <label className="text-xs text-ink-muted block mb-1">Team</label>
-              <input value={form.team_id} onChange={e => setForm(f => ({ ...f, team_id: e.target.value }))}
-                className={inputClass}
-                placeholder="t-platform" />
+              <label className="text-xs text-ink-muted block mb-1">Team *</label>
+              <select value={form.team_id} onChange={e => setForm(f => ({ ...f, team_id: e.target.value }))}
+                className={selectClass}>
+                <option value="">Select team...</option>
+                {teams.map(t => (
+                  <option key={t.id} value={t.id}>{t.name}</option>
+                ))}
+              </select>
             </div>
           </div>
           <div>
@@ -175,7 +206,15 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
           <button onClick={onClose} className="btn btn-ghost text-sm">Cancel</button>
           <button
             onClick={() => mutation.mutate()}
-            disabled={!form.name || !form.common_name || !form.issuer_id || mutation.isPending}
+            disabled={
+              !form.name ||
+              !form.common_name ||
+              !form.issuer_id ||
+              !form.owner_id ||
+              !form.team_id ||
+              !form.renewal_policy_id ||
+              mutation.isPending
+            }
             className="btn btn-primary text-sm disabled:opacity-50"
           >
             {mutation.isPending ? 'Creating...' : 'Create Certificate'}

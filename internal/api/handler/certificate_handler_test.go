@@ -432,6 +432,66 @@ func TestCreateCertificate_ServiceError(t *testing.T) {
 	}
 }
 
+// TestCreateCertificate_MissingRequiredField_Returns400 pins the C-001 handler
+// contract: handler MUST reject a create payload that omits any of the five
+// required fields (name, common_name, owner_id, team_id, issuer_id,
+// renewal_policy_id) with HTTP 400 before the service is invoked. The mock
+// service here would succeed if called; every subtest proving 400 therefore
+// proves the handler guard fires.
+func TestCreateCertificate_MissingRequiredField_Returns400(t *testing.T) {
+	baseBody := map[string]interface{}{
+		"name":              "API Prod",
+		"common_name":       "api.example.com",
+		"owner_id":          "o-alice",
+		"team_id":           "t-platform",
+		"issuer_id":         "iss-local",
+		"renewal_policy_id": "rp-standard",
+	}
+
+	cases := []struct {
+		name         string
+		missingField string
+	}{
+		{"missing name", "name"},
+		{"missing common_name", "common_name"},
+		{"missing owner_id", "owner_id"},
+		{"missing team_id", "team_id"},
+		{"missing issuer_id", "issuer_id"},
+		{"missing renewal_policy_id", "renewal_policy_id"},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			body := make(map[string]interface{}, len(baseBody))
+			for k, v := range baseBody {
+				body[k] = v
+			}
+			delete(body, tc.missingField)
+			bodyBytes, _ := json.Marshal(body)
+
+			mock := &MockCertificateService{
+				CreateCertificateFn: func(_ context.Context, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
+					// Would succeed if handler guard did not fire.
+					cert.ID = "mc-would-be-created"
+					return &cert, nil
+				},
+			}
+			handler := NewCertificateHandler(mock)
+
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates", bytes.NewReader(bodyBytes))
+			req = req.WithContext(contextWithRequestID())
+			req.Header.Set("Content-Type", "application/json")
+			w := httptest.NewRecorder()
+
+			handler.CreateCertificate(w, req)
+
+			if w.Code != http.StatusBadRequest {
+				t.Fatalf("%s: expected 400, got %d — body=%s", tc.name, w.Code, w.Body.String())
+			}
+		})
+	}
+}
+
 // Test UpdateCertificate - success case
 func TestUpdateCertificate_Success(t *testing.T) {
 	updated := &domain.ManagedCertificate{

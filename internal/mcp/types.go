@@ -35,7 +35,7 @@ type CreateCertificateInput struct {
 	TeamID          string            `json:"team_id" jsonschema:"Team ID (required)"`
 	IssuerID        string            `json:"issuer_id" jsonschema:"Issuer connector ID"`
 	TargetIDs       []string          `json:"target_ids,omitempty" jsonschema:"Deployment target IDs"`
-	RenewalPolicyID string            `json:"renewal_policy_id,omitempty" jsonschema:"Renewal policy ID"`
+	RenewalPolicyID string            `json:"renewal_policy_id" jsonschema:"Renewal policy ID (required)"`
 	ProfileID       string            `json:"certificate_profile_id,omitempty" jsonschema:"Certificate profile ID"`
 	Tags            map[string]string `json:"tags,omitempty" jsonschema:"Key-value tags"`
 }
@@ -112,7 +112,7 @@ type CreateTargetInput struct {
 	ID      string      `json:"id,omitempty" jsonschema:"Target ID"`
 	Name    string      `json:"name" jsonschema:"Target display name"`
 	Type    string      `json:"type" jsonschema:"Target type: NGINX, Apache, HAProxy, F5, IIS"`
-	AgentID string      `json:"agent_id,omitempty" jsonschema:"Agent ID that manages this target"`
+	AgentID string      `json:"agent_id" jsonschema:"Agent ID that manages this target (required)"`
 	Config  interface{} `json:"config,omitempty" jsonschema:"Target-specific configuration"`
 	Enabled bool        `json:"enabled,omitempty" jsonschema:"Whether the target is enabled"`
 }

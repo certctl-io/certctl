@@ -3326,6 +3326,7 @@ components:
 
     DeploymentTarget:
       type: object
+      required: [name, type, agent_id]
       properties:
         id:
           type: string
@@ -3335,6 +3336,12 @@ components:
           $ref: "#/components/schemas/TargetType"
         agent_id:
           type: string
+          description: |
+            ID of the agent that manages this target. Required because
+            deployment_targets.agent_id is a NOT NULL foreign key to agents(id)
+            (migration 000001). Empty or nonexistent agent IDs are rejected
+            with HTTP 400 by the service layer (see C-002 in the coverage-gap
+            audit).
         config:
           type: object
           description: Target-specific configuration (varies by type)

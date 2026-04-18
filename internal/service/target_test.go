@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"os"
 	"testing"
@@ -377,11 +378,17 @@ func TestTargetService_GetTarget_Success(t *testing.T) {
 }
 
 func TestTargetService_CreateTarget_Success(t *testing.T) {
-	svc, targetRepo, _, _ := newTestTargetService()
+	svc, targetRepo, _, agentRepo := newTestTargetService()
+
+	// C-002: CreateTarget now pre-validates agent_id against agentRepo. Seed a
+	// real agent so the happy path still exercises the normal creation flow
+	// without tripping the new ErrAgentNotFound guard.
+	agentRepo.AddAgent(&domain.Agent{ID: "a-1", Name: "test-agent"})
 
 	target := domain.DeploymentTarget{
-		Name: "New Target",
-		Type: domain.TargetTypeNGINX,
+		Name:    "New Target",
+		Type:    domain.TargetTypeNGINX,
+		AgentID: "a-1",
 	}
 
 	ctx := context.Background()
@@ -412,6 +419,53 @@ func TestTargetService_CreateTarget_InvalidType(t *testing.T) {
 	_, err := svc.CreateTarget(ctx, target)
 	if err == nil {
 		t.Fatalf("expected error for invalid type, got nil")
+	}
+}
+
+// TestTargetService_CreateTarget_MissingAgentID verifies the C-002 service-layer
+// guard: an empty agent_id must be rejected with ErrAgentNotFound before the
+// repository layer is ever consulted. The handler maps this sentinel to HTTP
+// 400, so a 500 from a Postgres 23503 FK violation is never surfaced.
+func TestTargetService_CreateTarget_MissingAgentID(t *testing.T) {
+	svc, _, _, _ := newTestTargetService()
+
+	target := domain.DeploymentTarget{
+		Name: "No Agent",
+		Type: domain.TargetTypeNGINX,
+		// AgentID intentionally empty
+	}
+
+	ctx := context.Background()
+	_, err := svc.CreateTarget(ctx, target)
+	if err == nil {
+		t.Fatalf("expected error for missing agent_id, got nil")
+	}
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Errorf("expected errors.Is(err, ErrAgentNotFound) to be true, got err=%v", err)
+	}
+}
+
+// TestTargetService_CreateTarget_NonexistentAgentID verifies the second half of
+// the C-002 guard: a non-empty agent_id that does not resolve in agentRepo
+// still returns ErrAgentNotFound rather than letting the FK violation escape to
+// Postgres. This is the realistic failure mode for a GUI sending a stale
+// agent_id or a CLI caller with a typo.
+func TestTargetService_CreateTarget_NonexistentAgentID(t *testing.T) {
+	svc, _, _, _ := newTestTargetService()
+
+	target := domain.DeploymentTarget{
+		Name:    "Bad Agent Ref",
+		Type:    domain.TargetTypeNGINX,
+		AgentID: "a-does-not-exist",
+	}
+
+	ctx := context.Background()
+	_, err := svc.CreateTarget(ctx, target)
+	if err == nil {
+		t.Fatalf("expected error for nonexistent agent_id, got nil")
+	}
+	if !errors.Is(err, ErrAgentNotFound) {
+		t.Errorf("expected errors.Is(err, ErrAgentNotFound) to be true, got err=%v", err)
 	}
 }
 

@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
-import { getTargets, createTarget, deleteTarget } from '../api/client';
+import { getTargets, createTarget, deleteTarget, getAgents } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -180,6 +180,16 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
   const [config, setConfig] = useState<Record<string, string>>({});
   const [error, setError] = useState('');
 
+  // C-002: agent_id is a NOT NULL FK in deployment_targets (migration 000001
+  // line 104). Load registered agents so the user picks a valid FK instead of
+  // typing a free-text ID that would 400 at the service layer (or, pre-fix,
+  // bubble up as a Postgres 23503 foreign-key violation → 500).
+  const { data: agentsResp } = useQuery({
+    queryKey: ['agents', 'form'],
+    queryFn: () => getAgents({ per_page: '500' }),
+  });
+  const agents = agentsResp?.data || [];
+
   // Fields that backends expect as boolean (Go bool)
   const BOOL_FIELDS = new Set([
     'sni', 'insecure', 'sds_config', 'remove_expired', 'create_keystore',
@@ -244,7 +254,7 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
   });
 
   const fields = CONFIG_FIELDS[targetType] || [];
-  const canProceedToReview = name && targetType && fields.filter(f => f.required).every(f => config[f.key]);
+  const canProceedToReview = name && targetType && agentId && fields.filter(f => f.required).every(f => config[f.key]);
 
   return (
     <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
@@ -314,10 +324,16 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
                   placeholder="web-server-1" />
               </div>
               <div>
-                <label className="text-xs text-ink-muted block mb-1">Agent ID</label>
-                <input value={agentId} onChange={e => setAgentId(e.target.value)}
-                  className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400"
-                  placeholder="agent-web1" />
+                <label className="text-xs text-ink-muted block mb-1">Agent *</label>
+                <select value={agentId} onChange={e => setAgentId(e.target.value)}
+                  className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400">
+                  <option value="">Select an agent...</option>
+                  {agents.map(a => (
+                    <option key={a.id} value={a.id}>
+                      {a.hostname || a.id} ({a.id})
+                    </option>
+                  ))}
+                </select>
               </div>
               {fields.map(f => (
                 <div key={f.key}>

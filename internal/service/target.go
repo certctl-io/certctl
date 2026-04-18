@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -11,6 +12,13 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
 )
+
+// ErrAgentNotFound is returned by [TargetService.CreateTarget] when the caller
+// references an agent_id that is empty or does not correspond to a registered
+// agent. The handler layer maps this to HTTP 400 via [errors.Is]. See C-002 in
+// cowork/certctl-coverage-gap-audit.md — this sentinel replaces a silent
+// Postgres FK violation (23503 → HTTP 500) with a deterministic 400.
+var ErrAgentNotFound = errors.New("referenced agent does not exist")
 
 // validTargetTypes is the set of allowed target types for validation.
 var validTargetTypes = map[domain.TargetType]bool{
@@ -276,6 +284,19 @@ func (s *TargetService) CreateTarget(ctx context.Context, target domain.Deployme
 	if !isValidTargetType(target.Type) {
 		return nil, fmt.Errorf("unsupported target type: %s", target.Type)
 	}
+
+	// C-002: enforce agent_id FK at service layer so we return a clean 400
+	// instead of bubbling a Postgres 23503 foreign-key violation out as 500.
+	// The schema (migrations/000001 line 104) declares agent_id TEXT NOT NULL
+	// with a FK to agents(id); we mirror that contract here for deterministic
+	// error mapping.
+	if target.AgentID == "" {
+		return nil, fmt.Errorf("%w: agent_id is required", ErrAgentNotFound)
+	}
+	if _, err := s.agentRepo.Get(ctx, target.AgentID); err != nil {
+		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, target.AgentID)
+	}
+
 	if target.ID == "" {
 		target.ID = generateID("target")
 	}

@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // TargetService defines the service interface for deployment target operations.
@@ -125,9 +127,23 @@ func (h TargetHandler) CreateTarget(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, "type is required", requestID)
 		return
 	}
+	// C-002: agent_id is a NOT NULL FK in deployment_targets (migration 000001
+	// line 104). Reject empty values at the boundary so callers get a clean 400
+	// with the field name rather than a generic "Failed to create target" 500.
+	if err := ValidateRequired("agent_id", target.AgentID); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+		return
+	}
 
 	created, err := h.svc.CreateTarget(r.Context(), target)
 	if err != nil {
+		// C-002: a nonexistent agent_id is a client error, not a server error.
+		// The service returns ErrAgentNotFound (wrapped via fmt.Errorf %w) when
+		// agentRepo.Get fails; we translate that to 400 via errors.Is.
+		if errors.Is(err, service.ErrAgentNotFound) {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
+			return
+		}
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create target", requestID)
 		return
 	}

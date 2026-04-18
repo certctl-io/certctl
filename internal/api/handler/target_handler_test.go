@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // MockTargetService is a mock implementation of TargetService interface.
@@ -239,8 +240,9 @@ func TestCreateTarget_Success(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name": "New Target",
-		"type": "nginx",
+		"name":     "New Target",
+		"type":     "nginx",
+		"agent_id": "agent-001",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -258,7 +260,8 @@ func TestCreateTarget_Success(t *testing.T) {
 
 func TestCreateTarget_MissingName(t *testing.T) {
 	body := map[string]interface{}{
-		"type": "nginx",
+		"type":     "nginx",
+		"agent_id": "agent-001",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -276,7 +279,8 @@ func TestCreateTarget_MissingName(t *testing.T) {
 
 func TestCreateTarget_MissingType(t *testing.T) {
 	body := map[string]interface{}{
-		"name": "New Target",
+		"name":     "New Target",
+		"agent_id": "agent-001",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -311,8 +315,9 @@ func TestCreateTarget_NameTooLong(t *testing.T) {
 		longName += "x"
 	}
 	body := map[string]interface{}{
-		"name": longName,
-		"type": "nginx",
+		"name":     longName,
+		"type":     "nginx",
+		"agent_id": "agent-001",
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -337,6 +342,65 @@ func TestCreateTarget_MethodNotAllowed(t *testing.T) {
 
 	if w.Code != http.StatusMethodNotAllowed {
 		t.Fatalf("expected status 405, got %d", w.Code)
+	}
+}
+
+// TestCreateTarget_MissingAgentID_Returns400 pins the C-002 handler contract:
+// handler MUST reject a create payload that omits agent_id with HTTP 400
+// before the service is invoked. Using a mock that would return 201-worthy
+// success proves the guard fires.
+func TestCreateTarget_MissingAgentID_Returns400(t *testing.T) {
+	body := map[string]interface{}{
+		"name": "New Target",
+		"type": "nginx",
+		// agent_id intentionally omitted
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	mock := &MockTargetService{
+		CreateTargetFn: func(_ context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+			// Would succeed if handler guard did not fire.
+			target.ID = "t-would-be-created"
+			return &target, nil
+		},
+	}
+	handler := NewTargetHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.CreateTarget(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d — body=%s", w.Code, w.Body.String())
+	}
+}
+
+// TestCreateTarget_NonexistentAgent_Returns400 pins the C-002 handler↔service
+// translation: when the service returns service.ErrAgentNotFound, the handler
+// MUST map it to HTTP 400, not the generic 500 used for other service errors.
+func TestCreateTarget_NonexistentAgent_Returns400(t *testing.T) {
+	mock := &MockTargetService{
+		CreateTargetFn: func(_ context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+			return nil, service.ErrAgentNotFound
+		},
+	}
+	body := map[string]interface{}{
+		"name":     "New Target",
+		"type":     "nginx",
+		"agent_id": "agent-does-not-exist",
+	}
+	bodyBytes, _ := json.Marshal(body)
+
+	handler := NewTargetHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/targets", bytes.NewReader(bodyBytes))
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.CreateTarget(w, req)
+
+	if w.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400 for nonexistent agent, got %d — body=%s", w.Code, w.Body.String())
 	}
 }
 
