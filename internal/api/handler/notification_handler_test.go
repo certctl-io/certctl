@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -17,21 +18,21 @@ type MockNotificationService struct {
 	MarkAsReadFn        func(id string) error
 }
 
-func (m *MockNotificationService) ListNotifications(page, perPage int) ([]domain.NotificationEvent, int64, error) {
+func (m *MockNotificationService) ListNotifications(_ context.Context, page, perPage int) ([]domain.NotificationEvent, int64, error) {
 	if m.ListNotificationsFn != nil {
 		return m.ListNotificationsFn(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockNotificationService) GetNotification(id string) (*domain.NotificationEvent, error) {
+func (m *MockNotificationService) GetNotification(_ context.Context, id string) (*domain.NotificationEvent, error) {
 	if m.GetNotificationFn != nil {
 		return m.GetNotificationFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockNotificationService) MarkAsRead(id string) error {
+func (m *MockNotificationService) MarkAsRead(_ context.Context, id string) error {
 	if m.MarkAsReadFn != nil {
 		return m.MarkAsReadFn(id)
 	}

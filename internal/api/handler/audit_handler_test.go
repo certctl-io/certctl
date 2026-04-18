@@ -19,14 +19,14 @@ type mockAuditService struct {
 	getFunc   func(id string) (*domain.AuditEvent, error)
 }
 
-func (m *mockAuditService) ListAuditEvents(page, perPage int) ([]domain.AuditEvent, int64, error) {
+func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
 	if m.listFunc != nil {
 		return m.listFunc(page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *mockAuditService) GetAuditEvent(id string) (*domain.AuditEvent, error) {
+func (m *mockAuditService) GetAuditEvent(_ context.Context, id string) (*domain.AuditEvent, error) {
 	if m.getFunc != nil {
 		return m.getFunc(id)
 	}

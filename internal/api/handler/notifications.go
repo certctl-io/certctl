@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 	"strconv"
 	"strings"
@@ -11,9 +12,9 @@ import (
 
 // NotificationService defines the service interface for notification operations.
 type NotificationService interface {
-	ListNotifications(page, perPage int) ([]domain.NotificationEvent, int64, error)
-	GetNotification(id string) (*domain.NotificationEvent, error)
-	MarkAsRead(id string) error
+	ListNotifications(ctx context.Context, page, perPage int) ([]domain.NotificationEvent, int64, error)
+	GetNotification(ctx context.Context, id string) (*domain.NotificationEvent, error)
+	MarkAsRead(ctx context.Context, id string) error
 }
 
 // NotificationHandler handles HTTP requests for notification operations.
@@ -50,7 +51,7 @@ func (h NotificationHandler) ListNotifications(w http.ResponseWriter, r *http.Re
 		}
 	}
 
-	notifications, total, err := h.svc.ListNotifications(page, perPage)
+	notifications, total, err := h.svc.ListNotifications(r.Context(), page, perPage)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list notifications", requestID)
 		return
@@ -84,7 +85,7 @@ func (h NotificationHandler) GetNotification(w http.ResponseWriter, r *http.Requ
 	}
 	id = parts[0]
 
-	notification, err := h.svc.GetNotification(id)
+	notification, err := h.svc.GetNotification(r.Context(), id)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusNotFound, "Notification not found", requestID)
 		return
@@ -112,7 +113,7 @@ func (h NotificationHandler) MarkAsRead(w http.ResponseWriter, r *http.Request) 
 	}
 	notificationID := parts[0]
 
-	if err := h.svc.MarkAsRead(notificationID); err != nil {
+	if err := h.svc.MarkAsRead(r.Context(), notificationID); err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to mark notification as read", requestID)
 		return
 	}

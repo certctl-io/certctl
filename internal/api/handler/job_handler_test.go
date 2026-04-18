@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -21,35 +22,35 @@ type MockJobService struct {
 	RejectJobFn  func(id string, reason string) error
 }
 
-func (m *MockJobService) ListJobs(status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
+func (m *MockJobService) ListJobs(_ context.Context, status, jobType string, page, perPage int) ([]domain.Job, int64, error) {
 	if m.ListJobsFn != nil {
 		return m.ListJobsFn(status, jobType, page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockJobService) GetJob(id string) (*domain.Job, error) {
+func (m *MockJobService) GetJob(_ context.Context, id string) (*domain.Job, error) {
 	if m.GetJobFn != nil {
 		return m.GetJobFn(id)
 	}
 	return nil, nil
 }
 
-func (m *MockJobService) CancelJob(id string) error {
+func (m *MockJobService) CancelJob(_ context.Context, id string) error {
 	if m.CancelJobFn != nil {
 		return m.CancelJobFn(id)
 	}
 	return nil
 }
 
-func (m *MockJobService) ApproveJob(id string) error {
+func (m *MockJobService) ApproveJob(_ context.Context, id string) error {
 	if m.ApproveJobFn != nil {
 		return m.ApproveJobFn(id)
 	}
 	return nil
 }
 
-func (m *MockJobService) RejectJob(id string, reason string) error {
+func (m *MockJobService) RejectJob(_ context.Context, id string, reason string) error {
 	if m.RejectJobFn != nil {
 		return m.RejectJobFn(id, reason)
 	}
