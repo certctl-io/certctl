@@ -242,7 +242,7 @@ func (s *TargetService) TestConnection(ctx context.Context, id string) error {
 }
 
 // ListTargets returns paginated targets (handler interface method).
-func (s *TargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+func (s *TargetService) ListTargets(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -250,7 +250,7 @@ func (s *TargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarge
 		perPage = 50
 	}
 
-	targets, err := s.targetRepo.List(context.Background())
+	targets, err := s.targetRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list targets: %w", err)
 	}
@@ -267,12 +267,12 @@ func (s *TargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarge
 }
 
 // GetTarget returns a single target (handler interface method).
-func (s *TargetService) GetTarget(id string) (*domain.DeploymentTarget, error) {
-	return s.targetRepo.Get(context.Background(), id)
+func (s *TargetService) GetTarget(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
+	return s.targetRepo.Get(ctx, id)
 }
 
 // CreateTarget creates a new target (handler interface method).
-func (s *TargetService) CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+func (s *TargetService) CreateTarget(ctx context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 	if !isValidTargetType(target.Type) {
 		return nil, fmt.Errorf("unsupported target type: %s", target.Type)
 	}
@@ -308,20 +308,20 @@ func (s *TargetService) CreateTarget(target domain.DeploymentTarget) (*domain.De
 		target.Config = redactConfigJSON(target.Config)
 	}
 
-	if err := s.targetRepo.Create(context.Background(), &target); err != nil {
+	if err := s.targetRepo.Create(ctx, &target); err != nil {
 		return nil, fmt.Errorf("failed to create target: %w", err)
 	}
 	return &target, nil
 }
 
 // UpdateTarget modifies a target (handler interface method).
-func (s *TargetService) UpdateTarget(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+func (s *TargetService) UpdateTarget(ctx context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 	target.ID = id
 	target.UpdatedAt = time.Now()
 
 	// Merge redacted fields with existing config
 	if len(target.Config) > 0 {
-		mergedConfig, err := s.mergeRedactedConfig(context.Background(), id, target.Config)
+		mergedConfig, err := s.mergeRedactedConfig(ctx, id, target.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to merge config: %w", err)
 		}
@@ -334,20 +334,15 @@ func (s *TargetService) UpdateTarget(id string, target domain.DeploymentTarget) 
 		target.Config = redactConfigJSON(json.RawMessage(mergedConfig))
 	}
 
-	if err := s.targetRepo.Update(context.Background(), &target); err != nil {
+	if err := s.targetRepo.Update(ctx, &target); err != nil {
 		return nil, fmt.Errorf("failed to update target: %w", err)
 	}
 	return &target, nil
 }
 
 // DeleteTarget removes a target (handler interface method).
-func (s *TargetService) DeleteTarget(id string) error {
-	return s.targetRepo.Delete(context.Background(), id)
-}
-
-// TestTargetConnection tests target connectivity (handler interface method).
-func (s *TargetService) TestTargetConnection(id string) error {
-	return s.TestConnection(context.Background(), id)
+func (s *TargetService) DeleteTarget(ctx context.Context, id string) error {
+	return s.targetRepo.Delete(ctx, id)
 }
 
 // --- Internal helpers ---

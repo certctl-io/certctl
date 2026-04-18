@@ -2,6 +2,7 @@ package handler
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
@@ -13,52 +14,52 @@ import (
 
 // MockTargetService is a mock implementation of TargetService interface.
 type MockTargetService struct {
-	ListTargetsFn        func(page, perPage int) ([]domain.DeploymentTarget, int64, error)
-	GetTargetFn          func(id string) (*domain.DeploymentTarget, error)
-	CreateTargetFn       func(target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	UpdateTargetFn       func(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
-	DeleteTargetFn       func(id string) error
-	TestTargetConnectionFn func(id string) error
+	ListTargetsFn    func(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error)
+	GetTargetFn      func(ctx context.Context, id string) (*domain.DeploymentTarget, error)
+	CreateTargetFn   func(ctx context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	UpdateTargetFn   func(ctx context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error)
+	DeleteTargetFn   func(ctx context.Context, id string) error
+	TestConnectionFn func(ctx context.Context, id string) error
 }
 
-func (m *MockTargetService) ListTargets(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+func (m *MockTargetService) ListTargets(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
 	if m.ListTargetsFn != nil {
-		return m.ListTargetsFn(page, perPage)
+		return m.ListTargetsFn(ctx, page, perPage)
 	}
 	return nil, 0, nil
 }
 
-func (m *MockTargetService) GetTarget(id string) (*domain.DeploymentTarget, error) {
+func (m *MockTargetService) GetTarget(ctx context.Context, id string) (*domain.DeploymentTarget, error) {
 	if m.GetTargetFn != nil {
-		return m.GetTargetFn(id)
+		return m.GetTargetFn(ctx, id)
 	}
 	return nil, nil
 }
 
-func (m *MockTargetService) CreateTarget(target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+func (m *MockTargetService) CreateTarget(ctx context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 	if m.CreateTargetFn != nil {
-		return m.CreateTargetFn(target)
+		return m.CreateTargetFn(ctx, target)
 	}
 	return nil, nil
 }
 
-func (m *MockTargetService) UpdateTarget(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+func (m *MockTargetService) UpdateTarget(ctx context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 	if m.UpdateTargetFn != nil {
-		return m.UpdateTargetFn(id, target)
+		return m.UpdateTargetFn(ctx, id, target)
 	}
 	return nil, nil
 }
 
-func (m *MockTargetService) DeleteTarget(id string) error {
+func (m *MockTargetService) DeleteTarget(ctx context.Context, id string) error {
 	if m.DeleteTargetFn != nil {
-		return m.DeleteTargetFn(id)
+		return m.DeleteTargetFn(ctx, id)
 	}
 	return nil
 }
 
-func (m *MockTargetService) TestTargetConnection(id string) error {
-	if m.TestTargetConnectionFn != nil {
-		return m.TestTargetConnectionFn(id)
+func (m *MockTargetService) TestConnection(ctx context.Context, id string) error {
+	if m.TestConnectionFn != nil {
+		return m.TestConnectionFn(ctx, id)
 	}
 	return nil
 }
@@ -85,7 +86,7 @@ func TestListTargets_Success(t *testing.T) {
 	}
 
 	mock := &MockTargetService{
-		ListTargetsFn: func(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+		ListTargetsFn: func(_ context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
 			return []domain.DeploymentTarget{t1, t2}, 2, nil
 		},
 	}
@@ -113,7 +114,7 @@ func TestListTargets_Success(t *testing.T) {
 func TestListTargets_Pagination(t *testing.T) {
 	var capturedPage, capturedPerPage int
 	mock := &MockTargetService{
-		ListTargetsFn: func(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+		ListTargetsFn: func(_ context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
 			capturedPage = page
 			capturedPerPage = perPage
 			return []domain.DeploymentTarget{}, 0, nil
@@ -137,7 +138,7 @@ func TestListTargets_Pagination(t *testing.T) {
 
 func TestListTargets_ServiceError(t *testing.T) {
 	mock := &MockTargetService{
-		ListTargetsFn: func(page, perPage int) ([]domain.DeploymentTarget, int64, error) {
+		ListTargetsFn: func(_ context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
 			return nil, 0, ErrMockServiceFailed
 		},
 	}
@@ -169,7 +170,7 @@ func TestListTargets_MethodNotAllowed(t *testing.T) {
 func TestGetTarget_Success(t *testing.T) {
 	now := time.Now()
 	mock := &MockTargetService{
-		GetTargetFn: func(id string) (*domain.DeploymentTarget, error) {
+		GetTargetFn: func(_ context.Context, id string) (*domain.DeploymentTarget, error) {
 			return &domain.DeploymentTarget{
 				ID:        id,
 				Name:      "NGINX Proxy",
@@ -196,7 +197,7 @@ func TestGetTarget_Success(t *testing.T) {
 
 func TestGetTarget_NotFound(t *testing.T) {
 	mock := &MockTargetService{
-		GetTargetFn: func(id string) (*domain.DeploymentTarget, error) {
+		GetTargetFn: func(_ context.Context, id string) (*domain.DeploymentTarget, error) {
 			return nil, ErrMockNotFound
 		},
 	}
@@ -229,7 +230,7 @@ func TestGetTarget_EmptyID(t *testing.T) {
 func TestCreateTarget_Success(t *testing.T) {
 	now := time.Now()
 	mock := &MockTargetService{
-		CreateTargetFn: func(target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+		CreateTargetFn: func(_ context.Context, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 			target.ID = "t-new"
 			target.CreatedAt = now
 			target.UpdatedAt = now
@@ -342,7 +343,7 @@ func TestCreateTarget_MethodNotAllowed(t *testing.T) {
 func TestUpdateTarget_Success(t *testing.T) {
 	now := time.Now()
 	mock := &MockTargetService{
-		UpdateTargetFn: func(id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
+		UpdateTargetFn: func(_ context.Context, id string, target domain.DeploymentTarget) (*domain.DeploymentTarget, error) {
 			return &domain.DeploymentTarget{
 				ID:        id,
 				Name:      target.Name,
@@ -375,7 +376,7 @@ func TestUpdateTarget_Success(t *testing.T) {
 func TestDeleteTarget_Success(t *testing.T) {
 	var deletedID string
 	mock := &MockTargetService{
-		DeleteTargetFn: func(id string) error {
+		DeleteTargetFn: func(_ context.Context, id string) error {
 			deletedID = id
 			return nil
 		},
@@ -398,7 +399,7 @@ func TestDeleteTarget_Success(t *testing.T) {
 
 func TestDeleteTarget_ServiceError(t *testing.T) {
 	mock := &MockTargetService{
-		DeleteTargetFn: func(id string) error {
+		DeleteTargetFn: func(_ context.Context, id string) error {
 			return ErrMockServiceFailed
 		},
 	}
@@ -430,7 +431,7 @@ func TestDeleteTarget_EmptyID(t *testing.T) {
 
 func TestTestTargetConnection_Success(t *testing.T) {
 	mock := &MockTargetService{
-		TestTargetConnectionFn: func(id string) error {
+		TestConnectionFn: func(_ context.Context, id string) error {
 			return nil
 		},
 	}
@@ -457,7 +458,7 @@ func TestTestTargetConnection_Success(t *testing.T) {
 
 func TestTestTargetConnection_Failed(t *testing.T) {
 	mock := &MockTargetService{
-		TestTargetConnectionFn: func(id string) error {
+		TestConnectionFn: func(_ context.Context, id string) error {
 			return ErrMockServiceFailed
 		},
 	}

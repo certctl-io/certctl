@@ -344,7 +344,8 @@ func TestTargetService_ListTargets_Success(t *testing.T) {
 	targetRepo.AddTarget(target2)
 
 	// Call handler-interface method
-	targets, total, err := svc.ListTargets(1, 50)
+	ctx := context.Background()
+	targets, total, err := svc.ListTargets(ctx, 1, 50)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -364,7 +365,8 @@ func TestTargetService_GetTarget_Success(t *testing.T) {
 	target := &domain.DeploymentTarget{ID: "t-1", Name: "Target 1", Type: domain.TargetTypeNGINX}
 	targetRepo.AddTarget(target)
 
-	result, err := svc.GetTarget("t-1")
+	ctx := context.Background()
+	result, err := svc.GetTarget(ctx, "t-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -382,7 +384,8 @@ func TestTargetService_CreateTarget_Success(t *testing.T) {
 		Type: domain.TargetTypeNGINX,
 	}
 
-	result, err := svc.CreateTarget(target)
+	ctx := context.Background()
+	result, err := svc.CreateTarget(ctx, target)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -405,7 +408,8 @@ func TestTargetService_CreateTarget_InvalidType(t *testing.T) {
 		Type: domain.TargetType("Unknown"),
 	}
 
-	_, err := svc.CreateTarget(target)
+	ctx := context.Background()
+	_, err := svc.CreateTarget(ctx, target)
 	if err == nil {
 		t.Fatalf("expected error for invalid type, got nil")
 	}
@@ -424,7 +428,8 @@ func TestTargetService_UpdateTarget_Success(t *testing.T) {
 		Type: domain.TargetTypeApache,
 	}
 
-	result, err := svc.UpdateTarget("t-1", updated)
+	ctx := context.Background()
+	result, err := svc.UpdateTarget(ctx, "t-1", updated)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -442,7 +447,8 @@ func TestTargetService_DeleteTarget_Success(t *testing.T) {
 	targetRepo.AddTarget(target)
 
 	// Delete it
-	err := svc.DeleteTarget("t-1")
+	ctx := context.Background()
+	err := svc.DeleteTarget(ctx, "t-1")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}

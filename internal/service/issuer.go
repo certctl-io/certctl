@@ -260,9 +260,9 @@ func (s *IssuerService) Delete(ctx context.Context, id string, actor string) err
 	return nil
 }
 
-// TestConnectionWithContext tests the connection to an issuer by instantiating a throwaway
+// TestConnection tests the connection to an issuer by instantiating a throwaway
 // connector and calling ValidateConfig. Records the result in the database.
-func (s *IssuerService) TestConnectionWithContext(ctx context.Context, id string) error {
+func (s *IssuerService) TestConnection(ctx context.Context, id string) error {
 	iss, err := s.issuerRepo.Get(ctx, id)
 	if err != nil {
 		return fmt.Errorf("issuer not found: %w", err)
@@ -289,11 +289,6 @@ func (s *IssuerService) TestConnectionWithContext(ctx context.Context, id string
 
 	s.updateTestStatus(ctx, iss, "success")
 	return nil
-}
-
-// TestConnection verifies the issuer connection (handler interface method).
-func (s *IssuerService) TestConnection(id string) error {
-	return s.TestConnectionWithContext(context.Background(), id)
 }
 
 // BuildRegistry loads all enabled issuers from the database and rebuilds the dynamic registry.
@@ -633,7 +628,7 @@ func (s *IssuerService) buildEnvVarSeeds(cfg *config.Config) []*domain.Issuer {
 }
 
 // ListIssuers returns paginated issuers (handler interface method).
-func (s *IssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, error) {
+func (s *IssuerService) ListIssuers(ctx context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -641,7 +636,7 @@ func (s *IssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, 
 		perPage = 50
 	}
 
-	issuers, err := s.issuerRepo.List(context.Background())
+	issuers, err := s.issuerRepo.List(ctx)
 	if err != nil {
 		return nil, 0, fmt.Errorf("failed to list issuers: %w", err)
 	}
@@ -658,12 +653,12 @@ func (s *IssuerService) ListIssuers(page, perPage int) ([]domain.Issuer, int64, 
 }
 
 // GetIssuer returns a single issuer (handler interface method).
-func (s *IssuerService) GetIssuer(id string) (*domain.Issuer, error) {
-	return s.issuerRepo.Get(context.Background(), id)
+func (s *IssuerService) GetIssuer(ctx context.Context, id string) (*domain.Issuer, error) {
+	return s.issuerRepo.Get(ctx, id)
 }
 
 // CreateIssuer creates a new issuer (handler interface method).
-func (s *IssuerService) CreateIssuer(iss domain.Issuer) (*domain.Issuer, error) {
+func (s *IssuerService) CreateIssuer(ctx context.Context, iss domain.Issuer) (*domain.Issuer, error) {
 	iss.Type = normalizeIssuerType(iss.Type)
 	if !isValidIssuerType(iss.Type) {
 		return nil, fmt.Errorf("unsupported issuer type: %s", iss.Type)
@@ -700,26 +695,26 @@ func (s *IssuerService) CreateIssuer(iss domain.Issuer) (*domain.Issuer, error) 
 		iss.Config = redactConfigJSON(iss.Config)
 	}
 
-	if err := s.issuerRepo.Create(context.Background(), &iss); err != nil {
+	if err := s.issuerRepo.Create(ctx, &iss); err != nil {
 		return nil, fmt.Errorf("failed to create issuer: %w", err)
 	}
 
 	// Rebuild registry
 	if iss.Enabled {
-		s.rebuildRegistryQuiet(context.Background())
+		s.rebuildRegistryQuiet(ctx)
 	}
 
 	return &iss, nil
 }
 
 // UpdateIssuer modifies an issuer (handler interface method).
-func (s *IssuerService) UpdateIssuer(id string, iss domain.Issuer) (*domain.Issuer, error) {
+func (s *IssuerService) UpdateIssuer(ctx context.Context, id string, iss domain.Issuer) (*domain.Issuer, error) {
 	iss.ID = id
 	iss.UpdatedAt = time.Now()
 
 	// Merge redacted fields with existing config
 	if len(iss.Config) > 0 {
-		mergedConfig, err := s.mergeRedactedConfig(context.Background(), id, iss.Config)
+		mergedConfig, err := s.mergeRedactedConfig(ctx, id, iss.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to merge config: %w", err)
 		}
@@ -732,18 +727,18 @@ func (s *IssuerService) UpdateIssuer(id string, iss domain.Issuer) (*domain.Issu
 		iss.Config = redactConfigJSON(json.RawMessage(mergedConfig))
 	}
 
-	if err := s.issuerRepo.Update(context.Background(), &iss); err != nil {
+	if err := s.issuerRepo.Update(ctx, &iss); err != nil {
 		return nil, fmt.Errorf("failed to update issuer: %w", err)
 	}
 
-	s.rebuildRegistryQuiet(context.Background())
+	s.rebuildRegistryQuiet(ctx)
 
 	return &iss, nil
 }
 
 // DeleteIssuer removes an issuer (handler interface method).
-func (s *IssuerService) DeleteIssuer(id string) error {
-	if err := s.issuerRepo.Delete(context.Background(), id); err != nil {
+func (s *IssuerService) DeleteIssuer(ctx context.Context, id string) error {
+	if err := s.issuerRepo.Delete(ctx, id); err != nil {
 		return err
 	}
 	if s.registry != nil {
