@@ -12,6 +12,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"strings"
 	"text/tabwriter"
 	"time"
 )
@@ -430,7 +431,54 @@ func (c *Client) GetStatus() error {
 }
 
 // ImportCertificates bulk imports certificates from PEM files.
-func (c *Client) ImportCertificates(files []string) error {
+//
+// C-001 scope-expansion closure: the create-certificate handler's
+// six-field required contract (name, common_name, renewal_policy_id,
+// issuer_id, owner_id, team_id) is enforced server-side via
+// ValidateRequired. The bulk importer must therefore be told which
+// owner / team / renewal-policy / issuer to assign to every imported
+// cert — otherwise every POST comes back 400. All four IDs are
+// required flags; missing flags error out with a user-legible message
+// before any files are read.
+func (c *Client) ImportCertificates(args []string) error {
+	fs := flag.NewFlagSet("import", flag.ContinueOnError)
+	ownerID := fs.String("owner-id", "", "Owner ID to assign to each imported certificate (required)")
+	teamID := fs.String("team-id", "", "Team ID to assign to each imported certificate (required)")
+	renewalPolicyID := fs.String("renewal-policy-id", "", "Renewal policy ID to assign to each imported certificate (required)")
+	issuerID := fs.String("issuer-id", "", "Issuer ID to assign to each imported certificate (required)")
+	nameTemplate := fs.String("name-template", "{cn}", "Template for the certificate name; {cn} is substituted with the cert's common name")
+	environment := fs.String("environment", "imported", "Environment tag for each imported certificate")
+	if err := fs.Parse(args); err != nil {
+		return err
+	}
+
+	// Validate required flags up front — a clear error here beats six
+	// parallel 400s from the server.
+	missing := []string{}
+	if *ownerID == "" {
+		missing = append(missing, "--owner-id")
+	}
+	if *teamID == "" {
+		missing = append(missing, "--team-id")
+	}
+	if *renewalPolicyID == "" {
+		missing = append(missing, "--renewal-policy-id")
+	}
+	if *issuerID == "" {
+		missing = append(missing, "--issuer-id")
+	}
+	if len(missing) > 0 {
+		return fmt.Errorf("missing required flag(s): %s", strings.Join(missing, ", "))
+	}
+	if *nameTemplate == "" {
+		return fmt.Errorf("--name-template must be non-empty")
+	}
+
+	files := fs.Args()
+	if len(files) == 0 {
+		return fmt.Errorf("at least one PEM file path is required")
+	}
+
 	var imported, failed int
 
 	for _, filePath := range files {
@@ -452,12 +500,18 @@ func (c *Client) ImportCertificates(files []string) error {
 			total := len(certs)
 			fmt.Printf("Importing %d/%d certificates from %s...\r", i+1, total, filepath.Base(filePath))
 
+			name := strings.ReplaceAll(*nameTemplate, "{cn}", cert.Subject.CommonName)
+
 			req := map[string]interface{}{
-				"common_name": cert.Subject.CommonName,
-				"sans":        cert.DNSNames,
-				"issuer_id":   "iss-local",
-				"environment": "imported",
-				"status":      "Active",
+				"name":              name,
+				"common_name":       cert.Subject.CommonName,
+				"sans":              cert.DNSNames,
+				"issuer_id":         *issuerID,
+				"owner_id":          *ownerID,
+				"team_id":           *teamID,
+				"renewal_policy_id": *renewalPolicyID,
+				"environment":       *environment,
+				"status":            "Active",
 			}
 
 			if cert.SerialNumber != nil {

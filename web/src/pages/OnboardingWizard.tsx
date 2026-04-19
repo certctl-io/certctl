@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  getIssuers, getAgents, getProfiles, getOwners,
+  getIssuers, getAgents, getProfiles, getOwners, getTeams, getPolicies,
   createIssuer, testIssuerConnection,
   createCertificate, triggerRenewal,
   getApiKey,
@@ -400,18 +400,28 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
   createdIssuerId: string | null;
 }) {
   const queryClient = useQueryClient();
+  const [name, setName] = useState('');
   const [commonName, setCommonName] = useState('');
   const [sans, setSans] = useState('');
   const [issuerId, setIssuerId] = useState(createdIssuerId || '');
   const [profileId, setProfileId] = useState('');
   const [ownerId, setOwnerId] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [renewalPolicyId, setRenewalPolicyId] = useState('');
   const [error, setError] = useState('');
   const [created, setCreated] = useState(false);
 
+  // C-001: the server requires name, common_name, issuer_id, owner_id,
+  // team_id, and renewal_policy_id (handler in
+  // internal/api/handler/certificates.go + ManagedCertificate.required in
+  // api/openapi.yaml). The wizard must collect the same six fields so that
+  // "Issue Certificate" doesn't 400 at the API boundary.
   const { data: issuers } = useQuery({ queryKey: ['issuers'], queryFn: () => getIssuers() });
   const { data: profiles } = useQuery({ queryKey: ['profiles'], queryFn: () => getProfiles() });
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => getAgents() });
-  const { data: owners } = useQuery({ queryKey: ['owners'], queryFn: () => getOwners() });
+  const { data: owners } = useQuery({ queryKey: ['owners'], queryFn: () => getOwners({ per_page: '500' }) });
+  const { data: teams } = useQuery({ queryKey: ['teams'], queryFn: () => getTeams({ per_page: '500' }) });
+  const { data: policies } = useQuery({ queryKey: ['renewal-policies'], queryFn: () => getPolicies({ per_page: '500' }) });
 
   const hasAgents = (agents?.data?.length ?? 0) > 0;
 
@@ -419,11 +429,14 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
     mutationFn: async () => {
       const sanList = sans.split(',').map(s => s.trim()).filter(Boolean);
       const cert = await createCertificate({
+        name,
         common_name: commonName,
         sans: sanList,
         issuer_id: issuerId,
         certificate_profile_id: profileId || undefined,
         owner_id: ownerId,
+        team_id: teamId,
+        renewal_policy_id: renewalPolicyId,
         environment: 'production',
       });
       // Trigger issuance
@@ -465,6 +478,19 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
       </p>
 
       <div className="space-y-5">
+        <div>
+          <label className="block text-sm font-medium text-ink mb-2">
+            Name <span className="text-red-600">*</span>
+          </label>
+          <input
+            type="text"
+            value={name}
+            onChange={e => setName(e.target.value)}
+            placeholder="API Production Cert"
+            className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+          />
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-ink mb-2">
             Common Name <span className="text-red-600">*</span>
@@ -525,25 +551,69 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
           </div>
         </div>
 
+        <div className="grid grid-cols-2 gap-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Owner <span className="text-red-600">*</span>
+            </label>
+            <select
+              value={ownerId}
+              onChange={e => setOwnerId(e.target.value)}
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
+            >
+              <option value="">Select owner...</option>
+              {owners?.data?.map(o => (
+                <option key={o.id} value={o.id}>
+                  {o.name}{o.email ? ` (${o.email})` : ''}
+                </option>
+              ))}
+            </select>
+            {(owners?.data?.length ?? 0) === 0 && (
+              <p className="mt-1 text-xs text-ink-muted">
+                No owners yet — create one from the <Link to="/owners" className="underline hover:text-ink">Owners page</Link> first, then return here.
+              </p>
+            )}
+          </div>
+
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Team <span className="text-red-600">*</span>
+            </label>
+            <select
+              value={teamId}
+              onChange={e => setTeamId(e.target.value)}
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
+            >
+              <option value="">Select team...</option>
+              {teams?.data?.map(t => (
+                <option key={t.id} value={t.id}>{t.name}</option>
+              ))}
+            </select>
+            {(teams?.data?.length ?? 0) === 0 && (
+              <p className="mt-1 text-xs text-ink-muted">
+                No teams yet — create one from the <Link to="/teams" className="underline hover:text-ink">Teams page</Link> first, then return here.
+              </p>
+            )}
+          </div>
+        </div>
+
         <div>
           <label className="block text-sm font-medium text-ink mb-2">
-            Owner <span className="text-red-600">*</span>
+            Renewal Policy <span className="text-red-600">*</span>
           </label>
           <select
-            value={ownerId}
-            onChange={e => setOwnerId(e.target.value)}
+            value={renewalPolicyId}
+            onChange={e => setRenewalPolicyId(e.target.value)}
             className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
           >
-            <option value="">Select owner...</option>
-            {owners?.data?.map(o => (
-              <option key={o.id} value={o.id}>
-                {o.name}{o.email ? ` (${o.email})` : ''}
-              </option>
+            <option value="">Select renewal policy...</option>
+            {policies?.data?.map(p => (
+              <option key={p.id} value={p.id}>{p.name}</option>
             ))}
           </select>
-          {(owners?.data?.length ?? 0) === 0 && (
+          {(policies?.data?.length ?? 0) === 0 && (
             <p className="mt-1 text-xs text-ink-muted">
-              No owners yet — create one from the <Link to="/owners" className="underline hover:text-ink">Owners page</Link> first, then return here.
+              No renewal policies yet — create one from the <Link to="/policies" className="underline hover:text-ink">Policies page</Link> first, then return here.
             </p>
           )}
         </div>
@@ -573,7 +643,15 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
         onSkip={onSkip}
         onNext={() => createMutation.mutate()}
         nextLabel={createMutation.isPending ? 'Creating...' : 'Issue Certificate'}
-        nextDisabled={!commonName || !issuerId || !ownerId || createMutation.isPending}
+        nextDisabled={
+          !name ||
+          !commonName ||
+          !issuerId ||
+          !ownerId ||
+          !teamId ||
+          !renewalPolicyId ||
+          createMutation.isPending
+        }
       />
     </div>
   );

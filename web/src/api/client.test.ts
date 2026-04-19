@@ -288,6 +288,39 @@ describe('API Client', () => {
       expect(JSON.parse(init.body)).toEqual(certData);
     });
 
+    // C-001 scope-expansion regression: the OnboardingWizard CertificateStep
+    // and the CertificatesPage CreateCertificateModal must both ship the full
+    // six-field required payload (name, common_name, renewal_policy_id,
+    // issuer_id, owner_id, team_id) — the handler's ValidateRequired contract
+    // rejects anything less with HTTP 400. This test pins the wire shape so
+    // that accidentally dropping a field from either UI surface fails CI
+    // rather than only surfacing as a 400 at runtime.
+    it('createCertificate accepts and transmits all six required fields', async () => {
+      const wizardPayload = {
+        name: 'API Production Cert',
+        common_name: 'api.example.com',
+        sans: ['www.example.com'],
+        issuer_id: 'iss-local',
+        owner_id: 'o-alice',
+        team_id: 't-platform',
+        renewal_policy_id: 'rp-standard',
+        environment: 'production',
+      };
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'mc-new', ...wizardPayload }));
+      await createCertificate(wizardPayload);
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/certificates');
+      expect(init.method).toBe('POST');
+      const body = JSON.parse(init.body);
+      // Assert every required field is present and intact
+      expect(body.name).toBe('API Production Cert');
+      expect(body.common_name).toBe('api.example.com');
+      expect(body.issuer_id).toBe('iss-local');
+      expect(body.owner_id).toBe('o-alice');
+      expect(body.team_id).toBe('t-platform');
+      expect(body.renewal_policy_id).toBe('rp-standard');
+    });
+
     it('updateCertificate sends PUT', async () => {
       mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'mc-test', status: 'Active' }));
       await updateCertificate('mc-test', { status: 'Active' });

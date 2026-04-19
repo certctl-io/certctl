@@ -435,10 +435,19 @@ func TestQA(t *testing.T) {
 	// ===================================================================
 	t.Run("Part03_CertCRUD", func(t *testing.T) {
 		t.Run("Create_Minimal", func(t *testing.T) {
+			// C-001 scope-expansion: the handler's ValidateRequired
+			// contract now gates common_name, owner_id, team_id,
+			// issuer_id, name, and renewal_policy_id. A 3-field
+			// payload would 400 regardless of the id hint, so the
+			// "minimal" variant carries every required field.
 			code, body := c.bodyStr(t, "POST", "/api/v1/certificates", `{
 				"id": "mc-qa-minimal",
+				"name": "qa-minimal",
 				"common_name": "qa-minimal.example.com",
-				"issuer_id": "iss-local"
+				"issuer_id": "iss-local",
+				"owner_id": "o-alice",
+				"team_id": "t-platform",
+				"renewal_policy_id": "rp-standard"
 			}`)
 			if code != 201 && code != 200 {
 				t.Fatalf("create cert: status %d, body: %s", code, body)
@@ -448,11 +457,14 @@ func TestQA(t *testing.T) {
 		t.Run("Create_Full", func(t *testing.T) {
 			code, body := c.bodyStr(t, "POST", "/api/v1/certificates", `{
 				"id": "mc-qa-full",
+				"name": "qa-full",
 				"common_name": "qa-full.example.com",
 				"sans": ["qa-full-alt.example.com"],
 				"issuer_id": "iss-local",
 				"environment": "staging",
-				"owner_id": "o-alice"
+				"owner_id": "o-alice",
+				"team_id": "t-platform",
+				"renewal_policy_id": "rp-standard"
 			}`)
 			if code != 201 && code != 200 {
 				t.Fatalf("create cert: status %d, body: %s", code, body)

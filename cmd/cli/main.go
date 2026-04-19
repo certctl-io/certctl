@@ -35,6 +35,8 @@ Commands:
   jobs cancel ID   Cancel a pending job
 
   import FILE      Bulk import certificates from PEM file(s)
+                   Required: --owner-id, --team-id, --renewal-policy-id, --issuer-id
+                   Optional: --name-template (default {cn}), --environment (default imported)
 
   status           Show server health + summary stats
   version          Show CLI version

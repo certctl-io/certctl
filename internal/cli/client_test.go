@@ -387,6 +387,178 @@ func TestClient_AuthHeader(t *testing.T) {
 	}
 }
 
+// TestClient_ImportCertificates_MissingRequiredFlags verifies the CLI
+// import command rejects invocations missing any of the four required
+// flags (--owner-id, --team-id, --renewal-policy-id, --issuer-id)
+// before any network call is attempted. This is the C-001 scope-expansion
+// closure for the CLI layer: the handler now requires all six cert
+// fields, so the importer must collect ownership / team / policy /
+// issuer up front rather than hard-coding iss-local and letting the
+// server 400 on every POST.
+func TestClient_ImportCertificates_MissingRequiredFlags(t *testing.T) {
+	var requestCount int
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	cases := []struct {
+		name    string
+		args    []string
+		missing string
+	}{
+		{
+			name:    "missing owner-id",
+			args:    []string{"--team-id", "t-platform", "--renewal-policy-id", "rp-default", "--issuer-id", "iss-local", "certs.pem"},
+			missing: "--owner-id",
+		},
+		{
+			name:    "missing team-id",
+			args:    []string{"--owner-id", "o-alice", "--renewal-policy-id", "rp-default", "--issuer-id", "iss-local", "certs.pem"},
+			missing: "--team-id",
+		},
+		{
+			name:    "missing renewal-policy-id",
+			args:    []string{"--owner-id", "o-alice", "--team-id", "t-platform", "--issuer-id", "iss-local", "certs.pem"},
+			missing: "--renewal-policy-id",
+		},
+		{
+			name:    "missing issuer-id",
+			args:    []string{"--owner-id", "o-alice", "--team-id", "t-platform", "--renewal-policy-id", "rp-default", "certs.pem"},
+			missing: "--issuer-id",
+		},
+		{
+			name:    "no flags at all",
+			args:    []string{"certs.pem"},
+			missing: "--owner-id",
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			client := NewClient(server.URL, "", "table")
+			err := client.ImportCertificates(tc.args)
+			if err == nil {
+				t.Fatalf("expected error for %s, got nil", tc.name)
+			}
+			msg := err.Error()
+			if !containsStr(msg, tc.missing) {
+				t.Fatalf("expected error to name %q, got: %v", tc.missing, err)
+			}
+			if !containsStr(msg, "required") {
+				t.Fatalf("expected error message to mention 'required', got: %v", err)
+			}
+		})
+	}
+
+	if requestCount != 0 {
+		t.Fatalf("expected zero HTTP requests before flag validation, got %d", requestCount)
+	}
+}
+
+// TestClient_ImportCertificates_MissingPositionalArgs verifies the
+// import command errors out when flags are present but no PEM file
+// paths follow them.
+func TestClient_ImportCertificates_MissingPositionalArgs(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		t.Errorf("unexpected HTTP request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", "table")
+	err := client.ImportCertificates([]string{
+		"--owner-id", "o-alice",
+		"--team-id", "t-platform",
+		"--renewal-policy-id", "rp-default",
+		"--issuer-id", "iss-local",
+	})
+	if err == nil {
+		t.Fatal("expected error when no PEM file paths are supplied")
+	}
+	if !containsStr(err.Error(), "PEM file") {
+		t.Fatalf("expected error to mention 'PEM file', got: %v", err)
+	}
+}
+
+// TestClient_ImportCertificates_SixFieldPayload verifies the happy
+// path: given all four required flags plus a PEM file, the importer
+// POSTs a request containing all six required fields plus the
+// name-template–resolved name. The httptest handler decodes the
+// request body and asserts every required field is populated with
+// the values supplied via flags.
+func TestClient_ImportCertificates_SixFieldPayload(t *testing.T) {
+	// Generate a test cert and write it to a temp PEM file.
+	cert := generateTestCert()
+	pemBlock := &pem.Block{Type: "CERTIFICATE", Bytes: cert.Raw}
+	pemPath := filepath.Join(t.TempDir(), "test.pem")
+	if err := os.WriteFile(pemPath, pem.EncodeToMemory(pemBlock), 0o600); err != nil {
+		t.Fatalf("write temp PEM: %v", err)
+	}
+
+	var gotBody map[string]interface{}
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != "POST" || r.URL.Path != "/api/v1/certificates" {
+			w.WriteHeader(http.StatusNotFound)
+			return
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Errorf("decode request body: %v", err)
+		}
+		w.WriteHeader(http.StatusCreated)
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"id":"mc-imported"}`))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL, "", "table")
+	err := client.ImportCertificates([]string{
+		"--owner-id", "o-alice",
+		"--team-id", "t-platform",
+		"--renewal-policy-id", "rp-default",
+		"--issuer-id", "iss-local",
+		"--name-template", "imported-{cn}",
+		pemPath,
+	})
+	if err != nil {
+		t.Fatalf("ImportCertificates failed: %v", err)
+	}
+
+	// Verify every required field from the six-field contract is present.
+	required := []struct {
+		field string
+		want  interface{}
+	}{
+		{"name", "imported-test.example.com"},
+		{"common_name", "test.example.com"},
+		{"issuer_id", "iss-local"},
+		{"owner_id", "o-alice"},
+		{"team_id", "t-platform"},
+		{"renewal_policy_id", "rp-default"},
+	}
+	for _, r := range required {
+		got, ok := gotBody[r.field]
+		if !ok {
+			t.Errorf("payload missing required field %q (body: %+v)", r.field, gotBody)
+			continue
+		}
+		if got != r.want {
+			t.Errorf("field %q = %v, want %v", r.field, got, r.want)
+		}
+	}
+}
+
+// containsStr is a tiny substring helper so the test file doesn't
+// need a `strings` import dependency aside from what's already there.
+func containsStr(haystack, needle string) bool {
+	for i := 0; i+len(needle) <= len(haystack); i++ {
+		if haystack[i:i+len(needle)] == needle {
+			return true
+		}
+	}
+	return false
+}
+
 // Helper function to generate a test certificate
 func generateTestCert() *x509.Certificate {
 	now := time.Now()
