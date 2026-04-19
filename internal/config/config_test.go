@@ -328,6 +328,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -347,6 +348,7 @@ func TestValidate_AuthTypeNone(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
