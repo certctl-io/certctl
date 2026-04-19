@@ -103,25 +103,25 @@ func TestCertificateLifecycle(t *testing.T) {
 	// Create router and register handlers
 	r := router.New()
 	r.RegisterHandlers(router.HandlerRegistry{
-		Certificates:  certificateHandler,
-		Issuers:       issuerHandler,
-		Targets:       targetHandler,
-		Agents:        agentHandler,
-		Jobs:          jobHandler,
-		Policies:      policyHandler,
-		Profiles:      profileHandler,
-		Teams:         teamHandler,
-		Owners:        ownerHandler,
-		AgentGroups:   agentGroupHandler,
-		Audit:         auditHandler,
-		Notifications: notificationHandler,
-		Stats:         statsHandler,
-		Metrics:       metricsHandler,
-		Health:        healthHandler,
-		Discovery:     discoveryHandler,
-		NetworkScan:   networkScanHandler,
-		Verification:    verificationHandler,
-		BulkRevocation:  handler.BulkRevocationHandler{},
+		Certificates:   certificateHandler,
+		Issuers:        issuerHandler,
+		Targets:        targetHandler,
+		Agents:         agentHandler,
+		Jobs:           jobHandler,
+		Policies:       policyHandler,
+		Profiles:       profileHandler,
+		Teams:          teamHandler,
+		Owners:         ownerHandler,
+		AgentGroups:    agentGroupHandler,
+		Audit:          auditHandler,
+		Notifications:  notificationHandler,
+		Stats:          statsHandler,
+		Metrics:        metricsHandler,
+		Health:         healthHandler,
+		Discovery:      discoveryHandler,
+		NetworkScan:    networkScanHandler,
+		Verification:   verificationHandler,
+		BulkRevocation: handler.BulkRevocationHandler{},
 	})
 	r.RegisterESTHandlers(estHandler)
 
@@ -1020,6 +1020,46 @@ func (m *mockNotificationRepository) UpdateStatus(ctx context.Context, id string
 		}
 	}
 	return fmt.Errorf("notification not found")
+}
+
+// I-005: retry/DLQ interface satisfiers. The integration tests in this package
+// drive the end-to-end lifecycle against a NotificationService which requires
+// the full repository.NotificationRepository interface, but none of the
+// lifecycle scenarios exercise the retry sweep or dead-letter transitions —
+// they're covered by unit tests in internal/service/notification_test.go. So
+// these are deliberate no-op / panic-free stubs whose only job is to satisfy
+// the compile-time interface contract. If a future integration test needs
+// real retry semantics, promote this mock to match internal/service's
+// mockNotifRepo (testutil_test.go:410) one-for-one.
+
+func (m *mockNotificationRepository) ListRetryEligible(ctx context.Context, now time.Time, maxAttempts, limit int) ([]*domain.NotificationEvent, error) {
+	return nil, nil
+}
+
+func (m *mockNotificationRepository) RecordFailedAttempt(ctx context.Context, id string, lastError string, nextRetryAt time.Time) error {
+	return nil
+}
+
+func (m *mockNotificationRepository) MarkAsDead(ctx context.Context, id string, lastError string) error {
+	return nil
+}
+
+func (m *mockNotificationRepository) Requeue(ctx context.Context, id string) error {
+	return nil
+}
+
+// CountByStatus satisfies the NotificationRepository interface contract added
+// by I-005 Phase 2 Green. Counts in-memory rows so StatsService wiring exercised
+// by the lifecycle integration tests gets a truthful count even though the
+// retry/DLQ surface isn't driven here.
+func (m *mockNotificationRepository) CountByStatus(ctx context.Context, status string) (int64, error) {
+	var count int64
+	for _, n := range m.notifications {
+		if n.Status == status {
+			count++
+		}
+	}
+	return count, nil
 }
 
 type mockPolicyRepository struct {

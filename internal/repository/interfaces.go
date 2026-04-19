@@ -285,6 +285,12 @@ type AuditRepository interface {
 }
 
 // NotificationRepository defines operations for managing notifications.
+//
+// I-005 extends the interface with four retry/DLQ methods. The retry scheduler
+// loop calls ListRetryEligible on every tick to pull overdue failed rows, then
+// either RecordFailedAttempt (still-retrying) or MarkAsDead (exhausted). The
+// operator-facing dead-letter tab calls Requeue to move a row from 'dead' (or
+// 'failed') back to 'pending' so ProcessPendingNotifications picks it up again.
 type NotificationRepository interface {
 	// Create stores a new notification.
 	Create(ctx context.Context, notif *domain.NotificationEvent) error
@@ -292,6 +298,44 @@ type NotificationRepository interface {
 	List(ctx context.Context, filter *NotificationFilter) ([]*domain.NotificationEvent, error)
 	// UpdateStatus updates a notification's delivery status.
 	UpdateStatus(ctx context.Context, id string, status string, sentAt time.Time) error
+	// ListRetryEligible returns failed notification rows whose next_retry_at
+	// is <= now AND retry_count < maxAttempts, ordered by next_retry_at ASC
+	// (oldest overdue first — same fairness as I-001's RetryFailedJobs). The
+	// WHERE clause mirrors the partial retry-sweep index predicate from
+	// migration 000016 so the planner uses it. A limit<=0 is normalised to
+	// a sane default in the repo implementation to avoid accidental unbounded
+	// sweeps. I-005 coverage-gap closure.
+	ListRetryEligible(ctx context.Context, now time.Time, maxAttempts, limit int) ([]*domain.NotificationEvent, error)
+	// RecordFailedAttempt is called by the retry sweep after a notifier.Send
+	// transient failure. The UPDATE increments retry_count by exactly 1,
+	// overwrites last_error, overwrites next_retry_at, and KEEPS status='failed'
+	// so the row remains a candidate for ListRetryEligible on the next sweep.
+	// Returns "not found" when no row matches the id (mirrors UpdateStatus).
+	// I-005 coverage-gap closure.
+	RecordFailedAttempt(ctx context.Context, id string, lastError string, nextRetryAt time.Time) error
+	// MarkAsDead performs the DLQ transition when retry_count reaches
+	// max_attempts. Flips status='dead', clears next_retry_at so the partial
+	// retry-sweep index drops the row, writes the final last_error, and
+	// PRESERVES retry_count as historical evidence of how many attempts were
+	// burned. Returns "not found" when no row matches.
+	// I-005 coverage-gap closure.
+	MarkAsDead(ctx context.Context, id string, lastError string) error
+	// Requeue is the operator "try again" action from the UI's Dead letter
+	// tab. Flips status='pending' (so ProcessPendingNotifications picks it
+	// up), resets retry_count to 0 (otherwise the operator's first retry
+	// would already be at hour-long waits), clears next_retry_at, and clears
+	// last_error. Valid from both 'dead' and 'failed'. Returns "not found"
+	// when no row matches. I-005 coverage-gap closure.
+	Requeue(ctx context.Context, id string) error
+	// CountByStatus returns the number of notification_events rows whose
+	// status column matches the given string exactly. Used by StatsService
+	// to populate DashboardSummary.NotificationsDead which in turn drives
+	// the Prometheus counter certctl_notification_dead_total (I-005 Phase 2
+	// observability gate). A dedicated SQL COUNT(*) is used instead of
+	// List(filter{Status: ...}) because List silently resets PerPage>500 to
+	// 50 — a latent scale bug for any status-filtered count. I-005
+	// coverage-gap closure.
+	CountByStatus(ctx context.Context, status string) (int64, error)
 }
 
 // TeamRepository defines operations for managing teams.

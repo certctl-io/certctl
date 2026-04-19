@@ -6812,6 +6812,194 @@ print('OpenAPI I-004 contract: OK')
 
 ---
 
+## Part 56: Notification Retry & Dead-Letter Queue (I-005)
+
+**What this validates:** The full retry lifecycle for `notification_events` rows — transient notifier failures are re-armed with exponential backoff (`2^retry_count` minutes capped at 1h, 5-attempt budget), rows that exhaust the budget land in the terminal `dead` status, the dead-letter depth is surfaced both on the dashboard and via a Prometheus counter, and operators can requeue dead rows once the underlying outage is resolved.
+
+**Why it matters:** Before I-005, a failed notification was a silent drop. `internal/service/notification.go` flipped `status` to `failed` and never came back to it, because `ProcessPendingNotifications` only lists rows whose `status='pending'`. A 5xx from Slack, a 30-second SMTP stall, or a misrouted webhook URL could each lose a critical alert (cert expiry, CA compromise, approval-rejected) with no trace beyond a single log line. Part 56 pins the replacement contract (retry loop + DLQ + dashboard surface + Prometheus metric + operator requeue) so regressions show up here rather than as a post-incident "why didn't we get paged?" review.
+
+### 56.1 Migration 000016 Columns Applied
+
+```bash
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT column_name FROM information_schema.columns WHERE table_name='notification_events' AND column_name IN ('retry_count','next_retry_at','last_error') ORDER BY column_name;"
+```
+
+**What:** Confirms migration 000016 added the retry bookkeeping columns to `notification_events`.
+**PASS if** all three rows (`last_error`, `next_retry_at`, `retry_count`) are returned. **FAIL** if any is missing — the migration did not apply and the retry loop will error on every tick.
+
+---
+
+### 56.2 Partial Retry-Sweep Index Present
+
+```bash
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT indexdef FROM pg_indexes WHERE tablename='notification_events' AND indexname='idx_notification_events_retry_sweep';"
+```
+
+**What:** Confirms the partial index `idx_notification_events_retry_sweep ON notification_events(next_retry_at) WHERE status = 'failed' AND next_retry_at IS NOT NULL` exists and has the expected predicate.
+**PASS if** the returned `indexdef` includes `WHERE ((status = 'failed'::text) AND (next_retry_at IS NOT NULL))`. **FAIL** if the index is missing or unpartialed — the retry sweep will scan the full notification history instead of the small retry-eligible slice.
+
+---
+
+### 56.3 Failed Notification Retries On Next Tick
+
+```bash
+# Seed a failed notification with next_retry_at in the past
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "UPDATE notification_events SET status='failed', retry_count=0, next_retry_at=NOW() - INTERVAL '1 minute', last_error='transient SMTP timeout' WHERE id='notif-demo-1';"
+
+# Wait for the retry loop to sweep (default CERTCTL_NOTIFICATION_RETRY_INTERVAL=2m)
+sleep 130
+
+# Observe the post-sweep state
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT id, status, retry_count, next_retry_at IS NOT NULL AS has_next_retry FROM notification_events WHERE id='notif-demo-1';"
+```
+
+**What:** Exercises the retry loop's failure path. The seeded row is re-dispatched through the notifier registry; in the demo environment the notifier does not exist for `email` so the sweep either delivers (`status='sent'`) or records a failed attempt (`retry_count=1`, `next_retry_at` re-armed).
+**PASS if** either `status='sent'` (delivered on retry) or the row is still `failed` with `retry_count >= 1` and `has_next_retry=t`. **FAIL** if the row is still `failed` with `retry_count=0` and `next_retry_at` in the past — the retry loop is not actually running.
+
+---
+
+### 56.4 Exhausted Notification Transitions To Dead
+
+```bash
+# Seed a row one failure shy of exhaustion — retry_count=4 means the next
+# tick's failure is the 5th attempt (notifRetryMaxAttempts-1 check at
+# internal/service/notification.go:531).
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "UPDATE notification_events SET status='failed', retry_count=4, next_retry_at=NOW() - INTERVAL '1 minute', last_error='persistent outage', channel='channel-that-does-not-exist' WHERE id='notif-demo-2';"
+
+sleep 130
+
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT id, status, retry_count, last_error FROM notification_events WHERE id='notif-demo-2';"
+```
+
+**What:** The row at `retry_count=4` enters the sweep, the notifier lookup fails (channel unknown), the exhaustion branch fires, and `MarkAsDead` flips the row. Note: the "notifier unknown" branch at notification.go:494-503 promotes to `sent` for demo parity, so for a strict DLQ assertion seed a row whose channel is a known registered notifier that will reject delivery — alternatively run against the integration test fixture where the retry-exhaustion path is deterministic.
+**PASS if** `status='dead'` and `last_error` reflects the send failure. **FAIL** if the row is still `failed` with `retry_count >= 5` — the exhaustion branch did not fire and the row will retry forever.
+
+---
+
+### 56.5 Dead Row Has Null next_retry_at
+
+```bash
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT COUNT(*) FROM notification_events WHERE status='dead' AND next_retry_at IS NOT NULL;"
+```
+
+**What:** `MarkAsDead` must clear `next_retry_at` so the partial retry-sweep index stops matching the row. If this invariant breaks, a dead row keeps appearing in `ListRetryEligible` and the exhaustion branch fires on every sweep.
+**PASS if** the count is `0`. **FAIL** if any dead rows still carry a non-null `next_retry_at` — the DLQ is leaky and the row will re-enter the retry rotation on the next tick.
+
+---
+
+### 56.6 DashboardSummary Populates NotificationsDead
+
+```bash
+# Seed a dead row so the count is observable
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "UPDATE notification_events SET status='dead', next_retry_at=NULL, last_error='demo DLQ fixture' WHERE id='notif-demo-3';"
+
+curl -sS "http://localhost:8443/api/v1/stats/summary" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  | python3 -c "import sys,json; s=json.load(sys.stdin); assert 'notifications_dead' in s, 'missing notifications_dead field'; assert s['notifications_dead'] >= 1, s['notifications_dead']; print('notifications_dead:', s['notifications_dead'])"
+```
+
+**What:** Confirms `DashboardSummary.NotificationsDead` (`internal/service/stats.go:66`) is populated by `notifRepo.CountByStatus(ctx, "dead")` (stats.go:137-142) and surfaced in the dashboard summary JSON.
+**PASS if** the field is present and reflects at least the seeded dead row. **FAIL** if the field is missing (`SetNotifRepo` was not called on StatsService) or stuck at zero despite seeded dead rows (repository `CountByStatus` is broken).
+
+---
+
+### 56.7 Prometheus Counter Emits certctl_notification_dead_total
+
+```bash
+curl -sS "http://localhost:8443/api/v1/metrics/prometheus" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  | grep -E '^# (HELP|TYPE) certctl_notification_dead_total|^certctl_notification_dead_total '
+```
+
+**What:** The Prometheus endpoint (`internal/api/handler/metrics.go:217-219`) emits three lines: `# HELP certctl_notification_dead_total Number of notifications in the dead-letter queue.`, `# TYPE certctl_notification_dead_total counter`, and a bare `certctl_notification_dead_total <value>` value line. Operator alert thresholds per the I-005 spec: `> 0` warning, `> 10` critical.
+**PASS if** all three lines are present and the value is `>= 1` when dead rows exist. **FAIL** if any of the three lines is missing — the metric name is misspelled, the `# TYPE` is wrong, or `DashboardSummary.NotificationsDead` is not wired into the metrics handler.
+
+---
+
+### 56.8 Requeue Resets Retry Bookkeeping
+
+```bash
+# Confirm the row is in 'dead' with the full retry history
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT id, status, retry_count, next_retry_at, last_error FROM notification_events WHERE id='notif-demo-3';"
+
+# Requeue via the operator endpoint
+curl -sS -X POST "http://localhost:8443/api/v1/notifications/notif-demo-3/requeue" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+
+# Confirm the atomic reset
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT id, status, retry_count, next_retry_at, last_error FROM notification_events WHERE id='notif-demo-3';"
+```
+
+**What:** Exercises the operator-driven escape hatch (`POST /api/v1/notifications/{id}/requeue`). The repository's `Requeue` must atomically flip `status → pending`, reset `retry_count → 0`, clear `next_retry_at → NULL`, and clear `last_error → NULL` — see `internal/service/notification.go:571-576` and the pinning test at `notification_handler_test.go:307-347`.
+**PASS if** HTTP `200` with JSON body `{"status":"requeued"}` AND the post-requeue row has `status='pending'`, `retry_count=0`, `next_retry_at IS NULL`, `last_error IS NULL`. **FAIL** if any of the four fields is not reset — `ProcessPendingNotifications` will not treat this as a fresh attempt and the audit trail will be ambiguous.
+
+---
+
+### 56.9 GUI Dead Letter Tab Threads ?status=dead
+
+```bash
+cd web
+npx vitest run src/pages/NotificationsPage.test.tsx -t 'Dead letter tab fetches notifications with status=dead'
+```
+
+**What:** The two-tab toolbar on `/notifications` routes the "Dead letter" tab's query through `getNotifications({ status: 'dead', per_page: '100' })`. This test verifies the React Query's `queryKey: ['notifications', activeTab]` (`NotificationsPage.tsx:31`) actually translates the tab click into the server-side filter — not client-side filtering of the full inbox.
+**PASS if** the Vitest assertion at `NotificationsPage.test.tsx:104-128` passes. **FAIL** if the Dead letter tab is merely a client-side filter on the `all` response — the DLQ-only code path (`NotificationRepository.ListByStatus`) is not exercised, which matters for pagination correctness once the inbox grows beyond 100 rows.
+
+---
+
+### 56.10 Requeue Button MutationFn Wrapper
+
+```bash
+cd web
+npx vitest run src/pages/NotificationsPage.test.tsx -t 'clicking Requeue invokes requeueNotification'
+```
+
+**What:** `react-query` v5's `mutate(id)` passes a second positional argument (the mutation context object) to the `mutationFn`. If `mutationFn: requeueNotification` is used directly, the API client receives `(id, { client })` — an extra argument that the strict-match `toHaveBeenCalledWith('notif-dead-001')` assertion at `NotificationsPage.test.tsx:181` rejects. The fix is an explicit single-arg arrow: `mutationFn: (id: string) => requeueNotification(id)` at `NotificationsPage.tsx:64`.
+**PASS if** the Vitest assertion passes (the API client was called with exactly one argument). **FAIL** if the wrapper is inadvertently removed — silent success in runtime, loud failure in this contract.
+
+---
+
+### 56.11 HEAD-State OpenAPI Contract
+
+```bash
+npx --yes @redocly/cli lint api/openapi.yaml \
+  --config '{"rules":{"operation-4xx-response":"error","no-invalid-media-type-examples":"error"}}'
+python3 -c "
+import yaml
+spec = yaml.safe_load(open('api/openapi.yaml'))
+post = spec['paths']['/api/v1/notifications/{id}/requeue']['post']
+assert post['operationId'] == 'requeueNotification', post['operationId']
+assert set(post['responses'].keys()) >= {'200','400','404','405','500'}, post['responses'].keys()
+print('OpenAPI I-005 contract: OK')
+"
+```
+
+**What:** Two-part check. Redocly lint confirms the spec is structurally valid; the Python assertions pin the requeue endpoint's `operationId` and the five minimum response codes (200/400/404/405/500).
+**PASS if** redocly prints no errors and the Python script prints `OpenAPI I-005 contract: OK`. **FAIL** if the `operationId` changed or any of the five responses is missing — downstream MCP/CLI clients rely on the contract.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).
@@ -7813,10 +8001,10 @@ These must be green before starting manual QA:
 | Category | Count |
 |----------|-------|
 | ☑ Auto (passed in `qa-smoke-test.sh`) | 144 |
-| ☐ Auto (not yet run) | 129 |
+| ☐ Auto (not yet run) | 136 |
 | — Skipped (preconditions not met in demo) | 5 |
-| ☐ Manual (requires hands-on verification) | 282 |
-| **Total** | **560** |
+| ☐ Manual (requires hands-on verification) | 286 |
+| **Total** | **571** |
 
 **Automated tests must also be green.** CI passing is necessary but not sufficient — this manual QA catches integration issues that isolated unit tests miss.
 

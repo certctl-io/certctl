@@ -1,6 +1,9 @@
 package domain
 
-import "testing"
+import (
+	"testing"
+	"time"
+)
 
 func TestNotificationType_Constants(t *testing.T) {
 	tests := map[string]NotificationType{
@@ -69,5 +72,56 @@ func TestNotificationEvent_Fields(t *testing.T) {
 
 	if event.Error == nil || *event.Error != "failed to send" {
 		t.Errorf("expected error 'failed to send', got %v", event.Error)
+	}
+}
+
+// TestNotificationStatus_Constants verifies that I-005 introduces a typed
+// NotificationStatus alongside canonical lowercase string constants covering
+// the pending → sent, pending → failed → dead, and pending → read transitions.
+// The Red signal here is a compile error: the type and the NotificationStatusDead
+// constant do not exist before Phase 2 Green.
+func TestNotificationStatus_Constants(t *testing.T) {
+	tests := map[string]NotificationStatus{
+		"pending": NotificationStatusPending,
+		"sent":    NotificationStatusSent,
+		"failed":  NotificationStatusFailed,
+		"dead":    NotificationStatusDead,
+		"read":    NotificationStatusRead,
+	}
+	for expected, got := range tests {
+		if string(got) != expected {
+			t.Errorf("expected %q, got %q", expected, string(got))
+		}
+	}
+}
+
+// TestNotificationEvent_RetryFields verifies the I-005 retry/DLQ columns are
+// surfaced on the domain model: a RetryCount counter, a nullable NextRetryAt
+// timestamp used by the retry-sweep partial index, and a nullable LastError
+// string preserving the most recent transient failure for operator triage.
+// The Red signal is a compile error — these fields do not exist yet.
+func TestNotificationEvent_RetryFields(t *testing.T) {
+	next := time.Now().Add(2 * time.Minute)
+	lastErr := "connection refused"
+	event := &NotificationEvent{
+		ID:           "notif-retry-001",
+		Type:         NotificationTypeExpirationWarning,
+		Channel:      NotificationChannelWebhook,
+		Recipient:    "https://hooks.example.com/certs",
+		Message:      "retry me",
+		Status:       string(NotificationStatusFailed),
+		RetryCount:   3,
+		NextRetryAt:  &next,
+		LastError:    &lastErr,
+	}
+
+	if event.RetryCount != 3 {
+		t.Errorf("expected RetryCount 3, got %d", event.RetryCount)
+	}
+	if event.NextRetryAt == nil || !event.NextRetryAt.Equal(next) {
+		t.Errorf("expected NextRetryAt %v, got %v", next, event.NextRetryAt)
+	}
+	if event.LastError == nil || *event.LastError != "connection refused" {
+		t.Errorf("expected LastError 'connection refused', got %v", event.LastError)
 	}
 }

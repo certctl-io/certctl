@@ -17,7 +17,6 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
 	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/domain"
 	discoveryawssm "github.com/shankar0123/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/shankar0123/certctl/internal/connector/discovery/azurekv"
 	discoverygcpsm "github.com/shankar0123/certctl/internal/connector/discovery/gcpsm"
@@ -26,6 +25,7 @@ import (
 	notifypagerduty "github.com/shankar0123/certctl/internal/connector/notifier/pagerduty"
 	notifyslack "github.com/shankar0123/certctl/internal/connector/notifier/slack"
 	notifyteams "github.com/shankar0123/certctl/internal/connector/notifier/teams"
+	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
@@ -353,6 +353,12 @@ func main() {
 
 	// Initialize stats and metrics services
 	statsService := service.NewStatsService(certificateRepo, jobRepo, agentRepo)
+	// I-005: wire the notification repository so DashboardSummary.NotificationsDead
+	// is populated, which in turn drives the Prometheus counter
+	// certctl_notification_dead_total in GetPrometheusMetrics. Setter
+	// pattern keeps NewStatsService's nine call sites (main.go + stats_test.go
+	// + 8 digest_test.go sites) untouched.
+	statsService.SetNotifRepo(notificationRepo)
 	logger.Info("initialized stats service")
 
 	// Initialize API handlers
@@ -447,6 +453,14 @@ func main() {
 	sched.SetJobRetryInterval(cfg.Scheduler.RetryInterval)
 	sched.SetAgentHealthCheckInterval(cfg.Scheduler.AgentHealthCheckInterval)
 	sched.SetNotificationProcessInterval(cfg.Scheduler.NotificationProcessInterval)
+	// I-005: drive the failed-notification retry sweep. Runs every
+	// NotificationRetryInterval (default 2m, CERTCTL_NOTIFICATION_RETRY_INTERVAL)
+	// and transitions eligible Failed notifications whose next_retry_at has
+	// arrived back to Pending so the notification processor picks them up on
+	// its next tick. Kept adjacent to the notification processor setter
+	// because they share the NotificationServicer dependency (same placement
+	// pattern as I-001's SetJobRetryInterval above).
+	sched.SetNotificationRetryInterval(cfg.Scheduler.NotificationRetryInterval)
 	if cfg.NetworkScan.Enabled {
 		sched.SetNetworkScanInterval(cfg.NetworkScan.ScanInterval)
 		logger.Info("network scanning enabled", "interval", cfg.NetworkScan.ScanInterval.String())
@@ -469,7 +483,6 @@ func main() {
 			"sources", cloudDiscoveryService.SourceCount())
 	}
 
-
 	// Wire job timeout reaper (I-003)
 	sched.SetJobReaperService(jobService)
 	sched.SetJobTimeoutInterval(cfg.Scheduler.JobTimeoutInterval)
@@ -489,28 +502,28 @@ func main() {
 	// Build the API router with all handlers
 	apiRouter := router.New()
 	apiRouter.RegisterHandlers(router.HandlerRegistry{
-		Certificates:  certificateHandler,
-		Issuers:       issuerHandler,
-		Targets:       targetHandler,
-		Agents:        agentHandler,
-		Jobs:          jobHandler,
-		Policies:      policyHandler,
-		Profiles:      profileHandler,
-		Teams:         teamHandler,
-		Owners:        ownerHandler,
-		AgentGroups:   agentGroupHandler,
-		Audit:         auditHandler,
-		Notifications: notificationHandler,
-		Stats:         statsHandler,
-		Metrics:       metricsHandler,
-		Health:        healthHandler,
-		Discovery:     discoveryHandler,
-		NetworkScan:   networkScanHandler,
-		Verification:  verificationHandler,
-		Export:        exportHandler,
-		Digest:        *digestHandler,
-		HealthChecks:     healthCheckHandler,
-		BulkRevocation:   bulkRevocationHandler,
+		Certificates:   certificateHandler,
+		Issuers:        issuerHandler,
+		Targets:        targetHandler,
+		Agents:         agentHandler,
+		Jobs:           jobHandler,
+		Policies:       policyHandler,
+		Profiles:       profileHandler,
+		Teams:          teamHandler,
+		Owners:         ownerHandler,
+		AgentGroups:    agentGroupHandler,
+		Audit:          auditHandler,
+		Notifications:  notificationHandler,
+		Stats:          statsHandler,
+		Metrics:        metricsHandler,
+		Health:         healthHandler,
+		Discovery:      discoveryHandler,
+		NetworkScan:    networkScanHandler,
+		Verification:   verificationHandler,
+		Export:         exportHandler,
+		Digest:         *digestHandler,
+		HealthChecks:   healthCheckHandler,
+		BulkRevocation: bulkRevocationHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {
@@ -845,4 +858,3 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 	}
 	return nil
 }
-

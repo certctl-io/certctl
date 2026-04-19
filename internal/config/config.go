@@ -12,29 +12,29 @@ import (
 // Config represents the complete application configuration.
 // All configuration values are read from environment variables with CERTCTL_ prefix.
 type Config struct {
-	Server       ServerConfig
-	Database     DatabaseConfig
-	Scheduler    SchedulerConfig
-	Log          LogConfig
-	Auth         AuthConfig
-	RateLimit    RateLimitConfig
-	CORS         CORSConfig
-	Keygen       KeygenConfig
-	CA           CAConfig
-	Notifiers    NotifierConfig
-	NetworkScan  NetworkScanConfig
-	EST          ESTConfig
-	SCEP         SCEPConfig
-	Verification VerificationConfig
-	ACME         ACMEConfig
-	Vault        VaultConfig
-	DigiCert     DigiCertConfig
-	Sectigo      SectigoConfig
-	GoogleCAS    GoogleCASConfig
-	AWSACMPCA    AWSACMPCAConfig
-	Entrust      EntrustConfig
-	GlobalSign   GlobalSignConfig
-	EJBCA        EJBCAConfig
+	Server         ServerConfig
+	Database       DatabaseConfig
+	Scheduler      SchedulerConfig
+	Log            LogConfig
+	Auth           AuthConfig
+	RateLimit      RateLimitConfig
+	CORS           CORSConfig
+	Keygen         KeygenConfig
+	CA             CAConfig
+	Notifiers      NotifierConfig
+	NetworkScan    NetworkScanConfig
+	EST            ESTConfig
+	SCEP           SCEPConfig
+	Verification   VerificationConfig
+	ACME           ACMEConfig
+	Vault          VaultConfig
+	DigiCert       DigiCertConfig
+	Sectigo        SectigoConfig
+	GoogleCAS      GoogleCASConfig
+	AWSACMPCA      AWSACMPCAConfig
+	Entrust        EntrustConfig
+	GlobalSign     GlobalSignConfig
+	EJBCA          EJBCAConfig
 	Digest         DigestConfig
 	HealthCheck    HealthCheckConfig
 	Encryption     EncryptionConfig
@@ -708,6 +708,17 @@ type SchedulerConfig struct {
 	// Setting: CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL environment variable.
 	NotificationProcessInterval time.Duration
 
+	// NotificationRetryInterval is how often the scheduler retries failed
+	// notifications whose retry_count is below the service-layer 5-attempt
+	// DLQ budget. Default: 2 minutes. Minimum: 1 second. Mirrors the I-001
+	// RetryInterval knob: transitions eligible Failed notifications whose
+	// next_retry_at has arrived back to Pending so the notification processor
+	// picks them up on its next tick (closes coverage gap I-005 — HEAD had
+	// no retry path for transient SMTP/webhook failures and notifications
+	// stayed Failed forever).
+	// Setting: CERTCTL_NOTIFICATION_RETRY_INTERVAL environment variable.
+	NotificationRetryInterval time.Duration
+
 	// RetryInterval is how often the scheduler retries failed jobs whose Attempts
 	// counter is below MaxAttempts. Default: 5 minutes. Minimum: 1 second.
 	// Transitions eligible Failed jobs back to Pending so the job processor can
@@ -838,10 +849,16 @@ func Load() (*Config, error) {
 			JobProcessorInterval:        getEnvDuration("CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL", 30*time.Second),
 			AgentHealthCheckInterval:    getEnvDuration("CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL", 2*time.Minute),
 			NotificationProcessInterval: getEnvDuration("CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL", 1*time.Minute),
-			RetryInterval:               getEnvDuration("CERTCTL_SCHEDULER_RETRY_INTERVAL", 5*time.Minute),
-			JobTimeoutInterval:          getEnvDuration("CERTCTL_JOB_TIMEOUT_INTERVAL", 10*time.Minute),
-			AwaitingCSRTimeout:          getEnvDuration("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", 24*time.Hour),
-			AwaitingApprovalTimeout:     getEnvDuration("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", 168*time.Hour),
+			// I-005: retry sweep for failed notifications. Mirrors RetryInterval
+			// (I-001 job retry) but scoped to the notification DLQ machinery.
+			// Default 2 minutes — fast enough to absorb transient SMTP/webhook
+			// blips, slow enough to respect the service-layer 5-attempt budget
+			// without hammering external notifier endpoints.
+			NotificationRetryInterval: getEnvDuration("CERTCTL_NOTIFICATION_RETRY_INTERVAL", 2*time.Minute),
+			RetryInterval:             getEnvDuration("CERTCTL_SCHEDULER_RETRY_INTERVAL", 5*time.Minute),
+			JobTimeoutInterval:        getEnvDuration("CERTCTL_JOB_TIMEOUT_INTERVAL", 10*time.Minute),
+			AwaitingCSRTimeout:        getEnvDuration("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", 24*time.Hour),
+			AwaitingApprovalTimeout:   getEnvDuration("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", 168*time.Hour),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
@@ -871,7 +888,7 @@ func Load() (*Config, error) {
 		Notifiers: NotifierConfig{
 			SlackWebhookURL:     getEnv("CERTCTL_SLACK_WEBHOOK_URL", ""),
 			SlackChannel:        getEnv("CERTCTL_SLACK_CHANNEL", ""),
-			SlackUsername:        getEnv("CERTCTL_SLACK_USERNAME", "certctl"),
+			SlackUsername:       getEnv("CERTCTL_SLACK_USERNAME", "certctl"),
 			TeamsWebhookURL:     getEnv("CERTCTL_TEAMS_WEBHOOK_URL", ""),
 			PagerDutyRoutingKey: getEnv("CERTCTL_PAGERDUTY_ROUTING_KEY", ""),
 			PagerDutySeverity:   getEnv("CERTCTL_PAGERDUTY_SEVERITY", "warning"),
@@ -1107,6 +1124,13 @@ func (c *Config) Validate() error {
 
 	if c.Scheduler.NotificationProcessInterval < 1*time.Second {
 		return fmt.Errorf("notification process interval must be at least 1 second")
+	}
+
+	// I-005: guard against a misconfigured retry sweep that would either
+	// spin-wait or never fire. Matches the NotificationProcessInterval
+	// minimum (1s) so operators can tune both knobs from the same floor.
+	if c.Scheduler.NotificationRetryInterval < 1*time.Second {
+		return fmt.Errorf("notification retry interval must be at least 1 second")
 	}
 
 	if c.Scheduler.RetryInterval < 1*time.Second {

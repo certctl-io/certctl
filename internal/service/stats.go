@@ -15,6 +15,12 @@ type StatsService struct {
 	certRepo  repository.CertificateRepository
 	jobRepo   repository.JobRepository
 	agentRepo repository.AgentRepository
+	// notifRepo is injected post-construction via SetNotifRepo so that
+	// NewStatsService's nine call sites (main.go + stats_test.go + 8 digest
+	// tests) keep their existing signatures. When nil, the dead-letter count
+	// falls through to zero — see GetDashboardSummary. I-005 coverage-gap
+	// closure.
+	notifRepo repository.NotificationRepository
 }
 
 // NewStatsService creates a new stats service.
@@ -30,19 +36,35 @@ func NewStatsService(
 	}
 }
 
+// SetNotifRepo injects the notification repository used to populate
+// DashboardSummary.NotificationsDead. Setter pattern (matching the
+// certificateService.SetTargetRepo / SetProfileRepo / SetDigestService
+// precedent) keeps the NewStatsService signature stable across its
+// pre-existing call sites. I-005 coverage-gap closure.
+func (s *StatsService) SetNotifRepo(notifRepo repository.NotificationRepository) {
+	s.notifRepo = notifRepo
+}
+
 // DashboardSummary represents a high-level summary of system state.
 type DashboardSummary struct {
-	TotalCertificates    int64     `json:"total_certificates"`
-	ExpiringCertificates int64     `json:"expiring_certificates"`
-	ExpiredCertificates  int64     `json:"expired_certificates"`
-	RevokedCertificates  int64     `json:"revoked_certificates"`
-	ActiveAgents         int64     `json:"active_agents"`
-	OfflineAgents        int64     `json:"offline_agents"`
-	TotalAgents          int64     `json:"total_agents"`
-	PendingJobs          int64     `json:"pending_jobs"`
-	FailedJobs           int64     `json:"failed_jobs"`
-	CompleteJobs         int64     `json:"complete_jobs"`
-	CompletedAt          time.Time `json:"completed_at"`
+	TotalCertificates    int64 `json:"total_certificates"`
+	ExpiringCertificates int64 `json:"expiring_certificates"`
+	ExpiredCertificates  int64 `json:"expired_certificates"`
+	RevokedCertificates  int64 `json:"revoked_certificates"`
+	ActiveAgents         int64 `json:"active_agents"`
+	OfflineAgents        int64 `json:"offline_agents"`
+	TotalAgents          int64 `json:"total_agents"`
+	PendingJobs          int64 `json:"pending_jobs"`
+	FailedJobs           int64 `json:"failed_jobs"`
+	CompleteJobs         int64 `json:"complete_jobs"`
+	// NotificationsDead is the number of notification_events rows currently
+	// in the terminal "dead" status (I-005 dead-letter queue). Exposed here
+	// so the metrics handler can derive the Prometheus counter
+	// certctl_notification_dead_total from the same snapshot used by the
+	// dashboard. DB-COUNT rather than in-memory — notifications can grow
+	// without bound, and filter-based List() is PerPage-capped to 50.
+	NotificationsDead int64     `json:"notifications_dead"`
+	CompletedAt       time.Time `json:"completed_at"`
 }
 
 // GetDashboardSummary returns a summary of key metrics.
@@ -103,6 +125,19 @@ func (s *StatsService) GetDashboardSummary(ctx context.Context) (interface{}, er
 			summary.FailedJobs++
 		case domain.JobStatusCompleted:
 			summary.CompleteJobs++
+		}
+	}
+
+	// I-005: dead-letter count for certctl_notification_dead_total. nil-safe
+	// so the nine existing NewStatsService call sites that haven't yet been
+	// updated to call SetNotifRepo keep working — they'll simply report
+	// NotificationsDead=0, which is the correct value on a system without a
+	// notification repository wired in. A CountByStatus error is non-fatal:
+	// the dashboard summary is best-effort for this field.
+	if s.notifRepo != nil {
+		deadCount, err := s.notifRepo.CountByStatus(ctx, string(domain.NotificationStatusDead))
+		if err == nil {
+			summary.NotificationsDead = deadCount
 		}
 	}
 

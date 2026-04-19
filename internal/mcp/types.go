@@ -182,6 +182,16 @@ type RejectJobInput struct {
 	Reason string `json:"reason,omitempty" jsonschema:"Reason for rejection"`
 }
 
+// ── Notifications ───────────────────────────────────────────────────
+
+// ListNotificationsInput adds the I-005 status filter on top of the standard
+// pagination params. Status="dead" drives the Dead letter tab use case;
+// empty status preserves the pre-I-005 list-all behavior.
+type ListNotificationsInput struct {
+	ListParams
+	Status string `json:"status,omitempty" jsonschema:"Filter by status: pending, sent, failed, dead, read"`
+}
+
 // ── Policies ────────────────────────────────────────────────────────
 
 type CreatePolicyInput struct {

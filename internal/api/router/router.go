@@ -45,28 +45,28 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 
 // HandlerRegistry groups all API handler dependencies for router registration.
 type HandlerRegistry struct {
-	Certificates  handler.CertificateHandler
-	Issuers       handler.IssuerHandler
-	Targets       handler.TargetHandler
-	Agents        handler.AgentHandler
-	Jobs          handler.JobHandler
-	Policies      handler.PolicyHandler
-	Profiles      handler.ProfileHandler
-	Teams         handler.TeamHandler
-	Owners        handler.OwnerHandler
-	AgentGroups   handler.AgentGroupHandler
-	Audit         handler.AuditHandler
-	Notifications handler.NotificationHandler
-	Stats         handler.StatsHandler
-	Metrics       handler.MetricsHandler
-	Health        handler.HealthHandler
-	Discovery     handler.DiscoveryHandler
-	NetworkScan   handler.NetworkScanHandler
-	Verification  handler.VerificationHandler
-	Export        handler.ExportHandler
-	Digest        handler.DigestHandler
-	HealthChecks     *handler.HealthCheckHandler
-	BulkRevocation   handler.BulkRevocationHandler
+	Certificates   handler.CertificateHandler
+	Issuers        handler.IssuerHandler
+	Targets        handler.TargetHandler
+	Agents         handler.AgentHandler
+	Jobs           handler.JobHandler
+	Policies       handler.PolicyHandler
+	Profiles       handler.ProfileHandler
+	Teams          handler.TeamHandler
+	Owners         handler.OwnerHandler
+	AgentGroups    handler.AgentGroupHandler
+	Audit          handler.AuditHandler
+	Notifications  handler.NotificationHandler
+	Stats          handler.StatsHandler
+	Metrics        handler.MetricsHandler
+	Health         handler.HealthHandler
+	Discovery      handler.DiscoveryHandler
+	NetworkScan    handler.NetworkScanHandler
+	Verification   handler.VerificationHandler
+	Export         handler.ExportHandler
+	Digest         handler.DigestHandler
+	HealthChecks   *handler.HealthCheckHandler
+	BulkRevocation handler.BulkRevocationHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -204,6 +204,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))
 	r.Register("GET /api/v1/notifications/{id}", http.HandlerFunc(reg.Notifications.GetNotification))
 	r.Register("POST /api/v1/notifications/{id}/read", http.HandlerFunc(reg.Notifications.MarkAsRead))
+	// I-005: requeue a dead notification back to pending so the retry sweep
+	// picks it up again. Go 1.22 ServeMux resolves the literal /requeue segment
+	// before falling back to the {id} path-variable route above.
+	r.Register("POST /api/v1/notifications/{id}/requeue", http.HandlerFunc(reg.Notifications.RequeueNotification))
 
 	// Stats routes: /api/v1/stats
 	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(reg.Stats.GetDashboardSummary))

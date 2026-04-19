@@ -1141,4 +1141,243 @@ func TestIntegrationSuite(t *testing.T) {
 			}
 		})
 	})
+
+	// -----------------------------------------------------------------------
+	// Phase 13: I-005 Phase 1 Red — Notification Retry + Dead Letter Queue (E2E)
+	//
+	// Pins the full retry-loop contract end-to-end. Phase 2 Green must turn
+	// every subtest Green with a single coherent change set (migration 000016
+	// live, scheduler notificationRetryLoop wired as the 11th loop bumping
+	// the total from 10 → 11, service RetryFailedNotifications + MarkAsDead +
+	// RequeueNotification implemented, handler POST
+	// /api/v1/notifications/{id}/requeue routed, list handler parsing the
+	// status query param).
+	//
+	// Subtests:
+	//
+	//   1. MarkAsDead_OnMaxAttempts — a notification seeded at retry_count=4
+	//      (one failure shy of the max_attempts=5 gate) with next_retry_at in
+	//      the past is promoted to status='dead' on the first retry-loop
+	//      tick. The pre-increment arithmetic `retry_count + 1 = 5 =
+	//      max_attempts` triggers MarkAsDead instead of scheduling another
+	//      retry.
+	//
+	//   2. Requeue_FlipsDeadToPending — POST
+	//      /api/v1/notifications/{id}/requeue on a dead row flips status back
+	//      to 'pending', resets retry_count to 0, and clears next_retry_at
+	//      so the existing ProcessPendingNotifications loop (not the retry
+	//      sweep) picks it up on its next tick.
+	//
+	//   3. ListFilter_StatusDead — GET /api/v1/notifications?status=dead
+	//      returns only rows in status='dead' so the UI's Dead Letter tab
+	//      (web/src/pages/NotificationsPage.test.tsx subtest #1) can isolate
+	//      them without client-side filtering.
+	//
+	// Red behavior at HEAD (what Phase 2 Green must flip):
+	//
+	//   * Schema: the INSERTs reference retry_count, next_retry_at,
+	//     last_error. Migration 000016 is already written (file (a) of
+	//     Phase 1 Red) but until it is applied the INSERTs fail with
+	//     "column does not exist" — schema-level Red halt.
+	//
+	//   * Subtest 1: no retry loop exists at HEAD. The seeded row stays at
+	//     status='failed' retry_count=4 forever. The 4-minute waitFor
+	//     therefore times out.
+	//
+	//   * Subtest 2: /notifications/{id}/requeue is not routed at HEAD
+	//     (internal/api/handler/notifications.go registers only list / get /
+	//     mark-read). The POST returns 404.
+	//
+	//   * Subtest 3: the list handler does not parse the status query param
+	//     at HEAD. The response includes rows of every status, so the
+	//     "leaked non-dead row" assertion fires.
+	// -----------------------------------------------------------------------
+	t.Run("Phase13_NotificationRetryDLQ", func(t *testing.T) {
+		// Unreachable endpoint so every webhook delivery attempt fails
+		// deterministically — port 1 is never bound. Pinning retry_count=4
+		// + a guaranteed-failing channel is what turns the seeded row into
+		// 'dead' on the very next scheduler tick (one delivery attempt,
+		// retry_count 4→5, crosses max_attempts=5 → MarkAsDead).
+		const blackHole = "http://127.0.0.1:1/i005-red-black-hole"
+
+		// ---------------------------------------------------------------
+		// Subtest 1: failed → dead transition after one retry-loop tick
+		// ---------------------------------------------------------------
+		t.Run("MarkAsDead_OnMaxAttempts", func(t *testing.T) {
+			id := fmt.Sprintf("notif-i005-dead-%d", time.Now().UnixNano())
+
+			// retry_count=4 + next attempt = 5 = max_attempts → MarkAsDead.
+			// next_retry_at is backdated so the row is immediately eligible
+			// for the retry sweep rather than having to wait for its own
+			// backoff to elapse.
+			past := time.Now().Add(-30 * time.Second).UTC()
+			db.Exec(t, `
+				INSERT INTO notification_events
+				  (id, type, channel, recipient, message, status,
+				   retry_count, next_retry_at, last_error)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`,
+				id, "ExpirationWarning", "Webhook", blackHole,
+				"I-005 integration: DLQ promotion on max_attempts",
+				"failed", 4, past, "transient webhook 500",
+			)
+
+			// Give the retry sweep up to 4m to tick at least once (default
+			// 2m interval + seed/sweep/notifier slop). On success the row
+			// carries status='dead' and retry_count has advanced to 5.
+			waitFor(t, "notification transitions to dead", 4*time.Minute, 5*time.Second,
+				func() (bool, error) {
+					var status string
+					var retry int
+					err := db.db.QueryRow(
+						"SELECT status, retry_count FROM notification_events WHERE id = $1",
+						id,
+					).Scan(&status, &retry)
+					if err != nil {
+						return false, err
+					}
+					return strings.EqualFold(status, "dead") && retry >= 5, nil
+				})
+
+			// The dead-letter tab is only useful if operators can see why
+			// the row died. MarkAsDead must preserve the most recent
+			// failure string in last_error rather than nil'ing it.
+			var lastErr sql.NullString
+			if err := db.db.QueryRow(
+				"SELECT last_error FROM notification_events WHERE id = $1", id,
+			).Scan(&lastErr); err != nil {
+				t.Fatalf("read last_error: %v", err)
+			}
+			if !lastErr.Valid || lastErr.String == "" {
+				t.Errorf("dead notification %s has empty last_error — "+
+					"retry loop must preserve the most recent failure", id)
+			}
+		})
+
+		// ---------------------------------------------------------------
+		// Subtest 2: dead → pending via manual Requeue endpoint
+		// ---------------------------------------------------------------
+		t.Run("Requeue_FlipsDeadToPending", func(t *testing.T) {
+			id := fmt.Sprintf("notif-i005-requeue-%d", time.Now().UnixNano())
+
+			// Seed directly at status='dead' rather than waiting for a
+			// scheduler tick — this subtest isolates the requeue handler,
+			// not the retry loop (subtest 1 already pins that).
+			past := time.Now().Add(-10 * time.Minute).UTC()
+			db.Exec(t, `
+				INSERT INTO notification_events
+				  (id, type, channel, recipient, message, status,
+				   retry_count, next_retry_at, last_error)
+				VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			`,
+				id, "ExpirationWarning", "Webhook", blackHole,
+				"I-005 integration: manual requeue",
+				"dead", 5, past, "max attempts reached",
+			)
+
+			resp, err := c.Post("/api/v1/notifications/"+id+"/requeue", "")
+			if err != nil {
+				t.Fatalf("POST requeue: %v", err)
+			}
+			body := readBody(resp)
+			if resp.StatusCode != http.StatusOK {
+				t.Fatalf("requeue status %d, want 200 (body: %s)",
+					resp.StatusCode, body)
+			}
+			// Phase 2 Green handler responds with {"status":"requeued"}
+			// to mirror MarkAsRead's {"status":"marked_as_read"} envelope.
+			if !strings.Contains(body, "requeued") {
+				t.Errorf("requeue body missing 'requeued' marker: %s", body)
+			}
+
+			// DB must reflect the full flip: pending status, reset counter,
+			// cleared next_retry_at. Clearing next_retry_at is what moves
+			// the row out of the retry-sweep partial index and back under
+			// ProcessPendingNotifications.
+			var status string
+			var retry int
+			var nextRetry sql.NullTime
+			if err := db.db.QueryRow(`
+				SELECT status, retry_count, next_retry_at
+				  FROM notification_events WHERE id = $1
+			`, id).Scan(&status, &retry, &nextRetry); err != nil {
+				t.Fatalf("read requeued row: %v", err)
+			}
+			if !strings.EqualFold(status, "pending") {
+				t.Errorf("after requeue: status=%q, want 'pending'", status)
+			}
+			if retry != 0 {
+				t.Errorf("after requeue: retry_count=%d, want 0", retry)
+			}
+			if nextRetry.Valid {
+				t.Errorf("after requeue: next_retry_at=%v, want NULL",
+					nextRetry.Time)
+			}
+		})
+
+		// ---------------------------------------------------------------
+		// Subtest 3: GET /notifications?status=dead isolates DLQ rows
+		// ---------------------------------------------------------------
+		t.Run("ListFilter_StatusDead", func(t *testing.T) {
+			suffix := fmt.Sprintf("%d", time.Now().UnixNano())
+			deadID := "notif-i005-filter-dead-" + suffix
+			pendingID := "notif-i005-filter-pending-" + suffix
+
+			// One row at each end of the lifecycle so we can prove the
+			// filter both matches and excludes.
+			db.Exec(t, `
+				INSERT INTO notification_events
+				  (id, type, channel, recipient, message, status, retry_count)
+				VALUES ($1, 'ExpirationWarning', 'Webhook', $2,
+				        'I-005 filter test: dead row', 'dead', 5)
+			`, deadID, blackHole)
+			db.Exec(t, `
+				INSERT INTO notification_events
+				  (id, type, channel, recipient, message, status, retry_count)
+				VALUES ($1, 'ExpirationWarning', 'Webhook', $2,
+				        'I-005 filter test: pending row', 'pending', 0)
+			`, pendingID, blackHole)
+
+			// per_page large enough to rule out pagination artifacts as
+			// the reason a seeded row might be missing from the response.
+			resp, err := c.Get("/api/v1/notifications?status=dead&per_page=500")
+			if err != nil {
+				t.Fatalf("GET notifications?status=dead: %v", err)
+			}
+			var pr pagedResponse
+			if err := decodeJSON(resp, &pr); err != nil {
+				t.Fatalf("decode: %v", err)
+			}
+
+			type row struct {
+				ID     string `json:"id"`
+				Status string `json:"status"`
+			}
+			var rows []row
+			if err := json.Unmarshal(pr.Data, &rows); err != nil {
+				t.Fatalf("unmarshal rows: %v", err)
+			}
+
+			var sawDead, sawPending bool
+			for _, r := range rows {
+				if r.ID == deadID {
+					sawDead = true
+				}
+				if r.ID == pendingID {
+					sawPending = true
+				}
+				if !strings.EqualFold(r.Status, "dead") {
+					t.Errorf("status=dead filter leaked non-dead row: "+
+						"id=%s status=%s", r.ID, r.Status)
+				}
+			}
+			if !sawDead {
+				t.Errorf("status=dead filter missed seeded dead row %s", deadID)
+			}
+			if sawPending {
+				t.Errorf("status=dead filter leaked seeded pending row %s",
+					pendingID)
+			}
+		})
+	})
 }

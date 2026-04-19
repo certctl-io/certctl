@@ -77,3 +77,8 @@ mcp-server
 /.gocache/
 /.gomodcache/
 /.gopath/
+/.gomodcache-gopath/
+
+# Design scratch files (session-scoped)
+/.i004-design.md
+/.i005-design.md

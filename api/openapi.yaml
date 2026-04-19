@@ -2037,6 +2037,16 @@ paths:
       parameters:
         - $ref: "#/components/parameters/page"
         - $ref: "#/components/parameters/per_page"
+        - name: status
+          in: query
+          required: false
+          description: |
+            Filter by lifecycle status. I-005: `dead` powers the Dead letter
+            tab on the GUI; empty/omitted returns the default all-statuses
+            listing to preserve pre-I-005 behavior.
+          schema:
+            type: string
+            enum: [pending, sent, failed, dead, read]
       responses:
         "200":
           description: Paginated list of notifications
@@ -2091,6 +2101,36 @@ paths:
                 $ref: "#/components/schemas/StatusResponse"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/notifications/{id}/requeue:
+    post:
+      tags: [Notifications]
+      summary: Requeue a dead notification
+      description: |
+        I-005: flip a notification from the `dead` dead-letter queue back to
+        `pending` so the retry sweep (default 2 minutes) picks it up on its
+        next tick. Used by operators after fixing the underlying delivery
+        failure (SMTP config, webhook endpoint, etc.). Clears `next_retry_at`
+        and resets the `retry_count` budget; `last_error` is preserved for
+        audit continuity.
+      operationId: requeueNotification
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Requeued
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/StatusResponse"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "405":
+          description: Method not allowed (POST only)
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -3905,8 +3945,32 @@ components:
           format: date-time
         status:
           type: string
+          enum: [pending, sent, failed, dead, read]
+          description: |
+            Notification lifecycle status. I-005 adds `dead` for notifications
+            that exhausted their 5-attempt retry budget and were moved to the
+            dead-letter queue; operators triage these in the GUI's Dead letter
+            tab and use POST /notifications/{id}/requeue to resurrect them.
         error:
           type: string
+        retry_count:
+          type: integer
+          description: |
+            Number of delivery attempts made. I-005 retry-sweep field; caps
+            at max_attempts=5 before the notification transitions to `dead`.
+        next_retry_at:
+          type: string
+          format: date-time
+          description: |
+            When the next retry attempt is scheduled. I-005 retry-sweep field;
+            null for `sent`, `dead`, and `read` statuses. Backoff follows
+            `min(2^retry_count * 1m, 1h)`.
+        last_error:
+          type: string
+          description: |
+            Most recent transient delivery error (SMTP failure, webhook 5xx,
+            etc.). I-005 retry-sweep field; surfaced on the Dead letter tab
+            so operators can triage without chasing server logs.
         created_at:
           type: string
           format: date-time

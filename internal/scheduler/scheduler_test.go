@@ -195,12 +195,25 @@ func (m *mockAgentService) MarkStaleAgentsOffline(ctx context.Context, interval 
 }
 
 // mockNotificationService is a mock implementation for testing.
+//
+// Tracks ProcessPendingNotifications and RetryFailedNotifications separately.
+// retrySlowDelay and retryShouldError let tests exercise the retry loop
+// independently of the processor loop without coupling their timing/failure
+// modes (coverage gap I-005 — prior to the notificationRetryLoop being wired,
+// RetryFailedNotifications had no runtime caller).
 type mockNotificationService struct {
 	mu          sync.Mutex
 	callCount   int
 	callTimes   []time.Time
 	slowDelay   time.Duration
 	shouldError bool
+
+	// Retry loop tracking (coverage gap I-005)
+	retryCallCount      int
+	retryCallTimes      []time.Time
+	retrySlowDelay      time.Duration
+	retryShouldError    bool
+	retryCtxHasDeadline bool
 }
 
 func (m *mockNotificationService) ProcessPendingNotifications(ctx context.Context) error {
@@ -218,6 +231,42 @@ func (m *mockNotificationService) ProcessPendingNotifications(ctx context.Contex
 	}
 
 	if m.shouldError {
+		return context.Canceled
+	}
+	return nil
+}
+
+// RetryFailedNotifications is the scheduler-driven counterpart to
+// ProcessPendingNotifications that closes coverage gap I-005. Prior to the
+// notificationRetryLoop being wired, notifications that hit status='failed'
+// orphaned there forever — no retry, no DLQ, no escalation. The service-layer
+// method exists to sweep failed rows whose next_retry_at has elapsed, but
+// without a scheduler caller the sweep never runs in production.
+//
+// This mock mirrors mockJobService.RetryFailedJobs's shape: a retry-only field
+// cluster so callers can dial retrySlowDelay / retryShouldError without
+// perturbing ProcessPendingNotifications's timing, and retryCtxHasDeadline so
+// the ContextDeadlineRespected test can assert the scheduler is passing a
+// per-tick context.WithTimeout rather than the raw shutdown ctx.
+func (m *mockNotificationService) RetryFailedNotifications(ctx context.Context) error {
+	m.mu.Lock()
+	m.retryCallCount++
+	m.retryCallTimes = append(m.retryCallTimes, time.Now())
+	// Track whether context has a deadline set — the scheduler must wrap each
+	// tick in a bounded context so a hung sweep can't stall shutdown.
+	_, hasDeadline := ctx.Deadline()
+	m.retryCtxHasDeadline = hasDeadline
+	m.mu.Unlock()
+
+	if m.retrySlowDelay > 0 {
+		select {
+		case <-time.After(m.retrySlowDelay):
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
+
+	if m.retryShouldError {
 		return context.Canceled
 	}
 	return nil
@@ -1357,4 +1406,222 @@ func TestScheduler_JobTimeoutLoop_ContextDeadlineRespected(t *testing.T) {
 		t.Fatal("expected timeout reaper context to have a deadline set, but none found")
 	}
 	t.Log("timeout reaper context deadline verified")
+}
+
+// ─── NotificationRetryLoop tests (coverage gap I-005) ────────────────────────
+//
+// These four tests are the scheduler-level Red half of the I-005 fix. They
+// mirror the I-001 jobRetryLoop triplet (CallsService / IdempotencyGuard /
+// WaitForCompletion) plus the I-003 ContextDeadlineRespected shape.
+//
+// All four use the same "quiet every other loop" pattern so the only tick
+// activity visible on notificationMock is the retry loop under test. JobTimeout
+// is intentionally left unconfigured — SetJobReaperService isn't called, so the
+// timeout loop is dormant (same convention the I-001 tests follow).
+
+// TestScheduler_NotificationRetryLoop_CallsService verifies that the
+// notification retry loop invokes NotificationService.RetryFailedNotifications
+// on each tick. Closes coverage gap I-005 — prior to the loop being wired,
+// RetryFailedNotifications had no runtime caller and failed notification_events
+// rows orphaned at status='failed' forever (no retry, no DLQ, no escalation).
+//
+// Unlike the jobRetryLoop test, there is no maxRetries advisory constant to
+// forward: the max_attempts limit on notification retries lives on the row
+// itself (retry_count column introduced by migration 000016), not in the call
+// signature.
+func TestScheduler_NotificationRetryLoop_CallsService(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	// Quiet every other loop so only the retry loop's calls are visible on notificationMock.
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(10 * time.Second)
+	sched.SetNotificationRetryInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Run long enough for the immediate start + at least one tick.
+	time.Sleep(200 * time.Millisecond)
+	cancel()
+	_ = sched.WaitForCompletion(2 * time.Second)
+
+	notificationMock.mu.Lock()
+	retryCount := notificationMock.retryCallCount
+	notificationMock.mu.Unlock()
+
+	if retryCount < 1 {
+		t.Fatalf("expected notification retry service to be called at least once, got %d", retryCount)
+	}
+	t.Logf("notification retry loop called %d times", retryCount)
+}
+
+// TestScheduler_NotificationRetryLoop_IdempotencyGuard verifies that a slow
+// retry sweep does not cause overlapping executions. Mirrors the shape of
+// TestScheduler_JobRetryLoop_IdempotencyGuard.
+//
+// The guard is the atomic.Bool notificationRetryRunning in scheduler.go.
+// Without it, a 100ms tick against a 150ms operation would fire ~4 times in
+// 400ms; with the guard we expect ~2–3 calls. Anything above 3 is logged as a
+// warning (not a hard failure) so CI timing noise doesn't produce flakes.
+func TestScheduler_NotificationRetryLoop_IdempotencyGuard(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{
+		retrySlowDelay: 150 * time.Millisecond, // slower than tick interval
+	}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(10 * time.Second)
+	sched.SetNotificationRetryInterval(100 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	time.Sleep(400 * time.Millisecond)
+
+	notificationMock.mu.Lock()
+	retryCount := notificationMock.retryCallCount
+	notificationMock.mu.Unlock()
+
+	// With a 150ms sweep and 100ms interval, a functioning guard should yield
+	// roughly 2–3 calls (immediate + any ticks whose previous sweep finished).
+	// Anything above 3 suggests the guard isn't holding.
+	if retryCount > 3 {
+		t.Logf("WARNING: retry called %d times in 400ms with 100ms interval and 150ms sweep — guard may not be working", retryCount)
+	}
+
+	t.Logf("notification retry idempotency guard: %d calls in 400ms (100ms interval, 150ms sweep)", retryCount)
+
+	cancel()
+	if err := sched.WaitForCompletion(2 * time.Second); err != nil {
+		t.Fatalf("WaitForCompletion should succeed: %v", err)
+	}
+}
+
+// TestScheduler_NotificationRetryLoop_WaitForCompletion verifies that a retry
+// sweep still in flight at shutdown is awaited by WaitForCompletion — the same
+// sync.WaitGroup contract every other loop satisfies. If the loop were to
+// return early without registering its goroutine on s.wg, this test would
+// either (a) observe retryCount==0 because the immediate-start sweep was never
+// launched, or (b) observe WaitForCompletion returning before the in-flight
+// sweep finished (elapsed < retrySlowDelay).
+func TestScheduler_NotificationRetryLoop_WaitForCompletion(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{
+		retrySlowDelay: 100 * time.Millisecond,
+	}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(10 * time.Second)
+	sched.SetNotificationRetryInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	startedChan := sched.Start(ctx)
+	<-startedChan
+
+	// Let the immediate-start retry goroutine begin its 100ms sweep.
+	time.Sleep(30 * time.Millisecond)
+
+	// Initiate shutdown mid-sweep.
+	cancel()
+
+	start := time.Now()
+	err := sched.WaitForCompletion(5 * time.Second)
+	elapsed := time.Since(start)
+
+	if err != nil {
+		t.Fatalf("WaitForCompletion should not error: %v", err)
+	}
+	if elapsed > 5*time.Second {
+		t.Fatalf("WaitForCompletion took longer than expected: %v", elapsed)
+	}
+
+	notificationMock.mu.Lock()
+	retryCount := notificationMock.retryCallCount
+	notificationMock.mu.Unlock()
+
+	if retryCount < 1 {
+		t.Fatalf("expected notification retry service to have started at least once before shutdown, got %d", retryCount)
+	}
+	t.Logf("notification retry loop graceful shutdown completed in %v after %d in-flight sweep(s)", elapsed, retryCount)
+}
+
+// TestScheduler_NotificationRetryLoop_ContextDeadlineRespected verifies that
+// each tick of the retry loop receives a context with a deadline set. Mirrors
+// TestScheduler_JobTimeoutLoop_ContextDeadlineRespected.
+//
+// The per-tick context.WithTimeout exists so a pathologically slow sweep (e.g.
+// a misbehaving DB lock) can't stall the rest of the scheduler's shutdown
+// sequence indefinitely — the wrapping context expires, the sweep returns
+// ctx.Err(), and the WaitGroup.Done() fires on schedule.
+func TestScheduler_NotificationRetryLoop_ContextDeadlineRespected(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stderr, nil))
+	renewalMock := &mockRenewalService{}
+	jobMock := &mockJobService{}
+	agentMock := &mockAgentService{}
+	notificationMock := &mockNotificationService{}
+	networkMock := &mockNetworkScanService{}
+
+	sched := NewScheduler(renewalMock, jobMock, agentMock, notificationMock, networkMock, logger)
+	sched.SetRenewalCheckInterval(10 * time.Second)
+	sched.SetJobProcessorInterval(10 * time.Second)
+	sched.SetAgentHealthCheckInterval(10 * time.Second)
+	sched.SetNotificationProcessInterval(10 * time.Second)
+	sched.SetNetworkScanInterval(10 * time.Second)
+	sched.SetJobRetryInterval(10 * time.Second)
+	sched.SetNotificationRetryInterval(50 * time.Millisecond)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+
+	<-sched.Start(ctx)
+	time.Sleep(100 * time.Millisecond)
+	cancel()
+	if err := sched.WaitForCompletion(2 * time.Second); err != nil {
+		t.Fatalf("WaitForCompletion: %v", err)
+	}
+
+	notificationMock.mu.Lock()
+	hasDeadline := notificationMock.retryCtxHasDeadline
+	notificationMock.mu.Unlock()
+
+	if !hasDeadline {
+		t.Fatal("expected notification retry context to have a deadline set, but none found")
+	}
+	t.Log("notification retry context deadline verified")
 }

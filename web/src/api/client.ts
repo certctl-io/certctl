@@ -301,6 +301,19 @@ export const getNotification = (id: string) =>
 export const markNotificationRead = (id: string) =>
   fetchJSON<{ message: string }>(`${BASE}/notifications/${id}/read`, { method: 'POST' });
 
+/**
+ * I-005: requeue a dead notification back to the retry queue. Flips status
+ * 'dead' → 'pending' and clears next_retry_at so the retry sweep picks it up
+ * on its next tick (default 2 minutes, CERTCTL_NOTIFICATION_RETRY_INTERVAL).
+ * Used by the Dead letter tab's "Requeue" button after an operator fixes the
+ * underlying delivery failure (SMTP config, webhook endpoint, etc.). The
+ * handler returns a StatusResponse ({ status: "requeued" }) — the frontend
+ * only needs to know the call succeeded so the mutation can invalidate the
+ * notifications query.
+ */
+export const requeueNotification = (id: string) =>
+  fetchJSON<{ status: string }>(`${BASE}/notifications/${id}/requeue`, { method: 'POST' });
+
 // Audit
 export const getAuditEvents = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '200', ...params }).toString();

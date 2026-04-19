@@ -34,8 +34,14 @@ type AgentServicer interface {
 }
 
 // NotificationServicer defines the interface for notification processing used by the scheduler.
+//
+// RetryFailedNotifications was added to close coverage gap I-005: the retry
+// sweep transitions eligible Failed notifications to Pending on an independent
+// tick, using exponential backoff with a 1h cap and a 5-attempt DLQ budget.
+// Mirrors the I-001 job retry loop topology.
 type NotificationServicer interface {
 	ProcessPendingNotifications(ctx context.Context) error
+	RetryFailedNotifications(ctx context.Context) error
 }
 
 // NetworkScanServicer defines the interface for network scanning used by the scheduler.
@@ -67,44 +73,46 @@ type JobReaperService interface {
 // It runs multiple concurrent loops for renewal checks, job processing, agent health checks,
 // and notification processing.
 type Scheduler struct {
-	renewalService         RenewalServicer
-	jobService             JobServicer
-	agentService           AgentServicer
-	notificationService    NotificationServicer
-	networkScanService     NetworkScanServicer
-	digestService          DigestServicer
-	healthCheckService     HealthCheckServicer
-	cloudDiscoveryService  CloudDiscoveryServicer
-	jobReaper              JobReaperService
-	logger                 *slog.Logger
+	renewalService        RenewalServicer
+	jobService            JobServicer
+	agentService          AgentServicer
+	notificationService   NotificationServicer
+	networkScanService    NetworkScanServicer
+	digestService         DigestServicer
+	healthCheckService    HealthCheckServicer
+	cloudDiscoveryService CloudDiscoveryServicer
+	jobReaper             JobReaperService
+	logger                *slog.Logger
 
 	// Configurable tick intervals
-	renewalCheckInterval            time.Duration
-	jobProcessorInterval            time.Duration
-	jobRetryInterval                time.Duration
-	agentHealthCheckInterval        time.Duration
-	notificationProcessInterval     time.Duration
-	shortLivedExpiryCheckInterval   time.Duration
-	networkScanInterval             time.Duration
-	digestInterval                  time.Duration
-	healthCheckInterval             time.Duration
-	cloudDiscoveryInterval          time.Duration
-	jobTimeoutInterval              time.Duration
-	awaitingCSRTimeout              time.Duration
-	awaitingApprovalTimeout         time.Duration
+	renewalCheckInterval          time.Duration
+	jobProcessorInterval          time.Duration
+	jobRetryInterval              time.Duration
+	agentHealthCheckInterval      time.Duration
+	notificationProcessInterval   time.Duration
+	notificationRetryInterval     time.Duration
+	shortLivedExpiryCheckInterval time.Duration
+	networkScanInterval           time.Duration
+	digestInterval                time.Duration
+	healthCheckInterval           time.Duration
+	cloudDiscoveryInterval        time.Duration
+	jobTimeoutInterval            time.Duration
+	awaitingCSRTimeout            time.Duration
+	awaitingApprovalTimeout       time.Duration
 
 	// Idempotency guards: prevent duplicate execution of slow jobs
-	renewalCheckRunning           atomic.Bool
-	jobProcessorRunning           atomic.Bool
-	jobRetryRunning               atomic.Bool
-	agentHealthCheckRunning       atomic.Bool
-	notificationProcessRunning    atomic.Bool
-	shortLivedExpiryCheckRunning  atomic.Bool
-	networkScanRunning            atomic.Bool
-	digestRunning                 atomic.Bool
-	healthCheckRunning            atomic.Bool
-	cloudDiscoveryRunning         atomic.Bool
-	jobTimeoutRunning             atomic.Bool
+	renewalCheckRunning          atomic.Bool
+	jobProcessorRunning          atomic.Bool
+	jobRetryRunning              atomic.Bool
+	agentHealthCheckRunning      atomic.Bool
+	notificationProcessRunning   atomic.Bool
+	notificationRetryRunning     atomic.Bool
+	shortLivedExpiryCheckRunning atomic.Bool
+	networkScanRunning           atomic.Bool
+	digestRunning                atomic.Bool
+	healthCheckRunning           atomic.Bool
+	cloudDiscoveryRunning        atomic.Bool
+	jobTimeoutRunning            atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -133,6 +141,7 @@ func NewScheduler(
 		jobRetryInterval:              5 * time.Minute,
 		agentHealthCheckInterval:      2 * time.Minute,
 		notificationProcessInterval:   1 * time.Minute,
+		notificationRetryInterval:     2 * time.Minute,
 		shortLivedExpiryCheckInterval: 30 * time.Second,
 		networkScanInterval:           6 * time.Hour,
 		digestInterval:                24 * time.Hour,
@@ -180,6 +189,13 @@ func (s *Scheduler) SetNotificationProcessInterval(d time.Duration) {
 	s.notificationProcessInterval = d
 }
 
+// SetNotificationRetryInterval configures the interval for the failed-notification
+// retry sweep (coverage gap I-005). Defaults to 2 minutes; honors
+// CERTCTL_NOTIFICATION_RETRY_INTERVAL when wired from config.
+func (s *Scheduler) SetNotificationRetryInterval(d time.Duration) {
+	s.notificationRetryInterval = d
+}
+
 // SetNetworkScanInterval configures the interval for network scanning.
 func (s *Scheduler) SetNetworkScanInterval(d time.Duration) {
 	s.networkScanInterval = d
@@ -212,7 +228,6 @@ func (s *Scheduler) SetCloudDiscoveryInterval(d time.Duration) {
 	s.cloudDiscoveryInterval = d
 }
 
-
 // SetJobReaperService sets the job reaper service (I-003).
 func (s *Scheduler) SetJobReaperService(jr JobReaperService) {
 	s.jobReaper = jr
@@ -232,6 +247,7 @@ func (s *Scheduler) SetAwaitingCSRTimeout(d time.Duration) {
 func (s *Scheduler) SetAwaitingApprovalTimeout(d time.Duration) {
 	s.awaitingApprovalTimeout = d
 }
+
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
@@ -242,10 +258,11 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 
 		// Track all loop goroutines in the WaitGroup so WaitForCompletion
 		// blocks until they've fully exited (prevents test races).
-		// Base count is 7: renewal, job processor, job retry (I-001),
-		// job timeout (I-003), agent health, notification, short-lived expiry. Optional loops
-		// (network scan, digest, health check, cloud discovery) add to this.
-		loopCount := 7
+		// Base count is 8: renewal, job processor, job retry (I-001),
+		// job timeout (I-003), agent health, notification, notification retry
+		// (I-005), short-lived expiry. Optional loops (network scan, digest,
+		// health check, cloud discovery) add to this.
+		loopCount := 8
 		if s.networkScanService != nil {
 			loopCount++
 		}
@@ -266,6 +283,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go func() { defer s.wg.Done(); s.jobTimeoutLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.agentHealthCheckLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.notificationProcessLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.notificationRetryLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.shortLivedExpiryCheckLoop(ctx) }()
 		if s.networkScanService != nil {
 			go func() { defer s.wg.Done(); s.networkScanLoop(ctx) }()
@@ -594,6 +612,64 @@ func (s *Scheduler) runNotificationProcess(ctx context.Context) {
 			"interval", s.notificationProcessInterval.String())
 	} else {
 		s.logger.Debug("notification processor completed")
+	}
+}
+
+// notificationRetryLoop runs every notificationRetryInterval and transitions
+// eligible Failed notifications back to Pending so the notification processor
+// can pick them up again. Closes coverage gap I-005 — NotificationService.
+// RetryFailedNotifications had no runtime caller prior to this loop being
+// wired. Runs immediately on start, then every interval.
+// Uses atomic.Bool to prevent duplicate execution if the previous retry sweep
+// is still running. Mirrors the I-001 jobRetryLoop topology byte-for-byte.
+func (s *Scheduler) notificationRetryLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.notificationRetryInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start (with idempotency guard)
+	s.notificationRetryRunning.Store(true)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.notificationRetryRunning.Store(false)
+		s.runNotificationRetry(ctx)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.notificationRetryRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("notification retry still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.notificationRetryRunning.Store(false)
+				s.runNotificationRetry(ctx)
+			}()
+		}
+	}
+}
+
+// runNotificationRetry executes a single failed-notification retry cycle with
+// error recovery. Uses a 2-minute per-tick timeout matching runJobRetry;
+// RetryFailedNotifications issues one SELECT and one UPDATE per eligible row
+// (cheap), so this headroom covers very large failure backlogs without
+// starving the loop. The service layer swallows per-row send errors (mirrors
+// ProcessPendingNotifications) and only returns the List error from the
+// initial ListRetryEligible call.
+func (s *Scheduler) runNotificationRetry(ctx context.Context) {
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := s.notificationService.RetryFailedNotifications(opCtx); err != nil {
+		s.logger.Error("notification retry failed",
+			"error", err,
+			"interval", s.notificationRetryInterval.String())
+	} else {
+		s.logger.Debug("notification retry completed")
 	}
 }
 

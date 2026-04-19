@@ -974,9 +974,13 @@ func registerAuditTools(s *gomcp.Server, c *Client) {
 func registerNotificationTools(s *gomcp.Server, c *Client) {
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_list_notifications",
-		Description: "List notification events (expiration warnings, renewal/deployment results, policy violations, revocations).",
-	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListParams) (*gomcp.CallToolResult, any, error) {
-		data, err := c.Get("/api/v1/notifications", paginationQuery(input.Page, input.PerPage))
+		Description: "List notification events (expiration warnings, renewal/deployment results, policy violations, revocations). Optional status filter supports the I-005 Dead letter tab (status=dead).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListNotificationsInput) (*gomcp.CallToolResult, any, error) {
+		q := paginationQuery(input.Page, input.PerPage)
+		if input.Status != "" {
+			q.Set("status", input.Status)
+		}
+		data, err := c.Get("/api/v1/notifications", q)
 		if err != nil {
 			return errorResult(err)
 		}
@@ -999,6 +1003,21 @@ func registerNotificationTools(s *gomcp.Server, c *Client) {
 		Description: "Mark a notification as read.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/notifications/"+input.ID+"/read", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	// I-005: requeue a dead-letter notification. Flips status from 'dead'
+	// back to 'pending' and clears next_retry_at so the retry sweep picks
+	// the notification up on its next tick. Operator-triggered; the tool
+	// is the MCP counterpart of the GUI's Dead letter tab "Requeue" button.
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_requeue_notification",
+		Description: "Requeue a dead notification back to pending so the retry sweep can deliver it again. Used to recover from persistent delivery failures after the underlying issue (SMTP config, webhook endpoint, etc.) has been fixed.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/notifications/"+input.ID+"/requeue", nil)
 		if err != nil {
 			return errorResult(err)
 		}

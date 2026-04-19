@@ -61,7 +61,7 @@ flowchart TB
         API["REST API\n(Go net/http, :8443)"]
         SVC["Service Layer"]
         REPO["Repository Layer\n(database/sql + lib/pq)"]
-        SCHED["Background Scheduler\n7 loops"]
+        SCHED["Background Scheduler\n8 always-on + 4 optional loops"]
         DASH["Web Dashboard\n(React SPA)"]
     end
 
@@ -285,6 +285,9 @@ erDiagram
         text channel
         text recipient
         text status
+        int retry_count
+        timestamptz next_retry_at
+        text last_error
     }
     certificate_profiles {
         text id PK
@@ -483,40 +486,55 @@ For compliance events requiring fleet-wide revocation (key compromise, CA distru
 
 ### 4. Automatic Renewal
 
-The control plane runs a scheduler with seven background loops:
+The control plane runs a scheduler with 8 always-on loops plus up to 4 optional loops (enabled by configuration). `internal/scheduler/scheduler.go:262-265` is the authoritative count.
 
 ```mermaid
 flowchart LR
     subgraph "Scheduler (Background Goroutines)"
         R["Renewal Checker\n⏱ every 1h"]
         J["Job Processor\n⏱ every 30s"]
+        JR["Job Retry\n⏱ every 5m"]
+        JT["Job Timeout\n⏱ every 10m"]
         H["Agent Health\n⏱ every 2m"]
         N["Notification Processor\n⏱ every 1m"]
+        NR["Notification Retry\n⏱ every 2m"]
         SL["Short-Lived Expiry\n⏱ every 30s"]
         NS["Network Scanner\n⏱ every 6h"]
         DG["Certificate Digest\n⏱ every 24h"]
+        HC["Endpoint Health\n⏱ every 60s"]
+        CD["Cloud Discovery\n⏱ every 6h"]
     end
 
     R -->|"Find expiring certs\nCreate renewal jobs"| DB[("PostgreSQL")]
     J -->|"Process pending jobs\nCoordinate issuance"| DB
+    JR -->|"Retry Failed jobs\nFailed→Pending"| DB
+    JT -->|"Reap stalled AwaitingCSR / AwaitingApproval jobs"| DB
     H -->|"Check heartbeat staleness\nMark agents offline"| DB
     N -->|"Send pending notifications\nEmail / Webhook / Slack"| DB
+    NR -->|"Retry failed notifications\n2^n-min backoff, DLQ after 5 attempts"| DB
     SL -->|"Expire short-lived certs\nMark as Expired"| DB
     NS -->|"Probe TLS endpoints\nStore discovered certs"| DB
     DG -->|"Generate & send HTML digest\nEmail to recipients"| DB
+    HC -->|"Probe deployed TLS endpoints\nState machine + mismatch"| DB
+    CD -->|"AWS SM / Azure KV / GCP SM\nFeed discovery pipeline"| DB
 ```
 
-| Loop | Interval | Timeout | Purpose |
-|------|----------|---------|---------|
-| Renewal checker | 1 hour | 5 minutes | Finds certificates approaching expiry, creates renewal jobs |
-| Job processor | 30 seconds | 2 minutes | Processes pending jobs (issuance, renewal, deployment) |
-| Agent health check | 2 minutes | 1 minute | Marks agents as offline if heartbeat is stale |
-| Notification processor | 1 minute | 1 minute | Sends pending notifications via configured channels |
-| Short-lived expiry | 30 seconds | 30 seconds | Marks expired short-lived certificates (profile TTL < 1 hour) |
-| Network scanner | 6 hours | 30 minutes | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21, opt-in via `CERTCTL_NETWORK_SCAN_ENABLED`). CIDR size validated at API level — max /20 (4096 IPs) per range. |
-| Certificate digest | 24 hours | 5 minutes | Generates HTML email with certificate stats, expiration timeline, job health, agent count. Does NOT run on startup — waits for first scheduled tick. Configurable interval and recipients via `CERTCTL_DIGEST_INTERVAL` and `CERTCTL_DIGEST_RECIPIENTS`. Falls back to certificate owner emails if no explicit recipients configured. |
+| Loop | Interval | Always-on? | Purpose |
+|------|----------|------------|---------|
+| Renewal checker | 1 hour | Yes | Finds certificates approaching expiry (threshold-based or ARI-directed), creates renewal jobs |
+| Job processor | 30 seconds | Yes | Processes pending jobs (issuance, renewal, deployment) |
+| Job retry | 5 minutes (`CERTCTL_SCHEDULER_RETRY_INTERVAL`) | Yes | Transitions `Failed` jobs back to `Pending` for re-dispatch (I-001) |
+| Job timeout | 10 minutes (`CERTCTL_JOB_TIMEOUT_INTERVAL`) | Yes | Reaps `AwaitingCSR` jobs older than 24h and `AwaitingApproval` jobs older than 7d to `Failed`, feeding the retry loop (I-003) |
+| Agent health check | 2 minutes | Yes | Marks agents as offline if heartbeat is stale |
+| Notification processor | 1 minute | Yes | Sends pending notifications via configured channels |
+| Notification retry | 2 minutes (`CERTCTL_NOTIFICATION_RETRY_INTERVAL`) | Yes | Re-dispatches `Failed` notifications whose `next_retry_at` has elapsed; exponential backoff (2^n minutes, capped at 1h), 5-attempt budget, terminal `dead` status after exhaustion (I-005) |
+| Short-lived expiry | 30 seconds | Yes | Marks expired short-lived certificates (profile TTL < 1 hour) |
+| Network scanner | 6 hours | Opt-in (`CERTCTL_NETWORK_SCAN_ENABLED`) | Probes TLS endpoints on configured CIDR ranges, stores discovered certs (M21). CIDR size validated at API level — max /20 (4096 IPs) per range. |
+| Certificate digest | 24 hours (`CERTCTL_DIGEST_INTERVAL`) | Opt-in (digest service) | Generates HTML email with certificate stats, expiration timeline, job health, agent count. Does NOT run on startup — waits for first scheduled tick. Falls back to certificate owner emails if no explicit recipients configured. |
+| Endpoint health | 60 seconds (`CERTCTL_HEALTH_CHECK_INTERVAL`) | Opt-in (health check service) | Probes deployed TLS endpoints, drives the healthy/degraded/down/cert_mismatch state machine (M48) |
+| Cloud discovery | 6 hours | Opt-in (at least one cloud source configured) | Walks AWS Secrets Manager / Azure Key Vault / GCP Secret Manager, feeds discovery pipeline (M50) |
 
-Each loop uses `sync/atomic.Bool` idempotency guards to prevent concurrent tick execution — if a loop iteration is still running when the next tick fires, the tick is skipped with a warning log. All loops (including short-lived expiry check) run immediately on startup before entering their ticker interval, ensuring no gap between scheduler start and first execution. The certificate digest loop is the exception — it does NOT run on startup, only on scheduled ticks. Graceful shutdown uses `sync.WaitGroup` with `WaitForCompletion()` to drain all in-flight work before process exit.
+Each loop uses `sync/atomic.Bool` idempotency guards to prevent concurrent tick execution — if a loop iteration is still running when the next tick fires, the tick is skipped with a warning log. Most loops (including short-lived expiry, job retry, job timeout, and notification retry) run immediately on startup before entering their ticker interval, ensuring no gap between scheduler start and first execution. The certificate digest loop is the exception — it does NOT run on startup, only on scheduled ticks. Graceful shutdown uses `sync.WaitGroup` with `WaitForCompletion()` to drain all in-flight work before process exit.
 
 Each operation has a context timeout to prevent indefinite hangs if external services become unresponsive.
 
@@ -657,6 +675,16 @@ type Connector interface {
 Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2). Each is enabled by setting its configuration environment variable.
 
 See the [Connector Development Guide](connectors.md) for details on building custom connectors.
+
+### Notification Retry & Dead-Letter Queue
+
+A transient notifier failure (SMTP timeout, 5xx webhook response, Slack rate-limit) must not silently drop a critical alert. Migration `000016_notification_retry` adds three columns to `notification_events` — `retry_count INTEGER NOT NULL DEFAULT 0`, `next_retry_at TIMESTAMPTZ` (nullable — only meaningful while a row is in `failed` state), and `last_error TEXT` (the most recent transient error, preserved for operator triage) — together with a partial index `idx_notification_events_retry_sweep ON notification_events(next_retry_at) WHERE status = 'failed' AND next_retry_at IS NOT NULL` so the retry hot path scales with the retry-eligible slice rather than the full notification history.
+
+The scheduler's notification-retry loop (see the scheduler section above) calls `NotificationService.RetryFailedNotifications(ctx)` every `CERTCTL_NOTIFICATION_RETRY_INTERVAL` (default `2m`). Each tick pulls up to 1000 rows via `notifRepo.ListRetryEligible(ctx, now, maxAttempts, sweepLimit)` — a partial-index-driven query that filters on `status='failed' AND next_retry_at <= now() AND retry_count < 5` — and redispatches them through the same notifier registry used by `ProcessPendingNotifications`. A successful redispatch transitions the row directly to `sent` without incrementing `retry_count`, so the audit trail preserves "delivered on attempt N". A failed redispatch re-arms `next_retry_at` using exponential backoff — `wait = min(2^retry_count minutes, 1h)` — bumps `retry_count`, and stamps `last_error`. When `retry_count >= 4` (the fifth attempt has just failed) the row is promoted to the terminal `dead` status via `notifRepo.MarkAsDead`, which clears `next_retry_at` so the partial retry-sweep index stops matching and the row cannot be re-entered into the retry rotation without operator action.
+
+`NotificationService.RequeueNotification(ctx, id)` is the operator-driven escape hatch from `dead`. It atomically resets `retry_count → 0`, `next_retry_at → NULL`, `last_error → NULL`, and `status → pending`, handing the row back to `ProcessPendingNotifications` on the next 1m tick. This is the correct response to "the notifier outage is resolved, redeliver the queue"; it is not a retry, which is why the retry counter is reset rather than incremented.
+
+The dead-letter depth is surfaced in two places. First, `DashboardSummary.NotificationsDead` is populated by `StatsService.GetDashboardSummary` via `notifRepo.CountByStatus(ctx, "dead")`. The injection uses a `SetNotifRepo` setter pattern (mirroring `CertificateService.SetTargetRepo`) rather than a new positional argument to `NewStatsService`, which keeps all nine existing `NewStatsService` call sites (main.go plus eight digest tests and stats_test.go) signature-stable — when the notification repository has not been wired in, `NotificationsDead` falls through to zero. Second, the `/api/v1/metrics/prometheus` endpoint emits `certctl_notification_dead_total` as a counter (operator alert thresholds per the I-005 spec: `> 0` warning, `> 10` critical) using the same `DashboardSummary` snapshot so the dashboard card and the Prometheus counter cannot skew. The web dashboard exposes a two-tab toolbar on `/notifications` — "All" (the pre-I-005 inbox) and "Dead letter" (threads `?status=dead` into the list query, surfaces `Retry N/5` and the truncated `last_error` with a full-text tooltip per row, and binds a Requeue button to `POST /api/v1/notifications/{id}/requeue`).
 
 ### EST Server (RFC 7030)
 
@@ -865,7 +893,7 @@ The HTTP middleware stack processes requests in the following order (see `cmd/se
 
 ### Concurrency Safety
 
-The background scheduler uses `sync/atomic.Bool` idempotency guards on all 7 loops — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
+The background scheduler uses `sync/atomic.Bool` idempotency guards on every loop (8 always-on plus up to 4 optional) — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
 
 ### Logging
 

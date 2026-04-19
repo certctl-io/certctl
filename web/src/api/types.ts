@@ -126,15 +126,47 @@ export interface Job {
   verification_error?: string;
 }
 
+/**
+ * Notification mirrors internal/domain/notification.go#NotificationEvent.
+ *
+ * I-005 (Notification Retry + Dead-letter Queue) widens the shape with three
+ * audit fields:
+ *
+ *   - retry_count   — number of delivery attempts already consumed (0..5). The
+ *                     5-cap is enforced server-side by NotificationsMaxAttempts.
+ *   - next_retry_at — RFC3339 timestamp the retry sweep will next consider this
+ *                     notification. Null for sent/dead/read and between sweeps
+ *                     for pending rows; the sweep populates it on each failure
+ *                     using min(2^retry_count * 1m, 1h).
+ *   - last_error    — most recent transient delivery failure. Preserved across
+ *                     requeue so Dead letter triage shows *why* the row died
+ *                     without chasing server logs.
+ *
+ * `sent_at` and `error` are the pre-I-005 audit fields on the backend struct.
+ * `subject` is a historical frontend-only field the backend never emits; it's
+ * kept optional so legacy fixtures and the pendingNotif test mock still type
+ * correctly without forcing a rewrite of every existing consumer.
+ *
+ * Status values follow the backend NotificationStatus constants:
+ *   pending · sent · failed · dead · read
+ * The existing list view tolerates the legacy title-cased "Pending" alias at
+ * render time (NotificationRow) so upgraded clients talking to older servers
+ * don't regress — see `isUnread` logic in NotificationsPage.tsx.
+ */
 export interface Notification {
   id: string;
   type: string;
   channel: string;
   recipient: string;
-  subject: string;
+  subject?: string;
   message: string;
   status: string;
-  certificate_id: string;
+  certificate_id?: string;
+  sent_at?: string | null;
+  error?: string | null;
+  retry_count?: number;
+  next_retry_at?: string | null;
+  last_error?: string | null;
   created_at: string;
 }
 

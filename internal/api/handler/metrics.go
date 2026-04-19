@@ -41,20 +41,26 @@ type MetricsResponse struct {
 
 // MetricsGauge represents gauge metrics (point-in-time values).
 type MetricsGauge struct {
-	CertificateTotal       int64   `json:"certificate_total"`
-	CertificateActive      int64   `json:"certificate_active"`
-	CertificateExpiringSoon int64  `json:"certificate_expiring_soon"` // Within 30d
-	CertificateExpired     int64   `json:"certificate_expired"`
-	CertificateRevoked     int64   `json:"certificate_revoked"`
-	AgentTotal             int64   `json:"agent_total"`
-	AgentOnline            int64   `json:"agent_online"`
-	JobPending             int64   `json:"job_pending"`
+	CertificateTotal        int64 `json:"certificate_total"`
+	CertificateActive       int64 `json:"certificate_active"`
+	CertificateExpiringSoon int64 `json:"certificate_expiring_soon"` // Within 30d
+	CertificateExpired      int64 `json:"certificate_expired"`
+	CertificateRevoked      int64 `json:"certificate_revoked"`
+	AgentTotal              int64 `json:"agent_total"`
+	AgentOnline             int64 `json:"agent_online"`
+	JobPending              int64 `json:"job_pending"`
 }
 
 // MetricsCounter represents counter metrics (cumulative values).
 type MetricsCounter struct {
 	JobCompletedTotal int64 `json:"job_completed_total"`
 	JobFailedTotal    int64 `json:"job_failed_total"`
+	// NotificationsDeadTotal is a point-in-time count of notifications in the
+	// dead-letter queue (status="dead"), exposed here with the _total suffix
+	// to match Prometheus DB-snapshot counter convention (same semantics as
+	// JobFailedTotal and JobCompletedTotal — see metrics.md). I-005 DLQ
+	// observability gate.
+	NotificationsDeadTotal int64 `json:"notifications_dead_total"`
 }
 
 // UptimeMetric represents server uptime information.
@@ -95,18 +101,19 @@ func (h MetricsHandler) GetMetrics(w http.ResponseWriter, r *http.Request) {
 	// Build metrics response
 	metricsResp := MetricsResponse{
 		Gauge: MetricsGauge{
-			CertificateTotal:      dashboardSummary.TotalCertificates,
-			CertificateActive:     dashboardSummary.TotalCertificates - dashboardSummary.ExpiringCertificates - dashboardSummary.ExpiredCertificates - dashboardSummary.RevokedCertificates,
+			CertificateTotal:        dashboardSummary.TotalCertificates,
+			CertificateActive:       dashboardSummary.TotalCertificates - dashboardSummary.ExpiringCertificates - dashboardSummary.ExpiredCertificates - dashboardSummary.RevokedCertificates,
 			CertificateExpiringSoon: dashboardSummary.ExpiringCertificates,
-			CertificateExpired:    dashboardSummary.ExpiredCertificates,
-			CertificateRevoked:    dashboardSummary.RevokedCertificates,
-			AgentTotal:            dashboardSummary.TotalAgents,
-			AgentOnline:           dashboardSummary.ActiveAgents,
-			JobPending:            dashboardSummary.PendingJobs,
+			CertificateExpired:      dashboardSummary.ExpiredCertificates,
+			CertificateRevoked:      dashboardSummary.RevokedCertificates,
+			AgentTotal:              dashboardSummary.TotalAgents,
+			AgentOnline:             dashboardSummary.ActiveAgents,
+			JobPending:              dashboardSummary.PendingJobs,
 		},
 		Counter: MetricsCounter{
-			JobCompletedTotal: dashboardSummary.CompleteJobs,
-			JobFailedTotal:    dashboardSummary.FailedJobs,
+			JobCompletedTotal:      dashboardSummary.CompleteJobs,
+			JobFailedTotal:         dashboardSummary.FailedJobs,
+			NotificationsDeadTotal: dashboardSummary.NotificationsDead,
 		},
 		Uptime: UptimeMetric{
 			UptimeSeconds: int64(time.Since(h.serverStarted).Seconds()),
@@ -200,6 +207,17 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 	fmt.Fprintf(w, "# TYPE certctl_job_failed_total counter\n")
 	fmt.Fprintf(w, "certctl_job_failed_total %d\n\n", dashboardSummary.FailedJobs)
 
+	// I-005: notification dead-letter queue depth. Emitted with the _total
+	// suffix to match the existing certctl_job_completed_total /
+	// certctl_job_failed_total convention for DB-snapshot counters — the
+	// value is a point-in-time COUNT(*) of notification_events rows where
+	// status='dead', not a monotonically increasing process-lifetime counter.
+	// Operators alert on this as "dead-letter depth" (thresholds in the
+	// I-005 spec: > 0 → warning, > 10 → critical).
+	fmt.Fprintf(w, "# HELP certctl_notification_dead_total Number of notifications in the dead-letter queue.\n")
+	fmt.Fprintf(w, "# TYPE certctl_notification_dead_total counter\n")
+	fmt.Fprintf(w, "certctl_notification_dead_total %d\n\n", dashboardSummary.NotificationsDead)
+
 	// Info — server uptime
 	fmt.Fprintf(w, "# HELP certctl_uptime_seconds Server uptime in seconds.\n")
 	fmt.Fprintf(w, "# TYPE certctl_uptime_seconds gauge\n")
@@ -209,15 +227,21 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 // DashboardSummary mirrors the service.DashboardSummary for JSON unmarshaling.
 // JSON tags must match the service-layer struct exactly.
 type DashboardSummary struct {
-	TotalCertificates    int64     `json:"total_certificates"`
-	ExpiringCertificates int64     `json:"expiring_certificates"`
-	ExpiredCertificates  int64     `json:"expired_certificates"`
-	RevokedCertificates  int64     `json:"revoked_certificates"`
-	ActiveAgents         int64     `json:"active_agents"`
-	OfflineAgents        int64     `json:"offline_agents"`
-	TotalAgents          int64     `json:"total_agents"`
-	PendingJobs          int64     `json:"pending_jobs"`
-	FailedJobs           int64     `json:"failed_jobs"`
-	CompleteJobs         int64     `json:"complete_jobs"`
-	CompletedAt          time.Time `json:"completed_at"`
+	TotalCertificates    int64 `json:"total_certificates"`
+	ExpiringCertificates int64 `json:"expiring_certificates"`
+	ExpiredCertificates  int64 `json:"expired_certificates"`
+	RevokedCertificates  int64 `json:"revoked_certificates"`
+	ActiveAgents         int64 `json:"active_agents"`
+	OfflineAgents        int64 `json:"offline_agents"`
+	TotalAgents          int64 `json:"total_agents"`
+	PendingJobs          int64 `json:"pending_jobs"`
+	FailedJobs           int64 `json:"failed_jobs"`
+	CompleteJobs         int64 `json:"complete_jobs"`
+	// NotificationsDead mirrors service.DashboardSummary.NotificationsDead.
+	// JSON tag "notifications_dead" must match the service-layer struct
+	// exactly — this cross-package mirror avoids a direct import cycle and
+	// is driven by the I-005 Prometheus counter emission path. See
+	// GetPrometheusMetrics and MetricsCounter.NotificationsDeadTotal.
+	NotificationsDead int64     `json:"notifications_dead"`
+	CompletedAt       time.Time `json:"completed_at"`
 }

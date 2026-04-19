@@ -1,6 +1,6 @@
 import { useState, useMemo } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getNotifications, markNotificationRead } from '../api/client';
+import { getNotifications, markNotificationRead, requeueNotification } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
@@ -9,20 +9,59 @@ import type { Notification } from '../api/types';
 
 type ViewMode = 'list' | 'grouped';
 
+// I-005: the Notifications page now hosts two tabs. "all" is the pre-I-005
+// inbox behavior — no server-side status filter, client-side type/status
+// dropdowns untouched. "dead" routes the query through the new ?status=dead
+// handler branch so operators can triage the dead-letter queue in isolation.
+// The tab is intentionally a separate state axis from the status dropdown so
+// the two don't fight each other (dropdown filters within the tab's scope).
+type ActiveTab = 'all' | 'dead';
+
 export default function NotificationsPage() {
   const [viewMode, setViewMode] = useState<ViewMode>('grouped');
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
+  const [activeTab, setActiveTab] = useState<ActiveTab>('all');
   const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useQuery({
-    queryKey: ['notifications'],
-    queryFn: () => getNotifications({ per_page: '100' }),
+    // I-005: queryKey carries the active tab so TanStack Query treats
+    // "all" and "dead" as distinct cache entries. Without this, switching
+    // tabs would return stale data until the 30s refetchInterval fires.
+    queryKey: ['notifications', activeTab],
+    queryFn: () => {
+      const params: Record<string, string> = { per_page: '100' };
+      if (activeTab === 'dead') {
+        // The listNotifications handler's ?status=dead branch hits the
+        // NotificationRepository.ListByStatus path instead of plain List,
+        // which is both cheaper (DLQ is a small slice of all notifications)
+        // and correct (pagination counts DLQ rows, not the full inbox).
+        params.status = 'dead';
+      }
+      return getNotifications(params);
+    },
     refetchInterval: 30000,
   });
 
   const markRead = useMutation({
     mutationFn: markNotificationRead,
+    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+  });
+
+  // I-005: requeue a dead notification. Invalidates both tab cache entries
+  // because a successful requeue flips the row out of "dead" and potentially
+  // into the "all" tab on its next refetch (status becomes 'pending').
+  //
+  // The mutationFn is wrapped as `(id) => requeueNotification(id)` rather
+  // than passed by reference so react-query v5's second positional argument
+  // (the mutation context object) never reaches the API client. Without the
+  // wrapper, TanStack invokes `requeueNotification(id, { client })`, and the
+  // I-005 Phase 1 Red contract's strict `toHaveBeenCalledWith('notif-dead-001')`
+  // assertion fails on the extra argument. Keep the arrow even if the context
+  // object later becomes structurally empty — the contract pins a single-arg
+  // call and the page must not leak mutation machinery into API boundaries.
+  const requeue = useMutation({
+    mutationFn: (id: string) => requeueNotification(id),
     onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
   });
 
@@ -81,6 +120,23 @@ export default function NotificationsPage() {
         subtitle={`${filtered.length} notifications${unreadCount ? ` (${unreadCount} unread)` : ''}`}
       />
       <div className="px-4 py-3 flex flex-wrap items-center gap-3 border-b border-surface-border/50">
+        {/* I-005: tab switcher between the standard inbox and the DLQ. The
+            "Dead letter" label is pinned by NotificationsPage.test.tsx — do
+            not rename without updating the Phase 1 Red contract. */}
+        <div className="flex rounded overflow-hidden border border-surface-border">
+          <button
+            onClick={() => setActiveTab('all')}
+            className={`px-3 py-1.5 text-xs transition-colors ${activeTab === 'all' ? 'bg-brand-400 text-white' : 'bg-surface text-ink-muted hover:text-ink'}`}
+          >
+            All
+          </button>
+          <button
+            onClick={() => setActiveTab('dead')}
+            className={`px-3 py-1.5 text-xs transition-colors ${activeTab === 'dead' ? 'bg-brand-400 text-white' : 'bg-surface text-ink-muted hover:text-ink'}`}
+          >
+            Dead letter
+          </button>
+        </div>
         <div className="flex rounded overflow-hidden border border-surface-border">
           <button
             onClick={() => setViewMode('grouped')}
@@ -135,7 +191,7 @@ export default function NotificationsPage() {
                 </div>
                 <div className="space-y-2">
                   {items.map((n) => (
-                    <NotificationRow key={n.id} notification={n} onMarkRead={() => markRead.mutate(n.id)} />
+                    <NotificationRow key={n.id} notification={n} onMarkRead={() => markRead.mutate(n.id)} onRequeue={() => requeue.mutate(n.id)} />
                   ))}
                 </div>
               </div>
@@ -157,10 +213,25 @@ export default function NotificationsPage() {
   );
 }
 
-function NotificationRow({ notification: n, onMarkRead }: { notification: Notification; onMarkRead: () => void }) {
+function NotificationRow({
+  notification: n,
+  onMarkRead,
+  onRequeue,
+}: {
+  notification: Notification;
+  onMarkRead: () => void;
+  // I-005: optional so callers who don't care about the DLQ (if any are ever
+  // added) aren't forced to thread a no-op through. Every NotificationRow
+  // today passes this, so in practice it's always defined.
+  onRequeue?: () => void;
+}) {
   const isUnread = n.status === 'Pending' || n.status === 'pending';
+  // I-005: dead rows get a Requeue button and surface the retry budget + the
+  // last transient error so operators triaging the DLQ can see *why* the
+  // notification died before deciding whether to requeue.
+  const isDead = n.status === 'dead';
   return (
-    <div className={`flex items-start justify-between py-2 px-3 rounded transition-colors ${isUnread ? 'bg-surface-muted border-l-2 border-brand-400' : 'hover:bg-surface-muted'}`}>
+    <div className={`flex items-start justify-between py-2 px-3 rounded transition-colors ${isUnread ? 'bg-surface-muted border-l-2 border-brand-400' : isDead ? 'bg-surface-muted border-l-2 border-danger' : 'hover:bg-surface-muted'}`}>
       <div className="flex-1 min-w-0">
         <div className="flex items-center gap-2 mb-1">
           <span className="text-sm text-ink">{n.type.replace(/([A-Z])/g, ' $1').trim()}</span>
@@ -168,6 +239,18 @@ function NotificationRow({ notification: n, onMarkRead }: { notification: Notifi
           <span className="text-xs text-ink-faint">{n.channel}</span>
         </div>
         <p className="text-xs text-ink-muted truncate">{n.message || n.subject}</p>
+        {isDead && (
+          <div className="flex items-center gap-3 mt-1 text-xs">
+            <span className="text-ink-faint">
+              Retry {n.retry_count ?? 0}/5
+            </span>
+            {n.last_error && (
+              <span className="text-danger truncate" title={n.last_error}>
+                {n.last_error}
+              </span>
+            )}
+          </div>
+        )}
         <div className="flex items-center gap-3 mt-1">
           <span className="text-xs text-ink-faint">{n.recipient}</span>
           <span className="text-xs text-ink-faint">{timeAgo(n.created_at)}</span>
@@ -179,6 +262,14 @@ function NotificationRow({ notification: n, onMarkRead }: { notification: Notifi
           className="ml-3 text-xs text-brand-400 hover:text-brand-500 transition-colors whitespace-nowrap"
         >
           Mark read
+        </button>
+      )}
+      {isDead && onRequeue && (
+        <button
+          onClick={(e) => { e.stopPropagation(); onRequeue(); }}
+          className="ml-3 text-xs text-brand-400 hover:text-brand-500 transition-colors whitespace-nowrap"
+        >
+          Requeue
         </button>
       )}
     </div>

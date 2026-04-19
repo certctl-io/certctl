@@ -10,6 +10,40 @@ import (
 	"github.com/shankar0123/certctl/internal/repository"
 )
 
+// I-005 retry + DLQ knobs. These pin the operator-approved retry budget and
+// the defense-in-depth ceiling on the exponential backoff curve used by
+// RetryFailedNotifications.
+//
+// Values match those the Phase 1 Red tests assert against (see
+// i005MaxAttempts / i005BackoffCap in notification_test.go:600-608) — the
+// production identifiers are distinct because this file and its tests share
+// `package service`, so a single shared name would collide at compile time.
+// The test comment explicitly notes "Phase 2 is free to thread this from
+// config"; when that wiring lands, these become package-level defaults the
+// scheduler can override. For now they are the single source of truth.
+const (
+	// notifRetryMaxAttempts is the attempt budget *before* the current
+	// attempt: a row at retry_count == notifRetryMaxAttempts-1 that fails
+	// this tick transitions to 'dead' instead of being re-armed. The
+	// repository's ListRetryEligible filter also uses this value as a
+	// guard (`AND retry_count < $2`) so a DLQ row is never re-swept.
+	notifRetryMaxAttempts = 5
+
+	// notifRetryBackoffCap is the 1h ceiling on `2^retry_count` minutes.
+	// With max_attempts=5 the deepest actually-schedulable wait is 2^3=8m
+	// (retry_count=3 → 8m, then retry_count=4 → 'dead'), so the cap is a
+	// ceiling-assertion today — but it must stay in place so a later
+	// increase in max_attempts cannot push next_retry_at past 1h without
+	// an explicit policy decision.
+	notifRetryBackoffCap = time.Hour
+
+	// notifRetrySweepLimit caps a single retry tick at this many rows so
+	// a large burst of dead-letter-bound mail cannot monopolize the 2m
+	// tick budget. Mirrors the 1000-row cap on ProcessPendingNotifications
+	// at notification.go:244 for operational symmetry.
+	notifRetrySweepLimit = 1000
+)
+
 // NotificationService provides business logic for managing notifications.
 type NotificationService struct {
 	notifRepo        repository.NotificationRepository
@@ -372,4 +406,212 @@ func (s *NotificationService) GetNotification(ctx context.Context, id string) (*
 // MarkAsRead marks a notification as read (handler interface method).
 func (s *NotificationService) MarkAsRead(ctx context.Context, id string) error {
 	return s.notifRepo.UpdateStatus(ctx, id, "read", time.Now())
+}
+
+// ─── I-005 retry + DLQ surface (Phase 2 Green) ───────────────────────────
+//
+// The three methods below close the retry loop the Phase 1 Red tests pin at
+// notification_test.go:600-917 and notification_handler_test.go:443-519:
+//
+//   1. RetryFailedNotifications — scheduler entry point. Pulls failed rows
+//      whose next_retry_at has elapsed, retries delivery, rewrites retry
+//      bookkeeping per the pre-increment backoff contract, and transitions
+//      exhausted rows to 'dead' (DLQ). Per-row errors never bubble — a
+//      single bad recipient cannot stall the tick. Mirrors the ordering
+//      the ProcessPendingNotifications loop uses at notification.go:242.
+//
+//   2. RequeueNotification — operator-driven escape hatch from 'dead' back
+//      to 'pending'. Pass-through to the repo's Requeue method with clean
+//      error wrapping so repo-layer failures ("pg: deadlock detected")
+//      surface in the UI instead of silently succeeding.
+//
+//   3. ListNotificationsByStatus — Dead letter tab support. Thin filter
+//      wrapper around the existing List query; the Phase 2 Green handler
+//      routes `?status=…` through this method while preserving the
+//      unfiltered path through ListNotifications (handler_test pins both).
+//
+// Sibling scheduler loops I-001 (job retry) and I-003 (job timeout) already
+// ship the 10-loop topology these methods plug into; the 11th loop added
+// by this milestone calls RetryFailedNotifications on a 2m tick, matching
+// the CERTCTL_NOTIFICATION_RETRY_INTERVAL default pinned in config/
+// scheduler Phase 2 Green edits that follow this one.
+
+// RetryFailedNotifications is the scheduler entry point for the I-005
+// retry sweep. Semantics (pinned by notification_test.go:635-843):
+//
+//   - A ListRetryEligible failure short-circuits with a wrapped error so
+//     the caller's tick counter reflects the outage. Crucially, zero
+//     notifier.Send calls fire in this path — we never got a canonical
+//     set of rows, and issuing any sends risks double-delivery when the
+//     DB comes back.
+//
+//   - Per-row failures are logged but NEVER returned. That contract comes
+//     straight from ProcessPendingNotifications (notification.go:242-267);
+//     the retry loop inherits it so a single 4xx response can't freeze
+//     every downstream row in the sweep.
+//
+//   - Success promotes the row directly to 'sent' via UpdateStatus. The
+//     retry_count field is *not* incremented on success — that would
+//     falsify the audit-trail signal "this row was delivered on attempt
+//     N". The mock's UpdateStatus does a plain status write with no retry
+//     mutation (testutil_test.go:446-459), matching the postgres impl.
+//
+//   - Failure uses pre-increment exponential backoff:
+//     wait = min(2^retry_count * time.Minute, notifRetryBackoffCap)
+//     where retry_count is the row's value *before* this attempt. The
+//     repo layer's RecordFailedAttempt then increments retry_count by 1
+//     server-side. This asymmetry keeps the service stateless — the
+//     service reads retry_count to compute the wait, but never writes it
+//     directly; the write is exclusively the repo's responsibility.
+//
+//   - Exhaustion transitions to 'dead' when retry_count == max-1, because
+//     RecordFailedAttempt's ++ would push retry_count to max and the next
+//     sweep's `retry_count < max` filter in ListRetryEligible would then
+//     silently skip the row forever (a zombie-failed row nobody sees).
+//     MarkAsDead clears next_retry_at to evict the row from the partial
+//     retry-sweep index as well, so it stops scanning past dead rows.
+//
+//   - A row whose Channel has no registered notifier is promoted to
+//     'sent' (demo-mode parity with sendNotification's fallback at
+//     notification.go:272-279). This branch should not normally fire for
+//     retry rows — they were created *by* a notifier that failed — but
+//     defensive handling guards against config drift (notifier disabled
+//     between Create and retry) that would otherwise wedge the row.
+func (s *NotificationService) RetryFailedNotifications(ctx context.Context) error {
+	now := time.Now()
+
+	rows, err := s.notifRepo.ListRetryEligible(ctx, now, notifRetryMaxAttempts, notifRetrySweepLimit)
+	if err != nil {
+		return fmt.Errorf("failed to list retry-eligible notifications: %w", err)
+	}
+
+	for _, row := range rows {
+		if row == nil {
+			continue
+		}
+
+		notifier, ok := s.notifierRegistry[string(row.Channel)]
+		if !ok {
+			// No notifier wired for this channel — promote to 'sent' to
+			// avoid looping forever over a row that has nowhere to go.
+			// See notification.go:272-279 for the sibling demo-mode path.
+			if updateErr := s.notifRepo.UpdateStatus(ctx, row.ID, string(domain.NotificationStatusSent), time.Now()); updateErr != nil {
+				slog.Error("failed to promote retry row with missing notifier to sent",
+					"notification_id", row.ID, "channel", row.Channel, "error", updateErr)
+			}
+			continue
+		}
+
+		sendErr := notifier.Send(ctx, row.Recipient, string(row.Type), row.Message)
+		if sendErr == nil {
+			// Success: promote straight to 'sent' without touching
+			// retry_count — the audit trail must preserve "this row was
+			// delivered on attempt N", and the mock's UpdateStatus is a
+			// plain status write (no retry_count reset). Errors here are
+			// logged, never returned.
+			if updateErr := s.notifRepo.UpdateStatus(ctx, row.ID, string(domain.NotificationStatusSent), time.Now()); updateErr != nil {
+				slog.Error("failed to mark retried notification as sent",
+					"notification_id", row.ID, "error", updateErr)
+			}
+			continue
+		}
+
+		// Failure path. Compute pre-increment backoff first so the
+		// exhaustion branch and the reschedule branch see an identical
+		// `wait` derivation — easier to audit against the test window
+		// assertions at notification_test.go:739-743 and :796-801.
+		wait := time.Duration(1<<row.RetryCount) * time.Minute
+		if wait > notifRetryBackoffCap {
+			wait = notifRetryBackoffCap
+		}
+
+		// Exhaustion: this attempt consumes the final slot of the attempt
+		// budget. Transition to 'dead' and let MarkAsDead clear
+		// next_retry_at so the retry-sweep index stops hitting the row.
+		if row.RetryCount >= notifRetryMaxAttempts-1 {
+			if markErr := s.notifRepo.MarkAsDead(ctx, row.ID, sendErr.Error()); markErr != nil {
+				slog.Error("failed to mark exhausted notification as dead",
+					"notification_id", row.ID, "retry_count", row.RetryCount,
+					"send_error", sendErr, "mark_error", markErr)
+			}
+			continue
+		}
+
+		// Non-terminal: hand the lastError + nextRetryAt off to the repo,
+		// which increments retry_count by exactly 1 and keeps the row in
+		// 'failed' state so the next tick picks it up.
+		nextRetryAt := time.Now().Add(wait)
+		if recErr := s.notifRepo.RecordFailedAttempt(ctx, row.ID, sendErr.Error(), nextRetryAt); recErr != nil {
+			slog.Error("failed to record notification retry attempt",
+				"notification_id", row.ID, "retry_count", row.RetryCount,
+				"next_retry_at", nextRetryAt, "send_error", sendErr, "record_error", recErr)
+		}
+	}
+
+	return nil
+}
+
+// RequeueNotification is the operator-driven escape hatch from 'dead' back
+// to 'pending'. It resets all retry bookkeeping — retry_count → 0,
+// next_retry_at → NULL, last_error → NULL — so ProcessPendingNotifications
+// treats the requeued row as a fresh attempt on its next tick. Identical on
+// the wire to a newly-created notification.
+//
+// Behavior contract (pinned by notification_test.go:849-917):
+//
+//   - Success path delegates to the repo's Requeue, which performs the
+//     status/retry_count/next_retry_at/last_error reset atomically. The
+//     service adds no extra bookkeeping; the audit trail already captures
+//     the transition via the upstream API call.
+//
+//   - Error path wraps the repo error with context so a failure like
+//     "pg: deadlock detected" surfaces in the handler response and the
+//     operator UI. The service has no fallback — a silent "success" that
+//     didn't actually mutate the row would be worse than a loud error.
+func (s *NotificationService) RequeueNotification(ctx context.Context, id string) error {
+	if err := s.notifRepo.Requeue(ctx, id); err != nil {
+		return fmt.Errorf("failed to requeue notification: %w", err)
+	}
+	return nil
+}
+
+// ListNotificationsByStatus returns paginated notifications filtered by
+// status. It mirrors ListNotifications's shape but threads a Status filter
+// into the NotificationFilter so the Phase 2 Green handler can route
+// `?status=dead` (Dead letter tab) through this method while keeping the
+// unfiltered path on ListNotifications for backward compat.
+//
+// Pinned by notification_handler_test.go:443-519 — the handler test asserts
+// that a request with `?status=dead&page=1&per_page=50` lands on exactly
+// this signature (`status string, page, perPage int`) and that requests
+// without a status param do NOT call it. Keep the returned shape identical
+// to ListNotifications so the handler can reuse its JSON-encoding path.
+func (s *NotificationService) ListNotificationsByStatus(ctx context.Context, status string, page, perPage int) ([]domain.NotificationEvent, int64, error) {
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+
+	filter := &repository.NotificationFilter{
+		Status:  status,
+		Page:    page,
+		PerPage: perPage,
+	}
+
+	notifications, err := s.notifRepo.List(ctx, filter)
+	if err != nil {
+		return nil, 0, fmt.Errorf("failed to list notifications by status: %w", err)
+	}
+
+	result := make([]domain.NotificationEvent, 0, len(notifications))
+	for _, n := range notifications {
+		if n != nil {
+			result = append(result, *n)
+		}
+	}
+
+	total := int64(len(result))
+	return result, total, nil
 }

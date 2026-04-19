@@ -562,6 +562,7 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
 - **Alert Notifications** (M3, M16a) — Configurable escalation:
   - Email alerts: certificate approaching expiration, renewal failure, revocation notification.
   - Webhook: custom HTTP POST to your monitoring system (Slack, Teams, PagerDuty, OpsGenie, custom webhook).
+  - **Retry & Dead-Letter Queue** (I-005) — Transient notifier failures (SMTP timeout, webhook 5xx) are retried with exponential backoff (`2^n` minutes capped at 1h, 5-attempt budget) before landing in the terminal `dead` status. Operators monitor DLQ depth via the `certctl_notification_dead_total` Prometheus counter and requeue via the Notifications page Dead letter tab once the underlying outage is resolved. Closes the pre-I-005 silent-drop gap where a single 5xx could lose a compliance-relevant alert without evidence.
   - Deduplication: one alert per threshold/certificate per day (avoid alert fatigue).
 
 - **Audit Trail Filtering and Export** (M13) — Compliance reporting:

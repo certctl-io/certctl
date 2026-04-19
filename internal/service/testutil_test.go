@@ -157,20 +157,20 @@ func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 
 // mockJobRepo is a test implementation of JobRepository
 type mockJobRepo struct {
-	mu                       sync.Mutex
-	Jobs                     map[string]*domain.Job
-	StatusUpdates            map[string]domain.JobStatus
-	CreateErr                error
-	UpdateErr                error
-	UpdateErrorByID          map[string]error
-	UpdateErrorByIDMu        sync.Mutex
-	UpdateStatusErr          error
-	GetErr                   error
-	ListErr                  error
-	ListByStatusErr          error
-	DeleteErr                error
-	ListTimedOutErr          error
-	Updated                  []*domain.Job
+	mu                sync.Mutex
+	Jobs              map[string]*domain.Job
+	StatusUpdates     map[string]domain.JobStatus
+	CreateErr         error
+	UpdateErr         error
+	UpdateErrorByID   map[string]error
+	UpdateErrorByIDMu sync.Mutex
+	UpdateStatusErr   error
+	GetErr            error
+	ListErr           error
+	ListByStatusErr   error
+	DeleteErr         error
+	ListTimedOutErr   error
+	Updated           []*domain.Job
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -393,13 +393,36 @@ func (m *mockJobRepo) AddJob(job *domain.Job) {
 	m.Jobs[job.ID] = job
 }
 
-// mockNotifRepo is a test implementation of NotificationRepository
+// mockNotifRepo is a test implementation of NotificationRepository.
+//
+// I-005 extensions (ListRetryEligible / RecordFailedAttempt / MarkAsDead /
+// Requeue) mutate the seeded *domain.NotificationEvent pointers in place.
+// The service tests in notification_test.go assert against those same
+// pointers (via notifRepo.Notifications or the local `row` handle), so
+// in-place mutation is the contract — not a copy-and-replace pattern.
+//
+// Error fields are layered:
+//   - Per-method errors (ListRetryEligibleErr, RecordFailedAttemptErr, etc.)
+//     for fine-grained failure injection when a test targets exactly one
+//     method.
+//   - Shared legacy errors (ListErr for list-shaped reads, UpdateErr for
+//     update-shaped writes) so the pre-I-005 tests that configure ListErr
+//     or UpdateErr continue to short-circuit the new methods too. The
+//     RequeueNotification_RepoError test deliberately relies on this by
+//     setting UpdateErr rather than RequeueErr.
 type mockNotifRepo struct {
 	mu            sync.Mutex
 	Notifications []*domain.NotificationEvent
 	CreateErr     error
 	ListErr       error
 	UpdateErr     error
+
+	// I-005 per-method failure injection.
+	ListRetryEligibleErr   error
+	RecordFailedAttemptErr error
+	MarkAsDeadErr          error
+	RequeueErr             error
+	CountByStatusErr       error
 }
 
 func (m *mockNotifRepo) Create(ctx context.Context, notif *domain.NotificationEvent) error {
@@ -436,10 +459,161 @@ func (m *mockNotifRepo) UpdateStatus(ctx context.Context, id string, status stri
 	return errNotFound
 }
 
+// ListRetryEligible returns failed rows whose NextRetryAt is non-nil, at or
+// before beforeTime, AND whose RetryCount is strictly less than maxAttempts,
+// ordered oldest-due first, capped at limit. Signature matches the postgres-
+// canonical shape pinned by notification_test.go:118 ("repo.ListRetryEligible
+// (ctx, now, 5, 100)") and the NotificationRepository interface at
+// interfaces.go:308 — a row at retry_count == maxAttempts is NOT returned
+// because the service has already exhausted its attempt budget and the row
+// must be MarkAsDead'd by whichever tick last touched it, not re-swept here.
+// Mirrors the partial-index predicate
+// `WHERE status='failed' AND next_retry_at IS NOT NULL AND next_retry_at <= $1`
+// that migration 000016's retry-sweep index makes cheap to scan; the
+// retry_count filter is an extra Go-side guard so the mock behaves
+// identically to the postgres `AND retry_count < $2` clause.
+func (m *mockNotifRepo) ListRetryEligible(ctx context.Context, beforeTime time.Time, maxAttempts, limit int) ([]*domain.NotificationEvent, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListRetryEligibleErr != nil {
+		return nil, m.ListRetryEligibleErr
+	}
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	eligible := make([]*domain.NotificationEvent, 0)
+	for _, n := range m.Notifications {
+		if n.Status != string(domain.NotificationStatusFailed) {
+			continue
+		}
+		if n.NextRetryAt == nil {
+			continue
+		}
+		if n.NextRetryAt.After(beforeTime) {
+			continue
+		}
+		if n.RetryCount >= maxAttempts {
+			continue
+		}
+		eligible = append(eligible, n)
+	}
+	// Oldest-due first so the service processes the most-overdue row first,
+	// matching how an ORDER BY next_retry_at ASC query would behave.
+	sort.Slice(eligible, func(i, j int) bool {
+		return eligible[i].NextRetryAt.Before(*eligible[j].NextRetryAt)
+	})
+	if limit > 0 && len(eligible) > limit {
+		eligible = eligible[:limit]
+	}
+	return eligible, nil
+}
+
+// RecordFailedAttempt mutates the matched row in place: increments
+// retry_count, pins next_retry_at, stores last_error, and keeps the row in
+// 'failed' state so the next retry-sweep tick picks it up again. Service-
+// level backoff math happens before the call; the repo is a dumb setter.
+// Signature matches the postgres-canonical shape pinned by
+// notification_test.go:184 ("repo.RecordFailedAttempt(ctx, 'notif-attempt-1',
+// 'connection refused', nextTry)") and the NotificationRepository interface
+// at interfaces.go:315 — id, then lastError, then nextRetryAt. The earlier
+// (id, nextRetryAt, lastError) ordering from the Phase 1 Red seed was wrong
+// and is corrected here in Phase 2 Green.
+func (m *mockNotifRepo) RecordFailedAttempt(ctx context.Context, id string, lastError string, nextRetryAt time.Time) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.RecordFailedAttemptErr != nil {
+		return m.RecordFailedAttemptErr
+	}
+	if m.UpdateErr != nil {
+		return m.UpdateErr
+	}
+	for _, n := range m.Notifications {
+		if n.ID == id {
+			n.RetryCount++
+			next := nextRetryAt
+			n.NextRetryAt = &next
+			le := lastError
+			n.LastError = &le
+			n.Status = string(domain.NotificationStatusFailed)
+			return nil
+		}
+	}
+	return errNotFound
+}
+
+// MarkAsDead flips the row into the terminal DLQ state. next_retry_at is
+// cleared so the partial retry-sweep index no longer touches this row —
+// otherwise RetryFailedNotifications would loop over it forever without
+// making any state change.
+func (m *mockNotifRepo) MarkAsDead(ctx context.Context, id string, lastError string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.MarkAsDeadErr != nil {
+		return m.MarkAsDeadErr
+	}
+	if m.UpdateErr != nil {
+		return m.UpdateErr
+	}
+	for _, n := range m.Notifications {
+		if n.ID == id {
+			n.Status = string(domain.NotificationStatusDead)
+			n.NextRetryAt = nil
+			le := lastError
+			n.LastError = &le
+			return nil
+		}
+	}
+	return errNotFound
+}
+
+// Requeue is the operator-driven escape hatch from 'dead' back to 'pending'.
+// Clears retry bookkeeping entirely so ProcessPendingNotifications treats
+// the requeued row as a fresh attempt — identical on the wire to a freshly-
+// created notification.
+func (m *mockNotifRepo) Requeue(ctx context.Context, id string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.RequeueErr != nil {
+		return m.RequeueErr
+	}
+	if m.UpdateErr != nil {
+		return m.UpdateErr
+	}
+	for _, n := range m.Notifications {
+		if n.ID == id {
+			n.Status = string(domain.NotificationStatusPending)
+			n.RetryCount = 0
+			n.NextRetryAt = nil
+			n.LastError = nil
+			return nil
+		}
+	}
+	return errNotFound
+}
+
 func (m *mockNotifRepo) AddNotification(notif *domain.NotificationEvent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Notifications = append(m.Notifications, notif)
+}
+
+// CountByStatus counts in-memory rows whose Status field matches exactly.
+// Dedicated error injection via CountByStatusErr so a test can assert the
+// StatsService wrap-path ("failed to count dead notifications: …") without
+// also tripping ListErr or other shared fields. I-005 Phase 2 Green.
+func (m *mockNotifRepo) CountByStatus(ctx context.Context, status string) (int64, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CountByStatusErr != nil {
+		return 0, m.CountByStatusErr
+	}
+	var count int64
+	for _, n := range m.Notifications {
+		if n.Status == status {
+			count++
+		}
+	}
+	return count, nil
 }
 
 // mockAuditRepo is a test implementation of AuditRepository
@@ -635,10 +809,10 @@ type mockAgentRepo struct {
 	// or RetireAgentWithCascade failure after preflight passed, so the
 	// service's error surfacing (wrap+return, skip audit, etc.) can be
 	// exercised without having to stand up a real PG connection.
-	SoftRetireErr  error
+	SoftRetireErr    error
 	RetireCascadeErr error
-	CountErr       error
-	ListRetiredErr error
+	CountErr         error
+	ListRetiredErr   error
 }
 
 // List mirrors the production repo contract post-I-004: it returns only
@@ -993,8 +1167,8 @@ func newMockTargetRepository() *mockTargetRepo {
 
 // mockIssuerConnector is a test implementation of IssuerConnector
 type mockIssuerConnector struct {
-	Result             *IssuanceResult
-	Err                error
+	Result               *IssuanceResult
+	Err                  error
 	getRenewalInfoResult *RenewalInfoResult
 	getRenewalInfoErr    error
 	// LastOCSPSignRequest captures the last request passed to SignOCSPResponse.
