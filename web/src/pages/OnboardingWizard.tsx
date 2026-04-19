@@ -5,6 +5,7 @@ import {
   getIssuers, getAgents, getProfiles, getOwners, getTeams, getPolicies,
   createIssuer, testIssuerConnection,
   createCertificate, triggerRenewal,
+  createTeam, createOwner,
   getApiKey,
 } from '../api/client';
 import { issuerTypes, type IssuerTypeConfig } from '../config/issuerTypes';
@@ -392,6 +393,180 @@ curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-a
   );
 }
 
+// ─── Step 3 helpers: inline team + owner creation ───
+
+// Inline CreateTeamModal — mirrors TeamsPage.tsx CreateTeamModal pattern.
+// Used inside CertificateStep so users can create a team without leaving the wizard.
+function CreateTeamModalInline({ isOpen, onClose, onCreated }: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: (teamId: string) => void;
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => createTeam({ name: name.trim(), description: description.trim() }),
+    onSuccess: (team) => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      setName('');
+      setDescription('');
+      setError('');
+      onCreated(team.id);
+      onClose();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Create Team</h2>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form onSubmit={(e) => { e.preventDefault(); if (!name.trim()) return; mutation.mutate(); }} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Name <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Platform Engineering"
+              autoFocus
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Description <span className="text-xs text-ink-muted font-normal">(optional)</span>
+            </label>
+            <textarea
+              value={description}
+              onChange={e => setDescription(e.target.value)}
+              rows={3}
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            />
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={mutation.isPending || !name.trim()}
+              className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create Team'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
+// Inline CreateOwnerModal — mirrors OwnersPage.tsx CreateOwnerModal pattern.
+// Used inside CertificateStep so users can create an owner without leaving the wizard.
+function CreateOwnerModalInline({ isOpen, onClose, onCreated, teams }: {
+  isOpen: boolean;
+  onClose: () => void;
+  onCreated: (ownerId: string) => void;
+  teams: { id: string; name: string }[];
+}) {
+  const queryClient = useQueryClient();
+  const [name, setName] = useState('');
+  const [email, setEmail] = useState('');
+  const [teamId, setTeamId] = useState('');
+  const [error, setError] = useState('');
+
+  const mutation = useMutation({
+    mutationFn: () => createOwner({
+      name: name.trim(),
+      email: email.trim(),
+      team_id: teamId || undefined,
+    }),
+    onSuccess: (owner) => {
+      queryClient.invalidateQueries({ queryKey: ['owners'] });
+      setName('');
+      setEmail('');
+      setTeamId('');
+      setError('');
+      onCreated(owner.id);
+      onClose();
+    },
+    onError: (err: Error) => setError(err.message),
+  });
+
+  if (!isOpen) return null;
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Create Owner</h2>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form
+          onSubmit={(e) => {
+            e.preventDefault();
+            if (!name.trim() || !email.trim()) return;
+            mutation.mutate();
+          }}
+          className="space-y-4"
+        >
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Name <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="text"
+              value={name}
+              onChange={e => setName(e.target.value)}
+              placeholder="Alice Chen"
+              autoFocus
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Email <span className="text-red-600">*</span>
+            </label>
+            <input
+              type="email"
+              value={email}
+              onChange={e => setEmail(e.target.value)}
+              placeholder="alice@example.com"
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink placeholder-ink-faint focus:outline-none focus:border-brand-500 transition-colors"
+            />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-2">
+              Team <span className="text-xs text-ink-muted font-normal">(optional)</span>
+            </label>
+            <select
+              value={teamId}
+              onChange={e => setTeamId(e.target.value)}
+              className="w-full px-3 py-2 bg-surface border border-surface-border rounded text-ink focus:outline-none focus:border-brand-500 transition-colors"
+            >
+              <option value="">Unassigned</option>
+              {teams.map(t => <option key={t.id} value={t.id}>{t.name}</option>)}
+            </select>
+          </div>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={mutation.isPending || !name.trim() || !email.trim()}
+              className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed"
+            >
+              {mutation.isPending ? 'Creating...' : 'Create Owner'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 // ─── Step 3: Add a Certificate ───────────────────────
 
 function CertificateStep({ onNext, onSkip, createdIssuerId }: {
@@ -410,6 +585,10 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
   const [renewalPolicyId, setRenewalPolicyId] = useState('');
   const [error, setError] = useState('');
   const [created, setCreated] = useState(false);
+
+  // Inline-create modals so users never have to leave the wizard (UX-001).
+  const [teamModalOpen, setTeamModalOpen] = useState(false);
+  const [ownerModalOpen, setOwnerModalOpen] = useState(false);
 
   // C-001: the server requires name, common_name, issuer_id, owner_id,
   // team_id, and renewal_policy_id (handler in
@@ -553,9 +732,18 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
 
         <div className="grid grid-cols-2 gap-4">
           <div>
-            <label className="block text-sm font-medium text-ink mb-2">
-              Owner <span className="text-red-600">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-ink">
+                Owner <span className="text-red-600">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setOwnerModalOpen(true)}
+                className="text-xs text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                + New owner
+              </button>
+            </div>
             <select
               value={ownerId}
               onChange={e => setOwnerId(e.target.value)}
@@ -570,15 +758,32 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
             </select>
             {(owners?.data?.length ?? 0) === 0 && (
               <p className="mt-1 text-xs text-ink-muted">
-                No owners yet — create one from the <Link to="/owners" className="underline hover:text-ink">Owners page</Link> first, then return here.
+                No owners yet —{' '}
+                <button
+                  type="button"
+                  onClick={() => setOwnerModalOpen(true)}
+                  className="underline hover:text-ink"
+                >
+                  create one now
+                </button>
+                .
               </p>
             )}
           </div>
 
           <div>
-            <label className="block text-sm font-medium text-ink mb-2">
-              Team <span className="text-red-600">*</span>
-            </label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-sm font-medium text-ink">
+                Team <span className="text-red-600">*</span>
+              </label>
+              <button
+                type="button"
+                onClick={() => setTeamModalOpen(true)}
+                className="text-xs text-brand-600 hover:text-brand-700 hover:underline"
+              >
+                + New team
+              </button>
+            </div>
             <select
               value={teamId}
               onChange={e => setTeamId(e.target.value)}
@@ -591,7 +796,15 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
             </select>
             {(teams?.data?.length ?? 0) === 0 && (
               <p className="mt-1 text-xs text-ink-muted">
-                No teams yet — create one from the <Link to="/teams" className="underline hover:text-ink">Teams page</Link> first, then return here.
+                No teams yet —{' '}
+                <button
+                  type="button"
+                  onClick={() => setTeamModalOpen(true)}
+                  className="underline hover:text-ink"
+                >
+                  create one now
+                </button>
+                .
               </p>
             )}
           </div>
@@ -652,6 +865,18 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
           !renewalPolicyId ||
           createMutation.isPending
         }
+      />
+
+      <CreateTeamModalInline
+        isOpen={teamModalOpen}
+        onClose={() => setTeamModalOpen(false)}
+        onCreated={(id) => setTeamId(id)}
+      />
+      <CreateOwnerModalInline
+        isOpen={ownerModalOpen}
+        onClose={() => setOwnerModalOpen(false)}
+        onCreated={(id) => setOwnerId(id)}
+        teams={(teams?.data ?? []).map(t => ({ id: t.id, name: t.name }))}
       />
     </div>
   );

@@ -1,4 +1,4 @@
-import { NavLink, Outlet } from 'react-router-dom';
+import { NavLink, Outlet, useNavigate } from 'react-router-dom';
 import { useAuth } from './AuthProvider';
 import logo from '../assets/certctl-logo.png';
 
@@ -35,6 +35,12 @@ function Icon({ d }: { d: string }) {
 
 export default function Layout() {
   const { authRequired, logout } = useAuth();
+  const navigate = useNavigate();
+
+  const openSetupGuide = () => {
+    try { localStorage.removeItem('certctl:onboarding-dismissed'); } catch { /* noop */ }
+    navigate('/?onboarding=1');
+  };
 
   return (
     <div className="flex h-screen overflow-hidden">
@@ -70,6 +76,18 @@ export default function Layout() {
             </NavLink>
           ))}
         </nav>
+
+        <div className="px-3 pb-2 pt-2 border-t border-white/10">
+          <button
+            type="button"
+            onClick={openSetupGuide}
+            title="Reopen the onboarding wizard"
+            className="w-full flex items-center gap-3 px-3 py-2 text-[13px] rounded text-sidebar-text hover:text-white hover:bg-white/10 transition-all duration-150"
+          >
+            <Icon d="M9.663 17h4.673M12 3v1m6.364 1.636l-.707.707M21 12h-1M4 12H3m3.343-5.657l-.707-.707m2.828 9.9a5 5 0 117.072 0l-.548.547A3.374 3.374 0 0014 18.469V19a2 2 0 11-4 0v-.531c0-.895-.356-1.754-.988-2.386l-.548-.547z" />
+            Setup guide
+          </button>
+        </div>
 
         <div className="px-5 py-3 border-t border-white/10 flex items-center justify-between">
           <span className="text-[10px] text-brand-300/60 font-mono">certctl</span>

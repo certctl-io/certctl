@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useMutation } from '@tanstack/react-query';
-import { useNavigate } from 'react-router-dom';
+import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
@@ -162,6 +162,7 @@ function DigestCard() {
 
 export default function DashboardPage() {
   const navigate = useNavigate();
+  const [searchParams, setSearchParams] = useSearchParams();
 
   // Onboarding wizard state: once shown, stays shown until explicitly dismissed.
   // Uses a ref to "latch" the first-run detection so query refetches don't yank the wizard away.
@@ -169,6 +170,10 @@ export default function DashboardPage() {
     try { return localStorage.getItem('certctl:onboarding-dismissed') === 'true'; } catch { return false; }
   });
   const [showWizard, setShowWizard] = useState(false);
+
+  // Re-entry signal: sidebar "Setup guide" button navigates to /?onboarding=1 to reopen the wizard
+  // even after dismissal. Takes precedence over localStorage dismissal; stripped on close.
+  const forceOnboarding = searchParams.get('onboarding') === '1';
 
   // All hooks must be called unconditionally (React rules of hooks — no hooks after early returns)
   const { data: health } = useQuery({ queryKey: ['health'], queryFn: getHealth, refetchInterval: 30000 });
@@ -190,17 +195,23 @@ export default function DashboardPage() {
     summary.total_certificates === 0 &&
     userConfiguredIssuers.length === 0;
 
-  if (isFirstRun && !showWizard) {
+  if ((isFirstRun || forceOnboarding) && !showWizard) {
     // Can't call setState during render — use a microtask
     setTimeout(() => setShowWizard(true), 0);
   }
 
-  if (showWizard && !onboardingDismissed) {
+  if ((showWizard && !onboardingDismissed) || forceOnboarding) {
     return (
       <OnboardingWizard onDismiss={() => {
         try { localStorage.setItem('certctl:onboarding-dismissed', 'true'); } catch { /* noop */ }
         setOnboardingDismissed(true);
         setShowWizard(false);
+        // Strip ?onboarding=1 so page refresh doesn't relaunch the wizard
+        if (searchParams.has('onboarding')) {
+          const next = new URLSearchParams(searchParams);
+          next.delete('onboarding');
+          setSearchParams(next, { replace: true });
+        }
       }} />
     );
   }
