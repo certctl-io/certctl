@@ -6587,6 +6587,231 @@ helm template certctl deploy/helm/certctl/ --set server.replicaCount=3 | grep 'r
 
 ---
 
+## Part 55: Agent Soft-Retirement (I-004)
+
+**What this validates:** The full `DELETE /api/v1/agents/{id}` soft-retirement contract — seven HTTP status codes (200/204/400/403/404/405/409/500), opt-in retired-agent listing, sentinel refusal, `410 Gone` heartbeat response, and the force-cascade escape hatch.
+
+**Why it matters:** Before I-004, there was no retirement surface at all — `DELETE` did not exist and agents could only be removed via raw SQL against the `agents` table. Worse, the schema declared `deployment_targets.agent_id ON DELETE CASCADE`, so any such manual delete silently cascaded through four tables with zero audit trail. This part pins the replacement contract (soft-delete + preflight + force-cascade + sentinel guard + heartbeat 410) so regressions show up here first rather than as orphaned targets in production.
+
+### 55.1 Migration 000015 Applied
+
+```bash
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT column_name FROM information_schema.columns WHERE table_name='agents' AND column_name IN ('retired_at','retired_reason') ORDER BY column_name;"
+```
+
+**What:** Confirms migration 000015 added the archival columns to the `agents` table.
+**PASS if** both `retired_at` and `retired_reason` rows are returned. **FAIL** if either is missing (migration did not apply).
+
+---
+
+### 55.2 FK Constraint Flipped to RESTRICT
+
+```bash
+docker compose -f deploy/docker-compose.yml exec postgres \
+  psql -U certctl -d certctl -c \
+  "SELECT confdeltype FROM pg_constraint WHERE conname='deployment_targets_agent_id_fkey';"
+```
+
+**What:** `confdeltype` is PostgreSQL's one-character code for the FK delete action: `r` = RESTRICT, `c` = CASCADE.
+**PASS if** the value is `r`. **FAIL** if it is still `c` — that means migration 000015's FK flip did not run, and a hard `DELETE` against an agent row would silently cascade.
+
+---
+
+### 55.3 Clean Retire — 200
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-test-clean" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Retires an agent that has no active deployment targets, no deployed certificates, and no pending jobs.
+**PASS if** status code is `200` and response body includes `"retired_at":"<ISO8601>"`, `"cascade":false`, and zero-valued counts.
+
+---
+
+### 55.4 Idempotent Re-Retire — 204
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-test-clean" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Retires an agent that is already retired.
+**PASS if** status code is `204` and response body is completely empty (not even a trailing newline from the handler). The 200-shape must NOT be emitted — this is the terminal no-op.
+
+---
+
+### 55.5 Blocked by Dependencies — 409
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-with-deps" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Attempts to retire an agent that still has active targets/certificates/jobs.
+**PASS if** status code is `409` and response body is the three-key `BlockedByDependenciesResponse` shape: `{"error":"blocked_by_dependencies", "message": "...", "counts": {"active_targets": N, "active_certificates": N, "pending_jobs": N}}`. Must NOT be the generic `ErrorResponse` shape — downstream dashboards parse the `counts` key.
+
+---
+
+### 55.6 Force Cascade — 200
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-with-deps?force=true&reason=decommissioning+rack-7" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Uses the force escape hatch to cascade-retire the dependencies.
+**PASS if** status code is `200`, response includes `"cascade":true` with the pre-cascade counts, and the subsequent `GET /api/v1/audit-events?action=agent_retirement_cascaded` shows the event with the supplied `reason` and actor.
+
+---
+
+### 55.7 Force Without Reason — 400
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-other?force=true" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Verifies the `ErrForceReasonRequired` guard — `force=true` without `reason` must be rejected before any state mutation.
+**PASS if** status code is `400` and no agent/target/job rows were modified.
+
+---
+
+### 55.8 Sentinel Refusal — 403
+
+```bash
+for id in server-scanner cloud-aws-sm cloud-azure-kv cloud-gcp-sm; do
+  echo "=== $id ==="
+  curl -sS -X DELETE "http://localhost:8443/api/v1/agents/${id}?force=true&reason=attempt" \
+    -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+    -w "\nHTTP %{http_code}\n"
+done
+```
+
+**What:** Verifies all four sentinel agents refuse retirement even with `force=true`.
+**PASS if** every request returns `403` and the response body's `error` value is `sentinel_agent` (or the equivalent `ErrAgentIsSentinel` mapping). **FAIL** if any sentinel accepts the request — retiring one silently orphans the network scanner or one of the three cloud secret-manager discovery sources.
+
+---
+
+### 55.9 Unknown ID — 404
+
+```bash
+curl -sS -X DELETE "http://localhost:8443/api/v1/agents/ag-does-not-exist" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Verifies `ErrAgentNotFound` maps to 404 (not 500). Ordering matters — the not-found check must come after the sentinel check so a typo'd sentinel ID still returns 403, not 404.
+**PASS if** status code is `404`.
+
+---
+
+### 55.10 Heartbeat on Retired Agent — 410
+
+```bash
+curl -sS -X POST "http://localhost:8443/api/v1/agents/ag-test-clean/heartbeat" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  -H "Content-Type: application/json" \
+  -d '{"os":"linux","architecture":"amd64","hostname":"test","ip_address":"10.0.0.1","version":"2.1.0"}' \
+  -w "\nHTTP %{http_code}\n"
+```
+
+**What:** Retired agents get `410 Gone` — the canonical "resource is permanently gone, stop retrying" signal — so `cmd/agent` detects it and exits cleanly.
+**PASS if** status code is `410`. **FAIL** if it is `404` (wrong ordering — retired-check must run before not-found) or `200` (retired filter missing entirely — agent would keep phoning home forever).
+
+---
+
+### 55.11 Default List Excludes Retired
+
+```bash
+curl -sS "http://localhost:8443/api/v1/agents" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  | jq -r '.data[] | select(.id=="ag-test-clean") | .id'
+```
+
+**What:** Verifies the default `/agents` listing filters retired rows via `AgentRepository.ListActive`.
+**PASS if** output is empty (the retired agent does NOT appear). **FAIL** if `ag-test-clean` shows up — default listings must not expose retired rows.
+
+---
+
+### 55.12 Retired Agents Opt-In View
+
+```bash
+curl -sS "http://localhost:8443/api/v1/agents/retired" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  | jq -r '.data[] | select(.id=="ag-test-clean") | {id, retired_at, retired_reason}'
+```
+
+**What:** Verifies the opt-in retired-agents view returns the row with `retired_at` and `retired_reason` populated. Go 1.22 ServeMux literal-beats-pattern-var precedence routes `/agents/retired` to this handler rather than `/agents/{id}`.
+**PASS if** the row appears with non-null `retired_at`. **FAIL** if the row is missing (listing broken) or `retired_at` is null (serialization broken).
+
+---
+
+### 55.13 Dashboard Stats Counter Excludes Retired
+
+```bash
+curl -sS "http://localhost:8443/api/v1/stats/summary" \
+  -H "Authorization: Bearer ${CERTCTL_API_KEY}" \
+  | jq -r '.total_agents'
+```
+
+**What:** Stats dashboard uses `ListActive`, not `List` — retired agents must not inflate the count.
+**PASS if** the counter reflects only non-retired rows (verify against `SELECT count(*) FROM agents WHERE retired_at IS NULL`).
+
+---
+
+### 55.14 CLI Retire Subcommand
+
+```bash
+certctl-cli agents retire ag-cli-test --force --reason "smoke test"
+certctl-cli agents list --retired | grep ag-cli-test
+```
+
+**What:** Verifies the CLI `agents retire` subcommand forwards `--force` and `--reason` via `DeleteWithQuery` and the `agents list --retired` flag hits `/agents/retired` rather than the default listing.
+**PASS if** the first command succeeds and the second shows the agent in the retired view.
+
+---
+
+### 55.15 MCP Retire Tool Schema
+
+```bash
+go test ./internal/mcp/ -run TestRetireAgent -v -count=1
+```
+
+**What:** Verifies the `certctl_retire_agent` MCP tool's input schema accepts `id`, `force`, and `reason`, and that the tool actually propagates `force`/`reason` into the outbound DELETE query string (not the body).
+**PASS if** exit code 0.
+
+---
+
+### 55.16 HEAD-State OpenAPI Contract
+
+```bash
+npx --yes @redocly/cli lint api/openapi.yaml \
+  --config '{"rules":{"operation-4xx-response":"error","no-invalid-media-type-examples":"error"}}'
+python3 -c "
+import yaml
+spec = yaml.safe_load(open('api/openapi.yaml'))
+del_op = spec['paths']['/api/v1/agents/{id}']['delete']
+assert set(del_op['responses'].keys()) == {'200','204','400','403','404','405','409','500'}, del_op['responses'].keys()
+hb = spec['paths']['/api/v1/agents/{id}/heartbeat']['post']
+assert '410' in hb['responses'], hb['responses'].keys()
+assert spec['paths']['/api/v1/agents/retired']['get']['operationId'] == 'listRetiredAgents'
+print('OpenAPI I-004 contract: OK')
+"
+```
+
+**What:** Two-part check. Redocly lint confirms the spec is structurally valid; the Python assertions pin the seven DELETE status codes, the 410 heartbeat response, and the retired-agents operationId.
+**PASS if** redocly prints no errors and the Python script prints `OpenAPI I-004 contract: OK`.
+
+---
+
 ## Release Sign-Off
 
 All tests below must pass before tagging v2.1.0. Each row is one individual test from the guide above. The **Method** column indicates whether `qa-smoke-test.sh` covers the test automatically (**Auto**) or requires hands-on verification (**Manual**).

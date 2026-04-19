@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -187,6 +187,98 @@ export const getAgent = (id: string) =>
 
 export const registerAgent = (data: Partial<Agent>) =>
   fetchJSON<Agent>(`${BASE}/agents`, { method: 'POST', body: JSON.stringify(data) });
+
+// I-004: typed error thrown by retireAgent when the server returns HTTP 409 with
+// {error: "blocked_by_dependencies", ...}. Callers that want to show the
+// dependency-counts dialog should `catch (e)` and check `e instanceof
+// BlockedByDependenciesError` — the counts field is the same shape the
+// backend handler returns from its inline struct in
+// internal/api/handler/agents.go. Generic network / 5xx failures still throw
+// plain Error so existing error-boundary code is unaffected.
+export class BlockedByDependenciesError extends Error {
+  readonly counts: AgentDependencyCounts;
+  constructor(message: string, counts: AgentDependencyCounts) {
+    super(message);
+    this.name = 'BlockedByDependenciesError';
+    this.counts = counts;
+  }
+}
+
+// I-004: retire an agent via DELETE /api/v1/agents/{id}. Three distinct
+// success paths the UI needs to distinguish:
+//   * 200 — fresh retire; body has retired_at, already_retired=false, cascade
+//     flag, counts of what was cascaded.
+//   * 204 — idempotent re-retire; the row was already retired. No body. We
+//     synthesize a RetireAgentResponse with already_retired=true and zero
+//     counts so the caller can keep a single return type.
+//   * 409 — blocked_by_dependencies; thrown as BlockedByDependenciesError so
+//     the caller can surface the active_targets/active_certificates/pending_jobs
+//     counts in a confirmation dialog and offer force=true.
+// Anything else bubbles up via the standard fetchJSON error path.
+export const retireAgent = async (
+  id: string,
+  opts: { force?: boolean; reason?: string } = {},
+): Promise<RetireAgentResponse> => {
+  const qs = new URLSearchParams();
+  if (opts.force) qs.set('force', 'true');
+  if (opts.reason) qs.set('reason', opts.reason);
+  const url = qs.toString()
+    ? `${BASE}/agents/${id}?${qs.toString()}`
+    : `${BASE}/agents/${id}`;
+
+  const res = await fetch(url, {
+    method: 'DELETE',
+    headers: authHeaders(),
+  });
+
+  if (res.status === 401) {
+    window.dispatchEvent(new CustomEvent('certctl:auth-required'));
+    throw new Error('Authentication required');
+  }
+
+  // 204 No Content — idempotent re-retire. Synthesize a response so callers
+  // get a uniform shape; already_retired=true tells them the agent was
+  // already in the retired state before this call.
+  if (res.status === 204) {
+    return {
+      retired_at: '',
+      already_retired: true,
+      cascade: false,
+      counts: { active_targets: 0, active_certificates: 0, pending_jobs: 0 },
+    };
+  }
+
+  if (res.status === 409) {
+    // Body is always JSON for 409 per the handler contract.
+    const body = (await res.json()) as BlockedByDependenciesResponse;
+    throw new BlockedByDependenciesError(
+      body.message || 'agent has active dependencies',
+      body.counts,
+    );
+  }
+
+  if (!res.ok) {
+    let errorMsg = res.statusText;
+    try {
+      const body = await res.json();
+      errorMsg = body.message || body.error || errorMsg;
+    } catch {
+      // not JSON
+    }
+    throw new Error(errorMsg || `HTTP ${res.status}`);
+  }
+
+  return (await res.json()) as RetireAgentResponse;
+};
+
+// I-004: list retired agents via GET /api/v1/agents/retired. Kept separate
+// from getAgents (which hits the default active-only listing) so the retired
+// tab on AgentsPage can page independently. per_page is capped server-side at
+// 500 (see handler ListRetiredAgents).
+export const listRetiredAgents = (params: Record<string, string> = {}) => {
+  const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();
+  return fetchJSON<PaginatedResponse<Agent>>(`${BASE}/agents/retired?${qs}`);
+};
 
 // Jobs
 export const getJobs = (params: Record<string, string> = {}) => {

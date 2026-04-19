@@ -12,6 +12,7 @@ import (
 	"crypto/x509/pkix"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"flag"
 	"fmt"
 	"io"
@@ -23,6 +24,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -53,6 +55,16 @@ type AgentConfig struct {
 	DiscoveryDirs []string // Directories to scan for certificates (comma-separated via env)
 }
 
+// ErrAgentRetired is the sentinel returned by [Agent.Run] when the control
+// plane responds with HTTP 410 Gone to a heartbeat or work-poll request — the
+// canonical signal that this agent's row has been soft-retired server-side
+// (see I-004 in cowork/certctl-coverage-gap-audit.md). The binary must
+// terminate cleanly: an init-system restart would only produce another 410
+// and wedge the host in a restart loop. main() translates this sentinel into
+// a zero exit code so systemd (Restart=on-failure) and launchd do not respawn
+// the process. Do not wrap this error — main() matches it with errors.Is.
+var ErrAgentRetired = fmt.Errorf("agent retired by control plane")
+
 // Agent represents the local agent that runs on target servers.
 // It periodically sends heartbeats, polls for work, executes deployment and CSR jobs,
 // and scans configured directories for existing certificates.
@@ -68,6 +80,17 @@ type Agent struct {
 	pollInterval          time.Duration
 	discoveryInterval     time.Duration
 	consecutiveFailures   int
+
+	// I-004: terminal retirement signal. retiredSignal is closed exactly once
+	// (guarded by retiredOnce) when either sendHeartbeat or pollForWork
+	// observes HTTP 410 Gone. The Run() select loop picks up the close and
+	// returns ErrAgentRetired, unwinding the goroutine cleanly so main() can
+	// log + exit(0). Using a channel + sync.Once (rather than an atomic bool
+	// + polling) lets us fall through the select statement immediately instead
+	// of waiting for the next ticker; the zero-allocation close is safe to
+	// race with ctx.Done() and other cases.
+	retiredOnce   sync.Once
+	retiredSignal chan struct{}
 }
 
 // WorkResponse represents the response from the work polling endpoint.
@@ -98,7 +121,29 @@ func NewAgent(cfg *AgentConfig, logger *slog.Logger) *Agent {
 		heartbeatInterval: 60 * time.Second,
 		pollInterval:      30 * time.Second,
 		discoveryInterval: 6 * time.Hour, // scan for certs every 6 hours
+		retiredSignal:     make(chan struct{}),
 	}
+}
+
+// markRetired records that the control plane has declared this agent retired
+// (HTTP 410 Gone on heartbeat or work poll). Idempotent via sync.Once — if
+// both the heartbeat and work-poll paths observe 410 in the same tick, only
+// the first close() runs and we avoid a runtime panic. Emits an ERROR-level
+// log line so init-system journaling captures it prominently, and includes
+// the source (heartbeat/work_poll), response body, and status code so the
+// operator can verify it's a genuine retirement signal rather than a
+// misrouted request. After this returns, the select-loop case in Run()
+// observes the closed channel on its next iteration and returns
+// ErrAgentRetired.
+func (a *Agent) markRetired(source string, statusCode int, body string) {
+	a.retiredOnce.Do(func() {
+		a.logger.Error("agent has been retired by control plane — shutting down",
+			"source", source,
+			"status", statusCode,
+			"body", body,
+			"agent_id", a.config.AgentID)
+		close(a.retiredSignal)
+	})
 }
 
 // Run starts the agent's main loop.
@@ -153,6 +198,19 @@ func (a *Agent) Run(ctx context.Context) error {
 		case <-ctx.Done():
 			a.logger.Info("agent shutting down", "reason", ctx.Err())
 			return ctx.Err()
+
+		// I-004: retiredSignal is closed exactly once (via markRetired's
+		// sync.Once) when either sendHeartbeat or pollForWork observes HTTP 410
+		// Gone from the control plane. Falling through this case immediately
+		// (rather than waiting for the next ticker) lets the agent shut down
+		// quickly once retirement is confirmed — every extra heartbeat against a
+		// retired row is wasted work and noise in the audit trail. Returning
+		// ErrAgentRetired propagates up to main(), which matches it with
+		// errors.Is and exits(0) so systemd/launchd do not respawn the process.
+		case <-a.retiredSignal:
+			a.logger.Info("agent retired signal received — exiting event loop",
+				"agent_id", a.config.AgentID)
+			return ErrAgentRetired
 
 		case <-heartbeatTicker.C:
 			a.sendHeartbeat(ctx)
@@ -209,6 +267,22 @@ func (a *Agent) sendHeartbeat(ctx context.Context) {
 	}
 	defer resp.Body.Close()
 
+	// I-004: HTTP 410 Gone is the terminal signal from the control plane that
+	// this agent's row has been soft-retired (see internal/api/handler/agent.go
+	// heartbeat path + AgentRetirementService). Treat it separately from the
+	// generic non-200 error branch: record the event to markRetired (which closes
+	// retiredSignal exactly once via sync.Once) and return without bumping
+	// consecutiveFailures — this is not a transient failure, it's a clean
+	// shutdown. The Run() select loop picks up the closed channel on its next
+	// iteration and returns ErrAgentRetired, which main() translates into an
+	// exit(0) so systemd/launchd don't respawn the process into another 410
+	// loop.
+	if resp.StatusCode == http.StatusGone {
+		body, _ := io.ReadAll(resp.Body)
+		a.markRetired("heartbeat", resp.StatusCode, string(body))
+		return
+	}
+
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
 		a.logger.Error("heartbeat rejected",
@@ -236,6 +310,19 @@ func (a *Agent) pollForWork(ctx context.Context) {
 		return
 	}
 	defer resp.Body.Close()
+
+	// I-004: same terminal-retirement handling as sendHeartbeat. Work-poll is the
+	// other hot path that can observe an agent's soft-retirement; if the
+	// heartbeat tick happens to fire after a work-poll tick within the same
+	// retirement window, this branch catches it first. markRetired's sync.Once
+	// guards idempotency so racing both paths in the same tick only closes the
+	// signal channel once. No consecutiveFailures increment — retirement is
+	// not a transient failure.
+	if resp.StatusCode == http.StatusGone {
+		body, _ := io.ReadAll(resp.Body)
+		a.markRetired("work_poll", resp.StatusCode, string(body))
+		return
+	}
 
 	if resp.StatusCode != http.StatusOK {
 		body, _ := io.ReadAll(resp.Body)
@@ -1117,6 +1204,19 @@ func main() {
 		cancel()
 		<-errChan
 	case err := <-errChan:
+		// I-004: ErrAgentRetired is a terminal, *clean* shutdown — the control
+		// plane responded HTTP 410 Gone on heartbeat/work-poll, meaning this
+		// agent's row has been soft-retired and will never be reachable again.
+		// Exit 0 so systemd's Restart=on-failure and launchd's KeepAlive do NOT
+		// respawn the process into another 410 loop (which would wedge the host
+		// and spam the control plane). Operators can observe the retirement via
+		// audit_events or the AgentsPage retired tab; the terminal log line on
+		// the way out is enough for post-mortem forensics.
+		if errors.Is(err, ErrAgentRetired) {
+			logger.Info("agent retired by control plane — exiting without restart",
+				"agent_id", agentCfg.AgentID)
+			return
+		}
 		if err != context.Canceled {
 			logger.Error("agent error", "error", err)
 			os.Exit(1)

@@ -67,6 +67,43 @@ export interface Agent {
   registered_at: string;
   created_at: string;
   updated_at: string;
+  // I-004: soft-retirement fields. When retired_at is non-null, the agent is
+  // tombstoned — it will never heartbeat again and cascaded targets have been
+  // retired alongside it. The retired tab on AgentsPage uses these to show the
+  // when/why. The server filters retired rows from the default /api/v1/agents
+  // listing; they appear only via GET /api/v1/agents/retired.
+  retired_at?: string | null;
+  retired_reason?: string | null;
+}
+
+// I-004: dependency counts returned by the retire handler in both the 200
+// success-with-cascade body and the 409 blocked_by_dependencies body. The
+// operator UI uses these to show "this agent has N targets, M certs, K jobs
+// depending on it" in the confirm-retire dialog.
+export interface AgentDependencyCounts {
+  active_targets: number;
+  active_certificates: number;
+  pending_jobs: number;
+}
+
+// I-004: success shape for DELETE /api/v1/agents/{id}. already_retired is
+// always false for 200 responses; 204 responses carry no body (the retire was
+// idempotent — the agent was already retired). The frontend distinguishes by
+// HTTP status, not by this field.
+export interface RetireAgentResponse {
+  retired_at: string;
+  already_retired: boolean;
+  cascade: boolean;
+  counts: AgentDependencyCounts;
+}
+
+// I-004: shape returned with HTTP 409 when a retire is blocked by active
+// downstream dependencies. Keep in lockstep with the handler's inline struct
+// in internal/api/handler/agents.go (search "blocked_by_dependencies").
+export interface BlockedByDependenciesResponse {
+  error: 'blocked_by_dependencies';
+  message: string;
+  counts: AgentDependencyCounts;
 }
 
 export interface Job {

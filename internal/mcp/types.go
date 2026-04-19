@@ -152,6 +152,23 @@ type AgentJobStatusInput struct {
 	Error   string `json:"error,omitempty" jsonschema:"Error message if job failed"`
 }
 
+// RetireAgentInput pins the MCP tool surface for certctl_retire_agent. I-004
+// introduces a soft-retirement flow that the handler exposes on DELETE
+// /api/v1/agents/{id} with two optional query flags: force=true cascades
+// through dependent active targets/certs/jobs, and reason is the human-readable
+// string captured in the audit trail. The handler enforces
+// ErrForceReasonRequired when force=true is sent without a reason; we surface
+// both as separate fields so the LLM can populate them independently and so
+// the retire_agent_test shape assertion stays aligned with the JSON-wire
+// contract. ID is always emitted (no omitempty) because a retire call without
+// a target agent is meaningless; Force and Reason are omitempty so the default
+// soft-retire path sends no query suffix at all.
+type RetireAgentInput struct {
+	ID     string `json:"id" jsonschema:"Agent ID to soft-retire"`
+	Force  bool   `json:"force,omitempty" jsonschema:"Cascade-retire downstream active targets, certs, and jobs (requires reason)"`
+	Reason string `json:"reason,omitempty" jsonschema:"Human-readable reason (required when force=true)"`
+}
+
 // ── Jobs ────────────────────────────────────────────────────────────
 
 type ListJobsInput struct {

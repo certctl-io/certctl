@@ -49,6 +49,16 @@ func (c *Client) Delete(path string) (json.RawMessage, error) {
 	return c.do("DELETE", path, nil, nil)
 }
 
+// DeleteWithQuery performs an HTTP DELETE with query parameters. I-004 adds
+// this transport so MCP tools can target endpoints that carry flags in the
+// query string (e.g. DELETE /api/v1/agents/{id}?force=true&reason=…). Client.Delete
+// is path-only; without this method the retire tool silently drops force/reason,
+// turning every cascade retire into a default soft-retire. Shares do()'s 204
+// normalization and 4xx/5xx error propagation so tool authors get one contract.
+func (c *Client) DeleteWithQuery(path string, query url.Values) (json.RawMessage, error) {
+	return c.do("DELETE", path, query, nil)
+}
+
 // GetRaw performs an HTTP GET and returns the raw response body bytes and content type.
 // Used for binary responses (DER CRL, OCSP).
 func (c *Client) GetRaw(path string) ([]byte, string, error) {

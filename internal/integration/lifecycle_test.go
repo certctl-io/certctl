@@ -848,6 +848,56 @@ func (m *mockAgentRepository) GetByAPIKey(ctx context.Context, keyHash string) (
 	return nil, fmt.Errorf("agent not found")
 }
 
+// I-004: the integration-level mockAgentRepository implements the 6 new
+// retirement-surface methods as thin contract-satisfying stubs. The
+// integration suite exercises lifecycle flows (issue → renew → deploy)
+// that don't touch retirement, so these methods never need real behavior
+// here — they exist purely to keep mockAgentRepository a valid
+// AgentRepository implementation after migration 000015 expanded the
+// interface. Dedicated retirement tests live in internal/service/
+// agent_retire_test.go against the richer service-layer mockAgentRepo.
+
+func (m *mockAgentRepository) ListRetired(ctx context.Context, page, perPage int) ([]*domain.Agent, int, error) {
+	var retired []*domain.Agent
+	for _, a := range m.agents {
+		if a.RetiredAt != nil {
+			retired = append(retired, a)
+		}
+	}
+	return retired, len(retired), nil
+}
+
+func (m *mockAgentRepository) SoftRetire(ctx context.Context, id string, retiredAt time.Time, reason string) error {
+	agent, ok := m.agents[id]
+	if !ok {
+		return fmt.Errorf("agent not found")
+	}
+	if agent.RetiredAt != nil {
+		return nil
+	}
+	stamped := retiredAt
+	agent.RetiredAt = &stamped
+	stampedReason := reason
+	agent.RetiredReason = &stampedReason
+	return nil
+}
+
+func (m *mockAgentRepository) RetireAgentWithCascade(ctx context.Context, id string, retiredAt time.Time, reason string) error {
+	return m.SoftRetire(ctx, id, retiredAt, reason)
+}
+
+func (m *mockAgentRepository) CountActiveTargets(ctx context.Context, agentID string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockAgentRepository) CountActiveCertificates(ctx context.Context, agentID string) (int, error) {
+	return 0, nil
+}
+
+func (m *mockAgentRepository) CountPendingJobs(ctx context.Context, agentID string) (int, error) {
+	return 0, nil
+}
+
 type mockTargetRepository struct {
 	targets map[string]*domain.DeploymentTarget
 }

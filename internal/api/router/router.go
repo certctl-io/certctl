@@ -131,9 +131,21 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/targets/{id}/test", http.HandlerFunc(reg.Targets.TestTargetConnection))
 
 	// Agents routes: /api/v1/agents
+	//
+	// I-004 soft-retirement surface:
+	//   * GET /api/v1/agents/retired — opt-in listing of retired agents.
+	//     MUST be registered before /agents/{id} so Go 1.22 ServeMux's
+	//     literal-beats-pattern-var precedence routes the `retired` literal
+	//     to ListRetiredAgents instead of treating "retired" as a {id}
+	//     parameter value against GetAgent.
+	//   * DELETE /api/v1/agents/{id} — RetireAgent. Replaces the pre-I-004
+	//     hard-delete; the underlying repo does a soft-retire with
+	//     optional cascade.
 	r.Register("GET /api/v1/agents", http.HandlerFunc(reg.Agents.ListAgents))
 	r.Register("POST /api/v1/agents", http.HandlerFunc(reg.Agents.RegisterAgent))
+	r.Register("GET /api/v1/agents/retired", http.HandlerFunc(reg.Agents.ListRetiredAgents))
 	r.Register("GET /api/v1/agents/{id}", http.HandlerFunc(reg.Agents.GetAgent))
+	r.Register("DELETE /api/v1/agents/{id}", http.HandlerFunc(reg.Agents.RetireAgent))
 	r.Register("POST /api/v1/agents/{id}/heartbeat", http.HandlerFunc(reg.Agents.Heartbeat))
 	r.Register("POST /api/v1/agents/{id}/csr", http.HandlerFunc(reg.Agents.AgentCSRSubmit))
 	r.Register("GET /api/v1/agents/{id}/certificates/{cert_id}", http.HandlerFunc(reg.Agents.AgentCertificatePickup))

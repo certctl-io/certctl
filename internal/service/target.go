@@ -232,6 +232,18 @@ func (s *TargetService) TestConnection(ctx context.Context, id string) error {
 		return fmt.Errorf("assigned agent not found: %w", err)
 	}
 
+	// I-004: AgentRepository.Get intentionally surfaces retired rows (the banner
+	// + 410 Gone paths need to see them). A test against a retired agent can
+	// never succeed — the agent is tombstoned, will never heartbeat again, and
+	// any active targets have already been cascade-retired alongside it. Fail
+	// fast with an explicit message instead of falling through to the Status /
+	// heartbeat checks, which would produce a misleading "agent is Offline" or
+	// "heartbeat stale" diagnostic.
+	if agent.IsRetired() {
+		s.updateTestStatus(ctx, target, "failed")
+		return fmt.Errorf("assigned agent %s is retired", agent.ID)
+	}
+
 	if agent.Status != domain.AgentStatusOnline {
 		s.updateTestStatus(ctx, target, "failed")
 		return fmt.Errorf("assigned agent %s is %s (expected Online)", agent.ID, agent.Status)
@@ -293,8 +305,19 @@ func (s *TargetService) CreateTarget(ctx context.Context, target domain.Deployme
 	if target.AgentID == "" {
 		return nil, fmt.Errorf("%w: agent_id is required", ErrAgentNotFound)
 	}
-	if _, err := s.agentRepo.Get(ctx, target.AgentID); err != nil {
+	agent, err := s.agentRepo.Get(ctx, target.AgentID)
+	if err != nil {
 		return nil, fmt.Errorf("%w: %s", ErrAgentNotFound, target.AgentID)
+	}
+	// I-004: refuse to attach new targets to a retired agent. The agent is
+	// tombstoned and no deployments would ever succeed against it; letting a
+	// row slip past here would immediately be cascade-retired on the next
+	// dependency sweep and confuse operators ("why is this brand-new target
+	// already retired?"). Treating retired agents as "not found" for creation
+	// purposes keeps the error surface tight and matches the default-list
+	// contract established by repository.AgentRepository.List.
+	if agent.IsRetired() {
+		return nil, fmt.Errorf("%w: %s (retired)", ErrAgentNotFound, target.AgentID)
 	}
 
 	if target.ID == "" {

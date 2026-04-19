@@ -92,10 +92,25 @@ func (s *AgentService) Register(ctx context.Context, name string, hostname strin
 }
 
 // Heartbeat updates an agent's last seen time, status, and metadata.
+//
+// I-004: retired agents must be rejected up-front. A retired agent that is
+// still polling is a zombie — its row exists only for audit history and must
+// not be allowed to bump LastHeartbeatAt (which would resurrect it in stats
+// dashboards and stale-offline sweeps). The sentinel ErrAgentRetired is
+// returned unwrapped so the HTTP handler can map it to 410 Gone via
+// errors.Is; the agent process detects the 410 and shuts down cleanly
+// instead of continuing to heartbeat indefinitely.
 func (s *AgentService) Heartbeat(ctx context.Context, agentID string, metadata *domain.AgentMetadata) error {
 	agent, err := s.agentRepo.Get(ctx, agentID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch agent: %w", err)
+	}
+
+	// I-004 guard: retired agents are frozen. Do not call UpdateHeartbeat —
+	// bumping the timestamp would defeat the retired-row filter that protects
+	// stats, scheduler sweeps, and handler listings.
+	if agent.IsRetired() {
+		return ErrAgentRetired
 	}
 
 	// Update heartbeat and metadata

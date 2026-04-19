@@ -93,9 +93,34 @@ type TargetRepository interface {
 
 // AgentRepository defines operations for managing control plane agents.
 type AgentRepository interface {
-	// List returns all agents.
+	// List returns all ACTIVE agents — rows with retired_at IS NULL.
+	//
+	// I-004: The default listing MUST NOT surface retired agents. The
+	// handler-facing ListAgents call, the stats dashboard, and the stale-offline
+	// sweeper all iterate this list and would otherwise re-surface decommissioned
+	// hardware in operational UI. Callers that genuinely want retired rows (the
+	// audit tab, compliance exports) must use ListRetired instead.
+	//
+	// The partial index idx_agents_retired_at (migration 000015) keeps retired
+	// rows cheap to exclude — the planner uses it to skip the retired segment
+	// of the table entirely.
 	List(ctx context.Context) ([]*domain.Agent, error)
+	// ListRetired returns a paginated list of retired agents (retired_at IS NOT NULL),
+	// ordered by retired_at DESC so the most recent retirements appear first. Used
+	// by the GUI's Retired tab and the audit export path. Returns the slice plus
+	// the total count (for pagination). A page<1 or perPage<1 is clamped to sensible
+	// defaults (page=1, perPage=50) in the repo implementation rather than erroring —
+	// this matches the ListAgents pagination behavior in the service layer.
+	// I-004 coverage-gap closure, migration 000015.
+	ListRetired(ctx context.Context, page, perPage int) ([]*domain.Agent, int, error)
 	// Get retrieves an agent by ID.
+	//
+	// I-004 note: Get returns retired rows (retired_at IS NOT NULL) because
+	// callers that need to check "has this agent been retired?" — the heartbeat
+	// handler returning 410 Gone, the retirement service's idempotent-retire
+	// branch, the detail page rendering a retirement banner — must see the
+	// retired_at/retired_reason fields. Only the default List path default-
+	// excludes retired; individual Get lookups surface them.
 	Get(ctx context.Context, id string) (*domain.Agent, error)
 	// Create stores a new agent. Callers that want duplicate-key errors surfaced
 	// (e.g. real-agent registration) must use this method; sentinel/bootstrap
@@ -112,11 +137,78 @@ type AgentRepository interface {
 	// Update modifies an existing agent.
 	Update(ctx context.Context, agent *domain.Agent) error
 	// Delete removes an agent.
+	//
+	// I-004: callers should prefer SoftRetire / RetireAgentWithCascade for the
+	// operator-facing retirement path; hard Delete remains available for test
+	// cleanup and repository-level administrative tasks. The deployment_targets
+	// FK flipped to ON DELETE RESTRICT in migration 000015, so hard-deleting an
+	// agent that still owns active targets will now fail at the DB layer — which
+	// is intentional: the fail-closed guardrail prevents audit-trail destruction.
 	Delete(ctx context.Context, id string) error
 	// UpdateHeartbeat updates the agent's last heartbeat timestamp and metadata.
+	//
+	// I-004: UpdateHeartbeat is a no-op on retired agents — the UPDATE clause
+	// includes AND retired_at IS NULL so a stale agent process that keeps polling
+	// after retirement cannot resurrect its heartbeat. The service layer already
+	// short-circuits with ErrAgentRetired before calling this method; the WHERE
+	// filter here is belt-and-braces for anyone who skips the service path.
 	UpdateHeartbeat(ctx context.Context, id string, metadata *domain.AgentMetadata) error
 	// GetByAPIKey retrieves an agent by hashed API key.
+	//
+	// I-004: GetByAPIKey returns retired rows so the auth middleware can detect
+	// "this API key belongs to a retired agent" and fail the request with
+	// 410 Gone. If retired rows were hidden, auth would return a plain 401 and
+	// leak no signal — which is wrong: the operator needs the retired state
+	// made explicit so they can clean up the agent process.
 	GetByAPIKey(ctx context.Context, keyHash string) (*domain.Agent, error)
+	// SoftRetire stamps retired_at + retired_reason on the agent row with no
+	// cascade. Used on the happy path where preflight confirmed the agent has
+	// zero active dependencies (no active deployment_targets, no pending jobs).
+	// The UPDATE is scoped to WHERE id=$1 AND retired_at IS NULL so re-retiring
+	// an already-retired row is a no-op (zero rows affected is NOT returned as
+	// an error — the service layer detects this via its own idempotent-retire
+	// branch before calling SoftRetire). Callers supply retiredAt so the service
+	// can pin a single consistent timestamp across audit + DB writes.
+	// I-004 coverage-gap closure.
+	SoftRetire(ctx context.Context, id string, retiredAt time.Time, reason string) error
+	// RetireAgentWithCascade performs a transactional retire + cascade. In one
+	// transaction it: (1) stamps retired_at + retired_reason on the agent row,
+	// and (2) stamps the SAME retired_at + retired_reason on every active
+	// deployment_targets row whose agent_id matches. Only rows with
+	// retired_at IS NULL are touched in (2) — already-retired targets keep their
+	// original retirement metadata (whoever retired them first, whenever). Used
+	// exclusively on the force=true path from the retirement handler; callers
+	// supply retiredAt so the agent row and every cascaded target row share an
+	// exact retirement instant (helps forensic analysis trace the cascade back
+	// to a single operator action). If the agent row is already retired, the
+	// whole operation is a no-op — the transaction commits without touching
+	// either table. I-004 coverage-gap closure, migration 000015.
+	RetireAgentWithCascade(ctx context.Context, id string, retiredAt time.Time, reason string) error
+	// CountActiveTargets returns the number of deployment_targets rows where
+	// agent_id=id AND retired_at IS NULL. The COUNT query hits the existing
+	// idx_deployment_targets_agent_id index (migration 000001 line 111); the
+	// additional retired_at IS NULL predicate is cheap because the partial
+	// idx_deployment_targets_retired_at index (migration 000015) lets the
+	// planner skip the retired-row segment entirely. Preflight uses this to
+	// decide 200 (soft-retire) vs 409 (blocked-by-deps). I-004.
+	CountActiveTargets(ctx context.Context, agentID string) (int, error)
+	// CountActiveCertificates returns the count of managed_certificates currently
+	// deployed through one of this agent's ACTIVE (non-retired) deployment_targets.
+	// The query joins certificate_target_mappings (migration 000001 line 116) →
+	// deployment_targets filtering on deployment_targets.agent_id=$1 AND
+	// deployment_targets.retired_at IS NULL, then COUNT(DISTINCT certificate_id)
+	// so the same cert deployed to multiple targets on one agent counts once.
+	// The primary key (certificate_id, target_id) on certificate_target_mappings
+	// plus idx_certificate_target_mappings_target_id (line 122) cover the join.
+	// Used purely for the preflight 409 body — the number is informational. I-004.
+	CountActiveCertificates(ctx context.Context, agentID string) (int, error)
+	// CountPendingJobs returns the number of jobs belonging to this agent whose
+	// status is in (Pending, AwaitingCSR, AwaitingApproval, Running) — the four
+	// statuses that indicate work the agent would still be expected to pick up.
+	// Completed/Failed/Cancelled jobs do not count. The filter agent_id=$1 hits
+	// the idx_jobs_agent_id index (migration 000001 line 161). Used for the
+	// preflight 409 body. I-004.
+	CountPendingJobs(ctx context.Context, agentID string) (int, error)
 }
 
 // JobRepository defines operations for managing renewal and deployment jobs.

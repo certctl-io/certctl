@@ -19,6 +19,8 @@ import {
   getAgents,
   getAgent,
   registerAgent,
+  retireAgent,
+  listRetiredAgents,
   getJobs,
   cancelJob,
   approveRenewal,
@@ -396,6 +398,113 @@ describe('API Client', () => {
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe('/api/v1/agents');
       expect(init.method).toBe('POST');
+    });
+  });
+
+  // ─── Agent Retirement (I-004) ───────────────────────
+  //
+  // These tests pin the GUI's retirement contract against what the backend
+  // will add in Phase 2b: soft-retire via DELETE, force-cascade via
+  // ?force=true&reason=..., idempotent 204 on already-retired, 409 blocked
+  // payload with counts, and a GET /agents/retired listing surface.
+  //
+  // All compile-fail until client.ts exports retireAgent + listRetiredAgents
+  // — the shape of those exports is pinned here rather than assumed.
+  describe('Agent Retirement (I-004)', () => {
+    it('retireAgent sends DELETE without query when no force/reason', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({
+          retired_at: '2026-04-18T12:00:00Z',
+          already_retired: false,
+          cascade: false,
+        }),
+      );
+      await retireAgent('ag-1');
+      const [url, init] = mockFetch.mock.calls[0];
+      // Default soft-retire: bare path, no stray ? suffix.
+      expect(url).toBe('/api/v1/agents/ag-1');
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('retireAgent propagates force+reason as URL query parameters', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({
+          retired_at: '2026-04-18T12:00:00Z',
+          already_retired: false,
+          cascade: true,
+          counts: { active_targets: 3, active_certificates: 7, pending_jobs: 2 },
+        }),
+      );
+      await retireAgent('ag-1', { force: true, reason: 'decommissioning rack 7' });
+      const [url, init] = mockFetch.mock.calls[0];
+      // URLSearchParams encodes space as "+"; "decommissioning rack 7" → "decommissioning+rack+7"
+      expect(url).toBe(
+        '/api/v1/agents/ag-1?force=true&reason=decommissioning+rack+7',
+      );
+      expect(init.method).toBe('DELETE');
+    });
+
+    it('retireAgent omits force=false even when reason is supplied', async () => {
+      // Client-side guard: the server's 400 ErrForceReasonRequired is the
+      // fallback; the GUI should never silently promote reason-without-force
+      // into a force call. Pins that reason-only still hits the soft path.
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({
+          retired_at: '2026-04-18T12:00:00Z',
+          already_retired: false,
+          cascade: false,
+        }),
+      );
+      await retireAgent('ag-1', { reason: 'routine decommission' });
+      const [url] = mockFetch.mock.calls[0];
+      // force defaults to false → query carries reason only.
+      expect(url).toBe('/api/v1/agents/ag-1?reason=routine+decommission');
+    });
+
+    it('retireAgent surfaces the 409 dependency error message to the caller', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockErrorResponse(409, {
+          message: 'agent has 3 active targets, 7 active certificates, 2 pending jobs',
+        }),
+      );
+      await expect(retireAgent('ag-1')).rejects.toThrow(
+        /active targets|active certificates|pending jobs/,
+      );
+    });
+
+    it('retireAgent treats 204 (already-retired) as success with empty body', async () => {
+      mockFetch.mockReturnValueOnce(
+        Promise.resolve({
+          ok: true,
+          status: 204,
+          json: () => Promise.reject(new Error('204 has no body')),
+          statusText: 'No Content',
+        } as Response),
+      );
+      // fetchJSON normalises 204 to {} — caller must not crash.
+      const result = await retireAgent('ag-1');
+      expect(result).toBeDefined();
+    });
+
+    it('listRetiredAgents sends GET /agents/retired with default pagination', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }),
+      );
+      await listRetiredAgents();
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/agents/retired?page=1&per_page=50');
+      // Default is GET — no explicit method means fetchJSON falls through.
+      expect(init.method ?? 'GET').toBe('GET');
+    });
+
+    it('listRetiredAgents forwards page/per_page overrides', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({ data: [], total: 0, page: 2, per_page: 100 }),
+      );
+      await listRetiredAgents({ page: '2', per_page: '100' });
+      const [url] = mockFetch.mock.calls[0];
+      expect(url).toContain('page=2');
+      expect(url).toContain('per_page=100');
     });
   });
 

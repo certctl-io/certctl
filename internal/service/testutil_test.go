@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"sort"
 	"sync"
 	"time"
 
@@ -607,7 +608,14 @@ func (m *mockRenewalPolicyRepo) AddPolicy(policy *domain.RenewalPolicy) {
 	m.Policies[policy.ID] = policy
 }
 
-// mockAgentRepo is a test implementation of AgentRepository
+// mockAgentRepo is a test implementation of AgentRepository.
+//
+// I-004: ActiveTargetCounts / ActiveCertCounts / PendingJobCounts are keyed by
+// agent ID and read back verbatim by the Count* methods — the retirement
+// service's preflight pokes these maps to simulate "agent has N active
+// deployments / M deployed certs / K pending jobs" without having to seed
+// real target/cert/job rows across multiple mock repos. An unset key means
+// zero, matching the production repo behavior on an agent with no deps.
 type mockAgentRepo struct {
 	mu                 sync.Mutex
 	Agents             map[string]*domain.Agent
@@ -619,8 +627,27 @@ type mockAgentRepo struct {
 	ListErr            error
 	UpdateHeartbeatErr error
 	GetByAPIKeyErr     error
+	// I-004 preflight count seeds (read by CountActiveTargets etc.).
+	ActiveTargetCounts map[string]int
+	ActiveCertCounts   map[string]int
+	PendingJobCounts   map[string]int
+	// I-004 retirement write-path error seams. Let tests force a SoftRetire
+	// or RetireAgentWithCascade failure after preflight passed, so the
+	// service's error surfacing (wrap+return, skip audit, etc.) can be
+	// exercised without having to stand up a real PG connection.
+	SoftRetireErr  error
+	RetireCascadeErr error
+	CountErr       error
+	ListRetiredErr error
 }
 
+// List mirrors the production repo contract post-I-004: it returns only
+// ACTIVE agents (RetiredAt == nil). Tests that seed a retired agent via
+// AddAgent and then call a List-driven service method (e.g. ListAgents,
+// MarkStaleAgentsOffline, stats dashboards) must not see the retired row
+// here — otherwise the mock would pass while the real planner filters it
+// out at the WHERE clause level. ListRetired is the companion method for
+// explicit retired-only listing.
 func (m *mockAgentRepo) List(ctx context.Context) ([]*domain.Agent, error) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
@@ -629,6 +656,9 @@ func (m *mockAgentRepo) List(ctx context.Context) ([]*domain.Agent, error) {
 	}
 	var agents []*domain.Agent
 	for _, a := range m.Agents {
+		if a.RetiredAt != nil {
+			continue
+		}
 		agents = append(agents, a)
 	}
 	return agents, nil
@@ -724,6 +754,134 @@ func (m *mockAgentRepo) AddAgent(agent *domain.Agent) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.Agents[agent.ID] = agent
+}
+
+// ListRetired returns the paginated retired-agents slice + total count.
+// Matches the production repo contract: RetiredAt != nil, sorted by
+// RetiredAt DESC, page<1 → 1, perPage<1 → 50. Sort is done in-memory over
+// the keyed map so the mock stays dependency-free. I-004.
+func (m *mockAgentRepo) ListRetired(ctx context.Context, page, perPage int) ([]*domain.Agent, int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListRetiredErr != nil {
+		return nil, 0, m.ListRetiredErr
+	}
+	if page < 1 {
+		page = 1
+	}
+	if perPage < 1 {
+		perPage = 50
+	}
+	var retired []*domain.Agent
+	for _, a := range m.Agents {
+		if a.RetiredAt != nil {
+			retired = append(retired, a)
+		}
+	}
+	total := len(retired)
+	// Sort by RetiredAt DESC — most recent first. The real query uses the
+	// partial idx_agents_retired_at index; here we sort in Go.
+	sort.SliceStable(retired, func(i, j int) bool {
+		return retired[i].RetiredAt.After(*retired[j].RetiredAt)
+	})
+	// Apply page/perPage window.
+	offset := (page - 1) * perPage
+	if offset >= total {
+		return nil, total, nil
+	}
+	end := offset + perPage
+	if end > total {
+		end = total
+	}
+	return retired[offset:end], total, nil
+}
+
+// SoftRetire stamps RetiredAt + RetiredReason on the agent row. Mirrors
+// the real repo's idempotent semantics: a row already retired is left
+// untouched (zero-rows-affected is not an error). I-004 preserves
+// retirement metadata across re-retire attempts — whoever retired it
+// first owns the audit trail.
+func (m *mockAgentRepo) SoftRetire(ctx context.Context, id string, retiredAt time.Time, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.SoftRetireErr != nil {
+		return m.SoftRetireErr
+	}
+	agent, ok := m.Agents[id]
+	if !ok {
+		return errNotFound
+	}
+	if agent.RetiredAt != nil {
+		return nil // already retired — no-op
+	}
+	stamped := retiredAt
+	agent.RetiredAt = &stamped
+	stampedReason := reason
+	agent.RetiredReason = &stampedReason
+	return nil
+}
+
+// RetireAgentWithCascade stamps the agent row the same way SoftRetire
+// does. The real repo also stamps every active deployment_targets row
+// in the same transaction; the mock can't do that because targets live
+// in mockTargetRepo, which the retirement service doesn't write to
+// through this repo interface. Tests that need to assert cascade
+// semantics on targets should seed mockTargetRepo directly and verify
+// the service-layer audit event captured the cascade count. I-004.
+func (m *mockAgentRepo) RetireAgentWithCascade(ctx context.Context, id string, retiredAt time.Time, reason string) error {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.RetireCascadeErr != nil {
+		return m.RetireCascadeErr
+	}
+	agent, ok := m.Agents[id]
+	if !ok {
+		return errNotFound
+	}
+	if agent.RetiredAt != nil {
+		return nil // already retired — no-op (same as production transaction)
+	}
+	stamped := retiredAt
+	agent.RetiredAt = &stamped
+	stampedReason := reason
+	agent.RetiredReason = &stampedReason
+	return nil
+}
+
+// CountActiveTargets returns the seeded ActiveTargetCounts value (0 if
+// unset). Matches the real repo signature: COUNT of non-retired
+// deployment_targets with agent_id=$1. I-004 preflight.
+func (m *mockAgentRepo) CountActiveTargets(ctx context.Context, agentID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CountErr != nil {
+		return 0, m.CountErr
+	}
+	return m.ActiveTargetCounts[agentID], nil
+}
+
+// CountActiveCertificates returns the seeded ActiveCertCounts value.
+// Real query: COUNT(DISTINCT certificate_id) across
+// certificate_target_mappings ↔ deployment_targets on agent_id. I-004.
+func (m *mockAgentRepo) CountActiveCertificates(ctx context.Context, agentID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CountErr != nil {
+		return 0, m.CountErr
+	}
+	return m.ActiveCertCounts[agentID], nil
+}
+
+// CountPendingJobs returns the seeded PendingJobCounts value. Real
+// query: COUNT of jobs with agent_id=$1 AND status IN (Pending,
+// AwaitingCSR, AwaitingApproval, Running). I-004.
+func (m *mockAgentRepo) CountPendingJobs(ctx context.Context, agentID string) (int, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.CountErr != nil {
+		return 0, m.CountErr
+	}
+	return m.PendingJobCounts[agentID], nil
 }
 
 // mockTargetRepo is a test implementation of TargetRepository
@@ -955,6 +1113,13 @@ func newMockAgentRepository() *mockAgentRepo {
 	return &mockAgentRepo{
 		Agents:           make(map[string]*domain.Agent),
 		HeartbeatUpdates: make(map[string]time.Time),
+		// I-004 preflight count maps. Tests seed these directly via
+		// agentRepo.ActiveTargetCounts["agent-id"] = N — unset keys
+		// read back as zero from CountActiveTargets etc., matching
+		// the production repo behavior for agents with no deps.
+		ActiveTargetCounts: make(map[string]int),
+		ActiveCertCounts:   make(map[string]int),
+		PendingJobCounts:   make(map[string]int),
 	}
 }
 

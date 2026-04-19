@@ -139,6 +139,16 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 **Agent groups (M11b):** Dynamic device grouping allows organizing agents by metadata criteria. Agent groups can match by OS, architecture, IP CIDR, and version. Groups support both dynamic matching (agents automatically join when criteria match) and manual membership (explicit include/exclude). Renewal policies can be scoped to agent groups via the `agent_group_id` foreign key. The GUI provides full CRUD management for agent groups with visual match criteria badges.
 
+**Agent soft-retirement (I-004):** `DELETE /api/v1/agents/{id}` is a soft-delete surface — the row is never removed. Retirement stamps `agents.retired_at` (TIMESTAMPTZ) and `agents.retired_reason` (TEXT) and flips the operational status to `Offline`. Default listings (`GET /api/v1/agents`, the dashboard stats counter, and the stale-offline sweeper) filter retired rows out via `AgentRepository.ListActive`; retired rows are surfaced only through the opt-in `GET /api/v1/agents/retired` view. The endpoint follows a preflight → block → escape-hatch contract:
+
+- **Clean retire** (no active dependencies) — `200 OK` with `RetireAgentResponse` (`cascade=false`, zero counts).
+- **Blocked by active dependencies** — `409 Conflict` with `BlockedByDependenciesResponse`. The three counts (`active_targets`, `active_certificates`, `pending_jobs`) tell the operator exactly which rows would be orphaned. The schema diverges from `ErrorResponse` because downstream dashboards parse the stable three-key shape.
+- **Force cascade** — `DELETE /api/v1/agents/{id}?force=true&reason=...`. `reason` is required (400 otherwise). Transactionally soft-retires downstream `deployment_targets`, cancels pending jobs, and soft-retires the agent, emitting an `agent_retirement_cascaded` audit event with actor + reason + per-bucket counts.
+- **Idempotent re-retire** — a retire attempt against an already-retired agent returns `204 No Content` with an empty body (no second audit event, no response shape — callers that POST again on a retry get a clean no-op).
+- **Sentinel refusal** — the four sentinel agent IDs (`server-scanner`, `cloud-aws-sm`, `cloud-azure-kv`, `cloud-gcp-sm`) back non-agent discovery subsystems (the network scanner and the three cloud secret-manager sources). They are refused unconditionally — even with `force=true` — via `ErrAgentIsSentinel` → `403 Forbidden`. The ID list lives in `internal/domain/connector.go` (`SentinelAgentIDs`) so handler, repository, and scheduler code can filter them without importing `service`.
+
+Retired agents receive `410 Gone` on subsequent heartbeats (`service.ErrAgentRetired`). `cmd/agent` treats 410 as a terminal signal and exits cleanly so retired agents stop phoning home. Migration `000015` flipped `deployment_targets.agent_id` from `ON DELETE CASCADE` to `ON DELETE RESTRICT`, making the old hard-delete path a schema error and forcing all retirement through this contract.
+
 ### Web Dashboard
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).

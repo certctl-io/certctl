@@ -880,6 +880,40 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/agents/retired:
+    get:
+      tags: [Agents]
+      summary: List retired agents
+      description: |
+        I-004: opt-in listing of soft-retired agents. The default
+        `GET /api/v1/agents` endpoint filters retired rows out; this is the
+        dedicated surface for reading them back (e.g., the operator UI's
+        "Retired" tab, audit and forensics workflows). Pagination defaults
+        match the default agent listing (page=1, per_page=50, max 500). Go
+        1.22's enhanced ServeMux routes `/agents/retired` to this handler
+        via the literal-beats-pattern-var precedence rule, so the sibling
+        `/agents/{id}` route does not shadow it.
+      operationId: listRetiredAgents
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of retired agents
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/Agent"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/agents/{id}:
     get:
       tags: [Agents]
@@ -900,12 +934,116 @@ paths:
           $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [Agents]
+      summary: Soft-retire agent
+      description: |
+        I-004: soft-retirement. The agent row is preserved (so its audit
+        trail and historical job links remain intact) and `retired_at` is
+        stamped. A retired agent receives `410 Gone` on subsequent
+        heartbeats so it can shut down cleanly.
+
+        Behavior matrix:
+
+        | Scenario | Query | Status | Body |
+        | --- | --- | --- | --- |
+        | Clean retire (no active dependencies) | none | `200` | `RetireAgentResponse` with `cascade=false`, zero counts |
+        | Blocked by active targets/certs/jobs | none | `409` | `BlockedByDependenciesResponse` with per-bucket counts |
+        | Force-cascade retire | `force=true&reason=...` | `200` | `RetireAgentResponse` with `cascade=true`, pre-cascade counts |
+        | Idempotent re-retire | either | `204` | (empty — downstream consumers break on stray bodies) |
+        | `force=true` without reason | `force=true` | `400` | ErrorResponse (ErrForceReasonRequired) |
+        | Reserved sentinel agent | any | `403` | ErrorResponse (ErrAgentIsSentinel) |
+        | Unknown agent id | any | `404` | ErrorResponse |
+
+        Sentinel agents are the four reserved identities backing non-agent
+        discovery subsystems (`server-scanner`, `cloud-aws-sm`,
+        `cloud-azure-kv`, `cloud-gcp-sm`). Retiring them would orphan the
+        scanner or a cloud secret-manager source, so the handler refuses
+        unconditionally — even with `force=true`.
+      operationId: retireAgent
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+        - name: force
+          in: query
+          required: false
+          schema:
+            type: boolean
+            default: false
+          description: |
+            Cascade-retire active downstream targets, certificates, and
+            jobs. When `true`, a non-empty `reason` is required. A
+            malformed value (anything strconv.ParseBool rejects) is
+            silently treated as `false` so a typoed query can never
+            accidentally enable the cascade.
+        - name: reason
+          in: query
+          required: false
+          schema:
+            type: string
+          description: |
+            Human-readable reason recorded on the retired row and in the
+            immutable audit trail. Required (non-empty after trimming)
+            when `force=true`.
+      responses:
+        "200":
+          description: |
+            Agent retired (clean retire or successful force-cascade). Body
+            is `RetireAgentResponse`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RetireAgentResponse"
+        "204":
+          description: |
+            Idempotent retire — the agent was already retired. Response
+            body is empty (the 200-path shape does not apply, and
+            downstream clients that tee responses into dashboards would
+            break on spurious bodies).
+        "400":
+          description: |
+            `force=true` was sent without a non-empty `reason`
+            (ErrForceReasonRequired).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "403":
+          description: |
+            Agent is a reserved sentinel and cannot be retired even with
+            `?force=true` (ErrAgentIsSentinel).
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: |
+            Blocked by active downstream dependencies. Body carries
+            per-bucket counts so the operator UI can show the user which
+            dependency is holding up the retire. Re-run with
+            `?force=true&reason=...` to cascade.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BlockedByDependenciesResponse"
+        "405":
+          description: Method not allowed (only DELETE, GET are routed to this path)
+        "500":
+          $ref: "#/components/responses/InternalError"
 
   /api/v1/agents/{id}/heartbeat:
     post:
       tags: [Agents]
       summary: Agent heartbeat
-      description: Reports agent liveness and metadata (OS, architecture, IP, version).
+      description: |
+        Reports agent liveness and metadata (OS, architecture, IP, version).
+
+        I-004: a retired agent still polling the heartbeat endpoint receives
+        `410 Gone` so `cmd/agent` detects the terminal signal and shuts down
+        cleanly instead of looping forever against a decommissioned identity.
+        The retired-agent check runs before any "not found" string match so
+        it can never be masked by a sibling error branch.
       operationId: agentHeartbeat
       parameters:
         - $ref: "#/components/parameters/resourceId"
@@ -936,6 +1074,14 @@ paths:
           $ref: "#/components/responses/BadRequest"
         "404":
           $ref: "#/components/responses/NotFound"
+        "410":
+          description: |
+            I-004: the agent has been soft-retired. The agent process should
+            treat this as a terminal signal and shut down cleanly.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -3373,6 +3519,85 @@ components:
           type: string
         version:
           type: string
+        retired_at:
+          type: string
+          format: date-time
+          nullable: true
+          description: |
+            I-004: soft-retirement timestamp. `null` (or field absent) means the
+            agent is active. A non-null value is the canonical "retired" state —
+            the operational `status` column is preserved at retirement time as
+            the last-seen value, but `retired_at` is the source of truth for
+            filtering agents out of active listings.
+        retired_reason:
+          type: string
+          nullable: true
+          description: |
+            I-004: human-readable reason captured at retirement time. Only set
+            when the agent was retired via `?force=true&reason=...` cascade; a
+            default soft-retire leaves this field null.
+
+    AgentDependencyCounts:
+      type: object
+      description: |
+        I-004: preflight counts of active downstream rows that would be
+        orphaned by retiring an agent. Returned in the 409
+        `blocked_by_dependencies` body so the operator UI can tell the user
+        which bucket is blocking the retire, and also in the 200 response
+        body on a successful `?force=true` cascade as a snapshot of what
+        was cascaded.
+      properties:
+        active_targets:
+          type: integer
+          description: Deployment targets with this agent assigned and retired_at IS NULL
+        active_certificates:
+          type: integer
+          description: Certificates currently deployed via one of this agent's active targets
+        pending_jobs:
+          type: integer
+          description: Jobs with agent_id=this in status Pending, AwaitingCSR, AwaitingApproval, or Running
+
+    RetireAgentResponse:
+      type: object
+      description: |
+        I-004: response body for a successful retire on DELETE /api/v1/agents/{id}.
+        Returned on both clean retires (cascade=false, zero counts) and
+        force-cascade retires (cascade=true, counts snapshot of the
+        pre-cascade dependency state). The 204 idempotent-retire path does
+        NOT emit this body — re-retiring an already-retired agent returns
+        an empty response.
+      properties:
+        retired_at:
+          type: string
+          format: date-time
+        already_retired:
+          type: boolean
+          description: |
+            Always false on the 200 response — the already-retired path
+            returns 204 No Content with no body. Surfaced in the schema
+            only so downstream consumers have a complete field map.
+        cascade:
+          type: boolean
+          description: True when the retire was invoked with ?force=true
+        counts:
+          $ref: "#/components/schemas/AgentDependencyCounts"
+
+    BlockedByDependenciesResponse:
+      type: object
+      description: |
+        I-004: 409 response body for a retire request blocked by active
+        downstream dependencies. Returned when `force=true` is not set and
+        any of the three counts is non-zero. The operator UI renders these
+        counts so the human can retire or reassign the blocking rows
+        before re-running the retire, or tick the force checkbox to cascade.
+      properties:
+        error:
+          type: string
+          example: blocked_by_dependencies
+        message:
+          type: string
+        counts:
+          $ref: "#/components/schemas/AgentDependencyCounts"
 
     WorkItem:
       type: object

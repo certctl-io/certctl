@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // MockAgentService is a mock implementation of AgentService interface.
@@ -24,6 +25,11 @@ type MockAgentService struct {
 	GetWorkFn            func(agentID string) ([]domain.Job, error)
 	GetWorkWithTargetsFn func(agentID string) ([]domain.WorkItem, error)
 	UpdateJobStatusFn    func(agentID string, jobID string, status string, errMsg string) error
+	// I-004: soft-retirement hooks. Tests that don't set these receive nil
+	// results and nil errors, which mirrors the safest default (no-op) for
+	// unrelated suites that mock only the legacy surface.
+	RetireAgentFn        func(agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error)
+	ListRetiredAgentsFn  func(page, perPage int) ([]domain.Agent, int64, error)
 }
 
 func (m *MockAgentService) ListAgents(_ context.Context, page, perPage int) ([]domain.Agent, int64, error) {
@@ -94,6 +100,25 @@ func (m *MockAgentService) UpdateJobStatus(_ context.Context, agentID string, jo
 		return m.UpdateJobStatusFn(agentID, jobID, status, errMsg)
 	}
 	return nil
+}
+
+// RetireAgent is the I-004 soft-retirement entrypoint. Tests that don't set
+// RetireAgentFn get a nil result + nil error, which is a no-op response that
+// lets unrelated suites compile without caring about the retirement surface.
+func (m *MockAgentService) RetireAgent(_ context.Context, agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error) {
+	if m.RetireAgentFn != nil {
+		return m.RetireAgentFn(agentID, actor, force, reason)
+	}
+	return nil, nil
+}
+
+// ListRetiredAgents returns retired rows for the retired-agents tab / audit
+// views. Same zero-value default as RetireAgent for unrelated tests.
+func (m *MockAgentService) ListRetiredAgents(_ context.Context, page, perPage int) ([]domain.Agent, int64, error) {
+	if m.ListRetiredAgentsFn != nil {
+		return m.ListRetiredAgentsFn(page, perPage)
+	}
+	return nil, 0, nil
 }
 
 // Test ListAgents - success case

@@ -293,6 +293,194 @@ func (c *Client) ListAgents(args []string) error {
 	return c.outputAgentsTable(result.Data, result.Total)
 }
 
+// ListRetiredAgents lists soft-retired agents from the dedicated endpoint.
+//
+// I-004: hits GET /api/v1/agents/retired which is a separate route from the
+// default listing (the default hides retired rows). Supports --page and
+// --per-page just like the active list. Output format mirrors ListAgents
+// but prepends RETIRED_AT and RETIRED_REASON columns so the operator can
+// forensic-grep the output.
+func (c *Client) ListRetiredAgents(args []string) error {
+	fs := flag.NewFlagSet("agents list --retired", flag.ContinueOnError)
+	page := fs.Int("page", 1, "Page number")
+	perPage := fs.Int("per-page", 50, "Items per page")
+	fs.Parse(args)
+
+	query := url.Values{}
+	query.Set("page", fmt.Sprintf("%d", *page))
+	query.Set("per_page", fmt.Sprintf("%d", *perPage))
+
+	resp, err := c.do("GET", "/api/v1/agents/retired", query, nil)
+	if err != nil {
+		return err
+	}
+
+	var result struct {
+		Data  []map[string]interface{} `json:"data"`
+		Total int                      `json:"total"`
+	}
+	if err := json.Unmarshal(resp, &result); err != nil {
+		return fmt.Errorf("parsing response: %w", err)
+	}
+
+	if c.format == "json" {
+		return c.outputJSON(result)
+	}
+
+	return c.outputRetiredAgentsTable(result.Data, result.Total)
+}
+
+// RetireAgent soft-retires an agent via DELETE /api/v1/agents/{id}.
+//
+// I-004: wraps the full status-code matrix pinned by the handler's
+// agent_retire_handler_test.go:
+//
+//	200 clean retire — body: retired_at, already_retired=false, cascade=false, counts=0
+//	200 force-cascade retire — body: cascade=true, counts=pre-cascade snapshot
+//	204 idempotent retire — agent was already retired, NO body
+//	403 sentinel — reserved agent (server-scanner / cloud-*), ErrAgentIsSentinel
+//	404 not found — agent doesn't exist
+//	409 blocked_by_dependencies — body: error, message, counts
+//
+// The default (force=false) flow refuses to retire agents with active
+// downstream dependencies; the operator must re-run with --force and an
+// explicit --reason to cascade. The handler rejects --force without
+// --reason with a 400 — we mirror that contract client-side so the
+// operator gets a clear error before the round trip.
+func (c *Client) RetireAgent(args []string) error {
+	// Convention: `agents retire <id> [--force] [--reason <reason>]` — the ID
+	// is a positional arg that precedes the flags. Go's flag package stops
+	// parsing at the first non-flag token, so we pull args[0] as the ID and
+	// hand args[1:] to the flag parser. Without this split, `agents retire
+	// ag-1 --force --reason "x"` would parse with force=false and reason=""
+	// because the flags land in fs.Args() instead of being recognized.
+	if len(args) == 0 {
+		return fmt.Errorf("agent ID is required: agents retire <id> [--force] [--reason <reason>]")
+	}
+	id := args[0]
+
+	fs := flag.NewFlagSet("agents retire", flag.ContinueOnError)
+	force := fs.Bool("force", false, "Cascade-retire downstream targets, certs, and jobs")
+	reason := fs.String("reason", "", "Human-readable reason (required with --force)")
+	if err := fs.Parse(args[1:]); err != nil {
+		return err
+	}
+
+	// Mirror the handler's ErrForceReasonRequired contract client-side so
+	// the operator gets a clear error before the round trip.
+	if *force && strings.TrimSpace(*reason) == "" {
+		return fmt.Errorf("--reason is required when --force is set")
+	}
+
+	// Build query string. Skip ?force=false; skip ?reason= when empty.
+	query := url.Values{}
+	if *force {
+		query.Set("force", "true")
+	}
+	if *reason != "" {
+		query.Set("reason", *reason)
+	}
+
+	u, err := url.JoinPath(c.baseURL, fmt.Sprintf("/api/v1/agents/%s", id))
+	if err != nil {
+		return fmt.Errorf("invalid URL: %w", err)
+	}
+	if len(query) > 0 {
+		u = u + "?" + query.Encode()
+	}
+
+	req, err := http.NewRequest("DELETE", u, nil)
+	if err != nil {
+		return fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Accept", "application/json")
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return fmt.Errorf("reading response: %w", err)
+	}
+
+	switch resp.StatusCode {
+	case http.StatusNoContent:
+		// 204 idempotent — the agent was already retired. No body.
+		if c.format == "json" {
+			return c.outputJSON(map[string]interface{}{
+				"agent_id":        id,
+				"already_retired": true,
+			})
+		}
+		fmt.Printf("Agent %s was already retired (idempotent)\n", id)
+		return nil
+
+	case http.StatusOK:
+		var result struct {
+			RetiredAt      string `json:"retired_at"`
+			AlreadyRetired bool   `json:"already_retired"`
+			Cascade        bool   `json:"cascade"`
+			Counts         struct {
+				ActiveTargets      int `json:"active_targets"`
+				ActiveCertificates int `json:"active_certificates"`
+				PendingJobs        int `json:"pending_jobs"`
+			} `json:"counts"`
+		}
+		if err := json.Unmarshal(body, &result); err != nil {
+			return fmt.Errorf("parsing 200 response: %w", err)
+		}
+
+		if c.format == "json" {
+			return c.outputJSON(json.RawMessage(body))
+		}
+
+		if result.Cascade {
+			fmt.Printf("Agent %s retired (cascade). Retired at: %s\n", id, result.RetiredAt)
+			fmt.Printf("  Cascaded: %d targets, %d certificates, %d jobs\n",
+				result.Counts.ActiveTargets, result.Counts.ActiveCertificates, result.Counts.PendingJobs)
+		} else {
+			fmt.Printf("Agent %s retired. Retired at: %s\n", id, result.RetiredAt)
+		}
+		return nil
+
+	case http.StatusConflict:
+		// 409 blocked_by_dependencies. Parse the body so we can show the
+		// operator which dependency counts are holding up the retire.
+		var blocked struct {
+			Error   string `json:"error"`
+			Message string `json:"message"`
+			Counts  struct {
+				ActiveTargets      int `json:"active_targets"`
+				ActiveCertificates int `json:"active_certificates"`
+				PendingJobs        int `json:"pending_jobs"`
+			} `json:"counts"`
+		}
+		if err := json.Unmarshal(body, &blocked); err != nil {
+			return fmt.Errorf("agent has active dependencies (HTTP 409); raw body: %s", string(body))
+		}
+		return fmt.Errorf("blocked_by_dependencies: %s (targets=%d certificates=%d jobs=%d); re-run with --force --reason \"<reason>\" to cascade",
+			blocked.Message, blocked.Counts.ActiveTargets, blocked.Counts.ActiveCertificates, blocked.Counts.PendingJobs)
+
+	case http.StatusForbidden:
+		return fmt.Errorf("agent %s is a reserved sentinel and cannot be retired (HTTP 403)", id)
+
+	case http.StatusNotFound:
+		return fmt.Errorf("agent %s not found (HTTP 404)", id)
+
+	case http.StatusBadRequest:
+		return fmt.Errorf("bad request (HTTP 400): %s", string(body))
+
+	default:
+		return fmt.Errorf("unexpected HTTP %d: %s", resp.StatusCode, string(body))
+	}
+}
+
 // GetAgent retrieves a single agent by ID.
 func (c *Client) GetAgent(id string) error {
 	resp, err := c.do("GET", fmt.Sprintf("/api/v1/agents/%s", id), nil, nil)
@@ -610,6 +798,35 @@ func (c *Client) outputAgentsTable(agents []map[string]interface{}, total int) e
 
 	w.Flush()
 	fmt.Printf("\nTotal: %d\n", total)
+	return nil
+}
+
+// outputRetiredAgentsTable is the tab-writer view for the retired listing.
+// I-004: adds RETIRED_AT + REASON columns so operators can forensic-grep.
+func (c *Client) outputRetiredAgentsTable(agents []map[string]interface{}, total int) error {
+	w := tabwriter.NewWriter(os.Stdout, 0, 0, 2, ' ', 0)
+	fmt.Fprintln(w, "ID\tHOSTNAME\tOS\tARCHITECTURE\tRETIRED AT\tREASON")
+
+	for _, agent := range agents {
+		id := getString(agent, "id")
+		hostname := getString(agent, "hostname")
+		osName := getString(agent, "os")
+		arch := getString(agent, "architecture")
+		retiredAt := ""
+		if raw, ok := agent["retired_at"].(string); ok && raw != "" {
+			if t, err := time.Parse(time.RFC3339, raw); err == nil {
+				retiredAt = t.Format("2006-01-02 15:04:05")
+			} else {
+				retiredAt = raw
+			}
+		}
+		reason := getString(agent, "retired_reason")
+
+		fmt.Fprintf(w, "%s\t%s\t%s\t%s\t%s\t%s\n", id, hostname, osName, arch, retiredAt, reason)
+	}
+
+	w.Flush()
+	fmt.Printf("\nTotal retired: %d\n", total)
 	return nil
 }
 

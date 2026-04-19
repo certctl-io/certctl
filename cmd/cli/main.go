@@ -27,8 +27,9 @@ Commands:
   certs renew ID   Trigger certificate renewal
   certs revoke ID  Revoke a certificate
 
-  agents list      List agents
-  agents get ID    Get agent details
+  agents list              List agents (add --retired to list soft-retired agents)
+  agents get ID            Get agent details
+  agents retire ID         Soft-retire an agent (add --force --reason "…" to cascade)
 
   jobs list        List jobs
   jobs get ID      Get job details
@@ -140,9 +141,19 @@ func handleCerts(client *cli.Client, args []string) error {
 	}
 }
 
+// handleAgents dispatches the `agents` subcommands.
+//
+// I-004 additions:
+//
+//	agents list --retired      — hit the opt-in /agents/retired endpoint
+//	                             instead of the default listing (which
+//	                             filters retired rows out).
+//	agents retire <id>         — soft-retire an agent (DELETE /agents/{id}).
+//	                             --force cascades; --reason is required with
+//	                             --force (mirrors ErrForceReasonRequired).
 func handleAgents(client *cli.Client, args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: agents <list|get> [options]\n")
+		fmt.Fprintf(os.Stderr, "usage: agents <list|get|retire> [options]\n")
 		return nil
 	}
 
@@ -151,13 +162,34 @@ func handleAgents(client *cli.Client, args []string) error {
 
 	switch subcommand {
 	case "list":
-		return client.ListAgents(subArgs)
+		// --retired flag splits to a separate endpoint. We intercept it
+		// client-side and strip it before delegating, so both code paths
+		// share the --page/--per-page flag parsing inside the client.
+		retired := false
+		rest := make([]string, 0, len(subArgs))
+		for _, a := range subArgs {
+			if a == "--retired" {
+				retired = true
+				continue
+			}
+			rest = append(rest, a)
+		}
+		if retired {
+			return client.ListRetiredAgents(rest)
+		}
+		return client.ListAgents(rest)
 	case "get":
 		if len(subArgs) == 0 {
 			fmt.Fprintf(os.Stderr, "usage: agents get <id>\n")
 			return nil
 		}
 		return client.GetAgent(subArgs[0])
+	case "retire":
+		if len(subArgs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: agents retire <id> [--force] [--reason <reason>]\n")
+			return nil
+		}
+		return client.RetireAgent(subArgs)
 	default:
 		fmt.Fprintf(os.Stderr, "unknown subcommand: agents %s\n", subcommand)
 		return nil

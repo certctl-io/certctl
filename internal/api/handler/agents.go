@@ -3,16 +3,24 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // AgentService defines the service interface for agent operations.
+//
+// I-004 expansion: RetireAgent + ListRetiredAgents back the soft-retirement
+// surface. The handler depends on the service-package's AgentRetirementResult
+// and BlockedByDependenciesError types for result shape + errors.As unwrap,
+// which is why this file imports internal/service.
 type AgentService interface {
 	ListAgents(ctx context.Context, page, perPage int) ([]domain.Agent, int64, error)
 	GetAgent(ctx context.Context, id string) (*domain.Agent, error)
@@ -24,6 +32,10 @@ type AgentService interface {
 	GetWork(ctx context.Context, agentID string) ([]domain.Job, error)
 	GetWorkWithTargets(ctx context.Context, agentID string) ([]domain.WorkItem, error)
 	UpdateJobStatus(ctx context.Context, agentID string, jobID string, status string, errMsg string) error
+	// I-004 soft-retirement API. Both default to no-op (nil result / nil error)
+	// in mocks that don't override them — handler tests opt in per suite.
+	RetireAgent(ctx context.Context, agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error)
+	ListRetiredAgents(ctx context.Context, page, perPage int) ([]domain.Agent, int64, error)
 }
 
 // AgentHandler handles HTTP requests for agent operations.
@@ -190,6 +202,15 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.Heartbeat(r.Context(), agentID, metadata); err != nil {
+		// I-004: a retired agent still polling must receive 410 Gone so
+		// cmd/agent detects the terminal signal and shuts down cleanly
+		// instead of looping forever against a decommissioned identity.
+		// Check this FIRST — before "not found" string matching — so the
+		// retired-path is never masked by a sibling error branch.
+		if errors.Is(err, service.ErrAgentRetired) {
+			ErrorWithRequestID(w, http.StatusGone, "Agent has been retired", requestID)
+			return
+		}
 		if strings.Contains(err.Error(), "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 			return
@@ -374,5 +395,183 @@ func (h AgentHandler) AgentReportJobStatus(w http.ResponseWriter, r *http.Reques
 
 	JSON(w, http.StatusOK, map[string]string{
 		"status": "updated",
+	})
+}
+
+// RetireAgent executes the I-004 soft-retirement surface.
+// DELETE /api/v1/agents/{id}[?force=true&reason=...]
+//
+// Contract (pinned by agent_retire_handler_test.go):
+//
+//	405  any method other than DELETE
+//	200  clean retire (body: retired_at, already_retired=false, cascade=false, counts=0s)
+//	200  force-cascade retire (body: cascade=true, counts=pre-cascade snapshot)
+//	204  idempotent retire of an already-retired agent (NO body — downstream
+//	     clients that tee responses into dashboards break on spurious bodies)
+//	400  force=true without a non-empty reason (ErrForceReasonRequired)
+//	403  one of the four reserved sentinel IDs (ErrAgentIsSentinel)
+//	404  agent does not exist ("not found" string match, kept for compat with
+//	     repo error strings; sentinel checks run first so they never mask)
+//	409  blocked by preflight counts (*BlockedByDependenciesError) — body
+//	     carries the per-bucket counts so the operator UI can tell the
+//	     human which downstream dependency is holding up the retirement,
+//	     rather than forcing them to re-run the DELETE with ?force=true
+//	     and guess
+//	500  anything else
+//
+// The 409 body intentionally does NOT go through ErrorWithRequestID because
+// that helper's ErrorResponse shape has no `counts` field — we inline-marshal
+// a custom body instead. Keeping this shape stable is important: the GUI
+// pattern is "show the 409 dialog, list the N targets / M certs / K jobs
+// blocking, let the operator retire them first or tick the force checkbox."
+func (h AgentHandler) RetireAgent(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	// Extract {id} from /api/v1/agents/{id}. Mirror GetAgent's pattern so
+	// the path parser is identical across the agent handler surface and a
+	// future refactor can extract it once without introducing drift.
+	rawID := strings.TrimPrefix(r.URL.Path, "/api/v1/agents/")
+	parts := strings.Split(rawID, "/")
+	if len(parts) == 0 || parts[0] == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Agent ID is required", requestID)
+		return
+	}
+	id := parts[0]
+
+	// Parse optional force + reason. A missing `force` param is treated as
+	// force=false (the default, safe path); anything strconv.ParseBool rejects
+	// is also force=false so a malformed query can never silently enable the
+	// cascade. The reason string is passed through verbatim — the service
+	// owns the "force=true requires reason" rule.
+	query := r.URL.Query()
+	force := false
+	if fv := query.Get("force"); fv != "" {
+		if parsed, err := strconv.ParseBool(fv); err == nil {
+			force = parsed
+		}
+	}
+	reason := query.Get("reason")
+
+	actor := resolveActor(r.Context())
+
+	result, err := h.svc.RetireAgent(r.Context(), id, actor, force, reason)
+	if err != nil {
+		// Sentinel + typed-error checks run BEFORE string matching on "not
+		// found" so a repo error that happens to contain those words can
+		// never mask a structural refusal (403/400/409). Order matters.
+		if errors.Is(err, service.ErrAgentIsSentinel) {
+			ErrorWithRequestID(w, http.StatusForbidden, "Agent is a reserved sentinel and cannot be retired", requestID)
+			return
+		}
+		if errors.Is(err, service.ErrForceReasonRequired) {
+			ErrorWithRequestID(w, http.StatusBadRequest, "force=true requires a non-empty reason", requestID)
+			return
+		}
+		var blocked *service.BlockedByDependenciesError
+		if errors.As(err, &blocked) {
+			// Custom 409 body with per-bucket counts. ErrorResponse has no
+			// `counts` field, so we marshal a bespoke struct instead.
+			// Keep `error`/`message`/`counts` as the stable shape — any
+			// dashboard parsing this relies on those three keys.
+			body := struct {
+				Error   string                       `json:"error"`
+				Message string                       `json:"message"`
+				Counts  domain.AgentDependencyCounts `json:"counts"`
+			}{
+				Error: "blocked_by_dependencies",
+				Message: "Agent has active downstream dependencies. Retire or reassign them " +
+					"first, or re-run with ?force=true&reason=... to cascade.",
+				Counts: blocked.Counts,
+			}
+			JSON(w, http.StatusConflict, body)
+			return
+		}
+		if strings.Contains(err.Error(), "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
+			return
+		}
+		slog.Error("RetireAgent failed", "agent_id", id, "error", err.Error())
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to retire agent", requestID)
+		return
+	}
+
+	// Idempotent retire: the agent was already retired, so we return 204 No
+	// Content with a ZERO-length body. The Red contract (test line 106) fails
+	// if even a trailing newline leaks into the response. WriteHeader alone
+	// emits the status without invoking the JSON encoder.
+	if result.AlreadyRetired {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+
+	// Clean retire (force=false) or successful cascade (force=true). Body
+	// shape pinned by Red contract: retired_at, already_retired, cascade,
+	// counts. Omitempty is deliberately NOT used — operators parsing the
+	// response expect every field to always be present.
+	JSON(w, http.StatusOK, struct {
+		RetiredAt      time.Time                    `json:"retired_at"`
+		AlreadyRetired bool                         `json:"already_retired"`
+		Cascade        bool                         `json:"cascade"`
+		Counts         domain.AgentDependencyCounts `json:"counts"`
+	}{
+		RetiredAt:      result.RetiredAt,
+		AlreadyRetired: result.AlreadyRetired,
+		Cascade:        result.Cascade,
+		Counts:         result.Counts,
+	})
+}
+
+// ListRetiredAgents returns the opt-in listing of retired agents for the
+// operator UI's "Retired" tab and for audit/forensics workflows.
+// GET /api/v1/agents/retired?page=1&per_page=50
+//
+// The default ListAgents handler hides retired rows; this is the dedicated
+// surface for reading them back. Pagination defaults match ListAgents so
+// the GUI can reuse the same query hook (page=1, per_page=50, cap 500).
+//
+// Go 1.22's enhanced ServeMux routes `/agents/retired` to this handler via
+// the literal-beats-pattern-var precedence rule (literal `retired` wins over
+// `{id}` in the sibling GET /api/v1/agents/{id} route), so both entries can
+// coexist without conflict. If that precedence ever regresses, the failure
+// mode is TestListRetiredAgentsHandler_Success blowing up with a 404 — which
+// is the fast signal we want.
+func (h AgentHandler) ListRetiredAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	requestID := middleware.GetRequestID(r.Context())
+
+	page := 1
+	perPage := 50
+	query := r.URL.Query()
+	if p := query.Get("page"); p != "" {
+		if parsed, err := strconv.Atoi(p); err == nil && parsed > 0 {
+			page = parsed
+		}
+	}
+	if pp := query.Get("per_page"); pp != "" {
+		if parsed, err := strconv.Atoi(pp); err == nil && parsed > 0 && parsed <= 500 {
+			perPage = parsed
+		}
+	}
+
+	agents, total, err := h.svc.ListRetiredAgents(r.Context(), page, perPage)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list retired agents", requestID)
+		return
+	}
+
+	JSON(w, http.StatusOK, PagedResponse{
+		Data:    agents,
+		Total:   total,
+		Page:    page,
+		PerPage: perPage,
 	})
 }

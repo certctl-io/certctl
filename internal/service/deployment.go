@@ -145,6 +145,31 @@ func (s *DeploymentService) ProcessDeploymentJob(ctx context.Context, job *domai
 		return fmt.Errorf("failed to fetch agent: %w", err)
 	}
 
+	// I-004: AgentRepository.Get surfaces retired rows by design (for the GUI
+	// banner + 410 Gone heartbeat path). Deployments must never dispatch to a
+	// retired agent — it will never heartbeat again and the target row should
+	// itself have been cascade-retired when the agent was force-retired. A job
+	// slipping through here would otherwise hit the heartbeat-staleness branch
+	// below with the misleading reason "agent is offline"; we want operators to
+	// see the real cause. Fail the job with an explicit reason, send a
+	// deployment notification so the owner is alerted, and record an audit
+	// event. Falls through the same notify+audit shape as the offline branch.
+	if agent.IsRetired() {
+		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, "assigned agent is retired")
+		if updateErr != nil {
+			slog.Error("failed to update job status", "job_id", job.ID, "error", updateErr)
+		}
+		if notifErr := s.notificationSvc.SendDeploymentNotification(ctx, cert, target, false, fmt.Errorf("agent retired")); notifErr != nil {
+			slog.Error("failed to send deployment notification", "error", notifErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+			"deployment_job_failed", "certificate", job.CertificateID,
+			map[string]interface{}{"job_id": job.ID, "reason": "agent retired", "target_id": targetID, "agent_id": agentID}); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
+		return fmt.Errorf("agent %s is retired", agentID)
+	}
+
 	// Check agent heartbeat (must be within last 5 minutes)
 	if agent.LastHeartbeatAt != nil && time.Since(*agent.LastHeartbeatAt) > 5*time.Minute {
 		updateErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusFailed, "agent is offline")

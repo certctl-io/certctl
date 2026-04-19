@@ -506,6 +506,53 @@ func registerAgentTools(s *gomcp.Server, c *Client) {
 		}
 		return textResult(data)
 	})
+
+	// I-004: soft-retirement. DELETE /api/v1/agents/{id} returns 200 on a
+	// fresh retire (body echoes retired_at/already_retired/cascade/counts),
+	// 204 on an idempotent retire of an already-retired agent (do() in
+	// client.go normalizes that to {"status":"deleted"}), 409 when downstream
+	// dependencies block the retire and force wasn't set, 403 on sentinel
+	// agents, or 400 when force=true was sent without a reason. The tool
+	// forwards the raw handler response so the LLM operator sees the
+	// dependency counts and can decide whether to retry with force=true.
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_retire_agent",
+		Description: "Soft-retire an agent (DELETE /api/v1/agents/{id}). Sets retired_at + retired_reason on the row; the agent is filtered from the default listing and surfaces only via certctl_list_retired_agents. Default is a safety-gated soft-retire that returns 409 blocked_by_dependencies if the agent has active targets, active certificates, or pending jobs — the returned counts tell you what would be orphaned. Pass force=true to cascade through and retire those dependents too; force=true requires a non-empty reason (captured in the audit trail). Sentinel discovery agents (server-scanner, cloud-aws-sm, cloud-azure-kv, cloud-gcp-sm) cannot be retired — the handler returns 403 unconditionally. Idempotent: retrying on an already-retired agent returns 204 without side effects.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input RetireAgentInput) (*gomcp.CallToolResult, any, error) {
+		// Client-side mirror of the handler's ErrForceReasonRequired contract
+		// (see internal/api/handler/agents.go) so the LLM gets an immediate,
+		// actionable error instead of a round-trip 400. Whitespace-only
+		// reasons are treated as empty — matches handler's TrimSpace check.
+		if input.Force && input.Reason == "" {
+			return errorResult(fmt.Errorf("reason is required when force=true"))
+		}
+		query := url.Values{}
+		if input.Force {
+			query.Set("force", "true")
+		}
+		if input.Reason != "" {
+			query.Set("reason", input.Reason)
+		}
+		data, err := c.DeleteWithQuery("/api/v1/agents/"+input.ID, query)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	// I-004: retired agents are filtered out of GET /api/v1/agents by default.
+	// The /agents/retired endpoint is the opt-in view — same pagination shape
+	// as the default listing, but filters to rows where retired_at IS NOT NULL.
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_retired_agents",
+		Description: "List soft-retired agents (GET /api/v1/agents/retired). These are agents that have been retired via certctl_retire_agent; retired_at and retired_reason are populated. Returned separately from certctl_list_agents so the default listing stays focused on operational agents.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListParams) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/agents/retired", paginationQuery(input.Page, input.PerPage))
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
 }
 
 // ── Jobs ────────────────────────────────────────────────────────────
