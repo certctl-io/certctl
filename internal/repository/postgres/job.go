@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/shankar0123/certctl/internal/domain"
@@ -568,6 +569,41 @@ func (r *JobRepository) ClaimPendingByAgentID(ctx context.Context, agentID strin
 	// Preserve the legacy ordering: Pending deployments first, AwaitingCSR
 	// second. Callers that want a strict created_at merge can re-sort.
 	return append(pendingJobs, csrJobs...), nil
+}
+
+// ListTimedOutAwaitingJobs returns jobs stuck in AwaitingCSR or AwaitingApproval past
+// their respective cutoff timestamps (created_at < cutoff). The reaper loop transitions
+// them to Failed; I-001's retry loop then auto-promotes eligible Failed jobs back to
+// Pending. I-003 coverage-gap closure.
+func (r *JobRepository) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, type, certificate_id, target_id, agent_id, status, attempts, max_attempts,
+		       last_error, scheduled_at, started_at, completed_at, created_at
+		FROM jobs
+		WHERE (status = $1 AND created_at < $2)
+		   OR (status = $3 AND created_at < $4)
+		ORDER BY created_at ASC
+	`, domain.JobStatusAwaitingCSR, csrCutoff, domain.JobStatusAwaitingApproval, approvalCutoff)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query timed-out awaiting jobs: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*domain.Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating timed-out job rows: %w", err)
+	}
+
+	return jobs, nil
 }
 
 // scanJob scans a job from a row or rows

@@ -742,6 +742,25 @@ func (m *mockJobRepository) ClaimPendingByAgentID(ctx context.Context, agentID s
 	return result, nil
 }
 
+// ListTimedOutAwaitingJobs is the I-003 integration-mock stub. Returns jobs whose
+// created_at predates the relevant cutoff for their status.
+func (m *mockJobRepository) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error) {
+	var jobs []*domain.Job
+	for _, j := range m.jobs {
+		switch j.Status {
+		case domain.JobStatusAwaitingCSR:
+			if j.CreatedAt.Before(csrCutoff) {
+				jobs = append(jobs, j)
+			}
+		case domain.JobStatusAwaitingApproval:
+			if j.CreatedAt.Before(approvalCutoff) {
+				jobs = append(jobs, j)
+			}
+		}
+	}
+	return jobs, nil
+}
+
 type mockAuditRepository struct {
 	events []*domain.AuditEvent
 }

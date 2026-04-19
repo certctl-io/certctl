@@ -77,6 +77,10 @@ func (m *mockVerificationJobRepo) ClaimPendingByAgentID(ctx context.Context, age
 	return nil, nil
 }
 
+func (m *mockVerificationJobRepo) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error) {
+	return nil, nil
+}
+
 // newVerificationTestService creates a VerificationService wired with test doubles.
 func newVerificationTestService(jobs map[string]*domain.Job, jobRepoErr error) (*VerificationService, *mockVerificationJobRepo, *mockAuditRepo) {
 	jobRepo := &mockVerificationJobRepo{jobs: jobs, err: jobRepoErr}

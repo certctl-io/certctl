@@ -151,6 +151,11 @@ type JobRepository interface {
 	// to Running) and locks AwaitingCSR jobs against concurrent observers (leaving state intact,
 	// since the CSR-submission path drives the next transition). H-6 (CWE-362) race remediation.
 	ClaimPendingByAgentID(ctx context.Context, agentID string) ([]*domain.Job, error)
+	// ListTimedOutAwaitingJobs returns jobs stuck in AwaitingCSR (created before csrCutoff) or
+	// AwaitingApproval (created before approvalCutoff). The reaper loop transitions them to
+	// Failed; I-001's retry loop then auto-promotes eligible Failed jobs back to Pending.
+	// I-003 coverage-gap closure.
+	ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error)
 }
 
 // RenewalPolicyRepository defines operations for managing renewal policies.

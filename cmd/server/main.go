@@ -469,6 +469,17 @@ func main() {
 			"sources", cloudDiscoveryService.SourceCount())
 	}
 
+
+	// Wire job timeout reaper (I-003)
+	sched.SetJobReaperService(jobService)
+	sched.SetJobTimeoutInterval(cfg.Scheduler.JobTimeoutInterval)
+	sched.SetAwaitingCSRTimeout(cfg.Scheduler.AwaitingCSRTimeout)
+	sched.SetAwaitingApprovalTimeout(cfg.Scheduler.AwaitingApprovalTimeout)
+	logger.Info("job timeout reaper enabled",
+		"interval", cfg.Scheduler.JobTimeoutInterval.String(),
+		"csr_timeout", cfg.Scheduler.AwaitingCSRTimeout.String(),
+		"approval_timeout", cfg.Scheduler.AwaitingApprovalTimeout.String())
+
 	// Start scheduler
 	logger.Info("starting scheduler")
 	startedChan := sched.Start(ctx)

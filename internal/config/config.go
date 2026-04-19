@@ -715,6 +715,29 @@ type SchedulerConfig struct {
 	// had no caller prior to this loop being wired).
 	// Setting: CERTCTL_SCHEDULER_RETRY_INTERVAL environment variable.
 	RetryInterval time.Duration
+
+	// JobTimeoutInterval is how often the reaper loop sweeps AwaitingCSR and
+	// AwaitingApproval jobs for TTL expiration. Default: 10 minutes. Minimum: 1
+	// second. Timed-out jobs are transitioned to Failed with a descriptive error
+	// message; I-001's retry loop then auto-promotes eligible Failed jobs back
+	// to Pending (closes coverage gap I-003).
+	// Setting: CERTCTL_JOB_TIMEOUT_INTERVAL environment variable.
+	JobTimeoutInterval time.Duration
+
+	// AwaitingCSRTimeout is the maximum age an AwaitingCSR job can remain in
+	// that state before the reaper transitions it to Failed. Default: 24 hours.
+	// An agent that hasn't submitted a CSR within this window is presumed
+	// unreachable. Minimum: 1 second.
+	// Setting: CERTCTL_JOB_AWAITING_CSR_TIMEOUT environment variable.
+	AwaitingCSRTimeout time.Duration
+
+	// AwaitingApprovalTimeout is the maximum age an AwaitingApproval job can
+	// remain in that state before the reaper transitions it to Failed. Default:
+	// 168 hours (7 days). Reviewers who haven't approved within this window
+	// force the renewal to fail loudly rather than silently stall. Minimum: 1
+	// second.
+	// Setting: CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT environment variable.
+	AwaitingApprovalTimeout time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -816,6 +839,9 @@ func Load() (*Config, error) {
 			AgentHealthCheckInterval:    getEnvDuration("CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL", 2*time.Minute),
 			NotificationProcessInterval: getEnvDuration("CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL", 1*time.Minute),
 			RetryInterval:               getEnvDuration("CERTCTL_SCHEDULER_RETRY_INTERVAL", 5*time.Minute),
+			JobTimeoutInterval:          getEnvDuration("CERTCTL_JOB_TIMEOUT_INTERVAL", 10*time.Minute),
+			AwaitingCSRTimeout:          getEnvDuration("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", 24*time.Hour),
+			AwaitingApprovalTimeout:     getEnvDuration("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", 168*time.Hour),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
@@ -1085,6 +1111,18 @@ func (c *Config) Validate() error {
 
 	if c.Scheduler.RetryInterval < 1*time.Second {
 		return fmt.Errorf("retry interval must be at least 1 second")
+	}
+
+	if c.Scheduler.JobTimeoutInterval < 1*time.Second {
+		return fmt.Errorf("job timeout interval must be at least 1 second")
+	}
+
+	if c.Scheduler.AwaitingCSRTimeout < 1*time.Second {
+		return fmt.Errorf("awaiting CSR timeout must be at least 1 second")
+	}
+
+	if c.Scheduler.AwaitingApprovalTimeout < 1*time.Second {
+		return fmt.Errorf("awaiting approval timeout must be at least 1 second")
 	}
 
 	return nil

@@ -58,6 +58,11 @@ type CloudDiscoveryServicer interface {
 	DiscoverAll(ctx context.Context) (int, []error)
 }
 
+// JobReaperService defines the interface for job timeout reaping used by the scheduler.
+type JobReaperService interface {
+	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
+}
+
 // Scheduler manages background jobs and periodic tasks for the certificate control plane.
 // It runs multiple concurrent loops for renewal checks, job processing, agent health checks,
 // and notification processing.
@@ -70,6 +75,7 @@ type Scheduler struct {
 	digestService          DigestServicer
 	healthCheckService     HealthCheckServicer
 	cloudDiscoveryService  CloudDiscoveryServicer
+	jobReaper              JobReaperService
 	logger                 *slog.Logger
 
 	// Configurable tick intervals
@@ -83,6 +89,9 @@ type Scheduler struct {
 	digestInterval                  time.Duration
 	healthCheckInterval             time.Duration
 	cloudDiscoveryInterval          time.Duration
+	jobTimeoutInterval              time.Duration
+	awaitingCSRTimeout              time.Duration
+	awaitingApprovalTimeout         time.Duration
 
 	// Idempotency guards: prevent duplicate execution of slow jobs
 	renewalCheckRunning           atomic.Bool
@@ -95,6 +104,7 @@ type Scheduler struct {
 	digestRunning                 atomic.Bool
 	healthCheckRunning            atomic.Bool
 	cloudDiscoveryRunning         atomic.Bool
+	jobTimeoutRunning             atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -128,6 +138,7 @@ func NewScheduler(
 		digestInterval:                24 * time.Hour,
 		healthCheckInterval:           60 * time.Second,
 		cloudDiscoveryInterval:        6 * time.Hour,
+		jobTimeoutInterval:            10 * time.Minute,
 	}
 }
 
@@ -201,6 +212,26 @@ func (s *Scheduler) SetCloudDiscoveryInterval(d time.Duration) {
 	s.cloudDiscoveryInterval = d
 }
 
+
+// SetJobReaperService sets the job reaper service (I-003).
+func (s *Scheduler) SetJobReaperService(jr JobReaperService) {
+	s.jobReaper = jr
+}
+
+// SetJobTimeoutInterval sets the job timeout reaper tick interval (I-003).
+func (s *Scheduler) SetJobTimeoutInterval(d time.Duration) {
+	s.jobTimeoutInterval = d
+}
+
+// SetAwaitingCSRTimeout sets the AwaitingCSR TTL (I-003).
+func (s *Scheduler) SetAwaitingCSRTimeout(d time.Duration) {
+	s.awaitingCSRTimeout = d
+}
+
+// SetAwaitingApprovalTimeout sets the AwaitingApproval TTL (I-003).
+func (s *Scheduler) SetAwaitingApprovalTimeout(d time.Duration) {
+	s.awaitingApprovalTimeout = d
+}
 // Start initiates all background scheduler loops. It returns a channel that signals
 // when the scheduler has started all loops. The scheduler runs until the context is cancelled.
 func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
@@ -211,10 +242,10 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 
 		// Track all loop goroutines in the WaitGroup so WaitForCompletion
 		// blocks until they've fully exited (prevents test races).
-		// Base count is 6: renewal, job processor, job retry (I-001),
-		// agent health, notification, short-lived expiry. Optional loops
+		// Base count is 7: renewal, job processor, job retry (I-001),
+		// job timeout (I-003), agent health, notification, short-lived expiry. Optional loops
 		// (network scan, digest, health check, cloud discovery) add to this.
-		loopCount := 6
+		loopCount := 7
 		if s.networkScanService != nil {
 			loopCount++
 		}
@@ -232,6 +263,7 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.jobProcessorLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.jobRetryLoop(ctx) }()
+		go func() { defer s.wg.Done(); s.jobTimeoutLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.agentHealthCheckLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.notificationProcessLoop(ctx) }()
 		go func() { defer s.wg.Done(); s.shortLivedExpiryCheckLoop(ctx) }()
@@ -410,6 +442,61 @@ func (s *Scheduler) runJobRetry(ctx context.Context) {
 			"interval", s.jobRetryInterval.String())
 	} else {
 		s.logger.Debug("job retry completed")
+	}
+}
+
+// jobTimeoutLoop runs every jobTimeoutInterval and transitions jobs stuck in
+// AwaitingCSR or AwaitingApproval to Failed if they exceed their TTL. I-001's
+// retry loop then auto-promotes eligible Failed jobs back to Pending. Closes
+// coverage gap I-003. Uses atomic.Bool to prevent duplicate execution.
+func (s *Scheduler) jobTimeoutLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.jobTimeoutInterval)
+	defer ticker.Stop()
+
+	// Run immediately on start (with idempotency guard)
+	s.jobTimeoutRunning.Store(true)
+	s.wg.Add(1)
+	go func() {
+		defer s.wg.Done()
+		defer s.jobTimeoutRunning.Store(false)
+		s.runJobTimeout(ctx)
+	}()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.jobTimeoutRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("job timeout reaper still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.jobTimeoutRunning.Store(false)
+				s.runJobTimeout(ctx)
+			}()
+		}
+	}
+}
+
+// runJobTimeout executes a single job timeout reaping cycle with error recovery.
+// When no JobReaperService has been wired (e.g. in tests that don't exercise
+// I-003) the call is a safe no-op, preserving the always-on loop topology
+// described in I-003 without forcing every consumer to wire a reaper.
+func (s *Scheduler) runJobTimeout(ctx context.Context) {
+	if s.jobReaper == nil {
+		return
+	}
+	opCtx, cancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer cancel()
+	if err := s.jobReaper.ReapTimedOutJobs(opCtx, s.awaitingCSRTimeout, s.awaitingApprovalTimeout); err != nil {
+		s.logger.Error("job timeout reaper failed",
+			"error", err,
+			"interval", s.jobTimeoutInterval.String())
+	} else {
+		s.logger.Debug("job timeout reaper completed")
 	}
 }
 

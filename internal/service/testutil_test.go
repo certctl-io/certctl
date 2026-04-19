@@ -156,17 +156,20 @@ func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 
 // mockJobRepo is a test implementation of JobRepository
 type mockJobRepo struct {
-	mu              sync.Mutex
-	Jobs            map[string]*domain.Job
-	StatusUpdates   map[string]domain.JobStatus
-	CreateErr       error
-	UpdateErr       error
-	UpdateStatusErr error
-	GetErr          error
-	ListErr         error
-	ListByStatusErr error
-	DeleteErr       error
-	Updated         []*domain.Job
+	mu                       sync.Mutex
+	Jobs                     map[string]*domain.Job
+	StatusUpdates            map[string]domain.JobStatus
+	CreateErr                error
+	UpdateErr                error
+	UpdateErrorByID          map[string]error
+	UpdateErrorByIDMu        sync.Mutex
+	UpdateStatusErr          error
+	GetErr                   error
+	ListErr                  error
+	ListByStatusErr          error
+	DeleteErr                error
+	ListTimedOutErr          error
+	Updated                  []*domain.Job
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -210,6 +213,13 @@ func (m *mockJobRepo) Update(ctx context.Context, job *domain.Job) error {
 	defer m.mu.Unlock()
 	if m.UpdateErr != nil {
 		return m.UpdateErr
+	}
+	// Check per-ID error injection
+	m.UpdateErrorByIDMu.Lock()
+	idErr, ok := m.UpdateErrorByID[job.ID]
+	m.UpdateErrorByIDMu.Unlock()
+	if ok && idErr != nil {
+		return idErr
 	}
 	m.Jobs[job.ID] = job
 	m.Updated = append(m.Updated, job)
@@ -350,6 +360,30 @@ func (m *mockJobRepo) ClaimPendingByAgentID(ctx context.Context, agentID string)
 		}
 	}
 	return result, nil
+}
+
+// ListTimedOutAwaitingJobs returns jobs stuck in AwaitingCSR/AwaitingApproval past the
+// respective cutoffs. I-003 coverage-gap closure.
+func (m *mockJobRepo) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListTimedOutErr != nil {
+		return nil, m.ListTimedOutErr
+	}
+	var jobs []*domain.Job
+	for _, j := range m.Jobs {
+		switch j.Status {
+		case domain.JobStatusAwaitingCSR:
+			if j.CreatedAt.Before(csrCutoff) {
+				jobs = append(jobs, j)
+			}
+		case domain.JobStatusAwaitingApproval:
+			if j.CreatedAt.Before(approvalCutoff) {
+				jobs = append(jobs, j)
+			}
+		}
+	}
+	return jobs, nil
 }
 
 func (m *mockJobRepo) AddJob(job *domain.Job) {

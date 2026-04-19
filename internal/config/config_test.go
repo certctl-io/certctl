@@ -4,6 +4,7 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"strings"
 	"time"
 )
 
@@ -329,6 +330,9 @@ func TestValidate_ValidConfig(t *testing.T) {
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
 			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -349,6 +353,9 @@ func TestValidate_AuthTypeNone(t *testing.T) {
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
 			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
 		},
 	}
 	if err := cfg.Validate(); err != nil {
@@ -704,6 +711,123 @@ func TestGetEnvBool(t *testing.T) {
 			got := getEnvBool("TEST_BOOL", false)
 			if got != tt.expected {
 				t.Errorf("getEnvBool(%q) = %v, want %v", tt.value, got, tt.expected)
+			}
+		})
+	}
+}
+// I-003: Job timeout reaper configuration tests
+func TestConfig_Scheduler_JobTimeoutDefaults(t *testing.T) {
+	clearCertctlEnv(t)
+	setMinimalValidEnv(t)
+	// Explicitly unset the three I-003 env vars to exercise the default path.
+	t.Setenv("CERTCTL_JOB_TIMEOUT_INTERVAL", "")
+	t.Setenv("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", "")
+	t.Setenv("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", "")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Scheduler.JobTimeoutInterval != 10*time.Minute {
+		t.Errorf("JobTimeoutInterval = %v, want 10m", cfg.Scheduler.JobTimeoutInterval)
+	}
+	if cfg.Scheduler.AwaitingCSRTimeout != 24*time.Hour {
+		t.Errorf("AwaitingCSRTimeout = %v, want 24h", cfg.Scheduler.AwaitingCSRTimeout)
+	}
+	if cfg.Scheduler.AwaitingApprovalTimeout != 168*time.Hour {
+		t.Errorf("AwaitingApprovalTimeout = %v, want 168h", cfg.Scheduler.AwaitingApprovalTimeout)
+	}
+}
+
+func TestConfig_Scheduler_JobTimeoutEnvOverride(t *testing.T) {
+	clearCertctlEnv(t)
+	setMinimalValidEnv(t)
+	t.Setenv("CERTCTL_JOB_TIMEOUT_INTERVAL", "15m")
+	t.Setenv("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", "48h")
+	t.Setenv("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", "336h")
+
+	cfg, err := Load()
+	if err != nil {
+		t.Fatalf("Load() error: %v", err)
+	}
+
+	if cfg.Scheduler.JobTimeoutInterval != 15*time.Minute {
+		t.Errorf("JobTimeoutInterval = %v, want 15m", cfg.Scheduler.JobTimeoutInterval)
+	}
+	if cfg.Scheduler.AwaitingCSRTimeout != 48*time.Hour {
+		t.Errorf("AwaitingCSRTimeout = %v, want 48h", cfg.Scheduler.AwaitingCSRTimeout)
+	}
+	if cfg.Scheduler.AwaitingApprovalTimeout != 336*time.Hour {
+		t.Errorf("AwaitingApprovalTimeout = %v, want 336h", cfg.Scheduler.AwaitingApprovalTimeout)
+	}
+}
+
+func TestConfig_Scheduler_JobTimeoutValidation(t *testing.T) {
+	tests := []struct {
+		name       string
+		field      string
+		value      time.Duration
+		wantErrMsg string
+	}{
+		{
+			"JobTimeoutInterval too small",
+			"JobTimeoutInterval",
+			500 * time.Millisecond,
+			"job timeout interval must be at least 1 second",
+		},
+		{
+			"AwaitingCSRTimeout too small",
+			"AwaitingCSRTimeout",
+			500 * time.Millisecond,
+			"awaiting CSR timeout must be at least 1 second",
+		},
+		{
+			"AwaitingApprovalTimeout too small",
+			"AwaitingApprovalTimeout",
+			500 * time.Millisecond,
+			"awaiting approval timeout must be at least 1 second",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Start from a fully valid config so the I-003 timeout checks
+			// are the only potential failure point.
+			cfg := &Config{
+				Server:   ServerConfig{Port: 8080},
+				Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+				Log:      LogConfig{Level: "info", Format: "json"},
+				Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
+				Keygen:   KeygenConfig{Mode: "agent"},
+				Scheduler: SchedulerConfig{
+					RenewalCheckInterval:        1 * time.Minute,
+					JobProcessorInterval:        1 * time.Minute,
+					AgentHealthCheckInterval:    1 * time.Minute,
+					NotificationProcessInterval: 1 * time.Minute,
+					RetryInterval:               1 * time.Minute,
+					JobTimeoutInterval:          10 * time.Minute,
+					AwaitingCSRTimeout:          24 * time.Hour,
+					AwaitingApprovalTimeout:     168 * time.Hour,
+				},
+			}
+
+			// Override the specific field under test
+			switch tt.field {
+			case "JobTimeoutInterval":
+				cfg.Scheduler.JobTimeoutInterval = tt.value
+			case "AwaitingCSRTimeout":
+				cfg.Scheduler.AwaitingCSRTimeout = tt.value
+			case "AwaitingApprovalTimeout":
+				cfg.Scheduler.AwaitingApprovalTimeout = tt.value
+			}
+
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error containing %q", tt.wantErrMsg)
+			}
+			if !strings.Contains(err.Error(), tt.wantErrMsg) {
+				t.Errorf("Validate() error = %q, want to contain %q", err.Error(), tt.wantErrMsg)
 			}
 		})
 	}
