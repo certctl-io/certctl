@@ -258,7 +258,19 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.
-// EST endpoints use a separate middleware chain (no API key auth — EST uses TLS client certs).
+//
+// EST endpoints are intentionally unauthenticated at the HTTP layer. Per RFC 7030
+// §3.2.3, authentication and authorization for enrollment are deployment-specific;
+// certctl relies on CSR signature verification, profile policy enforcement (allowed
+// key types, max TTL, permitted EKUs), and the underlying issuer connector's own
+// policy. Per RFC 7030 §4.1.1, /.well-known/est/cacerts is explicitly anonymous.
+//
+// cmd/server/main.go's finalHandler dispatches /.well-known/est/* to a dedicated
+// no-auth middleware chain (RequestID, structuredLogger, Recovery only) so EST
+// clients — IoT devices, 802.1X supplicants, MDM-enrolled laptops — never hit the
+// Bearer-token auth middleware they cannot satisfy. See M-001 audit 2026-04-19
+// (option D): prior builds routed EST through the authenticated apiHandler chain,
+// which reduced every enrollment to a 401 before the handler was reached.
 func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
 	// EST endpoints per RFC 7030 Section 3.2.2
 	r.Register("GET /.well-known/est/cacerts", http.HandlerFunc(est.CACerts))
@@ -269,7 +281,11 @@ func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
 
 // RegisterSCEPHandlers sets up SCEP (RFC 8894) routes.
 // SCEP uses a single endpoint with operation-based dispatch via query parameters.
-// Authentication is via challenge password in the CSR, not TLS client certs or API keys.
+// Authentication is via the challengePassword attribute in the PKCS#10 CSR, not
+// via HTTP Bearer tokens or TLS client certs. cmd/server/main.go's finalHandler
+// routes /scep* through the no-auth middleware chain (M-001 audit 2026-04-19,
+// option D), and Config.Validate() refuses to start the server if SCEP is enabled
+// without a non-empty CERTCTL_SCEP_CHALLENGE_PASSWORD (H-2, CWE-306).
 func (r *Router) RegisterSCEPHandlers(scep handler.SCEPHandler) {
 	// SCEP uses a single path; the handler dispatches on ?operation= query param
 	r.Register("GET /scep", http.HandlerFunc(scep.HandleSCEP))

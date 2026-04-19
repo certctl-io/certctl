@@ -723,6 +723,8 @@ type ESTService interface {
 
 **Issuer connector extension:** EST required adding `GetCACertPEM(ctx) (string, error)` to the issuer connector interface so the `/cacerts` endpoint can serve the CA chain. The Local CA returns its CA certificate PEM; Vault PKI fetches via `GET /v1/{mount}/ca/pem`; Google CAS fetches via API; AWS ACM PCA retrieves via `GetCertificateAuthorityCertificate`. ACME, step-ca, OpenSSL, DigiCert, and Sectigo connectors return errors (they don't expose a static CA chain — their chains are per-issuance).
 
+**Authentication:** EST endpoints are served unauthenticated at the HTTP layer under `/.well-known/est/*` — no Bearer token required. Per RFC 7030 §3.2.3 EST authentication is deployment-specific, and per §4.1.1 `/cacerts` is explicitly anonymous. certctl enforces authentication via CSR signature verification inside `ESTService.SimpleEnroll`/`SimpleReEnroll` plus profile policy gates (allowed key algorithms, minimum key size, permitted SANs, permitted EKUs, MaxTTL). The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes `/.well-known/est/*` through `noAuthHandler` (RequestID + structuredLogger + Recovery only). Operators who need stronger client identification should terminate mTLS at an upstream reverse proxy and pin the CSR's SAN to the client cert subject at the profile level.
+
 **Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID.
 
 ### SCEP Server (RFC 8894)
@@ -749,7 +751,7 @@ Signed certificate returned as PKCS#7 certs-only
 
 **Wire format:** SCEP clients wrap CSRs in PKCS#7 SignedData envelopes. The handler parses the outer ASN.1 ContentInfo → SignedData → EncapsulatedContentInfo to extract the CSR bytes. Fallback paths handle base64-encoded PKCS#7 and raw CSR submissions (for simpler clients). Responses use PKCS#7 certs-only via the shared `internal/pkcs7` package (same as EST). Single certs are returned as raw DER for `GetCACert`, chains as PKCS#7.
 
-**Authentication:** SCEP uses challenge passwords embedded in CSR attributes (OID 1.2.840.113549.1.9.7) rather than TLS client certificates. The server validates the challenge password against `CERTCTL_SCEP_CHALLENGE_PASSWORD`. When no challenge password is configured, any value is accepted.
+**Authentication:** SCEP endpoints at `/scep` and `/scep/*` are served unauthenticated at the HTTP layer — no Bearer token required — per RFC 8894 §3.2, which defines authentication via the `challengePassword` attribute (OID 1.2.840.113549.1.9.7) embedded in the PKCS#10 CSR rather than an HTTP credential. The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes `/scep` and `/scep/*` through `noAuthHandler` (RequestID + structuredLogger + Recovery only). The `challengePassword` is mandatory: `preflightSCEPChallengePassword` at startup refuses to boot the control plane when `CERTCTL_SCEP_ENABLED=true` is set without `CERTCTL_SCEP_CHALLENGE_PASSWORD`, closing CWE-306 (missing authentication for a critical function). `SCEPService.PKCSReq` enforces the same invariant defense-in-depth — an empty `s.challengePassword` rejects every enrollment — and the password comparison uses `crypto/subtle.ConstantTimeCompare` to prevent response-time side-channel leakage. The startup log line `SCEP server enabled` emits a `challenge_password_set` boolean for operator visibility.
 
 **Interface:** The `SCEPHandler` defines an `SCEPService` interface (dependency inversion):
 
@@ -806,10 +808,11 @@ The control plane only handles public material: certificates, chains, and CSRs.
 
 ### Authentication
 
-- **API clients → Server**: API key in `Authorization: Bearer` header, or `none` for demo mode
+- **API clients → Server**: API key in `Authorization: Bearer` header, or `none` for demo mode. Applies to every path under `/api/v1/*`.
 - **Agent → Server**: API key registered at agent creation, included in all requests
 - **Server → Issuers**: ACME account key, or connector-specific credentials
 - **Agent → Targets**: API tokens, WinRM credentials (stored locally on agent or proxy agent — never on server). Credential scope is limited to the agent's network zone.
+- **Standards-based enrollment and PKI distribution endpoints**: `/.well-known/est/*` (RFC 7030), `/scep` and `/scep/*` (RFC 8894), and `/.well-known/pki/crl/{issuer_id}` + `/.well-known/pki/ocsp/{issuer_id}/{serial}` (RFC 5280 §5 / RFC 6960 / RFC 8615) are served unauthenticated at the HTTP layer. These protocols carry their own authentication semantics — CSR signature + profile policy for EST (§3.2.3 says EST auth is deployment-specific; §4.1.1 makes `/cacerts` explicitly anonymous), `challengePassword` in CSR attributes for SCEP (§3.2), and relying-party accessibility for CRL/OCSP — and cannot present certctl Bearer tokens. The dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes these prefixes through `noAuthHandler` (RequestID + structuredLogger + Recovery only, no auth or rate-limit middleware). CWE-306 is closed for SCEP by `preflightSCEPChallengePassword`, which refuses to start the server when SCEP is enabled without `CERTCTL_SCEP_CHALLENGE_PASSWORD`. The 27-subtest regression harness `cmd/server/finalhandler_test.go` pins this dispatch surface (EST 4-endpoint, SCEP exact + trailing-slash + query-string, PKI CRL+OCSP, health probes, `/api/v1/*` authenticated, `/assets/*` file server, SPA fallback).
 
 ### Audit Trail
 

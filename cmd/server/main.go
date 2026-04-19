@@ -725,55 +725,14 @@ func main() {
 		middleware.Recovery,
 	)
 
+	dashboardEnabled := false
 	if _, err := os.Stat(webDir + "/index.html"); err == nil {
-		fileServer := http.FileServer(http.Dir(webDir))
-		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-			// Health/ready and auth/info bypass auth middleware.
-			// Health/ready: Docker/K8s health probes don't carry Bearer tokens.
-			// auth/info: React app calls this before login to detect auth mode.
-			if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
-				noAuthHandler.ServeHTTP(w, r)
-				return
-			}
-			// RFC 5280 CRL and RFC 6960 OCSP live under /.well-known/pki/ and
-			// MUST be served unauthenticated — relying parties (browsers,
-			// OpenSSL, OCSP stapling sidecars, mTLS clients) cannot present
-			// certctl Bearer tokens. See router.RegisterPKIHandlers.
-			if len(path) >= 16 && path[:16] == "/.well-known/pki" {
-				noAuthHandler.ServeHTTP(w, r)
-				return
-			}
-			// All other API and EST routes go through the full middleware stack (with auth)
-			if (len(path) >= 8 && path[:8] == "/api/v1/") ||
-				(len(path) >= 16 && path[:16] == "/.well-known/est") {
-				apiHandler.ServeHTTP(w, r)
-				return
-			}
-			// Try to serve static files (JS, CSS, assets)
-			if len(path) > 8 && path[:8] == "/assets/" {
-				fileServer.ServeHTTP(w, r)
-				return
-			}
-			// SPA fallback: serve index.html for all other routes
-			http.ServeFile(w, r, webDir+"/index.html")
-		})
+		dashboardEnabled = true
+	}
+	finalHandler = buildFinalHandler(apiHandler, noAuthHandler, webDir, dashboardEnabled)
+	if dashboardEnabled {
 		logger.Info("dashboard available at /", "web_dir", webDir)
 	} else {
-		// No dashboard: route health/auth-info and /.well-known/pki without
-		// auth, everything else through full stack.
-		finalHandler = http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			path := r.URL.Path
-			if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
-				noAuthHandler.ServeHTTP(w, r)
-				return
-			}
-			if len(path) >= 16 && path[:16] == "/.well-known/pki" {
-				noAuthHandler.ServeHTTP(w, r)
-				return
-			}
-			apiHandler.ServeHTTP(w, r)
-		})
 		logger.Info("dashboard directory not found, serving API only")
 	}
 
@@ -857,4 +816,96 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
 	}
 	return nil
+}
+
+// buildFinalHandler builds the outer HTTP dispatch handler that routes incoming
+// requests to either the authenticated apiHandler chain or the unauthenticated
+// noAuthHandler chain based on URL path prefix. Extracted from main() so the
+// dispatch logic can be unit tested without booting the full server stack
+// (see cmd/server/finalhandler_test.go).
+//
+// Dispatch rules (M-001, audit 2026-04-19, option D):
+//
+//   - /health, /ready, /api/v1/auth/info           → no-auth (probes + login detection)
+//   - /.well-known/pki/*                           → no-auth (RFC 5280 CRL, RFC 6960 OCSP)
+//   - /.well-known/est/*                           → no-auth (RFC 7030 §3.2.3)
+//   - /scep, /scep/*                               → no-auth (RFC 8894 §3.2, CSR challengePassword)
+//   - /api/v1/*                                    → auth (Bearer token required)
+//   - /assets/*                                    → static file server (dashboard only)
+//   - anything else                                → SPA index.html fallback (dashboard only)
+//                                                    OR apiHandler (no dashboard)
+//
+// EST/SCEP clients (IoT devices, 802.1X supplicants, MDM endpoints, network
+// appliances) cannot present certctl Bearer tokens, so those endpoints must be
+// reachable without the Auth middleware. Authentication is instead enforced by
+// CSR signature verification, profile policy gates, and for SCEP the
+// challengePassword shared secret (fail-loud gated by preflightSCEPChallengePassword
+// above).
+//
+// webDir must point to a directory containing index.html + assets/ when
+// dashboardEnabled is true; it is ignored otherwise.
+func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, dashboardEnabled bool) http.Handler {
+	var fileServer http.Handler
+	if dashboardEnabled {
+		fileServer = http.FileServer(http.Dir(webDir))
+	}
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		path := r.URL.Path
+
+		// Health/ready and auth/info bypass auth middleware.
+		// Health/ready: Docker/K8s health probes don't carry Bearer tokens.
+		// auth/info: React app calls this before login to detect auth mode.
+		if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
+			noAuthHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// RFC 5280 CRL and RFC 6960 OCSP live under /.well-known/pki/ and MUST
+		// be served unauthenticated — relying parties (browsers, OpenSSL, OCSP
+		// stapling sidecars, mTLS clients) cannot present certctl Bearer tokens.
+		if strings.HasPrefix(path, "/.well-known/pki") {
+			noAuthHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// RFC 7030 EST endpoints ride the no-auth middleware chain (M-001,
+		// option D, audit 2026-04-19). Trust boundary is CSR signature + profile
+		// policy, not HTTP Bearer. /.well-known/est/cacerts is explicitly
+		// anonymous per RFC 7030 §4.1.1.
+		if strings.HasPrefix(path, "/.well-known/est") {
+			noAuthHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// RFC 8894 SCEP rides the no-auth chain (M-001, option D). SCEP clients
+		// authenticate via the challengePassword attribute in the PKCS#10 CSR,
+		// not via HTTP Bearer tokens. preflightSCEPChallengePassword refuses to
+		// start the server if SCEP is enabled without a non-empty shared secret.
+		if path == "/scep" || strings.HasPrefix(path, "/scep/") {
+			noAuthHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// Authenticated API routes — full middleware stack including Auth.
+		if strings.HasPrefix(path, "/api/v1/") {
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+
+		if !dashboardEnabled {
+			// No dashboard: everything non-special falls through to the
+			// authenticated handler (preserves pre-M-001 behavior for API-only
+			// deployments).
+			apiHandler.ServeHTTP(w, r)
+			return
+		}
+
+		// Dashboard-present: serve static assets directly, SPA fallback for
+		// everything else.
+		if strings.HasPrefix(path, "/assets/") {
+			fileServer.ServeHTTP(w, r)
+			return
+		}
+		http.ServeFile(w, r, webDir+"/index.html")
+	})
 }

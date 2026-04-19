@@ -651,11 +651,14 @@ type SCEPConfig struct {
 	// ChallengePassword is the shared secret used to authenticate SCEP enrollment requests.
 	// Clients include this in the PKCS#10 CSR challengePassword attribute.
 	//
-	// REQUIRED when Enabled is true. If SCEP is enabled and this value is empty,
-	// cmd/server/main.go's preflightSCEPChallengePassword check will refuse to
-	// start the server (H-2, CWE-306): an empty shared secret allowed any client
-	// that could reach /scep to enroll a CSR against the configured issuer. The
-	// service-layer PKCSReq path also rejects this configuration defense-in-depth.
+	// REQUIRED when Enabled is true. Config.Validate() below refuses to start the
+	// server if SCEP is enabled and this value is empty (H-2, CWE-306): post-M-001
+	// under option (D), the /scep endpoint rides the no-auth middleware chain per
+	// RFC 8894 §3.2, so the challenge password is the sole application-layer
+	// authentication boundary for SCEP enrollment. An empty shared secret would
+	// allow any client that can reach /scep to enroll a CSR against the configured
+	// issuer. The service-layer PKCSReq path also rejects this configuration
+	// defense-in-depth.
 	ChallengePassword string
 }
 
@@ -1107,6 +1110,19 @@ func (c *Config) Validate() error {
 	}
 	if !validKeygenModes[c.Keygen.Mode] {
 		return fmt.Errorf("invalid keygen mode: %s (must be 'agent' or 'server')", c.Keygen.Mode)
+	}
+
+	// SCEP fail-loud startup gate (H-2, CWE-306).
+	//
+	// Post-M-001 option (D) routes /scep through the no-auth middleware chain per
+	// RFC 8894 §3.2 — SCEP clients authenticate via the challengePassword attribute
+	// in the PKCS#10 CSR, not via HTTP Bearer tokens or TLS client certs. That makes
+	// CERTCTL_SCEP_CHALLENGE_PASSWORD the sole application-layer authentication
+	// boundary for SCEP enrollment. Refuse to start if it is empty when SCEP is
+	// enabled: an empty shared secret would allow any client that can reach /scep to
+	// enroll a CSR against the configured issuer (anonymous issuance).
+	if c.SCEP.Enabled && c.SCEP.ChallengePassword == "" {
+		return fmt.Errorf("SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty — refuse to start (CWE-306: anonymous SCEP issuance is insecure; set a non-empty shared secret or disable SCEP with CERTCTL_SCEP_ENABLED=false). This gate duplicates cmd/server/main.go:preflightSCEPChallengePassword for defense in depth")
 	}
 
 	// Validate scheduler intervals

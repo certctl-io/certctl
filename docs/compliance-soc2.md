@@ -44,7 +44,8 @@ Each section includes:
 
 **certctl Implementation** (V2 — Community Edition):
 
-- **API Key Authentication** — All API calls require a Bearer token (hashed with SHA-256, stored securely, validated with constant-time comparison) or are rejected with 401 Unauthorized. Environment: `CERTCTL_AUTH_TYPE` (default `api-key`; `none` requires explicit opt-in with log warning)
+- **API Key Authentication** — All `/api/v1/*` calls require a Bearer token (hashed with SHA-256, stored securely, validated with constant-time comparison) or are rejected with 401 Unauthorized. Environment: `CERTCTL_AUTH_TYPE` (default `api-key`; `none` requires explicit opt-in with log warning)
+- **Standards-based enrollment and PKI distribution endpoints** — EST (`/.well-known/est/*`, RFC 7030), SCEP (`/scep`, `/scep/*`, RFC 8894), and CRL/OCSP (`/.well-known/pki/crl/{issuer_id}`, `/.well-known/pki/ocsp/{issuer_id}/{serial}`, RFC 5280 §5 / RFC 6960 / RFC 8615) are served unauthenticated at the HTTP layer because these protocols cannot present certctl Bearer tokens. Authentication is enforced in-protocol: EST relies on CSR signature verification plus profile policy (RFC 7030 §3.2.3 says EST auth is deployment-specific; §4.1.1 makes `/cacerts` explicitly anonymous); SCEP requires a shared `challengePassword` in the PKCS#10 CSR attributes (OID 1.2.840.113549.1.9.7, RFC 8894 §3.2), validated with `crypto/subtle.ConstantTimeCompare`; CRL and OCSP are intentionally anonymous for relying-party accessibility. CWE-306 (missing authentication for a critical function) is closed for SCEP by `preflightSCEPChallengePassword` in `cmd/server/main.go`, which refuses to start the control plane when `CERTCTL_SCEP_ENABLED=true` is set without `CERTCTL_SCEP_CHALLENGE_PASSWORD`. The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes these prefixes through `noAuthHandler` (RequestID + structuredLogger + Recovery only, no auth or rate-limit middleware) and is pinned by the 27-subtest regression harness at `cmd/server/finalhandler_test.go`.
 - **GUI Authentication** — Web dashboard includes login screen requiring API key entry. Failed auth redirects to login on 401. Auth context persists across page navigation. Logout clears session.
 - **Configurable CORS** — API restricts cross-origin requests via `CERTCTL_CORS_ORIGINS` allowlist or wildcard. Preflight caching prevents chatty browser auth flows.
 - **Token Bucket Rate Limiting** — Per-IP rate limiting (configurable via `CERTCTL_RATE_LIMIT_RPS` / `CERTCTL_RATE_LIMIT_BURST`) returns 429 Too Many Requests with Retry-After header. Prevents credential stuffing and brute-force attacks.
@@ -58,6 +59,11 @@ Each section includes:
 - Auth info endpoint: `GET /api/v1/auth/info` (returns current auth mode, served without auth so GUI detects mode)
 - Rate limiting middleware: `internal/api/middleware/rate_limit.go`
 - CORS configuration: `cmd/server/main.go`, search for `CERTCTL_CORS_ORIGINS`
+- Final handler dispatch (authenticated vs. unauthenticated routing): `cmd/server/main.go:buildFinalHandler`
+- SCEP preflight gate (CWE-306 closure): `cmd/server/main.go:preflightSCEPChallengePassword`
+- SCEP service-layer defense-in-depth (rejects enrollment on empty challenge password, `crypto/subtle.ConstantTimeCompare`): `internal/service/scep.go`
+- Final handler dispatch regression harness (27 subtests): `cmd/server/finalhandler_test.go`
+- OpenAPI spec `security: []` overrides on unauthenticated paths: `api/openapi.yaml` (EST `/cacerts`, `/simpleenroll`, `/simplereenroll`, `/csrattrs`; SCEP `/scep` GET+POST; PKI `/crl/{issuer_id}`, `/ocsp/{issuer_id}/{serial}`)
 
 **V3 Enhancement**:
 
@@ -110,7 +116,7 @@ Each section includes:
 
 **certctl Implementation** (V2):
 
-- **API Key Policy** — All API access requires an API key or explicit opt-out. Opt-out (`CERTCTL_AUTH_TYPE=none`) logs a warning: "WARNING: Auth disabled (CERTCTL_AUTH_TYPE=none) — this is insecure and only for development". Configuration choice is logged at startup.
+- **API Key Policy** — All `/api/v1/*` access requires an API key or explicit opt-out. Opt-out (`CERTCTL_AUTH_TYPE=none`) logs a warning: "WARNING: Auth disabled (CERTCTL_AUTH_TYPE=none) — this is insecure and only for development". Configuration choice is logged at startup. The standards-based enrollment and PKI distribution endpoints (EST, SCEP, CRL, OCSP) are served unauthenticated at the HTTP layer per their respective RFCs; see CC6.1 for the full authentication contract and CWE-306 closure via `preflightSCEPChallengePassword`.
 - **Agent Authentication** — Agents authenticate to the server via API keys (same mechanism as users). Agent credentials are separate from user API keys.
 - **Private Key Policy** — Agent-side key generation is the default (`CERTCTL_KEYGEN_MODE=agent`). Server-side keygen (`CERTCTL_KEYGEN_MODE=server`) requires explicit configuration and logs a warning: "server-side key generation enabled (CERTCTL_KEYGEN_MODE=server) — private keys touch control plane, demo only".
 - **Password Policy** — Not applicable; certctl uses API keys exclusively. Password management is delegated to your organization's IAM system if you integrate OIDC/SSO (V3).
