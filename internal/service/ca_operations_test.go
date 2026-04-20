@@ -75,6 +75,73 @@ func TestCAOperationsSvc_GenerateDERCRL_Success(t *testing.T) {
 	t.Logf("DER CRL generated successfully: %d bytes", len(crl))
 }
 
+// TestCAOperationsSvc_GenerateDERCRL_UsesListByIssuer_NotListAll guards F-001.
+// Before the fix, GenerateDERCRL called revocationRepo.ListAll(ctx) and filtered
+// results in Go (if rev.IssuerID != issuerID { continue }). That was O(N) in the
+// size of the entire revocation table and did not scale as revocations piled up
+// across many issuers. Migration 000012 added the composite index
+// idx_certificate_revocations_issuer_serial(issuer_id, serial_number), which is
+// a prefix scan target — so the hot path must now call ListByIssuer(ctx, id) to
+// drive an indexed query. This regression test asserts the hot path invokes
+// ListByIssuer exactly once and never falls back to the full-table ListAll scan,
+// and also double-checks that cross-issuer revocations are correctly excluded
+// from the generated CRL (no in-Go filter left to catch them).
+func TestCAOperationsSvc_GenerateDERCRL_UsesListByIssuer_NotListAll(t *testing.T) {
+	caSvc, revocationRepo, _ := newCAOperationsSvcTest()
+
+	// Pre-populate with revocations from TWO issuers. If the hot path regresses
+	// and calls ListAll instead of ListByIssuer, the generated CRL would either
+	// include the wrong rows or — with the in-Go filter gone — pull in both
+	// issuers' revocations. ListByIssuer scopes at the query level so only
+	// iss-local rows come back.
+	now := time.Now()
+	revocationRepo.Revocations = []*domain.CertificateRevocation{
+		{
+			SerialNumber:  "LOCAL-001",
+			CertificateID: "cert-local-1",
+			IssuerID:      "iss-local",
+			Reason:        "keyCompromise",
+			RevokedAt:     now.Add(-24 * time.Hour),
+			RevokedBy:     "admin",
+		},
+		{
+			SerialNumber:  "LOCAL-002",
+			CertificateID: "cert-local-2",
+			IssuerID:      "iss-local",
+			Reason:        "superseded",
+			RevokedAt:     now.Add(-12 * time.Hour),
+			RevokedBy:     "admin",
+		},
+		{
+			SerialNumber:  "OTHER-001",
+			CertificateID: "cert-other-1",
+			IssuerID:      "iss-other",
+			Reason:        "keyCompromise",
+			RevokedAt:     now.Add(-6 * time.Hour),
+			RevokedBy:     "admin",
+		},
+	}
+
+	crl, err := caSvc.GenerateDERCRL(context.Background(), "iss-local")
+	if err != nil {
+		t.Fatalf("expected no error, got: %v", err)
+	}
+	if len(crl) == 0 {
+		t.Fatal("expected non-empty CRL")
+	}
+
+	// The contractual assertion: the CRL hot path MUST use the scoped query.
+	if got, want := revocationRepo.ListByIssuerCalls, 1; got != want {
+		t.Errorf("ListByIssuerCalls = %d, want %d — CRL hot path must call the scoped query driven by migration 000012 index", got, want)
+	}
+	if got := revocationRepo.ListAllCalls; got != 0 {
+		t.Errorf("ListAllCalls = %d, want 0 — CRL hot path must NOT fall back to the full-table scan after F-001", got)
+	}
+	if got, want := revocationRepo.LastListIssuerID, "iss-local"; got != want {
+		t.Errorf("LastListIssuerID = %q, want %q — issuer scoping argument lost", got, want)
+	}
+}
+
 func TestCAOperationsSvc_GenerateDERCRL_EmptyCRL(t *testing.T) {
 	caSvc, revocationRepo, _ := newCAOperationsSvcTest()
 

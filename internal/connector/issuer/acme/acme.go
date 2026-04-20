@@ -664,12 +664,17 @@ func (c *Connector) solveAuthorizationsDNS01(ctx context.Context, authzURLs []st
 			return fmt.Errorf("failed to present DNS record for %s: %w", domain, err)
 		}
 
-		// Wait for DNS propagation
+		// Wait for DNS propagation (ctx-aware so graceful shutdown can interrupt — F-003)
 		propagationWait := time.Duration(c.config.DNSPropagationWait) * time.Second
 		c.logger.Info("waiting for DNS propagation",
 			"domain", domain,
 			"wait_seconds", c.config.DNSPropagationWait)
-		time.Sleep(propagationWait)
+		select {
+		case <-ctx.Done():
+			_ = c.dnsSolver.CleanUp(ctx, domain, dnsChallenge.Token, keyAuth)
+			return ctx.Err()
+		case <-time.After(propagationWait):
+		}
 
 		// Tell the CA we're ready
 		if _, err := c.client.Accept(ctx, dnsChallenge); err != nil {
@@ -773,12 +778,16 @@ func (c *Connector) solveAuthorizationsDNSPersist01(ctx context.Context, authzUR
 			return fmt.Errorf("failed to create persistent DNS record for %s: %w", domain, err)
 		}
 
-		// Wait for DNS propagation
+		// Wait for DNS propagation (ctx-aware so graceful shutdown can interrupt — F-003)
 		propagationWait := time.Duration(c.config.DNSPropagationWait) * time.Second
 		c.logger.Info("waiting for DNS propagation",
 			"domain", domain,
 			"wait_seconds", c.config.DNSPropagationWait)
-		time.Sleep(propagationWait)
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(propagationWait):
+		}
 
 		// Tell the CA we're ready
 		if _, err := c.client.Accept(ctx, persistChallenge); err != nil {

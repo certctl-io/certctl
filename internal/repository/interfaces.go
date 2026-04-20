@@ -47,8 +47,15 @@ type RevocationRepository interface {
 	// protocol endpoints carry it in the request path; RFC 5280 §5.2.3 guarantees
 	// uniqueness only within a single issuer.
 	GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.CertificateRevocation, error)
-	// ListAll returns all revocations, ordered by revocation time (for CRL generation).
+	// ListAll returns all revocations, ordered by revocation time (for global
+	// revocation admin views). CRL generation should prefer ListByIssuer to
+	// avoid loading and discarding rows that belong to other issuers.
 	ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error)
+	// ListByIssuer returns revocations for a single issuer, ordered by revocation
+	// time (for CRL generation). Pushing the issuer filter into the query lets
+	// the migration 000012 composite index (issuer_id, serial_number) drive a
+	// prefix scan instead of a full table read + in-memory filter.
+	ListByIssuer(ctx context.Context, issuerID string) ([]*domain.CertificateRevocation, error)
 	// ListByCertificate returns all revocations for a certificate.
 	ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error)
 	// MarkIssuerNotified updates the issuer_notified flag for a revocation.
