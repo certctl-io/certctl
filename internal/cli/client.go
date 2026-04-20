@@ -612,7 +612,7 @@ func (c *Client) CancelJob(id string) error {
 
 // GetStatus retrieves server health and summary stats.
 func (c *Client) GetStatus() error {
-	resp, err := c.do("GET", "/api/v1/health", nil, nil)
+	resp, err := c.do("GET", "/health", nil, nil)
 	if err != nil {
 		return err
 	}

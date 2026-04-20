@@ -293,7 +293,7 @@ func TestClient_GetStatus(t *testing.T) {
 
 		w.Header().Set("Content-Type", "application/json")
 
-		if r.URL.Path == "/api/v1/health" {
+		if r.URL.Path == "/health" {
 			json.NewEncoder(w).Encode(map[string]interface{}{
 				"status":    "healthy",
 				"timestamp": time.Now().Format(time.RFC3339),
