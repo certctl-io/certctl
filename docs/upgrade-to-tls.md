@@ -22,7 +22,7 @@ There is no schema migration tied to this release; the only at-rest state that c
 
 ## Procedure — docker-compose operators
 
-The shipped `deploy/docker-compose.yml` includes a `certctl-tls-init` init container that self-signs an ed25519 cert on first boot and drops `server.crt`, `server.key`, and `ca.crt` into a named volume mounted read-only at `/etc/certctl/tls/` on the server and agent containers. No manual cert provisioning is required for the default stack.
+The shipped `deploy/docker-compose.yml` includes a `certctl-tls-init` init container that self-signs an ECDSA-P256 (SHA-256 signature) cert on first boot and drops `server.crt`, `server.key`, and `ca.crt` into a named volume mounted read-only at `/etc/certctl/tls/` on the server and agent containers. No manual cert provisioning is required for the default stack. (Pre-v2.0.48 this was an ed25519 cert; see [`tls.md`](tls.md) Pattern 1 for the rationale and the `down -v && up --build` migration note.)
 
 1. **Pull the HTTPS-everywhere release.** From the repo root:
 

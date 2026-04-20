@@ -65,14 +65,16 @@ services:
           echo "TLS cert already present at $$CERT — skipping generation"
         else
           mkdir -p /etc/certctl/tls
-          openssl req -x509 -newkey ed25519 -nodes \
+          openssl req -x509 -newkey ec \
+            -pkeyopt ec_paramgen_curve:P-256 \
+            -nodes \
             -keyout "$$KEY" \
             -out "$$CERT" \
             -days 3650 \
             -subj "/CN=certctl-server" \
             -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1,IP:::1"
           cp "$$CERT" "$$CA"
-          echo "Generated self-signed TLS cert for certctl-test-server (ed25519, 3650d, CN=certctl-server)"
+          echo "Generated self-signed TLS cert for certctl-test-server (ECDSA-P256/SHA-256, 3650d, CN=certctl-server)"
         fi
         # The test server container runs as root (see `user: "0:0"` below)
         # because setup-trust.sh needs to update the system trust store, so

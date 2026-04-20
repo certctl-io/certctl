@@ -161,7 +161,7 @@ certctl-test-stepca         Up (healthy)
 
 ### Get the CA bundle for curl
 
-The test harness runs HTTPS-only (the `certctl-tls-init` init container self-signs an ed25519 server cert into a bind-mounted directory before the server starts — see `docker-compose.test.yml` §`certctl-tls-init` for details). The CA cert that signed it is materialized on the host at `./test/certs/ca.crt` (relative to the `deploy/` directory). Every `curl` in the rest of this doc expects it in `$CA`:
+The test harness runs HTTPS-only (the `certctl-tls-init` init container self-signs an ECDSA-P256 server cert with a SHA-256 signature into a bind-mounted directory before the server starts — see `docker-compose.test.yml` §`certctl-tls-init` for details). The CA cert that signed it is materialized on the host at `./test/certs/ca.crt` (relative to the `deploy/` directory). Every `curl` in the rest of this doc expects it in `$CA`:
 
 ```bash
 export CA=$PWD/test/certs/ca.crt

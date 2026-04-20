@@ -19,16 +19,20 @@ Both paths are read during a fail-loud preflight in `cmd/server/main.go` (see `p
 
 This is the default for the `deploy/docker-compose.yml` stack. It exists so `docker compose up -d --build` just works on a laptop without the operator standing up a CA first. It is not appropriate for any non-demo environment.
 
-An init container named `certctl-tls-init` runs once before the server starts. It uses the `alpine/openssl` image and generates an ed25519 self-signed cert:
+An init container named `certctl-tls-init` runs once before the server starts. It uses the `alpine/openssl` image and generates an ECDSA-P256 self-signed cert (SHA-256 signature):
 
 ```
-openssl req -x509 -newkey ed25519 -nodes \
+openssl req -x509 -newkey ec \
+  -pkeyopt ec_paramgen_curve:P-256 \
+  -nodes \
   -keyout /etc/certctl/tls/server.key \
   -out   /etc/certctl/tls/server.crt \
   -days 3650 \
   -subj "/CN=certctl-server" \
   -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1,IP:::1"
 ```
+
+**Why ECDSA-P256 and not ed25519.** The pre-v2.0.48 demo bootstrap used ed25519 (small keys, fast signatures). Apple's TLS stack — Safari Network Framework and the macOS-bundled LibreSSL 3.3.6 `/usr/bin/curl` — does not advertise ed25519 in the ClientHello `signature_algorithms` extension for server certs, so an ed25519 server cert was rejected at handshake with `tls: peer doesn't support any of the certificate's signature algorithms` on the server side (and the generic TLS handshake error on the client side). Homebrew OpenSSL 3.x, Chrome, Firefox, and Linux curl all accepted ed25519 — Apple was the outlier. ECDSA-P256 with SHA-256 is universally supported, so the demo bootstrap uses it by default. To pick up the new algorithm on an existing demo install, tear the volume down and rebuild: `docker compose -f deploy/docker-compose.yml down -v && docker compose -f deploy/docker-compose.yml up -d --build`. **Helm and operator-supplied-Secret users (Patterns 2 and 3) are unaffected** — they bring their own cert, and `cmd/server/tls.go` is algorithm-agnostic (TLS 1.3 with curve preference `[X25519, P-256]` for key exchange — no constraint on the server cert's signature algorithm).
 
 The cert, its matching key, and a copy of the cert published as `ca.crt` land in a named volume (`certs`) mounted at `/etc/certctl/tls/` in the server container (read-only) and the agent container (read-only). The bootstrap is idempotent — if `server.crt`, `server.key`, and `ca.crt` are already present on the volume, the init container logs `TLS cert already present at …` and exits cleanly.
 

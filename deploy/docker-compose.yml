@@ -1,12 +1,20 @@
 services:
   # HTTPS-Everywhere Phase 3 — self-signed TLS bootstrap (init container).
-  # Generates a CN=certctl-server ed25519 cert with the SAN list locked by
-  # milestone §3.6 on first boot; subsequent boots see the cert already
-  # present in the `certs` named volume and no-op out. Server + agent mount
-  # the volume read-only. Destroy via `docker compose down -v` to force
-  # regeneration. This bootstrap is for docker-compose demos and local dev
-  # only; Helm operators supply a Secret / cert-manager Certificate per
-  # docs/tls.md.
+  # Generates a CN=certctl-server ECDSA-P256 (SHA-256 signature) cert with
+  # the SAN list locked by milestone §3.6 on first boot; subsequent boots
+  # see the cert already present in the `certs` named volume and no-op out.
+  # Server + agent mount the volume read-only. Destroy via `docker compose
+  # down -v` to force regeneration. This bootstrap is for docker-compose
+  # demos and local dev only; Helm operators supply a Secret / cert-manager
+  # Certificate per docs/tls.md.
+  #
+  # Rationale for ECDSA-P256 (was ed25519 pre-v2.0.48): Apple's TLS stack
+  # — Safari Network Framework and the macOS-bundled LibreSSL 3.3.6
+  # /usr/bin/curl — does not advertise ed25519 in the ClientHello
+  # signature_algorithms extension for server certs, yielding "tls: peer
+  # doesn't support any of the certificate's signature algorithms" at
+  # handshake. ECDSA-P256 with SHA-256 is universally supported. See
+  # docs/tls.md Pattern 1.
   certctl-tls-init:
     image: alpine/openssl:latest
     container_name: certctl-tls-init
@@ -23,14 +31,16 @@ services:
           echo "TLS cert already present at $$CERT — skipping generation"
         else
           mkdir -p /etc/certctl/tls
-          openssl req -x509 -newkey ed25519 -nodes \
+          openssl req -x509 -newkey ec \
+            -pkeyopt ec_paramgen_curve:P-256 \
+            -nodes \
             -keyout "$$KEY" \
             -out "$$CERT" \
             -days 3650 \
             -subj "/CN=certctl-server" \
             -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1,IP:::1"
           cp "$$CERT" "$$CA"
-          echo "Generated self-signed TLS cert for certctl-server (ed25519, 3650d, CN=certctl-server)"
+          echo "Generated self-signed TLS cert for certctl-server (ECDSA-P256/SHA-256, 3650d, CN=certctl-server)"
         fi
         # certctl binary runs as UID 1000 inside the server container per
         # Dockerfile:64-65; the cert + key must be readable by that UID.
