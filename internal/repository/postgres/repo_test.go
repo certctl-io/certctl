@@ -1,6 +1,8 @@
-// Package postgres_test provides repository integration tests covering 15 of 17
+// Package postgres_test provides repository integration tests covering 17 of 17
 // PostgreSQL repository files. Each test function exercises CRUD operations,
-// edge cases, and deduplication logic against a real database.
+// edge cases, and deduplication logic against a real database. HealthCheck
+// and RenewalPolicy integration tests live in sibling *_test.go files in this
+// package (see health_check_test.go and renewal_policy_test.go).
 package postgres_test
 
 import (
