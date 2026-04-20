@@ -2,9 +2,25 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+)
+
+// Repository-level sentinel errors. Repositories (primarily the postgres
+// implementation) translate RDBMS-specific errors into these typed envelopes
+// so the service/handler layers can branch with errors.Is without importing
+// lib/pq or care about SQLSTATE codes.
+//
+// G-1: renewal-policy sentinels — DuplicateName → HTTP 409 (pg 23505 on
+// renewal_policies.name UNIQUE), InUse → HTTP 409 (pg 23503 on the FK from
+// managed_certificates.renewal_policy_id to renewal_policies.id with ON
+// DELETE RESTRICT). Both map onto the same 409 status but with distinct
+// messages so operators can tell them apart.
+var (
+	ErrRenewalPolicyDuplicateName = errors.New("renewal policy name already exists")
+	ErrRenewalPolicyInUse         = errors.New("renewal policy is still referenced by managed certificates")
 )
 
 // CertificateRepository defines operations for managing certificates.
@@ -258,11 +274,35 @@ type JobRepository interface {
 }
 
 // RenewalPolicyRepository defines operations for managing renewal policies.
+//
+// G-1: extended with Create/Update/Delete so the new /api/v1/renewal-policies
+// CRUD surface has a repo contract to lean on. Delete must map the PostgreSQL
+// 23503 (foreign_key_violation on managed_certificates.renewal_policy_id
+// REFERENCES renewal_policies(id) ON DELETE RESTRICT) onto the typed
+// ErrRenewalPolicyInUse sentinel so the handler can emit a 409 Conflict
+// instead of an opaque 500. Create/Update map PostgreSQL 23505
+// (unique_violation on renewal_policies.name) onto ErrRenewalPolicyDuplicateName
+// for the same 409 Conflict reason.
+//
+// List stays single-shot (no pagination params) because the production row
+// count is in the single digits — the service layer paginates/sorts in Go.
+// Changing the signature would churn every mock without functional benefit.
 type RenewalPolicyRepository interface {
 	// Get retrieves a renewal policy by ID.
 	Get(ctx context.Context, id string) (*domain.RenewalPolicy, error)
-	// List returns all renewal policies.
+	// List returns all renewal policies, ordered by name.
 	List(ctx context.Context) ([]*domain.RenewalPolicy, error)
+	// Create inserts a new renewal policy. The caller is responsible for
+	// populating Name; Create auto-generates ID (as rp-<slug(name)>) if empty.
+	// Returns ErrRenewalPolicyDuplicateName on pg 23505.
+	Create(ctx context.Context, policy *domain.RenewalPolicy) error
+	// Update modifies an existing renewal policy in-place. Returns
+	// sql.ErrNoRows-wrapped error when id is unknown, or
+	// ErrRenewalPolicyDuplicateName on pg 23505 (name collision with another row).
+	Update(ctx context.Context, id string, policy *domain.RenewalPolicy) error
+	// Delete removes a renewal policy. Returns ErrRenewalPolicyInUse when the
+	// policy is still referenced by rows in managed_certificates (pg 23503).
+	Delete(ctx context.Context, id string) error
 }
 
 // PolicyRepository defines operations for managing compliance policies and violations.

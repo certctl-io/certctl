@@ -749,11 +749,21 @@ func (m *mockPolicyRepo) AddRule(rule *domain.PolicyRule) {
 	m.Rules[rule.ID] = rule
 }
 
-// mockRenewalPolicyRepo is a test implementation of RenewalPolicyRepository
+// mockRenewalPolicyRepo is a test implementation of RenewalPolicyRepository.
+//
+// G-1: repo contract extended with Create/Update/Delete to support the
+// /api/v1/renewal-policies CRUD endpoints. Per-method *Err fields let tests
+// force specific repo failures (duplicate name → 23505, FK RESTRICT on Delete
+// → 23503) without standing up a real Postgres connection. The sentinel
+// errors `ErrRenewalPolicyDuplicateName` and `ErrRenewalPolicyInUse` are the
+// typed envelopes the service / handler layers translate into 409 Conflict.
 type mockRenewalPolicyRepo struct {
-	Policies map[string]*domain.RenewalPolicy
-	GetErr   error
-	ListErr  error
+	Policies  map[string]*domain.RenewalPolicy
+	GetErr    error
+	ListErr   error
+	CreateErr error
+	UpdateErr error
+	DeleteErr error
 }
 
 func (m *mockRenewalPolicyRepo) Get(ctx context.Context, id string) (*domain.RenewalPolicy, error) {
@@ -775,7 +785,47 @@ func (m *mockRenewalPolicyRepo) List(ctx context.Context) ([]*domain.RenewalPoli
 	for _, p := range m.Policies {
 		policies = append(policies, p)
 	}
+	// Deterministic ordering mirrors the production repo's ORDER BY name,
+	// so pagination-boundary assertions don't become flaky under map
+	// iteration randomness.
+	sort.Slice(policies, func(i, j int) bool {
+		return policies[i].Name < policies[j].Name
+	})
 	return policies, nil
+}
+
+func (m *mockRenewalPolicyRepo) Create(ctx context.Context, policy *domain.RenewalPolicy) error {
+	if m.CreateErr != nil {
+		return m.CreateErr
+	}
+	if _, exists := m.Policies[policy.ID]; exists {
+		return m.CreateErr
+	}
+	m.Policies[policy.ID] = policy
+	return nil
+}
+
+func (m *mockRenewalPolicyRepo) Update(ctx context.Context, id string, policy *domain.RenewalPolicy) error {
+	if m.UpdateErr != nil {
+		return m.UpdateErr
+	}
+	if _, exists := m.Policies[id]; !exists {
+		return errNotFound
+	}
+	policy.ID = id
+	m.Policies[id] = policy
+	return nil
+}
+
+func (m *mockRenewalPolicyRepo) Delete(ctx context.Context, id string) error {
+	if m.DeleteErr != nil {
+		return m.DeleteErr
+	}
+	if _, exists := m.Policies[id]; !exists {
+		return errNotFound
+	}
+	delete(m.Policies, id)
+	return nil
 }
 
 func (m *mockRenewalPolicyRepo) AddPolicy(policy *domain.RenewalPolicy) {

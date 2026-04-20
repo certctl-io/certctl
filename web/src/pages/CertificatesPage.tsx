@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getTeams, getPolicies, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
+import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
 import { useAuth } from '../components/AuthProvider';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
@@ -48,9 +48,15 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
     queryKey: ['teams', 'form'],
     queryFn: () => getTeams({ per_page: '500' }),
   });
+  // G-1: swap from getPolicies (compliance rules, pol-*) to getRenewalPolicies
+  // (lifecycle policies, rp-*). managed_certificates.renewal_policy_id FK
+  // points at renewal_policies(id), so the dropdown must pull from that table
+  // — the previous getPolicies call populated the dropdown with pol-* IDs that
+  // would 400/23503 at the server. See also OnboardingWizard.tsx:603 and
+  // CertificateDetailPage.tsx:169 for the sibling fixes.
   const { data: policiesResp } = useQuery({
     queryKey: ['renewal-policies', 'form'],
-    queryFn: () => getPolicies({ per_page: '500' }),
+    queryFn: () => getRenewalPolicies(1, 500),
   });
   const profiles = profilesResp?.data || [];
   const issuers = issuersResp?.data || [];

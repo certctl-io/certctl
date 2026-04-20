@@ -33,6 +33,10 @@ import {
   updatePolicy,
   deletePolicy,
   getPolicyViolations,
+  getRenewalPolicies,
+  createRenewalPolicy,
+  updateRenewalPolicy,
+  deleteRenewalPolicy,
   getIssuers,
   createIssuer,
   testIssuerConnection,
@@ -571,6 +575,60 @@ describe('API Client', () => {
       await deletePolicy('pol-1');
       const [url, init] = mockFetch.mock.calls[0];
       expect(url).toBe('/api/v1/policies/pol-1');
+      expect(init.method).toBe('DELETE');
+    });
+  });
+
+  // ─── Renewal Policies (G-1) ─────────────────────────
+  // Distinct from compliance Policies above. Populates the
+  // `renewal_policy_id` dropdown on OnboardingWizard + CertificatesPage +
+  // CertificateDetailPage.InlinePolicyEditor.  Hits `/api/v1/renewal-policies`.
+
+  describe('RenewalPolicies', () => {
+    it('getRenewalPolicies sends GET', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ data: [], total: 0, page: 1, per_page: 50 }));
+      await getRenewalPolicies();
+      expect(mockFetch.mock.calls[0][0]).toContain('/api/v1/renewal-policies');
+    });
+
+    it('createRenewalPolicy sends POST with body', async () => {
+      mockFetch.mockReturnValueOnce(
+        mockJsonResponse({
+          id: 'rp-new',
+          name: 'New Policy',
+          renewal_window_days: 30,
+          max_retries: 3,
+          retry_interval_seconds: 3600,
+          auto_renew: true,
+        }),
+      );
+      await createRenewalPolicy({
+        name: 'New Policy',
+        renewal_window_days: 30,
+        max_retries: 3,
+        retry_interval_seconds: 3600,
+        auto_renew: true,
+      });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/renewal-policies');
+      expect(init.method).toBe('POST');
+      expect(JSON.parse(init.body).name).toBe('New Policy');
+    });
+
+    it('updateRenewalPolicy sends PUT with partial data', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ id: 'rp-default', name: 'Renamed' }));
+      await updateRenewalPolicy('rp-default', { name: 'Renamed' });
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/renewal-policies/rp-default');
+      expect(init.method).toBe('PUT');
+      expect(JSON.parse(init.body)).toEqual({ name: 'Renamed' });
+    });
+
+    it('deleteRenewalPolicy sends DELETE', async () => {
+      mockFetch.mockReturnValueOnce(mockJsonResponse({ message: 'deleted' }));
+      await deleteRenewalPolicy('rp-default');
+      const [url, init] = mockFetch.mock.calls[0];
+      expect(url).toBe('/api/v1/renewal-policies/rp-default');
       expect(init.method).toBe('DELETE');
     });
   });

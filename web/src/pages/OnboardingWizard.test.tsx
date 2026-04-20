@@ -39,7 +39,10 @@ vi.mock('../api/client', () => ({
   getProfiles: vi.fn(),
   getOwners: vi.fn(),
   getTeams: vi.fn(),
-  getPolicies: vi.fn(),
+  // G-1: wizard populates the renewal_policy_id dropdown from
+  // getRenewalPolicies (rp-* ids), not getPolicies (which returns compliance
+  // rules with pol-* ids and violates the FK).
+  getRenewalPolicies: vi.fn(),
   createIssuer: vi.fn(),
   testIssuerConnection: vi.fn(),
   createCertificate: vi.fn(),
@@ -85,7 +88,9 @@ function stubAllQueriesEmpty() {
   vi.mocked(client.getTeams).mockResolvedValue({
     data: [], total: 0, page: 1, per_page: 500,
   } as never);
-  vi.mocked(client.getPolicies).mockResolvedValue({
+  // G-1: wizard populates renewal_policy_id from getRenewalPolicies, not
+  // getPolicies. See comment on the mock factory above.
+  vi.mocked(client.getRenewalPolicies).mockResolvedValue({
     data: [], total: 0, page: 1, per_page: 500,
   } as never);
 }

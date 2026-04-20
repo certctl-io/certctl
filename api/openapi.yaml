@@ -42,6 +42,8 @@ tags:
     description: Job queue — issuance, renewal, deployment, validation
   - name: Policies
     description: Policy rules and violation tracking
+  - name: RenewalPolicies
+    description: Lifecycle renewal policies (distinct from compliance policy rules above)
   - name: Profiles
     description: Certificate enrollment profiles with crypto constraints
   - name: Teams
@@ -1525,6 +1527,137 @@ paths:
                           $ref: "#/components/schemas/PolicyViolation"
         "400":
           $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ─── Renewal Policies ────────────────────────────────────────────────
+  # G-1: lifecycle policies (rp-* ids, table renewal_policies). DISTINCT from
+  # /api/v1/policies above, which returns compliance rules (pol-* ids, table
+  # policy_rules). `managed_certificates.renewal_policy_id` FK points at
+  # renewal_policies(id) — populating that dropdown from /api/v1/policies
+  # caused 23503 FK violations; hence this endpoint.
+  /api/v1/renewal-policies:
+    get:
+      tags: [RenewalPolicies]
+      summary: List renewal policies
+      operationId: listRenewalPolicies
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+      responses:
+        "200":
+          description: Paginated list of renewal policies
+          content:
+            application/json:
+              schema:
+                allOf:
+                  - $ref: "#/components/schemas/PaginationEnvelope"
+                  - type: object
+                    properties:
+                      data:
+                        type: array
+                        items:
+                          $ref: "#/components/schemas/RenewalPolicy"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    post:
+      tags: [RenewalPolicies]
+      summary: Create renewal policy
+      operationId: createRenewalPolicy
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewalPolicyCreateRequest"
+      responses:
+        "201":
+          description: Renewal policy created
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "409":
+          description: Duplicate policy name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/renewal-policies/{id}:
+    get:
+      tags: [RenewalPolicies]
+      summary: Get renewal policy
+      operationId: getRenewalPolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Renewal policy details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    put:
+      tags: [RenewalPolicies]
+      summary: Update renewal policy
+      operationId: updateRenewalPolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/RenewalPolicyUpdateRequest"
+      responses:
+        "200":
+          description: Renewal policy updated
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/RenewalPolicy"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Duplicate policy name
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "500":
+          $ref: "#/components/responses/InternalError"
+    delete:
+      tags: [RenewalPolicies]
+      summary: Delete renewal policy
+      operationId: deleteRenewalPolicy
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "204":
+          description: Renewal policy deleted
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Policy in use by one or more certificates (FK restrict)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -3764,6 +3897,132 @@ components:
         created_at:
           type: string
           format: date-time
+
+    # ─── Renewal Policies ─────────────────────────────────────────────
+    # G-1: renewal_policies table — lifecycle policies, referenced by
+    # managed_certificates.renewal_policy_id ON DELETE RESTRICT. Distinct
+    # from PolicyRule above (compliance rules, table policy_rules).
+    RenewalPolicy:
+      type: object
+      required:
+        - id
+        - name
+        - renewal_window_days
+        - auto_renew
+        - max_retries
+        - retry_interval_seconds
+        - alert_thresholds_days
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          description: Human-readable ID, prefixed `rp-` (e.g., `rp-default`).
+        name:
+          type: string
+          description: Unique display name (UNIQUE in DB).
+        renewal_window_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+          description: Days before expiry to trigger renewal.
+        auto_renew:
+          type: boolean
+          description: Whether renewal is triggered automatically by the scheduler.
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Maximum renewal retry attempts on failure.
+        retry_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          description: Seconds to wait between retry attempts.
+        alert_thresholds_days:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 365
+          description: Days-before-expiry thresholds at which to emit alerts.
+        certificate_profile_id:
+          type: string
+          nullable: true
+          description: Optional certificate profile binding. Read-only at this endpoint; UI does not currently edit this field.
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    RenewalPolicyCreateRequest:
+      type: object
+      required:
+        - name
+      properties:
+        id:
+          type: string
+          description: Optional human-readable ID. Auto-generated from name when omitted.
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        renewal_window_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+          default: 30
+        auto_renew:
+          type: boolean
+          default: true
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+          description: Required. Not defaulted — 0 is a valid operator choice.
+        retry_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+          default: 3600
+        alert_thresholds_days:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 365
+          default: [30, 14, 7, 0]
+
+    RenewalPolicyUpdateRequest:
+      type: object
+      description: Partial update. Omitted fields are left unchanged.
+      properties:
+        name:
+          type: string
+          minLength: 1
+          maxLength: 255
+        renewal_window_days:
+          type: integer
+          minimum: 1
+          maximum: 365
+        auto_renew:
+          type: boolean
+        max_retries:
+          type: integer
+          minimum: 0
+          maximum: 10
+        retry_interval_seconds:
+          type: integer
+          minimum: 60
+          maximum: 86400
+        alert_thresholds_days:
+          type: array
+          items:
+            type: integer
+            minimum: 0
+            maximum: 365
 
     # ─── Profiles ────────────────────────────────────────────────────
     CertificateProfile:

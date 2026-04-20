@@ -65,8 +65,9 @@ type HandlerRegistry struct {
 	Verification   handler.VerificationHandler
 	Export         handler.ExportHandler
 	Digest         handler.DigestHandler
-	HealthChecks   *handler.HealthCheckHandler
-	BulkRevocation handler.BulkRevocationHandler
+	HealthChecks    *handler.HealthCheckHandler
+	BulkRevocation  handler.BulkRevocationHandler
+	RenewalPolicies handler.RenewalPolicyHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -166,6 +167,18 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("PUT /api/v1/policies/{id}", http.HandlerFunc(reg.Policies.UpdatePolicy))
 	r.Register("DELETE /api/v1/policies/{id}", http.HandlerFunc(reg.Policies.DeletePolicy))
 	r.Register("GET /api/v1/policies/{id}/violations", http.HandlerFunc(reg.Policies.ListViolations))
+
+	// Renewal Policies routes: /api/v1/renewal-policies
+	// G-1: fixes frontend FK drift — OnboardingWizard + CertificatesPage dropdowns
+	// were previously populating renewal_policy_id from /api/v1/policies (compliance
+	// rules, pol-* IDs), violating FK managed_certificates.renewal_policy_id →
+	// renewal_policies(id) ON DELETE RESTRICT. This block is the backend half; the
+	// frontend half swaps getPolicies → getRenewalPolicies at 3 call sites.
+	r.Register("GET /api/v1/renewal-policies", http.HandlerFunc(reg.RenewalPolicies.ListRenewalPolicies))
+	r.Register("POST /api/v1/renewal-policies", http.HandlerFunc(reg.RenewalPolicies.CreateRenewalPolicy))
+	r.Register("GET /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.GetRenewalPolicy))
+	r.Register("PUT /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.UpdateRenewalPolicy))
+	r.Register("DELETE /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.DeleteRenewalPolicy))
 
 	// Profiles routes: /api/v1/profiles
 	r.Register("GET /api/v1/profiles", http.HandlerFunc(reg.Profiles.ListProfiles))
