@@ -1155,7 +1155,7 @@ flowchart TB
         API["REST API\nGo net/http"]
         SVC["Service Layer\nBusiness Logic"]
         REPO["Repository Layer\ndatabase/sql + lib/pq"]
-        SCHED["Scheduler\n7 background loops"]
+        SCHED["Scheduler\n12 background loops\n(8 always-on + 4 opt-in)"]
         CONN["Connector Registry\nIssuer + Target + Notifier"]
     end
 

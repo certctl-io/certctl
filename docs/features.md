@@ -16,7 +16,7 @@ Complete reference of every feature shipped in certctl through v2.1.0 (April 202
 | Target connectors | 14 |
 | Notifier connectors | 6 channels |
 | Database tables | 21 (across 10 migrations) |
-| Background scheduler loops | 7 |
+| Background scheduler loops | 12 (8 always-on + 4 opt-in) |
 | Web dashboard pages | 24 |
 | Test functions | 1850+ |
 | Supported platforms | linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 |
@@ -903,7 +903,7 @@ Server-side active TLS scanning of CIDR ranges. Concurrent probing with semaphor
 
 <!-- Source: internal/connector/discovery/awssm/, azurekv/, gcpsm/, internal/service/cloud_discovery.go -->
 
-Discovers certificates stored in cloud secret managers and brings them into the certctl inventory. Extends the existing discovery pipeline with pluggable `DiscoverySource` implementations. Each source runs as part of the 9th scheduler loop (6h default).
+Discovers certificates stored in cloud secret managers and brings them into the certctl inventory. Extends the existing discovery pipeline with pluggable `DiscoverySource` implementations. Each source runs as part of the opt-in cloud discovery scheduler loop (6h default; see `docs/architecture.md` for the full 12-loop scheduler topology).
 
 **Supported sources:**
 
@@ -1097,17 +1097,22 @@ Single SQL `UNION` query replaces the previous "fetch all, filter in Go" approac
 
 <!-- Source: internal/scheduler/scheduler.go -->
 
-7 background loops, each with an `atomic.Bool` idempotency guard preventing concurrent tick execution. `sync.WaitGroup` + `WaitForCompletion()` for graceful shutdown.
+12 background loops (8 always-on + 4 opt-in), each with an `atomic.Bool` idempotency guard preventing concurrent tick execution. `sync.WaitGroup` + `WaitForCompletion()` for graceful shutdown. Authoritative topology table lives in `docs/architecture.md`.
 
-| Loop | Default Interval | Description |
-|---|---|---|
-| Renewal check | 1 hour | Check expiring certs, query ARI, create renewal jobs |
-| Job processor | 30 seconds | Process pending jobs |
-| Agent health check | 2 minutes | Check agent heartbeat staleness |
-| Notification processor | 1 minute | Send queued notifications |
-| Short-lived expiry check | 30 seconds | Mark short-lived certs expired |
-| Network scan | 6 hours | Run network discovery scans |
-| Digest | 24 hours | Send certificate digest email (does not run on startup) |
+| Loop | Default Interval | Always-on | Env Var | Description |
+|---|---|---|---|---|
+| Renewal check | 1 hour | Yes | — | Check expiring certs, query ARI, create renewal jobs |
+| Job processor | 30 seconds | Yes | — | Process pending jobs |
+| Job retry | 5 minutes | Yes | `CERTCTL_SCHEDULER_RETRY_INTERVAL` | Retry Failed jobs (I-001) |
+| Job timeout reaper | 10 minutes | Yes | `CERTCTL_JOB_TIMEOUT_INTERVAL` | Fail AwaitingCSR/AwaitingApproval jobs past timeout (I-003) |
+| Agent health check | 2 minutes | Yes | — | Check agent heartbeat staleness |
+| Notification processor | 1 minute | Yes | — | Send queued notifications |
+| Notification retry | 2 minutes | Yes | `CERTCTL_NOTIFICATION_RETRY_INTERVAL` | Exponential backoff retry for failed notifications; promote to dead-letter after 5 attempts (I-005) |
+| Short-lived expiry check | 30 seconds | Yes | — | Mark short-lived certs expired |
+| Network scan | 6 hours | Opt-in | `CERTCTL_NETWORK_SCAN_ENABLED` | Run network discovery scans |
+| Digest | 24 hours | Opt-in | `CERTCTL_DIGEST_INTERVAL` | Send certificate digest email (does not run on startup) |
+| Endpoint health | 60 seconds | Opt-in | `CERTCTL_HEALTH_CHECK_INTERVAL` | Continuous TLS health probes (M48) |
+| Cloud discovery | 6 hours | Opt-in | `CERTCTL_CLOUD_DISCOVERY_INTERVAL` | Cloud secret manager certificate discovery (M50) |
 
 ---
 

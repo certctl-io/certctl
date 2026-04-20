@@ -189,15 +189,20 @@ Each section includes:
 
 - **Health Endpoint** — `GET /health` returns 200 OK with service status. Consumed by Docker health checks and Kubernetes probes.
 - **Readiness Endpoint** — `GET /ready` returns 200 OK when the database is connected and migrations are applied.
-- **Background Scheduler Monitoring** — 7 background loops run on a fixed schedule:
-  - Renewal loop: every 1 hour, scans for certificates approaching renewal threshold
-  - Job processor loop: every 30 seconds, picks up pending/waiting jobs and advances their state
-  - Health check loop: every 2 minutes, pings agents to detect downtime
-  - Notification dispatcher loop: every 1 minute, sends queued alerts
-  - Short-lived cert expiry loop: every 30 seconds, marks expired short-lived credentials
-  - Network scanner loop: every 6 hours, scans enabled TLS endpoints for certificate discovery
-  - Digest emailer loop: every 24 hours, sends scheduled certificate digest email to configured recipients
-  Each loop includes error handling and logs failures via structured slog.
+- **Background Scheduler Monitoring** — 12 background loops (8 always-on + 4 opt-in) run on a fixed schedule. Authoritative topology in `docs/architecture.md`:
+  - Renewal loop (always-on, 1 hour): scans for certificates approaching renewal threshold
+  - Job processor loop (always-on, 30 seconds): picks up pending/waiting jobs and advances their state
+  - Job retry loop (always-on, 5 minutes, `CERTCTL_SCHEDULER_RETRY_INTERVAL`): retries Failed jobs (I-001)
+  - Job timeout reaper loop (always-on, 10 minutes, `CERTCTL_JOB_TIMEOUT_INTERVAL`): fails AwaitingCSR/AwaitingApproval jobs past timeout (I-003)
+  - Agent health check loop (always-on, 2 minutes): pings agents to detect downtime
+  - Notification dispatcher loop (always-on, 1 minute): sends queued alerts
+  - Notification retry loop (always-on, 2 minutes, `CERTCTL_NOTIFICATION_RETRY_INTERVAL`): exponential backoff retry for failed notifications; promote to dead-letter after 5 attempts (I-005)
+  - Short-lived cert expiry loop (always-on, 30 seconds): marks expired short-lived credentials
+  - Network scanner loop (opt-in, 6 hours, `CERTCTL_NETWORK_SCAN_ENABLED`): scans enabled TLS endpoints for certificate discovery
+  - Digest emailer loop (opt-in, 24 hours, `CERTCTL_DIGEST_INTERVAL`): sends scheduled certificate digest email to configured recipients
+  - Endpoint health loop (opt-in, 60 seconds, `CERTCTL_HEALTH_CHECK_INTERVAL`): continuous TLS health probes (M48)
+  - Cloud discovery loop (opt-in, 6 hours, `CERTCTL_CLOUD_DISCOVERY_INTERVAL`): cloud secret manager certificate discovery (M50)
+  Each loop includes `atomic.Bool` idempotency guards, error handling, and structured slog failure logs.
 - **Metrics Endpoints** — Two formats for monitoring integration:
   - `GET /api/v1/metrics` — JSON object with gauges, counters, and uptime for custom dashboards
   - `GET /api/v1/metrics/prometheus` — Prometheus exposition format (`text/plain; version=0.0.4`) for native scraping by Prometheus, Grafana Agent, Datadog, and other OpenMetrics-compatible collectors
@@ -459,7 +464,7 @@ Each section includes:
 | | Metrics JSON Endpoint | `GET /api/v1/metrics` (gauges, counters, uptime) | ✅ | ✅ | Set thresholds, configure alerting |
 | | Stats API (time-series) | `GET /api/v1/stats/*` (summary, status, expiration, jobs, issuance) | ✅ | ✅ | Integrate into dashboards, SLO tracking |
 | | Structured Logging | `slog` middleware with request IDs | ✅ | ✅ | Aggregate logs to SIEM, define retention policy |
-| | Background Scheduler | 7 loops (renewal 1h, jobs 30s, health 2m, notifications 1m, short-lived 30s, network scan 6h, digest 24h) | ✅ | ✅ | Alert on scheduler loop failures |
+| | Background Scheduler | 12 loops (8 always-on: renewal 1h, jobs 30s, job retry 5m I-001, job timeout 10m I-003, health 2m, notifications 1m, notif retry 2m I-005, short-lived 30s; 4 opt-in: network scan 6h, digest 24h, endpoint health 60s M48, cloud discovery 6h M50) | ✅ | ✅ | Alert on scheduler loop failures |
 | **CC7.2** Anomaly Detection | Immutable API Audit Trail | `internal/api/middleware/audit.go`, `GET /api/v1/audit` | ✅ | Enhanced (SIEM export) | Integrate into SIEM, search for anomalies, archive long-term |
 | | Expiration Threshold Alerting | Configurable per-policy (default 30/14/7/0 days) | ✅ | ✅ | Configure thresholds, integrate notifications |
 | | Status Auto-Transitions | Active → Expiring (30d) → Expired (0d) | ✅ | ✅ | Monitor status changes in audit trail |

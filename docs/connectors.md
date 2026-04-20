@@ -1126,7 +1126,7 @@ The digest HTML template includes:
 - Expiring certificates table (color-coded by urgency: 7d, 14d, 30d)
 - Auto-refresh and responsive email layout
 
-**Scheduler Integration:** The 7th scheduler loop runs on configurable interval (default 24 hours). It does NOT run on startup — waits for first scheduled tick. Operation timeout is 5 minutes. Each loop execution is guarded by `sync/atomic.Bool` idempotency.
+**Scheduler Integration:** The opt-in digest scheduler loop runs on configurable interval (default 24 hours). It does NOT run on startup — waits for first scheduled tick. Operation timeout is 5 minutes. Each loop execution is guarded by `sync/atomic.Bool` idempotency. See `docs/architecture.md` for the full scheduler topology (12 loops, 8 always-on + 4 opt-in).
 
 Configuration:
 
@@ -1389,7 +1389,7 @@ curl -s -X DELETE http://localhost:8443/api/v1/network-scan-targets/nst-dmz
 
 ### Scheduler Integration
 
-When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs a 6th scheduler loop (alongside renewal, jobs, health, notifications, and short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health.
+When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs the opt-in network scanner scheduler loop alongside the always-on loops (renewal, jobs, job retry, job timeout, agent health, notifications, notification retry, short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health. See `docs/architecture.md` for the full 12-loop scheduler topology.
 
 ### Use Cases
 
@@ -1447,7 +1447,7 @@ Source path format: `gcp-sm://{project}/{secret-name}`. Sentinel agent: `cloud-g
 
 ### Cloud Discovery Scheduler
 
-All enabled cloud sources run on a shared scheduler loop (9th loop). The interval is configurable:
+All enabled cloud sources run on a shared opt-in cloud discovery scheduler loop (see `docs/architecture.md` for the full 12-loop scheduler topology). The interval is configurable:
 
 | Variable | Description | Default |
 |---|---|---|

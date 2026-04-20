@@ -5002,10 +5002,10 @@ curl -s -w "HTTP %{http_code}\n" -X DELETE -H "$AUTH" "$SERVER/api/v1/audit/$EVE
 
 > **Tip:** Open a second terminal with `docker compose logs -f certctl-server` to watch scheduler log output in real time.
 
-**Test 20.1.1 — Scheduler startup: all 7 loops registered**
+**Test 20.1.1 — Scheduler startup: all 12 loops registered**
 
 ```bash
-docker compose logs certctl-server 2>&1 | grep -i "scheduler\|renewal check\|job processor\|health check\|notification\|short-lived\|network scan" | head -20
+docker compose logs certctl-server 2>&1 | grep -i "scheduler\|renewal check\|job processor\|job retry\|job timeout\|health check\|notification\|notification retry\|short-lived\|network scan\|digest\|endpoint health\|cloud discovery" | head -30
 ```
 
 **What:** Checks server startup logs for scheduler loop registration.
@@ -7340,7 +7340,7 @@ These must be green before starting manual QA:
 
 | Test | Description | Method | Pass? | Date | Notes |
 |------|-------------|--------|-------|------|-------|
-| 20.1.1 | Scheduler startup: all 7 loops registered | Manual | ☐ |  |  |
+| 20.1.1 | Scheduler startup: all 12 loops registered | Manual | ☐ |  |  |
 | 20.1.2 | Job processor loop fires (30s interval) | Manual | ☐ |  |  |
 | 20.1.3 | Agent health check marks offline (2m interval) | Manual | ☐ |  |  |
 | 20.1.4 | Notification processor fires (1m interval) | Manual | ☐ |  |  |
