@@ -228,6 +228,31 @@ export interface PolicyViolation {
   created_at: string;
 }
 
+/**
+ * G-1: RenewalPolicy is the lifecycle policy attached to managed certificates
+ * via `managed_certificates.renewal_policy_id` (FK ON DELETE RESTRICT → `rp-*`
+ * IDs in the `renewal_policies` table). Distinct from `PolicyRule` above, which
+ * models compliance rules in the `policy_rules` table with `pol-*` IDs. The
+ * OnboardingWizard + CertificatesPage + CertificateDetailPage dropdowns populate
+ * `renewal_policy_id` from this interface — previously they mis-populated it
+ * from `getPolicies()` which returned `pol-*` IDs and produced FK violations on
+ * certificate insert/update.
+ *
+ * JSON tags mirror internal/domain/renewal_policy.go.
+ */
+export interface RenewalPolicy {
+  id: string;
+  name: string;
+  renewal_window_days: number;
+  auto_renew: boolean;
+  max_retries: number;
+  retry_interval_seconds: number;
+  alert_thresholds_days: number[];
+  certificate_profile_id?: string | null;
+  created_at: string;
+  updated_at: string;
+}
+
 export interface Issuer {
   id: string;
   name: string;

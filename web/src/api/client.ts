@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -343,6 +343,29 @@ export const deletePolicy = (id: string) =>
 
 export const getPolicyViolations = (id: string) =>
   fetchJSON<PaginatedResponse<PolicyViolation>>(`${BASE}/policies/${id}/violations`);
+
+// G-1: Renewal Policies (/api/v1/renewal-policies) — lifecycle policies with
+// rp-* IDs in the renewal_policies table. Distinct from getPolicies() above
+// which hits /api/v1/policies and returns PolicyRule (compliance, pol-* IDs).
+// OnboardingWizard, CertificatesPage, and CertificateDetailPage populate the
+// `renewal_policy_id` dropdown from this endpoint; populating it from
+// getPolicies() produced FK violations on certificate insert/update.
+export const getRenewalPolicies = (page = 1, perPage = 50) => {
+  const qs = new URLSearchParams({ page: String(page), per_page: String(perPage) }).toString();
+  return fetchJSON<PaginatedResponse<RenewalPolicy>>(`${BASE}/renewal-policies?${qs}`);
+};
+
+export const getRenewalPolicy = (id: string) =>
+  fetchJSON<RenewalPolicy>(`${BASE}/renewal-policies/${id}`);
+
+export const createRenewalPolicy = (data: Partial<RenewalPolicy>) =>
+  fetchJSON<RenewalPolicy>(`${BASE}/renewal-policies`, { method: 'POST', body: JSON.stringify(data) });
+
+export const updateRenewalPolicy = (id: string, data: Partial<RenewalPolicy>) =>
+  fetchJSON<RenewalPolicy>(`${BASE}/renewal-policies/${id}`, { method: 'PUT', body: JSON.stringify(data) });
+
+export const deleteRenewalPolicy = (id: string) =>
+  fetchJSON<void>(`${BASE}/renewal-policies/${id}`, { method: 'DELETE' });
 
 // Issuers
 export const getIssuers = (params: Record<string, string> = {}) => {

@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate, Link } from 'react-router-dom';
 import {
-  getIssuers, getAgents, getProfiles, getOwners, getTeams, getPolicies,
+  getIssuers, getAgents, getProfiles, getOwners, getTeams, getRenewalPolicies,
   createIssuer, testIssuerConnection,
   createCertificate, triggerRenewal,
   createTeam, createOwner,
@@ -600,7 +600,11 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
   const { data: agents } = useQuery({ queryKey: ['agents'], queryFn: () => getAgents() });
   const { data: owners } = useQuery({ queryKey: ['owners'], queryFn: () => getOwners({ per_page: '500' }) });
   const { data: teams } = useQuery({ queryKey: ['teams'], queryFn: () => getTeams({ per_page: '500' }) });
-  const { data: policies } = useQuery({ queryKey: ['renewal-policies'], queryFn: () => getPolicies({ per_page: '500' }) });
+  // G-1: bind renewal_policy_id dropdown to /api/v1/renewal-policies (rp-* IDs
+  // from the renewal_policies table). Previously populated from getPolicies()
+  // which returned compliance rules (pol-* IDs) and violated the FK
+  // managed_certificates.renewal_policy_id → renewal_policies(id) on submit.
+  const { data: policies } = useQuery({ queryKey: ['renewal-policies'], queryFn: () => getRenewalPolicies(1, 500) });
 
   const hasAgents = (agents?.data?.length ?? 0) > 0;
 

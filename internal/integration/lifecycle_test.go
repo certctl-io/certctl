@@ -1151,6 +1151,25 @@ func (m *mockRenewalPolicyRepository) List(ctx context.Context) ([]*domain.Renew
 	return policies, nil
 }
 
+// Create/Update/Delete satisfy the G-1 interface extension. The integration
+// harness never drives the CRUD endpoints directly — these methods exist
+// purely for interface compliance so the binary still builds.
+func (m *mockRenewalPolicyRepository) Create(ctx context.Context, policy *domain.RenewalPolicy) error {
+	m.policies[policy.ID] = policy
+	return nil
+}
+
+func (m *mockRenewalPolicyRepository) Update(ctx context.Context, id string, policy *domain.RenewalPolicy) error {
+	policy.ID = id
+	m.policies[id] = policy
+	return nil
+}
+
+func (m *mockRenewalPolicyRepository) Delete(ctx context.Context, id string) error {
+	delete(m.policies, id)
+	return nil
+}
+
 type mockIssuerRepository struct {
 	issuers map[string]*domain.Issuer
 }

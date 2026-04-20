@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -164,9 +164,14 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
   const [policyId, setPolicyId] = useState(currentPolicyId);
   const [profileId, setProfileId] = useState(currentProfileId);
 
+  // G-1: swap from getPolicies (compliance rules, pol-*) to getRenewalPolicies
+  // (lifecycle policies, rp-*). managed_certificates.renewal_policy_id FK
+  // points at renewal_policies(id); the previous getPolicies call populated
+  // the dropdown with pol-* IDs that would 400/23503 at the server. See also
+  // OnboardingWizard.tsx:603 and CertificatesPage.tsx:53 for the sibling fixes.
   const { data: policies } = useQuery({
-    queryKey: ['policies'],
-    queryFn: () => getPolicies(),
+    queryKey: ['renewal-policies'],
+    queryFn: () => getRenewalPolicies(1, 500),
     enabled: editing,
   });
 
@@ -227,7 +232,10 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
             className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink">
             <option value="">None</option>
             {policies?.data?.map(p => (
-              <option key={p.id} value={p.id}>{p.name} ({p.type})</option>
+              // G-1: RenewalPolicy has no `type` field (that was PolicyRule).
+              // Show the human-readable name + renewal window so operators can
+              // pick the correct lifecycle policy at a glance.
+              <option key={p.id} value={p.id}>{p.name} ({p.renewal_window_days}d window)</option>
             ))}
           </select>
         </div>

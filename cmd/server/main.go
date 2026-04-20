@@ -147,6 +147,11 @@ func main() {
 	auditService := service.NewAuditService(auditRepo)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
+	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
+	// Drives /api/v1/renewal-policies CRUD; the service layer owns slugify + validation,
+	// the repo layer owns sentinel translation for 23505 (name UNIQUE) and 23503
+	// (FK-RESTRICT against managed_certificates.renewal_policy_id).
+	renewalPolicyService := service.NewRenewalPolicyService(renewalPolicyRepo)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
 	notifierRegistry := make(map[string]service.Notifier)
 
@@ -368,6 +373,10 @@ func main() {
 	agentHandler := handler.NewAgentHandler(agentService)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
+	// G-1: RenewalPolicyHandler — /api/v1/renewal-policies CRUD. Value-returning
+	// constructor matches the house pattern (PolicyHandler, IssuerHandler etc.);
+	// the registry stores it by value in HandlerRegistry.RenewalPolicies.
+	renewalPolicyHandler := handler.NewRenewalPolicyHandler(renewalPolicyService)
 	profileHandler := handler.NewProfileHandler(profileService)
 	teamHandler := handler.NewTeamHandler(teamService)
 	ownerHandler := handler.NewOwnerHandler(ownerService)
@@ -508,6 +517,7 @@ func main() {
 		Agents:         agentHandler,
 		Jobs:           jobHandler,
 		Policies:       policyHandler,
+		RenewalPolicies: renewalPolicyHandler,
 		Profiles:       profileHandler,
 		Teams:          teamHandler,
 		Owners:         ownerHandler,
