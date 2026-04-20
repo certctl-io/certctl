@@ -81,6 +81,29 @@ func (r *RevocationRepository) ListAll(ctx context.Context) ([]*domain.Certifica
 	return scanRevocations(rows)
 }
 
+// ListByIssuer returns all revocations for a single issuer, ordered by revocation time.
+//
+// This is the hot path for CRL generation. Pushing the issuer filter into the
+// SQL query lets the composite index `idx_certificate_revocations_issuer_serial`
+// (migration 000012) drive a prefix scan on issuer_id rather than forcing
+// callers to load every row in the table and discard the ones belonging to
+// other issuers.
+func (r *RevocationRepository) ListByIssuer(ctx context.Context, issuerID string) ([]*domain.CertificateRevocation, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, certificate_id, serial_number, reason, revoked_by, revoked_at,
+		       issuer_id, issuer_notified, created_at
+		FROM certificate_revocations
+		WHERE issuer_id = $1
+		ORDER BY revoked_at ASC
+	`, issuerID)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list revocations by issuer: %w", err)
+	}
+	defer rows.Close()
+
+	return scanRevocations(rows)
+}
+
 // ListByCertificate returns all revocations for a certificate.
 func (r *RevocationRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
 	rows, err := r.db.QueryContext(ctx, `

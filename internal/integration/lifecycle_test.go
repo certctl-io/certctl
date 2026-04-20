@@ -1371,6 +1371,16 @@ func (m *mockRevocationRepository) ListAll(ctx context.Context) ([]*domain.Certi
 	return m.revocations, nil
 }
 
+func (m *mockRevocationRepository) ListByIssuer(ctx context.Context, issuerID string) ([]*domain.CertificateRevocation, error) {
+	var result []*domain.CertificateRevocation
+	for _, r := range m.revocations {
+		if r.IssuerID == issuerID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
+}
+
 func (m *mockRevocationRepository) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
 	var result []*domain.CertificateRevocation
 	for _, r := range m.revocations {

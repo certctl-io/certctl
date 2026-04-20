@@ -56,19 +56,19 @@ func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) (
 		return nil, fmt.Errorf("issuer not found: %s", issuerID)
 	}
 
-	revocations, err := s.revocationRepo.ListAll(ctx)
+	// Scope the query to this issuer so the migration 000012 composite index
+	// drives a prefix scan; previously this path read every revocation in the
+	// table and filtered in Go, which did not scale as the revocation table
+	// grew across many issuers (F-001).
+	revocations, err := s.revocationRepo.ListByIssuer(ctx, issuerID)
 	if err != nil {
-		return nil, fmt.Errorf("failed to list revocations: %w", err)
+		return nil, fmt.Errorf("failed to list revocations for issuer %s: %w", issuerID, err)
 	}
 
-	// Filter to this issuer and convert to CRL entries.
-	// Short-lived certificates (profile TTL < 1 hour) are excluded — expiry is sufficient revocation.
+	// Convert revocations to CRL entries. Short-lived certificates (profile
+	// TTL < 1 hour) are excluded — expiry is sufficient revocation.
 	var entries []CRLEntry
 	for _, rev := range revocations {
-		if rev.IssuerID != issuerID {
-			continue
-		}
-
 		// Check short-lived exemption: look up the cert's profile
 		if s.profileRepo != nil && s.certRepo != nil {
 			cert, err := s.certRepo.Get(ctx, rev.CertificateID)

@@ -269,7 +269,14 @@ func (a *Agent) Run(ctx context.Context) error {
 				a.logger.Warn("backing off due to consecutive failures",
 					"failures", a.consecutiveFailures,
 					"backoff", backoff.String())
-				time.Sleep(backoff)
+				// F-003: ctx-aware wait so graceful shutdown does not stall on
+				// a long backoff. If ctx cancels mid-backoff, return to the
+				// outer loop so the <-ctx.Done() case can trigger clean exit.
+				select {
+				case <-ctx.Done():
+					continue
+				case <-time.After(backoff):
+				}
 			}
 			a.pollForWork(ctx)
 

@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 )
 
@@ -39,7 +40,8 @@ func (h *DigestHandler) PreviewDigest(w http.ResponseWriter, r *http.Request) {
 
 	html, err := h.service.PreviewDigest(r.Context())
 	if err != nil {
-		http.Error(w, err.Error(), http.StatusInternalServerError)
+		slog.Error("digest preview failed", "error", err.Error())
+		http.Error(w, "internal error", http.StatusInternalServerError)
 		return
 	}
 
@@ -64,9 +66,10 @@ func (h *DigestHandler) SendDigest(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.service.SendDigest(r.Context()); err != nil {
+		slog.Error("digest send failed", "error", err.Error())
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusInternalServerError)
-		json.NewEncoder(w).Encode(map[string]string{"error": err.Error()})
+		json.NewEncoder(w).Encode(map[string]string{"error": "internal error"})
 		return
 	}
 

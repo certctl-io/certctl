@@ -1385,6 +1385,13 @@ type mockRevocationRepo struct {
 	Revocations []*domain.CertificateRevocation
 	CreateErr   error
 	ListErr     error
+	// F-001 regression instrumentation: track which list method was invoked
+	// so tests can assert that the CRL generation hot path uses the scoped
+	// ListByIssuer query (migration 000012 composite index) rather than
+	// ListAll followed by in-Go filtering.
+	ListAllCalls      int
+	ListByIssuerCalls int
+	LastListIssuerID  string
 }
 
 func (m *mockRevocationRepo) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
@@ -1405,10 +1412,26 @@ func (m *mockRevocationRepo) GetByIssuerAndSerial(ctx context.Context, issuerID,
 }
 
 func (m *mockRevocationRepo) ListAll(ctx context.Context) ([]*domain.CertificateRevocation, error) {
+	m.ListAllCalls++
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
 	return m.Revocations, nil
+}
+
+func (m *mockRevocationRepo) ListByIssuer(ctx context.Context, issuerID string) ([]*domain.CertificateRevocation, error) {
+	m.ListByIssuerCalls++
+	m.LastListIssuerID = issuerID
+	if m.ListErr != nil {
+		return nil, m.ListErr
+	}
+	var result []*domain.CertificateRevocation
+	for _, r := range m.Revocations {
+		if r.IssuerID == issuerID {
+			result = append(result, r)
+		}
+	}
+	return result, nil
 }
 
 func (m *mockRevocationRepo) ListByCertificate(ctx context.Context, certID string) ([]*domain.CertificateRevocation, error) {
