@@ -88,7 +88,7 @@ func TestRegisterTools_ToolCount(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	RegisterTools(server, client)
 
 	// The server should have tools registered — we can verify by listing them
@@ -166,7 +166,7 @@ func TestToolEndToEnd_ListCertificates(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 
 	// Manually call the handler logic that would be registered as a tool
 	q := paginationQuery(1, 50)
@@ -204,7 +204,7 @@ func TestToolEndToEnd_CreateCertificate(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 
 	input := CreateCertificateInput{
 		Name:       "API Production",
@@ -244,7 +244,7 @@ func TestToolEndToEnd_TriggerRenewal(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	data, err := client.Post("/api/v1/certificates/mc-api-prod/renew", nil)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -272,7 +272,7 @@ func TestToolEndToEnd_DeleteTarget(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	data, err := client.Delete("/api/v1/targets/t-platform")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -300,7 +300,7 @@ func TestToolEndToEnd_RevokeCertificate(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	input := RevokeCertificateInput{
 		ID:     "mc-api-prod",
 		Reason: "keyCompromise",
@@ -327,7 +327,7 @@ func TestToolEndToEnd_AgentHeartbeat(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	_, err := client.Post("/api/v1/agents/agent-001/heartbeat", map[string]string{
 		"os":           "linux",
 		"architecture": "amd64",
@@ -347,7 +347,7 @@ func TestToolEndToEnd_ListWithFilters(t *testing.T) {
 	api := mockCertctlAPI(log)
 	defer api.Close()
 
-	client := NewClient(api.URL, "test-key")
+	client, _ := NewClient(api.URL, "test-key", "", false)
 	q := paginationQuery(1, 25)
 	q.Set("status", "Pending")
 	q.Set("type", "Renewal")
@@ -377,7 +377,7 @@ func TestToolEndToEnd_GetRawBinary(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key")
+	client, _ := NewClient(server.URL, "test-key", "", false)
 	data, ct, err := client.GetRaw("/.well-known/pki/crl/iss-local")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -397,7 +397,7 @@ func TestToolEndToEnd_ErrorPropagation(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "test-key")
+	client, _ := NewClient(server.URL, "test-key", "", false)
 	_, err := client.Get("/api/v1/certificates", nil)
 	if err == nil {
 		t.Fatal("expected error for 403 response")

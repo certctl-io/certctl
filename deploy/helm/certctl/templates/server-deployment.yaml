@@ -1,3 +1,4 @@
+{{- include "certctl.tls.required" . }}
 apiVersion: apps/v1
 kind: Deployment
 metadata:
@@ -32,7 +33,7 @@ spec:
           image: {{ include "certctl.serverImage" . }}
           imagePullPolicy: {{ .Values.server.image.pullPolicy }}
           ports:
-            - name: http
+            - name: https
               containerPort: {{ .Values.server.port }}
               protocol: TCP
           env:
@@ -40,6 +41,10 @@ spec:
               value: "0.0.0.0"
             - name: CERTCTL_SERVER_PORT
               value: "{{ .Values.server.port }}"
+            - name: CERTCTL_SERVER_TLS_CERT_PATH
+              value: "{{ .Values.server.tls.mountPath }}/tls.crt"
+            - name: CERTCTL_SERVER_TLS_KEY_PATH
+              value: "{{ .Values.server.tls.mountPath }}/tls.key"
             - name: CERTCTL_DATABASE_URL
               valueFrom:
                 secretKeyRef:
@@ -172,12 +177,19 @@ spec:
           volumeMounts:
             - name: tmp
               mountPath: /tmp
+            - name: tls
+              mountPath: {{ .Values.server.tls.mountPath }}
+              readOnly: true
             {{- if .Values.server.volumeMounts }}
             {{- toYaml .Values.server.volumeMounts | nindent 12 }}
             {{- end }}
       volumes:
         - name: tmp
           emptyDir: {}
+        - name: tls
+          secret:
+            secretName: {{ include "certctl.tls.secretName" . }}
+            defaultMode: 0400
         {{- if .Values.server.volumes }}
         {{- toYaml .Values.server.volumes | nindent 8 }}
         {{- end }}

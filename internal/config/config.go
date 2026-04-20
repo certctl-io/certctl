@@ -1,6 +1,7 @@
 package config
 
 import (
+	"crypto/tls"
 	"fmt"
 	"log/slog"
 	"os"
@@ -677,9 +678,30 @@ type VerificationConfig struct {
 
 // ServerConfig contains HTTP server configuration.
 type ServerConfig struct {
-	Host        string // Server host (default: 127.0.0.1). Set via CERTCTL_SERVER_HOST.
-	Port        int    // Server port (default: 8080). Set via CERTCTL_SERVER_PORT.
-	MaxBodySize int64  // Maximum request body size in bytes (default: 1MB). Set via CERTCTL_MAX_BODY_SIZE.
+	Host        string          // Server host (default: 127.0.0.1). Set via CERTCTL_SERVER_HOST.
+	Port        int             // Server port (default: 8080). Set via CERTCTL_SERVER_PORT.
+	MaxBodySize int64           // Maximum request body size in bytes (default: 1MB). Set via CERTCTL_MAX_BODY_SIZE.
+	TLS         ServerTLSConfig // HTTPS-only TLS configuration. Both CertPath and KeyPath are required.
+}
+
+// ServerTLSConfig holds the server-side TLS material.
+//
+// The control plane is HTTPS-only as of the HTTPS-everywhere milestone
+// (§3 locked decisions: no `http` mode, no dual-listener, TLS 1.3 only).
+// Both CertPath and KeyPath are required; an empty value causes
+// Config.Validate() to return a fail-loud error and the server refuses
+// to start. There is no plaintext HTTP fallback, no N-release migration
+// bridge, and no auto-generated self-signed cert — operators either
+// supply a cert on disk (docker-compose init container, operator-managed
+// file, cert-manager mount) or the process exits non-zero.
+type ServerTLSConfig struct {
+	// CertPath is the filesystem path to the server's PEM-encoded X.509
+	// certificate. Set via CERTCTL_SERVER_TLS_CERT_PATH. Required.
+	CertPath string
+
+	// KeyPath is the filesystem path to the server's PEM-encoded private
+	// key that signs CertPath. Set via CERTCTL_SERVER_TLS_KEY_PATH. Required.
+	KeyPath string
 }
 
 // DatabaseConfig contains database connection configuration.
@@ -841,6 +863,13 @@ func Load() (*Config, error) {
 			Host:        getEnv("CERTCTL_SERVER_HOST", "127.0.0.1"),
 			Port:        getEnvInt("CERTCTL_SERVER_PORT", 8080),
 			MaxBodySize: getEnvInt64("CERTCTL_MAX_BODY_SIZE", 1024*1024), // 1MB default
+			// HTTPS-everywhere milestone §2.1: both paths REQUIRED. Empty defaults
+			// are intentional so Validate() emits a fail-loud error pointing at
+			// docs/tls.md rather than silently binding plaintext HTTP.
+			TLS: ServerTLSConfig{
+				CertPath: getEnv("CERTCTL_SERVER_TLS_CERT_PATH", ""),
+				KeyPath:  getEnv("CERTCTL_SERVER_TLS_KEY_PATH", ""),
+			},
 		},
 		Database: DatabaseConfig{
 			URL:            getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
@@ -1057,6 +1086,37 @@ func (c *Config) Validate() error {
 	// Validate server configuration
 	if c.Server.Port < 1 || c.Server.Port > 65535 {
 		return fmt.Errorf("invalid server port: %d", c.Server.Port)
+	}
+
+	// HTTPS-everywhere milestone §2.1 + §3 locked decisions: the control plane
+	// is TLS-only and refuses to start without a cert. No plaintext HTTP fallback,
+	// no auto-generated self-signed cert, no N-release migration window. An empty
+	// CertPath or KeyPath is operator-visible misconfiguration, not a soft warning.
+	if c.Server.TLS.CertPath == "" {
+		return fmt.Errorf("server TLS cert path is required — refuse to start (HTTPS-only: set CERTCTL_SERVER_TLS_CERT_PATH to a PEM-encoded certificate; see docs/tls.md)")
+	}
+	if c.Server.TLS.KeyPath == "" {
+		return fmt.Errorf("server TLS key path is required — refuse to start (HTTPS-only: set CERTCTL_SERVER_TLS_KEY_PATH to the PEM-encoded private key matching CERTCTL_SERVER_TLS_CERT_PATH; see docs/tls.md)")
+	}
+
+	// Files must exist and be readable. Catches typos and missing mount paths
+	// up-front so the operator gets a structured error on startup instead of
+	// a deferred ListenAndServeTLS failure after the scheduler has already
+	// fanned out its goroutines.
+	if _, err := os.Stat(c.Server.TLS.CertPath); err != nil {
+		return fmt.Errorf("server TLS cert file unreadable at %q: %w — refuse to start (HTTPS-only; see docs/tls.md)", c.Server.TLS.CertPath, err)
+	}
+	if _, err := os.Stat(c.Server.TLS.KeyPath); err != nil {
+		return fmt.Errorf("server TLS key file unreadable at %q: %w — refuse to start (HTTPS-only; see docs/tls.md)", c.Server.TLS.KeyPath, err)
+	}
+
+	// Parse the cert+key pair up-front. tls.LoadX509KeyPair verifies that the
+	// key signs the cert (prevents the classic footgun of shipping a pair
+	// whose private key doesn't match). Discard the returned Certificate — the
+	// server constructs its own holder from fresh reads so SIGHUP reload is
+	// authoritative.
+	if _, err := tls.LoadX509KeyPair(c.Server.TLS.CertPath, c.Server.TLS.KeyPath); err != nil {
+		return fmt.Errorf("server TLS cert/key pair invalid (cert=%q key=%q): %w — refuse to start (HTTPS-only; see docs/tls.md)", c.Server.TLS.CertPath, c.Server.TLS.KeyPath, err)
 	}
 
 	// Validate database configuration

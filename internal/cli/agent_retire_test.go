@@ -46,7 +46,7 @@ func TestClient_RetireAgent_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	// Positional arg: the agent ID. No --force, no --reason — the default
 	// soft-retire path. Compile-fail until client.RetireAgent exists.
 	if err := client.RetireAgent([]string{"ag-1"}); err != nil {
@@ -101,7 +101,7 @@ func TestClient_RetireAgent_Force_WithReason_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	if err := client.RetireAgent([]string{"ag-1", "--force", "--reason", "decommissioning rack 7"}); err != nil {
 		t.Fatalf("RetireAgent(force+reason) err=%v want nil", err)
 	}
@@ -126,7 +126,7 @@ func TestClient_RetireAgent_Force_RequiresReason(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	err := client.RetireAgent([]string{"ag-1", "--force"})
 	if err == nil {
 		t.Fatalf("RetireAgent(force, no reason) err=nil want client-side error")
@@ -150,7 +150,7 @@ func TestClient_RetireAgent_MissingID(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	err := client.RetireAgent([]string{})
 	if err == nil {
 		t.Fatalf("RetireAgent([]) err=nil want missing-id error")
@@ -198,7 +198,7 @@ func TestClient_ListRetiredAgents_Success(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	if err := client.ListRetiredAgents([]string{}); err != nil {
 		t.Fatalf("ListRetiredAgents err=%v want nil", err)
 	}
@@ -220,7 +220,7 @@ func TestClient_ListRetiredAgents_ServerError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	client := NewClient(server.URL, "", "table")
+	client, _ := NewClient(server.URL, "", "table", "", false)
 	err := client.ListRetiredAgents([]string{})
 	if err == nil {
 		t.Fatalf("ListRetiredAgents(500) err=nil want propagated error")

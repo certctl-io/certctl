@@ -47,11 +47,30 @@ func envOr(key, fallback string) string {
 	return fallback
 }
 
+// HTTPS-Everywhere Phase 6: the test harness now dials the server over TLS and
+// validates the self-signed cert against the init-container-generated CA bundle
+// bind-mounted at ./test/certs/ca.crt. The defaults assume the compose setup in
+// deploy/docker-compose.test.yml; override via the usual env vars when pointing
+// the suite at a different deployment.
+//
+//   - CERTCTL_TEST_SERVER_URL  — must be https:// for the Phase 6 wiring
+//   - CERTCTL_TEST_CA_BUNDLE   — PEM bundle; must contain the server's issuing
+//     CA (self-signed in the compose setup, so server.crt doubles as ca.crt)
+//   - CERTCTL_TEST_INSECURE    — set to "true" to fall back to
+//     InsecureSkipVerify when the CA bundle path is unavailable (CI smoke or
+//     exploratory runs only — CI-parity runs MUST use the pinned bundle).
+//
+// Under no circumstance does the suite silently downgrade to plaintext HTTP:
+// Phase 5 (#203) pre-flight guards in cmd/server will refuse to start with an
+// http:// URL anyway, so a misconfiguration fails loud at test-harness startup
+// rather than flaking mid-suite.
 var (
-	serverURL = envOr("CERTCTL_TEST_SERVER_URL", "http://localhost:8443")
-	apiKey    = envOr("CERTCTL_TEST_API_KEY", "test-key-2026")
-	dbURL     = envOr("CERTCTL_TEST_DB_URL", "postgres://certctl:testpass@localhost:5432/certctl?sslmode=disable")
-	nginxTLS  = envOr("CERTCTL_TEST_NGINX_TLS", "localhost:8444")
+	serverURL    = envOr("CERTCTL_TEST_SERVER_URL", "https://localhost:8443")
+	apiKey       = envOr("CERTCTL_TEST_API_KEY", "test-key-2026")
+	dbURL        = envOr("CERTCTL_TEST_DB_URL", "postgres://certctl:testpass@localhost:5432/certctl?sslmode=disable")
+	nginxTLS     = envOr("CERTCTL_TEST_NGINX_TLS", "localhost:8444")
+	caBundlePath = envOr("CERTCTL_TEST_CA_BUNDLE", "./certs/ca.crt")
+	insecureTLS  = strings.EqualFold(os.Getenv("CERTCTL_TEST_INSECURE"), "true")
 )
 
 // ---------------------------------------------------------------------------
@@ -75,13 +94,71 @@ type testClient struct {
 	apiKey  string
 }
 
+// buildTLSConfig wires up the x509.CertPool with the self-signed CA bundle
+// emitted by the certctl-tls-init container. Panics via t.Fatal on the happy
+// path if both CERTCTL_TEST_CA_BUNDLE is unreadable *and* CERTCTL_TEST_INSECURE
+// is not set — that combination is almost always a misconfigured test harness
+// and silently downgrading to InsecureSkipVerify would hide real failures.
+//
+// MinVersion is pinned to TLS 1.3 so this matches what cmd/server negotiates
+// by default; a drift there would surface here first.
+func buildTLSConfig() *tls.Config {
+	cfg := &tls.Config{
+		MinVersion: tls.VersionTLS13,
+	}
+	if insecureTLS {
+		// Opt-in smoke-run mode; log but don't fail so operators running
+		// `CERTCTL_TEST_INSECURE=true go test -tags integration ./deploy/test/...`
+		// against an ad-hoc environment still get a green suite when the server
+		// is reachable. CI must not set this.
+		cfg.InsecureSkipVerify = true
+		return cfg
+	}
+	pem, err := os.ReadFile(caBundlePath)
+	if err != nil {
+		// Can't use t.Fatal here (called from package-level helpers); fall
+		// back to a panic so the harness dies loud at the first HTTP call.
+		// Operators see a clear "CA bundle missing" message and fix their
+		// setup instead of chasing a confusing TLS handshake error.
+		panic(fmt.Sprintf("integration test: read CA bundle %q: %v — "+
+			"run `docker compose -f deploy/docker-compose.test.yml up` first, or "+
+			"set CERTCTL_TEST_CA_BUNDLE to a valid PEM path, or "+
+			"set CERTCTL_TEST_INSECURE=true for a smoke run", caBundlePath, err))
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		panic(fmt.Sprintf("integration test: no PEM certificates parsed from %q", caBundlePath))
+	}
+	cfg.RootCAs = pool
+	return cfg
+}
+
+// newTestClient builds a Bearer-authenticated HTTPS client pinned to the
+// init-container CA. Every phase uses this for REST calls.
 func newTestClient() *testClient {
 	return &testClient{
 		http: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig: buildTLSConfig(),
+			},
 		},
 		baseURL: serverURL,
 		apiKey:  apiKey,
+	}
+}
+
+// newUnauthHTTPClient returns an *http.Client with the same TLS configuration
+// but no Bearer token. Used for the Phase 7 RFC 5280 CRL / RFC 8615
+// `/.well-known/pki/*` probes — those endpoints must be reachable by
+// *unauthenticated* relying parties per M-006, so we explicitly omit the
+// Authorization header to prove it.
+func newUnauthHTTPClient() *http.Client {
+	return &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig: buildTLSConfig(),
+		},
 	}
 }
 
@@ -724,11 +801,18 @@ func TestIntegrationSuite(t *testing.T) {
 		}
 
 		// Check DER CRL served unauthenticated under /.well-known/pki/ per
-		// RFC 5280 §5 + RFC 8615 (M-006). Use a plain http.Get — no Bearer
-		// token — to prove the endpoint is reachable by relying parties that
-		// have no certctl API credentials.
+		// RFC 5280 §5 + RFC 8615 (M-006). Use newUnauthHTTPClient() — no
+		// Bearer token — to prove the endpoint is reachable by relying
+		// parties that have no certctl API credentials. Post HTTPS-Everywhere
+		// (M-007, Phase 6) the client still speaks TLS 1.3 against the pinned
+		// CA bundle from ./certs/ca.crt; we just skip the Authorization header
+		// to exercise the unauthenticated RFC 5280 / RFC 8615 relying-party
+		// path. Switching from the stdlib http.DefaultClient (plaintext OK,
+		// system trust store only) to the helper keeps the no-auth semantic
+		// while preventing silent plaintext downgrade — the whole point of
+		// this milestone.
 		t.Run("CRL_DER_Unauthenticated", func(t *testing.T) {
-			resp, err := http.Get(serverURL + "/.well-known/pki/crl/iss-local")
+			resp, err := newUnauthHTTPClient().Get(serverURL + "/.well-known/pki/crl/iss-local")
 			if err != nil {
 				t.Fatalf("GET DER CRL: %v", err)
 			}

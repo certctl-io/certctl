@@ -22,7 +22,7 @@ Option A: Docker Compose (quickest for evaluation)
 ```bash
 cd /opt/certctl
 docker compose up -d
-# Dashboard & API: http://localhost:8443
+# Dashboard & API: https://localhost:8443 (self-signed cert — use --cacert ./deploy/test/certs/ca.crt for the default compose stack)
 # Default API key in logs (grep CERTCTL_API_KEY docker logs certctl-server)
 ```
 
@@ -45,7 +45,8 @@ chmod +x /usr/local/bin/certctl-agent
 # Create config
 sudo mkdir -p /etc/certctl /var/lib/certctl/keys
 sudo tee /etc/certctl/agent.env > /dev/null <<EOF
-CERTCTL_SERVER_URL=http://certctl-control-plane.example.com:8443
+CERTCTL_SERVER_URL=https://certctl-control-plane.example.com:8443
+CERTCTL_SERVER_CA_BUNDLE_PATH=/etc/certctl/tls/ca.crt
 CERTCTL_API_KEY=your-api-key-here
 CERTCTL_DISCOVERY_DIRS=/etc/letsencrypt/live
 CERTCTL_KEY_DIR=/var/lib/certctl/keys

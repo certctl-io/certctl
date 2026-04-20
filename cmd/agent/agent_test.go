@@ -7,6 +7,7 @@ import (
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -72,7 +73,7 @@ func TestAgent_Heartbeat_Success(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should not panic
 	agent.sendHeartbeat(context.Background())
@@ -93,7 +94,7 @@ func TestAgent_Heartbeat_ServerError(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should increment consecutive failures
 	failureBefore := agent.consecutiveFailures
@@ -115,7 +116,7 @@ func TestAgent_Heartbeat_ConnectionError(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should fail due to connection error
 	agent.sendHeartbeat(context.Background())
@@ -150,7 +151,7 @@ func TestAgent_PollWork_NoWork(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should not panic
 	agent.pollForWork(context.Background())
@@ -195,7 +196,7 @@ func TestAgent_PollWork_Success(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should not panic; work items are processed in separate gorines in real usage
 	agent.pollForWork(context.Background())
@@ -285,7 +286,7 @@ func TestParsePEMFile(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Parse the file
 	entries := agent.parsePEMFile(certPath)
@@ -336,7 +337,7 @@ func TestParsePEMFile_MultipleCerts(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	entries := agent.parsePEMFile(certPath)
 
@@ -362,7 +363,7 @@ func TestParseDERFile(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	entry, err := agent.parseDERFile(derPath)
 	if err != nil {
@@ -397,7 +398,7 @@ func TestParseDERFile_Invalid(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	_, err := agent.parseDERFile(derPath)
 	if err == nil {
@@ -439,7 +440,7 @@ func TestScanDirectory(t *testing.T) {
 		DiscoveryDirs: []string{tmpdir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Simulate directory walk manually (as runDiscoveryScan does)
 	var certs []discoveredCertEntry
@@ -474,7 +475,7 @@ func TestCreateTargetConnector_NGINX(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	configJSON := json.RawMessage(`{"cert_path":"/etc/nginx/cert.pem"}`)
 	connector, err := agent.createTargetConnector("NGINX", configJSON)
@@ -496,7 +497,7 @@ func TestCreateTargetConnector_Unsupported(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	_, err := agent.createTargetConnector("UnsupportedType", nil)
 
@@ -530,7 +531,7 @@ func TestFetchCertificate_Success(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	certPEM, err := agent.fetchCertificate(context.Background(), "mc-001")
 	if err != nil {
@@ -556,7 +557,7 @@ func TestFetchCertificate_NotFound(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	_, err := agent.fetchCertificate(context.Background(), "mc-nonexistent")
 	if err == nil {
@@ -592,7 +593,7 @@ func TestReportJobStatus_Success(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	err := agent.reportJobStatus(context.Background(), "j-001", "Completed", "")
 	if err != nil {
@@ -624,7 +625,7 @@ func TestReportJobStatus_WithError(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	err := agent.reportJobStatus(context.Background(), "j-001", "Failed", "deployment failed")
 	if err != nil {
@@ -658,7 +659,7 @@ func TestMakeRequest_Success(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	resp, err := agent.makeRequest(context.Background(), http.MethodPost, "/test", map[string]string{"key": "value"})
 	if err != nil {
@@ -680,7 +681,7 @@ func TestMakeRequest_InvalidURL(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	_, err := agent.makeRequest(context.Background(), http.MethodGet, "/test", nil)
 	if err == nil {
@@ -765,7 +766,7 @@ func TestNewAgent(t *testing.T) {
 	}
 
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	if agent.config != cfg {
 		t.Error("config not set correctly")
@@ -791,7 +792,7 @@ func TestNewAgent_WithLogger(t *testing.T) {
 		Hostname:  "test-host",
 	}
 
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	if agent.logger != logger {
 		t.Error("logger not set correctly")
@@ -954,7 +955,7 @@ func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -1007,7 +1008,7 @@ func TestCreateTargetConnector_InvalidJSON(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	invalidJSON := json.RawMessage("{invalid json}")
 
@@ -1031,7 +1032,7 @@ func TestCreateTargetConnector_UnknownType(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	_, err := agent.createTargetConnector("MagicBox", nil)
 
@@ -1061,7 +1062,7 @@ func TestCreateTargetConnector_EmptyConfig(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	for _, typeName := range tests {
 		t.Run(typeName, func(t *testing.T) {
@@ -1137,7 +1138,7 @@ func TestRunDiscoveryScan_ValidCerts(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Run discovery scan
 	agent.runDiscoveryScan(context.Background())
@@ -1165,7 +1166,7 @@ func TestRunDiscoveryScan_NoCertificates(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Run discovery scan - should complete without error even with empty directory
 	agent.runDiscoveryScan(context.Background())
@@ -1222,7 +1223,7 @@ func TestRunDiscoveryScan_MultipleCerts(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Run discovery scan
 	agent.runDiscoveryScan(context.Background())
@@ -1273,7 +1274,7 @@ func TestRunDiscoveryScan_DERCertificate(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Run discovery scan
 	agent.runDiscoveryScan(context.Background())
@@ -1331,7 +1332,7 @@ func TestRunDiscoveryScan_Subdirectories(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Run discovery scan - should recursively find certs in subdirs
 	agent.runDiscoveryScan(context.Background())
@@ -1369,7 +1370,7 @@ func TestRunDiscoveryScan_ServerError(t *testing.T) {
 		DiscoveryDirs: []string{tmpDir},
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	// Should handle server error gracefully without panicking
 	agent.runDiscoveryScan(context.Background())
@@ -1396,7 +1397,7 @@ func TestDiscoveredCertEntry_ValidFields(t *testing.T) {
 		Hostname:  "test-host",
 	}
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
-	agent := NewAgent(cfg, logger)
+	agent, _ := NewAgent(cfg, logger)
 
 	entries := agent.parsePEMFile(certPath)
 
@@ -1445,5 +1446,246 @@ func TestDiscoveredCertEntry_ValidFields(t *testing.T) {
 	}
 	if entry.PEMData == "" {
 		t.Error("PEMData should not be empty")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// HTTPS-Everywhere milestone (v2.2, §3.2 / §7) — Phase 5 client-side tests.
+//
+// These tests pin the agent's pre-flight HTTPS-scheme guard and the TLS
+// configuration surface (CA bundle loading + TLS 1.3 round-trip) so that
+// regressions surface at unit-test time, not at the first heartbeat of a
+// production rollout. Matches the same contract asserted by the sibling
+// binaries cmd/cli/main_test.go and cmd/mcp-server/main_test.go — the three
+// must stay in lock-step because all three are HTTPS-only clients of the
+// same control plane.
+// ---------------------------------------------------------------------------
+
+// TestValidateHTTPSScheme pins the pre-flight URL-scheme guard that the
+// HTTPS-Everywhere milestone requires on the agent binary startup path. The
+// agent's diagnostic is distinct from the CLI/MCP variants because it names
+// CERTCTL_SERVER_URL (the only input channel — no --server flag on the
+// agent). Every case here mirrors the dispatch arms in cmd/agent/main.go:
+// validateHTTPSScheme; drifting the error-message substrings is what this
+// test is here to catch.
+func TestValidateHTTPSScheme(t *testing.T) {
+	tests := []struct {
+		name       string
+		serverURL  string
+		wantErr    bool
+		wantErrSub string
+	}{
+		{
+			name:      "https URL passes",
+			serverURL: "https://certctl-server:8443",
+			wantErr:   false,
+		},
+		{
+			name:      "https URL with path passes",
+			serverURL: "https://certctl.example.com/api/v1",
+			wantErr:   false,
+		},
+		{
+			name:      "uppercase HTTPS scheme passes (url.Parse lowercases)",
+			serverURL: "HTTPS://certctl-server:8443",
+			wantErr:   false,
+		},
+		{
+			name:       "empty URL rejected names CERTCTL_SERVER_URL",
+			serverURL:  "",
+			wantErr:    true,
+			wantErrSub: "CERTCTL_SERVER_URL is empty",
+		},
+		{
+			name:       "plaintext http rejected",
+			serverURL:  "http://certctl-server:8443",
+			wantErr:    true,
+			wantErrSub: "plaintext http://",
+		},
+		{
+			name:       "bare host missing scheme falls through to unsupported",
+			serverURL:  "localhost:8443",
+			wantErr:    true,
+			// url.Parse treats "localhost:8443" as scheme=localhost,
+			// opaque=8443 — exercises the default arm (unsupported scheme)
+			// rather than the empty-scheme arm. Both are fail-closed, which
+			// is what we care about.
+			wantErrSub: "unsupported scheme",
+		},
+		{
+			name:       "path-only URL rejected",
+			serverURL:  "//certctl-server:8443",
+			wantErr:    true,
+			wantErrSub: "missing a scheme",
+		},
+		{
+			name:       "unsupported scheme rejected",
+			serverURL:  "ftp://certctl-server:8443",
+			wantErr:    true,
+			wantErrSub: "unsupported scheme",
+		},
+		{
+			name:       "ws scheme rejected",
+			serverURL:  "ws://certctl-server:8443",
+			wantErr:    true,
+			wantErrSub: "unsupported scheme",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			err := validateHTTPSScheme(tt.serverURL)
+			if (err != nil) != tt.wantErr {
+				t.Fatalf("validateHTTPSScheme(%q) err=%v wantErr=%v", tt.serverURL, err, tt.wantErr)
+			}
+			if tt.wantErr && tt.wantErrSub != "" && !strings.Contains(err.Error(), tt.wantErrSub) {
+				t.Errorf("validateHTTPSScheme(%q) err=%q must contain %q so operators see the right diagnostic",
+					tt.serverURL, err.Error(), tt.wantErrSub)
+			}
+		})
+	}
+}
+
+// writeTestCABundle PEM-encodes a cert's DER bytes and writes the result to a
+// tmp file inside dir. Used by CA-bundle tests so each case owns a distinct
+// file path (matters for the "missing file" case which must point at a path
+// that provably does not exist). Returns the path.
+func writeTestCABundle(t *testing.T, dir string, certDER []byte, filename string) string {
+	t.Helper()
+	pemBytes := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER})
+	path := filepath.Join(dir, filename)
+	if err := os.WriteFile(path, pemBytes, 0644); err != nil {
+		t.Fatalf("writing CA bundle %q: %v", path, err)
+	}
+	return path
+}
+
+// TestNewAgent_CABundle_Success confirms that a well-formed PEM bundle gets
+// parsed into an x509.CertPool and wired onto the agent's HTTP client
+// transport. This is the happy path the docs/tls.md "Private CA signed
+// server cert" section depends on.
+func TestNewAgent_CABundle_Success(t *testing.T) {
+	cert, err := generateTestCertWithCN("test.certctl.local")
+	if err != nil {
+		t.Fatalf("generateTestCertWithCN: %v", err)
+	}
+	bundlePath := writeTestCABundle(t, t.TempDir(), cert.Raw, "ca-bundle.pem")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agent, err := NewAgent(&AgentConfig{
+		ServerURL:    "https://certctl-server:8443",
+		APIKey:       "test-key",
+		AgentID:      "a-test",
+		Hostname:     "test-host",
+		CABundlePath: bundlePath,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewAgent with valid CA bundle err=%v want nil", err)
+	}
+
+	transport, ok := agent.client.Transport.(*http.Transport)
+	if !ok {
+		t.Fatalf("agent.client.Transport is %T; want *http.Transport", agent.client.Transport)
+	}
+	if transport.TLSClientConfig == nil {
+		t.Fatal("TLSClientConfig is nil; HTTPS-everywhere milestone requires a non-nil TLS config")
+	}
+	if transport.TLSClientConfig.MinVersion != tls.VersionTLS13 {
+		t.Errorf("MinVersion=%x want TLS 1.3 (%x) per §2.3 of the milestone spec",
+			transport.TLSClientConfig.MinVersion, tls.VersionTLS13)
+	}
+	if transport.TLSClientConfig.RootCAs == nil {
+		t.Error("RootCAs is nil; the configured CA bundle was silently dropped")
+	}
+}
+
+// TestNewAgent_CABundle_MissingFile pins the fail-loud behavior when the
+// operator points CERTCTL_SERVER_CA_BUNDLE_PATH at a path that does not
+// exist. Falling back to system roots here would mask a misconfiguration as
+// a much harder-to-debug TLS handshake failure downstream.
+func TestNewAgent_CABundle_MissingFile(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	missingPath := filepath.Join(t.TempDir(), "does-not-exist.pem")
+	_, err := NewAgent(&AgentConfig{
+		ServerURL:    "https://certctl-server:8443",
+		APIKey:       "test-key",
+		AgentID:      "a-test",
+		Hostname:     "test-host",
+		CABundlePath: missingPath,
+	}, logger)
+	if err == nil {
+		t.Fatal("NewAgent err=nil for missing CA bundle path; must fail loud at startup")
+	}
+	if !strings.Contains(err.Error(), "reading CA bundle") {
+		t.Errorf("err=%q must contain \"reading CA bundle\" so operators can trace the cause", err.Error())
+	}
+}
+
+// TestNewAgent_CABundle_EmptyPEM covers the "file exists but contains no
+// valid certs" case (garbage, wrong-format, stripped PEM). AppendCertsFromPEM
+// returns false in this case; NewAgent must translate that into a fail-loud
+// startup error rather than quietly carry on with an empty pool.
+func TestNewAgent_CABundle_EmptyPEM(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	bundlePath := filepath.Join(t.TempDir(), "empty.pem")
+	if err := os.WriteFile(bundlePath, []byte("not a pem-encoded certificate, just garbage\n"), 0644); err != nil {
+		t.Fatalf("writing garbage bundle: %v", err)
+	}
+	_, err := NewAgent(&AgentConfig{
+		ServerURL:    "https://certctl-server:8443",
+		APIKey:       "test-key",
+		AgentID:      "a-test",
+		Hostname:     "test-host",
+		CABundlePath: bundlePath,
+	}, logger)
+	if err == nil {
+		t.Fatal("NewAgent err=nil for empty-PEM CA bundle; must fail loud at startup")
+	}
+	if !strings.Contains(err.Error(), "no valid PEM-encoded certificates") {
+		t.Errorf("err=%q must contain \"no valid PEM-encoded certificates\" so operators see why the bundle was rejected", err.Error())
+	}
+}
+
+// TestNewAgent_TLSRoundTrip is the end-to-end integration-style check: spin
+// up an httptest.NewTLSServer (which presents a self-signed cert over TLS
+// 1.3), feed that cert into the agent as a CA bundle, and confirm the agent
+// successfully completes a heartbeat round-trip over HTTPS. This proves that
+// (a) the CA pool is actually being consulted during verification and (b)
+// the TLS 1.3 MinVersion doesn't break against httptest's default
+// negotiation. Equivalent to the "TLS handshake succeeds against a
+// self-signed control plane" integration gate, but runs in-process with no
+// Docker dependency.
+func TestNewAgent_TLSRoundTrip(t *testing.T) {
+	var heartbeatHit int
+	server := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/agents/a-tls-test/heartbeat" && r.Method == http.MethodPost {
+			heartbeatHit++
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+		w.WriteHeader(http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	// server.Certificate() returns the *x509.Certificate httptest presents;
+	// PEM-encode its DER bytes so NewAgent's AppendCertsFromPEM can ingest it.
+	bundlePath := writeTestCABundle(t, t.TempDir(), server.Certificate().Raw, "httptest-ca.pem")
+
+	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
+	agent, err := NewAgent(&AgentConfig{
+		ServerURL:    server.URL,
+		APIKey:       "test-key",
+		AgentID:      "a-tls-test",
+		Hostname:     "tls-test-host",
+		CABundlePath: bundlePath,
+	}, logger)
+	if err != nil {
+		t.Fatalf("NewAgent with httptest CA bundle err=%v want nil", err)
+	}
+
+	agent.sendHeartbeat(context.Background())
+
+	if heartbeatHit != 1 {
+		t.Fatalf("heartbeat handler hit %d times; want 1 — the TLS round-trip must actually complete", heartbeatHit)
 	}
 }

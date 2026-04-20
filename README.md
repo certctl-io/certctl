@@ -197,7 +197,7 @@ cd certctl
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
-Wait ~30 seconds, then open **http://localhost:8443** in your browser. The onboarding wizard walks you through connecting a CA, deploying an agent, and issuing your first certificate.
+Wait ~30 seconds, then open **https://localhost:8443** in your browser. (The shipped `docker-compose.yml` self-signs a cert via the `certctl-tls-init` init container on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.) The onboarding wizard walks you through connecting a CA, deploying an agent, and issuing your first certificate.
 
 **Want a pre-populated demo instead?** Add the demo override to see 32 certificates across 10 issuers, 8 agents, and 180 days of realistic history:
 
@@ -208,9 +208,11 @@ docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up
 The `deploy/` directory has four compose files: `docker-compose.yml` (base platform), `docker-compose.demo.yml` (demo data overlay), `docker-compose.dev.yml` (PgAdmin + debug logging), and `docker-compose.test.yml` (standalone integration tests with real CA backends). See the [Docker Compose Environments Guide](deploy/ENVIRONMENTS.md) for a service-by-service walkthrough, or the [Quick Start](docs/quickstart.md#docker-compose-environments) for a summary.
 
 ```bash
-curl http://localhost:8443/health
+curl --cacert $(docker compose -f deploy/docker-compose.yml exec -T certctl-server cat /etc/certctl/tls/ca.crt) https://localhost:8443/health
 # {"status":"healthy"}
 ```
+
+The control plane is HTTPS-only (TLS 1.3, no plaintext listener). See [`docs/tls.md`](docs/tls.md) for cert provisioning patterns and [`docs/upgrade-to-tls.md`](docs/upgrade-to-tls.md) if you're upgrading from a pre-v2.2 release.
 
 ### Agent Install (One-Liner)
 
@@ -326,8 +328,9 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 go install github.com/shankar0123/certctl/cmd/cli@latest
 
 # Configure
-export CERTCTL_SERVER_URL=http://localhost:8443
+export CERTCTL_SERVER_URL=https://localhost:8443
 export CERTCTL_API_KEY=your-api-key
+export CERTCTL_SERVER_CA_BUNDLE_PATH=/path/to/ca.crt   # or --ca-bundle on the CLI; --insecure for dev self-signed
 
 # Usage
 certctl-cli certs list                    # List all certificates
@@ -347,10 +350,13 @@ certctl ships a standalone MCP (Model Context Protocol) server that exposes all 
 ```bash
 # Install and run
 go install github.com/shankar0123/certctl/cmd/mcp-server@latest
-export CERTCTL_SERVER_URL=http://localhost:8443
+export CERTCTL_SERVER_URL=https://localhost:8443
 export CERTCTL_API_KEY=your-api-key
+export CERTCTL_SERVER_CA_BUNDLE_PATH=/path/to/ca.crt   # required for self-signed bootstrap
 mcp-server
 ```
+
+The MCP server is env-vars-only — there are no CLI flags for TLS. If you must bypass verification for local development against a self-signed cert, set `CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true`. Never set that in production.
 
 **Claude Desktop** (`claude_desktop_config.json`):
 ```json
@@ -359,8 +365,9 @@ mcp-server
     "certctl": {
       "command": "mcp-server",
       "env": {
-        "CERTCTL_SERVER_URL": "http://localhost:8443",
-        "CERTCTL_API_KEY": "your-api-key"
+        "CERTCTL_SERVER_URL": "https://localhost:8443",
+        "CERTCTL_API_KEY": "your-api-key",
+        "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/ca.crt"
       }
     }
   }

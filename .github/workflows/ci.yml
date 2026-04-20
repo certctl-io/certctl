@@ -148,8 +148,34 @@ jobs:
         with:
           version: '3.13.0'
 
+      # HTTPS-Everywhere (v2.0.47): the chart fails render when no TLS source is
+      # configured. Every lint/template invocation below must pick exactly one
+      # provisioning mode — see deploy/helm/certctl/templates/_helpers.tpl
+      # (certctl.tls.required) and docs/tls.md.
       - name: Lint Helm Chart
-        run: helm lint deploy/helm/certctl/
+        run: |
+          helm lint deploy/helm/certctl/ \
+            --set server.tls.existingSecret=certctl-tls-ci
 
-      - name: Template Helm Chart
-        run: helm template certctl deploy/helm/certctl/ > /dev/null
+      - name: Template Helm Chart (existingSecret mode)
+        run: |
+          helm template certctl deploy/helm/certctl/ \
+            --set server.tls.existingSecret=certctl-tls-ci \
+            > /dev/null
+
+      - name: Template Helm Chart (cert-manager mode)
+        run: |
+          helm template certctl deploy/helm/certctl/ \
+            --set server.tls.certManager.enabled=true \
+            --set server.tls.certManager.issuerRef.name=letsencrypt-prod \
+            > /dev/null
+
+      - name: Template Helm Chart (guard fails without TLS)
+        run: |
+          # Inverse test: the chart MUST refuse to render when no TLS source is
+          # configured. If this ever renders successfully, the fail-loud guard
+          # in certctl.tls.required has regressed.
+          if helm template certctl deploy/helm/certctl/ > /dev/null 2>&1; then
+            echo "::error::Helm chart rendered without a TLS source — fail-loud guard regressed"
+            exit 1
+          fi

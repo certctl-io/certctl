@@ -29,14 +29,17 @@ The binary has zero runtime dependencies beyond the certctl server it connects t
 
 ## Configuration
 
-The MCP server reads two environment variables:
+The MCP server reads three environment variables:
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
-| `CERTCTL_SERVER_URL` | No | `http://localhost:8443` | URL of the certctl REST API |
+| `CERTCTL_SERVER_URL` | No | `https://localhost:8443` | URL of the certctl REST API (HTTPS-only as of v2.2) |
 | `CERTCTL_API_KEY` | No | (empty) | API key for authentication (passed as `Bearer` token) |
+| `CERTCTL_SERVER_CA_BUNDLE_PATH` | Yes (for self-signed / internal CA) | (empty) | Path to PEM CA bundle that signed the server cert. Required when the server cert isn't rooted in the system trust store (the default compose stack ships a self-signed cert at `deploy/test/certs/ca.crt`). |
 
 If your certctl server has auth enabled (the default), you must provide the API key. The MCP server passes it through to every HTTP request.
+
+Since v2.2 the certctl control plane is HTTPS-only. If the server cert is self-signed or chained to an internal CA, set `CERTCTL_SERVER_CA_BUNDLE_PATH` so the MCP server can verify the TLS handshake. Never set `CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true` outside local development — it disables all certificate validation.
 
 ## Setting Up with Claude Desktop
 
@@ -48,7 +51,8 @@ Add this to your Claude Desktop MCP configuration file (`~/Library/Application S
     "certctl": {
       "command": "/path/to/certctl-mcp",
       "env": {
-        "CERTCTL_SERVER_URL": "http://localhost:8443",
+        "CERTCTL_SERVER_URL": "https://localhost:8443",
+        "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/certctl/deploy/test/certs/ca.crt",
         "CERTCTL_API_KEY": "your-api-key-here"
       }
     }
@@ -67,7 +71,8 @@ In Cursor, go to Settings → MCP Servers and add:
   "certctl": {
     "command": "/path/to/certctl-mcp",
     "env": {
-      "CERTCTL_SERVER_URL": "http://localhost:8443",
+      "CERTCTL_SERVER_URL": "https://localhost:8443",
+      "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/certctl/deploy/test/certs/ca.crt",
       "CERTCTL_API_KEY": "your-api-key-here"
     }
   }
@@ -84,7 +89,8 @@ Add certctl as an MCP server in your project's `.mcp.json`:
     "certctl": {
       "command": "/path/to/certctl-mcp",
       "env": {
-        "CERTCTL_SERVER_URL": "http://localhost:8443",
+        "CERTCTL_SERVER_URL": "https://localhost:8443",
+        "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/certctl/deploy/test/certs/ca.crt",
         "CERTCTL_API_KEY": "your-api-key-here"
       }
     }

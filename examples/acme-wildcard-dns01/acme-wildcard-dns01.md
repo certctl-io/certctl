@@ -9,6 +9,13 @@ This example is ideal for:
 - Internal PKI with public DNS names
 - Scenarios where you have programmatic access to your DNS provider's API
 
+## TLS Security
+
+certctl is HTTPS-only as of v2.2. The demo compose stack provisions a self-signed certificate. When accessing `https://localhost:8443`, you can either:
+- Use `curl --cacert ./deploy/test/certs/ca.crt ...` to pin the CA certificate
+- Use `curl -k ...` for quick smoke tests (never in production)
+- Import the CA at `./deploy/test/certs/ca.crt` into your OS trust store for browser visits
+
 ## Prerequisites
 
 Before running this example, you need:
@@ -74,7 +81,7 @@ This starts:
 
 ### Step 5: Access the Dashboard
 
-Open your browser to `http://localhost:8443`
+Open your browser to `https://localhost:8443`
 
 ### Step 6: Create a Wildcard Certificate
 

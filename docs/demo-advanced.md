@@ -50,13 +50,16 @@ docker compose -f deploy/docker-compose.yml up -d --build
 docker compose -f deploy/docker-compose.yml ps
 ```
 
-Open **http://localhost:8443** in your browser alongside your terminal. You'll watch changes appear in the dashboard as you make API calls.
+Open **https://localhost:8443** in your browser alongside your terminal. The default compose stack ships a self-signed cert; your browser will show a warning the first time — click through (or trust `deploy/test/certs/ca.crt` in your OS keychain). You'll watch changes appear in the dashboard as you make API calls.
 
-Set up a base variable for convenience:
+Set up base variables for convenience:
 
 ```bash
-API="http://localhost:8443"
+API="https://localhost:8443"
+CA="$PWD/deploy/test/certs/ca.crt"   # pin the self-signed CA for curl
 ```
+
+Every `curl` in this guide uses `--cacert "$CA"` so the TLS handshake verifies against the compose-stack CA instead of the system trust store.
 
 ## How the pieces fit together
 
@@ -730,7 +733,7 @@ Check the CRL (Certificate Revocation List) — served unauthenticated under the
 # DER-encoded X.509 CRL for the local CA (binary — pipe to openssl for inspection).
 # Note: no -H "Authorization: Bearer ..." — the endpoint is deliberately
 # unauthenticated. Content-Type is application/pkix-crl.
-curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
+curl --cacert "$CA" -s https://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
 openssl crl -inform DER -in /tmp/crl.der -text -noout
 ```
 
@@ -740,7 +743,7 @@ Check OCSP status (RFC 6960, also unauthenticated, `application/ocsp-response`):
 # Replace SERIAL with the actual serial number from the certificate version.
 # The embedded OCSP responder returns a signed DER response — parse it with
 # `openssl ocsp -respin` or similar tooling.
-curl -s http://localhost:8443/.well-known/pki/ocsp/iss-local/SERIAL -o /tmp/ocsp.der
+curl --cacert "$CA" -s https://localhost:8443/.well-known/pki/ocsp/iss-local/SERIAL -o /tmp/ocsp.der
 openssl ocsp -respin /tmp/ocsp.der -noverify -resp_text | head -40
 ```
 
@@ -946,7 +949,8 @@ certctl includes a standalone CLI tool for command-line users:
 cd cmd/cli && go build -o certctl-cli .
 
 # Export credentials
-export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_SERVER_URL="https://localhost:8443"
+export CERTCTL_SERVER_CA_BUNDLE_PATH="$PWD/deploy/test/certs/ca.crt"
 export CERTCTL_API_KEY="test-key-123"
 
 # List certificates (JSON or table format)
@@ -990,7 +994,8 @@ certctl exposes the full REST API via the Model Context Protocol (MCP), enabling
 cd cmd/mcp-server && go build -o mcp-server .
 
 # Export credentials
-export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_SERVER_URL="https://localhost:8443"
+export CERTCTL_SERVER_CA_BUNDLE_PATH="$PWD/deploy/test/certs/ca.crt"
 export CERTCTL_API_KEY="test-key-123"
 
 # Start the MCP server (listens on stdin/stdout)
@@ -1048,7 +1053,7 @@ docker compose -f deploy/docker-compose.yml run -e CERTCTL_DISCOVERY_DIRS=/tmp/c
 Or with the CLI flag:
 
 ```bash
-certctl-agent --agent-id a-demo-1 --key-dir /tmp/keys --discovery-dirs /tmp/certs --server http://localhost:8443 --api-key test-key-123
+certctl-agent --agent-id a-demo-1 --key-dir /tmp/keys --discovery-dirs /tmp/certs --server https://localhost:8443 --ca-bundle "$CA" --api-key test-key-123
 ```
 
 ### Network Discovery (Server-Side)
@@ -1191,7 +1196,8 @@ Here's a single script that runs the entire demo end-to-end. Save it as `demo.sh
 #!/bin/bash
 set -e
 
-API="http://localhost:8443"
+API="https://localhost:8443"
+CA="$PWD/deploy/test/certs/ca.crt"   # pin the self-signed CA for curl
 BLUE='\033[0;34m'
 GREEN='\033[0;32m'
 YELLOW='\033[1;33m'
@@ -1299,7 +1305,7 @@ echo "  5. Revoked the certificate with RFC 5280 reason codes"
 echo "  6. Checked dashboard stats and metrics"
 echo "  7. All actions recorded in the audit trail"
 echo ""
-echo -e "Open ${GREEN}http://localhost:8443${NC} to see everything in the dashboard."
+echo -e "Open ${GREEN}https://localhost:8443${NC} to see everything in the dashboard."
 echo "Look for certificate: $CERT_ID"
 ```
 

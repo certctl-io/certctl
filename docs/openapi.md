@@ -68,8 +68,10 @@ The spec organizes endpoints into 16 tags:
 The spec declares a `bearerAuth` security scheme applied globally. All endpoints under `/api/v1/` require a Bearer token by default:
 
 ```bash
-curl -H "Authorization: Bearer your-api-key" \
-  http://localhost:8443/api/v1/certificates
+# The default compose stack uses a self-signed cert; pin with --cacert
+curl --cacert ./deploy/test/certs/ca.crt \
+  -H "Authorization: Bearer your-api-key" \
+  https://localhost:8443/api/v1/certificates
 ```
 
 Three endpoints are exempt from auth (declared with `security: []` in the spec): `/health`, `/ready`, and `/api/v1/auth/info`. The auth info endpoint tells clients whether authentication is enabled and what type is required — useful for GUIs that need to show/hide a login screen.
@@ -150,8 +152,9 @@ Import the spec directly into Postman:
 
 1. Open Postman → Import → File → select `api/openapi.yaml`
 2. Postman creates a collection with all 78 documented operations organized by tag
-3. Set the `baseUrl` variable to `http://localhost:8443`
+3. Set the `baseUrl` variable to `https://localhost:8443` (HTTPS-only as of v2.2)
 4. Add an `Authorization: Bearer your-api-key` header to the collection
+5. Import the demo stack CA bundle (`deploy/test/certs/ca.crt`) into Postman's Settings → Certificates → CA Certificates, or disable certificate verification for the `localhost` host (Settings → General → SSL certificate verification)
 
 ## Key Schemas
 
@@ -176,8 +179,10 @@ Use the spec to generate contract tests that verify the API matches the spec:
 ```bash
 # Using schemathesis for fuzz testing against the spec
 pip install schemathesis
+# The default compose stack uses a self-signed cert — export a CA bundle or set REQUESTS_CA_BUNDLE
+export REQUESTS_CA_BUNDLE=$(pwd)/deploy/test/certs/ca.crt
 schemathesis run api/openapi.yaml \
-  --base-url http://localhost:8443 \
+  --base-url https://localhost:8443 \
   --header "Authorization: Bearer your-api-key"
 ```
 

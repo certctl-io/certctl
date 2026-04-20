@@ -63,6 +63,7 @@ certctl-cli
 /server
 /agent
 /cli
+/mcp-server
 
 # Private strategy docs
 strategy.md
@@ -71,7 +72,6 @@ SECURITY_REMEDIATION.md
 # OS
 .DS_Store
 Thumbs.db
-mcp-server
 
 # Local Go build/module caches (session-scoped, never committed)
 /.gocache/
@@ -82,3 +82,10 @@ mcp-server
 # Design scratch files (session-scoped)
 /.i004-design.md
 /.i005-design.md
+
+# HTTPS-Everywhere (M-007) Phase 6: the docker-compose.test.yml tls-init
+# container writes ca.crt / server.crt / server.key into this directory so
+# the host-side integration_test.go binary can pin the CA via
+# CERTCTL_TEST_CA_BUNDLE=./certs/ca.crt. Material is regenerated on every
+# `docker compose up` and never belongs in git.
+/deploy/test/certs/

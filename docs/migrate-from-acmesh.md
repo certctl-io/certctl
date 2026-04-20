@@ -34,7 +34,7 @@ cd certctl/deploy
 docker compose up -d
 ```
 
-Access the dashboard at `http://localhost:8443` with API key from `.env` file.
+Access the dashboard at `https://localhost:8443` with the API key from `.env`. The default compose stack ships a self-signed cert; pin with `--cacert ./deploy/test/certs/ca.crt` when calling the API from the host.
 
 ### 2. Deploy Agents
 

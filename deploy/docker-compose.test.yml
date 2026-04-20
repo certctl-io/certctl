@@ -4,8 +4,12 @@
 #
 # Spins up the full certctl platform with real CA backends for manual QA:
 #
+#   0. certctl-tls-init     — one-shot init container; writes self-signed
+#                             server.crt/.key/ca.crt into ./test/certs (bind
+#                             mount, not a named volume — host-readable for
+#                             the Go integration test binary)
 #   1. PostgreSQL 16        — database (clean, no demo data)
-#   2. certctl-server       — control plane API + web dashboard on :8443
+#   2. certctl-server       — control plane API + web dashboard on :8443 (HTTPS)
 #   3. certctl-agent        — polls for work, deploys certs to NGINX
 #   4. step-ca              — private CA (JWK provisioner, auto-bootstraps)
 #   5. Pebble               — ACME test server (simulates Let's Encrypt)
@@ -16,14 +20,73 @@
 #   cd deploy
 #   docker compose -f docker-compose.test.yml up --build
 #
-# Dashboard:  http://localhost:8443
+# Dashboard:  https://localhost:8443   (self-signed — use --cacert test/certs/ca.crt)
 # API key:    test-key-2026
 # NGINX:      https://localhost:8444 (self-signed placeholder until cert deployed)
+#
+# Integration tests: `go test -tags integration ./deploy/test/...` picks up
+# the CA bundle at ./test/certs/ca.crt automatically via CERTCTL_TEST_CA_BUNDLE.
 #
 # See docs/test-env.md for the full walkthrough.
 # =============================================================================
 
 services:
+
+  # ---------------------------------------------------------------------------
+  # HTTPS-Everywhere Phase 6 — self-signed TLS bootstrap for the test harness.
+  # ---------------------------------------------------------------------------
+  # Mirrors the production `certctl-tls-init` (see docker-compose.yml §10-43)
+  # but writes into a *host bind mount* (./test/certs) instead of a named
+  # volume. The named-volume approach works fine inside Docker but hides the
+  # CA bundle from the Go integration test binary that runs on the host; the
+  # bind mount exposes /etc/certctl/tls/ca.crt at deploy/test/certs/ca.crt
+  # so `newTestClient()` can load it into an x509.CertPool and validate the
+  # self-signed server cert. Test-only divergence, explicitly documented.
+  #
+  # The generated cert has SAN=DNS:certctl-server,DNS:localhost,IP:127.0.0.1
+  # so both in-cluster traffic (agent → certctl-server:8443) and host traffic
+  # (go test → localhost:8443) validate cleanly. Destroy via
+  # `docker compose -f docker-compose.test.yml down -v` + `rm -rf test/certs`
+  # to force regeneration. Keys written 0600, certs 0644, owned 1000:1000
+  # (the UID the server binary runs as inside its container per Dockerfile:64).
+  certctl-tls-init:
+    image: alpine/openssl:latest
+    container_name: certctl-test-tls-init
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        CERT=/etc/certctl/tls/server.crt
+        KEY=/etc/certctl/tls/server.key
+        CA=/etc/certctl/tls/ca.crt
+        if [ -f "$$CERT" ] && [ -f "$$KEY" ] && [ -f "$$CA" ]; then
+          echo "TLS cert already present at $$CERT — skipping generation"
+        else
+          mkdir -p /etc/certctl/tls
+          openssl req -x509 -newkey ed25519 -nodes \
+            -keyout "$$KEY" \
+            -out "$$CERT" \
+            -days 3650 \
+            -subj "/CN=certctl-server" \
+            -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1,IP:::1"
+          cp "$$CERT" "$$CA"
+          echo "Generated self-signed TLS cert for certctl-test-server (ed25519, 3650d, CN=certctl-server)"
+        fi
+        # The test server container runs as root (see `user: "0:0"` below)
+        # because setup-trust.sh needs to update the system trust store, so
+        # the perms here are really about host-side readability — 0644 on
+        # the CA/cert lets `go test` on the host read the bundle without a
+        # chown dance.
+        chown 1000:1000 "$$CERT" "$$KEY" "$$CA" || true
+        chmod 0644 "$$CERT" "$$CA"
+        chmod 0600 "$$KEY"
+    volumes:
+      - ./test/certs:/etc/certctl/tls
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.9
 
   # ---------------------------------------------------------------------------
   # Database
@@ -168,6 +231,12 @@ services:
         condition: service_started
       step-ca:
         condition: service_healthy
+      # HTTPS-Everywhere Phase 6: block server boot until the init container
+      # has written server.crt / server.key / ca.crt into ./test/certs. The
+      # init container runs once and exits 0; service_completed_successfully
+      # makes that a gating dependency rather than a liveness one.
+      certctl-tls-init:
+        condition: service_completed_successfully
     # Run as root so update-ca-certificates can write to /etc/ssl/certs.
     # Container isolation provides the security boundary.
     user: "0:0"
@@ -179,6 +248,12 @@ services:
       # Server
       CERTCTL_SERVER_HOST: 0.0.0.0
       CERTCTL_SERVER_PORT: 8443
+      # HTTPS-Everywhere Phase 6: point the server at the init-container-generated
+      # cert/key pair (bind-mounted from ./test/certs). Same paths as production
+      # compose so the server binary code path is identical; only the host-side
+      # storage differs (bind mount vs named volume — see §certctl-tls-init block).
+      CERTCTL_SERVER_TLS_CERT_PATH: /etc/certctl/tls/server.crt
+      CERTCTL_SERVER_TLS_KEY_PATH: /etc/certctl/tls/server.key
       CERTCTL_LOG_LEVEL: debug
 
       # Auth — API key required (production-like)
@@ -224,12 +299,22 @@ services:
       - ./test/setup-trust.sh:/app/setup-trust.sh:ro
       # step-ca data volume (root cert at /certs/root_ca.crt, key at /secrets/provisioner_key)
       - stepca_data:/stepca-data:ro
+      # HTTPS-Everywhere Phase 6: read-only bind mount of the init-generated
+      # TLS material. The init container writes here; server reads here; the
+      # agent mounts the same host path at the same container path (see below)
+      # so /etc/certctl/tls/ca.crt resolves to the *same* bytes on both sides.
+      - ./test/certs:/etc/certctl/tls:ro
     networks:
       certctl-test:
         ipv4_address: 10.30.50.6
     healthcheck:
-      # /health requires auth when CERTCTL_AUTH_TYPE=api-key, so include the Bearer token
-      test: ["CMD", "curl", "-f", "-H", "Authorization: Bearer test-key-2026", "http://localhost:8443/health"]
+      # HTTPS-Everywhere Phase 6: healthcheck now speaks TLS with --cacert to
+      # verify the self-signed server cert against the init-generated bundle.
+      # /health requires auth when CERTCTL_AUTH_TYPE=api-key, so include the
+      # Bearer token. curl exits non-zero on both TLS handshake failure and
+      # non-2xx status — either failure keeps depends_on: {condition:
+      # service_healthy} from unblocking the agent, which is what we want.
+      test: ["CMD", "curl", "--cacert", "/etc/certctl/tls/ca.crt", "-f", "-H", "Authorization: Bearer test-key-2026", "https://localhost:8443/health"]
       interval: 10s
       timeout: 5s
       start_period: 30s
@@ -290,7 +375,13 @@ services:
       certctl-server:
         condition: service_healthy
     environment:
-      CERTCTL_SERVER_URL: http://certctl-server:8443
+      # HTTPS-Everywhere Phase 6: agent dials the server over TLS and validates
+      # the self-signed cert against the CA bundle pinned by
+      # CERTCTL_SERVER_CA_BUNDLE_PATH. Same env vars + container paths as
+      # production compose so the agent binary code path (loadCABundle →
+      # x509.CertPool → *tls.Config{RootCAs, MinVersion: TLS13}) is identical.
+      CERTCTL_SERVER_URL: https://certctl-server:8443
+      CERTCTL_SERVER_CA_BUNDLE_PATH: /etc/certctl/tls/ca.crt
       CERTCTL_API_KEY: test-key-2026
       CERTCTL_AGENT_NAME: test-agent-01
       CERTCTL_AGENT_ID: agent-test-01
@@ -300,6 +391,10 @@ services:
     volumes:
       - agent_keys:/var/lib/certctl/keys
       - nginx_certs:/nginx-certs
+      # HTTPS-Everywhere Phase 6: same bind mount as the server, same path,
+      # so /etc/certctl/tls/ca.crt resolves to the identical bytes. This is
+      # the only way the CN=certctl-server cert validates on the agent side.
+      - ./test/certs:/etc/certctl/tls:ro
     networks:
       certctl-test:
         ipv4_address: 10.30.50.8

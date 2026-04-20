@@ -1,4 +1,5 @@
 {{- if .Values.agent.enabled }}
+{{- include "certctl.tls.required" . }}
 {{- if eq .Values.agent.kind "DaemonSet" }}
 apiVersion: apps/v1
 kind: DaemonSet
@@ -53,6 +54,8 @@ spec:
                   fieldPath: metadata.name
             - name: CERTCTL_KEY_DIR
               value: {{ .Values.agent.keyDir }}
+            - name: CERTCTL_SERVER_CA_BUNDLE_PATH
+              value: "{{ .Values.server.tls.mountPath }}/ca.crt"
             {{- if .Values.agent.discoveryDirs }}
             - name: CERTCTL_DISCOVERY_DIRS
               valueFrom:
@@ -70,12 +73,19 @@ spec:
               mountPath: {{ .Values.agent.keyDir }}
             - name: tmp
               mountPath: /tmp
+            - name: server-tls
+              mountPath: {{ .Values.server.tls.mountPath }}
+              readOnly: true
       volumes:
         - name: agent-keys
           emptyDir:
             sizeLimit: 1Gi
         - name: tmp
           emptyDir: {}
+        - name: server-tls
+          secret:
+            secretName: {{ include "certctl.tls.secretName" . }}
+            defaultMode: 0400
 {{- else if eq .Values.agent.kind "Deployment" }}
 apiVersion: apps/v1
 kind: Deployment
@@ -135,6 +145,8 @@ spec:
               {{- end }}
             - name: CERTCTL_KEY_DIR
               value: {{ .Values.agent.keyDir }}
+            - name: CERTCTL_SERVER_CA_BUNDLE_PATH
+              value: "{{ .Values.server.tls.mountPath }}/ca.crt"
             {{- if .Values.agent.discoveryDirs }}
             - name: CERTCTL_DISCOVERY_DIRS
               valueFrom:
@@ -152,11 +164,18 @@ spec:
               mountPath: {{ .Values.agent.keyDir }}
             - name: tmp
               mountPath: /tmp
+            - name: server-tls
+              mountPath: {{ .Values.server.tls.mountPath }}
+              readOnly: true
       volumes:
         - name: agent-keys
           emptyDir:
             sizeLimit: 1Gi
         - name: tmp
           emptyDir: {}
+        - name: server-tls
+          secret:
+            secretName: {{ include "certctl.tls.secretName" . }}
+            defaultMode: 0400
 {{- end }}
 {{- end }}

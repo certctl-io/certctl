@@ -118,8 +118,54 @@ postgres://{{ .Values.postgresql.auth.username }}:$(POSTGRES_PASSWORD)@{{ includ
 {{- end }}
 
 {{/*
-Server URL (for agents)
+Server URL (for agents). HTTPS-only as of v2.2 — see docs/tls.md.
 */}}
 {{- define "certctl.serverURL" -}}
-http://{{ include "certctl.fullname" . }}-server:{{ .Values.server.service.port }}
+https://{{ include "certctl.fullname" . }}-server:{{ .Values.server.service.port }}
+{{- end }}
+
+{{/*
+TLS Secret name resolver.
+
+Operator-facing precedence:
+  1. server.tls.existingSecret        — operator points at a pre-existing kubernetes.io/tls Secret
+  2. server.tls.certManager.secretName — explicit secret name for the cert-manager Certificate CR
+  3. "<fullname>-tls"                  — default when cert-manager is enabled but secretName is blank
+
+Never emits an empty string — that case is already excluded by certctl.tls.required below,
+which must be invoked by any template that depends on the resolved secret name.
+*/}}
+{{- define "certctl.tls.secretName" -}}
+{{- if .Values.server.tls.existingSecret -}}
+{{- .Values.server.tls.existingSecret -}}
+{{- else if .Values.server.tls.certManager.secretName -}}
+{{- .Values.server.tls.certManager.secretName -}}
+{{- else -}}
+{{- printf "%s-tls" (include "certctl.fullname" .) -}}
+{{- end -}}
+{{- end }}
+
+{{/*
+TLS configuration gate.
+
+HTTPS is the only supported listener mode (v2.2+). The server refuses to start
+without a cert/key pair mounted at server.tls.mountPath, so `helm template` /
+`helm install` must fail loudly at render-time rather than shipping a broken
+Deployment that crash-loops with "tls config required".
+
+Operators MUST configure EXACTLY ONE of:
+  (a) server.tls.existingSecret: <name-of-kubernetes.io/tls-secret>
+  (b) server.tls.certManager.enabled: true  (+ issuerRef.name populated)
+
+Any template that mounts the TLS Secret must call
+`{{ include "certctl.tls.required" . }}` at the top so this guard runs once
+per affected resource. No-op when configured correctly.
+*/}}
+{{- define "certctl.tls.required" -}}
+{{- if and (not .Values.server.tls.existingSecret) (not .Values.server.tls.certManager.enabled) -}}
+{{- fail "\n\ncertctl refuses to start without TLS.\n\nSet EXACTLY ONE of:\n  --set server.tls.existingSecret=<your-kubernetes.io/tls-secret-name>\nOR\n  --set server.tls.certManager.enabled=true \\\n  --set server.tls.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nSee docs/tls.md for the full setup walkthrough, including bootstrap\nguidance for air-gapped clusters without cert-manager.\n" -}}
+{{- end -}}
+{{- if and .Values.server.tls.certManager.enabled (not .Values.server.tls.certManager.issuerRef.name) -}}
+{{- fail "\n\nserver.tls.certManager.enabled=true but server.tls.certManager.issuerRef.name is empty.\n\nSet:\n  --set server.tls.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nSee docs/tls.md.\n" -}}
+{{- end -}}
 {{- end }}

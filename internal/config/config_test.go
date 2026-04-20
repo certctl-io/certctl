@@ -1,10 +1,18 @@
 package config
 
 import (
+	"crypto/ecdsa"
+	"crypto/elliptic"
+	"crypto/rand"
+	"crypto/x509"
+	"crypto/x509/pkix"
+	"encoding/pem"
 	"log/slog"
+	"math/big"
 	"os"
-	"testing"
+	"path/filepath"
 	"strings"
+	"testing"
 	"time"
 )
 
@@ -26,10 +34,76 @@ func clearCertctlEnv(t *testing.T) {
 }
 
 // setMinimalValidEnv sets the minimum env vars needed for Load() to succeed (Validate passes).
+//
+// HTTPS-everywhere milestone (§2.1 + §3 locked decisions): the control plane
+// is TLS-only and Validate() refuses to pass without a readable cert/key pair
+// on disk. setMinimalValidEnv therefore materializes a throwaway ECDSA P-256
+// self-signed pair in t.TempDir() and points the two TLS env vars at it so
+// every Load-based test inherits a valid HTTPS posture without each caller
+// having to spell out cert generation. The temp dir is cleaned up by
+// testing.T at end-of-test.
 func setMinimalValidEnv(t *testing.T) {
 	t.Helper()
 	// api-key auth requires a secret
 	t.Setenv("CERTCTL_AUTH_SECRET", "test-secret-key")
+	// HTTPS-only control plane requires a real cert/key pair on disk.
+	certPath, keyPath := generateTestTLSPair(t)
+	t.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
+	t.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
+}
+
+// generateTestTLSPair writes an ECDSA P-256 self-signed certificate + private
+// key pair to files inside t.TempDir() and returns the paths. Same shape used
+// by cmd/server/tls_test.go — this duplicates the generator rather than
+// importing it so the config package tests stay independent of cmd/server.
+func generateTestTLSPair(t *testing.T) (certPath, keyPath string) {
+	t.Helper()
+	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	tmpl := &x509.Certificate{
+		SerialNumber: big.NewInt(1),
+		Subject:      pkix.Name{CommonName: "certctl-config-test"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(time.Hour),
+		KeyUsage:     x509.KeyUsageDigitalSignature | x509.KeyUsageKeyEncipherment,
+		ExtKeyUsage:  []x509.ExtKeyUsage{x509.ExtKeyUsageServerAuth},
+	}
+	der, err := x509.CreateCertificate(rand.Reader, tmpl, tmpl, &key.PublicKey, key)
+	if err != nil {
+		t.Fatalf("x509.CreateCertificate: %v", err)
+	}
+	dir := t.TempDir()
+	certPath = filepath.Join(dir, "cert.pem")
+	keyPath = filepath.Join(dir, "key.pem")
+	certPEM := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: der})
+	if err := os.WriteFile(certPath, certPEM, 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+	keyDER, err := x509.MarshalECPrivateKey(key)
+	if err != nil {
+		t.Fatalf("x509.MarshalECPrivateKey: %v", err)
+	}
+	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
+	if err := os.WriteFile(keyPath, keyPEM, 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+	return certPath, keyPath
+}
+
+// validServerConfig returns a ServerConfig with Port=8080 plus a freshly
+// minted TLS cert/key pair on disk, so Validate() passes the HTTPS-only
+// preflight (cert empty → stat → tls.LoadX509KeyPair round-trip). Every
+// struct-based Validate test uses this so they fail for the reason they
+// claim to test, not for a missing TLS pair.
+func validServerConfig(t *testing.T) ServerConfig {
+	t.Helper()
+	certPath, keyPath := generateTestTLSPair(t)
+	return ServerConfig{
+		Port: 8080,
+		TLS:  ServerTLSConfig{CertPath: certPath, KeyPath: keyPath},
+	}
 }
 
 func TestLoad_DefaultValues(t *testing.T) {
@@ -134,6 +208,13 @@ func TestLoad_DefaultValues(t *testing.T) {
 
 func TestLoad_AllEnvVarsSet(t *testing.T) {
 	clearCertctlEnv(t)
+
+	// HTTPS-only control plane: Load() → Validate() refuses an empty cert path.
+	// Materialize a throwaway ECDSA P-256 pair and point the two TLS env vars
+	// at it before setting every other CERTCTL_* var this test cares about.
+	certPath, keyPath := generateTestTLSPair(t)
+	t.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
+	t.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
 
 	t.Setenv("CERTCTL_SERVER_HOST", "0.0.0.0")
 	t.Setenv("CERTCTL_SERVER_PORT", "9090")
@@ -319,7 +400,7 @@ func TestLoad_CommaSeparatedList(t *testing.T) {
 
 func TestValidate_ValidConfig(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
@@ -329,6 +410,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
 			RetryInterval:               5 * time.Minute,
 			JobTimeoutInterval:          10 * time.Minute,
 			AwaitingCSRTimeout:          24 * time.Hour,
@@ -342,7 +424,7 @@ func TestValidate_ValidConfig(t *testing.T) {
 
 func TestValidate_AuthTypeNone(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "none", Secret: ""},
@@ -352,6 +434,7 @@ func TestValidate_AuthTypeNone(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
 			RetryInterval:               5 * time.Minute,
 			JobTimeoutInterval:          10 * time.Minute,
 			AwaitingCSRTimeout:          24 * time.Hour,
@@ -365,7 +448,7 @@ func TestValidate_AuthTypeNone(t *testing.T) {
 
 func TestValidate_InvalidAuthType(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "oauth", Secret: "key"},
@@ -384,7 +467,7 @@ func TestValidate_InvalidAuthType(t *testing.T) {
 
 func TestValidate_APIKeyAuth_MissingSecret(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: ""},
@@ -403,7 +486,7 @@ func TestValidate_APIKeyAuth_MissingSecret(t *testing.T) {
 
 func TestValidate_JWTAuth_MissingSecret(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "jwt", Secret: ""},
@@ -422,7 +505,7 @@ func TestValidate_JWTAuth_MissingSecret(t *testing.T) {
 
 func TestValidate_InvalidKeygenMode(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
@@ -470,9 +553,168 @@ func TestValidate_InvalidPort(t *testing.T) {
 	}
 }
 
+// TestValidate_TLSCertPathEmpty pins the first of the HTTPS-only fail-loud
+// gates in Validate(): an empty CertPath must produce the operator-facing
+// "server TLS cert path is required" error. Per §2.1 + §3 locked decisions,
+// there is no plaintext HTTP fallback — missing TLS config is a hard startup
+// refusal, not a warning.
+func TestValidate_TLSCertPathEmpty(t *testing.T) {
+	_, keyPath := generateTestTLSPair(t)
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+			TLS:  ServerTLSConfig{CertPath: "", KeyPath: keyPath},
+		},
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for empty TLS cert path")
+	}
+	if !strings.Contains(err.Error(), "server TLS cert path is required") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "server TLS cert path is required")
+	}
+}
+
+// TestValidate_TLSKeyPathEmpty pins the second HTTPS-only gate: empty KeyPath
+// must produce the "server TLS key path is required" error. Runs with a valid
+// CertPath so the cert-empty gate (which fires first) is cleanly bypassed —
+// proves the key-empty gate is actually reached.
+func TestValidate_TLSKeyPathEmpty(t *testing.T) {
+	certPath, _ := generateTestTLSPair(t)
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+			TLS:  ServerTLSConfig{CertPath: certPath, KeyPath: ""},
+		},
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for empty TLS key path")
+	}
+	if !strings.Contains(err.Error(), "server TLS key path is required") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "server TLS key path is required")
+	}
+}
+
+// TestValidate_TLSCertFileMissing pins the os.Stat gate on the cert path. A
+// non-existent path must surface "server TLS cert file unreadable" so the
+// operator sees the bad path in the error (file=%q) instead of a deferred
+// ListenAndServeTLS panic after the scheduler has already fanned out.
+func TestValidate_TLSCertFileMissing(t *testing.T) {
+	_, keyPath := generateTestTLSPair(t)
+	missingCert := filepath.Join(t.TempDir(), "does-not-exist.pem")
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+			TLS:  ServerTLSConfig{CertPath: missingCert, KeyPath: keyPath},
+		},
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for missing TLS cert file")
+	}
+	if !strings.Contains(err.Error(), "server TLS cert file unreadable") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "server TLS cert file unreadable")
+	}
+}
+
+// TestValidate_TLSKeyFileMissing pins the os.Stat gate on the key path. Uses a
+// valid CertPath so the cert-missing gate does not pre-empt; proves the key
+// gate is reached and reports the bad key path.
+func TestValidate_TLSKeyFileMissing(t *testing.T) {
+	certPath, _ := generateTestTLSPair(t)
+	missingKey := filepath.Join(t.TempDir(), "does-not-exist.key")
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+			TLS:  ServerTLSConfig{CertPath: certPath, KeyPath: missingKey},
+		},
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for missing TLS key file")
+	}
+	if !strings.Contains(err.Error(), "server TLS key file unreadable") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "server TLS key file unreadable")
+	}
+}
+
+// TestValidate_TLSMismatchedPair pins the tls.LoadX509KeyPair gate — the
+// classic "you shipped the wrong private key" footgun. Generates two
+// independent ECDSA pairs and crosses them (pair1 cert + pair2 key). Both
+// files exist and parse as PEM, so os.Stat passes; only the cryptographic
+// round-trip inside LoadX509KeyPair catches the mismatch.
+func TestValidate_TLSMismatchedPair(t *testing.T) {
+	certPath1, _ := generateTestTLSPair(t)
+	_, keyPath2 := generateTestTLSPair(t)
+	cfg := &Config{
+		Server: ServerConfig{
+			Port: 8080,
+			TLS:  ServerTLSConfig{CertPath: certPath1, KeyPath: keyPath2},
+		},
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+		},
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() should return error for mismatched TLS cert/key pair")
+	}
+	if !strings.Contains(err.Error(), "server TLS cert/key pair invalid") {
+		t.Errorf("error = %q, want substring %q", err.Error(), "server TLS cert/key pair invalid")
+	}
+}
+
 func TestValidate_EmptyDatabaseURL(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
@@ -491,7 +733,7 @@ func TestValidate_EmptyDatabaseURL(t *testing.T) {
 
 func TestValidate_InvalidLogLevel(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "verbose", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
@@ -510,7 +752,7 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 
 func TestValidate_InvalidLogFormat(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "yaml"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
@@ -572,7 +814,7 @@ func TestValidate_SchedulerIntervalTooSmall(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			cfg := &Config{
-				Server:    ServerConfig{Port: 8080},
+				Server:    validServerConfig(t),
 				Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 				Log:       LogConfig{Level: "info", Format: "json"},
 				Auth:      AuthConfig{Type: "api-key", Secret: "key"},
@@ -588,7 +830,7 @@ func TestValidate_SchedulerIntervalTooSmall(t *testing.T) {
 
 func TestValidate_DatabaseMaxConnectionsZero(t *testing.T) {
 	cfg := &Config{
-		Server:   ServerConfig{Port: 8080},
+		Server:   validServerConfig(t),
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 0},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "api-key", Secret: "key"},
@@ -795,7 +1037,7 @@ func TestConfig_Scheduler_JobTimeoutValidation(t *testing.T) {
 			// Start from a fully valid config so the I-003 timeout checks
 			// are the only potential failure point.
 			cfg := &Config{
-				Server:   ServerConfig{Port: 8080},
+				Server:   validServerConfig(t),
 				Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 				Log:      LogConfig{Level: "info", Format: "json"},
 				Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
@@ -805,6 +1047,7 @@ func TestConfig_Scheduler_JobTimeoutValidation(t *testing.T) {
 					JobProcessorInterval:        1 * time.Minute,
 					AgentHealthCheckInterval:    1 * time.Minute,
 					NotificationProcessInterval: 1 * time.Minute,
+					NotificationRetryInterval:   2 * time.Minute,
 					RetryInterval:               1 * time.Minute,
 					JobTimeoutInterval:          10 * time.Minute,
 					AwaitingCSRTimeout:          24 * time.Hour,

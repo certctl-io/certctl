@@ -29,6 +29,13 @@ flowchart TD
     C -->|TLS handshakes| D
 ```
 
+## TLS Security
+
+certctl is HTTPS-only as of v2.2. The demo compose stack provisions a self-signed certificate. When accessing `https://localhost:8443`, you can either:
+- Use `curl --cacert ./deploy/test/certs/ca.crt ...` to pin the CA certificate
+- Use `curl -k ...` for quick smoke tests (never in production)
+- Import the CA at `./deploy/test/certs/ca.crt` into your OS trust store for browser visits
+
 ## Quick Start (Self-Signed CA)
 
 The simplest way to get running in 2 minutes:
@@ -58,7 +65,7 @@ EOF
 docker compose up -d
 
 # 4. Access the dashboards
-# - certctl: http://localhost:8443 (API only, use the CLI or direct HTTP calls)
+# - certctl: https://localhost:8443 (API only, use the CLI or direct HTTP calls)
 # - Traefik dashboard: http://localhost:8080
 ```
 
@@ -112,7 +119,7 @@ Once the stack is running:
 
 ```bash
 # 1. Create a certificate profile in certctl (defines allowed key types, TTL, etc.)
-curl -X POST http://localhost:8443/api/v1/profiles \
+curl -X POST https://localhost:8443/api/v1/profiles \
   -H "Content-Type: application/json" \
   -d '{
     "id": "prof-internal",
@@ -123,7 +130,7 @@ curl -X POST http://localhost:8443/api/v1/profiles \
   }'
 
 # 2. Create a renewal policy (defines issuer, renewal thresholds, etc.)
-curl -X POST http://localhost:8443/api/v1/policies \
+curl -X POST https://localhost:8443/api/v1/policies \
   -H "Content-Type: application/json" \
   -d '{
     "id": "pol-internal",
@@ -135,7 +142,7 @@ curl -X POST http://localhost:8443/api/v1/policies \
   }'
 
 # 3. Create a certificate (triggers issuance immediately)
-curl -X POST http://localhost:8443/api/v1/certificates \
+curl -X POST https://localhost:8443/api/v1/certificates \
   -H "Content-Type: application/json" \
   -d '{
     "common_name": "api.internal.local",
@@ -144,7 +151,7 @@ curl -X POST http://localhost:8443/api/v1/certificates \
   }'
 
 # 4. Create a Traefik target (agent will deploy to this)
-curl -X POST http://localhost:8443/api/v1/targets \
+curl -X POST https://localhost:8443/api/v1/targets \
   -H "Content-Type: application/json" \
   -d '{
     "id": "target-traefik-01",
@@ -156,7 +163,7 @@ curl -X POST http://localhost:8443/api/v1/targets \
   }'
 
 # 5. Create a deployment job (agent picks this up and deploys)
-curl -X POST http://localhost:8443/api/v1/certificates/{cert-id}/deploy \
+curl -X POST https://localhost:8443/api/v1/certificates/{cert-id}/deploy \
   -H "Content-Type: application/json" \
   -d '{
     "target_ids": ["target-traefik-01"]
@@ -209,16 +216,16 @@ The server provides a REST API on port 8443. Example queries:
 
 ```bash
 # List all certificates
-curl http://localhost:8443/api/v1/certificates
+curl https://localhost:8443/api/v1/certificates
 
 # Check certificate status
-curl http://localhost:8443/api/v1/certificates/{cert-id}
+curl https://localhost:8443/api/v1/certificates/{cert-id}
 
 # View audit trail
-curl http://localhost:8443/api/v1/audit
+curl https://localhost:8443/api/v1/audit
 
 # Check renewal policy compliance
-curl http://localhost:8443/api/v1/policies/{policy-id}
+curl https://localhost:8443/api/v1/policies/{policy-id}
 ```
 
 ### Traefik Dashboard
@@ -290,7 +297,7 @@ Changes are picked up automatically (file watcher enabled).
 docker compose logs certctl-agent | grep heartbeat
 
 # Check deployment job status
-curl http://localhost:8443/api/v1/jobs | jq '.[] | select(.type == "Deployment")'
+curl https://localhost:8443/api/v1/jobs | jq '.[] | select(.type == "Deployment")'
 
 # Check Traefik is watching the directory
 docker compose exec traefik ls -la /etc/traefik/certs/

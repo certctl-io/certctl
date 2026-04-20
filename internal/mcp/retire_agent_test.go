@@ -44,7 +44,7 @@ func TestClient_DeleteWithQuery_ForceRetire(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "test-key")
+	c, _ := NewClient(server.URL, "test-key", "", false)
 	// Compile-fail until Phase 2b grows Client.DeleteWithQuery. Passing the
 	// query as a url.Values is the established pattern (matches Get's shape).
 	query := url.Values{}
@@ -87,7 +87,7 @@ func TestClient_DeleteWithQuery_NoQuery(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "")
+	c, _ := NewClient(server.URL, "", "", false)
 	if _, err := c.DeleteWithQuery("/api/v1/agents/ag-1", nil); err != nil {
 		t.Fatalf("DeleteWithQuery(nil query) err=%v want nil", err)
 	}
@@ -108,7 +108,7 @@ func TestClient_DeleteWithQuery_204ReturnsMinimalBody(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "")
+	c, _ := NewClient(server.URL, "", "", false)
 	data, err := c.DeleteWithQuery("/api/v1/agents/ag-1", nil)
 	if err != nil {
 		t.Fatalf("DeleteWithQuery(204) err=%v want nil (idempotent)", err)
@@ -141,7 +141,7 @@ func TestClient_DeleteWithQuery_409PropagatesError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	c := NewClient(server.URL, "")
+	c, _ := NewClient(server.URL, "", "", false)
 	_, err := c.DeleteWithQuery("/api/v1/agents/ag-1", nil)
 	if err == nil {
 		t.Fatalf("DeleteWithQuery(409) err=nil; 409 must propagate as Go error")

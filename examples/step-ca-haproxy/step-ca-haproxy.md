@@ -48,6 +48,13 @@ Monitor logs:
 docker compose logs -f certctl-server
 ```
 
+## TLS Security
+
+certctl is HTTPS-only as of v2.2. The demo compose stack provisions a self-signed certificate. When accessing `https://localhost:8443`, you can either:
+- Use `curl --cacert ./deploy/test/certs/ca.crt ...` to pin the CA certificate
+- Use `curl -k ...` for quick smoke tests (never in production)
+- Import the CA at `./deploy/test/certs/ca.crt` into your OS trust store for browser visits
+
 Wait for all services to reach healthy state:
 
 ```bash
@@ -69,7 +76,7 @@ certctl-haproxy-...               healthy
 Open your browser to:
 
 ```
-http://localhost:8443
+https://localhost:8443
 ```
 
 You should see an empty dashboard. This is expected — no certificates issued yet.
@@ -79,7 +86,7 @@ You should see an empty dashboard. This is expected — no certificates issued y
 This defines what certificates certctl can issue (key algorithm, max TTL, allowed names).
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/profiles \
+curl -X POST https://localhost:8443/api/v1/profiles \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "internal-web",
@@ -94,7 +101,7 @@ curl -X POST http://localhost:8443/api/v1/profiles \
 This tells certctl where to deploy certificates on the HAProxy server.
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/targets \
+curl -X POST https://localhost:8443/api/v1/targets \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "haproxy-01",
@@ -115,7 +122,7 @@ Note: In the Docker Compose environment, reload command can be `kill -HUP $(pido
 This ties a certificate profile to a deployment target and sets renewal thresholds.
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/renewal-policies \
+curl -X POST https://localhost:8443/api/v1/renewal-policies \
   -H 'Content-Type: application/json' \
   -d '{
     "name": "haproxy-internal-web",
@@ -130,7 +137,7 @@ curl -X POST http://localhost:8443/api/v1/renewal-policies \
 Get the issuer ID:
 
 ```bash
-curl http://localhost:8443/api/v1/issuers | jq '.'
+curl https://localhost:8443/api/v1/issuers | jq '.'
 ```
 
 You should see `iss-stepca` in the list.
@@ -140,7 +147,7 @@ You should see `iss-stepca` in the list.
 Request a certificate via the API. The server will sign it via step-ca.
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/certificates \
+curl -X POST https://localhost:8443/api/v1/certificates \
   -H 'Content-Type: application/json' \
   -d '{
     "common_name": "api.internal.example.com",
@@ -155,7 +162,7 @@ curl -X POST http://localhost:8443/api/v1/certificates \
 Get the certificate ID and trigger deployment:
 
 ```bash
-curl -X POST http://localhost:8443/api/v1/certificates/<cert_id>/deploy \
+curl -X POST https://localhost:8443/api/v1/certificates/<cert_id>/deploy \
   -H 'Content-Type: application/json' \
   -d '{
     "target_id": "<target_id_from_step_4>"
@@ -171,7 +178,7 @@ The agent will:
 
 ### 8. Verify in Dashboard
 
-Refresh http://localhost:8443 and you should see:
+Refresh https://localhost:8443 and you should see:
 - 1 certificate (status: Active, expiry in 90 days)
 - 1 deployment job (status: Completed)
 - 1 agent (heartbeat: recent)

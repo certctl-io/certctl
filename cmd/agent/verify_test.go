@@ -228,7 +228,7 @@ func TestReportVerificationResult_Success(t *testing.T) {
 		ServerURL: server.URL,
 		APIKey:    "test-api-key",
 	}
-	agent := NewAgent(cfg, nil)
+	agent, _ := NewAgent(cfg, nil)
 
 	result := &VerificationResult{
 		ExpectedFingerprint: "abc123",
@@ -244,7 +244,7 @@ func TestReportVerificationResult_Success(t *testing.T) {
 }
 
 func TestReportVerificationResult_MissingFields(t *testing.T) {
-	agent := NewAgent(&AgentConfig{}, nil)
+	agent, _ := NewAgent(&AgentConfig{}, nil)
 
 	result := &VerificationResult{
 		Verified:   true,
@@ -343,7 +343,7 @@ func TestReportVerificationResult_ServerError(t *testing.T) {
 		ServerURL: server.URL,
 		APIKey:    "test-api-key",
 	}
-	agent := NewAgent(cfg, nil)
+	agent, _ := NewAgent(cfg, nil)
 
 	result := &VerificationResult{
 		ExpectedFingerprint: "abc123",

@@ -1,0 +1,31 @@
+{{- if .Values.server.tls.certManager.enabled }}
+{{- include "certctl.tls.required" . }}
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: {{ include "certctl.fullname" . }}-server-tls
+  labels:
+    {{- include "certctl.labels" . | nindent 4 }}
+    app.kubernetes.io/component: server
+spec:
+  secretName: {{ include "certctl.tls.secretName" . }}
+  commonName: {{ .Values.server.tls.certManager.commonName | quote }}
+  dnsNames:
+    {{- range .Values.server.tls.certManager.dnsNames }}
+    - {{ . | quote }}
+    {{- end }}
+  duration: {{ .Values.server.tls.certManager.duration }}
+  renewBefore: {{ .Values.server.tls.certManager.renewBefore }}
+  usages:
+    - server auth
+    - digital signature
+    - key encipherment
+  privateKey:
+    algorithm: ECDSA
+    size: 256
+    rotationPolicy: Always
+  issuerRef:
+    name: {{ .Values.server.tls.certManager.issuerRef.name | quote }}
+    kind: {{ .Values.server.tls.certManager.issuerRef.kind }}
+    group: {{ .Values.server.tls.certManager.issuerRef.group }}
+{{- end }}

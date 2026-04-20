@@ -4,36 +4,46 @@
 {{- else if contains "NodePort" .Values.server.service.type }}
   export NODE_IP=$(kubectl get nodes --namespace {{ .Release.Namespace }} -o jsonpath="{.items[0].status.addresses[0].address}")
   export NODE_PORT=$(kubectl get --namespace {{ .Release.Namespace }} -o jsonpath="{.spec.ports[0].nodePort}" services {{ include "certctl.fullname" . }}-server)
-  echo http://$NODE_IP:$NODE_PORT
+  echo https://$NODE_IP:$NODE_PORT
 {{- else if contains "LoadBalancer" .Values.server.service.type }}
   export SERVICE_IP=$(kubectl get svc --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-server --template "{.status.loadBalancer.ingress[0].ip}")
-  echo http://$SERVICE_IP:{{ .Values.server.service.port }}
+  echo https://$SERVICE_IP:{{ .Values.server.service.port }}
 {{- else }}
   export POD_NAME=$(kubectl get pods --namespace {{ .Release.Namespace }} -l "app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/instance={{ .Release.Name }},app.kubernetes.io/component=server" -o jsonpath="{.items[0].metadata.name}")
   export CONTAINER_PORT=$(kubectl get pod --namespace {{ .Release.Namespace }} $POD_NAME -o jsonpath="{.spec.containers[0].ports[0].containerPort}")
-  echo "Visit http://127.0.0.1:8080 to use your application"
-  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8080:$CONTAINER_PORT
+  echo "Visit https://127.0.0.1:8443 to use your application"
+  kubectl --namespace {{ .Release.Namespace }} port-forward $POD_NAME 8443:$CONTAINER_PORT
 {{- end }}
 
-2. Get the default API key:
+2. Talk to the HTTPS-only server from your workstation:
+  # Export the CA bundle that signed the server cert (self-signed or cert-manager-issued)
+  kubectl get secret --namespace {{ .Release.Namespace }} {{ include "certctl.tls.secretName" . }} \
+    -o jsonpath='{.data.ca\.crt}' | base64 --decode > /tmp/certctl-ca.crt
+  # (If ca.crt is empty, fall back to tls.crt — typical when the Secret
+  #  was created from a self-signed bootstrap cert without a separate CA.)
+
+  # Adapt the URL below to match the Server URL printed in step 1.
+  curl --cacert /tmp/certctl-ca.crt https://127.0.0.1:8443/health
+
+3. Get the default API key:
   kubectl get secret --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-server -o jsonpath="{.data.api-key}" | base64 --decode; echo
 
-3. Get PostgreSQL connection details:
+4. Get PostgreSQL connection details:
   Host: {{ include "certctl.fullname" . }}-postgres.{{ .Release.Namespace }}.svc.cluster.local
   Port: 5432
   Database: {{ .Values.postgresql.auth.database }}
   Username: {{ .Values.postgresql.auth.username }}
   Password: $(kubectl get secret --namespace {{ .Release.Namespace }} {{ include "certctl.fullname" . }}-postgres -o jsonpath="{.data.password}" | base64 --decode)
 
-4. Check deployment status:
+5. Check deployment status:
   kubectl get pods -n {{ .Release.Namespace }} -l app.kubernetes.io/instance={{ .Release.Name }}
 
-5. View server logs:
+6. View server logs:
   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/component=server -f
 
 {{- if .Values.agent.enabled }}
 
-6. View agent logs:
+7. View agent logs:
   kubectl logs -n {{ .Release.Namespace }} -l app.kubernetes.io/name={{ include "certctl.name" . }},app.kubernetes.io/component=agent -f
 
 {{- end }}
@@ -58,11 +68,7 @@ IMPORTANT NOTES FOR PRODUCTION:
    - Use an external PostgreSQL managed service (AWS RDS, Cloud SQL, etc.)
    - Set postgresql.enabled=false and configure CERTCTL_DATABASE_URL in values
 
-5. Enable HTTPS/TLS using an Ingress with certificate management:
-   - Configure cert-manager for automatic TLS certificate renewal
-   - Update ingress values with your domain and certificate issuer
-
-6. Review security contexts and network policies:
+5. Review security contexts and network policies:
    - All containers run as non-root
    - Implement network policies to restrict traffic between components
    - Consider pod security policies or security standards for your cluster

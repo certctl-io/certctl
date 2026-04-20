@@ -17,10 +17,8 @@ info:
     url: https://github.com/shankar0123/certctl/blob/master/LICENSE
 
 servers:
-  - url: http://localhost:8080
-    description: Local development
-  - url: http://localhost:8443
-    description: Docker Compose demo
+  - url: https://localhost:8443
+    description: Docker Compose demo (self-signed cert; pin with ./deploy/test/certs/ca.crt)
 
 security:
   - bearerAuth: []

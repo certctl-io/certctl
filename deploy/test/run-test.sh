@@ -1,5 +1,30 @@
 #!/usr/bin/env bash
 # =============================================================================
+# DEPRECATED — prefer `go test -tags integration ./deploy/test/...`
+# =============================================================================
+#
+# This bash harness predates the Go integration test suite in
+# deploy/test/integration_test.go (build tag `integration`, 34 subtests across
+# 13 phases — health, agent heartbeat, Local CA issuance, ACME, step-ca, EST,
+# S/MIME, discovery, network scan, revocation + CRL, deployment verification).
+# The Go suite uses crypto/x509, crypto/tls, and database/sql to parse certs,
+# probe TLS, and talk to PostgreSQL directly — no openssl text-scraping or
+# brittle curl pipelines. It is the authoritative integration test surface as
+# of milestone M-007 (HTTPS Everywhere, Phase 6), where the test compose
+# stack wires the server on https://localhost:8443 behind a pinned CA bundle
+# at ./certs/ca.crt.
+#
+# Run the Go suite:
+#   (cd deploy && docker compose -f docker-compose.test.yml up -d --build)
+#   go test -tags integration -v -count=1 ./deploy/test/...
+#
+# Keep this bash script around because:
+#   * It is cited in docs/test-env.md and muscle-memory for contributors.
+#   * It exercises the CLI / curl path end-to-end (a different failure mode
+#     than the Go HTTP client path).
+# But any NEW integration coverage goes in integration_test.go — not here.
+#
+# =============================================================================
 # certctl End-to-End Test Script
 # =============================================================================
 #
@@ -32,10 +57,11 @@ set -euo pipefail
 # Config
 # ---------------------------------------------------------------------------
 COMPOSE_FILE="docker-compose.test.yml"
-API_URL="http://localhost:8443"
+API_URL="https://localhost:8443"
 API_KEY="test-key-2026"
 NGINX_TLS="localhost:8444"
 AUTH_HEADER="Authorization: Bearer ${API_KEY}"
+CACERT="./certs/ca.crt"
 
 # Flags
 BUILD=true
@@ -91,7 +117,7 @@ header() {
 # API helper: GET endpoint, return JSON body. Exits 1 on HTTP error.
 api_get() {
   local path="$1"
-  curl -sf -H "${AUTH_HEADER}" "${API_URL}${path}" 2>/dev/null
+  curl -sf --cacert "${CACERT}" -H "${AUTH_HEADER}" "${API_URL}${path}" 2>/dev/null
 }
 
 # API helper: POST with optional JSON body
@@ -99,10 +125,10 @@ api_post() {
   local path="$1"
   local body="${2:-}"
   if [ -n "$body" ]; then
-    curl -sf -X POST -H "${AUTH_HEADER}" -H "Content-Type: application/json" \
+    curl -sf --cacert "${CACERT}" -X POST -H "${AUTH_HEADER}" -H "Content-Type: application/json" \
       -d "$body" "${API_URL}${path}" 2>/dev/null
   else
-    curl -sf -X POST -H "${AUTH_HEADER}" "${API_URL}${path}" 2>/dev/null
+    curl -sf --cacert "${CACERT}" -X POST -H "${AUTH_HEADER}" "${API_URL}${path}" 2>/dev/null
   fi
 }
 

@@ -2,6 +2,7 @@ package cli
 
 import (
 	"bytes"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/json"
 	"encoding/pem"
@@ -19,22 +20,51 @@ import (
 
 // Client is the CLI HTTP client that communicates with the certctl server.
 type Client struct {
-	baseURL   string
-	apiKey    string
-	format    string
+	baseURL    string
+	apiKey     string
+	format     string
 	httpClient *http.Client
 }
 
 // NewClient creates a new CLI client.
-func NewClient(baseURL, apiKey, format string) *Client {
+//
+// HTTPS-Everywhere (v2.2): the certctl control plane is HTTPS-only. caBundlePath,
+// when non-empty, points at a PEM bundle used to verify the server cert; otherwise
+// the system trust store is used. insecure skips cert verification — dev only,
+// never enable in production. The TLS config is attached to *http.Transport so
+// every call goes through the same verified socket.
+func NewClient(baseURL, apiKey, format, caBundlePath string, insecure bool) (*Client, error) {
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: insecure, //nolint:gosec // opt-in dev toggle, documented in docs/tls.md
+	}
+	if caBundlePath != "" {
+		pemBytes, err := os.ReadFile(caBundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA bundle at %q: %w", caBundlePath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, fmt.Errorf("CA bundle at %q contains no valid PEM-encoded certificates", caBundlePath)
+		}
+		tlsConfig.RootCAs = pool
+	}
 	return &Client{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		format:  format,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig:       tlsConfig,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 		},
-	}
+	}, nil
 }
 
 // do performs an HTTP request and returns the parsed JSON response.

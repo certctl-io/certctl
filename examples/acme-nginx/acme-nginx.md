@@ -36,6 +36,13 @@ flowchart TD
 
 If you don't have a real domain or can't open port 80, see [Customization Tips](#customization-tips) below.
 
+## TLS Security
+
+certctl is HTTPS-only as of v2.2. The demo compose stack provisions a self-signed certificate. When accessing `https://localhost:8443`, you can either:
+- Use `curl --cacert ./deploy/test/certs/ca.crt ...` to pin the CA certificate
+- Use `curl -k ...` for quick smoke tests (never in production)
+- Import the CA at `./deploy/test/certs/ca.crt` into your OS trust store for browser visits
+
 ## Quick Start
 
 ### 1. Clone or copy this example
@@ -122,7 +129,7 @@ docker compose logs -f certctl-server certctl-agent
 
 ### 5. Access the dashboard
 
-Navigate to `http://localhost:8443` (or your `SERVER_PORT`)
+Navigate to `https://localhost:8443` (or your `SERVER_PORT`)
 
 You should see:
 - An empty certificate inventory (no certs issued yet)

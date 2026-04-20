@@ -48,11 +48,12 @@ server:
       drop:
         - ALL
 
-  # Liveness and readiness probes
+  # Liveness and readiness probes (HTTPS-only as of v2.2)
   livenessProbe:
     httpGet:
       path: /health
-      port: http
+      port: https
+      scheme: HTTPS
     initialDelaySeconds: 10
     periodSeconds: 10
     timeoutSeconds: 5
@@ -61,11 +62,49 @@ server:
   readinessProbe:
     httpGet:
       path: /readyz
-      port: http
+      port: https
+      scheme: HTTPS
     initialDelaySeconds: 5
     periodSeconds: 5
     timeoutSeconds: 3
     failureThreshold: 2
+
+  # TLS configuration — REQUIRED. HTTPS is the only supported mode (v2.2+).
+  # Operator must configure EXACTLY ONE of:
+  #   (a) server.tls.existingSecret: <name>        # pre-existing kubernetes.io/tls Secret
+  #   (b) server.tls.certManager.enabled: true     # provision a cert-manager Certificate CR
+  # Refusing to set either makes `helm template` fail with a diagnostic pointing at docs/tls.md.
+  tls:
+    # Name of a pre-existing Secret (type kubernetes.io/tls) holding tls.crt + tls.key (+ optional ca.crt).
+    # Leave empty to fall through to the cert-manager path.
+    existingSecret: ""
+
+    # Mount path for the TLS Secret inside the server + agent containers.
+    mountPath: /etc/certctl/tls
+
+    # cert-manager auto-provisioning. Opt-in (off by default per milestone §3.4).
+    certManager:
+      enabled: false
+
+      # Secret name the cert-manager Certificate CR writes into. Agents and the server
+      # both read from this Secret. If empty, defaults to "<fullname>-tls".
+      secretName: ""
+
+      # Cert-manager issuer reference.
+      issuerRef:
+        name: ""                      # e.g. "letsencrypt-prod" or "internal-ca"
+        kind: ClusterIssuer           # ClusterIssuer or Issuer
+        group: cert-manager.io
+
+      # Subject fields on the issued cert.
+      commonName: "certctl-server"
+      dnsNames:
+        - certctl-server
+        - localhost
+
+      # Certificate lifetime + renewal window.
+      duration: 2160h                 # 90 days
+      renewBefore: 360h               # 15 days
 
   # Service type (ClusterIP, LoadBalancer, NodePort)
   service:
@@ -356,7 +395,16 @@ ingress:
   className: ""
   annotations: {}
     # kubernetes.io/ingress.class: nginx
-    # cert-manager.io/cluster-issuer: letsencrypt-prod
+
+  # Optional cert-manager integration for the public-facing Ingress cert.
+  # This is completely independent of server.tls.* — the Ingress terminates
+  # an *additional* TLS hop between the internet and the in-cluster Service.
+  # Leave disabled unless an Ingress is exposing certctl to the outside world.
+  certManager:
+    enabled: false
+    issuerRef:
+      name: ""                      # e.g. "letsencrypt-prod"
+      kind: ClusterIssuer           # ClusterIssuer or Issuer
   hosts:
     - host: certctl.local
       paths:

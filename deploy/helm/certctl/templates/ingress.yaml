@@ -1,14 +1,24 @@
 {{- if .Values.ingress.enabled }}
+{{- if and .Values.ingress.certManager.enabled (not .Values.ingress.certManager.issuerRef.name) -}}
+{{- fail "\n\ningress.certManager.enabled=true but ingress.certManager.issuerRef.name is empty.\n\nSet:\n  --set ingress.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nThis is separate from server.tls.certManager — it issues the external-facing\nIngress cert, not the in-cluster server TLS cert. See docs/tls.md.\n" -}}
+{{- end -}}
 apiVersion: networking.k8s.io/v1
 kind: Ingress
 metadata:
   name: {{ include "certctl.fullname" . }}
   labels:
     {{- include "certctl.labels" . | nindent 4 }}
-  {{- with .Values.ingress.annotations }}
   annotations:
+    {{- if .Values.ingress.certManager.enabled }}
+    {{- if eq .Values.ingress.certManager.issuerRef.kind "ClusterIssuer" }}
+    cert-manager.io/cluster-issuer: {{ .Values.ingress.certManager.issuerRef.name | quote }}
+    {{- else }}
+    cert-manager.io/issuer: {{ .Values.ingress.certManager.issuerRef.name | quote }}
+    {{- end }}
+    {{- end }}
+    {{- with .Values.ingress.annotations }}
     {{- toYaml . | nindent 4 }}
-  {{- end }}
+    {{- end }}
 spec:
   {{- if .Values.ingress.className }}
   ingressClassName: {{ .Values.ingress.className }}
@@ -33,7 +43,7 @@ spec:
             pathType: {{ .pathType }}
             backend:
               service:
-                name: {{ include "certctl.fullname" . }}-server
+                name: {{ include "certctl.fullname" $ }}-server
                 port:
                   number: {{ $.Values.server.service.port }}
           {{- end }}

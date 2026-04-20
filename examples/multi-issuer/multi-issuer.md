@@ -45,6 +45,13 @@ flowchart TD
 - **Domain for ACME** (optional) — if using real Let's Encrypt, not needed for demo
 - **Internet connectivity** — to reach Let's Encrypt's API (demo can use staging directory)
 
+## TLS Security
+
+certctl is HTTPS-only as of v2.2. The demo compose stack provisions a self-signed certificate. When accessing `https://localhost:8443`, you can either:
+- Use `curl --cacert ./deploy/test/certs/ca.crt ...` to pin the CA certificate
+- Use `curl -k ...` for quick smoke tests (never in production)
+- Import the CA at `./deploy/test/certs/ca.crt` into your OS trust store for browser visits
+
 ## Quick Start
 
 ### 1. Clone or navigate to this directory
@@ -83,7 +90,7 @@ This spins up:
 
 ### 4. Access the dashboard
 
-Open your browser to **http://localhost:8443** (or your configured SERVER_PORT)
+Open your browser to **https://localhost:8443** (or your configured SERVER_PORT)
 
 You should see:
 - Empty cert inventory (fresh start)

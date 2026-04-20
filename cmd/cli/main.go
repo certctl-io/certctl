@@ -3,7 +3,9 @@ package main
 import (
 	"flag"
 	"fmt"
+	"net/url"
 	"os"
+	"strings"
 
 	"github.com/shankar0123/certctl/internal/cli"
 )
@@ -43,21 +45,33 @@ Commands:
   version          Show CLI version
 
 Examples:
-  certctl-cli --server http://localhost:8443 --api-key mykey certs list
+  certctl-cli --server https://localhost:8443 --api-key mykey certs list
   certctl-cli certs renew mc-prod --format json
   certctl-cli import certs.pem
 `)
 	}
 
-	serverURL := fs.String("server", os.Getenv("CERTCTL_SERVER_URL"), "certctl server URL (env: CERTCTL_SERVER_URL)")
-	if *serverURL == "" {
-		*serverURL = "http://localhost:8443"
+	// HTTPS-Everywhere (v2.2): the server is HTTPS-only. The default URL uses
+	// https://; plaintext http:// is rejected by validateHTTPSScheme below.
+	defaultServer := os.Getenv("CERTCTL_SERVER_URL")
+	if defaultServer == "" {
+		defaultServer = "https://localhost:8443"
 	}
+	serverURL := fs.String("server", defaultServer, "certctl server URL — must be https:// (env: CERTCTL_SERVER_URL)")
 
 	apiKey := fs.String("api-key", os.Getenv("CERTCTL_API_KEY"), "API key for authentication (env: CERTCTL_API_KEY)")
 	format := fs.String("format", "table", "Output format: table, json")
+	caBundlePath := fs.String("ca-bundle", os.Getenv("CERTCTL_SERVER_CA_BUNDLE_PATH"), "Path to a PEM-encoded CA bundle that signed the server cert (env: CERTCTL_SERVER_CA_BUNDLE_PATH)")
+	insecure := fs.Bool("insecure", strings.EqualFold(os.Getenv("CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY"), "true"), "Skip TLS certificate verification — dev only, never set in production (env: CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY)")
 
 	fs.Parse(os.Args[1:])
+
+	if err := validateHTTPSScheme(*serverURL); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nThe certctl control plane is HTTPS-only as of v2.2.\n")
+		fmt.Fprintf(os.Stderr, "See docs/upgrade-to-tls.md for the cutover walkthrough.\n")
+		os.Exit(1)
+	}
 
 	args := fs.Args()
 	if len(args) == 0 {
@@ -66,13 +80,16 @@ Examples:
 	}
 
 	// Create client
-	client := cli.NewClient(*serverURL, *apiKey, *format)
+	client, err := cli.NewClient(*serverURL, *apiKey, *format, *caBundlePath, *insecure)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Dispatch to appropriate command
 	command := args[0]
 	cmdArgs := args[1:]
 
-	var err error
 	switch command {
 	case "certs":
 		err = handleCerts(client, cmdArgs)
@@ -236,4 +253,27 @@ func handleImport(client *cli.Client, args []string) error {
 
 func handleStatus(client *cli.Client) error {
 	return client.GetStatus()
+}
+
+// validateHTTPSScheme rejects plaintext and empty-scheme server URLs at
+// startup so operators get a fail-loud diagnostic before any network call,
+// not a TCP-refused or TLS-handshake-error downstream. See docs/upgrade-to-tls.md.
+func validateHTTPSScheme(serverURL string) error {
+	if serverURL == "" {
+		return fmt.Errorf("server URL is empty — set --server (or CERTCTL_SERVER_URL) to an https:// URL (e.g., https://certctl-server:8443)")
+	}
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return fmt.Errorf("server URL %q is not a valid URL: %w", serverURL, err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		return fmt.Errorf("server URL %q uses plaintext http:// — the certctl control plane is HTTPS-only", serverURL)
+	case "":
+		return fmt.Errorf("server URL %q is missing a scheme — expected https://", serverURL)
+	default:
+		return fmt.Errorf("server URL %q uses unsupported scheme %q — expected https://", serverURL, u.Scheme)
+	}
 }

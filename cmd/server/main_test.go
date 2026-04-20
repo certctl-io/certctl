@@ -214,6 +214,8 @@ func TestMain_ServerConfigFromEnvironment(t *testing.T) {
 	oldAuthType := os.Getenv("CERTCTL_AUTH_TYPE")
 	oldServerHost := os.Getenv("CERTCTL_SERVER_HOST")
 	oldServerPort := os.Getenv("CERTCTL_SERVER_PORT")
+	oldTLSCert := os.Getenv("CERTCTL_SERVER_TLS_CERT_PATH")
+	oldTLSKey := os.Getenv("CERTCTL_SERVER_TLS_KEY_PATH")
 	defer func() {
 		if oldAuthType != "" {
 			os.Setenv("CERTCTL_AUTH_TYPE", oldAuthType)
@@ -230,12 +232,32 @@ func TestMain_ServerConfigFromEnvironment(t *testing.T) {
 		} else {
 			os.Unsetenv("CERTCTL_SERVER_PORT")
 		}
+		if oldTLSCert != "" {
+			os.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", oldTLSCert)
+		} else {
+			os.Unsetenv("CERTCTL_SERVER_TLS_CERT_PATH")
+		}
+		if oldTLSKey != "" {
+			os.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", oldTLSKey)
+		} else {
+			os.Unsetenv("CERTCTL_SERVER_TLS_KEY_PATH")
+		}
 	}()
+
+	// HTTPS-only control plane: Validate() refuses to pass without a readable
+	// cert/key pair on disk. Materialize a throwaway ECDSA P-256 pair using the
+	// same generator cmd/server/tls_test.go uses for the certHolder tests.
+	dir := t.TempDir()
+	certPath := dir + "/server.crt"
+	keyPath := dir + "/server.key"
+	generateTestCert(t, certPath, keyPath, "main-test-cn")
 
 	// Set test env vars
 	os.Setenv("CERTCTL_AUTH_TYPE", "none")
 	os.Setenv("CERTCTL_SERVER_HOST", "127.0.0.1")
 	os.Setenv("CERTCTL_SERVER_PORT", "8080")
+	os.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
+	os.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
 
 	cfg, err := config.Load()
 	if err != nil {
@@ -260,6 +282,8 @@ func TestMain_AuthTypeConfiguration(t *testing.T) {
 	// Save original env vars
 	oldAuthType := os.Getenv("CERTCTL_AUTH_TYPE")
 	oldAuthSecret := os.Getenv("CERTCTL_AUTH_SECRET")
+	oldTLSCert := os.Getenv("CERTCTL_SERVER_TLS_CERT_PATH")
+	oldTLSKey := os.Getenv("CERTCTL_SERVER_TLS_KEY_PATH")
 	defer func() {
 		if oldAuthType != "" {
 			os.Setenv("CERTCTL_AUTH_TYPE", oldAuthType)
@@ -271,7 +295,27 @@ func TestMain_AuthTypeConfiguration(t *testing.T) {
 		} else {
 			os.Unsetenv("CERTCTL_AUTH_SECRET")
 		}
+		if oldTLSCert != "" {
+			os.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", oldTLSCert)
+		} else {
+			os.Unsetenv("CERTCTL_SERVER_TLS_CERT_PATH")
+		}
+		if oldTLSKey != "" {
+			os.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", oldTLSKey)
+		} else {
+			os.Unsetenv("CERTCTL_SERVER_TLS_KEY_PATH")
+		}
 	}()
+
+	// HTTPS-only control plane: config.Load()→Validate() refuses to pass
+	// without a readable cert/key pair. Mint one throwaway pair for the whole
+	// sub-test cohort — auth type toggles don't care about the TLS surface.
+	dir := t.TempDir()
+	certPath := dir + "/server.crt"
+	keyPath := dir + "/server.key"
+	generateTestCert(t, certPath, keyPath, "main-test-cn")
+	os.Setenv("CERTCTL_SERVER_TLS_CERT_PATH", certPath)
+	os.Setenv("CERTCTL_SERVER_TLS_KEY_PATH", keyPath)
 
 	// Set auth secret for api-key mode
 	os.Setenv("CERTCTL_AUTH_SECRET", "test-secret")

@@ -33,9 +33,11 @@ kubectl get pods -l app.kubernetes.io/instance=certctl
 # View server logs
 kubectl logs -l app.kubernetes.io/component=server -f
 
-# Access the API
+# Access the API (HTTPS-only as of v2.2; use --cacert or -k depending on your cert provisioning)
 kubectl port-forward svc/certctl-server 8443:8443 &
-curl http://localhost:8443/health
+# If the chart provisioned a self-signed cert, fetch the CA bundle from the secret first:
+#   kubectl get secret certctl-server-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/certctl-ca.crt
+curl --cacert /tmp/certctl-ca.crt https://localhost:8443/health
 ```
 
 ## Next Steps

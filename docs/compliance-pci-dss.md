@@ -387,12 +387,12 @@ This requirement covers key generation, storage, rotation, and destruction. Cert
   - API key transmitted in Authorization header (not URL parameter, not cookie).
   - Browser to server: TLS.
   - Agent to server: TLS.
-  - No credential logging (API key hash only, never plaintext).
+  - No credential logging (audit records the per-key actor `Name`, never the Bearer token; logs redact the `Authorization` header).
 
 **Evidence You Can Provide**:
 - API configuration: `CERTCTL_AUTH_TYPE=api-key` in deployment manifest.
-- Database schema: `api_keys` table showing SHA-256 hash column, not plaintext.
-- API audit log: `GET /api/v1/audit?action=api_call` showing Bearer token validation (no plaintext keys logged).
+- Key inventory: `CERTCTL_API_KEYS_NAMED` env var (format `name:key:admin,...`) — seeds the in-memory `NamedAPIKey{Name, Key, Admin}` struct at `internal/api/middleware/middleware.go:29`. Keys are constant-time-compared (`subtle.ConstantTimeCompare`) against the Bearer token. No database table stores them; protect the env var contents at rest via a secrets manager (Vault / AWS Secrets Manager / Kubernetes Secrets / Docker Secrets).
+- API audit log: `GET /api/v1/audit?action=api_call` showing per-key actor names (`Name` field of matched `NamedAPIKey`) on every call, with zero plaintext or hashed key material recorded.
 - TLS certificate on control plane: `openssl s_client -connect {server}:8443` showing valid certificate, TLS 1.2+, strong cipher.
 - GUI login flow: browser network tab showing Authorization header (token value redacted in compliance report).
 

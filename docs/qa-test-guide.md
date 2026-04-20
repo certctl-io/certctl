@@ -85,10 +85,12 @@ go test -tags qa -v -timeout 10m ./...
 
 | Variable | Default | Description |
 |---|---|---|
-| `CERTCTL_QA_SERVER_URL` | `http://localhost:8443` | certctl server URL |
+| `CERTCTL_QA_SERVER_URL` | `https://localhost:8443` | certctl server URL (HTTPS-only as of v2.2) |
 | `CERTCTL_QA_API_KEY` | `change-me-in-production` | API key for Bearer auth |
 | `CERTCTL_QA_DB_URL` | `postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable` | PostgreSQL connection string |
 | `CERTCTL_QA_REPO_DIR` | `../..` | Path to certctl repo root (for source file checks) |
+| `CERTCTL_QA_CA_BUNDLE` | `./certs/ca.crt` | PEM CA bundle pinned for TLS verification. The demo stack's `certctl-tls-init` container writes here. |
+| `CERTCTL_QA_INSECURE` | `false` | Set to `"true"` to skip TLS verification (e.g. before the init container finishes). Never use outside the demo harness. |
 
 ## Part-by-Part Coverage Map
 
@@ -256,8 +258,8 @@ docker compose -f docker-compose.yml -f docker-compose.demo.yml ps
 # Check server logs
 docker compose -f docker-compose.yml -f docker-compose.demo.yml logs certctl-server
 
-# Check if the port is exposed
-curl -s http://localhost:8443/health
+# Check if the port is exposed (self-signed cert — pin CA bundle)
+curl --cacert ./deploy/test/certs/ca.crt -s https://localhost:8443/health
 ```
 
 ### "connect to QA DB" failure

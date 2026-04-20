@@ -1,4 +1,47 @@
 services:
+  # HTTPS-Everywhere Phase 3 — self-signed TLS bootstrap (init container).
+  # Generates a CN=certctl-server ed25519 cert with the SAN list locked by
+  # milestone §3.6 on first boot; subsequent boots see the cert already
+  # present in the `certs` named volume and no-op out. Server + agent mount
+  # the volume read-only. Destroy via `docker compose down -v` to force
+  # regeneration. This bootstrap is for docker-compose demos and local dev
+  # only; Helm operators supply a Secret / cert-manager Certificate per
+  # docs/tls.md.
+  certctl-tls-init:
+    image: alpine/openssl:latest
+    container_name: certctl-tls-init
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        CERT=/etc/certctl/tls/server.crt
+        KEY=/etc/certctl/tls/server.key
+        CA=/etc/certctl/tls/ca.crt
+        if [ -f "$$CERT" ] && [ -f "$$KEY" ] && [ -f "$$CA" ]; then
+          echo "TLS cert already present at $$CERT — skipping generation"
+        else
+          mkdir -p /etc/certctl/tls
+          openssl req -x509 -newkey ed25519 -nodes \
+            -keyout "$$KEY" \
+            -out "$$CERT" \
+            -days 3650 \
+            -subj "/CN=certctl-server" \
+            -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1,IP:::1"
+          cp "$$CERT" "$$CA"
+          echo "Generated self-signed TLS cert for certctl-server (ed25519, 3650d, CN=certctl-server)"
+        fi
+        # certctl binary runs as UID 1000 inside the server container per
+        # Dockerfile:64-65; the cert + key must be readable by that UID.
+        chown 1000:1000 "$$CERT" "$$KEY" "$$CA"
+        chmod 0644 "$$CERT" "$$CA"
+        chmod 0600 "$$KEY"
+    volumes:
+      - certs:/etc/certctl/tls
+    networks:
+      - certctl-network
+
   # PostgreSQL database
   postgres:
     image: postgres:16-alpine
@@ -50,10 +93,14 @@ services:
     depends_on:
       postgres:
         condition: service_healthy
+      certctl-tls-init:
+        condition: service_completed_successfully
     environment:
       CERTCTL_DATABASE_URL: postgres://certctl:${POSTGRES_PASSWORD:-certctl}@postgres:5432/certctl?sslmode=disable
       CERTCTL_SERVER_HOST: 0.0.0.0
       CERTCTL_SERVER_PORT: 8443
+      CERTCTL_SERVER_TLS_CERT_PATH: /etc/certctl/tls/server.crt
+      CERTCTL_SERVER_TLS_KEY_PATH: /etc/certctl/tls/server.key
       CERTCTL_LOG_LEVEL: info
       CERTCTL_AUTH_TYPE: none
       CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
@@ -61,10 +108,12 @@ services:
       CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}  # AES-256-GCM for dynamic issuer/target config
     ports:
       - "8443:8443"
+    volumes:
+      - certs:/etc/certctl/tls:ro
     networks:
       - certctl-network
     healthcheck:
-      test: ["CMD", "curl", "-f", "http://localhost:8443/health"]
+      test: ["CMD", "curl", "--cacert", "/etc/certctl/tls/ca.crt", "-f", "https://localhost:8443/health"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -99,13 +148,15 @@ services:
       certctl-server:
         condition: service_healthy
     environment:
-      CERTCTL_SERVER_URL: http://certctl-server:8443
+      CERTCTL_SERVER_URL: https://certctl-server:8443
+      CERTCTL_SERVER_CA_BUNDLE_PATH: /etc/certctl/tls/ca.crt
       CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
       CERTCTL_AGENT_NAME: docker-agent
       CERTCTL_LOG_LEVEL: info
       CERTCTL_DISCOVERY_DIRS: /var/lib/certctl/keys  # Agent scans this directory for existing certificates
     volumes:
       - agent_keys:/var/lib/certctl/keys
+      - certs:/etc/certctl/tls:ro
     networks:
       - certctl-network
     healthcheck:
@@ -133,4 +184,6 @@ volumes:
   postgres_data:
     driver: local
   agent_keys:
+    driver: local
+  certs:
     driver: local

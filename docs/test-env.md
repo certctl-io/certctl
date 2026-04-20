@@ -16,7 +16,7 @@ You'll start 7 Docker containers that talk to each other:
 | **pebble-challtestsrv** | DNS/HTTP challenge test server for Pebble | 10.30.50.3 | Not directly — Pebble talks to it |
 | **Pebble** | A fake Let's Encrypt (tests the ACME protocol without touching the real internet) | 10.30.50.4 | Not directly — the server talks to it |
 | **step-ca** | A private Certificate Authority (think: your company's internal CA) | 10.30.50.5 | Not directly — the server talks to it |
-| **certctl-server** | The brain. API + web dashboard + scheduler + ACME challenge server | 10.30.50.6 | **http://localhost:8443** |
+| **certctl-server** | The brain. API + web dashboard + scheduler + ACME challenge server | 10.30.50.6 | **https://localhost:8443** (self-signed — see CA-bundle note below) |
 | **NGINX** | A web server. The agent deploys certificates here. | 10.30.50.7 | **https://localhost:8444** |
 | **certctl-agent** | The hands. Generates keys, deploys certs to NGINX | 10.30.50.8 | Not directly — it talks to the server |
 
@@ -123,7 +123,7 @@ docker compose -f docker-compose.test.yml up --build
 
 ```
 certctl-test-server    | {"level":"INFO","msg":"server started","address":"0.0.0.0:8443"}
-certctl-test-agent     | {"level":"INFO","msg":"agent starting","server_url":"http://certctl-server:8443"}
+certctl-test-agent     | {"level":"INFO","msg":"agent starting","server_url":"https://certctl-server:8443"}
 certctl-test-stepca    | Serving HTTPS on :9000 ...
 certctl-test-pebble    | Listening on: 0.0.0.0:14000
 ```
@@ -159,13 +159,29 @@ certctl-test-stepca         Up (healthy)
 
 **If certctl-test-server says "Restarting"**: It probably started before step-ca or Pebble were ready. Wait 30 seconds and check again. If it keeps restarting, see [Troubleshooting](#troubleshooting).
 
+### Get the CA bundle for curl
+
+The test harness runs HTTPS-only (the `certctl-tls-init` init container self-signs an ed25519 server cert into a bind-mounted directory before the server starts — see `docker-compose.test.yml` §`certctl-tls-init` for details). The CA cert that signed it is materialized on the host at `./test/certs/ca.crt` (relative to the `deploy/` directory). Every `curl` in the rest of this doc expects it in `$CA`:
+
+```bash
+export CA=$PWD/test/certs/ca.crt
+ls -la "$CA"  # sanity check: file should exist and be non-empty
+curl --cacert "$CA" -f https://localhost:8443/health
+```
+
+Expect `{"status":"ok"}`. If `curl` errors with `SSL certificate problem: unable to get local issuer certificate`, the init container hasn't finished yet — wait a few seconds and retry. If the file doesn't exist at all, the bind mount didn't populate; `docker compose -f docker-compose.test.yml logs certctl-tls-init` should show the self-sign ran.
+
+For a full explanation of the cert provisioning patterns (self-signed bootstrap, operator-supplied, cert-manager), see [`tls.md`](tls.md). For the one-step cutover from the old plaintext test harness to HTTPS, see [`upgrade-to-tls.md`](upgrade-to-tls.md).
+
 ---
 
 ## Step 2: Open the Dashboard
 
 Open your web browser and go to:
 
-**http://localhost:8443**
+**https://localhost:8443**
+
+Your browser will warn you that the cert is self-signed ("Your connection is not private" / "NET::ERR_CERT_AUTHORITY_INVALID"). That's expected for the test harness — the CA that signed the cert lives at `deploy/test/certs/ca.crt` and isn't in your system trust store. Click through the warning (Chrome: "Advanced" → "Proceed"; Firefox: "Accept the Risk"; Safari: "Show Details" → "visit this website").
 
 You'll see a login screen asking for an API key. Enter:
 
@@ -198,12 +214,13 @@ Go back to your second terminal. Let's verify the data loaded correctly.
 ### Check the agent
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/agents | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/agents | python3 -m json.tool
 ```
 
 **What this command does**:
-- `curl` makes an HTTP request (like a browser but from the terminal)
+- `curl` makes an HTTPS request (like a browser but from the terminal)
+- `--cacert "$CA"` pins the test harness's self-signed root as the only trust anchor for this call — matches what you exported in Step 1
 - `-s` means "silent" (don't show progress bars)
 - `-H "Authorization: Bearer test-key-2026"` sends the API key (same one you used to log in)
 - `python3 -m json.tool` formats the JSON response so it's readable
@@ -233,8 +250,8 @@ The important parts: `"id": "agent-test-01"` and `"status": "online"`. If the st
 ### Check the issuers
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/issuers | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/issuers | python3 -m json.tool
 ```
 
 You should see three issuers:
@@ -245,8 +262,8 @@ You should see three issuers:
 ### Check the target
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/targets | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/targets | python3 -m json.tool
 ```
 
 You should see `target-test-nginx` — the NGINX deployment target, assigned to `agent-test-01`.
@@ -255,7 +272,7 @@ The target config uses no-op commands for `reload_command` and `validate_command
 
 ### See it all in the dashboard
 
-Open the dashboard at http://localhost:8443 and click through the sidebar:
+Open the dashboard at https://localhost:8443 and click through the sidebar:
 - **Agents** — you should see `test-agent-01`
 - **Issuers** — you should see all three CAs
 - **Targets** — you should see `Test NGINX`
@@ -287,7 +304,7 @@ The private key **never leaves the agent**. The server only ever sees the CSR (p
 ### Step 4a: Create the certificate record
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/json" \
   -d '{
@@ -338,7 +355,7 @@ docker exec certctl-test-postgres psql -U certctl -d certctl -c \
 ### Step 4c: Trigger issuance
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates/mc-local-test/renew \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/mc-local-test/renew \
   -H "Authorization: Bearer test-key-2026" | python3 -m json.tool
 ```
 
@@ -395,7 +412,7 @@ The `subject` should match the domain name you chose. The `issuer` should say "c
 
 ### Step 4f: Check the dashboard
 
-Open the dashboard at http://localhost:8443 and:
+Open the dashboard at https://localhost:8443 and:
 
 1. Click **Certificates** in the sidebar — you should see `mc-local-test` with status "Active"
 2. Click on it to see the detail page — you should see version history, the signed certificate details, and the deployment timeline
@@ -414,7 +431,7 @@ This is the real deal. ACME is the protocol that Let's Encrypt uses to issue cer
 ### Step 5a: Create the certificate record
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/json" \
   -d '{
@@ -441,7 +458,7 @@ docker exec certctl-test-postgres psql -U certctl -d certctl -c \
   "INSERT INTO certificate_target_mappings (certificate_id, target_id) VALUES ('mc-acme-test', 'target-test-nginx') ON CONFLICT DO NOTHING;"
 
 # Trigger issuance
-curl -s -X POST http://localhost:8443/api/v1/certificates/mc-acme-test/renew \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/mc-acme-test/renew \
   -H "Authorization: Bearer test-key-2026" | python3 -m json.tool
 ```
 
@@ -502,7 +519,7 @@ Revocation means "this certificate is no longer trusted, even though it hasn't e
 ### Step 7a: Revoke the Local CA cert
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates/mc-local-test/revoke \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/mc-local-test/revoke \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/json" \
   -d '{"reason": "superseded"}' | python3 -m json.tool
@@ -516,7 +533,7 @@ The CRL is a DER-encoded X.509 v2 CRL (RFC 5280 §5) served under the RFC 8615 w
 
 ```bash
 # No Authorization header — the endpoint is public by design.
-curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
+curl --cacert "$CA" -s https://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
 openssl crl -inform der -in /tmp/crl.der -noout -text | head -40
 ```
 
@@ -533,8 +550,8 @@ Go to **Certificates** in the sidebar. The `mc-local-test` cert should now show 
 The agent is configured to scan `/nginx-certs` every 6 hours for existing certificates. It already ran a scan when it started up. Let's see what it found.
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/discovered-certificates | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/discovered-certificates | python3 -m json.tool
 ```
 
 **What you should see**: Any certificates that exist in the NGINX cert directory, including the ones you deployed in Steps 4-5. The discovery system extracts metadata (CN, SANs, issuer, expiry, fingerprint) from the PEM files.
@@ -542,8 +559,8 @@ curl -s -H "Authorization: Bearer test-key-2026" \
 Check the summary:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/discovery-summary | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/discovery-summary | python3 -m json.tool
 ```
 
 This shows counts: how many are Unmanaged, Managed, and Dismissed.
@@ -557,7 +574,7 @@ In the dashboard: click **Discovery** in the sidebar to see the triage view.
 Force a renewal on the ACME certificate to see the full cycle happen again:
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates/mc-acme-test/renew \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/mc-acme-test/renew \
   -H "Authorization: Bearer test-key-2026" | python3 -m json.tool
 ```
 
@@ -584,7 +601,7 @@ The test environment enables EST with `CERTCTL_EST_ENABLED=true` and `CERTCTL_ES
 ### Step 10a: Check available CA certificates
 
 ```bash
-curl -sk http://localhost:8443/.well-known/est/cacerts \
+curl --cacert "$CA" -s https://localhost:8443/.well-known/est/cacerts \
   -H "Authorization: Bearer test-key-2026"
 ```
 
@@ -595,7 +612,7 @@ curl -sk http://localhost:8443/.well-known/est/cacerts \
 ### Step 10b: Check CSR attributes
 
 ```bash
-curl -sk http://localhost:8443/.well-known/est/csrattrs \
+curl --cacert "$CA" -s https://localhost:8443/.well-known/est/csrattrs \
   -H "Authorization: Bearer test-key-2026"
 ```
 
@@ -615,7 +632,7 @@ openssl req -new -newkey ec -pkeyopt ec_paramgen_curve:P-256 \
 EST_CSR=$(openssl req -in /tmp/est-test.csr -outform DER | base64 -w 0)
 
 # Submit to EST simpleenroll endpoint
-curl -sk -X POST http://localhost:8443/.well-known/est/simpleenroll \
+curl --cacert "$CA" -s -X POST https://localhost:8443/.well-known/est/simpleenroll \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/pkcs10" \
   -d "$EST_CSR"
@@ -628,8 +645,8 @@ curl -sk -X POST http://localhost:8443/.well-known/est/simpleenroll \
 Decode and inspect the response (if you saved it to a variable):
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/audit-events | python3 -m json.tool | head -30
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/audit-events | python3 -m json.tool | head -30
 ```
 
 Check the audit trail — you should see an `est_enrollment` event with the CN `est-device.certctl.test`.
@@ -639,7 +656,7 @@ Check the audit trail — you should see an `est_enrollment` event with the CN `
 EST also supports re-enrollment (certificate renewal). The same CSR format works:
 
 ```bash
-curl -sk -X POST http://localhost:8443/.well-known/est/simplereenroll \
+curl --cacert "$CA" -s -X POST https://localhost:8443/.well-known/est/simplereenroll \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/pkcs10" \
   -d "$EST_CSR"
@@ -658,7 +675,7 @@ S/MIME certificates are used for email signing and encryption — a different us
 ### Step 11a: Create an S/MIME certificate record
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates \
   -H "Authorization: Bearer test-key-2026" \
   -H "Content-Type: application/json" \
   -d '{
@@ -686,7 +703,7 @@ Notice:
 docker exec certctl-test-postgres psql -U certctl -d certctl -c \
   "INSERT INTO certificate_target_mappings (certificate_id, target_id) VALUES ('mc-smime-test', 'target-test-nginx') ON CONFLICT DO NOTHING;"
 
-curl -s -X POST http://localhost:8443/api/v1/certificates/mc-smime-test/renew \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/mc-smime-test/renew \
   -H "Authorization: Bearer test-key-2026" | python3 -m json.tool
 ```
 
@@ -695,15 +712,15 @@ curl -s -X POST http://localhost:8443/api/v1/certificates/mc-smime-test/renew \
 After the agent processes the job (30-60 seconds), check the certificate details:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/certificates/mc-smime-test | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/certificates/mc-smime-test | python3 -m json.tool
 ```
 
 The certificate should show `"status": "active"`. To verify the EKU on the actual cert, you can export it:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/certificates/mc-smime-test/export/pem | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/certificates/mc-smime-test/export/pem | python3 -m json.tool
 ```
 
 If you decode the certificate PEM, you should see:
@@ -768,16 +785,16 @@ If you have Go installed, you can build and test the CLI tool:
 go build -o certctl-cli ./cmd/cli
 
 # List certificates
-./certctl-cli --server http://localhost:8443 --api-key test-key-2026 list-certs
+./certctl-cli --server https://localhost:8443 --ca-bundle "$CA" --api-key test-key-2026 list-certs
 
 # Get a specific certificate
-./certctl-cli --server http://localhost:8443 --api-key test-key-2026 get-cert mc-acme-test
+./certctl-cli --server https://localhost:8443 --ca-bundle "$CA" --api-key test-key-2026 get-cert mc-acme-test
 
 # Check health
-./certctl-cli --server http://localhost:8443 --api-key test-key-2026 health
+./certctl-cli --server https://localhost:8443 --ca-bundle "$CA" --api-key test-key-2026 health
 
 # Get metrics (JSON format)
-./certctl-cli --server http://localhost:8443 --api-key test-key-2026 --format json metrics
+./certctl-cli --server https://localhost:8443 --ca-bundle "$CA" --api-key test-key-2026 --format json metrics
 ```
 
 ---
@@ -924,15 +941,15 @@ Look for error messages. Common ones:
 **Step 2**: Verify the agent is registered:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  http://localhost:8443/api/v1/agents/agent-test-01 | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  https://localhost:8443/api/v1/agents/agent-test-01 | python3 -m json.tool
 ```
 
 **Step 3**: Check for pending jobs:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  "http://localhost:8443/api/v1/jobs?status=Pending&status=AwaitingCSR" | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  "https://localhost:8443/api/v1/jobs?status=Pending&status=AwaitingCSR" | python3 -m json.tool
 ```
 
 If there are pending jobs but the agent isn't picking them up, check that the job's `agent_id` matches `agent-test-01`.
@@ -962,8 +979,8 @@ docker exec certctl-test-nginx nginx -s reload
 **Step 3**: If the files aren't there, the deployment job hasn't completed. Check the jobs:
 
 ```bash
-curl -s -H "Authorization: Bearer test-key-2026" \
-  "http://localhost:8443/api/v1/jobs?type=Deployment" | python3 -m json.tool
+curl --cacert "$CA" -s -H "Authorization: Bearer test-key-2026" \
+  "https://localhost:8443/api/v1/jobs?type=Deployment" | python3 -m json.tool
 ```
 
 Look at the job status. If it's "Running" and stuck, the server's job processor may have picked it up instead of the agent (this was a known bug — the fix skips deployment jobs with `agent_id` in the server's `ProcessPendingJobs`).
@@ -1008,7 +1025,7 @@ Change it to a different port, like:
       - "9443:8443"
 ```
 
-Then access the dashboard at http://localhost:9443 instead.
+Then access the dashboard at https://localhost:9443 instead.
 
 ### Starting completely fresh
 
@@ -1054,7 +1071,7 @@ docker compose -f docker-compose.test.yml up --build
 
 | What | Value |
 |---|---|
-| Dashboard URL | http://localhost:8443 |
+| Dashboard URL | https://localhost:8443 (use `--cacert ./test/certs/ca.crt`) |
 | API key | `test-key-2026` |
 | NGINX HTTP | http://localhost:8080 |
 | NGINX HTTPS | https://localhost:8444 |

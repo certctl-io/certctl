@@ -105,16 +105,24 @@ certctl-server       Up (healthy)
 certctl-agent        Up
 ```
 
+The control plane is HTTPS-only as of v2.2. The `certctl-tls-init` init container in the shipped `deploy/docker-compose.yml` self-signs a cert on first boot and drops it into a named volume. Extract the CA bundle once and reuse it for every API call in this guide:
+
 ```bash
-curl http://localhost:8443/health
+export CA=/tmp/certctl-ca.crt
+docker compose -f deploy/docker-compose.yml exec -T certctl-server \
+  cat /etc/certctl/tls/ca.crt > "$CA"
+
+curl --cacert "$CA" https://localhost:8443/health
 ```
 ```json
 {"status":"healthy"}
 ```
 
+If you're bringing your own cert (internal CA, cert-manager, operator-supplied Secret), see [`docs/tls.md`](tls.md) for the full provisioning matrix. If you're cutting over an existing install, see [`docs/upgrade-to-tls.md`](upgrade-to-tls.md) for the failure modes (out-of-date `http://…` agents fail at the TLS handshake) and the one-step procedure.
+
 ## Open the Dashboard
 
-Open **http://localhost:8443** in your browser.
+Open **https://localhost:8443** in your browser. Your browser will warn about the self-signed cert — that's expected for the demo bootstrap. Trust the CA bundle you just exported, or click through the warning.
 
 > **Note:** The Docker Compose demo runs with authentication disabled (`CERTCTL_AUTH_TYPE=none`) so you can explore immediately. For production, set `CERTCTL_AUTH_TYPE=api-key` and `CERTCTL_AUTH_SECRET=<your-secret>` in your environment, then pass `Authorization: Bearer <your-secret>` on all API requests. The dashboard will prompt for your API key on first load.
 >
@@ -154,62 +162,64 @@ Everything you see in the dashboard is backed by the REST API. All endpoints liv
 
 ### Core operations
 
+Every request below uses `--cacert "$CA"` to pin the self-signed CA bundle extracted above. In production, point `$CA` at your internal CA root or the bundle you distributed to the fleet.
+
 ```bash
 # List all certificates
-curl -s http://localhost:8443/api/v1/certificates | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/certificates | jq .
 
 # Filter by status
-curl -s "http://localhost:8443/api/v1/certificates?status=Expiring" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?status=Expiring" | jq .
 
 # Filter by environment
-curl -s "http://localhost:8443/api/v1/certificates?environment=production" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?environment=production" | jq .
 
 # Get a specific certificate
-curl -s http://localhost:8443/api/v1/certificates/mc-api-prod | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/certificates/mc-api-prod | jq .
 
 # Get deployment targets for a certificate
-curl -s http://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/certificates/mc-api-prod/deployments | jq .
 
 # List agents
-curl -s http://localhost:8443/api/v1/agents | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/agents | jq .
 
 # Check agent pending work
-curl -s http://localhost:8443/api/v1/agents/ag-web-prod/work | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/agents/ag-web-prod/work | jq .
 
 # View audit trail
-curl -s http://localhost:8443/api/v1/audit | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/audit | jq .
 
 # View policies and violations
-curl -s http://localhost:8443/api/v1/policies | jq .
-curl -s http://localhost:8443/api/v1/policies/pr-require-owner/violations | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/policies | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/policies/pr-require-owner/violations | jq .
 
 # Notifications
-curl -s http://localhost:8443/api/v1/notifications | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/notifications | jq .
 
 # Profiles and agent groups
-curl -s http://localhost:8443/api/v1/profiles | jq .
-curl -s http://localhost:8443/api/v1/agent-groups | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/profiles | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/agent-groups | jq .
 ```
 
 ### Sorting, filtering, and pagination
 
 ```bash
 # Sort by expiration date (ascending)
-curl -s "http://localhost:8443/api/v1/certificates?sort=notAfter" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?sort=notAfter" | jq .
 
 # Sort descending (prefix with -)
-curl -s "http://localhost:8443/api/v1/certificates?sort=-createdAt" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?sort=-createdAt" | jq .
 
 # Time-range filters (RFC3339)
-curl -s "http://localhost:8443/api/v1/certificates?expires_before=2026-05-01T00:00:00Z" | jq .
-curl -s "http://localhost:8443/api/v1/certificates?created_after=2026-03-01T00:00:00Z" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?expires_before=2026-05-01T00:00:00Z" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?created_after=2026-03-01T00:00:00Z" | jq .
 
 # Sparse fields — request only what you need
-curl -s "http://localhost:8443/api/v1/certificates?fields=id,common_name,status,expires_at" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?fields=id,common_name,status,expires_at" | jq .
 
 # Cursor pagination — efficient for large inventories
-curl -s "http://localhost:8443/api/v1/certificates?page_size=5" | jq '{next_cursor: .next_cursor, count: (.data | length)}'
-curl -s "http://localhost:8443/api/v1/certificates?cursor=<next_cursor_value>&page_size=5" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?page_size=5" | jq '{next_cursor: .next_cursor, count: (.data | length)}'
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/certificates?cursor=<next_cursor_value>&page_size=5" | jq .
 ```
 
 Supported sort fields: `notAfter`, `expiresAt`, `createdAt`, `updatedAt`, `commonName`, `name`, `status`, `environment`.
@@ -218,22 +228,22 @@ Supported sort fields: `notAfter`, `expiresAt`, `createdAt`, `updatedAt`, `commo
 
 ```bash
 # Dashboard summary
-curl -s http://localhost:8443/api/v1/stats/summary | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/stats/summary | jq .
 
 # Certificates by status
-curl -s http://localhost:8443/api/v1/stats/certificates-by-status | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/stats/certificates-by-status | jq .
 
 # Expiration timeline (next 90 days)
-curl -s "http://localhost:8443/api/v1/stats/expiration-timeline?days=90" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/stats/expiration-timeline?days=90" | jq .
 
 # Job trends (last 30 days)
-curl -s "http://localhost:8443/api/v1/stats/job-trends?days=30" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/stats/job-trends?days=30" | jq .
 
 # JSON metrics
-curl -s http://localhost:8443/api/v1/metrics | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/metrics | jq .
 
 # Prometheus format (for Prometheus, Grafana Agent, Datadog)
-curl -s http://localhost:8443/api/v1/metrics/prometheus
+curl --cacert "$CA" -s https://localhost:8443/api/v1/metrics/prometheus
 ```
 
 ## Create Your First Certificate
@@ -241,7 +251,7 @@ curl -s http://localhost:8443/api/v1/metrics/prometheus
 Create a certificate record that certctl will track, renew, and deploy automatically.
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates \
   -H "Content-Type: application/json" \
   -d '{
     "name": "My First Certificate",
@@ -264,22 +274,22 @@ CERT_ID="<paste the id from the response>"
 
 Trigger renewal:
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates/$CERT_ID/renew | jq .
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/$CERT_ID/renew | jq .
 ```
 
 Check the result:
 ```bash
-curl -s http://localhost:8443/api/v1/certificates/$CERT_ID | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/certificates/$CERT_ID | jq .
 ```
 
-Refresh the dashboard at http://localhost:8443 — your new certificate appears in the inventory.
+Refresh the dashboard at https://localhost:8443 — your new certificate appears in the inventory.
 
 ### Revoke a certificate
 
 When a private key is compromised or a service is decommissioned:
 
 ```bash
-curl -s -X POST http://localhost:8443/api/v1/certificates/$CERT_ID/revoke \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/certificates/$CERT_ID/revoke \
   -H "Content-Type: application/json" \
   -d '{"reason": "superseded"}' | jq .
 ```
@@ -289,7 +299,8 @@ Supported RFC 5280 reason codes: `unspecified`, `keyCompromise`, `caCompromise`,
 Confirm via the unauthenticated DER CRL (RFC 5280 §5, RFC 8615):
 ```bash
 # Fetch the CRL without any API key — relying parties shouldn't need one.
-curl -s http://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
+# The CRL path is unauthenticated, but it's still served over TLS.
+curl --cacert "$CA" -s https://localhost:8443/.well-known/pki/crl/iss-local -o /tmp/crl.der
 openssl crl -inform der -in /tmp/crl.der -noout -text | head -40
 ```
 
@@ -299,15 +310,15 @@ For high-value certificates where you want human oversight. The demo includes 2 
 
 ```bash
 # List jobs awaiting approval (demo includes 2)
-curl -s "http://localhost:8443/api/v1/jobs?status=AwaitingApproval" | jq '.data[] | {id, certificate_id, status}'
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/jobs?status=AwaitingApproval" | jq '.data[] | {id, certificate_id, status}'
 
 # Approve a pending job
-curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/approve \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/jobs/JOB_ID/approve \
   -H "Content-Type: application/json" \
   -d '{"reason": "Approved for production deployment"}' | jq .
 
 # Reject a pending job
-curl -s -X POST http://localhost:8443/api/v1/jobs/JOB_ID/reject \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/jobs/JOB_ID/reject \
   -H "Content-Type: application/json" \
   -d '{"reason": "Key type does not meet compliance requirements"}' | jq .
 ```
@@ -333,7 +344,7 @@ export CERTCTL_DISCOVERY_DIRS="/etc/nginx/certs,/etc/ssl/certs,/var/lib/certs"
 export CERTCTL_NETWORK_SCAN_ENABLED=true
 
 # Create a scan target
-curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/network-scan-targets \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Internal Network",
@@ -345,20 +356,20 @@ curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
   }' | jq .
 
 # Trigger an immediate scan
-curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-internal-network/scan | jq .
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/network-scan-targets/nst-internal-network/scan | jq .
 ```
 
 ### Triage discovered certificates
 
 ```bash
 # List discovered certs
-curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-prod" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-prod" | jq .
 
 # Summary counts
-curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/discovery-summary | jq .
 
 # Claim a discovered cert (bring under management)
-curl -s -X POST "http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim" \
+curl --cacert "$CA" -s -X POST "https://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim" \
   -H "Content-Type: application/json" \
   -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
 ```
@@ -368,8 +379,9 @@ curl -s -X POST "http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_
 ```bash
 cd cmd/cli && go build -o certctl-cli .
 
-export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_SERVER_URL="https://localhost:8443"
 export CERTCTL_API_KEY="test-key-123"
+export CERTCTL_SERVER_CA_BUNDLE_PATH="$CA"   # or pass --ca-bundle; --insecure for dev self-signed
 
 ./certctl-cli certs list               # List certificates
 ./certctl-cli certs get mc-api-prod    # Certificate details
@@ -402,10 +414,10 @@ export CERTCTL_DIGEST_RECIPIENTS=ops@example.com,security@example.com
 
 Preview the digest HTML before enabling scheduled delivery:
 ```bash
-curl http://localhost:8443/api/v1/digest/preview | jq '.html' | grep -o '<html>' # Shows HTML is ready
+curl --cacert "$CA" https://localhost:8443/api/v1/digest/preview | jq '.html' | grep -o '<html>' # Shows HTML is ready
 
 # Trigger a digest send immediately (outside of schedule)
-curl -X POST http://localhost:8443/api/v1/digest/send
+curl --cacert "$CA" -X POST https://localhost:8443/api/v1/digest/send
 ```
 
 If no recipients are configured (`CERTCTL_DIGEST_RECIPIENTS` empty), the digest falls back to certificate owner emails. Digests include total certificates, expiring soon, expired, active agents, completed/failed jobs (30-day summary), and a table of expiring certs color-coded by urgency (7/14/30 days).
@@ -415,8 +427,9 @@ If no recipients are configured (`CERTCTL_DIGEST_RECIPIENTS` empty), the digest 
 ```bash
 cd cmd/mcp-server && go build -o mcp-server .
 
-export CERTCTL_SERVER_URL="http://localhost:8443"
+export CERTCTL_SERVER_URL="https://localhost:8443"
 export CERTCTL_API_KEY="test-key-123"
+export CERTCTL_SERVER_CA_BUNDLE_PATH="$CA"   # MCP is env-vars-only; no CLI flags
 
 ./mcp-server
 ```

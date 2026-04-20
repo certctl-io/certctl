@@ -2,11 +2,14 @@ package mcp
 
 import (
 	"bytes"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net/http"
 	"net/url"
+	"os"
 	"time"
 )
 
@@ -18,15 +21,45 @@ type Client struct {
 	httpClient *http.Client
 }
 
-// NewClient creates a new certctl API client.
-func NewClient(baseURL, apiKey string) *Client {
+// NewClient creates a new certctl API client. The control plane is HTTPS-only
+// as of v2.2, so the transport is pinned to TLS 1.3 and optionally loads a
+// PEM-encoded CA bundle from caBundlePath (empty means "trust the system
+// roots"). The insecure flag disables certificate verification and is a
+// dev-only opt-in documented in docs/tls.md — it must never be set in
+// production. Returns an error if the CA bundle path is non-empty but the
+// file is missing or contains no valid PEM-encoded certificates, so the
+// caller can fail loud before any network call.
+func NewClient(baseURL, apiKey, caBundlePath string, insecure bool) (*Client, error) {
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: insecure, //nolint:gosec // opt-in dev toggle, documented in docs/tls.md
+	}
+	if caBundlePath != "" {
+		pemBytes, err := os.ReadFile(caBundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA bundle at %q: %w", caBundlePath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, fmt.Errorf("CA bundle at %q contains no valid PEM-encoded certificates", caBundlePath)
+		}
+		tlsConfig.RootCAs = pool
+	}
 	return &Client{
 		baseURL: baseURL,
 		apiKey:  apiKey,
 		httpClient: &http.Client{
 			Timeout: 30 * time.Second,
+			Transport: &http.Transport{
+				TLSClientConfig:       tlsConfig,
+				ForceAttemptHTTP2:     true,
+				MaxIdleConns:          10,
+				IdleConnTimeout:       90 * time.Second,
+				TLSHandshakeTimeout:   10 * time.Second,
+				ExpectContinueTimeout: 1 * time.Second,
+			},
 		},
-	}
+	}, nil
 }
 
 // Get performs an HTTP GET and returns the raw JSON response body.

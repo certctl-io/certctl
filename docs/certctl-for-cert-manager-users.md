@@ -39,7 +39,7 @@ Deploy certctl control plane once (Docker Compose, Kubernetes Helm chart, or sel
 ```bash
 cd /opt/certctl
 docker compose up -d
-# Dashboard & API: http://localhost:8443
+# Dashboard & API: https://localhost:8443 (self-signed cert — pin with --cacert ./deploy/test/certs/ca.crt)
 ```
 
 **Option B: Kubernetes** (recommended for prod)
@@ -59,7 +59,8 @@ chmod +x /usr/local/bin/certctl-agent
 
 # Config
 sudo tee /etc/certctl/agent.env > /dev/null <<EOF
-CERTCTL_SERVER_URL=http://certctl-control-plane:8443
+CERTCTL_SERVER_URL=https://certctl-control-plane:8443
+CERTCTL_SERVER_CA_BUNDLE_PATH=/etc/certctl/tls/ca.crt
 CERTCTL_API_KEY=your-api-key
 CERTCTL_DISCOVERY_DIRS=/etc/nginx/certs,/etc/ssl,/etc/letsencrypt/live
 CERTCTL_KEY_DIR=/var/lib/certctl/keys

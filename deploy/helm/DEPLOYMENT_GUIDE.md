@@ -236,10 +236,12 @@ kubectl get svc -l app.kubernetes.io/instance=certctl
 kubectl get ingress
 kubectl describe ingress certctl
 
-# Test API connectivity
+# Test API connectivity (HTTPS-only as of v2.2)
 POD=$(kubectl get pods -l app.kubernetes.io/component=server -o jsonpath='{.items[0].metadata.name}')
 kubectl port-forward $POD 8443:8443 &
-curl -H "Authorization: Bearer $API_KEY" http://localhost:8443/health
+# If the chart provisioned a self-signed cert, fetch the CA bundle from the TLS secret first:
+#   kubectl get secret certctl-server-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/certctl-ca.crt
+curl --cacert /tmp/certctl-ca.crt -H "Authorization: Bearer $API_KEY" https://localhost:8443/health
 ```
 
 ### Step 6: Access the Dashboard
@@ -333,9 +335,10 @@ kubectl logs $POD | tail -20
 # Port forward to API
 kubectl port-forward svc/certctl-server 8443:8443 &
 
-# Create a test certificate
+# Create a test certificate (HTTPS-only as of v2.2 — pin the chart-provisioned CA bundle)
+# kubectl get secret certctl-server-tls -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/certctl-ca.crt
 API_KEY="your-api-key"
-curl -X POST http://localhost:8443/api/v1/certificates \
+curl --cacert /tmp/certctl-ca.crt -X POST https://localhost:8443/api/v1/certificates \
   -H "Authorization: Bearer $API_KEY" \
   -H "Content-Type: application/json" \
   -d '{

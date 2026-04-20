@@ -19,16 +19,29 @@
 //
 // Environment overrides:
 //
-//	CERTCTL_QA_SERVER_URL  (default: http://localhost:8443)
-//	CERTCTL_QA_API_KEY     (default: change-me-in-production)
-//	CERTCTL_QA_DB_URL      (default: postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable)
-//	CERTCTL_QA_REPO_DIR    (default: ../.. — the certctl repo root)
+//	CERTCTL_QA_SERVER_URL     (default: https://localhost:8443)
+//	CERTCTL_QA_API_KEY        (default: change-me-in-production)
+//	CERTCTL_QA_DB_URL         (default: postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable)
+//	CERTCTL_QA_REPO_DIR       (default: ../.. — the certctl repo root)
+//	CERTCTL_QA_CA_BUNDLE      (default: ./certs/ca.crt — the demo stack's init container writes here)
+//	CERTCTL_QA_INSECURE       (default: false — set to "true" to skip TLS verify, e.g. before the init container finishes)
+//
+// TLS note (HTTPS-Everywhere M-007, Phase 6): the demo compose stack now
+// listens on https://localhost:8443 with a self-signed cert written by the
+// tls-init container. This suite pins the issuing CA via
+// CERTCTL_QA_CA_BUNDLE so cert rotation or a tampered proxy fails the
+// handshake instead of being silently trusted. CERTCTL_QA_INSECURE="true"
+// is an explicit opt-out for bootstrap scenarios — there is no silent
+// plaintext downgrade, matching the server-side pre-flight guard added in
+// Phase 5 (task #203).
 package integration_test
 
 import (
+	"crypto/tls"
 	"crypto/x509"
 	"database/sql"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -50,10 +63,12 @@ func qaEnv(key, fallback string) string {
 }
 
 var (
-	qaServerURL = qaEnv("CERTCTL_QA_SERVER_URL", "http://localhost:8443")
-	qaAPIKey    = qaEnv("CERTCTL_QA_API_KEY", "change-me-in-production")
-	qaDBURL     = qaEnv("CERTCTL_QA_DB_URL", "postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable")
-	qaRepoDir   = qaEnv("CERTCTL_QA_REPO_DIR", filepath.Join("..", ".."))
+	qaServerURL    = qaEnv("CERTCTL_QA_SERVER_URL", "https://localhost:8443")
+	qaAPIKey       = qaEnv("CERTCTL_QA_API_KEY", "change-me-in-production")
+	qaDBURL        = qaEnv("CERTCTL_QA_DB_URL", "postgres://certctl:certctl@localhost:5432/certctl?sslmode=disable")
+	qaRepoDir      = qaEnv("CERTCTL_QA_REPO_DIR", filepath.Join("..", ".."))
+	qaCABundlePath = qaEnv("CERTCTL_QA_CA_BUNDLE", "./certs/ca.crt")
+	qaInsecure     = strings.EqualFold(os.Getenv("CERTCTL_QA_INSECURE"), "true")
 )
 
 // ---------------------------------------------------------------------------
@@ -66,9 +81,38 @@ type qaClient struct {
 	apiKey  string
 }
 
+// buildQATLSConfig returns the *tls.Config used by every qaClient. TLS 1.3
+// minimum matches the server-side config pinned in Phase 2 (cmd/server).
+// When CERTCTL_QA_INSECURE=true we skip verification entirely — useful
+// when running against a compose stack where the tls-init container hasn't
+// written ca.crt yet, or when pointing at a dev server with a rotated cert.
+// Otherwise we pin CERTCTL_QA_CA_BUNDLE and panic on read/parse failure
+// rather than silently downgrading to the system trust store (which would
+// mask a missing init container).
+func buildQATLSConfig() *tls.Config {
+	cfg := &tls.Config{MinVersion: tls.VersionTLS13}
+	if qaInsecure {
+		cfg.InsecureSkipVerify = true
+		return cfg
+	}
+	pem, err := os.ReadFile(qaCABundlePath)
+	if err != nil {
+		panic(fmt.Sprintf("qa test: read CA bundle %q: %v — set CERTCTL_QA_CA_BUNDLE or CERTCTL_QA_INSECURE=true", qaCABundlePath, err))
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM(pem) {
+		panic(fmt.Sprintf("qa test: no PEM certificates parsed from %q", qaCABundlePath))
+	}
+	cfg.RootCAs = pool
+	return cfg
+}
+
 func newQAClient() *qaClient {
 	return &qaClient{
-		http:    &http.Client{Timeout: 30 * time.Second},
+		http: &http.Client{
+			Timeout:   30 * time.Second,
+			Transport: &http.Transport{TLSClientConfig: buildQATLSConfig()},
+		},
 		baseURL: qaServerURL,
 		apiKey:  qaAPIKey,
 	}

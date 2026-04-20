@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -19,6 +20,7 @@ import (
 	"log/slog"
 	"net"
 	"net/http"
+	"net/url"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -46,13 +48,15 @@ import (
 
 // AgentConfig represents the agent-side configuration.
 type AgentConfig struct {
-	ServerURL     string   // Control plane server URL (e.g., http://localhost:8443)
-	APIKey        string   // Agent API key for authentication
-	AgentName     string   // Agent name for identification
-	AgentID       string   // Agent ID for API calls (set after registration or from env)
-	Hostname      string   // Server hostname
-	KeyDir        string   // Directory for storing private keys (default: /var/lib/certctl/keys)
-	DiscoveryDirs []string // Directories to scan for certificates (comma-separated via env)
+	ServerURL          string   // Control plane server URL (e.g., https://localhost:8443) — must be https:// scheme
+	APIKey             string   // Agent API key for authentication
+	AgentName          string   // Agent name for identification
+	AgentID            string   // Agent ID for API calls (set after registration or from env)
+	Hostname           string   // Server hostname
+	KeyDir             string   // Directory for storing private keys (default: /var/lib/certctl/keys)
+	DiscoveryDirs      []string // Directories to scan for certificates (comma-separated via env)
+	CABundlePath       string   // Optional path to a PEM-encoded CA bundle that signed the server's cert (empty = system roots)
+	InsecureSkipVerify bool     // Dev-only: skip TLS certificate verification. Never enable in production. See docs/tls.md.
 }
 
 // ErrAgentRetired is the sentinel returned by [Agent.Run] when the control
@@ -113,16 +117,57 @@ type JobItem struct {
 }
 
 // NewAgent creates a new agent instance.
-func NewAgent(cfg *AgentConfig, logger *slog.Logger) *Agent {
+//
+// The returned HTTP client enforces HTTPS-only control-plane access per the
+// HTTPS-Everywhere milestone (see docs/tls.md). TLS 1.3 is required; the
+// optional CABundlePath loads a PEM bundle into RootCAs so the agent can
+// trust internal / self-signed server certs without touching system trust
+// stores. InsecureSkipVerify is a dev-only escape hatch — callers must log a
+// loud warning when it's set; never enable in production (see §2.4 of the
+// milestone spec and docs/upgrade-to-tls.md).
+//
+// Returns an error if CABundlePath is set but unreadable or malformed — fail
+// loud at startup rather than silently fall back to system roots, which would
+// turn a misconfigured bundle path into a cryptic "x509: certificate signed
+// by unknown authority" on the first heartbeat.
+func NewAgent(cfg *AgentConfig, logger *slog.Logger) (*Agent, error) {
+	tlsConfig := &tls.Config{
+		MinVersion:         tls.VersionTLS13,
+		InsecureSkipVerify: cfg.InsecureSkipVerify, //nolint:gosec // opt-in dev escape hatch, documented in docs/tls.md
+	}
+	if cfg.CABundlePath != "" {
+		pemBytes, err := os.ReadFile(cfg.CABundlePath)
+		if err != nil {
+			return nil, fmt.Errorf("reading CA bundle at %q: %w", cfg.CABundlePath, err)
+		}
+		pool := x509.NewCertPool()
+		if !pool.AppendCertsFromPEM(pemBytes) {
+			return nil, fmt.Errorf("CA bundle at %q contains no valid PEM-encoded certificates", cfg.CABundlePath)
+		}
+		tlsConfig.RootCAs = pool
+	}
+
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
+		Transport: &http.Transport{
+			TLSClientConfig:       tlsConfig,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+
 	return &Agent{
 		config:            cfg,
 		logger:            logger,
-		client:            &http.Client{Timeout: 30 * time.Second},
+		client:            httpClient,
 		heartbeatInterval: 60 * time.Second,
 		pollInterval:      30 * time.Second,
 		discoveryInterval: 6 * time.Hour, // scan for certs every 6 hours
 		retiredSignal:     make(chan struct{}),
-	}
+	}, nil
 }
 
 // markRetired records that the control plane has declared this agent retired
@@ -1118,12 +1163,14 @@ func certKeyInfo(cert *x509.Certificate) (string, int) {
 
 func main() {
 	// Parse command-line flags (with env var fallbacks for Docker deployment)
-	serverURL := flag.String("server", getEnvDefault("CERTCTL_SERVER_URL", "http://localhost:8443"), "Control plane server URL")
+	serverURL := flag.String("server", getEnvDefault("CERTCTL_SERVER_URL", "https://localhost:8443"), "Control plane server URL (must be https://)")
 	apiKey := flag.String("api-key", getEnvDefault("CERTCTL_API_KEY", ""), "Agent API key")
 	agentName := flag.String("name", getEnvDefault("CERTCTL_AGENT_NAME", "certctl-agent"), "Agent name")
 	agentID := flag.String("agent-id", getEnvDefault("CERTCTL_AGENT_ID", ""), "Agent ID (from registration)")
 	keyDir := flag.String("key-dir", getEnvDefault("CERTCTL_KEY_DIR", "/var/lib/certctl/keys"), "Directory for storing private keys")
 	discoveryDirsStr := flag.String("discovery-dirs", getEnvDefault("CERTCTL_DISCOVERY_DIRS", ""), "Comma-separated directories to scan for certificates")
+	caBundlePath := flag.String("ca-bundle", getEnvDefault("CERTCTL_SERVER_CA_BUNDLE_PATH", ""), "Path to a PEM-encoded CA bundle that signed the server's TLS cert (optional; falls back to system roots)")
+	insecureSkipVerify := flag.Bool("insecure-skip-verify", getEnvBoolDefault("CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY", false), "Dev-only: skip TLS certificate verification. Never enable in production. See docs/tls.md.")
 	flag.Parse()
 
 	if *apiKey == "" {
@@ -1134,6 +1181,18 @@ func main() {
 	if *agentID == "" {
 		fmt.Fprintf(os.Stderr, "Error: -agent-id flag or CERTCTL_AGENT_ID env var is required\n")
 		fmt.Fprintf(os.Stderr, "Register an agent first via POST /api/v1/agents\n")
+		os.Exit(1)
+	}
+
+	// Pre-flight URL-scheme validation — reject plaintext http:// before any
+	// network call. The HTTPS-Everywhere milestone (§2.4, §7) mandates that
+	// mis-configured agents fail loudly at startup with a diagnostic pointing
+	// at the upgrade guide, rather than producing a TCP-refused or
+	// TLS-handshake-error that obscures the actual cause.
+	if err := validateHTTPSScheme(*serverURL); err != nil {
+		fmt.Fprintf(os.Stderr, "Error: %v\n", err)
+		fmt.Fprintf(os.Stderr, "\nThe certctl control plane is HTTPS-only as of v2.2.\n")
+		fmt.Fprintf(os.Stderr, "See docs/upgrade-to-tls.md for the cutover walkthrough.\n")
 		os.Exit(1)
 	}
 
@@ -1165,17 +1224,27 @@ func main() {
 
 	// Create agent configuration
 	agentCfg := &AgentConfig{
-		ServerURL:     *serverURL,
-		APIKey:        *apiKey,
-		AgentName:     *agentName,
-		AgentID:       *agentID,
-		Hostname:      hostname,
-		KeyDir:        *keyDir,
-		DiscoveryDirs: discoveryDirs,
+		ServerURL:          *serverURL,
+		APIKey:             *apiKey,
+		AgentName:          *agentName,
+		AgentID:            *agentID,
+		Hostname:           hostname,
+		KeyDir:             *keyDir,
+		DiscoveryDirs:      discoveryDirs,
+		CABundlePath:       *caBundlePath,
+		InsecureSkipVerify: *insecureSkipVerify,
+	}
+
+	if agentCfg.InsecureSkipVerify {
+		logger.Warn("TLS certificate verification is disabled (CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true) — never enable this in production")
 	}
 
 	// Create and start agent
-	agent := NewAgent(agentCfg, logger)
+	agent, err := NewAgent(agentCfg, logger)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Error: failed to initialize agent: %v\n", err)
+		os.Exit(1)
+	}
 
 	// Create context with cancellation for graceful shutdown
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1232,4 +1301,50 @@ func getEnvDefault(key, defaultValue string) string {
 		return value
 	}
 	return defaultValue
+}
+
+// getEnvBoolDefault parses an environment variable as a boolean. Accepts "1",
+// "t", "true", "T", "TRUE", "True" as true; anything else (including empty)
+// returns the provided default. Kept permissive on purpose so operators can
+// flip the dev-only TLS skip-verify toggle with any common truthy spelling
+// without having to remember exactly what we parse.
+func getEnvBoolDefault(key string, defaultValue bool) bool {
+	raw := os.Getenv(key)
+	if raw == "" {
+		return defaultValue
+	}
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "t", "true", "yes", "on":
+		return true
+	case "0", "f", "false", "no", "off":
+		return false
+	default:
+		return defaultValue
+	}
+}
+
+// validateHTTPSScheme enforces the HTTPS-Everywhere milestone's §7 acceptance
+// criterion: "Agent with CERTCTL_SERVER_URL=http://... fails at startup with
+// a fail-loud diagnostic pointing at docs/upgrade-to-tls.md. Not TCP-refused,
+// not TLS-handshake-error — a pre-flight config validation failure before any
+// network call." Returns a descriptive error; the caller prints the upgrade
+// guide pointer and exits non-zero.
+func validateHTTPSScheme(serverURL string) error {
+	if serverURL == "" {
+		return fmt.Errorf("CERTCTL_SERVER_URL is empty — set it to an https:// URL (e.g., https://certctl-server:8443)")
+	}
+	u, err := url.Parse(serverURL)
+	if err != nil {
+		return fmt.Errorf("CERTCTL_SERVER_URL %q is not a valid URL: %w", serverURL, err)
+	}
+	switch strings.ToLower(u.Scheme) {
+	case "https":
+		return nil
+	case "http":
+		return fmt.Errorf("CERTCTL_SERVER_URL %q uses plaintext http:// — the certctl control plane is HTTPS-only", serverURL)
+	case "":
+		return fmt.Errorf("CERTCTL_SERVER_URL %q is missing a scheme — expected https://", serverURL)
+	default:
+		return fmt.Errorf("CERTCTL_SERVER_URL %q uses unsupported scheme %q — expected https://", serverURL, u.Scheme)
+	}
 }

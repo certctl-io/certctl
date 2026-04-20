@@ -736,22 +736,54 @@ func main() {
 		logger.Info("dashboard directory not found, serving API only")
 	}
 
+	// HTTPS-everywhere milestone §2.1: fail-loud if the TLS configuration is
+	// missing or malformed. Duplicates config.Validate() for defense in depth
+	// (same pattern as preflightSCEPChallengePassword).
+	if err := preflightServerTLS(cfg.Server.TLS.CertPath, cfg.Server.TLS.KeyPath); err != nil {
+		logger.Error("startup refused: HTTPS cert unusable; control plane is HTTPS-only",
+			"error", err,
+			"cert_path", cfg.Server.TLS.CertPath,
+			"key_path", cfg.Server.TLS.KeyPath)
+		os.Exit(1)
+	}
+
+	// Load the cert+key into a SIGHUP-reloadable holder. Any subsequent
+	// SIGHUP triggers a fresh read and atomic swap so rotations do not need
+	// a restart. Reload failures keep the previous cert and log a warning.
+	tlsCertHolder, err := newCertHolder(cfg.Server.TLS.CertPath, cfg.Server.TLS.KeyPath)
+	if err != nil {
+		logger.Error("startup refused: failed to load TLS cert holder",
+			"error", err,
+			"cert_path", cfg.Server.TLS.CertPath,
+			"key_path", cfg.Server.TLS.KeyPath)
+		os.Exit(1)
+	}
+	stopTLSWatcher := tlsCertHolder.watchSIGHUP(logger)
+	defer stopTLSWatcher()
+
 	// Server configuration
 	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	httpServer := &http.Server{
 		Addr:              addr,
 		Handler:           finalHandler,
+		TLSConfig:         buildServerTLSConfig(tlsCertHolder),
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      120 * time.Second, // Must accommodate ACME issuance (order + challenge + finalize)
 		IdleTimeout:       60 * time.Second,
 	}
 
-	// Start HTTP server in background
-	logger.Info("starting HTTP server", "address", addr)
+	// Start HTTPS server in background. ListenAndServeTLS is called with
+	// empty cert+key arguments because the cert is sourced through
+	// TLSConfig.GetCertificate (the SIGHUP-reloadable holder). Passing file
+	// paths here would pin the first-loaded cert and defeat hot reload.
+	logger.Info("HTTPS server listening",
+		"address", addr,
+		"cert_path", cfg.Server.TLS.CertPath,
+		"min_version", "TLS1.3")
 	go func() {
-		if err := httpServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			logger.Error("HTTP server error", "error", err)
+		if err := httpServer.ListenAndServeTLS("", ""); err != nil && err != http.ErrServerClosed {
+			logger.Error("HTTPS server error", "error", err)
 		}
 	}()
 
@@ -774,9 +806,9 @@ func main() {
 		logger.Warn("scheduler work did not complete in time", "error", err)
 	}
 
-	logger.Info("shutting down HTTP server")
+	logger.Info("shutting down HTTPS server")
 	if err := httpServer.Shutdown(shutdownCtx); err != nil {
-		logger.Error("HTTP server shutdown error", "error", err)
+		logger.Error("HTTPS server shutdown error", "error", err)
 	}
 
 	// Drain in-flight audit-recording goroutines before closing the DB pool.

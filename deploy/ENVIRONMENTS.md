@@ -55,7 +55,7 @@ A compose file defines **services** (containers), **networks** (how they talk to
 
 **Overlay files** let you layer changes. Running `docker compose -f base.yml -f overlay.yml up` merges both files. The overlay can add services, change environment variables, or mount extra volumes without editing the base.
 
-**Port mapping** (`"8443:8443"`) maps host port (left) to container port (right). After startup, `http://localhost:8443` on your machine reaches the certctl server inside its container.
+**Port mapping** (`"8443:8443"`) maps host port (left) to container port (right). After startup, `https://localhost:8443` on your machine reaches the certctl server inside its container (HTTPS-only as of v2.2; the `certctl-tls-init` init container bootstraps a self-signed cert into `deploy/test/certs/`).
 
 ---
 
@@ -91,11 +91,13 @@ Wait about 30 seconds, then verify:
 docker compose -f deploy/docker-compose.yml ps
 # All three services should show "Up (healthy)"
 
-curl http://localhost:8443/health
+curl --cacert ./deploy/test/certs/ca.crt https://localhost:8443/health
 # {"status":"healthy"}
 ```
 
-Open **http://localhost:8443** in your browser. You'll see the onboarding wizard guiding you through: connecting a CA, deploying an agent, and adding your first certificate.
+The control plane is HTTPS-only as of v2.2. The `certctl-tls-init` init container bootstraps a self-signed cert into `deploy/test/certs/` on first boot; pin it with `--cacert` (as above) or pass `-k` for one-off smoke tests (never in production).
+
+Open **https://localhost:8443** in your browser. You'll see the onboarding wizard guiding you through: connecting a CA, deploying an agent, and adding your first certificate. Your browser will flag the self-signed cert as untrusted — accept the warning for local evaluation, or import `deploy/test/certs/ca.crt` into your OS trust store to make the warning go away.
 
 ### Service-by-service walkthrough
 
@@ -307,8 +309,9 @@ docker compose -f deploy/docker-compose.test.yml up --build
 Wait for all health checks to pass (about 60 seconds for step-ca's first-run bootstrap). Then:
 
 ```bash
-# Dashboard with auth enabled
-open http://localhost:8443
+# Dashboard with auth enabled (HTTPS-only as of v2.2; browser will warn on the self-signed cert —
+# accept the warning or trust `deploy/test/certs/ca.crt` in your OS keychain)
+open https://localhost:8443
 # API key: test-key-2026
 
 # NGINX serving a self-signed placeholder

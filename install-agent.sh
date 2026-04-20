@@ -75,6 +75,14 @@ EXAMPLES:
           --server-url https://certctl.example.com \\
           --api-key YOUR_API_KEY
 
+CONTROL-PLANE TLS TRUST:
+    The certctl server is HTTPS-only as of v2.2. This installer does NOT copy a CA
+    bundle — the generated agent.env leaves TLS trust to the system root store by
+    default. If the server uses a private/enterprise or self-signed CA, set
+    CERTCTL_SERVER_CA_BUNDLE_PATH in the generated agent.env to point at the CA
+    bundle, or (dev only) CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true. See the
+    commented block in the generated agent.env for the full menu.
+
 EOF
 }
 
@@ -322,7 +330,7 @@ setup_linux_config() {
 # Agent ID (unique identifier in the fleet)
 CERTCTL_AGENT_ID=$AGENT_ID
 
-# Control plane server URL
+# Control plane server URL (HTTPS-only as of v2.2)
 CERTCTL_SERVER_URL=$SERVER_URL
 
 # API authentication key
@@ -333,6 +341,21 @@ CERTCTL_KEYGEN_MODE=agent
 
 # Key storage directory (agent-side keygen)
 CERTCTL_KEY_DIR=$key_dir
+
+# ---- Control-plane TLS trust ----
+# The certctl server is HTTPS-only (v2.2+). The agent's HTTP client MUST trust the
+# server's certificate chain. Pick ONE of the approaches below:
+#
+#   1) Public CA (Let's Encrypt, DigiCert, etc.) — no config needed; system trust store works.
+#   2) Private / enterprise CA — point the agent at the CA bundle that signed the server cert:
+# CERTCTL_SERVER_CA_BUNDLE_PATH=/etc/certctl/server-ca.crt
+#
+#   3) Self-signed server cert (Helm/compose bootstrap) — same env var, just point at the
+#      extracted self-signed CA bundle (e.g. from the certctl-server-tls Kubernetes secret
+#      via: kubectl get secret certctl-server-tls -o jsonpath='{.data.ca\.crt}' | base64 -d).
+#
+#   4) Dev/eval only — disable verification entirely (NEVER do this in production):
+# CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true
 
 # Logging level (debug, info, warn, error)
 # CERTCTL_LOG_LEVEL=info
@@ -373,7 +396,7 @@ setup_macos_config() {
 # Agent ID (unique identifier in the fleet)
 CERTCTL_AGENT_ID=$AGENT_ID
 
-# Control plane server URL
+# Control plane server URL (HTTPS-only as of v2.2)
 CERTCTL_SERVER_URL=$SERVER_URL
 
 # API authentication key
@@ -384,6 +407,21 @@ CERTCTL_KEYGEN_MODE=agent
 
 # Key storage directory (agent-side keygen)
 CERTCTL_KEY_DIR=$key_dir
+
+# ---- Control-plane TLS trust ----
+# The certctl server is HTTPS-only (v2.2+). The agent's HTTP client MUST trust the
+# server's certificate chain. Pick ONE of the approaches below:
+#
+#   1) Public CA (Let's Encrypt, DigiCert, etc.) — no config needed; system trust store works.
+#   2) Private / enterprise CA — point the agent at the CA bundle that signed the server cert:
+# CERTCTL_SERVER_CA_BUNDLE_PATH=$HOME/.certctl/server-ca.crt
+#
+#   3) Self-signed server cert (Helm/compose bootstrap) — same env var, just point at the
+#      extracted self-signed CA bundle (e.g. from the certctl-server-tls Kubernetes secret
+#      via: kubectl get secret certctl-server-tls -o jsonpath='{.data.ca\.crt}' | base64 -d).
+#
+#   4) Dev/eval only — disable verification entirely (NEVER do this in production):
+# CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true
 
 # Logging level (debug, info, warn, error)
 # CERTCTL_LOG_LEVEL=info
