@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // ProfileService defines the service interface for certificate profile operations.
@@ -21,6 +23,20 @@ type ProfileService interface {
 }
 
 // ProfileHandler handles HTTP requests for certificate profile operations.
+//
+// Error dispatch (post-M-1): every service error routes through the [errToStatus]
+// choke point via `errors.Is` walking the wrap chain, with one explicit
+// [service.ErrValidation] arm on the write paths (Create, Update) so the
+// composed "validation: <field-specific reason>" message the service layer
+// attaches via `fmt.Errorf("%w: ...", ErrValidation)` can be passed through to
+// the 400 response body. Before M-1, the Create and Update handlers branched on
+// `strings.Contains(err.Error(), "invalid"|"required"|"must be"|"cannot")` — a
+// fragile pattern where a single reword in [service.validateProfile] would
+// demote the 400 to 500 with no compile-time signal. The substring-based 404
+// branches on Update and Delete likewise depended on the repository's
+// human-readable "profile not found" message surviving forever; both now ride
+// the same [repository.ErrNotFound] wrap that G-1's renewal-policy and M-1's
+// other repositories use.
 type ProfileHandler struct {
 	svc ProfileService
 }
@@ -88,7 +104,18 @@ func (h ProfileHandler) GetProfile(w http.ResponseWriter, r *http.Request) {
 
 	profile, err := h.svc.GetProfile(r.Context(), id)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
+		// M-1: route through errToStatus so a repo-level `sql.ErrNoRows`
+		// (wrapped as repository.ErrNotFound) becomes 404, but a transient DB
+		// failure no longer masquerades as 404 — it correctly surfaces 500. The
+		// pre-M-1 "any error → 404" shortcut was plausible when Get's only
+		// expected failure was "not found", but the choke point now gives us
+		// correct dispatch for free. Mirrors GetRenewalPolicy.
+		status := errToStatus(err)
+		msg := "Failed to get profile"
+		if status == http.StatusNotFound {
+			msg = "Profile not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -123,9 +150,15 @@ func (h ProfileHandler) CreateProfile(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.CreateProfile(r.Context(), profile)
 	if err != nil {
-		// Check if it's a validation error from the service
-		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") ||
-			strings.Contains(err.Error(), "must be") || strings.Contains(err.Error(), "cannot") {
+		// M-1: replace the 4-term substring net
+		// (`"invalid"|"required"|"must be"|"cannot"`) with a single
+		// `errors.Is(err, service.ErrValidation)` arm. validateProfile wraps
+		// every field-specific failure via `fmt.Errorf("%w: <reason>",
+		// ErrValidation)`, so `err.Error()` still contains the human-readable
+		// reason (e.g., "RSA minimum key size must be at least 2048") and can be
+		// safely passed to the 400 body — but the status decision no longer
+		// depends on the exact wording. Other errors redact to a generic 500.
+		if errors.Is(err, service.ErrValidation) {
 			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 			return
 		}
@@ -162,16 +195,21 @@ func (h ProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateProfile(r.Context(), id, profile)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
-			return
-		}
-		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") ||
-			strings.Contains(err.Error(), "must be") || strings.Contains(err.Error(), "cannot") {
+		// M-1: explicit ErrValidation arm preserves the user-facing reason in
+		// the 400 body (validateProfile wraps every failure via
+		// `fmt.Errorf("%w: ...", ErrValidation)`); every other error — including
+		// repo-layer ErrNotFound on a missing row — routes through errToStatus
+		// so the 404/500 decision no longer depends on substring matching.
+		if errors.Is(err, service.ErrValidation) {
 			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 			return
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update profile", requestID)
+		status := errToStatus(err)
+		msg := "Failed to update profile"
+		if status == http.StatusNotFound {
+			msg = "Profile not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -195,11 +233,14 @@ func (h ProfileHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteProfile(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
-			return
+		// M-1: sentinel dispatch replaces the substring 404 check — see the
+		// parallel comment block in UpdateProfile for the rationale.
+		status := errToStatus(err)
+		msg := "Failed to delete profile"
+		if status == http.StatusNotFound {
+			msg = "Profile not found"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete profile", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

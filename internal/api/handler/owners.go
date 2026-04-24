@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -184,13 +185,13 @@ func (h OwnerHandler) DeleteOwner(w http.ResponseWriter, r *http.Request) {
 	id = parts[0]
 
 	if err := h.svc.DeleteOwner(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
-			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete owner: certificates are still assigned to this owner", requestID)
-		} else if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Owner not found", requestID)
-		} else {
-			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete owner", requestID)
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("DeleteOwner failed", "owner_id", id, "error", err)
+			msg = "internal error"
 		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

@@ -108,7 +108,19 @@ func (h AgentHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
 
 	agent, err := h.svc.GetAgent(r.Context(), id)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
+		// M-1 (P2): route through errToStatus so a repo-level
+		// sql.ErrNoRows (wrapped as repository.ErrNotFound) becomes 404,
+		// but a transient DB failure no longer masquerades as 404 — it
+		// correctly surfaces 500. The pre-M-1 "any error → 404" shortcut
+		// was plausible when Get's only expected failure was "not found",
+		// but the choke point now gives us correct dispatch for free.
+		// Mirrors GetAgentGroup / GetProfile.
+		status := errToStatus(err)
+		msg := "Failed to get agent"
+		if status == http.StatusNotFound {
+			msg = "Agent not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -147,11 +159,20 @@ func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.RegisterAgent(r.Context(), agent)
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate") || strings.Contains(errMsg, "already exists") {
+		// M-1 (P2): replace the 3-term substring net
+		// (`"unique"|"duplicate"|"already exists"`) with a typed
+		// errors.Is(err, service.ErrConflict) arm. The service layer now
+		// wraps pg SQLSTATE 23505 duplicate-name violations via
+		// fmt.Errorf("%w: agent name already exists", ErrConflict), so
+		// classification no longer depends on the exact driver wording.
+		// Other errors redact to a generic 500 with slog.Error server-
+		// side diagnostic capture (F-002). Mirrors CreateProfile's
+		// ErrValidation arm pattern, adapted for the conflict case.
+		if errors.Is(err, service.ErrConflict) {
 			ErrorWithRequestID(w, http.StatusConflict, "Agent with this name already exists", requestID)
 			return
 		}
+		slog.Error("RegisterAgent failed", "name", agent.Name, "error", err.Error())
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to register agent", requestID)
 		return
 	}
@@ -211,7 +232,15 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 			ErrorWithRequestID(w, http.StatusGone, "Agent has been retired", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		// M-1 (P2): the pre-M-1 `strings.Contains(err.Error(), "not
+		// found")` branch now rides the errToStatus choke point, which
+		// recognizes repository.ErrNotFound via errors.Is. The retired-
+		// agent sentinel is still checked FIRST above so the 410 Gone
+		// short-circuit is never masked by the 404 arm. Any other error
+		// redacts to a generic 500 with slog.Error server-side diagnostic
+		// capture (F-002). Mirrors GetAgentGroup.
+		status := errToStatus(err)
+		if status == http.StatusNotFound {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 			return
 		}
@@ -308,7 +337,16 @@ func (h AgentHandler) AgentCertificatePickup(w http.ResponseWriter, r *http.Requ
 
 	certPEM, err := h.svc.CertificatePickup(r.Context(), agentID, certID)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found or not ready", requestID)
+		// M-1 (P2): route through errToStatus so a repo-level
+		// sql.ErrNoRows (wrapped as repository.ErrNotFound) becomes 404,
+		// but a transient DB failure no longer masquerades as 404 — it
+		// correctly surfaces 500. Mirrors GetAgent.
+		status := errToStatus(err)
+		msg := "Failed to retrieve certificate"
+		if status == http.StatusNotFound {
+			msg = "Certificate not found or not ready"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -491,7 +529,16 @@ func (h AgentHandler) RetireAgent(w http.ResponseWriter, r *http.Request) {
 			JSON(w, http.StatusConflict, body)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		// M-1 (P2): the pre-M-1 `strings.Contains(err.Error(), "not
+		// found")` branch now rides the errToStatus choke point, which
+		// recognizes repository.ErrNotFound via errors.Is. The sentinel
+		// (ErrAgentIsSentinel, ErrForceReasonRequired) and typed
+		// (*BlockedByDependenciesError) checks above still run FIRST so
+		// the 403/400/409 structural refusals are never masked by the
+		// 404 arm. Any other error redacts to a generic 500 with
+		// slog.Error server-side diagnostic capture (F-002).
+		status := errToStatus(err)
+		if status == http.StatusNotFound {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 			return
 		}

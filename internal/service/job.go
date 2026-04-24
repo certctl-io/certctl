@@ -3,7 +3,6 @@ package service
 import (
 	"time"
 	"context"
-	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
@@ -16,8 +15,16 @@ import (
 // approve a renewal job is the same person listed as the owner of the
 // underlying certificate. M-003 enforces separation of duties: the owner who
 // requested (or benefits from) the renewal must not be the same identity that
-// approves it. Handlers map this sentinel to HTTP 403 Forbidden.
-var ErrSelfApproval = errors.New("self-approval forbidden: actor is the owner of the certificate")
+// approves it.
+//
+// M-1 (P2): wraps [ErrForbidden] via fmt.Errorf("%w", ...) so the single
+// handler-layer errToStatus choke point resolves HTTP 403 via
+// errors.Is(err, ErrForbidden). Call sites can continue to
+// errors.Is(err, ErrSelfApproval) for domain-specific logging — both succeed
+// because %w builds a wrap chain. Pre-M-1, handler/jobs.go classified the
+// failure by substring-matching "cannot approve" in the message; a reword
+// would have silently demoted 403 to 500 with no observable signal.
+var ErrSelfApproval = fmt.Errorf("%w: self-approval forbidden: actor is the owner of the certificate", ErrForbidden)
 
 // JobService manages job processing and status tracking.
 // It coordinates between the scheduler and various job-specific services.
@@ -403,9 +410,17 @@ func (s *JobService) GetJob(ctx context.Context, id string) (*domain.Job, error)
 // duties. Callers must pass a non-empty actor; empty actor is treated as an
 // anonymous system caller and permitted (internal/system paths).
 func (s *JobService) ApproveJob(ctx context.Context, id, actor string) error {
+	// M-1 (P2): the pre-M-1 wrap was `"job not found: %w"` on every jobRepo.Get
+	// error — which coupled to the handler's strings.Contains substring classifier
+	// on "not found" and gave false positives on transient DB failures, demoting a
+	// 500 to a 404. Now the repo wraps only the genuine sql.ErrNoRows path with
+	// repository.ErrNotFound (postgres/job.go Get), so errors.Is walks the wrap
+	// chain correctly: truly-missing → 404, everything else → 500. The wrap text
+	// is changed from "job not found" to "failed to get job" to match the
+	// semantic.
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
-		return fmt.Errorf("job not found: %w", err)
+		return fmt.Errorf("failed to get job: %w", err)
 	}
 
 	if job.Status != domain.JobStatusAwaitingApproval {
@@ -435,9 +450,13 @@ func (s *JobService) ApproveJob(ctx context.Context, id, actor string) error {
 // owner is permitted to cancel their own pending renewal. actor is recorded
 // on the log line for audit attribution.
 func (s *JobService) RejectJob(ctx context.Context, id, reason, actor string) error {
+	// M-1 (P2): wrap-text correction — see ApproveJob for rationale. Same
+	// repo.Get sql.ErrNoRows → repository.ErrNotFound propagation; text changed
+	// from "job not found" to "failed to get job" so transient DB errors stay
+	// 500 while genuine 404s are picked up via errors.Is at errToStatus.
 	job, err := s.jobRepo.Get(ctx, id)
 	if err != nil {
-		return fmt.Errorf("job not found: %w", err)
+		return fmt.Errorf("failed to get job: %w", err)
 	}
 
 	if job.Status != domain.JobStatusAwaitingApproval {

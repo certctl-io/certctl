@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -86,7 +87,24 @@ func (h AuditHandler) GetAuditEvent(w http.ResponseWriter, r *http.Request) {
 
 	event, err := h.svc.GetAuditEvent(r.Context(), id)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Audit event not found", requestID)
+		// M-1 (P2): dispatch routes through errToStatus. Pre-M-1 this branch was
+		// a blanket `any error → 404 Audit event not found` shortcut — which
+		// silently demoted transient DB failures from the service's auditRepo.List
+		// wrap to 404 Not Found with no observable external signal. Post-M-1:
+		// service/audit.go GetAuditEvent only wraps the genuine zero-events path
+		// with service.ErrNotFound via %w, and the repo.List wrap surfaces without
+		// that sentinel — so errors.Is(err, service.ErrNotFound) picks up the real
+		// 404s and everything else correctly surfaces as 500 with server-side
+		// slog.Error capture (F-002 redacted-500 pattern preserved).
+		status := errToStatus(err)
+		if status == http.StatusInternalServerError {
+			slog.Error("GetAuditEvent failed", "audit_event_id", id, "error", err.Error())
+		}
+		msg := "Failed to get audit event"
+		if status == http.StatusNotFound {
+			msg = "Audit event not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

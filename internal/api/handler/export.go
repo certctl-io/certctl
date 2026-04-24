@@ -46,12 +46,26 @@ func (h ExportHandler) ExportPEM(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.ExportPEM(r.Context(), id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		// M-1 (P2): dispatch routes through errToStatus. Pre-M-1 this branch
+		// classified 404 via strings.Contains(err.Error(), "not found"), which
+		// gave false positives on any error whose rendered text happened to
+		// contain "not found" — notably a transient DB failure when the service
+		// layer wrapped every certRepo.Get error with "certificate not found".
+		// Post-M-1: service/export.go now wraps with "failed to get certificate"
+		// and only the genuine sql.ErrNoRows path surfaces repository.ErrNotFound
+		// through the wrap chain, so errors.Is(err, repository.ErrNotFound) picks
+		// up the real 404s and everything else — including transient DB errors —
+		// correctly surfaces as 500 with server-side slog.Error capture (F-002
+		// redacted-500 pattern preserved).
+		status := errToStatus(err)
+		if status == http.StatusInternalServerError {
+			slog.Error("ExportPEM failed", "cert_id", id, "error", err.Error())
 		}
-		slog.Error("ExportPEM failed", "cert_id", id, "error", err.Error())
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to export certificate", requestID)
+		msg := "Failed to export certificate"
+		if status == http.StatusNotFound {
+			msg = "Certificate not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -94,16 +108,32 @@ func (h ExportHandler) ExportPKCS12(w http.ResponseWriter, r *http.Request) {
 
 	pfxData, err := h.svc.ExportPKCS12(r.Context(), id, req.Password)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		// M-1 (P2): dispatch routes through errToStatus. The pre-M-1 3-term
+		// substring net (`"not found"|"cannot be parsed"|"no certificates
+		// found"`) is replaced with sentinel dispatch:
+		//   - repository.ErrNotFound (from certificate.go Get/GetLatestVersion
+		//     sql.ErrNoRows wrap) → 404
+		//   - service.ErrUnprocessable (from service/export.go ExportPKCS12's
+		//     parsePEMCertificates-failure and empty-chain wraps) → 422 —
+		//     semantically correct because the caller's request is fine; our
+		//     stored PEM chain is what cannot be processed
+		//   - everything else → 500 with slog.Error capture (F-002 redacted-500
+		//     pattern preserved)
+		// A transient DB failure that pre-M-1 would have been swept into the
+		// 404 substring branch (because the service wrapped every certRepo.Get
+		// error with "certificate not found") now correctly surfaces as 500.
+		status := errToStatus(err)
+		if status == http.StatusInternalServerError {
+			slog.Error("ExportPKCS12 failed", "cert_id", id, "error", err.Error())
 		}
-		if strings.Contains(err.Error(), "cannot be parsed") || strings.Contains(err.Error(), "no certificates found") {
-			ErrorWithRequestID(w, http.StatusUnprocessableEntity, "Certificate data cannot be parsed as X.509", requestID)
-			return
+		msg := "Failed to export PKCS#12"
+		switch status {
+		case http.StatusNotFound:
+			msg = "Certificate not found"
+		case http.StatusUnprocessableEntity:
+			msg = "Certificate data cannot be parsed as X.509"
 		}
-		slog.Error("ExportPKCS12 failed", "cert_id", id, "error", err.Error())
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to export PKCS#12", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

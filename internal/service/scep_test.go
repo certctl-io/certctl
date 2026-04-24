@@ -148,6 +148,13 @@ func TestSCEPService_PKCSReq_ChallengePassword_Invalid(t *testing.T) {
 	if err == nil {
 		t.Fatal("expected error for invalid challenge password")
 	}
+	// M-1 (P2): pin the sentinel wrap so the handler's errToStatus dispatch
+	// (errors.Is → 401 Unauthorized) stays contract-stable. The parallel
+	// substring check is retained because it also pins the user-facing reason
+	// that service.ErrUnauthenticated composes with via fmt.Errorf("%w: ...").
+	if !errors.Is(err, ErrUnauthenticated) {
+		t.Errorf("expected errors.Is(err, ErrUnauthenticated), got: %v", err)
+	}
 	if !strings.Contains(err.Error(), "challenge password") {
 		t.Errorf("expected 'challenge password' in error, got: %v", err)
 	}
@@ -171,6 +178,12 @@ func TestSCEPService_PKCSReq_ChallengePassword_EmptyServerConfigRejected(t *test
 		if err == nil {
 			t.Fatalf("expected rejection when server challenge password is empty (client=%q)", clientPassword)
 		}
+		// M-1 (P2): pin the sentinel wrap on the "no shared secret configured"
+		// branch so both H-2 failure modes route to the same 401 arm at the
+		// handler. Preserves the explanatory substring assertion alongside.
+		if !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("expected errors.Is(err, ErrUnauthenticated) for client=%q, got: %v", clientPassword, err)
+		}
 		if !strings.Contains(err.Error(), "not configured") {
 			t.Errorf("expected 'not configured' in error, got: %v", err)
 		}
@@ -192,6 +205,12 @@ func TestSCEPService_PKCSReq_ChallengePassword_ConstantTimeLengthIndependence(t 
 		_, err := svc.PKCSReq(context.Background(), csrPEM, bad, "txn-ct")
 		if err == nil {
 			t.Fatalf("expected rejection for bad password %q", bad)
+		}
+		// M-1 (P2): pin sentinel-wrap on every bad-password input so both the
+		// length-mismatch and content-mismatch ConstantTimeCompare paths map to
+		// the same 401 arm.
+		if !errors.Is(err, ErrUnauthenticated) {
+			t.Errorf("expected errors.Is(err, ErrUnauthenticated) for %q, got: %v", bad, err)
 		}
 		if !strings.Contains(err.Error(), "invalid challenge password") {
 			t.Errorf("expected 'invalid challenge password' for %q, got: %v", bad, err)

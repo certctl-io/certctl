@@ -139,42 +139,51 @@ func (s *ProfileService) Get(ctx context.Context, id string) (*domain.Certificat
 }
 
 // validateProfile checks that a profile's configuration is valid.
+//
+// M-1: every return here wraps ErrValidation via %w so the handler's
+// errToStatus choke point dispatches these to HTTP 400 via errors.Is without
+// the substring-matching on "invalid"/"required"/"must be"/"cannot" that the
+// pre-M-1 profile handler relied on. The composed Error() string still
+// contains the original human-readable text (e.g. "RSA minimum key size must
+// be at least 2048"), so the handler safely passes err.Error() through to the
+// response body on the 400 arm. Substring assertions in profile_test.go
+// continue to match for the same reason.
 func validateProfile(p *domain.CertificateProfile) error {
 	if p.Name == "" {
-		return fmt.Errorf("profile name is required")
+		return fmt.Errorf("%w: profile name is required", ErrValidation)
 	}
 	if len(p.Name) > 255 {
-		return fmt.Errorf("profile name exceeds 255 characters")
+		return fmt.Errorf("%w: profile name exceeds 255 characters", ErrValidation)
 	}
 
 	// Validate key algorithms
 	for _, alg := range p.AllowedKeyAlgorithms {
 		if !domain.ValidKeyAlgorithms[alg.Algorithm] {
-			return fmt.Errorf("invalid key algorithm: %s (allowed: RSA, ECDSA, Ed25519)", alg.Algorithm)
+			return fmt.Errorf("%w: invalid key algorithm: %s (allowed: RSA, ECDSA, Ed25519)", ErrValidation, alg.Algorithm)
 		}
 		if alg.Algorithm == domain.KeyAlgorithmRSA && alg.MinSize < 2048 {
-			return fmt.Errorf("RSA minimum key size must be at least 2048, got %d", alg.MinSize)
+			return fmt.Errorf("%w: RSA minimum key size must be at least 2048, got %d", ErrValidation, alg.MinSize)
 		}
 		if alg.Algorithm == domain.KeyAlgorithmECDSA && alg.MinSize < 256 {
-			return fmt.Errorf("ECDSA minimum key size must be at least 256, got %d", alg.MinSize)
+			return fmt.Errorf("%w: ECDSA minimum key size must be at least 256, got %d", ErrValidation, alg.MinSize)
 		}
 	}
 
 	// Validate EKUs
 	for _, eku := range p.AllowedEKUs {
 		if !domain.ValidEKUs[eku] {
-			return fmt.Errorf("invalid EKU: %s", eku)
+			return fmt.Errorf("%w: invalid EKU: %s", ErrValidation, eku)
 		}
 	}
 
 	// Validate max TTL
 	if p.MaxTTLSeconds < 0 {
-		return fmt.Errorf("max_ttl_seconds cannot be negative")
+		return fmt.Errorf("%w: max_ttl_seconds cannot be negative", ErrValidation)
 	}
 
 	// Validate short-lived consistency
 	if p.AllowShortLived && p.MaxTTLSeconds >= 3600 {
-		return fmt.Errorf("allow_short_lived is true but max_ttl_seconds (%d) is >= 3600; short-lived certs must have TTL under 1 hour", p.MaxTTLSeconds)
+		return fmt.Errorf("%w: allow_short_lived is true but max_ttl_seconds (%d) is >= 3600; short-lived certs must have TTL under 1 hour", ErrValidation, p.MaxTTLSeconds)
 	}
 
 	return nil

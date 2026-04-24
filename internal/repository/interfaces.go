@@ -18,7 +18,17 @@ import (
 // managed_certificates.renewal_policy_id to renewal_policies.id with ON
 // DELETE RESTRICT). Both map onto the same 409 status but with distinct
 // messages so operators can tell them apart.
+//
+// M-1: ErrNotFound is the repo-layer "row not found" sentinel. Repositories
+// that historically returned fmt.Errorf("... not found: %s", id) without
+// wrapping sql.ErrNoRows now wrap ErrNotFound via fmt.Errorf("%w: ...", so
+// the handler layer's single errToStatus choke point can route them to HTTP
+// 404 via errors.Is without substring-matching the message text. Existing
+// service-level service.ErrNotFound stays a distinct value — both map to 404
+// through explicit branches in handler/errors.go (mirrors the G-1 treatment
+// of the repo-level 409 sentinels).
 var (
+	ErrNotFound                   = errors.New("repository: not found")
 	ErrRenewalPolicyDuplicateName = errors.New("renewal policy name already exists")
 	ErrRenewalPolicyInUse         = errors.New("renewal policy is still referenced by managed certificates")
 )

@@ -264,8 +264,14 @@ func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.Man
 
 	cert, err := r.scanCertificate(ctx, row)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("certificate not found")
+		// M-1 (P2): wrap sql.ErrNoRows with repository.ErrNotFound via %w so
+		// the handler's errToStatus choke point dispatches to 404 via
+		// errors.Is instead of the pre-M-1 strings.Contains(err.Error(),
+		// "not found") branch at handler/export.go (ExportPEM + ExportPKCS12).
+		// scanCertificate already wraps sql.ErrNoRows via %w, so errors.Is
+		// walks through. Mirrors profile and agent_group repositories.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: certificate %s", repository.ErrNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to query certificate: %w", err)
 	}
@@ -396,8 +402,11 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	// M-1 (P2): zero-rows-affected → repository.ErrNotFound wrap so the
+	// handler's errToStatus dispatches to 404 via errors.Is. Mirrors profile
+	// and agent_group repositories.
 	if rows == 0 {
-		return fmt.Errorf("certificate not found")
+		return fmt.Errorf("%w: certificate %s", repository.ErrNotFound, cert.ID)
 	}
 
 	return nil
@@ -418,8 +427,10 @@ func (r *CertificateRepository) Archive(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	// M-1 (P2): zero-rows-affected → repository.ErrNotFound wrap. Mirrors
+	// profile and agent_group repositories.
 	if rows == 0 {
-		return fmt.Errorf("certificate not found")
+		return fmt.Errorf("%w: certificate %s", repository.ErrNotFound, id)
 	}
 
 	return nil
@@ -583,6 +594,16 @@ func (r *CertificateRepository) GetLatestVersion(ctx context.Context, certID str
 	v.KeySize = int(keySize.Int64)
 
 	if err != nil {
+		// M-1 (P2): wrap sql.ErrNoRows with repository.ErrNotFound via %w so
+		// the handler's errToStatus choke point dispatches to 404 via
+		// errors.Is. The export service surfaces "no certificate version
+		// found" on this path — pre-M-1 the handler branched on
+		// strings.Contains(err.Error(), "not found"), now it walks the wrap
+		// chain. Non-ErrNoRows errors preserve their "failed to get latest
+		// certificate version" framing.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: certificate version for %s", repository.ErrNotFound, certID)
+		}
 		return nil, fmt.Errorf("failed to get latest certificate version: %w", err)
 	}
 

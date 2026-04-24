@@ -143,6 +143,15 @@ func (s *AuditService) ListAuditEvents(ctx context.Context, page, perPage int) (
 }
 
 // GetAuditEvent returns a single audit event (handler interface method).
+//
+// M-1 (P2): the pre-M-1 zero-events path returned a bare
+// `fmt.Errorf("audit event not found")` and the handler dispatched via a
+// blanket `any error → 404 Audit event not found` shortcut. That silently
+// demoted transient DB failures from the auditRepo.List wrap (line 154 above)
+// to 404 Not Found. Now the zero-events path wraps ErrNotFound via %w so
+// errors.Is(err, service.ErrNotFound) picks up the real 404 at the handler's
+// errToStatus choke point, and the repo.List wrap surfaces as 500 with
+// server-side slog.Error capture (F-002 redacted-500 pattern preserved).
 func (s *AuditService) GetAuditEvent(ctx context.Context, id string) (*domain.AuditEvent, error) {
 	filter := &repository.AuditFilter{
 		ResourceID: id,
@@ -155,7 +164,7 @@ func (s *AuditService) GetAuditEvent(ctx context.Context, id string) (*domain.Au
 	}
 
 	if len(events) == 0 {
-		return nil, fmt.Errorf("audit event not found")
+		return nil, fmt.Errorf("%w: audit event not found", ErrNotFound)
 	}
 
 	return events[0], nil

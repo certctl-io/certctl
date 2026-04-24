@@ -138,7 +138,15 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 	return notifs, nil
 }
 
-// UpdateStatus updates a notification's delivery status
+// UpdateStatus updates a notification's delivery status.
+//
+// M-1 (P2): zero-rows-affected now wraps repository.ErrNotFound via %w so the
+// handler's errToStatus choke point dispatches to 404 via errors.Is. Pre-M-1
+// the return was a raw fmt.Errorf("notification not found") string that the
+// service layer re-wrapped and the handler classified via strings.Contains —
+// one sentinel-message reword away from silently demoting 404 to 500. The
+// behavior (error on concurrent-delete / bad-id) is unchanged; only the error
+// identity is now type-safe.
 func (r *NotificationRepository) UpdateStatus(ctx context.Context, id string, status string, sentAt time.Time) error {
 	result, err := r.db.ExecContext(ctx, `
 		UPDATE notification_events SET status = $1, sent_at = $2 WHERE id = $3
@@ -154,7 +162,7 @@ func (r *NotificationRepository) UpdateStatus(ctx context.Context, id string, st
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		return fmt.Errorf("%w: notification %s", repository.ErrNotFound, id)
 	}
 
 	return nil
@@ -307,10 +315,12 @@ func (r *NotificationRepository) RecordFailedAttempt(ctx context.Context, id str
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		// Same "not found" error shape as UpdateStatus above. The scheduler
-		// logs-and-continues on this so a concurrently-deleted row doesn't
-		// break the sweep.
-		return fmt.Errorf("notification not found")
+		// M-1 (P2): wrap repository.ErrNotFound (was raw
+		// fmt.Errorf("notification not found")). Same "not found" shape as
+		// UpdateStatus — the scheduler logs-and-continues on a concurrently
+		// deleted row, but callers that surface the error (the handler) now
+		// discriminate via errors.Is instead of substring matching.
+		return fmt.Errorf("%w: notification %s", repository.ErrNotFound, id)
 	}
 	return nil
 }
@@ -342,7 +352,8 @@ func (r *NotificationRepository) MarkAsDead(ctx context.Context, id string, last
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		// M-1 (P2): wrap repository.ErrNotFound. See UpdateStatus rationale.
+		return fmt.Errorf("%w: notification %s", repository.ErrNotFound, id)
 	}
 	return nil
 }
@@ -379,7 +390,8 @@ func (r *NotificationRepository) Requeue(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		// M-1 (P2): wrap repository.ErrNotFound. See UpdateStatus rationale.
+		return fmt.Errorf("%w: notification %s", repository.ErrNotFound, id)
 	}
 	return nil
 }

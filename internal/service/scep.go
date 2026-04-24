@@ -84,10 +84,22 @@ func (s *SCEPService) PKCSReq(ctx context.Context, csrPEM string, challengePassw
 	// this branch also protects future call sites (tests, library reuse, a
 	// future REST-over-HTTPS wrapper) from silently accepting unauthenticated
 	// CSRs.
+	//
+	// M-1 (P2): both failure modes now wrap service.ErrUnauthenticated via %w so
+	// the handler's errToStatus choke point dispatches them to HTTP 401 via
+	// errors.Is instead of relying on a `strings.Contains(err.Error(), "challenge
+	// password")` substring branch at handler/scep.go:174. This is a deliberate
+	// semantic correction: the pre-M-1 substring branch returned 403 Forbidden,
+	// but SCEP challenge-password failure is an authentication failure (the
+	// caller has no valid credential at the application layer), not an
+	// authorization denial (the caller has a credential but is not permitted),
+	// and 401 Unauthorized is the correct RFC 7235 status. The errToStatus doc
+	// block explicitly cites this site as the canonical ErrUnauthenticated use
+	// case.
 	if s.challengePassword == "" {
 		s.logger.Warn("SCEP enrollment rejected: server has no challenge password configured",
 			"transaction_id", transactionID)
-		return nil, fmt.Errorf("SCEP challenge password not configured on server")
+		return nil, fmt.Errorf("%w: SCEP challenge password not configured on server", ErrUnauthenticated)
 	}
 	// Constant-time compare avoids leaking the configured secret through
 	// response-time variance. ConstantTimeCompare returns 1 only when both
@@ -96,7 +108,7 @@ func (s *SCEPService) PKCSReq(ctx context.Context, csrPEM string, challengePassw
 	if subtle.ConstantTimeCompare([]byte(challengePassword), []byte(s.challengePassword)) != 1 {
 		s.logger.Warn("SCEP enrollment rejected: invalid challenge password",
 			"transaction_id", transactionID)
-		return nil, fmt.Errorf("invalid challenge password")
+		return nil, fmt.Errorf("%w: invalid challenge password", ErrUnauthenticated)
 	}
 
 	return s.processEnrollment(ctx, csrPEM, transactionID, "scep_pkcsreq")

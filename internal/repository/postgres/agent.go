@@ -3,11 +3,13 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // AgentRepository implements repository.AgentRepository
@@ -72,8 +74,13 @@ func (r *AgentRepository) Get(ctx context.Context, id string) (*domain.Agent, er
 
 	agent, err := scanAgent(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("agent not found")
+		// M-1 (P2): wrap sql.ErrNoRows with repository.ErrNotFound via %w so
+		// the handler's errToStatus choke point dispatches to 404 via
+		// errors.Is instead of the pre-M-1 strings.Contains(err.Error(),
+		// "not found") branch at handler/agents.go. Mirrors agent_group and
+		// profile repositories.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: agent %s", repository.ErrNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to query agent: %w", err)
 	}
@@ -169,8 +176,12 @@ func (r *AgentRepository) Update(ctx context.Context, agent *domain.Agent) error
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	// M-1 (P2): wrap the zero-rows-affected condition with
+	// repository.ErrNotFound so the handler's errToStatus dispatches to 404
+	// via errors.Is without substring matching. Mirrors agent_group and
+	// profile repositories.
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("%w: agent %s", repository.ErrNotFound, agent.ID)
 	}
 
 	return nil
@@ -189,8 +200,10 @@ func (r *AgentRepository) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	// M-1 (P2): zero-rows-affected → repository.ErrNotFound wrap. Mirrors
+	// agent_group and profile repositories.
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("%w: agent %s", repository.ErrNotFound, id)
 	}
 
 	return nil
@@ -236,8 +249,13 @@ func (r *AgentRepository) UpdateHeartbeat(ctx context.Context, id string, metada
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 
+	// M-1 (P2): zero-rows-affected → repository.ErrNotFound wrap. Note the
+	// UPDATE filters on `retired_at IS NULL`, so a retired agent row also
+	// returns zero-rows-affected here. The service layer short-circuits with
+	// ErrAgentRetired (410) BEFORE reaching this path via Heartbeat's
+	// explicit Get check, so the 404 vs 410 distinction is drawn upstream.
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("%w: agent %s", repository.ErrNotFound, id)
 	}
 
 	return nil
@@ -258,8 +276,13 @@ func (r *AgentRepository) GetByAPIKey(ctx context.Context, keyHash string) (*dom
 
 	agent, err := scanAgent(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("agent not found")
+		// M-1 (P2): wrap sql.ErrNoRows with repository.ErrNotFound via %w.
+		// The auth middleware calls this on every request; a missing row
+		// must surface as 404 (well, 401 upstream — the middleware treats
+		// "no agent matched" as auth failure) via the errToStatus choke
+		// point, not via substring matching.
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("%w: agent with api key not found", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query agent: %w", err)
 	}

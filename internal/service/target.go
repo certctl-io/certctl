@@ -3,7 +3,6 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"log/slog"
 	"time"
@@ -18,7 +17,15 @@ import (
 // agent. The handler layer maps this to HTTP 400 via [errors.Is]. See C-002 in
 // cowork/certctl-coverage-gap-audit.md — this sentinel replaces a silent
 // Postgres FK violation (23503 → HTTP 500) with a deterministic 400.
-var ErrAgentNotFound = errors.New("referenced agent does not exist")
+//
+// M-1 (P2): wraps [ErrValidation] via fmt.Errorf("%w", ...) so the single
+// handler-layer errToStatus choke point resolves HTTP 400 via
+// errors.Is(err, ErrValidation). "Referenced FK does not exist in POST body"
+// is invalid input — not a missing-resource lookup — which is why this wraps
+// ErrValidation (400) rather than ErrNotFound (404). Pre-M-1, target handlers
+// classified this via strings.Contains(err.Error(), "not found"); a message
+// reword would have silently promoted 400 to 500 with no observable signal.
+var ErrAgentNotFound = fmt.Errorf("%w: referenced agent does not exist", ErrValidation)
 
 // validTargetTypes is the set of allowed target types for validation.
 var validTargetTypes = map[domain.TargetType]bool{
@@ -215,10 +222,20 @@ func (s *TargetService) Delete(ctx context.Context, id string, actor string) err
 // TestConnection tests a target's connectivity by checking the assigned agent's heartbeat status.
 // Target connectors run on agents, not on the server, so we can't instantiate a connector here.
 // Instead, we verify the agent is online and reachable.
+//
+// M-1 (P2): the pre-M-1 wraps were `"target not found: %w"` and
+// `"assigned agent not found: %w"` on every targetRepo.Get / agentRepo.Get error
+// — which coupled to pre-M-1 handler strings.Contains substring classifiers on
+// "not found" and gave false positives on transient DB failures. Now both
+// repos wrap only the genuine sql.ErrNoRows path with repository.ErrNotFound,
+// so errors.Is walks the chain correctly: truly-missing → 404, everything else
+// → 500. The wrap text is changed to "failed to get target" / "failed to get
+// agent" to match the semantic (agent-misconfigured stays 500 — "assigned
+// agent" is a data-integrity issue, not a consumer 404).
 func (s *TargetService) TestConnection(ctx context.Context, id string) error {
 	target, err := s.targetRepo.Get(ctx, id)
 	if err != nil {
-		return fmt.Errorf("target not found: %w", err)
+		return fmt.Errorf("failed to get target: %w", err)
 	}
 
 	if target.AgentID == "" {
@@ -229,7 +246,7 @@ func (s *TargetService) TestConnection(ctx context.Context, id string) error {
 	agent, err := s.agentRepo.Get(ctx, target.AgentID)
 	if err != nil {
 		s.updateTestStatus(ctx, target, "failed")
-		return fmt.Errorf("assigned agent not found: %w", err)
+		return fmt.Errorf("failed to get assigned agent: %w", err)
 	}
 
 	// I-004: AgentRepository.Get intentionally surfaces retired rows (the banner

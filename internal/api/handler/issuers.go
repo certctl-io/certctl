@@ -135,16 +135,13 @@ func (h IssuerHandler) CreateIssuer(w http.ResponseWriter, r *http.Request) {
 
 	created, err := h.svc.CreateIssuer(r.Context(), issuer)
 	if err != nil {
-		h.logger.Error("failed to create issuer", "error", err, "name", issuer.Name, "type", issuer.Type)
-		errMsg := err.Error()
-		switch {
-		case strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate"):
-			ErrorWithRequestID(w, http.StatusConflict, "An issuer with this name already exists", requestID)
-		case strings.Contains(errMsg, "unsupported issuer type"):
-			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
-		default:
-			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to create issuer", requestID)
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			h.logger.Error("failed to create issuer", "error", err, "name", issuer.Name, "type", issuer.Type)
+			msg = "internal error"
 		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -177,16 +174,13 @@ func (h IssuerHandler) UpdateIssuer(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateIssuer(r.Context(), id, issuer)
 	if err != nil {
-		h.logger.Error("failed to update issuer", "error", err, "id", id)
-		errMsg := err.Error()
-		switch {
-		case strings.Contains(errMsg, "unique") || strings.Contains(errMsg, "duplicate"):
-			ErrorWithRequestID(w, http.StatusConflict, "An issuer with this name already exists", requestID)
-		case strings.Contains(errMsg, "not found"):
-			ErrorWithRequestID(w, http.StatusNotFound, "Issuer not found", requestID)
-		default:
-			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update issuer", requestID)
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			h.logger.Error("failed to update issuer", "error", err, "id", id)
+			msg = "internal error"
 		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -210,13 +204,13 @@ func (h IssuerHandler) DeleteIssuer(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteIssuer(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "violates foreign key") || strings.Contains(err.Error(), "RESTRICT") {
-			ErrorWithRequestID(w, http.StatusConflict, "Cannot delete issuer: certificates are still using this issuer", requestID)
-		} else if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Issuer not found", requestID)
-		} else {
-			ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete issuer", requestID)
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			h.logger.Error("DeleteIssuer failed", "issuer_id", id, "error", err)
+			msg = "internal error"
 		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

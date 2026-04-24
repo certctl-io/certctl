@@ -43,6 +43,15 @@ func (s *CAOperationsSvc) SetIssuerRegistry(registry *IssuerRegistry) {
 
 // GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
 // Short-lived certificates (profile TTL < 1 hour) are excluded from the CRL.
+//
+// M-1 (P2): the pre-M-1 issuer-not-found path returned a bare
+// `fmt.Errorf("issuer not found: %s", issuerID)` with no sentinel wrap. A
+// pre-M-1 handler strings.Contains(err.Error(), "not found") classifier would
+// sweep both this path and any transient error whose text happened to mention
+// "not found" into 404. Post-M-1 this path wraps service.ErrNotFound via %w so
+// errors.Is picks up the genuine 404 at errToStatus, and truly-unexpected
+// errors (e.g., registry misconfigured) surface as 500 via the generic-error
+// fallback.
 func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
@@ -53,7 +62,7 @@ func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) (
 
 	issuerConn, ok := s.issuerRegistry.Get(issuerID)
 	if !ok {
-		return nil, fmt.Errorf("issuer not found: %s", issuerID)
+		return nil, fmt.Errorf("%w: issuer %s", ErrNotFound, issuerID)
 	}
 
 	// Scope the query to this issuer so the migration 000012 composite index
@@ -98,6 +107,11 @@ func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) (
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
+//
+// M-1 (P2): see GenerateDERCRL above — same sentinel-wrap rationale applies.
+// The issuer-not-found path wraps service.ErrNotFound via %w so errors.Is
+// picks up the genuine 404 at errToStatus; transient/misconfiguration errors
+// surface as 500.
 func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
@@ -108,7 +122,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 
 	issuerConn, ok := s.issuerRegistry.Get(issuerID)
 	if !ok {
-		return nil, fmt.Errorf("issuer not found: %s", issuerID)
+		return nil, fmt.Errorf("%w: issuer %s", ErrNotFound, issuerID)
 	}
 
 	serial := new(big.Int)

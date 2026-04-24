@@ -26,14 +26,28 @@ type RenewalPolicyService interface {
 
 // RenewalPolicyHandler serves /api/v1/renewal-policies CRUD endpoints.
 //
-// G-1 design note: the service-level `ErrRenewalPolicyDuplicateName` /
-// `ErrRenewalPolicyInUse` sentinels alias the repository sentinels (same var
-// identity), so `errors.Is` walks transparently across layers. Delete/Update
-// not-found detection intentionally uses a `strings.Contains(err.Error(),
-// "not found")` substring check — the repo wraps `sql.ErrNoRows` as
-// `fmt.Errorf("renewal policy not found: %s", id)` which strips the sentinel,
-// and the handler red-tests' `ErrMockNotFound = errors.New("mock not found
-// error")` follows the same substring convention.
+// Error dispatch (post-M-1): every service error routes through the [errToStatus]
+// choke point via `errors.Is` walking the wrap chain. Three sentinel identities
+// cover the full dispatch surface:
+//
+//   - [service.ErrRenewalPolicyDuplicateName] / [service.ErrRenewalPolicyInUse]
+//     are `var`-aliased to the repository-layer sentinels of the same name (G-1),
+//     so handler-side `errors.Is` succeeds against a sentinel raised three layers
+//     deep in [internal/repository/postgres.RenewalPolicyRepository] without the
+//     service layer having to translate. [errToStatus] routes both to 409.
+//   - [repository.ErrNotFound] is wrapped around `sql.ErrNoRows` inside the
+//     repo's Get/Update/Delete methods via `fmt.Errorf("%w: renewal policy %s",
+//     repository.ErrNotFound, id)` (M-1). [errToStatus] routes that to 404 in
+//     the same switch arm as [service.ErrNotFound], preserving the existing
+//     404-on-missing behavior that the pre-M-1 substring check provided —
+//     without the rewording-regression risk that motivated the migration.
+//
+// The handler layer keeps two explicit `errors.Is` arms for the
+// duplicate-name / in-use sentinels so each 409 response can carry a
+// constraint-specific human-readable message ("with that name" vs. "still
+// referenced by managed certificates"); every other error path — including
+// not-found — delegates the status decision to [errToStatus] and provides a
+// generic body via the F-002 redacted-500 pattern.
 type RenewalPolicyHandler struct {
 	svc RenewalPolicyService
 }
@@ -105,11 +119,18 @@ func (h RenewalPolicyHandler) GetRenewalPolicy(w http.ResponseWriter, r *http.Re
 
 	policy, err := h.svc.GetRenewalPolicy(r.Context(), id)
 	if err != nil {
-		// Matches the PolicyHandler.GetPolicy convention: any error from the
-		// service surfaces as 404. The repo wraps sql.ErrNoRows as
-		// "renewal policy not found: %s" and there's no other expected failure
-		// mode on Get — the caller gets a clean 404.
-		ErrorWithRequestID(w, http.StatusNotFound, "Renewal policy not found", requestID)
+		// M-1: route through errToStatus so a repo-level `sql.ErrNoRows`
+		// (wrapped as repository.ErrNotFound) becomes 404, but a transient DB
+		// failure no longer masquerades as 404 — it correctly surfaces 500.
+		// The pre-M-1 "any error → 404" shortcut was plausible when Get's only
+		// expected failure was "not found", but the choke point now gives us
+		// correct dispatch for free.
+		status := errToStatus(err)
+		msg := "Failed to get renewal policy"
+		if status == http.StatusNotFound {
+			msg = "Renewal policy not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -158,11 +179,11 @@ func (h RenewalPolicyHandler) CreateRenewalPolicy(w http.ResponseWriter, r *http
 // UpdateRenewalPolicy replaces the fields of an existing renewal policy.
 // PUT /api/v1/renewal-policies/{id}
 //
-// Error mapping:
-//   - invalid JSON / empty ID      → 400
-//   - ErrRenewalPolicyDuplicateName → 409
-//   - error text contains "not found" → 404 (see struct doc comment re: substring check)
-//   - anything else                → 500
+// Error mapping (post-M-1, sentinel-driven):
+//   - invalid JSON / empty ID                      → 400
+//   - ErrRenewalPolicyDuplicateName (pg 23505)     → 409 (explicit arm, custom msg)
+//   - ErrNotFound (wrapping sql.ErrNoRows)         → 404 (via errToStatus)
+//   - anything else                                → 500 (via errToStatus, body redacted)
 func (h RenewalPolicyHandler) UpdateRenewalPolicy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPut {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -191,11 +212,17 @@ func (h RenewalPolicyHandler) UpdateRenewalPolicy(w http.ResponseWriter, r *http
 			ErrorWithRequestID(w, http.StatusConflict, "A renewal policy with that name already exists", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Renewal policy not found", requestID)
-			return
+		// M-1: drop the `strings.Contains(err.Error(), "not found")` branch.
+		// [repository.ErrNotFound] now wraps sql.ErrNoRows at the three
+		// renewal-policy repo methods (Get/Update/Delete), so errToStatus
+		// routes a missing row to 404 via errors.Is without depending on the
+		// repo's fmt.Errorf format string surviving a future reword.
+		status := errToStatus(err)
+		msg := "Failed to update renewal policy"
+		if status == http.StatusNotFound {
+			msg = "Renewal policy not found"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update renewal policy", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -205,11 +232,11 @@ func (h RenewalPolicyHandler) UpdateRenewalPolicy(w http.ResponseWriter, r *http
 // DeleteRenewalPolicy removes a renewal policy.
 // DELETE /api/v1/renewal-policies/{id}
 //
-// Error mapping:
-//   - empty ID (trailing slash)    → 400
-//   - ErrRenewalPolicyInUse (pg 23503 FK-RESTRICT against managed_certificates.renewal_policy_id) → 409
-//   - error text contains "not found" → 404
-//   - anything else                → 500
+// Error mapping (post-M-1, sentinel-driven):
+//   - empty ID (trailing slash)                    → 400
+//   - ErrRenewalPolicyInUse (pg 23503 FK-RESTRICT) → 409 (explicit arm, custom msg)
+//   - ErrNotFound (wrapping sql.ErrNoRows)         → 404 (via errToStatus)
+//   - anything else                                → 500 (via errToStatus, body redacted)
 func (h RenewalPolicyHandler) DeleteRenewalPolicy(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodDelete {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -231,11 +258,14 @@ func (h RenewalPolicyHandler) DeleteRenewalPolicy(w http.ResponseWriter, r *http
 			ErrorWithRequestID(w, http.StatusConflict, "Renewal policy is still referenced by managed certificates", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Renewal policy not found", requestID)
-			return
+		// M-1: sentinel dispatch replaces the substring check — see the
+		// parallel comment block in UpdateRenewalPolicy for the rationale.
+		status := errToStatus(err)
+		msg := "Failed to delete renewal policy"
+		if status == http.StatusNotFound {
+			msg = "Renewal policy not found"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete renewal policy", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

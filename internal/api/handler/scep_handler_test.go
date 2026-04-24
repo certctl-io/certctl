@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/pem"
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // mockSCEPService implements SCEPService for testing.
@@ -214,9 +216,21 @@ func TestSCEP_PKIOperation_Success_RawCSR(t *testing.T) {
 	}
 }
 
+// TestSCEP_PKIOperation_ChallengePasswordRejected pins the M-1 (P2) dispatch
+// contract: when the service wraps the failure via `fmt.Errorf("%w: ...",
+// service.ErrUnauthenticated)` the handler's errToStatus choke point must
+// return 401 Unauthorized, NOT 403 Forbidden.
+//
+// This is a deliberate semantic correction. Pre-M-1 the handler inspected
+// err.Error() for the "challenge password" substring and returned 403, which
+// misclassified the RFC 7235 condition (the caller presented no valid
+// application-layer credential — that is auth failure, not authorization
+// denial). The errToStatus doc explicitly cites this code path as the
+// canonical ErrUnauthenticated consumer; see handler/errors.go and the
+// symmetric M-1 comment block at handler/scep.go in the pkiOperation arm.
 func TestSCEP_PKIOperation_ChallengePasswordRejected(t *testing.T) {
 	svc := &mockSCEPService{
-		EnrollErr: errors.New("invalid challenge password"),
+		EnrollErr: fmt.Errorf("%w: invalid challenge password", service.ErrUnauthenticated),
 	}
 	h := NewSCEPHandler(svc)
 
@@ -230,8 +244,8 @@ func TestSCEP_PKIOperation_ChallengePasswordRejected(t *testing.T) {
 	w := httptest.NewRecorder()
 	h.HandleSCEP(w, req)
 
-	if w.Code != http.StatusForbidden {
-		t.Errorf("expected 403, got %d: %s", w.Code, w.Body.String())
+	if w.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401 Unauthorized (M-1 dispatch of service.ErrUnauthenticated), got %d: %s", w.Code, w.Body.String())
 	}
 }
 

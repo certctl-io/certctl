@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
@@ -107,7 +108,25 @@ func (h NotificationHandler) GetNotification(w http.ResponseWriter, r *http.Requ
 
 	notification, err := h.svc.GetNotification(r.Context(), id)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Notification not found", requestID)
+		// M-1 (P2): dispatch routes through errToStatus. Pre-M-1 this branch was
+		// a blanket `any error → 404 Notification not found` shortcut — which
+		// silently demoted transient DB failures from the service's List() wrap
+		// (notification.go:386 pre-M-1) to 404 Not Found with no observable
+		// external signal. Post-M-1: service/notification.go GetNotification only
+		// wraps the genuine "not found" path with service.ErrNotFound via %w, and
+		// every other error (including the List() wrap) surfaces without that
+		// sentinel — so errors.Is(err, service.ErrNotFound) picks up the real
+		// 404s and everything else correctly surfaces as 500 with server-side
+		// slog.Error capture (F-002 redacted-500 pattern preserved).
+		status := errToStatus(err)
+		if status == http.StatusInternalServerError {
+			slog.Error("GetNotification failed", "notification_id", id, "error", err.Error())
+		}
+		msg := "Failed to get notification"
+		if status == http.StatusNotFound {
+			msg = "Notification not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -170,11 +189,26 @@ func (h NotificationHandler) RequeueNotification(w http.ResponseWriter, r *http.
 	notificationID := parts[0]
 
 	if err := h.svc.RequeueNotification(r.Context(), notificationID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Notification not found", requestID)
-			return
+		// M-1 (P2): dispatch routes through errToStatus. Pre-M-1 this branch
+		// classified 404 via strings.Contains(err.Error(), "not found"), which
+		// would have given false positives on any error whose rendered text
+		// happened to contain "not found" — notably a transient DB failure whose
+		// driver message mentioned a missing relation or column. Post-M-1: the
+		// repo-layer Requeue (postgres/notification.go) wraps zero-rows-affected
+		// with repository.ErrNotFound via %w, and the service layer forwards
+		// that error with %w — so errors.Is(err, repository.ErrNotFound) walks
+		// the full wrap chain and picks up the real 404s while everything else
+		// (including transient DB errors) correctly surfaces as 500 with
+		// server-side slog.Error capture (F-002 redacted-500 pattern preserved).
+		status := errToStatus(err)
+		if status == http.StatusInternalServerError {
+			slog.Error("RequeueNotification failed", "notification_id", notificationID, "error", err.Error())
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to requeue notification", requestID)
+		msg := "Failed to requeue notification"
+		if status == http.StatusNotFound {
+			msg = "Notification not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

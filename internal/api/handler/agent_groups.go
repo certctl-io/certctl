@@ -3,12 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // AgentGroupService defines the service interface for agent group operations.
@@ -22,6 +24,19 @@ type AgentGroupService interface {
 }
 
 // AgentGroupHandler handles HTTP requests for agent group operations.
+//
+// Error dispatch (post-M-1): every service error routes through the [errToStatus]
+// choke point via `errors.Is` walking the wrap chain, with one explicit
+// [service.ErrValidation] arm on the write paths (Create, Update) so the
+// composed "validation: <field-specific reason>" message the service layer
+// attaches via `fmt.Errorf("%w: ...", ErrValidation)` can be passed through to
+// the 400 response body. Before M-1, the Create handler branched on
+// `strings.Contains(err.Error(), "invalid"|"required")` — fragile because a
+// single reword in [service.validateAgentGroup] would demote the 400 to 500
+// with no compile-time signal — and the Update/Delete handlers branched on
+// `strings.Contains(err.Error(), "not found")`, coupling HTTP classification
+// to repository human-readable strings. Both now ride the typed
+// [repository.ErrNotFound] wrap through errToStatus. Mirrors ProfileHandler.
 type AgentGroupHandler struct {
 	svc AgentGroupService
 }
@@ -89,7 +104,18 @@ func (h AgentGroupHandler) GetAgentGroup(w http.ResponseWriter, r *http.Request)
 
 	group, err := h.svc.GetAgentGroup(r.Context(), id)
 	if err != nil {
-		ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
+		// M-1: route through errToStatus so a repo-level `sql.ErrNoRows`
+		// (wrapped as repository.ErrNotFound) becomes 404, but a transient DB
+		// failure no longer masquerades as 404 — it correctly surfaces 500. The
+		// pre-M-1 "any error → 404" shortcut was plausible when Get's only
+		// expected failure was "not found", but the choke point now gives us
+		// correct dispatch for free. Mirrors GetProfile.
+		status := errToStatus(err)
+		msg := "Failed to get agent group"
+		if status == http.StatusNotFound {
+			msg = "Agent group not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -123,7 +149,15 @@ func (h AgentGroupHandler) CreateAgentGroup(w http.ResponseWriter, r *http.Reque
 
 	created, err := h.svc.CreateAgentGroup(r.Context(), group)
 	if err != nil {
-		if strings.Contains(err.Error(), "invalid") || strings.Contains(err.Error(), "required") {
+		// M-1: replace the 2-term substring net (`"invalid"|"required"`) with a
+		// single `errors.Is(err, service.ErrValidation)` arm. validateAgentGroup
+		// wraps every field-specific failure via `fmt.Errorf("%w: <reason>",
+		// ErrValidation)`, so `err.Error()` still contains the human-readable
+		// reason (e.g., "agent group name is required") and can be safely passed
+		// to the 400 body — but the status decision no longer depends on the
+		// exact wording. Other errors redact to a generic 500. Mirrors
+		// CreateProfile.
+		if errors.Is(err, service.ErrValidation) {
 			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 			return
 		}
@@ -160,11 +194,22 @@ func (h AgentGroupHandler) UpdateAgentGroup(w http.ResponseWriter, r *http.Reque
 
 	updated, err := h.svc.UpdateAgentGroup(r.Context(), id, group)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
+		// M-1: explicit ErrValidation arm preserves the user-facing reason in
+		// the 400 body (validateAgentGroup wraps every failure via
+		// `fmt.Errorf("%w: ...", ErrValidation)`); every other error — including
+		// repo-layer ErrNotFound on a missing row — routes through errToStatus
+		// so the 404/500 decision no longer depends on substring matching.
+		// Mirrors UpdateProfile.
+		if errors.Is(err, service.ErrValidation) {
+			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
 			return
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update agent group", requestID)
+		status := errToStatus(err)
+		msg := "Failed to update agent group"
+		if status == http.StatusNotFound {
+			msg = "Agent group not found"
+		}
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -188,11 +233,15 @@ func (h AgentGroupHandler) DeleteAgentGroup(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.svc.DeleteAgentGroup(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
-			return
+		// M-1: sentinel dispatch replaces the substring 404 check — see the
+		// parallel comment block in UpdateAgentGroup for the rationale. Mirrors
+		// DeleteProfile.
+		status := errToStatus(err)
+		msg := "Failed to delete agent group"
+		if status == http.StatusNotFound {
+			msg = "Agent group not found"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to delete agent group", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

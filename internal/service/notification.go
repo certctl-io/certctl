@@ -383,6 +383,15 @@ func (s *NotificationService) ListNotifications(ctx context.Context, page, perPa
 }
 
 // GetNotification returns a single notification (handler interface method).
+//
+// M-1 (P2): the not-found branch now wraps service.ErrNotFound via %w so the
+// handler's errToStatus choke point dispatches to 404 via errors.Is. Pre-M-1
+// this returned a raw fmt.Errorf("notification not found") and the handler
+// relied on a blanket "any error from this service call → 404" shortcut —
+// which silently demoted transient DB failures (the List() error wrap above)
+// to 404. Post-M-1 the handler uses errToStatus; the List() error wrap still
+// surfaces as 500 (no sentinel attached), and only this explicit not-found
+// branch maps to 404.
 func (s *NotificationService) GetNotification(ctx context.Context, id string) (*domain.NotificationEvent, error) {
 	filter := &repository.NotificationFilter{
 		PerPage: 1,
@@ -400,7 +409,7 @@ func (s *NotificationService) GetNotification(ctx context.Context, id string) (*
 		}
 	}
 
-	return nil, fmt.Errorf("notification not found")
+	return nil, fmt.Errorf("%w: notification %s", ErrNotFound, id)
 }
 
 // MarkAsRead marks a notification as read (handler interface method).
@@ -568,6 +577,13 @@ func (s *NotificationService) RetryFailedNotifications(ctx context.Context) erro
 //     "pg: deadlock detected" surfaces in the handler response and the
 //     operator UI. The service has no fallback — a silent "success" that
 //     didn't actually mutate the row would be worse than a loud error.
+//
+// M-1 (P2): the repo's Requeue (postgres/notification.go) now wraps
+// repository.ErrNotFound on zero-rows-affected. Because this method wraps
+// the repo error with %w, errors.Is(err, repository.ErrNotFound) walks
+// cleanly through both wrap layers — so the handler's errToStatus choke
+// point dispatches a genuine missing-row Requeue to 404 and a transient
+// "pg: deadlock detected" to 500 without substring matching.
 func (s *NotificationService) RequeueNotification(ctx context.Context, id string) error {
 	if err := s.notifRepo.Requeue(ctx, id); err != nil {
 		return fmt.Errorf("failed to requeue notification: %w", err)

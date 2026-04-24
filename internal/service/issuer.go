@@ -262,10 +262,18 @@ func (s *IssuerService) Delete(ctx context.Context, id string, actor string) err
 
 // TestConnection tests the connection to an issuer by instantiating a throwaway
 // connector and calling ValidateConfig. Records the result in the database.
+//
+// M-1 (P2): the pre-M-1 wrap was `"issuer not found: %w"` on every
+// issuerRepo.Get error — which coupled to handler substring classifiers on
+// "not found" and could have demoted transient DB failures to 404. Now the
+// repo wraps only the genuine sql.ErrNoRows path with repository.ErrNotFound
+// (postgres/issuer.go Get), so errors.Is walks the wrap chain correctly:
+// truly-missing → 404, everything else → 500. The wrap text is changed from
+// "issuer not found" to "failed to get issuer" to match the semantic.
 func (s *IssuerService) TestConnection(ctx context.Context, id string) error {
 	iss, err := s.issuerRepo.Get(ctx, id)
 	if err != nil {
-		return fmt.Errorf("issuer not found: %w", err)
+		return fmt.Errorf("failed to get issuer: %w", err)
 	}
 
 	// Get the decrypted config

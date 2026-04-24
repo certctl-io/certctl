@@ -4,11 +4,13 @@ import (
 	"context"
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // ProfileRepository implements repository.CertificateProfileRepository
@@ -63,8 +65,11 @@ func (r *ProfileRepository) Get(ctx context.Context, id string) (*domain.Certifi
 
 	p, err := scanProfile(row)
 	if err != nil {
-		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("profile not found")
+		if errors.Is(err, sql.ErrNoRows) {
+			// M-1: wrap repository.ErrNotFound so the handler's errToStatus
+			// choke point can route this to HTTP 404 via errors.Is without
+			// substring-matching the "not found" message text.
+			return nil, fmt.Errorf("%w: profile %s", repository.ErrNotFound, id)
 		}
 		return nil, fmt.Errorf("failed to query profile: %w", err)
 	}
@@ -159,7 +164,8 @@ func (r *ProfileRepository) Update(ctx context.Context, profile *domain.Certific
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("profile not found")
+		// M-1: wrap repository.ErrNotFound — see Get for rationale.
+		return fmt.Errorf("%w: profile %s", repository.ErrNotFound, profile.ID)
 	}
 
 	return nil
@@ -178,7 +184,8 @@ func (r *ProfileRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("profile not found")
+		// M-1: wrap repository.ErrNotFound — see Get for rationale.
+		return fmt.Errorf("%w: profile %s", repository.ErrNotFound, id)
 	}
 
 	return nil

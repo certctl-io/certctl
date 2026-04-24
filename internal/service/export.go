@@ -38,16 +38,31 @@ type ExportPEMResult struct {
 
 // ExportPEM returns the PEM-encoded certificate and chain for the latest version.
 func (s *ExportService) ExportPEM(ctx context.Context, certID string) (*ExportPEMResult, error) {
-	// Verify certificate exists
+	// Verify certificate exists.
+	//
+	// M-1 (P2): the pre-M-1 wrap was `"certificate not found: %w"` on every
+	// certRepo.Get error — which gave the handler's strings.Contains(err.Error(),
+	// "not found") check a false positive on transient DB failures (connection
+	// refused, context deadline, etc.), demoting a 500 to a 404. Now the repo
+	// wraps only the genuine sql.ErrNoRows path with repository.ErrNotFound
+	// (certificate.go Get), so the errors.Is walk through the handler's
+	// errToStatus discriminates correctly: truly-missing → 404, everything else
+	// → 500 (the intended outcome). The wrap text is changed from "certificate
+	// not found" to "failed to get certificate" to match the semantic.
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found: %w", err)
+		return nil, fmt.Errorf("failed to get certificate: %w", err)
 	}
 
-	// Get latest version (contains the PEM chain)
+	// Get latest version (contains the PEM chain).
+	//
+	// M-1 (P2): same wrap-text correction as above — pre-M-1 any
+	// GetLatestVersion error surfaced as "no certificate version found",
+	// which bled into the handler's substring classifier. Now the repo wraps
+	// sql.ErrNoRows with repository.ErrNotFound; the wrap chain walks cleanly.
 	version, err := s.certRepo.GetLatestVersion(ctx, certID)
 	if err != nil {
-		return nil, fmt.Errorf("no certificate version found: %w", err)
+		return nil, fmt.Errorf("failed to get latest certificate version: %w", err)
 	}
 
 	// Split PEM chain into leaf cert + chain
@@ -73,26 +88,37 @@ func (s *ExportService) ExportPEM(ctx context.Context, certID string) (*ExportPE
 // The private key is NOT included — it lives on the agent and never touches the control plane.
 // The PKCS#12 bundle is encrypted with the provided password (can be empty for cert-only bundles).
 func (s *ExportService) ExportPKCS12(ctx context.Context, certID string, password string) ([]byte, error) {
-	// Verify certificate exists
+	// Verify certificate exists. See M-1 (P2) note on ExportPEM for the wrap-text
+	// correction — same rationale applies here.
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found: %w", err)
+		return nil, fmt.Errorf("failed to get certificate: %w", err)
 	}
 
-	// Get latest version
+	// Get latest version. Same wrap-text correction as ExportPEM.
 	version, err := s.certRepo.GetLatestVersion(ctx, certID)
 	if err != nil {
-		return nil, fmt.Errorf("no certificate version found: %w", err)
+		return nil, fmt.Errorf("failed to get latest certificate version: %w", err)
 	}
 
-	// Parse PEM chain into x509.Certificate objects
+	// Parse PEM chain into x509.Certificate objects.
+	//
+	// M-1 (P2): wrap both parse-failure paths with ErrUnprocessable so the
+	// handler's errToStatus choke point dispatches to 422 Unprocessable Entity
+	// via errors.Is instead of the pre-M-1 two-term substring net
+	// (`"cannot be parsed"|"no certificates found"`) at handler/export.go:101.
+	// 422 is the correct status here — the caller's request is syntactically
+	// fine; the stored PEM chain is what can't be processed. The composed
+	// Error() string still carries the "certificate data cannot be parsed as
+	// X.509"/"no certificates found in PEM chain" wording so server-side
+	// slog.Error capture and any future 422 body propagation stay readable.
 	certs, err := parsePEMCertificates(version.PEMChain)
 	if err != nil {
-		return nil, fmt.Errorf("certificate data cannot be parsed as X.509: %w", err)
+		return nil, fmt.Errorf("%w: certificate data cannot be parsed as X.509: %v", ErrUnprocessable, err)
 	}
 
 	if len(certs) == 0 {
-		return nil, fmt.Errorf("no certificates found in PEM chain")
+		return nil, fmt.Errorf("%w: no certificates found in PEM chain", ErrUnprocessable)
 	}
 
 	// Build PKCS#12 bundle: leaf cert + CA chain (no private key)

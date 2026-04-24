@@ -1318,7 +1318,10 @@ func (m *mockProfileService) ListProfiles(_ context.Context, page, perPage int) 
 }
 
 func (m *mockProfileService) GetProfile(_ context.Context, id string) (*domain.CertificateProfile, error) {
-	return nil, fmt.Errorf("profile not found")
+	// M-1: wrap service.ErrNotFound so the handler's errToStatus choke point
+	// routes this to 404 via errors.Is. The Error() message still contains
+	// "not found" so any pre-migration substring assertions continue to pass.
+	return nil, fmt.Errorf("%w: profile not found", service.ErrNotFound)
 }
 
 func (m *mockProfileService) CreateProfile(_ context.Context, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
@@ -1341,7 +1344,8 @@ func (m *mockAgentGroupService) ListAgentGroups(_ context.Context, page, perPage
 }
 
 func (m *mockAgentGroupService) GetAgentGroup(_ context.Context, id string) (*domain.AgentGroup, error) {
-	return nil, fmt.Errorf("agent group not found")
+	// M-1: wrap service.ErrNotFound — see GetProfile above for rationale.
+	return nil, fmt.Errorf("%w: agent group not found", service.ErrNotFound)
 }
 
 func (m *mockAgentGroupService) CreateAgentGroup(_ context.Context, group domain.AgentGroup) (*domain.AgentGroup, error) {

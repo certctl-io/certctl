@@ -143,12 +143,20 @@ func (s *AgentGroupService) ListMembers(ctx context.Context, id string) ([]domai
 }
 
 // validateAgentGroup checks that an agent group's configuration is valid.
+//
+// M-1 (P2): every return wraps ErrValidation via %w so the handler's
+// errToStatus choke point dispatches these to HTTP 400 via errors.Is without
+// the substring-matching on "invalid"/"required" that the pre-M-1
+// agent_groups handler relied on at handler/agent_groups.go:126. The composed
+// Error() string still contains the original human-readable text, so the
+// handler safely passes err.Error() through to the response body on the 400
+// arm. Mirrors validateProfile.
 func validateAgentGroup(g *domain.AgentGroup) error {
 	if g.Name == "" {
-		return fmt.Errorf("agent group name is required")
+		return fmt.Errorf("%w: agent group name is required", ErrValidation)
 	}
 	if len(g.Name) > 255 {
-		return fmt.Errorf("agent group name exceeds 255 characters")
+		return fmt.Errorf("%w: agent group name exceeds 255 characters", ErrValidation)
 	}
 	return nil
 }

@@ -6,10 +6,12 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/lib/pq"
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
 )
@@ -409,6 +411,16 @@ func (s *AgentService) RegisterAgent(ctx context.Context, agent domain.Agent) (*
 	agent.LastHeartbeatAt = &now
 
 	if err := s.agentRepo.Create(ctx, &agent); err != nil {
+		// M-1 (P2): explicit pg-23505 dispatch wraps unique-constraint
+		// violations on the agent name with ErrConflict so the handler's
+		// errors.Is(err, service.ErrConflict) arm fires 409 deterministically
+		// instead of relying on the errToStatus *pq.Error SQLSTATE fallback.
+		// Mirrors the duplicate-name paths in IssuerService and
+		// RenewalPolicyService.
+		var pgErr *pq.Error
+		if errors.As(err, &pgErr) && pgErr.Code == "23505" {
+			return nil, fmt.Errorf("%w: agent name already exists", ErrConflict)
+		}
 		return nil, fmt.Errorf("failed to register agent: %w", err)
 	}
 	return &agent, nil

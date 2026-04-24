@@ -108,9 +108,17 @@ func TestExportPEM_Download(t *testing.T) {
 }
 
 func TestExportPEM_NotFound(t *testing.T) {
+	// M-1 (P2): wrap with service.ErrNotFound via %w so the handler's
+	// errToStatus choke point dispatches to 404 via errors.Is. Pre-M-1 this
+	// test used a raw `fmt.Errorf("certificate not found")` string and relied
+	// on the handler's strings.Contains(err.Error(), "not found") classifier
+	// — which was the same mechanism that silently misclassified transient DB
+	// failures whose text happened to include "not found" (see docblock on
+	// ExportPEM handler). Pinning the sentinel contract makes this test
+	// regression-proof against wrap-text changes.
 	mockSvc := &MockExportService{
 		ExportPEMFn: func(_ context.Context, _ string) (*service.ExportPEMResult, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("%w: certificate", service.ErrNotFound)
 		},
 	}
 	h := NewExportHandler(mockSvc)
@@ -214,9 +222,11 @@ func TestExportPKCS12_EmptyPassword(t *testing.T) {
 }
 
 func TestExportPKCS12_NotFound(t *testing.T) {
+	// M-1 (P2): same sentinel migration as TestExportPEM_NotFound — see
+	// rationale there.
 	mockSvc := &MockExportService{
 		ExportPKCS12Fn: func(_ context.Context, _ string, _ string) ([]byte, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("%w: certificate", service.ErrNotFound)
 		},
 	}
 	h := NewExportHandler(mockSvc)
@@ -228,6 +238,31 @@ func TestExportPKCS12_NotFound(t *testing.T) {
 
 	if w.Code != http.StatusNotFound {
 		t.Fatalf("expected 404, got %d", w.Code)
+	}
+}
+
+// TestExportPKCS12_Unprocessable pins the M-1 (P2) 422 contract: when the
+// service layer wraps a parse failure with service.ErrUnprocessable, the
+// handler's errToStatus choke point must dispatch to 422 Unprocessable
+// Entity. Pre-M-1 this was classified via a 2-term substring net
+// (`"cannot be parsed"|"no certificates found"`) at export.go:101, which
+// would have been silently broken by a message reword in service/export.go.
+// The new sentinel makes the dispatch survive message rewording.
+func TestExportPKCS12_Unprocessable(t *testing.T) {
+	mockSvc := &MockExportService{
+		ExportPKCS12Fn: func(_ context.Context, _ string, _ string) ([]byte, error) {
+			return nil, fmt.Errorf("%w: certificate data cannot be parsed as X.509: asn1 decode error", service.ErrUnprocessable)
+		},
+	}
+	h := NewExportHandler(mockSvc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-test-1/export/pkcs12", nil)
+	w := httptest.NewRecorder()
+
+	h.ExportPKCS12(w, req)
+
+	if w.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("expected 422, got %d", w.Code)
 	}
 }
 

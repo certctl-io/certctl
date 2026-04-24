@@ -376,10 +376,21 @@ func (s *CertificateService) CreateCertificate(ctx context.Context, cert domain.
 
 // UpdateCertificate modifies a certificate (handler interface method).
 func (s *CertificateService) UpdateCertificate(ctx context.Context, id string, patch domain.ManagedCertificate) (*domain.ManagedCertificate, error) {
-	// Fetch existing certificate so partial updates don't zero out fields
+	// Fetch existing certificate so partial updates don't zero out fields.
+	//
+	// M-1 (P2): the pre-M-1 wrap was `"certificate not found: %w"` on every
+	// certRepo.Get error — which coupled to the handler's strings.Contains
+	// substring classifier on "not found" and gave false positives on transient
+	// DB failures (connection refused, context deadline, etc.), demoting a 500
+	// to a 404. Now the repo wraps only the genuine sql.ErrNoRows path with
+	// repository.ErrNotFound (certificate.go Get), so the errors.Is walk
+	// through the handler's errToStatus choke point discriminates correctly:
+	// truly-missing → 404, everything else → 500 (the intended outcome). The
+	// wrap text is changed from "certificate not found" to "failed to get
+	// certificate" to match the semantic.
 	existing, err := s.certRepo.Get(ctx, id)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found: %w", err)
+		return nil, fmt.Errorf("failed to get certificate: %w", err)
 	}
 
 	// Merge non-zero fields from patch into existing
@@ -501,10 +512,14 @@ func (s *CertificateService) GetOCSPResponse(ctx context.Context, issuerID strin
 
 // GetCertificateDeployments returns all deployment targets for a certificate (M20).
 func (s *CertificateService) GetCertificateDeployments(ctx context.Context, certID string) ([]domain.DeploymentTarget, error) {
-	// Verify certificate exists
+	// Verify certificate exists. See M-1 (P2) note on UpdateCertificate for
+	// the wrap-text correction rationale — same treatment applies here: the
+	// repo's sql.ErrNoRows wrap with repository.ErrNotFound escapes cleanly
+	// through fmt.Errorf("%w", ...) so errors.Is picks up the genuine 404
+	// while transient DB errors correctly surface as 500.
 	_, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
-		return nil, fmt.Errorf("certificate not found: %w", err)
+		return nil, fmt.Errorf("failed to get certificate: %w", err)
 	}
 
 	if s.targetRepo == nil {

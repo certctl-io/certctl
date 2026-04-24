@@ -26,8 +26,12 @@ import (
 // three cloud secret-manager discovery sources; retiring any of them orphans
 // its subsystem. The guard fires unconditionally — force=true does not bypass
 // it, because a sentinel is a structural invariant of the deployment, not
-// a piece of fleet state the operator owns. Handler maps this to HTTP 403.
-var ErrAgentIsSentinel = errors.New("agent is a reserved sentinel and cannot be retired")
+// a piece of fleet state the operator owns.
+//
+// M-1 (P2): wraps [ErrForbidden] so the handler-layer errToStatus choke point
+// resolves HTTP 403 via errors.Is. Call sites can still errors.Is against
+// ErrAgentIsSentinel for domain-specific branches.
+var ErrAgentIsSentinel = fmt.Errorf("%w: agent is a reserved sentinel and cannot be retired", ErrForbidden)
 
 // ErrBlockedByDependencies is returned by RetireAgent when at least one of
 // (active targets, active certificates, pending jobs) referencing the agent
@@ -35,15 +39,22 @@ var ErrAgentIsSentinel = errors.New("agent is a reserved sentinel and cannot be 
 // a *BlockedByDependenciesError (see below), so handlers doing errors.As
 // can surface the per-bucket counts in the 409 body for operator
 // troubleshooting. Tests use errors.Is; handlers use errors.As.
-var ErrBlockedByDependencies = errors.New("agent has active downstream dependencies")
+//
+// M-1 (P2): wraps [ErrConflict] so errToStatus resolves HTTP 409 via
+// errors.Is, keeping the per-bucket errors.As path unchanged for the
+// detailed 409 body. BlockedByDependenciesError.Unwrap still returns the
+// domain-specific sentinel for chained Is checks.
+var ErrBlockedByDependencies = fmt.Errorf("%w: agent has active downstream dependencies", ErrConflict)
 
 // ErrForceReasonRequired is returned when force=true is supplied without a
 // non-empty reason. The force escape hatch is deliberately chatty: operators
 // pulling the emergency cord must leave an auditable breadcrumb explaining
-// why a cascade was justified. Handler maps this to HTTP 400 so the operator
-// retries with --reason rather than silently skipping the guard. Checked
-// before any DB mutation to keep the no-reason path transactionally clean.
-var ErrForceReasonRequired = errors.New("force=true requires a non-empty reason")
+// why a cascade was justified. Operators must retry with --reason rather
+// than silently skipping the guard. Checked before any DB mutation to keep
+// the no-reason path transactionally clean.
+//
+// M-1 (P2): wraps [ErrValidation] so errToStatus resolves HTTP 400.
+var ErrForceReasonRequired = fmt.Errorf("%w: force=true requires a non-empty reason", ErrValidation)
 
 // ErrAgentRetired is returned by Heartbeat (and any future agent-authenticated
 // call site) when a retired agent is still polling. The handler layer maps
@@ -52,6 +63,12 @@ var ErrForceReasonRequired = errors.New("force=true requires a non-empty reason"
 // forever on a soft-retired identity. IsRetired() on the domain model is
 // the single source of truth; the sentinel exists so service and handler
 // callers can errors.Is against one symbol.
+//
+// M-1 (P2): deliberately NOT wrapped under any generic sentinel. 410 Gone is
+// semantically distinct from 403/404/409 — it signals a permanently-terminated
+// resource identity and drives deterministic agent-binary shutdown (see
+// cmd/agent/main.go). errToStatus tests it FIRST so it cannot be demoted by
+// the generic cascade.
 var ErrAgentRetired = errors.New("agent has been retired")
 
 // BlockedByDependenciesError wraps ErrBlockedByDependencies and carries the

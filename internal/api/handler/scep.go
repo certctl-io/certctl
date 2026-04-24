@@ -6,6 +6,7 @@ import (
 	"encoding/asn1"
 	"encoding/base64"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -14,6 +15,7 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/pkcs7"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // SCEPService defines the service interface for SCEP enrollment operations.
@@ -171,11 +173,25 @@ func (h SCEPHandler) pkiOperation(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.PKCSReq(r.Context(), csrPEM, challengePassword, transactionID)
 	if err != nil {
-		if strings.Contains(err.Error(), "challenge password") {
-			ErrorWithRequestID(w, http.StatusForbidden, "Invalid challenge password", requestID)
+		// M-1 (P2): typed-sentinel dispatch replaces the pre-M-1 substring
+		// branch `strings.Contains(err.Error(), "challenge password")`. The
+		// service layer now wraps both challenge-password failure modes (server
+		// misconfigured / client credential wrong) via `fmt.Errorf("%w: ...",
+		// ErrUnauthenticated)`, so errors.Is walks the wrap chain without
+		// depending on the exact wording of the error string. This also
+		// corrects the HTTP status: pre-M-1 returned 403 Forbidden, but RFC
+		// 7235 classifies this as 401 Unauthorized (authentication failure, not
+		// authorization denial). The errToStatus doc block enumerates this as
+		// the canonical ErrUnauthenticated call site.
+		if errors.Is(err, service.ErrUnauthenticated) {
+			ErrorWithRequestID(w, http.StatusUnauthorized, "Invalid challenge password", requestID)
 			return
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, fmt.Sprintf("Enrollment failed: %v", err), requestID)
+		// F-002 redacted-500: every other enrollment failure (CSR parse errors,
+		// issuer-layer failures, audit-layer failures) returns an opaque body
+		// so we don't leak internal state through the SCEP response. The
+		// logger already captured the real error at the service layer.
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Enrollment failed", requestID)
 		return
 	}
 

@@ -298,12 +298,13 @@ func (h CertificateHandler) UpdateCertificate(w http.ResponseWriter, r *http.Req
 
 	updated, err := h.svc.UpdateCertificate(r.Context(), id, cert)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("UpdateCertificate failed", "cert_id", id, "error", err)
+			msg = "internal error"
 		}
-		slog.Error("UpdateCertificate failed", "cert_id", id, "error", err.Error())
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to update certificate", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -327,11 +328,13 @@ func (h CertificateHandler) ArchiveCertificate(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.svc.ArchiveCertificate(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("ArchiveCertificate failed", "cert_id", id, "error", err)
+			msg = "internal error"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to archive certificate", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -373,12 +376,13 @@ func (h CertificateHandler) GetCertificateVersions(w http.ResponseWriter, r *htt
 
 	versions, total, err := h.svc.GetCertificateVersions(r.Context(), certID, page, perPage)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("GetCertificateVersions failed", "cert_id", certID, "error", err)
+			msg = "internal error"
 		}
-		slog.Error("GetCertificateVersions failed", "cert_id", certID, "error", err.Error())
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to get certificate versions", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -414,20 +418,13 @@ func (h CertificateHandler) TriggerRenewal(w http.ResponseWriter, r *http.Reques
 	actor := resolveActor(r.Context())
 
 	if err := h.svc.TriggerRenewal(r.Context(), certID, actor); err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("TriggerRenewal failed", "cert_id", certID, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(errMsg, "cannot renew") {
-			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
-			return
-		}
-		if strings.Contains(errMsg, "already in progress") {
-			ErrorWithRequestID(w, http.StatusConflict, errMsg, requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to trigger renewal", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -516,19 +513,13 @@ func (h CertificateHandler) RevokeCertificate(w http.ResponseWriter, r *http.Req
 	actor := resolveActor(r.Context())
 
 	if err := h.svc.RevokeCertificate(r.Context(), certID, req.Reason, actor); err != nil {
-		// Distinguish between client errors and server errors
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "already revoked") ||
-			strings.Contains(errMsg, "cannot revoke") ||
-			strings.Contains(errMsg, "invalid revocation reason") {
-			ErrorWithRequestID(w, http.StatusBadRequest, errMsg, requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("RevokeCertificate failed", "cert_id", certID, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(errMsg, "not found") || strings.Contains(errMsg, "failed to fetch") || strings.Contains(errMsg, "failed to get") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to revoke certificate", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -557,16 +548,13 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 
 	derBytes, err := h.svc.GenerateDERCRL(r.Context(), issuerID)
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, errMsg, requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("GenerateDERCRL failed", "issuer_id", issuerID, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
-			ErrorWithRequestID(w, http.StatusNotImplemented, errMsg, requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate CRL", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -602,16 +590,13 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 
 	derBytes, err := h.svc.GetOCSPResponse(r.Context(), issuerID, serialHex)
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, errMsg, requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("GetOCSPResponse failed", "issuer_id", issuerID, "serial", serialHex, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
-			ErrorWithRequestID(w, http.StatusNotImplemented, errMsg, requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate OCSP response", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -642,12 +627,13 @@ func (h CertificateHandler) GetCertificateDeployments(w http.ResponseWriter, r *
 
 	deployments, err := h.svc.GetCertificateDeployments(r.Context(), certID)
 	if err != nil {
-		errMsg := err.Error()
-		if strings.Contains(errMsg, "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("GetCertificateDeployments failed", "cert_id", certID, "error", err)
+			msg = "internal error"
 		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to get deployments", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

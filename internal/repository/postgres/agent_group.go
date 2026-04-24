@@ -3,10 +3,12 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // AgentGroupRepository implements agent group CRUD with PostgreSQL.
@@ -49,8 +51,12 @@ func (r *AgentGroupRepository) Get(ctx context.Context, id string) (*domain.Agen
 	g := &domain.AgentGroup{}
 	err := row.Scan(&g.ID, &g.Name, &g.Description, &g.MatchOS, &g.MatchArchitecture,
 		&g.MatchIPCIDR, &g.MatchVersion, &g.Enabled, &g.CreatedAt, &g.UpdatedAt)
-	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent group not found: %s", id)
+	// M-1 (P2): wrap sql.ErrNoRows with repository.ErrNotFound via %w so the
+	// handler's errToStatus choke point dispatches to 404 via errors.Is
+	// instead of the pre-M-1 strings.Contains(err.Error(), "not found")
+	// branch at handler/agent_groups.go. Mirrors profile repository.
+	if errors.Is(err, sql.ErrNoRows) {
+		return nil, fmt.Errorf("%w: agent group %s", repository.ErrNotFound, id)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get agent group: %w", err)
@@ -83,8 +89,11 @@ func (r *AgentGroupRepository) Update(ctx context.Context, group *domain.AgentGr
 		return fmt.Errorf("failed to update agent group: %w", err)
 	}
 	rows, _ := result.RowsAffected()
+	// M-1 (P2): wrap the zero-rows-affected condition with
+	// repository.ErrNotFound so the handler's errToStatus dispatches to 404
+	// via errors.Is without substring matching. Mirrors profile repository.
 	if rows == 0 {
-		return fmt.Errorf("agent group not found: %s", group.ID)
+		return fmt.Errorf("%w: agent group %s", repository.ErrNotFound, group.ID)
 	}
 	return nil
 }
@@ -96,8 +105,11 @@ func (r *AgentGroupRepository) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to delete agent group: %w", err)
 	}
 	rows, _ := result.RowsAffected()
+	// M-1 (P2): wrap zero-rows-affected with repository.ErrNotFound so the
+	// handler's errToStatus dispatches to 404 via errors.Is. Mirrors profile
+	// repository.
 	if rows == 0 {
-		return fmt.Errorf("agent group not found: %s", id)
+		return fmt.Errorf("%w: agent group %s", repository.ErrNotFound, id)
 	}
 	return nil
 }

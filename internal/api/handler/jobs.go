@@ -3,15 +3,14 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"io"
+	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/service"
 )
 
 // JobService defines the service interface for job operations.
@@ -160,22 +159,13 @@ func (h JobHandler) ApproveJob(w http.ResponseWriter, r *http.Request) {
 	actor := resolveActor(r.Context())
 
 	if err := h.svc.ApproveJob(r.Context(), jobID, actor); err != nil {
-		// M-003: self-approval by the certificate owner is forbidden.
-		if errors.Is(err, service.ErrSelfApproval) {
-			ErrorWithRequestID(w, http.StatusForbidden,
-				"Self-approval is forbidden: the certificate owner cannot approve their own renewal",
-				requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("ApproveJob failed", "job_id", jobID, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
-			return
-		}
-		if strings.Contains(err.Error(), "cannot approve") {
-			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to approve job", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 
@@ -213,15 +203,13 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 	actor := resolveActor(r.Context())
 
 	if err := h.svc.RejectJob(r.Context(), jobID, body.Reason, actor); err != nil {
-		if strings.Contains(err.Error(), "not found") {
-			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
-			return
+		status := errToStatus(err)
+		msg := err.Error()
+		if status == http.StatusInternalServerError {
+			slog.Error("RejectJob failed", "job_id", jobID, "error", err)
+			msg = "internal error"
 		}
-		if strings.Contains(err.Error(), "cannot reject") {
-			ErrorWithRequestID(w, http.StatusBadRequest, err.Error(), requestID)
-			return
-		}
-		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to reject job", requestID)
+		ErrorWithRequestID(w, status, msg, requestID)
 		return
 	}
 

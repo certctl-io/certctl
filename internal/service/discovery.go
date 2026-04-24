@@ -166,9 +166,20 @@ func (s *DiscoveryService) ClaimDiscovered(ctx context.Context, id string, manag
 		return fmt.Errorf("failed to get discovered certificate: %w", err)
 	}
 
-	// Verify the managed cert exists
+	// Verify the managed cert exists.
+	//
+	// M-1 (P2): the pre-M-1 wrap was a bare `fmt.Errorf("managed certificate not
+	// found: %s", managedCertID)` with no %w and no sentinel. That threw away the
+	// underlying error entirely — a transient DB failure from certRepo.Get (e.g.,
+	// connection dropped, query timeout) would be flattened into the same "not
+	// found" string as a genuine sql.ErrNoRows, which the pre-M-1 handler
+	// strings.Contains classifier then swept into 404. Post-M-1 we propagate the
+	// underlying error via %w so errors.Is walks the chain correctly:
+	// certRepo.Get wraps genuine sql.ErrNoRows with repository.ErrNotFound (see
+	// postgres/certificate.go Get), and errToStatus dispatches that to 404;
+	// transient errors surface as 500 via the generic-error fallback.
 	if _, err := s.certRepo.Get(ctx, managedCertID); err != nil {
-		return fmt.Errorf("managed certificate not found: %s", managedCertID)
+		return fmt.Errorf("failed to get managed certificate %s: %w", managedCertID, err)
 	}
 
 	if err := s.discoveryRepo.UpdateDiscoveredStatus(ctx, id, domain.DiscoveryStatusManaged, managedCertID); err != nil {
