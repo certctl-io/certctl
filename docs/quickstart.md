@@ -60,6 +60,8 @@ cp deploy/.env.example deploy/.env
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
+> **Warning:** Edit `POSTGRES_PASSWORD` *before* the very first `docker compose up`. Postgres seeds the password into its data directory only on first boot of an empty volume — after that, the password is baked into `pg_authid` and the env var is ignored. If you boot once with the default and later change `POSTGRES_PASSWORD` in `.env`, the certctl-server container picks up the new value but postgres still authenticates against the old one, and the server logs `pq: password authentication failed for user "certctl"` (SQLSTATE 28P01). Two ways out: tear down the volume with `docker compose -f deploy/docker-compose.yml down -v` (this **deletes all data**) and bring up fresh, or rotate non-destructively with `docker compose -f deploy/docker-compose.yml exec postgres psql -U certctl -c "ALTER ROLE certctl PASSWORD '<new>';"` and then restart certctl-server with the matching `POSTGRES_PASSWORD`.
+
 ### Docker Compose Environments
 
 The `deploy/` directory contains four compose files for different use cases:
