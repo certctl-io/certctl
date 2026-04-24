@@ -2,6 +2,8 @@
 
 This example demonstrates certctl managing **both public and internal certificates from a single dashboard**. Public-facing services use Let's Encrypt (ACME), while internal services use a private Local CA — all visible and managed in one place.
 
+> **Operational notes** shared by every example (postgres password rotation trap, TLS provisioning, teardown semantics) live in [`../README.md`](../README.md). Read it first if you plan to change `DB_PASSWORD` after the initial `docker compose up` — the postgres volume binds the password on first boot only.
+
 ## The Use Case
 
 You have:

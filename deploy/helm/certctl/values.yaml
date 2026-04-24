@@ -260,7 +260,30 @@ postgresql:
   auth:
     database: certctl
     username: certctl
-    password: ""  # REQUIRED - set via --set or values override
+    # REQUIRED — set via `--set postgresql.auth.password=<value>` or values override.
+    #
+    # WARNING (U-1): rotating this value after first deploy does NOT change the
+    # database password. The `postgres:16-alpine` image runs `initdb` only when
+    # /var/lib/postgresql/data is empty, so POSTGRES_PASSWORD is written into
+    # pg_authid exactly once — on the first boot of the StatefulSet's PVC.
+    # Subsequent rollouts pick up the new env value in the postgres container
+    # but the certctl-server container's CERTCTL_DATABASE_URL also picks up
+    # the new value, while pg_authid still expects the old one — leading to
+    # `pq: password authentication failed for user "certctl"` (SQLSTATE 28P01).
+    #
+    # The certctl-server emits guidance via internal/repository/postgres/db.go::
+    # wrapPingError when it sees SQLSTATE 28P01 at startup. To resolve in a
+    # Helm deployment:
+    #   - Non-destructive (preferred for environments with data):
+    #       kubectl exec -it <release>-postgres-0 -- \
+    #         psql -U certctl -c "ALTER ROLE certctl PASSWORD '<new>';"
+    #     then update the secret/values to match and let the certctl-server
+    #     pod restart against the matching credential.
+    #   - Destructive (DESTROYS DATA — only acceptable on dev/demo PVCs):
+    #       helm uninstall <release> && \
+    #       kubectl delete pvc -l app.kubernetes.io/name=certctl,app.kubernetes.io/component=postgres && \
+    #       helm install <release> ...  # PVC re-creates empty, initdb seeds new password
+    password: ""
 
   # Storage configuration
   storage:

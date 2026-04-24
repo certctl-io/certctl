@@ -2,6 +2,8 @@
 
 This example demonstrates certctl managing certificates issued by **Smallstep step-ca** and deploying them to **HAProxy**.
 
+> **Operational notes** shared by every example (postgres password rotation trap, TLS provisioning, teardown semantics) live in [`../README.md`](../README.md). Read it first if you plan to change `DB_PASSWORD` after the initial `docker compose up` — the postgres volume binds the password on first boot only.
+
 ## Scenario
 
 You're a Smallstep user running step-ca as your internal PKI. You have HAProxy load balancers that need certificates. This setup:

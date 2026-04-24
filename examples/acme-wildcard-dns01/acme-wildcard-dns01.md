@@ -2,6 +2,8 @@
 
 **What this does:** Issues wildcard certificates (e.g., `*.example.com`) from Let's Encrypt using DNS-01 challenge validation.
 
+> **Operational notes** shared by every example (postgres password rotation trap, TLS provisioning, teardown semantics) live in [`../README.md`](../README.md). Read it first if you plan to change `DB_PASSWORD` after the initial `docker compose up` — the postgres volume binds the password on first boot only.
+
 This example is ideal for:
 - Issuing wildcard certificates (`*.example.com`)
 - Services behind NAT, firewalls, or non-public networks
