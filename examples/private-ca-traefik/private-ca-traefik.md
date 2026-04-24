@@ -1,5 +1,7 @@
 # Private CA + Traefik Example
 
+> **Operational notes** shared by every example (postgres password rotation trap, TLS provisioning, teardown semantics) live in [`../README.md`](../README.md). Read it first if you plan to change `DB_PASSWORD` after the initial `docker compose up` — the postgres volume binds the password on first boot only.
+
 This example demonstrates certctl managing certificates for **internal services without public CA dependency**. Ideal for enterprise environments where:
 
 - All services are internal (VPN, private networks)

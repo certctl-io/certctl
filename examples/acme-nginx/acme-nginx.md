@@ -2,6 +2,8 @@
 
 This example demonstrates certctl's core use case: **automatically manage TLS certificates for NGINX using Let's Encrypt (ACME HTTP-01 challenges).**
 
+> **Operational notes** shared by every example (postgres password rotation trap, TLS provisioning, teardown semantics) live in [`../README.md`](../README.md). Read it first if you plan to change `DB_PASSWORD` after the initial `docker compose up` — the postgres volume binds the password on first boot only.
+
 ## What This Does
 
 - Deploys certctl server (control plane) with PostgreSQL
