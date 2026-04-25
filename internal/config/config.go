@@ -1176,6 +1176,26 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("server TLS cert/key pair invalid (cert=%q key=%q): %w — refuse to start (HTTPS-only; see docs/tls.md)", c.Server.TLS.CertPath, c.Server.TLS.KeyPath, err)
 	}
 
+	// H-1 closure (cat-r-encryption_key_no_length_validation): if
+	// CERTCTL_CONFIG_ENCRYPTION_KEY is set, enforce a minimum length of
+	// 32 bytes. Pre-H-1 the field was accepted with any non-empty value
+	// — including a single character — and PBKDF2-SHA256 (100k rounds)
+	// alone does not compensate for low-entropy passphrases at scale
+	// (CWE-916 Use of Password Hash With Insufficient Computational
+	// Effort + CWE-329 Generation of Predictable IV with CBC Mode).
+	// 32 bytes ≈ 256 bits when generated via `openssl rand -base64 32`,
+	// matching the AES-256-GCM key size the passphrase derives. An
+	// empty key remains accepted — the fail-closed sentinel
+	// crypto.ErrEncryptionKeyRequired triggers downstream when an
+	// empty key is asked to encrypt or decrypt sensitive config.
+	const minEncryptionKeyLength = 32
+	if c.Encryption.ConfigEncryptionKey != "" && len(c.Encryption.ConfigEncryptionKey) < minEncryptionKeyLength {
+		return fmt.Errorf(
+			"CERTCTL_CONFIG_ENCRYPTION_KEY too short (%d bytes; minimum %d). Generate with: openssl rand -base64 32",
+			len(c.Encryption.ConfigEncryptionKey), minEncryptionKeyLength,
+		)
+	}
+
 	// Validate database configuration
 	if c.Database.URL == "" {
 		return fmt.Errorf("database URL is required")

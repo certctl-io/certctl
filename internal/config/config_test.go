@@ -1209,3 +1209,84 @@ func TestConfig_Scheduler_JobTimeoutValidation(t *testing.T) {
 		})
 	}
 }
+
+// H-1 closure (cat-r-encryption_key_no_length_validation): validate
+// CERTCTL_CONFIG_ENCRYPTION_KEY length. Pre-H-1 the field was accepted
+// with any non-empty value (including a single character); post-H-1 a
+// minimum 32-byte length is enforced. Empty stays accepted because the
+// downstream fail-closed sentinel crypto.ErrEncryptionKeyRequired
+// handles the missing-key case for the encrypt/decrypt paths.
+
+func validBaseConfigForEncryption(t *testing.T) *Config {
+	t.Helper()
+	return &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
+		},
+	}
+}
+
+func TestValidate_EncryptionKey_EmptyAccepted(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = ""
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned error for empty key: %v (empty must be accepted; fail-closed sentinel handles it downstream)", err)
+	}
+}
+
+func TestValidate_EncryptionKey_TooShortRejected(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = "x" // 1 byte
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for 1-byte key")
+	}
+	if !strings.Contains(err.Error(), "too short") {
+		t.Errorf("Validate() error = %q, want to contain %q", err.Error(), "too short")
+	}
+	if !strings.Contains(err.Error(), "openssl rand -base64 32") {
+		t.Errorf("Validate() error = %q, must include the canonical generation command", err.Error())
+	}
+}
+
+func TestValidate_EncryptionKey_BoundaryRejected(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = "12345678901234567890123456789012"[:31] // 31 bytes — one short
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() = nil, want error for 31-byte key (boundary -1)")
+	}
+	if !strings.Contains(err.Error(), "too short") {
+		t.Errorf("Validate() error = %q, want 'too short'", err.Error())
+	}
+}
+
+func TestValidate_EncryptionKey_MinLengthAccepted(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = "12345678901234567890123456789012" // exactly 32 bytes
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned error for 32-byte key: %v", err)
+	}
+}
+
+func TestValidate_EncryptionKey_LongAccepted(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	// Realistic operator key from `openssl rand -base64 32` — 44 characters.
+	cfg.Encryption.ConfigEncryptionKey = "AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned error for 44-byte key: %v", err)
+	}
+}

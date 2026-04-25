@@ -4,6 +4,32 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### H-1: Security hardening trio — closed end-to-end
+
+> Three 2026-04-24 audit findings (all P2) that together complete the HTTPS-Everywhere security baseline. The audit flagged: (1) the unauth surface (EST RFC 7030, SCEP, PKI CRL/OCSP, /health, /ready) accepted arbitrary-size request bodies because the `noAuthHandler` middleware chain was missing the `bodyLimitMiddleware` that the authed `apiHandler` chain has; (2) zero security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) were emitted on any response — enabling clickjacking, MIME-sniffing, and untrusted-origin resource loads against the dashboard and API; (3) `CERTCTL_CONFIG_ENCRYPTION_KEY` was accepted with any non-empty value, including a single character — PBKDF2-SHA256 with 100k rounds does not compensate for low-entropy passphrases at scale (CWE-916 / CWE-329).
+
+### Breaking Changes
+
+**Operators with low-entropy `CERTCTL_CONFIG_ENCRYPTION_KEY` will fail to start after upgrade.** Pre-H-1 the field accepted any non-empty string. Post-H-1 it requires ≥32 bytes (e.g. `openssl rand -base64 32`). The startup error names the offending env var, the actual length, the required minimum, and the canonical generation command. Empty (`""`) remains accepted — the existing fail-closed sentinel `crypto.ErrEncryptionKeyRequired` triggers downstream when an empty key tries to encrypt or decrypt. Operators using a short passphrase must rotate before the upgrade.
+
+### Added
+
+- **`internal/api/middleware/securityheaders.go`** (new) — `SecurityHeaders` middleware applies HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, and a conservative Content-Security-Policy on every response. Defaults via `SecurityHeadersDefaults()` are: `Strict-Transport-Security: max-age=31536000; includeSubDomains`, `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: no-referrer-when-downgrade`, and `Content-Security-Policy: default-src 'self'; img-src 'self' data:; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'`. Operators behind a customising reverse proxy can override per-header by setting any field of the config struct to the empty string (omits that header).
+- **`bodyLimitMiddleware` wired into `noAuthHandler`** in `cmd/server/main.go`. Same default cap (1 MB, configurable via `CERTCTL_MAX_BODY_SIZE`), same 413 response on overflow. Pre-H-1 only the authed surface had this protection.
+- **`securityHeadersMiddleware` wired into BOTH chains** (`middlewareStack` for authed routes; `noAuthHandler` for unauth routes). Applied before the audit middleware so headers reach 4xx/5xx responses too — critical for security posture (an attacker probing for misconfiguration sees the same headers on a 401 as on a 200).
+- **`CERTCTL_CONFIG_ENCRYPTION_KEY` length validation** in `internal/config/config.go::Validate()` — rejects keys shorter than 32 bytes with a structured error naming the actual length, the required minimum, and the canonical generation command. Empty keys remain accepted (downstream fail-closed sentinel handles it).
+- **Tests:** `internal/api/middleware/securityheaders_test.go` (4 cases — defaults present, empty disables single header, override applied, headers on 4xx/5xx). `internal/config/config_test.go` adds 5 cases for the encryption-key length check (empty accepted, 1-byte rejected, 31-byte rejected at boundary, 32-byte accepted, 44-byte realistic operator key accepted).
+
+### Audit findings closed
+
+- `cat-s5-4936a1cf0118` (P2, EST/SCEP/PKI unauth endpoints bypass `http.MaxBytesReader`)
+- `cat-s11-missing_security_headers` (P2, no CSP / HSTS / X-Frame-Options on responses)
+- `cat-r-encryption_key_no_length_validation` (P2, encryption key accepted with zero entropy validation)
+
+### Known follow-ups (deferred from H-1 scope)
+
+A weak-key dictionary check (reject `password123`, common ASCII patterns) is deferred — adds operational friction with low marginal entropy gain at the 32-byte minimum. CSP `'unsafe-inline'` for styles is required because Tailwind via Vite injects per-component `<style>` blocks at build time; removing it would require an HTML report or component refactor outside H-1 scope. A `Permissions-Policy` (formerly Feature-Policy) header is not in the H-1 baseline because the dashboard uses no advanced browser APIs (camera, microphone, geolocation); deferred until a real consumer needs it.
+
 ### D-2: TS ↔ Go type drift cluster — closed end-to-end
 
 > The 2026-04-24 coverage-gap audit flagged five `diff-05x06-*` findings — every one a TypeScript-vs-Go shape mismatch where the on-wire JSON the backend emits and the TS interface in `web/src/api/types.ts` had drifted apart. D-1 master closed the same pattern for `Certificate` (cat-f-ae0d06b6588f, 5 phantom fields trimmed, plus the cat-f-cert_detail_page_key_render_fallback render-site fix). D-2 closes it for the remaining five entities: Agent, Target, DiscoveredCertificate, Issuer, and Notification. The audit's blunt rule "stricter side is the contract" decides the per-entity verdict — for TS phantoms (fields declared on TS, never emitted by Go) the Go side wins and TS gets trimmed; for TS-missing fields (emitted by Go, absent from TS) the Go side still wins and TS gets the addition. Pre-D-2 the failure modes were: phantom fields silently rendered `'—'` at consumer sites (e.g. AgentDetailPage's "Capabilities" + "Tags" sections always rendered empty; IssuersPage rendered `'Unknown'` for every issuer; NotificationsPage's `n.message || n.subject` fallback always fell through), and missing fields forced `(target as any).retired_at` escapes that lost type-checking. Verify-only side task: Certificate / ManagedCertificate confirmed clean since D-1.
