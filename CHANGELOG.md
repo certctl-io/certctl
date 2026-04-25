@@ -4,6 +4,39 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### B-1: Orphan-CRUD client functions + RenewalPolicy GUI gap — closed end-to-end
+
+> The 2026-04-24 coverage-gap audit flagged a cluster of operator-blocking GUI omissions: six client.ts `update*` functions (`updateOwner`, `updateTeam`, `updateAgentGroup`, `updateIssuer`, `updateProfile`, plus the full `*RenewalPolicy` CRUD trio) had backend handlers, OpenAPI operations, and exported TypeScript fetchers — but zero page consumers. Operators wanting to fix a typo in an owner's email, rename a team, retarget an agent group's match rules, or edit a renewal-policy field were forced to either delete-and-recreate (losing FK history and audit-trail continuity) or open a `psql` session against the production database directly. The audit's blunt summary: "every backend feature ships with its GUI surface" — a load-bearing CLAUDE.md invariant — was being violated for five operator-facing entities. B-1 closes that violation by wiring per-page Edit modals onto five existing pages, adding a brand-new `RenewalPoliciesPage` for the rp-* CRUD surface, and deleting one dead duplicate (`exportCertificatePEM`) so the public client surface area stops growing without consumers.
+
+### Breaking Changes
+
+None. All five existing pages keep their Create + Delete affordances unchanged; Edit is purely additive. `RenewalPoliciesPage` is a new route at `/renewal-policies` and a new sidebar nav item slotted between Policies and Profiles. The `exportCertificatePEM` helper had zero consumers in `web/`, MCP, CLI, and tests at the time of removal — operators using `downloadCertificatePEM` (the actual call site in `CertificateDetailPage`) are unaffected.
+
+### Added
+
+- **`web/src/pages/RenewalPoliciesPage.tsx`** — a new full-CRUD page for the `rp-*` renewal-policy table. Surfaces a 7-column DataTable (Policy / Renewal Window / Auto / Retries / Alert Thresholds / Created / Actions) with Create, Edit, and Delete affordances. A shared `PolicyFormModal` powers both Create and Edit (the form shape is identical) covering the full domain field set: `name`, `renewal_window_days`, `auto_renew`, `max_retries`, `retry_interval_seconds`, `alert_thresholds_days[]`. The thresholds input parses comma-separated integers (`30, 14, 7, 0`) into the array shape the backend expects. Delete surfaces `repository.ErrRenewalPolicyInUse` (409 from the backend when a policy still has `managed_certificates.renewal_policy_id` references) via an explicit alert so the operator can re-target the dependent certs to a different policy before deletion. Wired into `web/src/main.tsx` routing and `web/src/components/Layout.tsx` sidebar nav.
+- **EditOwnerModal** in `web/src/pages/OwnersPage.tsx` — pre-populates from the editing owner via `useEffect`, calls `updateOwner(id, {name, email, team_id})`, mirrors the Create modal's TanStack-Query mutation/invalidation pattern.
+- **EditTeamModal** in `web/src/pages/TeamsPage.tsx` — same shape, fields `name`/`description`.
+- **EditAgentGroupModal** in `web/src/pages/AgentGroupsPage.tsx` — covers the full match-rule set (`name`, `description`, `match_os`, `match_architecture`, `match_ip_cidr`, `match_version`, `enabled`).
+- **EditIssuerModal** in `web/src/pages/IssuersPage.tsx` — deliberately rename-only. The `type` field is shown but disabled, the existing `config` blob (which includes credentials for ACME, ADCS, ZeroSSL, etc.) is forwarded untouched, and only `name` is editable. Footer note: "To change issuer type or rotate credentials, delete and recreate." This trades scope for safety — the audit's destructive-rename complaint is closed without surfacing a credential-edit attack surface that has not been threat-modeled.
+- **EditProfileModal** in `web/src/pages/ProfilesPage.tsx` — same rename-only shape. Forwards full `Partial<CertificateProfile>` with policy fields (`allowed_key_algorithms`, `max_ttl_seconds`, `allowed_ekus`, etc.) preserved untouched. Footer note about deferred policy-field editing.
+- **CI regression guardrail** in `.github/workflows/ci.yml` (`Forbidden orphan-CRUD client function regression guard (B-1)`) — grep-fails the build if any of the eight previously-orphan client functions (`updateOwner`, `updateTeam`, `updateAgentGroup`, `updateIssuer`, `updateProfile`, `createRenewalPolicy`, `updateRenewalPolicy`, `deleteRenewalPolicy`) loses its non-test consumer under `web/src/pages/`. Also blocks resurrection of the deleted `exportCertificatePEM` function. Verified locally on the post-fix tree (passes — all 8 fns have ≥2 consumers); fires against synthetic regressions (delete the Edit modal → guardrail fires the next CI run).
+
+### Removed
+
+- `web/src/api/client.ts::exportCertificatePEM` — closes `cat-b-9b97ffb35ef7`. The function returned `{cert_pem, chain_pem, full_pem}` JSON but had zero consumers across `web/`, MCP, CLI, and tests; `downloadCertificatePEM` (the blob-download path consumed by `CertificateDetailPage`) covers all real call sites. Test references in `web/src/api/client.test.ts` and `client.error.test.ts` were also removed. The CI guardrail blocks resurrection without an accompanying page consumer.
+
+### Audit findings closed
+
+- `cat-b-31ceb6aaa9f1` (P1, `updateOwner`/`updateTeam`/`updateAgentGroup` orphan)
+- `cat-b-7a34f893a8f9` (P1, `updateIssuer`/`updateProfile` orphan, rename-only closure)
+- `cat-b-4631ca092bee` (P1, RenewalPolicy CRUD orphan — new RenewalPoliciesPage)
+- `cat-b-9b97ffb35ef7` (P3, `exportCertificatePEM` dead duplicate)
+
+### Known follow-ups (deferred from B-1 scope)
+
+A fuller `EditIssuerModal` with explicit credential-rotation flow is deferred — that needs an explicit threat model (rotation reuse window, audit-trail granularity, in-flight CSR cancellation), and the audit's destructive-rename complaint is closed by rename-only Edit alone. Likewise an `EditProfileModal` with policy-field editing (max-TTL, allowed EKUs, allowed key algorithms) is deferred because policy edits affect the `enforce_certificate_policy` evaluator's semantics for already-issued certs and warrant their own scope. Per-page Vitest coverage for the new Edit modals is deferred — the CI grep guardrail catches the same regression vector ("page lost its `update*` fn consumer") at lower cost than five new test files.
+
 ### L-1: Client-side bulk-action loops — closed end-to-end
 
 > The certctl dashboard's busiest screen (`CertificatesPage.tsx`) had two bulk-action workflows that looped per-cert HTTP calls. Selecting 100 certs and clicking "Renew" issued 100 sequential `POST /api/v1/certificates/{id}/renew` requests; "Reassign owner" issued 100 sequential `PUT /api/v1/certificates/{id}` requests. Each round-trip carried ~50–200 ms of Auth → audit-log → handler → service → repo → DB → audit-write → response, so a 100-cert bulk action was a 5–20-second wedge during which the operator stared at a progress bar. The bulk-revoke endpoint (`POST /api/v1/certificates/bulk-revoke`) already shipped in v2.0.x as the canonical pattern for this; L-1 ports that exact shape to bulk-renew (P1) and bulk-reassign (P2). One backend round-trip; one audit event for the entire operation; per-cert success/skip/error counts in a single response envelope. Bundled with two new MCP tools and an OpenAPI spec update so non-GUI callers (CLI / MCP / blackbox probes) can use the same endpoints.

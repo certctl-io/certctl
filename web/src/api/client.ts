@@ -188,9 +188,14 @@ export const bulkReassignCertificates = (request: BulkReassignmentRequest) =>
   });
 
 // Certificate Export
-export const exportCertificatePEM = (id: string) =>
-  fetchJSON<{ cert_pem: string; chain_pem: string; full_pem: string }>(`${BASE}/certificates/${id}/export/pem`);
-
+//
+// B-1 master closure (cat-b-9b97ffb35ef7): the previous `exportCertificatePEM`
+// helper that returned `{cert_pem, chain_pem, full_pem}` JSON was removed —
+// it had zero consumers across web/, MCP, CLI, and tests, and was a dead
+// duplicate of `downloadCertificatePEM` which is the only call site that
+// actually exists in `CertificateDetailPage` (browser file-download path).
+// If a JSON variant is ever needed again, re-add an explicit fetcher with a
+// page consumer in the same commit; do not resurrect the orphan.
 export const downloadCertificatePEM = (id: string) => {
   const headers: Record<string, string> = {};
   if (apiKey) headers['Authorization'] = `Bearer ${apiKey}`;

@@ -6,7 +6,6 @@ import {
   createCertificate,
   triggerRenewal,
   revokeCertificate,
-  exportCertificatePEM,
   downloadCertificatePEM,
   exportCertificatePKCS12,
   getAgents,
@@ -106,10 +105,8 @@ describe('API Client - Error Handling', () => {
       );
     });
 
-    it('exportCertificatePEM propagates network error', async () => {
-      mockFetch.mockReturnValueOnce(mockNetworkError());
-      await expect(exportCertificatePEM('mc-test')).rejects.toThrow('Failed to fetch');
-    });
+    // B-1 closure (cat-b-9b97ffb35ef7): exportCertificatePEM removed as a
+    // dead duplicate of downloadCertificatePEM (zero consumers).
 
     it('downloadCertificatePEM propagates network error', async () => {
       mockFetch.mockReturnValueOnce(mockNetworkError());

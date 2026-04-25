@@ -14,6 +14,7 @@ import AgentDetailPage from './pages/AgentDetailPage';
 import JobsPage from './pages/JobsPage';
 import NotificationsPage from './pages/NotificationsPage';
 import PoliciesPage from './pages/PoliciesPage';
+import RenewalPoliciesPage from './pages/RenewalPoliciesPage';
 import IssuersPage from './pages/IssuersPage';
 import TargetsPage from './pages/TargetsPage';
 import ProfilesPage from './pages/ProfilesPage';
@@ -62,6 +63,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="jobs/:id" element={<JobDetailPage />} />
                   <Route path="notifications" element={<NotificationsPage />} />
                   <Route path="policies" element={<PoliciesPage />} />
+                  <Route path="renewal-policies" element={<RenewalPoliciesPage />} />
                   <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="issuers" element={<IssuersPage />} />
                   <Route path="issuers/:id" element={<IssuerDetailPage />} />
