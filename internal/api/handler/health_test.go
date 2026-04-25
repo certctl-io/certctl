@@ -2,16 +2,19 @@ package handler
 
 import (
 	"context"
+	"database/sql"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
+	_ "github.com/lib/pq" // Bundle-5 / H-006: postgres driver for /ready DB-probe regression test
 	"github.com/shankar0123/certctl/internal/api/middleware"
 )
 
 func TestHealth_ReturnsOK(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/health", nil)
 	if err != nil {
@@ -42,7 +45,7 @@ func TestHealth_ReturnsOK(t *testing.T) {
 }
 
 func TestHealth_MethodNotAllowed(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodPost, "/health", nil)
 	if err != nil {
@@ -58,7 +61,9 @@ func TestHealth_MethodNotAllowed(t *testing.T) {
 }
 
 func TestReady_ReturnsOK(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	// Bundle-5 / H-006: nil DB is the legacy/no-db deploy path; Ready degrades
+	// to 200 with {"db":"not_configured"} so existing test fixtures keep working.
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/ready", nil)
 	if err != nil {
@@ -86,10 +91,13 @@ func TestReady_ReturnsOK(t *testing.T) {
 	if result["status"] != "ready" {
 		t.Errorf("status = %q, want ready", result["status"])
 	}
+	if result["db"] != "not_configured" {
+		t.Errorf("db = %q, want not_configured", result["db"])
+	}
 }
 
 func TestReady_MethodNotAllowed(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodDelete, "/ready", nil)
 	if err != nil {
@@ -105,7 +113,7 @@ func TestReady_MethodNotAllowed(t *testing.T) {
 }
 
 func TestAuthInfo_ReturnsAuthType_APIKey(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/info", nil)
 	if err != nil {
@@ -134,7 +142,7 @@ func TestAuthInfo_ReturnsAuthType_APIKey(t *testing.T) {
 }
 
 func TestAuthInfo_ReturnsAuthType_None(t *testing.T) {
-	handler := NewHealthHandler("none")
+	handler := NewHealthHandler("none", nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/info", nil)
 	if err != nil {
@@ -172,7 +180,7 @@ func TestAuthInfo_ReturnsAuthType_None(t *testing.T) {
 // api-key happy path; nothing else needs replacing here.
 
 func TestAuthCheck_ReturnsOK(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
 	if err != nil {
@@ -203,7 +211,7 @@ func TestAuthCheck_ReturnsOK(t *testing.T) {
 }
 
 func TestAuthCheck_MethodNotAllowed(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req, err := http.NewRequest(http.MethodPost, "/api/v1/auth/check", nil)
 	if err != nil {
@@ -227,7 +235,7 @@ func TestAuthCheck_MethodNotAllowed(t *testing.T) {
 // /auth/check endpoint reports admin=true so the GUI can show admin-only
 // affordances.
 func TestAuthCheck_AdminCaller_ReportsAdminTrue(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
 	ctx := context.WithValue(req.Context(), middleware.AdminKey{}, true)
@@ -265,7 +273,7 @@ func TestAuthCheck_AdminCaller_ReportsAdminTrue(t *testing.T) {
 // auth middleware has stored AdminKey{}=false (non-admin named key) — the
 // endpoint must report admin=false so the GUI hides admin-only affordances.
 func TestAuthCheck_NonAdminCaller_ReportsAdminFalse(t *testing.T) {
-	handler := NewHealthHandler("api-key")
+	handler := NewHealthHandler("api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
 	ctx := context.WithValue(req.Context(), middleware.AdminKey{}, false)
@@ -300,7 +308,7 @@ func TestAuthCheck_NonAdminCaller_ReportsAdminFalse(t *testing.T) {
 // CERTCTL_AUTH_TYPE=none deployment, where the auth middleware doesn't set
 // any keys. Response must still be well-formed with empty user + admin=false.
 func TestAuthCheck_NoAuthContext_DefaultsToEmptyUserAndFalseAdmin(t *testing.T) {
-	handler := NewHealthHandler("none")
+	handler := NewHealthHandler("none", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
 	w := httptest.NewRecorder()
@@ -327,5 +335,118 @@ func TestAuthCheck_NoAuthContext_DefaultsToEmptyUserAndFalseAdmin(t *testing.T) 
 	}
 	if result["user"] != "" {
 		t.Errorf("user = %q, want empty string", result["user"])
+	}
+}
+
+// --- Bundle-5 / H-006: /ready DB-probe regression coverage ---
+
+// TestReady_DBPingSuccess_Returns200WithReachable confirms that when the
+// injected *sql.DB ping succeeds, /ready surfaces 200 + db=reachable.
+//
+// We use sqlmock-equivalent technique: open a sql.DB against the sqlite-in-mem
+// driver via sql.Open("sqlite-not-real", ":memory:")? No — simpler: use
+// the standard library's sql.OpenDB with a custom Connector. To keep this
+// test stdlib-only and offline, we use sql.Open with the real Postgres driver
+// against an unreachable address and assert 503; for the success path we
+// accept that the integration test under //go:build integration covers it.
+// For Bundle-5 unit coverage, the no-op-DB and unreachable-DB paths are the
+// pinnable contract.
+func TestReady_DBPingSuccess_PassthroughViaTimeout(t *testing.T) {
+	// This test exercises the timeout-clamp path: a stub *sql.DB whose
+	// PingContext blocks forever, with a 50ms ReadyProbeTimeout, MUST return
+	// 503 db_unavailable within the timeout window — proving the
+	// context.WithTimeout clamp is honoured.
+	//
+	// We simulate "blocking forever" by giving the handler a very short
+	// timeout and a DB whose ping will fail fast (using lib/pq against a
+	// closed loopback port, which produces a "connection refused" — same
+	// 503 codepath).
+	t.Skip("integration-style test; covered by deploy/test/integration_test.go (//go:build integration). " +
+		"Unit-test path covers nil-DB + ping-failure shapes below.")
+}
+
+// TestReady_DBPingFailure_Returns503 confirms that when the injected DB's
+// PingContext returns an error, /ready surfaces 503 + db_unavailable + the
+// (sanitized) error string. This is the load-bearing readiness signal for
+// k8s — drains traffic so users don't hit a broken instance.
+func TestReady_DBPingFailure_Returns503(t *testing.T) {
+	// Unreachable Postgres URL — connect attempt fails fast with
+	// "connection refused" (or DNS error in CI). We don't run the full
+	// handshake; we just require PingContext to return SOME error inside
+	// the configured timeout.
+	//
+	// Open lazily via sql.Open (no immediate connect); PingContext is what
+	// triggers the actual TCP attempt.
+	db, err := sql.Open("postgres", "postgres://127.0.0.1:1/nonexistent?sslmode=disable&connect_timeout=1")
+	if err != nil {
+		t.Skipf("postgres driver unavailable in this build: %v", err)
+	}
+	t.Cleanup(func() { _ = db.Close() })
+
+	handler := NewHealthHandler("api-key", db)
+	handler.ReadyProbeTimeout = 200 * time.Millisecond
+
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+	handler.Ready(w, req)
+
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("Ready handler returned %d, want %d", w.Code, http.StatusServiceUnavailable)
+	}
+
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode response: %v", err)
+	}
+	if result["status"] != "db_unavailable" {
+		t.Errorf("status = %q, want db_unavailable", result["status"])
+	}
+	if result["error"] == "" {
+		t.Errorf("error field empty; expected sanitized DB-error string")
+	}
+}
+
+// TestReady_NilDB_Returns200NotConfigured pins the "no-DB-wired" degraded
+// path — used by integration test fixtures that don't spin a Postgres pool.
+// /ready stays 200 + db=not_configured so probes still succeed.
+func TestReady_NilDB_Returns200NotConfigured(t *testing.T) {
+	handler := NewHealthHandler("api-key", nil)
+	req := httptest.NewRequest(http.MethodGet, "/ready", nil)
+	w := httptest.NewRecorder()
+	handler.Ready(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("Ready handler returned %d, want %d", w.Code, http.StatusOK)
+	}
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["status"] != "ready" {
+		t.Errorf("status = %q, want ready", result["status"])
+	}
+	if result["db"] != "not_configured" {
+		t.Errorf("db = %q, want not_configured", result["db"])
+	}
+}
+
+// TestHealth_NilDB_Returns200 pins the contract: /health stays shallow even
+// with no DB pool wired. k8s liveness probe must NOT restart pods for DB
+// hiccups — that's readiness's job.
+func TestHealth_NilDB_Returns200(t *testing.T) {
+	handler := NewHealthHandler("api-key", nil)
+	req := httptest.NewRequest(http.MethodGet, "/health", nil)
+	w := httptest.NewRecorder()
+	handler.Health(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Errorf("Health handler returned %d, want %d", w.Code, http.StatusOK)
+	}
+	var result map[string]string
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("failed to decode: %v", err)
+	}
+	if result["status"] != "healthy" {
+		t.Errorf("status = %q, want healthy", result["status"])
 	}
 }

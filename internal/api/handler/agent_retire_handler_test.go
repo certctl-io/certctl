@@ -18,7 +18,7 @@ import (
 // failing assertion can't cascade through a shared fixture.
 func agentRetireTestSetup() (*MockAgentService, AgentHandler) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	return mock, handler
 }
 

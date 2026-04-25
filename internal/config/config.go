@@ -682,6 +682,16 @@ type ServerConfig struct {
 	Port        int             // Server port (default: 8080). Set via CERTCTL_SERVER_PORT.
 	MaxBodySize int64           // Maximum request body size in bytes (default: 1MB). Set via CERTCTL_MAX_BODY_SIZE.
 	TLS         ServerTLSConfig // HTTPS-only TLS configuration. Both CertPath and KeyPath are required.
+
+	// AuditFlushTimeoutSeconds is the budget (in seconds) main.go gives the
+	// audit middleware to drain in-flight recordings during graceful
+	// shutdown. Bundle-5 / Audit M-011: pre-Bundle-5 this was hard-coded
+	// 30s, which dropped events silently in high-volume environments
+	// because the same context governed HTTP server shutdown + audit
+	// flush. Post-Bundle-5: configurable; default 30s preserves prior
+	// behaviour. WARN-log on deadline exceeded, but never exit hard.
+	// Setting: CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS environment variable.
+	AuditFlushTimeoutSeconds int
 }
 
 // ServerTLSConfig holds the server-side TLS material.
@@ -892,6 +902,25 @@ type AuthConfig struct {
 	// non-empty, this takes precedence over the legacy Secret field.
 	// Setting: CERTCTL_API_KEYS_NAMED="name1:key1,name2:key2:admin"
 	NamedKeys []NamedAPIKey
+
+	// AgentBootstrapToken is the pre-shared secret enforced on the agent
+	// registration endpoint (POST /api/v1/agents). Bundle-5 / Audit H-007 /
+	// CWE-306 + CWE-288: pre-Bundle-5, any host with network reach to the
+	// server could self-register an agent and start polling for work — no
+	// shared secret required. Post-Bundle-5: when this field is non-empty,
+	// the registration handler requires `Authorization: Bearer <token>`
+	// (constant-time comparison via crypto/subtle.ConstantTimeCompare); 401
+	// on missing/wrong/malformed.
+	//
+	// Backwards compatibility: when empty (the v2.0.x default), the server
+	// logs a startup WARN announcing the v2.2.0 deprecation — the field
+	// will become required in v2.2.0 and unset will fail-loud — and accepts
+	// registrations as today. Existing demo deploys that don't set it keep
+	// working through v2.1.x.
+	//
+	// Generation guidance: `openssl rand -hex 32` (256-bit entropy).
+	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN environment variable.
+	AgentBootstrapToken string
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -938,6 +967,9 @@ func Load() (*Config, error) {
 				CertPath: getEnv("CERTCTL_SERVER_TLS_CERT_PATH", ""),
 				KeyPath:  getEnv("CERTCTL_SERVER_TLS_KEY_PATH", ""),
 			},
+			// Bundle-5 / M-011: configurable shutdown audit-flush budget.
+			// Default 30s preserves pre-Bundle-5 behaviour.
+			AuditFlushTimeoutSeconds: getEnvInt("CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS", 30),
 		},
 		Database: DatabaseConfig{
 			URL:            getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
@@ -973,6 +1005,10 @@ func Load() (*Config, error) {
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
 			// can surface parse errors alongside other config errors.
+
+			// Bundle-5 / Audit H-007: agent-registration bootstrap secret.
+			// Empty (default) = warn-mode pass-through; v2.2.0 will require it.
+			AgentBootstrapToken: getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:   getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),

@@ -150,7 +150,7 @@ func TestListAgents_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?page=1&per_page=50", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -174,7 +174,7 @@ func TestListAgents_Success(t *testing.T) {
 // Test ListAgents - method not allowed
 func TestListAgents_MethodNotAllowed(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", nil)
 	req = req.WithContext(contextWithRequestID())
@@ -195,7 +195,7 @@ func TestListAgents_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -228,7 +228,7 @@ func TestGetAgent_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -257,7 +257,7 @@ func TestGetAgent_NotFound(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/nonexistent", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -286,7 +286,7 @@ func TestRegisterAgent_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	agentBody := domain.Agent{
 		Name:     "Production Agent",
@@ -318,7 +318,7 @@ func TestRegisterAgent_Success(t *testing.T) {
 // Test RegisterAgent - invalid body
 func TestRegisterAgent_InvalidBody(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", bytes.NewReader([]byte("invalid json")))
 	req = req.WithContext(contextWithRequestID())
@@ -343,7 +343,7 @@ func TestHeartbeat_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/a-prod-001/heartbeat", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -372,7 +372,7 @@ func TestHeartbeat_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/a-prod-001/heartbeat", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -397,7 +397,7 @@ func TestAgentCSRSubmit_WithCertificateID(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	reqBody := map[string]string{
 		"csr_pem":        csrPEM,
@@ -439,7 +439,7 @@ func TestAgentCSRSubmit_WithoutCertificateID(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	reqBody := map[string]string{
 		"csr_pem": csrPEM,
@@ -461,7 +461,7 @@ func TestAgentCSRSubmit_WithoutCertificateID(t *testing.T) {
 // Test AgentCSRSubmit - missing CSR PEM
 func TestAgentCSRSubmit_MissingCSRPEM(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	reqBody := map[string]string{
 		"certificate_id": "mc-prod-001",
@@ -483,7 +483,7 @@ func TestAgentCSRSubmit_MissingCSRPEM(t *testing.T) {
 // Test AgentCSRSubmit - invalid body
 func TestAgentCSRSubmit_InvalidBody(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/a-prod-001/csr", bytes.NewReader([]byte("invalid")))
 	req = req.WithContext(contextWithRequestID())
@@ -510,7 +510,7 @@ func TestAgentCertificatePickup_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	// Path structure: /api/v1/agents/{agent_id}/certificates/{cert_id}
 	// After trim and split: parts[0]="agent_id", parts[1]="certificates", parts[2]="cert_id", parts[3]=""
 	// Note: handler checks len(parts) < 4, so we need the trailing slash
@@ -542,7 +542,7 @@ func TestAgentCertificatePickup_NotFound(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001/certificates/nonexistent/", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -574,7 +574,7 @@ func TestAgentGetWork_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001/work", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -603,7 +603,7 @@ func TestAgentGetWork_NoItems(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001/work", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -632,7 +632,7 @@ func TestAgentGetWork_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001/work", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -655,7 +655,7 @@ func TestAgentReportJobStatus_Success(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	statusReq := map[string]string{
 		"status": "Completed",
@@ -694,7 +694,7 @@ func TestAgentReportJobStatus_WithError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	statusReq := map[string]string{
 		"status": "Failed",
@@ -717,7 +717,7 @@ func TestAgentReportJobStatus_WithError(t *testing.T) {
 // Test AgentReportJobStatus - missing status
 func TestAgentReportJobStatus_MissingStatus(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	statusReq := map[string]string{}
 	body, _ := json.Marshal(statusReq)
@@ -737,7 +737,7 @@ func TestAgentReportJobStatus_MissingStatus(t *testing.T) {
 // Test AgentReportJobStatus - invalid body
 func TestAgentReportJobStatus_InvalidBody(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents/a-prod-001/jobs/j-deploy-001/status", bytes.NewReader([]byte("invalid")))
 	req = req.WithContext(contextWithRequestID())
@@ -763,7 +763,7 @@ func TestListAgents_InvalidPagination(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?page=invalid&per_page=invalid", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -778,7 +778,7 @@ func TestListAgents_InvalidPagination(t *testing.T) {
 // Test GetAgent - empty ID
 func TestGetAgent_EmptyID(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/", nil)
 	req = req.WithContext(contextWithRequestID())
@@ -799,7 +799,7 @@ func TestRegisterAgent_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	agentBody := domain.Agent{
 		Name:     "Production Agent",
@@ -822,7 +822,7 @@ func TestRegisterAgent_ServiceError(t *testing.T) {
 // Test Heartbeat - empty agent ID
 func TestHeartbeat_EmptyAgentID(t *testing.T) {
 	mock := &MockAgentService{}
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents//heartbeat", nil)
 	req = req.WithContext(contextWithRequestID())
@@ -843,7 +843,7 @@ func TestAgentCSRSubmit_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	reqBody := map[string]string{
 		"csr_pem": "-----BEGIN CERTIFICATE REQUEST-----\nMIIC...\n-----END CERTIFICATE REQUEST-----",
@@ -870,7 +870,7 @@ func TestAgentReportJobStatus_ServiceError(t *testing.T) {
 		},
 	}
 
-	handler := NewAgentHandler(mock)
+	handler := NewAgentHandler(mock, "")
 
 	statusReq := map[string]string{
 		"status": "Completed",
@@ -922,7 +922,7 @@ func TestListAgents_DoesNotLeakAPIKeyHash(t *testing.T) {
 			}, 2, nil
 		},
 	}
-	h := NewAgentHandler(mock)
+	h := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?page=1&per_page=50", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -957,7 +957,7 @@ func TestGetAgent_DoesNotLeakAPIKeyHash(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewAgentHandler(mock)
+	h := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()
@@ -994,7 +994,7 @@ func TestRegisterAgent_DoesNotLeakAPIKeyHash(t *testing.T) {
 			}, nil
 		},
 	}
-	h := NewAgentHandler(mock)
+	h := NewAgentHandler(mock, "")
 	body := bytes.NewBufferString(`{"name":"freshly-registered","hostname":"new.host"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", body)
 	req = req.WithContext(contextWithRequestID())
@@ -1031,7 +1031,7 @@ func TestListRetiredAgents_DoesNotLeakAPIKeyHash(t *testing.T) {
 			}, 1, nil
 		},
 	}
-	h := NewAgentHandler(mock)
+	h := NewAgentHandler(mock, "")
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/retired?page=1&per_page=50", nil)
 	req = req.WithContext(contextWithRequestID())
 	w := httptest.NewRecorder()

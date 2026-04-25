@@ -79,7 +79,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	certificateHandler := handler.NewCertificateHandler(certificateService)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
 	targetHandler := handler.NewTargetHandler(&mockTargetService{targetRepo: targetRepo, auditService: auditService})
-	agentHandler := handler.NewAgentHandler(agentService)
+	agentHandler := handler.NewAgentHandler(agentService, "") // Bundle-5 / H-007: integration fixture uses warn-mode pass-through
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
 	profileHandler := handler.NewProfileHandler(&mockProfileService{})
@@ -90,7 +90,7 @@ func TestCertificateLifecycle(t *testing.T) {
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	statsHandler := handler.NewStatsHandler(&mockStatsService{})
 	metricsHandler := handler.NewMetricsHandler(&mockStatsService{}, time.Now())
-	healthHandler := handler.NewHealthHandler("none")
+	healthHandler := handler.NewHealthHandler("none", nil) // Bundle-5 / H-006: integration fixture has no DB pool wired
 	discoveryHandler := handler.NewDiscoveryHandler(&mockDiscoveryService{})
 	networkScanHandler := handler.NewNetworkScanHandler(&mockNetworkScanService{})
 	verificationHandler := handler.NewVerificationHandler(&mockVerificationService{})
