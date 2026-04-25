@@ -36,7 +36,7 @@ func NewRenewalPolicyRepository(db *sql.DB) *RenewalPolicyRepository {
 // and require domain-layer churn we're not taking on in this change.
 const renewalPolicyColumns = `
 	id, name, renewal_window_days, auto_renew, max_retries,
-	retry_interval_minutes, alert_thresholds_days, created_at, updated_at
+	retry_interval_seconds, alert_thresholds_days, created_at, updated_at
 `
 
 // scanRenewalPolicy decodes one renewal_policies row from a Row or Rows
@@ -170,7 +170,7 @@ func (r *RenewalPolicyRepository) Create(ctx context.Context, policy *domain.Ren
 	insertSQL := `
 		INSERT INTO renewal_policies (
 			id, name, renewal_window_days, auto_renew, max_retries,
-			retry_interval_minutes, alert_thresholds_days, created_at, updated_at
+			retry_interval_seconds, alert_thresholds_days, created_at, updated_at
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
 		RETURNING ` + renewalPolicyColumns
 
@@ -240,7 +240,7 @@ func (r *RenewalPolicyRepository) Update(ctx context.Context, id string, policy 
 			renewal_window_days = $3,
 			auto_renew = $4,
 			max_retries = $5,
-			retry_interval_minutes = $6,
+			retry_interval_seconds = $6,
 			alert_thresholds_days = $7,
 			updated_at = NOW()
 		WHERE id = $1

@@ -7,8 +7,20 @@
 # To start fresh (wipe previous data):
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml down -v
 #   docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build
-
+#
+# U-3 (P1, cat-u-seed_initdb_schema_drift): pre-U-3 this overlay mounted
+# `seed_demo.sql` into postgres `/docker-entrypoint-initdb.d/`. That worked
+# only because the production stack also mounted the migrations there, so
+# the schema existed at initdb time. Once U-3 dropped the production
+# initdb mounts (single source of truth: server runs RunMigrations + RunSeed
+# at boot), the demo seed could no longer be applied at initdb time — the
+# tables it references wouldn't exist yet.
+#
+# Post-U-3 the demo overlay just sets CERTCTL_DEMO_SEED=true; the server
+# applies seed_demo.sql at boot via postgres.RunDemoSeed AFTER baseline
+# migrations + seed.sql are in place. Same single source of truth, no
+# initdb mounts, no schema-vs-seed drift.
 services:
-  postgres:
-    volumes:
-      - ../migrations/seed_demo.sql:/docker-entrypoint-initdb.d/030_seed_demo.sql
+  certctl-server:
+    environment:
+      CERTCTL_DEMO_SEED: "true"

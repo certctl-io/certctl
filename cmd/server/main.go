@@ -86,6 +86,41 @@ func main() {
 	}
 	logger.Info("migrations completed")
 
+	// Apply baseline seed data.
+	//
+	// U-3 (P1, cat-u-seed_initdb_schema_drift): pre-U-3 seed.sql was mounted
+	// into postgres `/docker-entrypoint-initdb.d/` alongside a hand-curated
+	// subset of migrations. Adding a migration that introduced a new column
+	// referenced by seed.sql (cat-o-retry_interval_unit_mismatch /
+	// policy_rules.severity / etc.) without also updating the compose volume
+	// mounts caused initdb to crash on first up. Post-U-3 the compose stack
+	// drops all initdb mounts; postgres comes up with empty schema, the
+	// server runs RunMigrations above, then this RunSeed call lands the
+	// baseline data — all from a single source of truth (this binary).
+	// See internal/repository/postgres/db.go::RunSeed for the contract.
+	logger.Info("applying baseline seed", "path", cfg.Database.MigrationsPath)
+	if err := postgres.RunSeed(db, cfg.Database.MigrationsPath); err != nil {
+		logger.Error("failed to apply seed data", "error", err)
+		os.Exit(1)
+	}
+	logger.Info("seed completed")
+
+	// Apply demo overlay seed when CERTCTL_DEMO_SEED=true. Pre-U-3 the demo
+	// overlay (deploy/docker-compose.demo.yml) mounted seed_demo.sql into
+	// postgres `/docker-entrypoint-initdb.d/`; that broke once U-3 dropped
+	// the initdb migration mounts (the demo seed references tables that
+	// wouldn't exist at initdb time). The runtime path here is the
+	// post-U-3 replacement. Default-off so a vanilla deploy never lands
+	// fake-history rows. See postgres.RunDemoSeed for the contract.
+	if cfg.Database.DemoSeed {
+		logger.Info("applying demo seed (CERTCTL_DEMO_SEED=true)", "path", cfg.Database.MigrationsPath)
+		if err := postgres.RunDemoSeed(db, cfg.Database.MigrationsPath); err != nil {
+			logger.Error("failed to apply demo seed data", "error", err)
+			os.Exit(1)
+		}
+		logger.Info("demo seed completed")
+	}
+
 	// Initialize repositories with real PostgreSQL connection
 	auditRepo := postgres.NewAuditRepository(db)
 	certificateRepo := postgres.NewCertificateRepository(db)
@@ -406,6 +441,13 @@ func main() {
 	statsHandler := handler.NewStatsHandler(statsService)
 	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
+	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
+	// answers GET /api/v1/version with build identity (ldflags Version,
+	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
+	// no-auth dispatch + audit ExcludePaths below so probes and rollout
+	// systems can read it without Bearer credentials and without flooding
+	// the audit trail.
+	versionHandler := handler.NewVersionHandler()
 	discoveryHandler := handler.NewDiscoveryHandler(discoveryService)
 	networkScanHandler := handler.NewNetworkScanHandler(networkScanService)
 	verificationService := service.NewVerificationService(jobRepo, auditService, logger)
@@ -554,6 +596,7 @@ func main() {
 		Digest:         *digestHandler,
 		HealthChecks:   healthCheckHandler,
 		BulkRevocation: bulkRevocationHandler,
+		Version:        versionHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {
@@ -690,10 +733,15 @@ func main() {
 		},
 	)
 	auditMiddleware := middleware.NewAuditLog(auditAdapter, middleware.AuditConfig{
-		ExcludePaths: []string{"/health", "/ready"},
+		// /api/v1/version is excluded for the same reason /health and /ready
+		// are: rollout systems and blackbox probes hammer it on a tight
+		// interval, and the audit trail's value comes from rare,
+		// operator-authored mutations — not from sub-second readonly polls.
+		// U-3 ride-along (cat-u-no_version_endpoint, P2).
+		ExcludePaths: []string{"/health", "/ready", "/api/v1/version"},
 		Logger:       logger,
 	})
-	logger.Info("API audit logging enabled (excluding /health, /ready)")
+	logger.Info("API audit logging enabled (excluding /health, /ready, /api/v1/version)")
 
 	middlewareStack := []func(http.Handler) http.Handler{
 		middleware.RequestID,
@@ -889,6 +937,7 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 // Dispatch rules (M-001, audit 2026-04-19, option D):
 //
 //   - /health, /ready, /api/v1/auth/info           → no-auth (probes + login detection)
+//   - /api/v1/version                              → no-auth (U-3 ride-along: build identity for rollout/probes)
 //   - /.well-known/pki/*                           → no-auth (RFC 5280 CRL, RFC 6960 OCSP)
 //   - /.well-known/est/*                           → no-auth (RFC 7030 §3.2.3)
 //   - /scep, /scep/*                               → no-auth (RFC 8894 §3.2, CSR challengePassword)
@@ -914,10 +963,12 @@ func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, da
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		path := r.URL.Path
 
-		// Health/ready and auth/info bypass auth middleware.
+		// Health/ready, auth/info, and version bypass auth middleware.
 		// Health/ready: Docker/K8s health probes don't carry Bearer tokens.
 		// auth/info: React app calls this before login to detect auth mode.
-		if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" {
+		// version: U-3 ride-along (cat-u-no_version_endpoint) — rollout
+		// systems and blackbox probes need build identity without a key.
+		if path == "/health" || path == "/ready" || path == "/api/v1/auth/info" || path == "/api/v1/version" {
 			noAuthHandler.ServeHTTP(w, r)
 			return
 		}

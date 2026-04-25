@@ -1,7 +1,7 @@
 -- Seed data for certificate control plane
 
 -- Default renewal policy
-INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_minutes, alert_thresholds_days)
+INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_seconds, alert_thresholds_days)
 VALUES (
   'rp-default',
   'default',

@@ -53,6 +53,29 @@ services:
       - certctl-network
 
   # PostgreSQL database
+  #
+  # U-3 (P1, cat-u-seed_initdb_schema_drift, GitHub #10):
+  # Pre-U-3 this stack mounted a hand-curated subset of `migrations/*.up.sql`
+  # plus `seed.sql` into `/docker-entrypoint-initdb.d/`, and postgres
+  # initdb-applied them on first boot. The mount list rotted every time a
+  # new migration shipped that the seed depended on (000013 added
+  # policy_rules.severity, 000017 renames retry_interval_minutes, etc.) —
+  # initdb crashed, the container reported `unhealthy` indefinitely, and
+  # `docker compose -f deploy/docker-compose.yml up -d --build` from a
+  # fresh clone of v2.0.50 hit it on the first try.
+  #
+  # Post-U-3 the schema is built EXCLUSIVELY by the server at startup via
+  # internal/repository/postgres.RunMigrations + RunSeed. Single source of
+  # truth, no list to keep in sync. Postgres comes up empty; the server
+  # waits for it healthy, then applies the full migration ladder + seed in
+  # one shot. Helm + the dev examples were already runtime-only (Path B)
+  # and worked through the same window.
+  #
+  # `start_period: 30s` gives postgres room to bootstrap on slow runners
+  # (CI macOS, low-spec laptops) before the healthcheck failure counter
+  # starts ticking. Pre-U-3 a slow first-init combined with the
+  # `unhealthy` flap to cascade into certctl-server's `service_healthy`
+  # depends_on, blocking the whole stack.
   postgres:
     image: postgres:16-alpine
     container_name: certctl-postgres
@@ -64,17 +87,6 @@ services:
       - "5432:5432"
     volumes:
       - postgres_data:/var/lib/postgresql/data
-      - ../migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/001_schema.sql
-      - ../migrations/000002_agent_metadata.up.sql:/docker-entrypoint-initdb.d/002_agent_metadata.sql
-      - ../migrations/000003_certificate_profiles.up.sql:/docker-entrypoint-initdb.d/003_certificate_profiles.sql
-      - ../migrations/000004_agent_groups.up.sql:/docker-entrypoint-initdb.d/004_agent_groups.sql
-      - ../migrations/000005_revocation.up.sql:/docker-entrypoint-initdb.d/005_revocation.sql
-      - ../migrations/000006_discovery.up.sql:/docker-entrypoint-initdb.d/006_discovery.sql
-      - ../migrations/000007_network_discovery.up.sql:/docker-entrypoint-initdb.d/007_network_discovery.sql
-      - ../migrations/000008_verification.up.sql:/docker-entrypoint-initdb.d/008_verification.sql
-      - ../migrations/000009_issuer_config.up.sql:/docker-entrypoint-initdb.d/009_issuer_config.sql
-      - ../migrations/000010_target_config.up.sql:/docker-entrypoint-initdb.d/010_target_config.sql
-      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/020_seed.sql
     networks:
       - certctl-network
     healthcheck:
@@ -82,6 +94,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # Certctl Server (API + scheduler)
@@ -127,6 +140,11 @@ services:
       interval: 10s
       timeout: 5s
       retries: 5
+      # U-3: server boot now does RunMigrations + RunSeed before listening on
+      # 8443. On a fresh clone the full migration ladder + seed application
+      # can take ~10s on a small VM; start_period prevents the first few
+      # healthcheck attempts from counting as failures while that work runs.
+      start_period: 30s
     restart: unless-stopped
     logging:
       driver: "json-file"

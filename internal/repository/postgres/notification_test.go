@@ -339,6 +339,95 @@ func TestNotificationRepository_Requeue(t *testing.T) {
 	}
 }
 
+// TestNotificationRepository_CreatedAt_IsPersisted is the U-3 ride-along
+// regression for cat-o-notification_created_at_dead_field. Pre-U-3 the
+// Go domain.NotificationEvent had a CreatedAt field but the DB had no
+// column — JSON serialisation produced 0001-01-01T00:00:00Z, breaking
+// timestamp ordering on operator dashboards. Post-U-3 migration 000017
+// adds the column NOT NULL DEFAULT NOW(), Create populates it, and
+// scanNotification reads it back.
+//
+// The contract under test is round-trip equivalence: the timestamp the
+// caller sets goes into the DB and comes back out unchanged (modulo
+// PostgreSQL's microsecond precision). Truncate to microseconds before
+// comparing because TIMESTAMPTZ rounds nanoseconds away.
+func TestNotificationRepository_CreatedAt_IsPersisted(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewNotificationRepository(db)
+	ctx := context.Background()
+
+	// A specific, recognisable timestamp. Truncated to microseconds so
+	// the post-roundtrip equality assertion isn't tripped up by Postgres
+	// dropping the nanosecond tail.
+	want := time.Now().UTC().Add(-2 * time.Hour).Truncate(time.Microsecond)
+
+	notif := &domain.NotificationEvent{
+		Type:      domain.NotificationTypeExpirationWarning,
+		Channel:   domain.NotificationChannelWebhook,
+		Recipient: "https://hooks.example.com/u3",
+		Message:   "U-3 round-trip witness",
+		Status:    string(domain.NotificationStatusPending),
+		CreatedAt: want,
+	}
+	if err := repo.Create(ctx, notif); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	// Re-read via List (which goes through scanNotification) so we're
+	// testing both the INSERT and SELECT halves of the U-3 plumbing.
+	got, err := repo.List(ctx, nil)
+	if err != nil {
+		t.Fatalf("List failed: %v", err)
+	}
+	if len(got) != 1 {
+		t.Fatalf("List returned %d rows, want 1", len(got))
+	}
+	if !got[0].CreatedAt.Equal(want) {
+		t.Errorf("CreatedAt round-trip mismatch:\n  set:  %v\n  got:  %v\n"+
+			"Pre-U-3 this would have come back as 0001-01-01 because the column didn't exist.",
+			want, got[0].CreatedAt)
+	}
+}
+
+// TestNotificationRepository_CreatedAt_DefaultsToNow verifies the helper
+// behavior in Create: when the caller hands over an event with the
+// zero-value CreatedAt, Create substitutes time.Now() rather than
+// trusting the DB DEFAULT. This keeps wire-level JSON consistent with
+// what the row will hold once it's read back, and avoids a clock-skew
+// gap between "Go computed the timestamp" and "DB applied DEFAULT NOW()".
+func TestNotificationRepository_CreatedAt_DefaultsToNow(t *testing.T) {
+	tdb := getTestDB(t)
+	db := tdb.freshSchema(t)
+	repo := postgres.NewNotificationRepository(db)
+	ctx := context.Background()
+
+	before := time.Now().UTC().Add(-time.Second)
+
+	notif := &domain.NotificationEvent{
+		Type:      domain.NotificationTypeExpirationWarning,
+		Channel:   domain.NotificationChannelWebhook,
+		Recipient: "https://hooks.example.com/zerotime",
+		Message:   "U-3 zero-time fallback",
+		Status:    string(domain.NotificationStatusPending),
+		// CreatedAt left zero on purpose — the contract is that Create
+		// fills it in from time.Now() when it's unset.
+	}
+	if err := repo.Create(ctx, notif); err != nil {
+		t.Fatalf("Create failed: %v", err)
+	}
+
+	after := time.Now().UTC().Add(time.Second)
+
+	if notif.CreatedAt.IsZero() {
+		t.Fatalf("CreatedAt is still zero after Create — the fallback in NotificationRepository.Create did not fire")
+	}
+	if notif.CreatedAt.Before(before) || notif.CreatedAt.After(after) {
+		t.Errorf("CreatedAt = %v is outside the [%v, %v] window — the substituted time.Now() should fall inside the test's wall-clock bracket",
+			notif.CreatedAt, before, after)
+	}
+}
+
 // ─── Helpers ──────────────────────────────────────────────────────────────
 
 // past returns a stable "5 minutes ago" time for fixture seeding. Truncated
