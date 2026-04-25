@@ -109,6 +109,11 @@ func (h ESTHandler) SimpleEnroll(w http.ResponseWriter, r *http.Request) {
 
 	requestID := middleware.GetRequestID(r.Context())
 
+	if err := verifyESTTransport(r); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("EST transport precondition failed: %v", err), requestID)
+		return
+	}
+
 	csrPEM, err := h.readCSRFromRequest(r)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("Invalid CSR: %v", err), requestID)
@@ -134,6 +139,11 @@ func (h ESTHandler) SimpleReEnroll(w http.ResponseWriter, r *http.Request) {
 
 	requestID := middleware.GetRequestID(r.Context())
 
+	if err := verifyESTTransport(r); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("EST transport precondition failed: %v", err), requestID)
+		return
+	}
+
 	csrPEM, err := h.readCSRFromRequest(r)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("Invalid CSR: %v", err), requestID)
@@ -147,6 +157,60 @@ func (h ESTHandler) SimpleReEnroll(w http.ResponseWriter, r *http.Request) {
 	}
 
 	h.writeCertResponse(w, result)
+}
+
+// verifyESTTransport implements Bundle-4 / M-021 EST transport precondition.
+//
+// RFC 7030 §3.2.3 ("Linking Identity and POP Information") requires that when
+// EST clients use certificate-based authentication AND send a Proof-of-Possession
+// (PoP), the PoP MUST be cryptographically bound to the underlying TLS session
+// via TLS-Unique (RFC 5929). With TLS 1.3 (which certctl pins via
+// `tls.Config.MinVersion = tls.VersionTLS13` per the HTTPS-Everywhere milestone),
+// TLS-Unique is unavailable; RFC 9266 defines `tls-exporter` as the TLS 1.3
+// replacement.
+//
+// **Current scope of this function (Bundle-4 closure):** certctl does NOT
+// currently support EST client certificate authentication. The EST endpoint
+// accepts unauthenticated POSTs (the SCEP equivalent enforces a
+// challenge-password via `preflightSCEPChallengePassword`; EST has no
+// equivalent today). Per RFC 7030 §3.2.3, channel binding is REQUIRED only
+// when client certificate authentication is in use; without that, the §3.2.3
+// requirement is moot.
+//
+// What we DO enforce here as defense-in-depth:
+//
+//  1. r.TLS must be non-nil — the EST endpoint MUST be reached over TLS.
+//     Defensive: certctl pins HTTPS-only at the server-side TLS config, but
+//     a future routing-layer regression that exposes EST over plaintext
+//     would be caught here.
+//  2. Negotiated TLS version must be >= TLS 1.2 — RFC 7030 doesn't mandate
+//     a specific TLS version, but a pre-1.2 negotiation indicates a
+//     misconfigured client/server pair. certctl's MinVersion is TLS 1.3
+//     so this should always hold.
+//  3. r.TLS.HandshakeComplete must be true — defensive against partial-
+//     handshake replays.
+//
+// **Deferred to a future bundle (operator decision required):**
+//
+//   - RFC 9266 `tls-exporter` channel binding when EST mTLS is added.
+//   - EST mTLS support itself — currently EST is unauth-or-bearer; mTLS
+//     would be a V3-aligned compliance feature.
+//
+// Returns nil if all preconditions pass; non-nil error otherwise.
+func verifyESTTransport(r *http.Request) error {
+	if r.TLS == nil {
+		return fmt.Errorf("EST endpoint reached over plaintext; TLS required (RFC 7030 §3.2.1)")
+	}
+	if !r.TLS.HandshakeComplete {
+		return fmt.Errorf("EST request reached handler before TLS handshake completed")
+	}
+	// tls.VersionTLS12 == 0x0303; certctl's MinVersion is TLS 1.3 (0x0304).
+	// Defensive lower bound at TLS 1.2 lets us catch a future MinVersion
+	// regression cleanly without coupling this guard to the server config.
+	if r.TLS.Version < 0x0303 {
+		return fmt.Errorf("EST request negotiated TLS version 0x%04x; TLS 1.2 minimum required", r.TLS.Version)
+	}
+	return nil
 }
 
 // CSRAttrs handles GET /.well-known/est/csrattrs

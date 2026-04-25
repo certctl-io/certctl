@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/tls"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/base64"
@@ -170,6 +171,7 @@ func TestESTSimpleEnroll_Success_PEM(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simpleenroll", strings.NewReader(csrPEM))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	req.Header.Set("Content-Type", "application/pkcs10")
 	w := httptest.NewRecorder()
 	h.SimpleEnroll(w, req)
@@ -195,6 +197,7 @@ func TestESTSimpleEnroll_Success_Base64DER(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simpleenroll", strings.NewReader(csrB64))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	req.Header.Set("Content-Type", "application/pkcs10")
 	w := httptest.NewRecorder()
 	h.SimpleEnroll(w, req)
@@ -222,6 +225,7 @@ func TestESTSimpleEnroll_EmptyBody(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simpleenroll", strings.NewReader(""))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	w := httptest.NewRecorder()
 	h.SimpleEnroll(w, req)
 
@@ -235,6 +239,7 @@ func TestESTSimpleEnroll_InvalidCSR(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simpleenroll", strings.NewReader("not-a-valid-csr"))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	w := httptest.NewRecorder()
 	h.SimpleEnroll(w, req)
 
@@ -251,6 +256,7 @@ func TestESTSimpleEnroll_ServiceError(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simpleenroll", strings.NewReader(csrPEM))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	w := httptest.NewRecorder()
 	h.SimpleEnroll(w, req)
 
@@ -271,6 +277,7 @@ func TestESTSimpleReEnroll_Success(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simplereenroll", strings.NewReader(csrPEM))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	w := httptest.NewRecorder()
 	h.SimpleReEnroll(w, req)
 
@@ -396,6 +403,7 @@ func TestESTSimpleReEnroll_ServiceError(t *testing.T) {
 	h := NewESTHandler(svc)
 
 	req := httptest.NewRequest(http.MethodPost, "/.well-known/est/simplereenroll", strings.NewReader(csrPEM))
+	req.TLS = &tls.ConnectionState{HandshakeComplete: true, Version: tls.VersionTLS13}
 	w := httptest.NewRecorder()
 	h.SimpleReEnroll(w, req)
 

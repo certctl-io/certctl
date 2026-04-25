@@ -2,6 +2,7 @@ package integration
 
 import (
 	"bytes"
+	"crypto/tls"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -118,7 +119,22 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 	// no Authorization header to verify the relying-party contract.
 	r.RegisterPKIHandlers(certificateHandler)
 
-	server := httptest.NewServer(r)
+	// Bundle-4 / M-021: the EST handler now requires `r.TLS != nil` per
+	// verifyESTTransport. The integration tests use httptest.NewServer (HTTP,
+	// not HTTPS) for simplicity. Wrap the router with a fake-TLS injector that
+	// sets a synthetic `*tls.ConnectionState` on every request — mimicking what
+	// the real TLS listener does in production. The injector is test-only;
+	// production paths use the real listener's `r.TLS`.
+	wrapped := http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+		if req.TLS == nil {
+			req.TLS = &tls.ConnectionState{
+				HandshakeComplete: true,
+				Version:           tls.VersionTLS13,
+			}
+		}
+		r.ServeHTTP(w, req)
+	})
+	server := httptest.NewServer(wrapped)
 	t.Cleanup(func() { server.Close() })
 
 	return server, certRepo, jobRepo, agentRepo
