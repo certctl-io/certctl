@@ -13,7 +13,6 @@ import {
   archiveCertificate,
   revokeCertificate,
   bulkRevokeCertificates,
-  exportCertificatePEM,
   downloadCertificatePEM,
   exportCertificatePKCS12,
   getAgents,
@@ -1151,15 +1150,8 @@ describe('API Client', () => {
   // ─── Certificate Export ────────────────────────────────
 
   describe('Certificate Export', () => {
-    it('exportCertificatePEM fetches PEM data as JSON', async () => {
-      const pemResult = { cert_pem: 'CERT', chain_pem: 'CHAIN', full_pem: 'FULL' };
-      mockFetch.mockReturnValueOnce(mockJsonResponse(pemResult));
-      const result = await exportCertificatePEM('mc-1');
-      const [url] = mockFetch.mock.calls[0];
-      expect(url).toBe('/api/v1/certificates/mc-1/export/pem');
-      expect(result.cert_pem).toBe('CERT');
-      expect(result.full_pem).toBe('FULL');
-    });
+    // B-1 closure (cat-b-9b97ffb35ef7): exportCertificatePEM was removed
+    // from client.ts as a dead duplicate of downloadCertificatePEM.
 
     it('downloadCertificatePEM fetches blob with download=true', async () => {
       const mockBlob = new Blob(['pem-data'], { type: 'application/x-pem-file' });

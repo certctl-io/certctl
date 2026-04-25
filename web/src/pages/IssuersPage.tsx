@@ -1,7 +1,7 @@
-import { useState, useMemo } from 'react';
+import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getIssuers, testIssuerConnection, deleteIssuer, createIssuer } from '../api/client';
+import { getIssuers, testIssuerConnection, deleteIssuer, createIssuer, updateIssuer } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -30,6 +30,18 @@ export default function IssuersPage() {
   const [preselectedType, setPreselectedType] = useState<string | null>(null);
   const [typeFilter, setTypeFilter] = useState<string>('');
   const [configModal, setConfigModal] = useState<{ title: string; config: Record<string, unknown> } | null>(null);
+  // B-1 master closure (cat-b-7a34f893a8f9): rename-only Edit affordance.
+  // Pre-B-1 the only way to rename an issuer was delete-and-recreate,
+  // which destroyed cert provenance and forced a re-encryption cycle
+  // through internal/crypto/encryption.go for every cert under the
+  // issuer. Type and credential blob are intentionally NOT editable here
+  // — changing the underlying CA driver type would require
+  // re-encrypting config under a different schema, and credentials are
+  // stored encrypted at rest (we can't decrypt them client-side to
+  // pre-populate). Operators who need to rotate credentials still
+  // delete + recreate. Documented as a deferred follow-up in the L-1
+  // CHANGELOG entry.
+  const [editingIssuer, setEditingIssuer] = useState<Issuer | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['issuers'],
@@ -54,6 +66,19 @@ export default function IssuersPage() {
       queryClient.invalidateQueries({ queryKey: ['issuers'] });
       setShowCreateModal(false);
       setPreselectedType(null);
+    },
+  });
+
+  // B-1 master closure: updateIssuer is wired to the rename-only Edit
+  // modal. Type and credential blob are NOT mutated here — see editingIssuer
+  // docblock above. Sends `{ name, type, config }` to satisfy the backend
+  // PUT contract (the handler decodes into a full domain.Issuer struct);
+  // type + config are preserved by reading them from the editing target.
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Issuer> }) => updateIssuer(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['issuers'] });
+      setEditingIssuer(null);
     },
   });
 
@@ -128,6 +153,12 @@ export default function IssuersPage() {
             className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
           >
             Test
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); setEditingIssuer(i); }}
+            className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
+          >
+            Edit
           </button>
           <button
             onClick={(e) => { e.stopPropagation(); if (confirm(`Delete issuer ${i.name}?`)) deleteMutation.mutate(i.id); }}
@@ -244,7 +275,88 @@ export default function IssuersPage() {
           isSubmitting={createMutation.isPending}
         />
       )}
+
+      {/* B-1 closure: EditIssuerModal — rename-only. */}
+      <EditIssuerModal
+        issuer={editingIssuer}
+        onClose={() => setEditingIssuer(null)}
+        onSave={(name) => {
+          if (!editingIssuer) return;
+          updateMutation.mutate({
+            id: editingIssuer.id,
+            data: {
+              name,
+              // Preserve type + config + enabled — the rename-only
+              // contract. Credential blob stays encrypted at rest.
+              type: editingIssuer.type,
+              config: editingIssuer.config,
+              enabled: editingIssuer.enabled,
+            },
+          });
+        }}
+        isSaving={updateMutation.isPending}
+        error={updateMutation.error ? (updateMutation.error as Error).message : null}
+      />
     </>
+  );
+}
+
+// ─── EditIssuerModal — rename-only Edit modal (B-1) ─────────────
+//
+// Locked: type, config (credentials), enabled. Editable: name only.
+// The audit's "destructive rename workflow" complaint is specifically
+// about renames; B-1 closes that hazard. Credential rotation still
+// requires delete-and-recreate (see CHANGELOG B-1 known follow-ups).
+interface EditIssuerModalProps {
+  issuer: Issuer | null;
+  onClose: () => void;
+  onSave: (name: string) => void;
+  isSaving: boolean;
+  error: string | null;
+}
+
+function EditIssuerModal({ issuer, onClose, onSave, isSaving, error }: EditIssuerModalProps) {
+  const [name, setName] = useState('');
+  useEffect(() => { if (issuer) setName(issuer.name); }, [issuer]);
+
+  if (!issuer) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave(name.trim());
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Edit Issuer</h2>
+        <p className="text-xs text-ink-muted mb-4 font-mono">{issuer.id}</p>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} required
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink-muted mb-1">Type (locked)</label>
+            <input value={issuer.type} disabled
+              className="w-full bg-surface-border/50 border border-surface-border rounded px-3 py-2 text-sm text-ink-muted font-mono" />
+            <p className="text-xs text-ink-faint mt-1">
+              To change issuer type or rotate credentials, delete and recreate.
+              See CHANGELOG B-1 known follow-ups.
+            </p>
+          </div>
+          <div className="flex gap-2 pt-4">
+            <button type="submit" disabled={isSaving} className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }
 

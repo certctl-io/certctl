@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getTeams, deleteTeam, createTeam } from '../api/client';
+import { getTeams, deleteTeam, createTeam, updateTeam } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -82,9 +82,70 @@ function CreateTeamModal({ isOpen, onClose, onSuccess, isLoading, error }: Creat
   );
 }
 
+// EditTeamModal — B-1 master closure (cat-b-31ceb6aaa9f1). Mirrors
+// CreateTeamModal; pre-populates from the editing team; calls
+// updateTeam(id, fields) to close the destructive-rename hazard.
+interface EditTeamModalProps {
+  team: Team | null;
+  onClose: () => void;
+  onSuccess: () => void;
+  isLoading: boolean;
+  error: string | null;
+}
+
+function EditTeamModal({ team, onClose, onSuccess, isLoading, error }: EditTeamModalProps) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (team) {
+      setName(team.name);
+      setDescription(team.description || '');
+    }
+  }, [team]);
+
+  const handleSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!team || !name.trim()) return;
+    await updateTeam(team.id, { name: name.trim(), description: description.trim() });
+    onSuccess();
+  };
+
+  if (!team) return null;
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Edit Team</h2>
+        <p className="text-xs text-ink-muted mb-4 font-mono">{team.id}</p>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} required
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Description</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+          </div>
+          <div className="flex gap-2 pt-4">
+            <button type="submit" disabled={isLoading} className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {isLoading ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}
+
 export default function TeamsPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  const [editingTeam, setEditingTeam] = useState<Team | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['teams'],
@@ -102,6 +163,14 @@ export default function TeamsPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['teams'] });
       setShowCreate(false);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<Team> }) => updateTeam(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['teams'] });
+      setEditingTeam(null);
     },
   });
 
@@ -132,12 +201,20 @@ export default function TeamsPage() {
       key: 'actions',
       label: '',
       render: (t) => (
-        <button
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete team ${t.name}?`)) deleteMutation.mutate(t.id); }}
-          className="text-xs text-red-600 hover:text-red-700 transition-colors"
-        >
-          Delete
-        </button>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={(e) => { e.stopPropagation(); setEditingTeam(t); }}
+            className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
+          >
+            Edit
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete team ${t.name}?`)) deleteMutation.mutate(t.id); }}
+            className="text-xs text-red-600 hover:text-red-700 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
       ),
     },
   ];
@@ -169,6 +246,16 @@ export default function TeamsPage() {
         }}
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
+      />
+      <EditTeamModal
+        team={editingTeam}
+        onClose={() => setEditingTeam(null)}
+        onSuccess={() => {
+          queryClient.invalidateQueries({ queryKey: ['teams'] });
+          setEditingTeam(null);
+        }}
+        isLoading={updateMutation.isPending}
+        error={updateMutation.error ? (updateMutation.error as Error).message : null}
       />
     </>
   );

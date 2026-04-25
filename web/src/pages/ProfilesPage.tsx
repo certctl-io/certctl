@@ -1,6 +1,6 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
-import { getProfiles, deleteProfile, createProfile } from '../api/client';
+import { getProfiles, deleteProfile, createProfile, updateProfile } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
@@ -288,6 +288,12 @@ function CreateProfileModal({ isOpen, onClose, onSuccess, isLoading, error }: Cr
 export default function ProfilesPage() {
   const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
+  // B-1 master closure (cat-b-7a34f893a8f9): rename + description Edit
+  // affordance. Deeper policy fields (allowed_ekus, max_ttl_seconds,
+  // allowed_key_algorithms, etc.) stay on the delete-and-recreate path
+  // for v1 — closing the audit's destructive-rename complaint requires
+  // only the simple metadata edit. Documented as a follow-up.
+  const [editingProfile, setEditingProfile] = useState<CertificateProfile | null>(null);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['profiles'],
@@ -304,6 +310,14 @@ export default function ProfilesPage() {
     onSuccess: () => {
       queryClient.invalidateQueries({ queryKey: ['profiles'] });
       setShowCreate(false);
+    },
+  });
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, data }: { id: string; data: Partial<CertificateProfile> }) => updateProfile(id, data),
+    onSuccess: () => {
+      queryClient.invalidateQueries({ queryKey: ['profiles'] });
+      setEditingProfile(null);
     },
   });
 
@@ -382,12 +396,20 @@ export default function ProfilesPage() {
       key: 'actions',
       label: '',
       render: (p) => (
-        <button
-          onClick={(e) => { e.stopPropagation(); if (confirm(`Delete profile ${p.name}?`)) deleteMutation.mutate(p.id); }}
-          className="text-xs text-red-600 hover:text-red-700 transition-colors"
-        >
-          Delete
-        </button>
+        <div className="flex gap-3 justify-end">
+          <button
+            onClick={(e) => { e.stopPropagation(); setEditingProfile(p); }}
+            className="text-xs text-brand-400 hover:text-brand-500 transition-colors"
+          >
+            Edit
+          </button>
+          <button
+            onClick={(e) => { e.stopPropagation(); if (confirm(`Delete profile ${p.name}?`)) deleteMutation.mutate(p.id); }}
+            className="text-xs text-red-600 hover:text-red-700 transition-colors"
+          >
+            Delete
+          </button>
+        </div>
       ),
     },
   ];
@@ -420,6 +442,95 @@ export default function ProfilesPage() {
         isLoading={createMutation.isPending}
         error={createMutation.error ? (createMutation.error as Error).message : null}
       />
+      <EditProfileModal
+        profile={editingProfile}
+        onClose={() => setEditingProfile(null)}
+        onSave={(data) => {
+          if (!editingProfile) return;
+          updateMutation.mutate({ id: editingProfile.id, data });
+        }}
+        isSaving={updateMutation.isPending}
+        error={updateMutation.error ? (updateMutation.error as Error).message : null}
+      />
     </>
+  );
+}
+
+// EditProfileModal — B-1 closure (cat-b-7a34f893a8f9). Rename +
+// description only. Deeper policy fields (allowed_ekus, max_ttl_seconds,
+// allowed_key_algorithms, required_san_patterns, spiffe_uri_pattern,
+// allow_short_lived) stay on delete-and-recreate for v1 — closing the
+// audit's destructive-rename complaint requires only the simple
+// metadata edit. The PUT contract takes a full Partial<CertificateProfile>
+// so we forward the existing policy fields untouched.
+interface EditProfileModalProps {
+  profile: CertificateProfile | null;
+  onClose: () => void;
+  onSave: (data: Partial<CertificateProfile>) => void;
+  isSaving: boolean;
+  error: string | null;
+}
+
+function EditProfileModal({ profile, onClose, onSave, isSaving, error }: EditProfileModalProps) {
+  const [name, setName] = useState('');
+  const [description, setDescription] = useState('');
+
+  useEffect(() => {
+    if (profile) {
+      setName(profile.name);
+      setDescription(profile.description || '');
+    }
+  }, [profile]);
+
+  if (!profile) return null;
+
+  const handleSubmit = (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!name.trim()) return;
+    onSave({
+      // Pass the full struct minus id/timestamps. Backend PUT needs the
+      // policy fields preserved so we forward them from the editing target.
+      name: name.trim(),
+      description: description.trim(),
+      allowed_key_algorithms: profile.allowed_key_algorithms,
+      max_ttl_seconds: profile.max_ttl_seconds,
+      allowed_ekus: profile.allowed_ekus,
+      required_san_patterns: profile.required_san_patterns,
+      spiffe_uri_pattern: profile.spiffe_uri_pattern,
+      allow_short_lived: profile.allow_short_lived,
+      enabled: profile.enabled,
+    });
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl" onClick={e => e.stopPropagation()}>
+        <h2 className="text-lg font-semibold text-ink mb-4">Edit Profile</h2>
+        <p className="text-xs text-ink-muted mb-4 font-mono">{profile.id}</p>
+        {error && <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>}
+        <form onSubmit={handleSubmit} className="space-y-4">
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} required
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+          </div>
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">Description</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm text-ink focus:outline-none focus:border-brand-400" />
+          </div>
+          <p className="text-xs text-ink-faint">
+            Policy fields (TTL, EKUs, key algorithms, SAN patterns) stay on the
+            create-recreate path for v1. See CHANGELOG B-1 known follow-ups.
+          </p>
+          <div className="flex gap-2 pt-4">
+            <button type="submit" disabled={isSaving} className="flex-1 btn btn-primary disabled:opacity-50 disabled:cursor-not-allowed">
+              {isSaving ? 'Saving...' : 'Save Changes'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost">Cancel</button>
+          </div>
+        </form>
+      </div>
+    </div>
   );
 }

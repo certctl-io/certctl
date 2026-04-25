@@ -163,6 +163,8 @@ The dashboard includes an **ErrorBoundary component** for graceful error recover
 - Light content area with branded dark teal sidebar, Inter + JetBrains Mono typography
 - SSE/WebSocket planned for real-time job status updates
 
+**Backend ↔ frontend round-trip rule (B-1 closure):** every backend CRUD operation must have at least one GUI consumer in `web/src/pages/`. Shipping a handler + repository method + OpenAPI operation + `client.ts` fetcher with no page that calls it leaves operators forced to `psql` directly — defeats the "every backend feature ships with its GUI surface" invariant and creates a destructive workflow when the missing path is `update*` (operators delete-and-recreate, losing FK history and audit-trail continuity). The CI guardrail in `.github/workflows/ci.yml` (`Forbidden orphan-CRUD client function regression guard (B-1)`) enforces this for the eight previously-orphan functions (`updateOwner`/`updateTeam`/`updateAgentGroup`/`updateIssuer`/`updateProfile` + `createRenewalPolicy`/`updateRenewalPolicy`/`deleteRenewalPolicy`); apply the same rule when adding any new write endpoint. If a fetcher is needed in `client.ts` before its consumer page exists, leave a TODO referencing this rule and ship them in the same commit.
+
 ### PostgreSQL Database
 
 All state is stored in PostgreSQL 16. The schema uses TEXT primary keys (not UUIDs) with human-readable prefixed IDs like `mc-api-prod`, `t-platform`, `o-alice`.
