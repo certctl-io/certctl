@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, triggerRenewal, revokeCertificate, updateCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates } from '../api/client';
+import { getCertificates, createCertificate, revokeCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates, bulkRenewCertificates, bulkReassignCertificates } from '../api/client';
 import { useAuth } from '../components/AuthProvider';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
@@ -311,22 +311,38 @@ function BulkReassignModal({ ids, onClose, onSuccess }: { ids: string[]; onClose
     queryFn: () => getOwners(),
   });
 
+  // L-2 closure (cat-l-8a1fb258a38a): pre-L-2 this looped
+  // `await updateCertificate(id, { owner_id })` over the selection
+  // (N HTTP round-trips). Post-L-2 it's a single POST to
+  // /api/v1/certificates/bulk-reassign. The CI guardrail in
+  // .github/workflows/ci.yml (`Forbidden client-side bulk-action loop
+  // regression guard (L-1)`) catches reintroduction of the loop shape.
   const handleReassign = async () => {
     if (!ownerId) return;
     setRunning(true);
     setError('');
-    let succeeded = 0;
-    for (const id of ids) {
-      try {
-        await updateCertificate(id, { owner_id: ownerId } as Partial<Certificate>);
-        succeeded++;
-        setProgress(succeeded);
-      } catch (err) {
-        setError(`Failed on ${id}: ${err instanceof Error ? err.message : 'Unknown error'}`);
-        break;
+    setProgress(0);
+    try {
+      const result = await bulkReassignCertificates({
+        certificate_ids: ids,
+        owner_id: ownerId,
+      });
+      setProgress(result.total_reassigned);
+      if (result.total_failed > 0) {
+        const first = result.errors?.[0];
+        setError(
+          `${result.total_failed} of ${result.total_matched} failed${
+            first ? `: ${first.certificate_id} — ${first.error}` : ''
+          }`
+        );
+      } else {
+        onSuccess();
       }
+    } catch (err) {
+      setError(`Bulk reassignment failed: ${err instanceof Error ? err.message : 'Unknown error'}`);
+    } finally {
+      setRunning(false);
     }
-    if (!error) onSuccess();
   };
 
   return (
@@ -405,20 +421,32 @@ export default function CertificatesPage() {
     refetchInterval: 30000,
   });
 
+  // L-1 closure (cat-l-fa0c1ac07ab5): pre-L-1 this looped
+  // `await triggerRenewal(ids[i])` over the selection (N HTTP round-
+  // trips × ~50–200ms each = 5–20s wedge for 100 selected certs).
+  // Post-L-1 it's a single POST to /api/v1/certificates/bulk-renew;
+  // the server resolves the criteria, applies status filters
+  // (RenewalInProgress/Revoked/Archived/Expired all silent-skip), and
+  // enqueues N renewal jobs server-side, returning a per-cert
+  // {certificate_id, job_id} envelope. CI guardrail at
+  // .github/workflows/ci.yml catches loop-shape regression.
   const handleBulkRenewal = async () => {
     const ids = Array.from(selectedIds);
     setBulkRenewProgress({ done: 0, total: ids.length, running: true });
-    for (let i = 0; i < ids.length; i++) {
-      try {
-        await triggerRenewal(ids[i]);
-      } catch {
-        // continue on individual failures
-      }
-      setBulkRenewProgress({ done: i + 1, total: ids.length, running: i + 1 < ids.length });
+    try {
+      const result = await bulkRenewCertificates({ certificate_ids: ids });
+      setBulkRenewProgress({
+        done: result.total_enqueued,
+        total: result.total_matched,
+        running: false,
+      });
+    } catch {
+      // surface as a "0 of N" terminal state — no retries.
+      setBulkRenewProgress({ done: 0, total: ids.length, running: false });
     }
     queryClient.invalidateQueries({ queryKey: ['certificates'] });
     setSelectedIds(new Set());
-    setTimeout(() => setBulkRenewProgress(null), 3000);
+    setTimeout(() => setBulkRenewProgress(null), 5000);
   };
 
   const columns: Column<Certificate>[] = [

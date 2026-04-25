@@ -129,6 +129,64 @@ export const bulkRevokeCertificates = (criteria: BulkRevokeCriteria) =>
     body: JSON.stringify(criteria),
   });
 
+// L-1 master closure (cat-l-fa0c1ac07ab5): bulk renew. Mirrors
+// BulkRevokeCriteria field-for-field so operators who already know the
+// bulk-revoke contract have zero new surface to learn. Pre-L-1 the GUI
+// looped `await triggerRenewal(id)` over the selection; 100 certs = 100
+// HTTP round-trips. Post-L-1 it's a single POST returning per-cert
+// {certificate_id, job_id} pairs in enqueued_jobs and per-cert errors
+// in errors. The "renew all certs of profile X" use case is the
+// canonical reason to support criteria-mode in addition to explicit IDs.
+export interface BulkRenewalCriteria {
+  profile_id?: string;
+  owner_id?: string;
+  agent_id?: string;
+  issuer_id?: string;
+  team_id?: string;
+  certificate_ids?: string[];
+}
+
+export interface BulkRenewalResult {
+  total_matched: number;
+  total_enqueued: number;
+  total_skipped: number;
+  total_failed: number;
+  enqueued_jobs?: { certificate_id: string; job_id: string }[];
+  errors?: { certificate_id: string; error: string }[];
+}
+
+export const bulkRenewCertificates = (criteria: BulkRenewalCriteria) =>
+  fetchJSON<BulkRenewalResult>(`${BASE}/certificates/bulk-renew`, {
+    method: 'POST',
+    body: JSON.stringify(criteria),
+  });
+
+// L-2 closure (cat-l-8a1fb258a38a): bulk reassign owner (and optionally
+// team) for a set of certificates. Narrower than bulk-renew — explicit
+// IDs only, no criteria-mode (operators query first, then reassign by
+// ID). Pre-L-2 the GUI looped `await updateCertificate(id, { owner_id })`.
+// owner_id is required; team_id is optional and updates only when
+// non-empty (matches the existing per-cert PUT contract).
+export interface BulkReassignmentRequest {
+  certificate_ids: string[];
+  owner_id: string;
+  team_id?: string;
+}
+
+export interface BulkReassignmentResult {
+  total_matched: number;
+  total_reassigned: number;
+  total_skipped: number;
+  total_failed: number;
+  errors?: { certificate_id: string; error: string }[];
+}
+
+export const bulkReassignCertificates = (request: BulkReassignmentRequest) =>
+  fetchJSON<BulkReassignmentResult>(`${BASE}/certificates/bulk-reassign`, {
+    method: 'POST',
+    body: JSON.stringify(request),
+  });
+
 // Certificate Export
 export const exportCertificatePEM = (id: string) =>
   fetchJSON<{ cert_pem: string; chain_pem: string; full_pem: string }>(`${BASE}/certificates/${id}/export/pem`);
