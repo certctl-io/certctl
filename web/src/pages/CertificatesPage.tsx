@@ -398,6 +398,24 @@ export default function CertificatesPage() {
   const [issuerFilter, setIssuerFilter] = useState('');
   const [ownerFilter, setOwnerFilter] = useState('');
   const [profileFilter, setProfileFilter] = useState('');
+  // F-1 closure (cat-e-610251c8f72d): pre-F-1 the page exposed only 5 of
+  // the backend handler's 17 supported query filters. Three new operator-
+  // facing filters added: team_id (already first-class elsewhere),
+  // expires_before (drives the "expiring in N days" workflow), and a
+  // sort selector (defaults to backend ordering). Audit-recommended
+  // minimum-add per the closure rationale; remaining filters
+  // (agent_id, expires_after, created_after, updated_after, cursor,
+  // fields, sort_desc) are deferred until a consumer use case
+  // demands them — over-stuffing the toolbar is its own UX cost.
+  const [teamFilter, setTeamFilter] = useState('');
+  const [expiresBefore, setExpiresBefore] = useState('');
+  const [sortBy, setSortBy] = useState('');
+  // F-1 closure (cat-k-e85d1099b2d7): pre-F-1 the page rendered the
+  // first 50 certs returned by the backend with no way to advance.
+  // The reusable DataTable pagination prop (added in this same
+  // commit) takes the page + per_page state declared here.
+  const [page, setPage] = useState(1);
+  const [perPage, setPerPage] = useState(50);
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkRevoke, setShowBulkRevoke] = useState(false);
@@ -407,13 +425,21 @@ export default function CertificatesPage() {
   const { data: issuersData } = useQuery({ queryKey: ['issuers-filter'], queryFn: () => getIssuers({ per_page: '100' }) });
   const { data: ownersData } = useQuery({ queryKey: ['owners-filter'], queryFn: () => getOwners({ per_page: '100' }) });
   const { data: profilesData } = useQuery({ queryKey: ['profiles-filter'], queryFn: () => getProfiles({ per_page: '100' }) });
+  // F-1 closure: hydrate the team filter dropdown.
+  const { data: teamsFilterData } = useQuery({ queryKey: ['teams-filter'], queryFn: () => getTeams({ per_page: '100' }) });
 
   const params: Record<string, string> = {};
-  if (statusFilter) params.status = statusFilter;
-  if (envFilter) params.environment = envFilter;
-  if (issuerFilter) params.issuer_id = issuerFilter;
-  if (ownerFilter) params.owner_id = ownerFilter;
-  if (profileFilter) params.profile_id = profileFilter;
+  if (statusFilter)  params.status         = statusFilter;
+  if (envFilter)     params.environment    = envFilter;
+  if (issuerFilter)  params.issuer_id      = issuerFilter;
+  if (ownerFilter)   params.owner_id       = ownerFilter;
+  if (profileFilter) params.profile_id     = profileFilter;
+  if (teamFilter)    params.team_id        = teamFilter;
+  if (expiresBefore) params.expires_before = expiresBefore;
+  if (sortBy)        params.sort           = sortBy;
+  // Pagination (F-1) — re-fetch on page / per_page change.
+  params.page     = String(page);
+  params.per_page = String(perPage);
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['certificates', params],
@@ -587,6 +613,36 @@ export default function CertificatesPage() {
             <option key={p.id} value={p.id}>{p.name}</option>
           ))}
         </select>
+        {/* F-1 closure (cat-e-610251c8f72d): team / expires_before / sort */}
+        <select
+          value={teamFilter}
+          onChange={e => { setTeamFilter(e.target.value); setPage(1); }}
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        >
+          <option value="">All teams</option>
+          {teamsFilterData?.data?.map(t => (
+            <option key={t.id} value={t.id}>{t.name}</option>
+          ))}
+        </select>
+        <input
+          type="date"
+          value={expiresBefore}
+          onChange={e => { setExpiresBefore(e.target.value); setPage(1); }}
+          title="Expires before (drives the 'expiring in N days' workflow)"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        />
+        <select
+          value={sortBy}
+          onChange={e => { setSortBy(e.target.value); setPage(1); }}
+          title="Sort order"
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
+        >
+          <option value="">Default sort</option>
+          <option value="notAfter">Expires soonest</option>
+          <option value="-notAfter">Expires latest</option>
+          <option value="createdAt">Created earliest</option>
+          <option value="-createdAt">Created latest</option>
+        </select>
       </div>
       <div className="flex-1 overflow-y-auto">
         {error ? (
@@ -601,6 +657,13 @@ export default function CertificatesPage() {
             selectable
             selectedKeys={selectedIds}
             onSelectionChange={setSelectedIds}
+            pagination={{
+              page,
+              perPage,
+              total: data?.total ?? 0,
+              onPageChange: setPage,
+              onPerPageChange: (n) => { setPerPage(n); setPage(1); },
+            }}
           />
         )}
       </div>
