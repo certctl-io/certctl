@@ -149,7 +149,7 @@ Every API call is recorded to the immutable audit trail. Best-effort (non-blocki
 
 <!-- Source: internal/scheduler/scheduler.go (renewalCheckLoop, 1-hour default interval) -->
 
-The renewal scheduler runs every hour (configurable via `CERTCTL_RENEWAL_CHECK_INTERVAL`). For each certificate approaching expiration:
+The renewal scheduler runs every hour (configurable via `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL`). For each certificate approaching expiration:
 
 1. Checks ACME ARI (RFC 9773) if available — CA-directed renewal timing takes priority
 2. Falls back to threshold-based logic using per-policy `alert_thresholds_days` (default `[30, 14, 7, 0]`)
@@ -1114,12 +1114,12 @@ Single SQL `UNION` query replaces the previous "fetch all, filter in Go" approac
 
 | Loop | Default Interval | Always-on | Env Var | Description |
 |---|---|---|---|---|
-| Renewal check | 1 hour | Yes | — | Check expiring certs, query ARI, create renewal jobs |
-| Job processor | 30 seconds | Yes | — | Process pending jobs |
+| Renewal check | 1 hour | Yes | `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | Check expiring certs, query ARI, create renewal jobs |
+| Job processor | 30 seconds | Yes | `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | Process pending jobs |
 | Job retry | 5 minutes | Yes | `CERTCTL_SCHEDULER_RETRY_INTERVAL` | Retry Failed jobs (I-001) |
-| Job timeout reaper | 10 minutes | Yes | `CERTCTL_JOB_TIMEOUT_INTERVAL` | Fail AwaitingCSR/AwaitingApproval jobs past timeout (I-003) |
-| Agent health check | 2 minutes | Yes | — | Check agent heartbeat staleness |
-| Notification processor | 1 minute | Yes | — | Send queued notifications |
+| Job timeout reaper | 10 minutes | Yes | `CERTCTL_JOB_TIMEOUT_INTERVAL` (per-state thresholds: `CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT`, `CERTCTL_JOB_AWAITING_CSR_TIMEOUT`) | Fail AwaitingCSR/AwaitingApproval jobs past timeout (I-003) |
+| Agent health check | 2 minutes | Yes | `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | Check agent heartbeat staleness |
+| Notification processor | 1 minute | Yes | `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | Send queued notifications |
 | Notification retry | 2 minutes | Yes | `CERTCTL_NOTIFICATION_RETRY_INTERVAL` | Exponential backoff retry for failed notifications; promote to dead-letter after 5 attempts (I-005) |
 | Short-lived expiry check | 30 seconds | Yes | — | Mark short-lived certs expired |
 | Network scan | 6 hours | Opt-in | `CERTCTL_NETWORK_SCAN_ENABLED` | Run network discovery scans |
@@ -1369,7 +1369,9 @@ Config via `values.yaml`. Secrets for API key, database password, SMTP password.
 
 <!-- Source: migrations/ -->
 
-21 tables across 10 numbered migrations. PostgreSQL 16. `database/sql` + `lib/pq` (no ORM). TEXT primary keys with human-readable prefixed IDs.
+PostgreSQL 16, `database/sql` + `lib/pq` (no ORM). TEXT primary keys with human-readable prefixed IDs. The catalog of tables and migrations rebuilds via the commands in the "At a Glance" table at the top of this doc — re-derive at release time rather than reading hardcoded numbers from prose.
+
+The migration runner reads SQL files from `./migrations/` by default; the path is configurable via `CERTCTL_DATABASE_MIGRATIONS_PATH` for operators running certctl out of a non-standard layout (e.g. a Helm chart that bind-mounts migrations into `/etc/certctl/migrations/`).
 
 ### Migrations
 
