@@ -2,6 +2,41 @@
 
 All notable changes to certctl are documented in this file. Dates use ISO 8601. Versions follow [Semantic Versioning](https://semver.org/).
 
+## [unreleased] — 2026-04-24
+
+### G-1: JWT silent auth downgrade — closed end-to-end
+
+> Pre-G-1 the config validator accepted `CERTCTL_AUTH_TYPE=jwt` and the startup log faithfully echoed `"authentication enabled" "type"="jwt"`. Reasonable people read that and concluded JWT was on. It wasn't. The auth-middleware wiring at `cmd/server/main.go` unconditionally routed every request through the api-key bearer middleware regardless of `cfg.Auth.Type`. So `CERTCTL_AUTH_TYPE=jwt` quietly compared incoming `Authorization: Bearer <something>` against whatever string the operator put in `CERTCTL_AUTH_SECRET` — real JWT clients got 401, and operators who treated `CERTCTL_AUTH_SECRET` as a *signing* secret (because they thought they were configuring JWT) had effectively handed an attacker an api-key. A security finding masquerading as a config option. We chose to remove the option rather than ship JWT middleware — the audit-recommended structural fix that closes the hazard. Operators who actually need JWT/OIDC front certctl with an authenticating gateway (oauth2-proxy / Envoy `ext_authz` / Traefik `ForwardAuth` / Pomerium / Authelia) and run the upstream certctl with `CERTCTL_AUTH_TYPE=none`. The same pattern works on docker-compose and Helm.
+
+### Breaking Changes
+
+- **`CERTCTL_AUTH_TYPE=jwt` is no longer accepted.** Pre-G-1 the value was silently downgraded to api-key middleware. Post-G-1 the server fails at startup with a dedicated diagnostic naming the authenticating-gateway pattern. Operators with this in their env block must either switch to `api-key` (if they were de facto using api-key auth all along — same Bearer token continues to work) or switch to `none` and front certctl with an oauth2-proxy / Envoy / Traefik / Pomerium gateway. See [`docs/upgrade-to-v2-jwt-removal.md`](docs/upgrade-to-v2-jwt-removal.md).
+- **Helm chart `server.auth.type=jwt` now fails at `helm install` / `helm upgrade` template time.** New `certctl.validateAuthType` template helper runs on every template that depends on `.Values.server.auth.type` (`server-deployment.yaml`, `server-configmap.yaml`, `server-secret.yaml`) and fails the render with a pointer at the gateway-fronting pattern.
+- **OpenAPI spec `auth_type` enum no longer includes `jwt`.** API consumers checking `/api/v1/auth/info` against the spec will see a smaller enum.
+
+### Removed
+
+- Documented references to JWT in the certctl auth surface (config docblocks, middleware/health-handler comments, `.env.example`, `docs/architecture.md` middleware-stack bullet). Connector-level JWT references (Google OAuth2 service-account JWT in `internal/connector/discovery/gcpsm/`, `internal/connector/issuer/googlecas/`; step-ca's provisioner one-time-token JWT in `internal/connector/issuer/stepca/`) are unrelated and untouched — those are external-protocol uses, not certctl's own auth shape.
+
+### Added
+
+- **`config.AuthType` typed alias** with `AuthTypeAPIKey` / `AuthTypeNone` exported constants. Single source of truth for the allowed set across the validator, the runtime defense-in-depth switch in `main.go`, and the helm chart's `validateAuthType` helper.
+- **`config.ValidAuthTypes()`** helper returning the complete allowed set; pinned by a property test (`TestValidAuthTypesDoesNotContainJWT`) that fails the build if `"jwt"` is ever re-added to the slice.
+- **Defense-in-depth runtime guard** in `cmd/server/main.go` immediately after `config.Load()` — a `switch config.AuthType(cfg.Auth.Type)` that exits 1 if the validator was bypassed (test harness, alt config loader, env-var rebinding).
+- **`certctl.validateAuthType` Helm template helper** mirroring the existing `certctl.tls.required` pattern. Fails template render on any `server.auth.type` outside `{api-key, none}`.
+- **`docs/architecture.md` "Authenticating-gateway pattern (JWT, OIDC, mTLS)"** section explaining the design rationale for the narrow in-process auth surface and listing oauth2-proxy / Envoy `ext_authz` / Traefik `ForwardAuth` / Pomerium / Authelia / Caddy `forward_auth` / Apache `mod_auth_openidc` / nginx `auth_request` as the standard fronting options.
+- **`docs/upgrade-to-v2-jwt-removal.md`** migration guide. Same shape as `docs/upgrade-to-tls.md`. Walks through the dedicated startup error, both recovery paths (`api-key` vs gateway-fronting), a complete docker-compose oauth2-proxy walkthrough, Traefik ForwardAuth and Envoy `ext_authz` patterns, and rollback posture.
+- **`deploy/helm/certctl/README.md`** "JWT / OIDC via authenticating gateway" section with a Kubernetes-flavored oauth2-proxy + certctl walkthrough.
+- **CI regression guardrail** in `.github/workflows/ci.yml` (`Forbidden auth-type literal regression guard (G-1)`) — grep-fails the build if `"jwt"` appears as an auth-type literal in production code or spec. Connector packages exempt (legitimate external-protocol uses).
+- **Negative test coverage** in `internal/config/config_test.go`: `TestValidate_JWTAuth_RejectedDedicated` (two table rows pinning that the dedicated G-1 error fires regardless of whether `Secret` is set), `TestValidAuthTypesDoesNotContainJWT` (property-level guard), `TestValidAuthTypesIsExactly_APIKey_None` (allowed-set contract), `TestValidate_GenericInvalidAuthType` (pins that other invalid values still surface the generic invalid-auth-type error, so the dedicated G-1 path doesn't accidentally swallow non-jwt typos).
+
+### Changed
+
+- `internal/api/middleware/middleware.go::AuthConfig.Type` field comment now references the typed `config.AuthType` constants instead of an inline string enumeration.
+- `internal/api/handler/health.go::HealthHandler.AuthType` field comment same treatment.
+- `internal/api/handler/health_test.go` — the prior `TestAuthInfo_ReturnsAuthType_JWT` (which asserted the handler echoed `"jwt"`, baking the silent-downgrade lie into the regression suite) is removed; the pre-existing `TestAuthInfo_ReturnsAuthType_APIKey` continues to cover the api-key happy path.
+- Auth-disabled startup log in `main.go` now points operators at the authenticating-gateway pattern explicitly.
+
 ## [2.2.0] — 2026-04-19
 
 ### HTTPS Everywhere — The Irony

@@ -39,6 +39,26 @@ func main() {
 		os.Exit(1)
 	}
 
+	// Defense-in-depth runtime guard for the auth-type discriminator.
+	//
+	// G-1 (P1): config.Load() already runs Validate() which rejects "jwt"
+	// and any value outside config.ValidAuthTypes() with a dedicated
+	// diagnostic. This switch is belt-and-braces — if a future refactor
+	// bypasses the validator (test harness, alt config loader, env-var
+	// rebinding after Load) the server must not silently boot with an
+	// unsupported auth shape. The error path uses fmt.Fprintf because
+	// the slog logger is constructed from cfg below this point; we want
+	// the failure to be visible regardless of log-level configuration.
+	switch config.AuthType(cfg.Auth.Type) {
+	case config.AuthTypeAPIKey, config.AuthTypeNone:
+		// ok — fall through
+	default:
+		fmt.Fprintf(os.Stderr,
+			"unsupported auth type at runtime: %q (valid: %v) — config validation should have caught this; refusing to start\n",
+			cfg.Auth.Type, config.ValidAuthTypes())
+		os.Exit(1)
+	}
+
 	// Set up structured logging
 	logger := slog.New(slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{
 		Level: cfg.GetLogLevel(),
@@ -615,7 +635,7 @@ func main() {
 	// compatibility CERTCTL_AUTH_SECRET is synthesized into legacy-key-N
 	// entries with Admin=false.
 	var namedKeys []middleware.NamedAPIKey
-	if cfg.Auth.Type != "none" {
+	if config.AuthType(cfg.Auth.Type) != config.AuthTypeNone {
 		// Translate typed config.NamedAPIKey -> middleware.NamedAPIKey. The
 		// two structs are field-compatible but live in different packages to
 		// preserve the config→middleware dependency direction.
@@ -704,8 +724,8 @@ func main() {
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
 	}
 
-	if cfg.Auth.Type == "none" {
-		logger.Warn("authentication disabled (CERTCTL_AUTH_TYPE=none) — not suitable for production")
+	if config.AuthType(cfg.Auth.Type) == config.AuthTypeNone {
+		logger.Warn("authentication disabled (CERTCTL_AUTH_TYPE=none) — not suitable for production except behind an authenticating gateway (oauth2-proxy / Envoy ext_authz / Traefik ForwardAuth / Pomerium)")
 	} else {
 		logger.Info("authentication enabled", "type", cfg.Auth.Type)
 	}

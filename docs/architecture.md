@@ -891,8 +891,14 @@ The HTTP middleware stack processes requests in the following order (see `cmd/se
 4. **BodyLimit** - request body size cap via `http.MaxBytesReader`
 5. **RateLimiter** - token bucket rate limiting (optional, when enabled)
 6. **CORS** - cross-origin request handling (deny-by-default)
-7. **Auth** - API key or JWT validation
+7. **Auth** - API key validation (or none in development; JWT/OIDC via authenticating gateway, see below — not in-process)
 8. **AuditLog** - records every API call to the audit trail (requires auth context for actor)
+
+### Authenticating-gateway pattern (JWT, OIDC, mTLS)
+
+certctl's in-process authentication surface is intentionally narrow: `api-key` for production deployments and `none` for development. There is no in-process JWT, OIDC, mTLS, or SAML middleware. (`CERTCTL_AUTH_TYPE=jwt` was accepted pre-G-1 but silently routed through the api-key bearer middleware — a security finding masquerading as a config option, removed at the v2.x boundary; see [`upgrade-to-v2-jwt-removal.md`](upgrade-to-v2-jwt-removal.md) if you previously set it.)
+
+For deployments that need JWT/OIDC/mTLS, the standard pattern is to put an authenticating gateway in front of certctl and configure `CERTCTL_AUTH_TYPE=none` on the upstream certctl process. The gateway terminates the federated identity protocol, validates tokens / certificates / SAML assertions, and proxies the authenticated request to certctl as a same-origin call on a private network. This separation gives operators the full breadth of the modern identity ecosystem (oauth2-proxy, Envoy `ext_authz`, Traefik `ForwardAuth`, Pomerium, Authelia, Caddy `forward_auth`, Apache `mod_auth_openidc`, nginx `auth_request`) without certctl itself having to track signing-key rotation, claim mapping, audience validation, and the rest of the JWT/OIDC surface area. Operators wanting per-request actor attribution past the gateway boundary forward the gateway-resolved identity (e.g., `X-Auth-Request-User` from oauth2-proxy) and run a small authorization layer at the gateway that enforces the bearer-key contract certctl actually uses.
 
 ### Concurrency Safety
 

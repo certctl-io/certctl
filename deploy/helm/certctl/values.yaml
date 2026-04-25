@@ -112,10 +112,23 @@ server:
     port: 8443
     annotations: {}
 
-  # Authentication configuration
+  # Authentication configuration.
+  # Valid types: "api-key" (production) or "none" (demo only — disables
+  # authentication on the API and logs a loud Warn at server startup).
+  # For JWT/OIDC, run an authenticating gateway in front of certctl
+  # (oauth2-proxy / Envoy ext_authz / Traefik ForwardAuth / Pomerium)
+  # and set type=none here so the gateway terminates federated identity.
+  # See docs/architecture.md "Authenticating-gateway pattern".
+  #
+  # G-1 (P1): pre-G-1 the chart accepted server.auth.type=jwt and the
+  # certctl-server container silently routed every request through the
+  # api-key bearer middleware — silent auth downgrade. Post-G-1 the
+  # chart's `certctl.validateAuthType` template helper rejects any value
+  # outside {api-key, none} at template time. See
+  # docs/upgrade-to-v2-jwt-removal.md if you previously set type=jwt.
   auth:
-    type: api-key  # Options: api-key, none (for demo only)
-    apiKey: ""     # REQUIRED in production - set via --set or values override
+    type: api-key
+    apiKey: ""     # REQUIRED when type=api-key (set via --set or values override).
 
   # Logging configuration
   logging:

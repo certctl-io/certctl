@@ -169,3 +169,26 @@ per affected resource. No-op when configured correctly.
 {{- fail "\n\nserver.tls.certManager.enabled=true but server.tls.certManager.issuerRef.name is empty.\n\nSet:\n  --set server.tls.certManager.issuerRef.name=<your-issuer-or-clusterissuer>\n\nSee docs/tls.md.\n" -}}
 {{- end -}}
 {{- end }}
+
+{{/*
+Auth-type validation gate.
+
+G-1 (P1): pre-G-1 the chart accepted server.auth.type=jwt and the
+certctl-server container silently routed every request through the
+api-key bearer middleware (no JWT impl ships with certctl). Post-G-1
+the chart fails at template-time with a pointer at the authenticating-
+gateway pattern. The valid set must stay in sync with
+internal/config.ValidAuthTypes() in the Go binary; if you add a value
+there you must add it here too (and update the property test in
+internal/config/config_test.go that pins both surfaces).
+
+Any template that consumes .Values.server.auth.type should call
+`{{ include "certctl.validateAuthType" . }}` at the top so this guard
+runs once per affected resource. No-op when configured correctly.
+*/}}
+{{- define "certctl.validateAuthType" -}}
+{{- $valid := list "api-key" "none" -}}
+{{- if not (has .Values.server.auth.type $valid) -}}
+{{- fail (printf "\n\nserver.auth.type=%q is not supported (valid: %v).\n\nFor JWT/OIDC, run an authenticating gateway in front of certctl\n(oauth2-proxy / Envoy ext_authz / Traefik ForwardAuth / Pomerium) and\nset server.auth.type=none here so the gateway terminates federated\nidentity. See docs/architecture.md \"Authenticating-gateway pattern\"\nand docs/upgrade-to-v2-jwt-removal.md for the migration walkthrough.\n\nG-1 audit closure: pre-G-1 the chart accepted type=jwt and the binary\nsilently downgraded to api-key middleware. The chart now fails at\ntemplate time so misconfigured deployments cannot ship.\n" .Values.server.auth.type $valid) -}}
+{{- end -}}
+{{- end }}

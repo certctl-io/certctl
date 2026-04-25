@@ -802,13 +802,59 @@ type NamedAPIKey struct {
 	Admin bool
 }
 
+// AuthType is the discriminator for the API auth middleware shape. The
+// string alias preserves env-var roundtrip (the value flows through getEnv
+// as a plain string) while giving us a typed surface for switches and
+// validation. Use the named constants below rather than string literals
+// so future enum additions/removals are caught at compile time.
+//
+// G-1 (P1): the pre-G-1 validAuthTypes map literal accepted "jwt" with no
+// JWT middleware behind it (silent auth downgrade — the configured type
+// was logged as "jwt" but every request routed through the api-key bearer
+// middleware regardless). Operators who set CERTCTL_AUTH_TYPE=jwt thought
+// they had JWT auth; they didn't. The typed alias + ValidAuthTypes()
+// helper make the allowed set the single source of truth across config
+// validation, the runtime defense-in-depth switch in main.go, and the
+// helm-chart template guard (`certctl.validateAuthType`).
+type AuthType string
+
+const (
+	// AuthTypeAPIKey routes requests through the api-key bearer middleware.
+	// CERTCTL_AUTH_SECRET (or CERTCTL_API_KEYS_NAMED) is required.
+	AuthTypeAPIKey AuthType = "api-key"
+
+	// AuthTypeNone disables authentication entirely. Development only —
+	// the server logs a loud Warn at startup. Operators who need
+	// JWT/OIDC/mTLS run an authenticating gateway (oauth2-proxy / Envoy
+	// ext_authz / Traefik ForwardAuth / Pomerium) in front of certctl
+	// and set this value on the upstream certctl process. See
+	// docs/architecture.md "Authenticating-gateway pattern".
+	AuthTypeNone AuthType = "none"
+)
+
+// ValidAuthTypes returns the allowed CERTCTL_AUTH_TYPE values. The set is
+// intentionally narrow — JWT was accepted pre-G-1 with no middleware
+// implementation behind it. Single source of truth referenced by the
+// validator below, the runtime guard in cmd/server/main.go, the helm
+// chart template (`certctl.validateAuthType`), and the property test in
+// config_test.go that pins "jwt" out of the slice forever.
+func ValidAuthTypes() []AuthType {
+	return []AuthType{AuthTypeAPIKey, AuthTypeNone}
+}
+
 // AuthConfig contains authentication configuration.
 type AuthConfig struct {
 	// Type sets the authentication mechanism for the REST API.
-	// Valid values: "api-key" (default, production), "jwt", "none" (development only).
-	// When "api-key", clients must provide Authorization: Bearer <key> header.
-	// "none" requires explicit opt-in via CERTCTL_AUTH_TYPE env var with warning logged.
+	// Valid values: "api-key" (default, production) and "none" (development
+	// only — disables authentication on the API and logs a loud Warn at
+	// startup). For JWT/OIDC, run an authenticating gateway (oauth2-proxy /
+	// Envoy / Traefik ForwardAuth / Pomerium) in front of certctl and set
+	// CERTCTL_AUTH_TYPE=none on the upstream — see docs/architecture.md
+	// "Authenticating-gateway pattern" and docs/upgrade-to-v2-jwt-removal.md.
 	// Setting: CERTCTL_AUTH_TYPE environment variable. Default: "api-key".
+	// Use the AuthType constants (AuthTypeAPIKey / AuthTypeNone) for typed
+	// comparisons; the field stays `string` to preserve env-var roundtrip
+	// shape used by getEnv() and downstream Helm/compose interpolation.
 	Type string
 
 	// Secret is the legacy authentication secret (comma-separated API keys).
@@ -1148,18 +1194,40 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("invalid log format: %s", c.Log.Format)
 	}
 
-	// Validate auth type
-	validAuthTypes := map[string]bool{
-		"api-key": true,
-		"jwt":     true,
-		"none":    true,
+	// Validate auth type.
+	//
+	// G-1 (P1): the pre-G-1 set was {"api-key", "jwt", "none"} with "jwt"
+	// accepted but no JWT middleware shipped — silent auth downgrade.
+	// Post-G-1 we route a literal "jwt" value through a dedicated
+	// rejection that gives operators actionable guidance (the
+	// authenticating-gateway pattern) instead of the generic
+	// "invalid auth type". Then we cross-check against ValidAuthTypes()
+	// so any value outside {api-key, none} surfaces uniformly.
+	if c.Auth.Type == "jwt" {
+		return fmt.Errorf(
+			"CERTCTL_AUTH_TYPE=jwt is no longer accepted (G-1 silent auth " +
+				"downgrade): no JWT middleware ships with certctl. To use " +
+				"JWT/OIDC, run an authenticating gateway (oauth2-proxy / " +
+				"Envoy ext_authz / Traefik ForwardAuth / Pomerium) in " +
+				"front of certctl and set CERTCTL_AUTH_TYPE=none on the " +
+				"upstream. See docs/architecture.md \"Authenticating-" +
+				"gateway pattern\" and docs/upgrade-to-v2-jwt-removal.md " +
+				"for the migration walkthrough")
 	}
-	if !validAuthTypes[c.Auth.Type] {
-		return fmt.Errorf("invalid auth type: %s", c.Auth.Type)
+	authTypeValid := false
+	for _, t := range ValidAuthTypes() {
+		if AuthType(c.Auth.Type) == t {
+			authTypeValid = true
+			break
+		}
+	}
+	if !authTypeValid {
+		return fmt.Errorf("invalid auth type: %s (valid: %v)", c.Auth.Type, ValidAuthTypes())
 	}
 
-	// If using JWT or API-key, secret is required
-	if (c.Auth.Type == "jwt" || c.Auth.Type == "api-key") && c.Auth.Secret == "" {
+	// If using API-key, secret is required. (Secret was previously also
+	// required for "jwt"; removed with the jwt rejection above.)
+	if c.Auth.Type == string(AuthTypeAPIKey) && c.Auth.Secret == "" {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
 	}
 

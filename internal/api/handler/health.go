@@ -7,8 +7,14 @@ import (
 )
 
 // HealthHandler handles health and readiness check endpoints.
+//
+// G-1 (P1): AuthType is one of "api-key" or "none" — see
+// internal/config.AuthType / config.ValidAuthTypes() for the typed
+// constants and the rationale for dropping "jwt" (no JWT middleware
+// ships with certctl; operators who need JWT/OIDC front certctl with
+// an authenticating gateway and set AuthType="none" on the upstream).
 type HealthHandler struct {
-	AuthType string // "api-key", "jwt", "none"
+	AuthType string // "api-key" or "none" (see config.AuthType constants)
 }
 
 // NewHealthHandler creates a new HealthHandler.

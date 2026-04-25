@@ -132,7 +132,14 @@ paths:
                 properties:
                   auth_type:
                     type: string
-                    enum: [api-key, jwt, none]
+                    # G-1 (P1): "jwt" removed from this enum after the silent
+                    # auth downgrade was identified — no JWT middleware ships
+                    # with certctl. Operators who need JWT/OIDC front certctl
+                    # with an authenticating gateway (oauth2-proxy / Envoy /
+                    # Traefik / Pomerium) and set CERTCTL_AUTH_TYPE=none
+                    # upstream. See docs/architecture.md "Authenticating-
+                    # gateway pattern".
+                    enum: [api-key, none]
                   required:
                     type: boolean
 
