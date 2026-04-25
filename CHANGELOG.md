@@ -4,6 +4,34 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### Bundle 5 (Operational Liveness + Bootstrap): 4 audit findings closed
+
+> Closure bundle from the 2026-04-25 comprehensive audit
+> (`cowork/comprehensive-audit-2026-04-25/`). Hardens the orchestrator-
+> facing surface — Kubernetes probes, agent enrollment, shutdown audit
+> drain — and confirms the L-006 short-lived-expiry plumbing already
+> shipped in v2.0.54 via the C-1 master closure. Closes
+> H-006 + H-007 + M-011 + L-006.
+
+#### Added
+
+- **`/ready` deep DB probe (Audit H-006 / CWE-754)** — `internal/api/handler/health.go::HealthHandler.Ready` now accepts a `*sql.DB` and runs `db.PingContext` with a 2-second ceiling; returns 503 + `{"status":"db_unavailable","error":"<sanitized>"}` when the DB is unreachable. Pre-Bundle-5 `/ready` returned 200 unconditionally — k8s readinessProbe pointed at `/ready` would succeed even when the control plane was disconnected from Postgres, masking outages and routing user traffic to a broken instance. Post-Bundle-5: `/health` stays shallow (k8s liveness signal — process alive, never restart for DB hiccups); `/ready` is the new readiness signal. Nil DB pool degrades gracefully to 200 + `db=not_configured` for test fixtures and no-DB deploys. Helm chart already routed readinessProbe to `/ready` so no chart change required — the upgrade is purely behavioural.
+- **Agent bootstrap token (Audit H-007 / CWE-306 + CWE-288)** — new env var `CERTCTL_AGENT_BOOTSTRAP_TOKEN` and `internal/api/handler/agent_bootstrap.go::verifyBootstrapToken` helper. When set, `RegisterAgent` requires `Authorization: Bearer <token>` (constant-time compare via `crypto/subtle.ConstantTimeCompare`) BEFORE body parse — defeats both timing oracles and unauth payload allocation. Length-mismatch path runs a dummy compare so timing is uniform regardless of failure mode. 401 returns a fixed string `invalid_or_missing_bootstrap_token` (no echo of presented credential — defence against shape leakage to a token spray probe). Backwards-compat: empty token (the v2.0.x default) = warn-mode pass-through with one-shot startup deprecation WARN announcing v2.2.0 deny-default. Generation guidance: `openssl rand -hex 32` for 256-bit entropy.
+- **`CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS` env var (Audit M-011)** — `Server.AuditFlushTimeoutSeconds` field; `cmd/server/main.go` shutdown path uses `time.Duration(cfg.Server.AuditFlushTimeoutSeconds) * time.Second` with default 30s preserving prior behaviour. Server logs `graceful shutdown budget` at startup. High-volume operators can extend the window without forking the binary; existing WARN on deadline-exceeded retained.
+
+#### Tests
+
+- `internal/api/handler/agent_bootstrap_test.go` (NEW) — full coverage: missing header, wrong scheme, empty bearer, wrong token, length mismatch, matching bearer, warn-mode pass-through, RegisterAgent E2E gate (401 BEFORE service call).
+- `internal/api/handler/health_test.go` (extended) — `/ready` DB-ping failure (503 + db_unavailable), nil-DB pass-through (200 + db=not_configured), `/health` shallow with nil DB.
+
+#### Verified (no code change required)
+
+- **`L-006` Short-lived expiry interval plumb** — re-verified at HEAD: `cmd/server/main.go:557` already calls `sched.SetShortLivedExpiryCheckInterval(cfg.Scheduler.ShortLivedExpiryCheckInterval)` per the C-1 master closure in v2.0.54. Bundle 5 confirms; tracker box flipped, no code change required.
+
+#### Why this matters
+
+Pre-Bundle-5, three operational footguns sat unfixed: (1) k8s readinessProbe couldn't distinguish "process alive" from "DB reachable", so an outage looked healthy until users complained; (2) any host with network reach to the agent registration endpoint could enroll an agent and start polling for work — no shared secret required; (3) the shutdown audit drain was hard-coded 30s, which was too short for high-volume environments and dropped events silently. Bundle 5 closes all three plus verifies a fourth (L-006) that was already silently fixed by C-1.
+
 ### Bundle 3 (MCP Trust-Boundary Fencing): 5 audit findings closed
 
 > Second closure bundle from the 2026-04-25 comprehensive audit
