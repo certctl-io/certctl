@@ -62,7 +62,7 @@ func (r *DiscoveryRepository) GetScan(ctx context.Context, id string) (*domain.D
 		&scan.ScanDurationMs, &scan.StartedAt, &scan.CompletedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("discovery scan not found: %s", id)
+		return nil, fmt.Errorf("discovery scan not found: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get discovery scan: %w", err)
@@ -190,7 +190,7 @@ func (r *DiscoveryRepository) GetDiscovered(ctx context.Context, id string) (*do
 		&cert.CreatedAt, &cert.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("discovered certificate not found: %s", id)
+		return nil, fmt.Errorf("discovered certificate not found: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get discovered certificate: %w", err)
@@ -317,7 +317,7 @@ func (r *DiscoveryRepository) UpdateDiscoveredStatus(ctx context.Context, id str
 	}
 	rowsAffected, _ := result.RowsAffected()
 	if rowsAffected == 0 {
-		return fmt.Errorf("discovered certificate not found: %s", id)
+		return fmt.Errorf("discovered certificate not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }

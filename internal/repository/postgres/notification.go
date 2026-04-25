@@ -174,7 +174,7 @@ func (r *NotificationRepository) UpdateStatus(ctx context.Context, id string, st
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		return fmt.Errorf("notification not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -336,7 +336,7 @@ func (r *NotificationRepository) RecordFailedAttempt(ctx context.Context, id str
 		// Same "not found" error shape as UpdateStatus above. The scheduler
 		// logs-and-continues on this so a concurrently-deleted row doesn't
 		// break the sweep.
-		return fmt.Errorf("notification not found")
+		return fmt.Errorf("notification not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }
@@ -368,7 +368,7 @@ func (r *NotificationRepository) MarkAsDead(ctx context.Context, id string, last
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		return fmt.Errorf("notification not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }
@@ -405,7 +405,7 @@ func (r *NotificationRepository) Requeue(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to get rows affected: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("notification not found")
+		return fmt.Errorf("notification not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }

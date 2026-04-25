@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -73,7 +74,7 @@ func (r *AgentRepository) Get(ctx context.Context, id string) (*domain.Agent, er
 	agent, err := scanAgent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("agent not found")
+			return nil, fmt.Errorf("agent not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query agent: %w", err)
 	}
@@ -170,7 +171,7 @@ func (r *AgentRepository) Update(ctx context.Context, agent *domain.Agent) error
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("agent not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -190,7 +191,7 @@ func (r *AgentRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("agent not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -237,7 +238,7 @@ func (r *AgentRepository) UpdateHeartbeat(ctx context.Context, id string, metada
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("agent not found")
+		return fmt.Errorf("agent not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -259,7 +260,7 @@ func (r *AgentRepository) GetByAPIKey(ctx context.Context, keyHash string) (*dom
 	agent, err := scanAgent(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("agent not found")
+			return nil, fmt.Errorf("agent not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query agent: %w", err)
 	}

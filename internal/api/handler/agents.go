@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"encoding/json"
 	"errors"
@@ -211,7 +212,7 @@ func (h AgentHandler) Heartbeat(w http.ResponseWriter, r *http.Request) {
 			ErrorWithRequestID(w, http.StatusGone, "Agent has been retired", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 			return
 		}
@@ -491,7 +492,7 @@ func (h AgentHandler) RetireAgent(w http.ResponseWriter, r *http.Request) {
 			JSON(w, http.StatusConflict, body)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent not found", requestID)
 			return
 		}

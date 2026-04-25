@@ -383,7 +383,7 @@ func TestApproveJob_Success(t *testing.T) {
 func TestApproveJob_NotFound(t *testing.T) {
 	mock := &MockJobService{
 		ApproveJobFn: func(id, actor string) error {
-			return fmt.Errorf("job not found: no rows")
+			return fmt.Errorf("job not found: no rows: %w", ErrMockNotFound)
 		},
 	}
 
@@ -527,7 +527,7 @@ func TestRejectJob_NoReason(t *testing.T) {
 func TestRejectJob_NotFound(t *testing.T) {
 	mock := &MockJobService{
 		RejectJobFn: func(id, reason, actor string) error {
-			return fmt.Errorf("job not found: no rows")
+			return fmt.Errorf("job not found: no rows: %w", ErrMockNotFound)
 		},
 	}
 

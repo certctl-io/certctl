@@ -72,7 +72,7 @@ func (r *RenewalPolicyRepository) Get(ctx context.Context, id string) (*domain.R
 	policy, err := scanRenewalPolicy(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return nil, fmt.Errorf("renewal policy not found: %s", id)
+			return nil, fmt.Errorf("renewal policy not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query renewal policy: %w", err)
 	}
@@ -252,7 +252,7 @@ func (r *RenewalPolicyRepository) Update(ctx context.Context, id string, policy 
 	updated, err := scanRenewalPolicy(row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
-			return fmt.Errorf("renewal policy not found: %s", id)
+			return fmt.Errorf("renewal policy not found: %w", repository.ErrNotFound)
 		}
 		if isUniqueViolation(err) {
 			return repository.ErrRenewalPolicyDuplicateName
@@ -283,7 +283,7 @@ func (r *RenewalPolicyRepository) Delete(ctx context.Context, id string) error {
 		return fmt.Errorf("failed to read RowsAffected for delete: %w", err)
 	}
 	if rows == 0 {
-		return fmt.Errorf("renewal policy not found: %s", id)
+		return fmt.Errorf("renewal policy not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }

@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
+	"errors"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -160,7 +162,7 @@ func (h AgentGroupHandler) UpdateAgentGroup(w http.ResponseWriter, r *http.Reque
 
 	updated, err := h.svc.UpdateAgentGroup(r.Context(), id, group)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
 			return
 		}
@@ -188,7 +190,7 @@ func (h AgentGroupHandler) DeleteAgentGroup(w http.ResponseWriter, r *http.Reque
 	}
 
 	if err := h.svc.DeleteAgentGroup(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Agent group not found", requestID)
 			return
 		}

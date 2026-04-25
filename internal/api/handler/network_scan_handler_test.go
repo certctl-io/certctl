@@ -27,7 +27,7 @@ func (m *mockNetworkScanService) GetTarget(ctx context.Context, id string) (*dom
 			return t, nil
 		}
 	}
-	return nil, fmt.Errorf("not found: %s", id)
+	return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
 func (m *mockNetworkScanService) CreateTarget(ctx context.Context, target *domain.NetworkScanTarget) (*domain.NetworkScanTarget, error) {
@@ -48,7 +48,7 @@ func (m *mockNetworkScanService) UpdateTarget(ctx context.Context, id string, ta
 			return t, nil
 		}
 	}
-	return nil, fmt.Errorf("not found: %s", id)
+	return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
 func (m *mockNetworkScanService) DeleteTarget(ctx context.Context, id string) error {
@@ -58,7 +58,7 @@ func (m *mockNetworkScanService) DeleteTarget(ctx context.Context, id string) er
 			return nil
 		}
 	}
-	return fmt.Errorf("not found: %s", id)
+	return fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
 func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID string) (*domain.DiscoveryScan, error) {
@@ -71,7 +71,7 @@ func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID strin
 			}, nil
 		}
 	}
-	return nil, fmt.Errorf("not found: %s", targetID)
+	return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
 func TestListNetworkScanTargets(t *testing.T) {

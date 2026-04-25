@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -68,7 +69,7 @@ func (r *NetworkScanRepository) Get(ctx context.Context, id string) (*domain.Net
 		&target.CreatedAt, &target.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("network scan target not found: %s", id)
+		return nil, fmt.Errorf("network scan target not found: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get network scan target: %w", err)
@@ -117,7 +118,7 @@ func (r *NetworkScanRepository) Update(ctx context.Context, target *domain.Netwo
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("network scan target not found: %s", target.ID)
+		return fmt.Errorf("network scan target not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }
@@ -130,7 +131,7 @@ func (r *NetworkScanRepository) Delete(ctx context.Context, id string) error {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("network scan target not found: %s", id)
+		return fmt.Errorf("network scan target not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }

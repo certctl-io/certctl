@@ -900,7 +900,7 @@ func TestRevokeCertificate_Handler_AlreadyRevoked(t *testing.T) {
 func TestRevokeCertificate_Handler_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
 		RevokeCertificateFn: func(_ context.Context, certID string, reason string, _ string) error {
-			return fmt.Errorf("failed to fetch certificate: not found")
+			return fmt.Errorf("failed to fetch certificate: not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1033,7 +1033,7 @@ func TestGetDERCRL_Success(t *testing.T) {
 			if issuerID == "iss-local" {
 				return derCRLData, nil
 			}
-			return nil, fmt.Errorf("issuer not found")
+			return nil, fmt.Errorf("issuer not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1061,7 +1061,7 @@ func TestGetDERCRL_Success(t *testing.T) {
 func TestGetDERCRL_IssuerNotFound(t *testing.T) {
 	mock := &MockCertificateService{
 		GenerateDERCRLFn: func(_ context.Context, issuerID string) ([]byte, error) {
-			return nil, fmt.Errorf("issuer not found")
+			return nil, fmt.Errorf("issuer not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1118,7 +1118,7 @@ func TestHandleOCSP_Success(t *testing.T) {
 			if issuerID == "iss-local" && serialHex == "12345" {
 				return ocspResponseBytes, nil
 			}
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1159,7 +1159,7 @@ func TestHandleOCSP_MissingSerial(t *testing.T) {
 func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 	mock := &MockCertificateService{
 		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
-			return nil, fmt.Errorf("issuer not found")
+			return nil, fmt.Errorf("issuer not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1178,7 +1178,7 @@ func TestHandleOCSP_IssuerNotFound(t *testing.T) {
 func TestHandleOCSP_CertNotFound(t *testing.T) {
 	mock := &MockCertificateService{
 		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -1529,7 +1529,7 @@ func TestGetCertificateDeployments_Success(t *testing.T) {
 func TestGetCertificateDeployments_NotFound(t *testing.T) {
 	mock := &MockCertificateService{
 		GetCertificateDeploymentsFn: func(_ context.Context, certID string) ([]domain.DeploymentTarget, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 		},
 	}
 

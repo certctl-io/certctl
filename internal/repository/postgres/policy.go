@@ -63,7 +63,7 @@ func (r *PolicyRepository) GetRule(ctx context.Context, id string) (*domain.Poli
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("policy rule not found")
+			return nil, fmt.Errorf("policy rule not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query policy rule: %w", err)
 	}
@@ -114,7 +114,7 @@ func (r *PolicyRepository) UpdateRule(ctx context.Context, rule *domain.PolicyRu
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("policy rule not found")
+		return fmt.Errorf("policy rule not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -134,7 +134,7 @@ func (r *PolicyRepository) DeleteRule(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("policy rule not found")
+		return fmt.Errorf("policy rule not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

@@ -3,7 +3,6 @@ package handler
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -142,7 +141,9 @@ func TestRetireAgentHandler_Sentinel_403(t *testing.T) {
 func TestRetireAgentHandler_NotFound_404(t *testing.T) {
 	mock, handler := agentRetireTestSetup()
 	mock.RetireAgentFn = func(agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error) {
-		return nil, errors.New("agent not found")
+		// S-2 closure (cat-s6-efc7f6f6bd50): wrap repository.ErrNotFound
+		// so the handler's errors.Is dispatch resolves to 404.
+		return nil, ErrMockNotFound
 	}
 
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/agents/unknown-id", nil)

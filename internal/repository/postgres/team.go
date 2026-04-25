@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -61,7 +62,7 @@ func (r *TeamRepository) Get(ctx context.Context, id string) (*domain.Team, erro
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("team not found")
+			return nil, fmt.Errorf("team not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query team: %w", err)
 	}
@@ -108,7 +109,7 @@ func (r *TeamRepository) Update(ctx context.Context, team *domain.Team) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("team not found")
+		return fmt.Errorf("team not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -128,7 +129,7 @@ func (r *TeamRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("team not found")
+		return fmt.Errorf("team not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

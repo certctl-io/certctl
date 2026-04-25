@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"encoding/json"
@@ -64,7 +65,7 @@ func (r *ProfileRepository) Get(ctx context.Context, id string) (*domain.Certifi
 	p, err := scanProfile(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("profile not found")
+			return nil, fmt.Errorf("profile not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query profile: %w", err)
 	}
@@ -159,7 +160,7 @@ func (r *ProfileRepository) Update(ctx context.Context, profile *domain.Certific
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("profile not found")
+		return fmt.Errorf("profile not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -178,7 +179,7 @@ func (r *ProfileRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("profile not found")
+		return fmt.Errorf("profile not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

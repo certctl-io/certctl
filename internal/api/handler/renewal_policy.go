@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"encoding/json"
 	"errors"
@@ -26,14 +27,14 @@ type RenewalPolicyService interface {
 
 // RenewalPolicyHandler serves /api/v1/renewal-policies CRUD endpoints.
 //
-// G-1 design note: the service-level `ErrRenewalPolicyDuplicateName` /
+// G-1 + S-2 design note: the service-level `ErrRenewalPolicyDuplicateName` /
 // `ErrRenewalPolicyInUse` sentinels alias the repository sentinels (same var
-// identity), so `errors.Is` walks transparently across layers. Delete/Update
-// not-found detection intentionally uses a `strings.Contains(err.Error(),
-// "not found")` substring check — the repo wraps `sql.ErrNoRows` as
-// `fmt.Errorf("renewal policy not found: %s", id)` which strips the sentinel,
-// and the handler red-tests' `ErrMockNotFound = errors.New("mock not found
-// error")` follows the same substring convention.
+// identity), so `errors.Is` walks transparently across layers. S-2 closure
+// (cat-s6-efc7f6f6bd50) extends the same convention to not-found detection:
+// repos now wrap `sql.ErrNoRows` via `fmt.Errorf("X not found: %w",
+// repository.ErrNotFound)`, handler dispatch uses
+// `errors.Is(err, repository.ErrNotFound)`, and `ErrMockNotFound` in
+// test_utils.go wraps the same sentinel so the mocks still resolve to 404.
 type RenewalPolicyHandler struct {
 	svc RenewalPolicyService
 }
@@ -191,7 +192,7 @@ func (h RenewalPolicyHandler) UpdateRenewalPolicy(w http.ResponseWriter, r *http
 			ErrorWithRequestID(w, http.StatusConflict, "A renewal policy with that name already exists", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Renewal policy not found", requestID)
 			return
 		}
@@ -231,7 +232,7 @@ func (h RenewalPolicyHandler) DeleteRenewalPolicy(w http.ResponseWriter, r *http
 			ErrorWithRequestID(w, http.StatusConflict, "Renewal policy is still referenced by managed certificates", requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Renewal policy not found", requestID)
 			return
 		}

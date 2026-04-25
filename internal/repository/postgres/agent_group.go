@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -50,7 +51,7 @@ func (r *AgentGroupRepository) Get(ctx context.Context, id string) (*domain.Agen
 	err := row.Scan(&g.ID, &g.Name, &g.Description, &g.MatchOS, &g.MatchArchitecture,
 		&g.MatchIPCIDR, &g.MatchVersion, &g.Enabled, &g.CreatedAt, &g.UpdatedAt)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("agent group not found: %s", id)
+		return nil, fmt.Errorf("agent group not found: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("failed to get agent group: %w", err)
@@ -84,7 +85,7 @@ func (r *AgentGroupRepository) Update(ctx context.Context, group *domain.AgentGr
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("agent group not found: %s", group.ID)
+		return fmt.Errorf("agent group not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }
@@ -97,7 +98,7 @@ func (r *AgentGroupRepository) Delete(ctx context.Context, id string) error {
 	}
 	rows, _ := result.RowsAffected()
 	if rows == 0 {
-		return fmt.Errorf("agent group not found: %s", id)
+		return fmt.Errorf("agent group not found: %w", repository.ErrNotFound)
 	}
 	return nil
 }

@@ -626,7 +626,10 @@ func (m *mockJobRepository) List(ctx context.Context) ([]*domain.Job, error) {
 func (m *mockJobRepository) Get(ctx context.Context, id string) (*domain.Job, error) {
 	job, ok := m.jobs[id]
 	if !ok {
-		return nil, fmt.Errorf("job not found")
+		// S-2 closure: wrap repository.ErrNotFound so the handler's
+		// errors.Is dispatch resolves to 404 (matches the Postgres
+		// repo's post-S-2 wrapping).
+		return nil, fmt.Errorf("job not found: %w", repository.ErrNotFound)
 	}
 	return job, nil
 }

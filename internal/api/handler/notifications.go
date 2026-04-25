@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
+	"errors"
 	"context"
 	"net/http"
 	"strconv"
@@ -170,7 +172,7 @@ func (h NotificationHandler) RequeueNotification(w http.ResponseWriter, r *http.
 	notificationID := parts[0]
 
 	if err := h.svc.RequeueNotification(r.Context(), notificationID); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Notification not found", requestID)
 			return
 		}

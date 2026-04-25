@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
+	"errors"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -46,7 +48,7 @@ func (h ExportHandler) ExportPEM(w http.ResponseWriter, r *http.Request) {
 
 	result, err := h.svc.ExportPEM(r.Context(), id)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}
@@ -94,7 +96,7 @@ func (h ExportHandler) ExportPKCS12(w http.ResponseWriter, r *http.Request) {
 
 	pfxData, err := h.svc.ExportPKCS12(r.Context(), id, req.Password)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}

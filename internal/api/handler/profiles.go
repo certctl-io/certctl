@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
+	"errors"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -162,7 +164,7 @@ func (h ProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateProfile(r.Context(), id, profile)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
 			return
 		}
@@ -195,7 +197,7 @@ func (h ProfileHandler) DeleteProfile(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := h.svc.DeleteProfile(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
 			return
 		}

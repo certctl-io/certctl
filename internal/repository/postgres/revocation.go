@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -136,7 +137,7 @@ func (r *RevocationRepository) MarkIssuerNotified(ctx context.Context, id string
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("revocation not found")
+		return fmt.Errorf("revocation not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
