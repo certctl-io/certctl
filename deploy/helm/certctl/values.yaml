@@ -48,7 +48,14 @@ server:
       drop:
         - ALL
 
-  # Liveness and readiness probes (HTTPS-only as of v2.2)
+  # Liveness and readiness probes (HTTPS-only as of v2.2).
+  #
+  # The two paths exposed for probes are `/health` and `/ready` —
+  # registered in internal/api/router/router.go:76-85 and bypassing the
+  # auth middleware via the no-auth list at cmd/server/main.go:920.
+  # Both serve the same JSON shape today (`{"status":"healthy"}` /
+  # `{"status":"ready"}`) but exist as separate routes so liveness and
+  # readiness can diverge in the future without renaming.
   livenessProbe:
     httpGet:
       path: /health
@@ -59,9 +66,18 @@ server:
     timeoutSeconds: 5
     failureThreshold: 3
 
+  # U-2 (P1, cat-u-healthcheck_protocol_mismatch — adjacent fix): pre-U-2
+  # the readiness probe pointed at `/readyz`, the conventional kube-flavor
+  # name. The certctl server doesn't register `/readyz` (only `/health`
+  # and `/ready`) — see cmd/server/main.go:920 and
+  # internal/api/router/router.go:81. K8s readiness probes therefore
+  # received a 404 (or, with auth enabled, a 401 from the api-key middleware
+  # because `/readyz` was NOT in the no-auth bypass set), pods stayed
+  # `NotReady` indefinitely, and Helm rollouts stalled. Post-U-2 the path
+  # matches a registered route.
   readinessProbe:
     httpGet:
-      path: /readyz
+      path: /ready
       port: https
       scheme: HTTPS
     initialDelaySeconds: 5

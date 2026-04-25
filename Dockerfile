@@ -76,7 +76,34 @@ USER certctl
 
 EXPOSE 8443
 
+# Image-level HEALTHCHECK for bare `docker run` / Docker Swarm / Nomad / ECS.
+#
+# U-2 (P1, cat-u-healthcheck_protocol_mismatch): pre-U-2 this probe used
+# `curl -f http://localhost:8443/health`, which always failed against the
+# HTTPS-only listener (HTTPS-Everywhere milestone, v2.2 / tag v2.0.47 —
+# `cmd/server/main.go::ListenAndServeTLS`, no plaintext fallback, TLS 1.3
+# pinned). Operators outside docker-compose / Helm saw permanent
+# `unhealthy` status and a restart-loop the first time they pulled the
+# image. The compose stack overrides this HEALTHCHECK with `--cacert` to
+# the bootstrap CA bundle (deploy/docker-compose.yml:126); the Helm chart
+# uses explicit `httpGet` probes with `scheme: HTTPS` and ignores Docker's
+# HEALTHCHECK; every example compose file in `examples/*/docker-compose.yml`
+# overrides with `curl -sfk https://localhost:8443/health`. This image-
+# level probe is for the bare-`docker run` consumer ONLY.
+#
+# `-k` (insecure) is acceptable here because the probe is localhost-to-
+# localhost: the same process serving the cert is being probed; the probe
+# never traverses a network. Pinning a `--cacert` is not viable for the
+# published image because the bootstrap cert is per-deploy (generated into
+# the `certs` named volume on first up; operator-supplied via Helm's
+# `existingSecret` or cert-manager). Compose / Helm / examples already
+# perform full cert-chain validation and are unaffected.
+#
+# CI grep guardrail at .github/workflows/ci.yml ("Forbidden plaintext
+# HEALTHCHECK regression guard (U-2)") blocks reintroduction of the
+# `http://` shape. Image-level integration test in
+# deploy/test/healthcheck_test.go pins the contract end-to-end.
 HEALTHCHECK --interval=10s --timeout=5s --start-period=5s --retries=5 \
-    CMD curl -f http://localhost:8443/health || exit 1
+    CMD curl -fsk https://localhost:8443/health || exit 1
 
 ENTRYPOINT ["/app/server"]
