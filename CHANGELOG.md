@@ -4,6 +4,21 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### T-1 + Q-1: Final-tail closure of the 2026-04-24 audit — 47/47 (100%)
+
+> The last two findings from the v5 unified audit closed in two independent
+> sub-bundles. After this lands, the `coverage-gap-audit-2026-04-24-v5/`
+> folder is officially closed; future audits start a new dated folder.
+
+### Added (T-1)
+
+- **8 new Vitest test files for high-leverage pages** — `web/src/pages/CertificatesPage.test.tsx` (F-1 filter+pagination contract: team_id, expires_before, sort param wiring, page-reset on filter change), `PoliciesPage.test.tsx` (D-006/D-008 TitleCase severity contract, toggle-enabled inversion, delete confirm), `IssuersPage.test.tsx` (D-2 phantom-trim + B-1 EditIssuer rename-only), `TargetsPage.test.tsx` (D-2 phantom-trim status derivation), `AgentsPage.test.tsx` + `AgentDetailPage.test.tsx` (D-2 phantom-trim + heartbeatStatus undefined-fallback + lazy retired tab + registered_at row), `OwnersPage.test.tsx` + `TeamsPage.test.tsx` + `AgentGroupsPage.test.tsx` (B-1 Edit modals call updateOwner/updateTeam/updateAgentGroup with right payload), `RenewalPoliciesPage.test.tsx` (B-1 brand-new page; PolicyFormModal create + edit modes; alert_thresholds_days display), `DiscoveryPage.test.tsx` (I-2 dismiss flow; status filter wiring). Total ~35 new Vitest cases lifting page-level coverage from 3/28 (11%) → 14/28 (50%).
+- **`.github/workflows/ci.yml::Frontend page-coverage regression guard (T-1)`** — blocks new pages from landing without a sibling `.test.tsx` unless added to a 14-name deferred allowlist with one-line "why deferred" justifications (drill-down views covered transitively, read-only timelines, etc.). Each allowlist entry is a TODO with a name attached; future commits remove entries as they ship the corresponding test.
+
+### Changed (Q-1)
+
+- **37 skipped-test sites across 9 files now have closure comments** pinning the rationale: `cmd/agent/verify_test.go` (defensive httptest guard), `deploy/test/qa_test.go` (file-level header explaining the `//go:build qa` tag + 11 manual-test markers), `deploy/test/healthcheck_test.go` (file-level header explaining 5 docker / testing.Short / not-yet-wired skips), `deploy/test/integration_test.go` (5 in-flight-state guards: poll-with-skip after 90s, inter-test ordering, scheduler-tick race, defensive PEM-empty fallback — each comment explains why skip is preferable to fail), `internal/repository/postgres/{testutil,seed,repo}_test.go` (5 testing.Short gates for testcontainers), `internal/connector/notifier/email/email_test.go` (2 anti-fixture assertions), `internal/connector/target/iis/iis_test.go` (2 platform-gated for non-Windows). No tests were re-enabled, deleted, or restructured — the closure is purely documentation. All skips were correctly gated; the audit recommendation was "audit each skip and decide", and the decision is uniformly **document-skip**.
+
 ### H-1: Security hardening trio — closed end-to-end
 
 > Three 2026-04-24 audit findings (all P2) that together complete the HTTPS-Everywhere security baseline. The audit flagged: (1) the unauth surface (EST RFC 7030, SCEP, PKI CRL/OCSP, /health, /ready) accepted arbitrary-size request bodies because the `noAuthHandler` middleware chain was missing the `bodyLimitMiddleware` that the authed `apiHandler` chain has; (2) zero security headers (CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy) were emitted on any response — enabling clickjacking, MIME-sniffing, and untrusted-origin resource loads against the dashboard and API; (3) `CERTCTL_CONFIG_ENCRYPTION_KEY` was accepted with any non-empty value, including a single character — PBKDF2-SHA256 with 100k rounds does not compensate for low-entropy passphrases at scale (CWE-916 / CWE-329).
