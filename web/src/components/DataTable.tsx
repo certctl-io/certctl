@@ -5,6 +5,24 @@ interface Column<T> {
   className?: string;
 }
 
+// F-1 closure (cat-k-e85d1099b2d7): DataTable was a render-only
+// component pre-F-1 — every consumer page handed it the first 50
+// rows from a paginated endpoint and there was no way for the
+// operator to advance. The backend has always returned `{data,
+// total, page, per_page}` but the frontend never surfaced page
+// 2+. The pagination prop below opt-ins reusable controls in the
+// table footer; CertificatesPage is the first consumer (and the
+// audit's flagged page), but TargetsPage / IssuersPage / others
+// can adopt by passing the same prop.
+interface PaginationProps {
+  page: number;
+  perPage: number;
+  total: number;
+  onPageChange: (page: number) => void;
+  onPerPageChange?: (perPage: number) => void;
+  perPageOptions?: number[];
+}
+
 interface DataTableProps<T> {
   columns: Column<T>[];
   data: T[];
@@ -15,9 +33,10 @@ interface DataTableProps<T> {
   selectable?: boolean;
   selectedKeys?: Set<string>;
   onSelectionChange?: (keys: Set<string>) => void;
+  pagination?: PaginationProps;
 }
 
-export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange }: DataTableProps<T>) {
+export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, isLoading, keyField = 'id', selectable, selectedKeys, onSelectionChange, pagination }: DataTableProps<T>) {
   if (isLoading) {
     return (
       <div className="flex items-center justify-center py-16 text-ink-muted">
@@ -111,8 +130,69 @@ export default function DataTable<T>({ columns, data, onRowClick, emptyMessage, 
           })}
         </tbody>
       </table>
+      {pagination && pagination.total > 0 && (
+        <PaginationControls {...pagination} />
+      )}
     </div>
   );
 }
 
-export type { Column };
+// F-1 closure (cat-k-e85d1099b2d7): pagination footer for DataTable
+// consumers that want prev/next + page counter + per-page selector
+// against a paginated backend response. Disabling logic guards the
+// boundaries (prev disabled on page 1; next disabled when page *
+// per_page >= total).
+function PaginationControls({ page, perPage, total, onPageChange, onPerPageChange, perPageOptions }: PaginationProps) {
+  const start = total === 0 ? 0 : (page - 1) * perPage + 1;
+  const end = Math.min(page * perPage, total);
+  const lastPage = Math.max(1, Math.ceil(total / perPage));
+  const isFirst = page <= 1;
+  const isLast = page >= lastPage;
+  const options = perPageOptions ?? [25, 50, 100, 200];
+  return (
+    <div className="flex items-center justify-between border-t border-surface-border px-4 py-3 text-sm text-ink-muted">
+      <span>
+        Showing <span className="font-medium text-ink">{start}</span>–<span className="font-medium text-ink">{end}</span> of <span className="font-medium text-ink">{total.toLocaleString()}</span>
+      </span>
+      <div className="flex items-center gap-3">
+        {onPerPageChange && (
+          <label className="flex items-center gap-2 text-xs">
+            <span>Rows per page:</span>
+            <select
+              value={perPage}
+              onChange={e => onPerPageChange(Number(e.target.value))}
+              className="rounded border border-surface-border bg-white px-2 py-1 text-xs text-ink focus:outline-none focus:border-brand-400"
+            >
+              {options.map(opt => (
+                <option key={opt} value={opt}>{opt}</option>
+              ))}
+            </select>
+          </label>
+        )}
+        <span className="text-xs">
+          Page <span className="font-medium text-ink">{page}</span> of <span className="font-medium text-ink">{lastPage}</span>
+        </span>
+        <div className="flex gap-1">
+          <button
+            type="button"
+            onClick={() => onPageChange(page - 1)}
+            disabled={isFirst}
+            className="rounded border border-surface-border px-3 py-1 text-xs text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Prev
+          </button>
+          <button
+            type="button"
+            onClick={() => onPageChange(page + 1)}
+            disabled={isLast}
+            className="rounded border border-surface-border px-3 py-1 text-xs text-ink hover:bg-surface-muted disabled:cursor-not-allowed disabled:opacity-50"
+          >
+            Next
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+export type { Column, PaginationProps };
