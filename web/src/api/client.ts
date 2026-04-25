@@ -248,6 +248,17 @@ export const getAgents = (params: Record<string, string> = {}) => {
 export const getAgent = (id: string) =>
   fetchJSON<Agent>(`${BASE}/agents/${id}`);
 
+// C-1 closure (cat-b-6177f36636fb): registerAgent is intentionally
+// orphan in the GUI per certctl's pull-only deployment model. Agents
+// enroll via install-agent.sh + cmd/agent/main.go and register
+// themselves at first heartbeat — operators don't (and shouldn't)
+// drive registration from the dashboard. The client fn is preserved
+// here (rather than deleted) so future features that want to drive
+// registration from the GUI (e.g. a one-click "register proxy agent"
+// panel for network-appliance topologies) can reach the endpoint
+// without a client.ts edit. See docs/architecture.md::Agents for
+// the architectural rationale and unified-audit.md cat-b-6177f36636fb
+// for closure rationale.
 export const registerAgent = (data: Partial<Agent>) =>
   fetchJSON<Agent>(`${BASE}/agents`, { method: 'POST', body: JSON.stringify(data) });
 

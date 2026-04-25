@@ -545,6 +545,16 @@ func main() {
 	// because they share the NotificationServicer dependency (same placement
 	// pattern as I-001's SetJobRetryInterval above).
 	sched.SetNotificationRetryInterval(cfg.Scheduler.NotificationRetryInterval)
+	// C-1 closure (cat-g-7e38f9708e20 + diff-10xmain-2bf4a0a60388): pre-C-1
+	// the SetShortLivedExpiryCheckInterval setter was defined + tested but
+	// never called from main.go, so the 30-second hardcoded default in
+	// scheduler.NewScheduler was effectively the only value. Operators
+	// running short-lived cert workloads with high churn (or low-churn
+	// workloads wanting to relax the cadence) had no working knob despite
+	// CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL being documented. Wire it
+	// here alongside the other scheduler-interval setters so the
+	// documented env var actually takes effect.
+	sched.SetShortLivedExpiryCheckInterval(cfg.Scheduler.ShortLivedExpiryCheckInterval)
 	if cfg.NetworkScan.Enabled {
 		sched.SetNetworkScanInterval(cfg.NetworkScan.ScanInterval)
 		logger.Info("network scanning enabled", "interval", cfg.NetworkScan.ScanInterval.String())
