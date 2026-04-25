@@ -72,8 +72,9 @@ type BulkRevokeCertificatesInput struct {
 	CertificateIDs []string `json:"certificate_ids,omitempty" jsonschema:"Explicit list of certificate IDs to revoke"`
 }
 
-// L-1 master closure (cat-l-fa0c1ac07ab5): bulk-renew MCP tool input.
-// Mirrors BulkRevokeCertificatesInput field-for-field minus Reason.
+// BulkRenewCertificatesInput is the MCP tool input for bulk-renew (L-1
+// master closure, cat-l-fa0c1ac07ab5). Mirrors BulkRevokeCertificatesInput
+// field-for-field minus Reason.
 type BulkRenewCertificatesInput struct {
 	ProfileID      string   `json:"profile_id,omitempty" jsonschema:"Renew all certs matching this profile ID"`
 	OwnerID        string   `json:"owner_id,omitempty" jsonschema:"Renew all certs owned by this owner"`
@@ -83,8 +84,8 @@ type BulkRenewCertificatesInput struct {
 	CertificateIDs []string `json:"certificate_ids,omitempty" jsonschema:"Explicit list of certificate IDs to renew"`
 }
 
-// L-2 closure (cat-l-8a1fb258a38a): bulk-reassign MCP tool input.
-// IDs-only — no criteria-mode.
+// BulkReassignCertificatesInput is the MCP tool input for bulk-reassign
+// (L-2 closure, cat-l-8a1fb258a38a). IDs-only — no criteria-mode.
 type BulkReassignCertificatesInput struct {
 	CertificateIDs []string `json:"certificate_ids" jsonschema:"Explicit list of certificate IDs to reassign"`
 	OwnerID        string   `json:"owner_id" jsonschema:"Required. New owner_id for every cert in certificate_ids"`
