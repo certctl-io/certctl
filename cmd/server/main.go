@@ -630,6 +630,17 @@ func main() {
 			logger.Error("EST issuer not found in registry", "issuer_id", cfg.EST.IssuerID)
 			os.Exit(1)
 		}
+		// Bundle-4 / L-005: validate the issuer can actually serve a CA certificate
+		// at startup, not at first request time. ACME / DigiCert / Sectigo etc.
+		// return an error from GetCACertPEM because they don't expose a static
+		// CA chain; binding EST to one of those would silently degrade enrollment.
+		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := preflightEnrollmentIssuer(preflightCtx, "EST", cfg.EST.IssuerID, issuerConn); err != nil {
+			preflightCancel()
+			logger.Error("startup refused: EST issuer cannot serve CA certificate", "error", err)
+			os.Exit(1)
+		}
+		preflightCancel()
 		estService := service.NewESTService(cfg.EST.IssuerID, issuerConn, auditService, logger)
 		estService.SetProfileRepo(profileRepo)
 		if cfg.EST.ProfileID != "" {
@@ -668,6 +679,15 @@ func main() {
 			logger.Error("SCEP issuer not found in registry", "issuer_id", cfg.SCEP.IssuerID)
 			os.Exit(1)
 		}
+		// Bundle-4 / L-005: validate the issuer can actually serve a CA certificate
+		// at startup. Same rationale as EST above.
+		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
+		if err := preflightEnrollmentIssuer(preflightCtx, "SCEP", cfg.SCEP.IssuerID, issuerConn); err != nil {
+			preflightCancel()
+			logger.Error("startup refused: SCEP issuer cannot serve CA certificate", "error", err)
+			os.Exit(1)
+		}
+		preflightCancel()
 		scepService := service.NewSCEPService(cfg.SCEP.IssuerID, issuerConn, auditService, logger, cfg.SCEP.ChallengePassword)
 		scepService.SetProfileRepo(profileRepo)
 		if cfg.SCEP.ProfileID != "" {
@@ -977,6 +997,43 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 		return fmt.Errorf("SCEP enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty: " +
 			"SCEP enrollment would accept any client (CWE-306); " +
 			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
+	}
+	return nil
+}
+
+// preflightEnrollmentIssuer validates at startup that an EST/SCEP-bound issuer
+// can actually serve a CA certificate. This closes audit finding L-005:
+// pre-Bundle-4 the EST/SCEP startup path verified the issuer existed in the
+// registry but did not verify the issuer TYPE could emit a CA cert. An
+// operator who bound CERTCTL_EST_ISSUER_ID to an ACME issuer (which does
+// not have a static CA cert — see internal/connector/issuer/acme/acme.go::
+// GetCACertPEM returning an explicit error) would boot successfully and
+// only see failures at the first /est/cacerts request, hiding the misconfig
+// for hours/days behind a degraded enrollment surface.
+//
+// Strategy: call issuerConn.GetCACertPEM(ctx) at startup with a short
+// timeout. If the issuer can serve a CA cert (local, vault, openssl,
+// stepca, awsacmpca, etc.), the call succeeds and we proceed. If not
+// (acme, digicert, sectigo, entrust, googlecas, ejbca, globalsign — most
+// vendor-CA issuers that hand back chains per-issuance), the call fails
+// loudly with the connector's own error string, and the caller os.Exit(1)s.
+//
+// Returns nil on success, non-nil error suitable for structured logging
+// + os.Exit(1) by the caller. Caller is responsible for the timeout context.
+func preflightEnrollmentIssuer(ctx context.Context, protocol, issuerID string, issuerConn service.IssuerConnector) error {
+	if issuerConn == nil {
+		return fmt.Errorf("%s issuer %q: connector is nil", protocol, issuerID)
+	}
+	caCertPEM, err := issuerConn.GetCACertPEM(ctx)
+	if err != nil {
+		return fmt.Errorf("%s issuer %q: cannot serve CA certificate (%w); "+
+			"choose an issuer type that exposes a static CA chain "+
+			"(local / vault / openssl / stepca / awsacmpca) or disable %s",
+			protocol, issuerID, err, protocol)
+	}
+	if caCertPEM == "" {
+		return fmt.Errorf("%s issuer %q: GetCACertPEM returned empty PEM with no error; "+
+			"choose an issuer type that exposes a static CA chain", protocol, issuerID)
 	}
 	return nil
 }
