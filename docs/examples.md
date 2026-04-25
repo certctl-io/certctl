@@ -111,7 +111,7 @@ The full walkthrough — including profile-based issuer assignment, testing with
 
 ## Beyond These Examples
 
-These 5 scenarios cover the most common deployment patterns, but certctl supports 7 issuer backends and 10 target connectors. Once you have the basics running, you can mix and match:
+These 5 scenarios cover the most common deployment patterns, but certctl supports a broader set of issuer and target backends — see `docs/features.md`'s Issuer Connectors and Target Connectors sections for the live catalogs (rebuild via `ls -d internal/connector/issuer/*/ | wc -l` and `ls -d internal/connector/target/*/ | wc -l`). Once you have the basics running, you can mix and match:
 
 **Issuers:** ACME (Let's Encrypt, ZeroSSL, Buypass, Google Trust Services), Local CA (self-signed or sub-CA), step-ca, Vault PKI, DigiCert CertCentral, OpenSSL/Custom CA script, Sectigo (coming soon).
 

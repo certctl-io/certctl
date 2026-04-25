@@ -8,17 +8,30 @@ Complete reference of every feature shipped in certctl through v2.1.0 (April 202
 
 | Metric | Count |
 |---|---|
-| HTTP routes | 107 (103 under `/api/v1/` + 4 EST) |
-| OpenAPI 3.1 operations | 97 |
-| MCP tools | 80 |
-| CLI commands | 12 |
-| Issuer connectors | 9 (+ EST server) |
-| Target connectors | 14 |
-| Notifier connectors | 6 channels |
-| Database tables | 21 (across 10 migrations) |
-| Background scheduler loops | 12 (8 always-on + 4 opt-in) |
-| Web dashboard pages | 24 |
-| Test functions | 1850+ |
+<!--
+  S-1 master closure (cat-s1-9ce1cbe26876, cat-s1-features_md_issuer_count_contradiction):
+  every numeric count below is captured at the time of the last edit AND
+  paired with the source-of-truth grep command from CLAUDE.md. CLAUDE.md
+  rule: "Numeric claims about current state rot the instant the next
+  release lands." Re-derive before each release; the CI guardrail at
+  .github/workflows/ci.yml::"Forbidden hardcoded source-count prose
+  regression guard (S-1)" fails the build on any new prose-only counts
+  without an adjacent rebuild command.
+-->
+| Surface | Count (rebuild command) |
+|---|---|
+| HTTP routes | rebuild via `grep -cE 'r\.Register\("[A-Z]' internal/api/router/router.go` |
+| OpenAPI 3.1 operations | rebuild via `grep -cE '^\s+operationId:' api/openapi.yaml` |
+| MCP tools | rebuild via `grep -cE 'gomcp\.AddTool\(' internal/mcp/tools.go` |
+| CLI commands | rebuild via `grep -cE 'AddCommand|RootCmd\.Add' cmd/cli/*.go internal/cli/*.go` (intentionally narrow — see CLI Scope §) |
+| Issuer connectors | rebuild via `ls -d internal/connector/issuer/*/ \| wc -l` (+ EST server) |
+| Target connectors | rebuild via `ls -d internal/connector/target/*/ \| wc -l` (includes shared `certutil/`) |
+| Notifier connectors | rebuild via `ls -d internal/connector/notifier/*/ \| wc -l` |
+| Discovery connectors | rebuild via `ls -d internal/connector/discovery/*/ \| wc -l` |
+| Database tables | rebuild via `grep -hE '^CREATE TABLE' migrations/*.up.sql \| sed -E 's/CREATE TABLE (IF NOT EXISTS )?([a-zA-Z_]+).*/\2/' \| sort -u \| wc -l` (across `ls migrations/*.up.sql \| wc -l` migrations) |
+| Background scheduler loops | rebuild via `grep -cE '^func \(s \*Scheduler\) [a-zA-Z]+Loop' internal/scheduler/scheduler.go` |
+| Web dashboard pages | rebuild via `ls web/src/pages/*.tsx \| grep -v '\.test\.' \| wc -l` |
+| Test functions (Go backend) | rebuild via the `find` + `grep '^func Test'` recipe in CLAUDE.md::Current-state commands |
 | Supported platforms | linux/amd64, linux/arm64, darwin/amd64, darwin/arm64 |
 
 ---
@@ -325,9 +338,9 @@ Policies can be scoped to agent groups via `agent_group_id` foreign key. Violati
 
 ## Issuer Connectors
 
-<!-- Source: internal/domain/connector.go (12 IssuerType constants), internal/connector/issuer/ -->
+<!-- Source: internal/domain/connector.go (IssuerType constants), internal/connector/issuer/. Rebuild count via `ls -d internal/connector/issuer/*/ | wc -l`. -->
 
-12 issuer connectors implementing the `issuer.Connector` interface. All support `ValidateConfig`, `IssueCertificate`, `RenewCertificate`, `RevokeCertificate`, `GetOrderStatus`, `GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`, `GetRenewalInfo`.
+The issuer connector catalog (rebuild count via `ls -d internal/connector/issuer/*/ | wc -l`) implements the `issuer.Connector` interface. All support `ValidateConfig`, `IssueCertificate`, `RenewCertificate`, `RevokeCertificate`, `GetOrderStatus`, `GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`, `GetRenewalInfo`.
 
 ### Local CA
 
@@ -616,9 +629,9 @@ For Let's Encrypt 6-day `shortlived` certificates, ARI is the expected renewal p
 
 ## Target Connectors
 
-<!-- Source: internal/domain/connector.go (14 TargetType constants), internal/connector/target/ -->
+<!-- Source: internal/domain/connector.go (TargetType constants), internal/connector/target/. Rebuild count via `ls -d internal/connector/target/*/ | wc -l` (includes shared `certutil/`). -->
 
-14 target connector types implementing the `target.Connector` interface. All support `ValidateConfig`, `DeployCertificate`, `ValidateDeployment`.
+The target connector catalog (rebuild count via `ls -d internal/connector/target/*/ | wc -l`) implements the `target.Connector` interface. All support `ValidateConfig`, `DeployCertificate`, `ValidateDeployment`.
 
 ### Deployment Model
 
@@ -1124,7 +1137,7 @@ Single SQL `UNION` query replaces the previous "fetch all, filter in Go" approac
 
 GUI-driven issuer CRUD with AES-256-GCM encrypted config storage in PostgreSQL.
 
-- Per-type config schema validation for all 9 issuer types
+- Per-type config schema validation for all issuer types (rebuild count via `ls -d internal/connector/issuer/*/ | wc -l`)
 - Test connection flow (instantiates throwaway connector, calls `ValidateConfig`)
 - Dynamic `sync.RWMutex`-guarded `IssuerRegistry` — rebuilds without server restart
 - Env var backward compatibility: seeds DB on first boot if no DB config exists
@@ -1153,9 +1166,9 @@ Same pattern as issuer configuration:
 
 ## Web Dashboard
 
-<!-- Source: web/src/main.tsx (25 Route elements, 24 pages), Vite + React 18 + TypeScript + TanStack Query + Recharts -->
+<!-- Source: web/src/main.tsx (Route elements + page imports), Vite + React 18 + TypeScript + TanStack Query + Recharts. Rebuild page count via `ls web/src/pages/*.tsx | grep -v '\.test\.' | wc -l`. -->
 
-24 pages wired to real API endpoints.
+The dashboard surface (rebuild count via `ls web/src/pages/*.tsx | grep -v '\.test\.' | wc -l`) wires every page to real API endpoints.
 
 ### Pages
 
@@ -1274,7 +1287,7 @@ certctl-cli certs bulk-revoke --issuer-id iss-letsencrypt --reason caCompromise
 
 Separate standalone binary (`cmd/mcp-server/`) using the official MCP Go SDK (`modelcontextprotocol/go-sdk`). Stdio transport for Claude, Cursor, and similar AI tool integrations.
 
-- 80 MCP tools covering all API endpoints
+- MCP tools covering all API endpoints (rebuild count via `grep -cE 'gomcp\.AddTool\(' internal/mcp/tools.go`)
 - Stateless HTTP proxy — translates MCP tool calls to REST API calls
 - Typed input structs with `jsonschema` struct tags for automatic schema generation
 - Binary response support (DER CRL, OCSP)
