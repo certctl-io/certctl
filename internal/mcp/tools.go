@@ -1238,4 +1238,36 @@ func registerHealthTools(s *gomcp.Server, c *Client) {
 		}
 		return textResult(data)
 	})
+
+	// I-2 closure (cat-i-b0924b6675f8): pre-I-2 the README claimed "all
+	// API endpoints are exposed via MCP" but the discovered-certificate
+	// lifecycle (claim + dismiss) was never wrapped — operators using
+	// MCP clients (Claude, Cursor, etc.) had no path to bring an
+	// out-of-band cert under management or to mark a benign discovery
+	// as not-of-interest without dropping to the REST API directly.
+	// These two tools wrap the existing HTTP handlers
+	// (DiscoveryHandler.ClaimDiscovered + DismissDiscovered).
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_claim_discovered_certificate",
+		Description: "Link a discovered certificate (dc-*) to an existing managed certificate (mc-*) via POST /api/v1/discovered-certificates/{id}/claim. Use this to bring an out-of-band cert (e.g. one found by an agent filesystem scan or a network scan) under certctl management without re-issuing — the discovered row is marked Managed and its managed_certificate_id is set so subsequent renewals/revocations on the managed cert update both rows.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ClaimDiscoveredCertificateInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]string{"managed_certificate_id": input.ManagedCertificateID}
+		data, err := c.Post("/api/v1/discovered-certificates/"+input.ID+"/claim", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_dismiss_discovered_certificate",
+		Description: "Dismiss a discovered certificate (POST /api/v1/discovered-certificates/{id}/dismiss). Use this to mark a discovery as not-of-interest (e.g. expired self-signed test certs found by a network scan) — the row stops appearing in the unmanaged-list view but is preserved in the DB for audit history.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input DismissDiscoveredCertificateInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/discovered-certificates/"+input.ID+"/dismiss", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
 }
