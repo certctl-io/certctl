@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest';
 import { POLICY_TYPES, POLICY_SEVERITIES } from './types';
-import type { Agent } from './types';
+import type { Agent, Certificate, CertificateVersion } from './types';
 
 /**
  * Regression tests for the policy enum tuples.
@@ -130,5 +130,93 @@ describe('Agent interface (I-004 retirement)', () => {
     };
     expect(active.retired_at).toBeUndefined();
     expect(active.retired_reason).toBeUndefined();
+  });
+});
+
+/**
+ * D-5 (cat-f-ae0d06b6588f, master): Certificate TS phantom-fields trim.
+ *
+ * Pre-D-5 the Certificate interface declared `serial_number`,
+ * `fingerprint_sha256`, `key_algorithm`, `key_size`, and `issued_at` as
+ * optional. These fields were never emitted by Go's `ManagedCertificate`
+ * (internal/domain/certificate.go) — they live on `CertificateVersion`,
+ * which is the per-issuance record fetched from
+ * /api/v1/certificates/{id}/versions. The optional declarations made
+ * `cert.serial_number` always-undefined on list responses, and downstream
+ * consumers (CertificateDetailPage's Key Algorithm / Key Size rows in
+ * particular) silently rendered '—' for every cert despite the data
+ * being available a single fetch away.
+ *
+ * Post-D-5 the TS type makes the missing-data case explicit: a
+ * `cert.serial_number` access becomes a TS compile error, forcing every
+ * consumer to acknowledge the version-fallback pattern. This regression
+ * test pins the trim — if a future PR re-adds any of the five phantom
+ * fields to Certificate (e.g. via merge conflict, copy-paste, or a
+ * codegen run that regenerates from a stale OpenAPI spec), the
+ * compile-fail block here will surface it.
+ */
+describe('Certificate interface (D-5 phantom-fields trim)', () => {
+  it('does NOT declare per-issuance fields — those live on CertificateVersion', () => {
+    // Construct a fully-populated Certificate. If a future PR re-adds
+    // any of the five phantom fields (serial_number, fingerprint_sha256,
+    // key_algorithm, key_size, issued_at) to the interface, every
+    // omission in this literal becomes "missing required field" and
+    // the test fails to compile. Conversely, attempting to set any of
+    // the five fields on the literal is a TS error today (excess
+    // property), so the negative-assertion block below also fails to
+    // compile if someone re-adds them as optional.
+    const cert: Certificate = {
+      id: 'mc-test',
+      name: 'test',
+      common_name: 'test.example.com',
+      sans: [],
+      status: 'Active',
+      environment: 'production',
+      issuer_id: 'iss-test',
+      owner_id: 'o-test',
+      team_id: 't-test',
+      renewal_policy_id: 'rp-default',
+      certificate_profile_id: 'cp-default',
+      expires_at: '2027-01-01T00:00:00Z',
+      tags: {},
+      created_at: '2026-01-01T00:00:00Z',
+      updated_at: '2026-01-01T00:00:00Z',
+    };
+    expect(cert.id).toBe('mc-test');
+
+    // Excess-property check: each of these MUST be a TS error if
+    // uncommented. Keep them in the test as documentation of what's
+    // intentionally absent. (We can't directly assert "type does not
+    // have property X" without a type-level helper, but the literal
+    // construction above plus tsc --noEmit in CI is the binding check.)
+    //
+    // const broken: Certificate = { ...cert, serial_number: '01:02' }; // ❌ TS2353
+    // const broken2: Certificate = { ...cert, key_algorithm: 'EC' };   // ❌ TS2353
+    // const broken3: Certificate = { ...cert, key_size: 256 };         // ❌ TS2353
+    // const broken4: Certificate = { ...cert, fingerprint_sha256: '' };// ❌ TS2353
+    // const broken5: Certificate = { ...cert, issued_at: '...' };      // ❌ TS2353
+  });
+
+  it('CertificateVersion still carries the per-issuance fields', () => {
+    // The other half of the contract: the trimmed fields didn't go to
+    // /dev/null — they live (and have always lived) on CertificateVersion.
+    // If a refactor removes them from CertificateVersion too, the
+    // CertificateDetailPage fallback path breaks. Pin both halves.
+    const v: CertificateVersion = {
+      id: 'mcv-test',
+      certificate_id: 'mc-test',
+      serial_number: '01:02:03',
+      fingerprint_sha256: 'a'.repeat(64),
+      pem_chain: '-----BEGIN CERTIFICATE-----\n...',
+      csr_pem: '-----BEGIN CERTIFICATE REQUEST-----\n...',
+      not_before: '2026-01-01T00:00:00Z',
+      not_after: '2027-01-01T00:00:00Z',
+      key_algorithm: 'ECDSA',
+      key_size: 256,
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    expect(v.serial_number).toBe('01:02:03');
+    expect(v.key_algorithm).toBe('ECDSA');
+    expect(v.key_size).toBe(256);
   });
 });

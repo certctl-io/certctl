@@ -380,11 +380,20 @@ export default function CertificateDetailPage() {
     );
   }
 
-  // Derive certificate metadata from latest version (backend doesn't include these on the cert object)
+  // Derive certificate metadata from latest version. Per-issuance fields
+  // (serial_number, fingerprint_sha256, key_algorithm, key_size, issued_at)
+  // live on `CertificateVersion`, NOT on `ManagedCertificate` — the Go
+  // domain has always been this way; the TS interface used to lie about
+  // it via optional `cert.X?` declarations that always returned undefined
+  // on list responses (D-5 / cat-f-ae0d06b6588f). Post-D-5 the TS type
+  // makes the missing-data case explicit, and every read goes through
+  // `latestVersion?.field` here.
   const latestVersion = versions?.data?.[0];
-  const serialNumber = cert.serial_number || latestVersion?.serial_number;
-  const fingerprintSha256 = cert.fingerprint_sha256 || latestVersion?.fingerprint_sha256;
-  const issuedAt = cert.issued_at || latestVersion?.not_before;
+  const serialNumber = latestVersion?.serial_number;
+  const fingerprintSha256 = latestVersion?.fingerprint_sha256;
+  const issuedAt = latestVersion?.not_before;
+  const keyAlgorithm = latestVersion?.key_algorithm;
+  const keySize = latestVersion?.key_size;
 
   const days = daysUntil(cert.expires_at);
   const isRevoked = cert.status === 'Revoked';
@@ -536,8 +545,13 @@ export default function CertificateDetailPage() {
             <InfoRow label="Fingerprint" value={
               fingerprintSha256 ? <span className="font-mono text-xs">{fingerprintSha256.slice(0, 24)}...</span> : '—'
             } />
-            <InfoRow label="Key Algorithm" value={cert.key_algorithm || '—'} />
-            <InfoRow label="Key Size" value={cert.key_size ? `${cert.key_size} bits` : '—'} />
+            {/* D-4 (cat-f-cert_detail_page_key_render_fallback): mirror the
+                latestVersion fallback used for serialNumber / fingerprintSha256
+                above. Pre-D-4 these rows accessed `cert.key_algorithm` /
+                `cert.key_size` directly — both phantom Certificate fields per
+                D-5 (cat-f-ae0d06b6588f), so the rows always rendered '—'. */}
+            <InfoRow label="Key Algorithm" value={keyAlgorithm || '—'} />
+            <InfoRow label="Key Size" value={keySize != null ? `${keySize} bits` : '—'} />
             {profile?.allowed_ekus && profile.allowed_ekus.length > 0 && (
               <InfoRow label="Extended Key Usage" value={
                 <div className="flex flex-wrap gap-1">

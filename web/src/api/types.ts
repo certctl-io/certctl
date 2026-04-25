@@ -1,3 +1,15 @@
+// D-5 (cat-f-ae0d06b6588f, master): the five per-issuance fields
+// (serial_number, fingerprint_sha256, key_algorithm, key_size,
+// issued_at) USED to live here as optional. They were never emitted
+// by Go's `ManagedCertificate` (internal/domain/certificate.go) — they
+// live on `CertificateVersion` (per-issuance evidence) and are fetched
+// via getCertificateVersions(id). Render-site consumers (notably
+// CertificateDetailPage) use `latestVersion?.field` as the canonical
+// access path. Pre-D-5 the optional declaration silently returned
+// `undefined` on every list response, so consumers who didn't know
+// about the version-fallback pattern rendered '—' for every cert; now
+// the missing-data case is explicit at the type level (a `cert.X`
+// access for one of these fields is a TS compile error).
 export interface Certificate {
   id: string;
   name: string;
@@ -10,11 +22,6 @@ export interface Certificate {
   team_id: string;
   renewal_policy_id: string;
   certificate_profile_id: string;
-  serial_number?: string;
-  fingerprint_sha256?: string;
-  key_algorithm?: string;
-  key_size?: number;
-  issued_at?: string;
   expires_at: string;
   revoked_at?: string;
   revocation_reason?: string;

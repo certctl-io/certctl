@@ -3492,6 +3492,15 @@ components:
         - Archived
 
     ManagedCertificate:
+      # D-5 (cat-f-ae0d06b6588f, master): per-issuance fields
+      # (serial_number, fingerprint_sha256, key_algorithm, key_size,
+      # issued_at) are intentionally NOT declared here. They live on
+      # CertificateVersion (per-issuance evidence) and are fetched via
+      # /api/v1/certificates/{id}/versions. ManagedCertificate is the
+      # management envelope; CertificateVersion is the issuance record.
+      # Pre-D-5 the TS Certificate interface had them as optional and
+      # the dashboard's Key Algorithm / Key Size rows always rendered
+      # '—' as a result. The TS trim restores parity with this schema.
       type: object
       properties:
         id:
