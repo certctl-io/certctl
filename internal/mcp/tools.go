@@ -214,6 +214,61 @@ func registerCertificateTools(s *gomcp.Server, c *Client) {
 		}
 		return textResult(data)
 	})
+
+	// L-1 master closure (cat-l-fa0c1ac07ab5): bulk-renew MCP tool.
+	// Mirrors certctl_bulk_revoke_certificates shape sans the Reason
+	// field. Server returns total_matched / total_enqueued /
+	// total_skipped / total_failed plus per-cert {certificate_id,
+	// job_id} pairs in enqueued_jobs.
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_bulk_renew_certificates",
+		Description: "Bulk renew certificates matching filter criteria (profile_id, owner_id, agent_id, issuer_id, team_id) or an explicit certificate_ids list. At least one selector required. Returns counts of matched, enqueued, skipped, and failed certificates plus per-cert {certificate_id, job_id} pairs.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input BulkRenewCertificatesInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]interface{}{}
+		if input.ProfileID != "" {
+			body["profile_id"] = input.ProfileID
+		}
+		if input.OwnerID != "" {
+			body["owner_id"] = input.OwnerID
+		}
+		if input.AgentID != "" {
+			body["agent_id"] = input.AgentID
+		}
+		if input.IssuerID != "" {
+			body["issuer_id"] = input.IssuerID
+		}
+		if input.TeamID != "" {
+			body["team_id"] = input.TeamID
+		}
+		if len(input.CertificateIDs) > 0 {
+			body["certificate_ids"] = input.CertificateIDs
+		}
+		data, err := c.Post("/api/v1/certificates/bulk-renew", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	// L-2 closure (cat-l-8a1fb258a38a): bulk-reassign MCP tool.
+	// Narrower than bulk-renew/revoke — IDs-only, no criteria-mode.
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_bulk_reassign_certificates",
+		Description: "Bulk reassign owner (and optionally team) for a set of certificates. owner_id is required. team_id is optional and updates only when non-empty. Returns counts of matched, reassigned, skipped (already-owned-by-target), and failed certificates.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input BulkReassignCertificatesInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]interface{}{
+			"certificate_ids": input.CertificateIDs,
+			"owner_id":        input.OwnerID,
+		}
+		if input.TeamID != "" {
+			body["team_id"] = input.TeamID
+		}
+		data, err := c.Post("/api/v1/certificates/bulk-reassign", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
 }
 
 // ── CRL & OCSP ──────────────────────────────────────────────────────

@@ -411,6 +411,14 @@ func main() {
 	// Initialize bulk revocation service
 	bulkRevocationService := service.NewBulkRevocationService(revocationSvc, certificateRepo, auditService, logger)
 
+	// L-1 master (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a): bulk-renew
+	// and bulk-reassign services. Mirror BulkRevocationService wiring so
+	// the construction site is co-located with the existing bulk endpoint.
+	// keygenMode is threaded so bulk-renew jobs land in the same initial
+	// status (AwaitingCSR vs Pending) as single-cert TriggerRenewal.
+	bulkRenewalService := service.NewBulkRenewalService(certificateRepo, jobRepo, auditService, logger, cfg.Keygen.Mode)
+	bulkReassignmentService := service.NewBulkReassignmentService(certificateRepo, ownerRepo, auditService, logger)
+
 	// Initialize stats and metrics services
 	statsService := service.NewStatsService(certificateRepo, jobRepo, agentRepo)
 	// I-005: wire the notification repository so DashboardSummary.NotificationsDead
@@ -456,6 +464,11 @@ func main() {
 	exportHandler := handler.NewExportHandler(exportService)
 
 	bulkRevocationHandler := handler.NewBulkRevocationHandler(bulkRevocationService)
+	// L-1 master closure: handlers for the new bulk-renew + bulk-reassign
+	// endpoints. Both registered via HandlerRegistry below; dispatched
+	// through the standard authed middleware chain (no admin gate).
+	bulkRenewalHandler := handler.NewBulkRenewalHandler(bulkRenewalService)
+	bulkReassignmentHandler := handler.NewBulkReassignmentHandler(bulkReassignmentService)
 
 	// Initialize digest service (requires email notifier)
 	var digestService *service.DigestService
@@ -595,8 +608,10 @@ func main() {
 		Export:         exportHandler,
 		Digest:         *digestHandler,
 		HealthChecks:   healthCheckHandler,
-		BulkRevocation: bulkRevocationHandler,
-		Version:        versionHandler,
+		BulkRevocation:   bulkRevocationHandler,
+		BulkRenewal:      bulkRenewalHandler,
+		BulkReassignment: bulkReassignmentHandler,
+		Version:          versionHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

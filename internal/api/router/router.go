@@ -67,7 +67,13 @@ type HandlerRegistry struct {
 	Digest         handler.DigestHandler
 	HealthChecks    *handler.HealthCheckHandler
 	BulkRevocation  handler.BulkRevocationHandler
-	RenewalPolicies handler.RenewalPolicyHandler
+	// L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
+	// server-side bulk endpoints replace pre-L-1 client-side N×HTTP
+	// loops in CertificatesPage.tsx. See handler/bulk_renewal.go and
+	// handler/bulk_reassignment.go.
+	BulkRenewal      handler.BulkRenewalHandler
+	BulkReassignment handler.BulkReassignmentHandler
+	RenewalPolicies  handler.RenewalPolicyHandler
 	// Version handles GET /api/v1/version (U-3 ride-along,
 	// cat-u-no_version_endpoint). Wired through the no-auth dispatch in
 	// cmd/server/main.go so probes and rollout systems can read build
@@ -109,8 +115,17 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/auth/check", http.HandlerFunc(reg.Health.AuthCheck))
 
 	// Certificates routes: /api/v1/certificates
-	// Bulk revoke must be registered before {id} routes to avoid path conflict
+	// Bulk operations MUST register before {id} routes — Go 1.22 ServeMux
+	// gives literal segments precedence over pattern-var segments, but
+	// listing the bulk paths first makes the precedence operator-visible
+	// and prevents a future refactor from accidentally inverting it. All
+	// three bulk endpoints share the same envelope shape (criteria/IDs
+	// in, {total_matched, total_<verb>, total_skipped, total_failed,
+	// errors[]} out). L-1 master added bulk-renew + bulk-reassign
+	// alongside the pre-existing bulk-revoke.
 	r.Register("POST /api/v1/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevoke))
+	r.Register("POST /api/v1/certificates/bulk-renew", http.HandlerFunc(reg.BulkRenewal.BulkRenew))
+	r.Register("POST /api/v1/certificates/bulk-reassign", http.HandlerFunc(reg.BulkReassignment.BulkReassign))
 	r.Register("GET /api/v1/certificates", http.HandlerFunc(reg.Certificates.ListCertificates))
 	r.Register("POST /api/v1/certificates", http.HandlerFunc(reg.Certificates.CreateCertificate))
 	r.Register("GET /api/v1/certificates/{id}", http.HandlerFunc(reg.Certificates.GetCertificate))

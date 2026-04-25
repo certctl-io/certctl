@@ -4,6 +4,48 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### L-1: Client-side bulk-action loops — closed end-to-end
+
+> The certctl dashboard's busiest screen (`CertificatesPage.tsx`) had two bulk-action workflows that looped per-cert HTTP calls. Selecting 100 certs and clicking "Renew" issued 100 sequential `POST /api/v1/certificates/{id}/renew` requests; "Reassign owner" issued 100 sequential `PUT /api/v1/certificates/{id}` requests. Each round-trip carried ~50–200 ms of Auth → audit-log → handler → service → repo → DB → audit-write → response, so a 100-cert bulk action was a 5–20-second wedge during which the operator stared at a progress bar. The bulk-revoke endpoint (`POST /api/v1/certificates/bulk-revoke`) already shipped in v2.0.x as the canonical pattern for this; L-1 ports that exact shape to bulk-renew (P1) and bulk-reassign (P2). One backend round-trip; one audit event for the entire operation; per-cert success/skip/error counts in a single response envelope. Bundled with two new MCP tools and an OpenAPI spec update so non-GUI callers (CLI / MCP / blackbox probes) can use the same endpoints.
+
+### Breaking Changes
+
+None. Both endpoints are additive; the per-cert `POST /certificates/{id}/renew` and `PUT /certificates/{id}` paths remain available and unchanged. The frontend implementation switches from looping to single-call, but operators with custom GUIs hitting the per-cert endpoints continue to work.
+
+### Added
+
+- **`POST /api/v1/certificates/bulk-renew`** — enqueues a renewal job for every matching managed certificate. Supports criteria-mode (`{profile_id, owner_id, agent_id, issuer_id, team_id}`) and explicit-IDs mode (`{certificate_ids}`). Mirrors `BulkRevokeCriteria` field-for-field (sans the RFC-5280 reason code). Returns `{total_matched, total_enqueued, total_skipped, total_failed, enqueued_jobs[], errors[]}`. NOT admin-gated — bulk renewal is non-destructive (worst case it kicks off some redundant ACME orders). Status filter: certs in `Archived/Revoked/Expired/RenewalInProgress` are silent-skipped (TotalSkipped++) rather than returned as errors. Implementation: `internal/domain/bulk_renewal.go`, `internal/service/bulk_renewal.go`, `internal/api/handler/bulk_renewal.go`.
+- **`POST /api/v1/certificates/bulk-reassign`** — updates `owner_id` (required) and `team_id` (optional) on every cert in `certificate_ids`. Skips certs already owned by the target (silent no-op surfaced as `total_skipped`). Validates the target `owner_id` upfront — a non-existent owner returns 400 (via the typed `service.ErrBulkReassignOwnerNotFound` sentinel) before any cert is touched. NOT admin-gated. Implementation: `internal/domain/bulk_reassignment.go`, `internal/service/bulk_reassignment.go`, `internal/api/handler/bulk_reassignment.go`.
+- **MCP tools `certctl_bulk_renew_certificates` and `certctl_bulk_reassign_certificates`** in `internal/mcp/tools.go` + `internal/mcp/types.go`. Mirror the existing `certctl_bulk_revoke_certificates` shape so MCP consumers have a uniform bulk-action surface.
+- **OpenAPI schemas** `BulkRenewRequest`, `BulkRenewResult`, `BulkEnqueuedJob`, `BulkReassignRequest`, `BulkReassignResult` plus the two new operations with shared envelope semantics.
+- **Frontend client functions** `bulkRenewCertificates(criteria)` and `bulkReassignCertificates(request)` in `web/src/api/client.ts` with full TS types for both request and response envelopes.
+- **Service-layer regression tests** for both new services (`internal/service/bulk_renewal_test.go` + `internal/service/bulk_reassignment_test.go`): happy path, criteria-mode, status-skip semantics (RenewalInProgress / Revoked / Archived for renew; already-owned for reassign), empty-criteria rejection, partial-failure tolerance, single-bulk-audit-event contract.
+- **Handler-layer regression tests** (`internal/api/handler/bulk_renewal_handler_test.go` + `internal/api/handler/bulk_reassignment_handler_test.go`): happy path, empty-body 400, wrong-method 405, actor attribution from `middleware.GetUser`, owner-not-found-sentinel-→-400 mapping for reassign, generic-service-error-→-500.
+- **Domain-layer JSON-shape tests** pinning the wire contract for `BulkRenewalResult` / `BulkReassignmentResult` / `BulkOperationError`.
+- **CI regression guardrail** in `.github/workflows/ci.yml` (`Forbidden client-side bulk-action loop regression guard (L-1)`) — grep-fails the build if `for(...) await triggerRenewal(...)` or `for(...) await updateCertificate(...)` reappears in `web/src/pages/CertificatesPage.tsx`. Verified: passes against the post-fix tree, fires against synthetic regressions.
+
+### Changed
+
+- **`web/src/pages/CertificatesPage.tsx::handleBulkRenewal`** — rewritten from N-call loop to a single `bulkRenewCertificates({ certificate_ids })` call. Result envelope drives the progress UI (matched / enqueued / skipped / failed counts).
+- **`web/src/pages/CertificatesPage.tsx::handleReassign`** (in the reassign modal) — same shape: single `bulkReassignCertificates({ certificate_ids, owner_id })` call. First-error message surfaced when `total_failed > 0`.
+- **`internal/api/router/router.go`** — three bulk-* routes (revoke / renew / reassign) registered together as a block before the per-cert `{id}` routes; `HandlerRegistry` gains `BulkRenewal` and `BulkReassignment` fields.
+- **`cmd/server/main.go`** — constructs `BulkRenewalService` (threads `cfg.Keygen.Mode` so bulk-renew jobs land in the same initial status as single-cert `TriggerRenewal`) and `BulkReassignmentService` alongside the existing `BulkRevocationService`.
+
+### Performance impact
+
+100-cert bulk-renew workflow goes from ~10 s of sequential per-cert HTTP (worst case) to a single ~100 ms call — roughly 99% latency reduction on the canonical operator workflow. Server-side resource use also drops: one Auth pass, one audit event, one criteria-resolution query, instead of N of each.
+
+### Closed audit findings
+
+- `cat-l-fa0c1ac07ab5` (P1, primary) — bulk renew client-side sequential loop
+- `cat-l-8a1fb258a38a` (P2) — bulk owner-reassign client-side sequential loop
+
+### Known follow-ups (deferred from L-1 scope)
+
+- `cat-b-31ceb6aaa9f1` (P1, `updateOwner`/`updateTeam`/`updateAgentGroup` orphan) — different shape; the fix is "wire up the existing PUT endpoints to the GUI", not "add a bulk endpoint".
+- `cat-k-e85d1099b2d7` (P2, CertificatesPage no pagination UI) — same page; criteria-mode bulk-renew (`{owner_id: 'o-alice'}`) means an operator can already "renew all of Alice's certs" without paginating, but pagination is still wanted for the table view.
+- `cat-i-b0924b6675f8` (P1, MCP missing `claim`/`dismiss`/`acknowledge`) — L-1 added two new MCP tools but does NOT close that finding.
+
 ### D-1: StatusBadge enum drift + Certificate phantom fields — closed end-to-end
 
 > The dashboard silently lied in five places. Agents in the `Degraded` state (the only Go-side AgentStatus that means "needs operator attention") rendered as default neutral grey because StatusBadge mapped `Stale` (a key Go has never emitted) to yellow and let the real `Degraded` value fall through to the dictionary default. Dead-letter notifications (`status: 'dead'`, retries exhausted) rendered as default neutral, visually equated with `read` (operator-acknowledged). The Certificate badge map carried a `PendingIssuance` key that no Go enum value ever emits — dead key, latent confusion vector. CertificateDetailPage's Key Algorithm and Key Size rows always rendered `—` even when the data was a single fetch away, because the lookup went through `cert.key_algorithm` directly — and the underlying `Certificate` TypeScript interface declared five optional fields (`serial_number`, `fingerprint_sha256`, `key_algorithm`, `key_size`, `issued_at`) that Go's `ManagedCertificate` has never carried (those values live on `CertificateVersion`). Five findings, two files, one frontend rebuild. Pre-D-1 the only reason this didn't trip a regression suite was that the regression suite never asserted "every Go-emitted enum value gets a non-default StatusBadge class" — D-1 fixes the visual lies and adds a 38-case Vitest property test that walks every Go enum and pins the contract.

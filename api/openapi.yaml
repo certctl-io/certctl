@@ -470,6 +470,69 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/certificates/bulk-renew:
+    post:
+      tags: [Certificates]
+      summary: Bulk renew certificates by criteria or explicit IDs
+      description: |
+        Enqueues a renewal job for every matching managed certificate. Mirrors POST
+        /api/v1/certificates/bulk-revoke shape exactly so operators who already know
+        that contract have zero new surface to learn. L-1 closure
+        (cat-l-fa0c1ac07ab5): pre-L-1 the GUI looped per-cert HTTP calls;
+        post-L-1 it's a single POST. Status filter: certs in
+        Archived/Revoked/Expired/RenewalInProgress are silent-skipped (TotalSkipped++)
+        rather than returned as errors. Asynchronous: the action ENQUEUES jobs the
+        scheduler picks up; per-cert {certificate_id, job_id} pairs are returned in
+        enqueued_jobs. NOT admin-gated — bulk renewal is non-destructive.
+      operationId: bulkRenewCertificates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRenewRequest"
+      responses:
+        "200":
+          description: Bulk renewal result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkRenewResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/certificates/bulk-reassign:
+    post:
+      tags: [Certificates]
+      summary: Bulk reassign owner (and optionally team) for a set of certificates
+      description: |
+        Updates owner_id (required) and team_id (optional) on every certificate in
+        certificate_ids. Skips certs already owned by the target (silent no-op,
+        TotalSkipped++). L-2 closure (cat-l-8a1fb258a38a). Narrower than bulk-renew:
+        explicit IDs only, no criteria-mode. The OwnerID is validated upfront — a
+        non-existent owner returns 400 before any cert is touched. Verb chosen as
+        POST (not PATCH) for codebase consistency with bulk-revoke and bulk-renew.
+      operationId: bulkReassignCertificates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkReassignRequest"
+      responses:
+        "200":
+          description: Bulk reassignment result
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkReassignResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   # ─── Certificate Export ──────────────────────────────────────────────
   /api/v1/certificates/{id}/export/pem:
     get:
@@ -3656,6 +3719,116 @@ components:
               error:
                 type: string
           description: Per-certificate error details for failed revocations
+
+    # L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
+    # bulk-renew + bulk-reassign request/result schemas. Mirror
+    # BulkRevokeRequest/Result envelope shape so frontend bulk-result
+    # rendering is one helper. See internal/domain/bulk_renewal.go +
+    # internal/domain/bulk_reassignment.go for the Go-side source of
+    # truth.
+    BulkRenewRequest:
+      type: object
+      description: Criteria for bulk renewal. At least one selector required.
+      properties:
+        profile_id:
+          type: string
+          description: Renew all certificates matching this profile
+        owner_id:
+          type: string
+          description: Renew all certificates owned by this owner
+        agent_id:
+          type: string
+          description: Renew all certificates deployed via this agent
+        issuer_id:
+          type: string
+          description: Renew all certificates issued by this issuer
+        team_id:
+          type: string
+          description: Renew all certificates owned by members of this team
+        certificate_ids:
+          type: array
+          items:
+            type: string
+          description: Explicit list of certificate IDs to renew
+
+    BulkEnqueuedJob:
+      type: object
+      properties:
+        certificate_id:
+          type: string
+        job_id:
+          type: string
+          description: ID of the renewal job created for this certificate
+
+    BulkRenewResult:
+      type: object
+      properties:
+        total_matched:
+          type: integer
+          description: Number of certificates matching the criteria
+        total_enqueued:
+          type: integer
+          description: Number of renewal jobs successfully created
+        total_skipped:
+          type: integer
+          description: Certs already RenewalInProgress / Revoked / Archived / Expired (silent no-op)
+        total_failed:
+          type: integer
+          description: Number of certificates whose enqueue path returned an error
+        enqueued_jobs:
+          type: array
+          items:
+            $ref: "#/components/schemas/BulkEnqueuedJob"
+          description: Per-certificate {certificate_id, job_id} pairs for the successful enqueue path
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              certificate_id:
+                type: string
+              error:
+                type: string
+          description: Per-certificate error details for the failure path
+
+    BulkReassignRequest:
+      type: object
+      required: [certificate_ids, owner_id]
+      properties:
+        certificate_ids:
+          type: array
+          items:
+            type: string
+          description: Explicit list of certificate IDs to reassign
+        owner_id:
+          type: string
+          description: Required. New owner_id for every cert in certificate_ids.
+        team_id:
+          type: string
+          description: Optional. When non-empty, also updates team_id on every cert.
+
+    BulkReassignResult:
+      type: object
+      properties:
+        total_matched:
+          type: integer
+        total_reassigned:
+          type: integer
+          description: Number of certs whose owner_id (and optionally team_id) was actually mutated
+        total_skipped:
+          type: integer
+          description: Certs already owned by the target (silent no-op)
+        total_failed:
+          type: integer
+        errors:
+          type: array
+          items:
+            type: object
+            properties:
+              certificate_id:
+                type: string
+              error:
+                type: string
 
     # ─── Issuers ─────────────────────────────────────────────────────
     IssuerType:
