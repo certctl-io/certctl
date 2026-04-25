@@ -323,6 +323,29 @@ type TimelineInput struct {
 	Days int `json:"days,omitempty" jsonschema:"Number of days to look back (default 30, max 365)"`
 }
 
+// ── Discovered Certificates (I-2 closure) ──────────────────────────
+
+// ClaimDiscoveredCertificateInput is the MCP tool input for claiming a
+// discovered certificate (POST /api/v1/discovered-certificates/{id}/claim).
+// I-2 closure (cat-i-b0924b6675f8). The HTTP handler at
+// internal/api/handler/discovery.go::ClaimDiscovered links the discovered
+// row (DC-*) to a managed certificate (mc-*); operators use this to
+// bring an out-of-band cert under management without re-issuing.
+type ClaimDiscoveredCertificateInput struct {
+	ID                   string `json:"id" jsonschema:"Discovered certificate ID (dc-*)"`
+	ManagedCertificateID string `json:"managed_certificate_id" jsonschema:"Existing managed certificate ID (mc-*) to link to"`
+}
+
+// DismissDiscoveredCertificateInput is the MCP tool input for dismissing
+// a discovered certificate (POST /api/v1/discovered-certificates/{id}/dismiss).
+// I-2 closure (cat-i-b0924b6675f8). Marks the row as not-of-interest
+// (e.g. expired self-signed test certs found by a network scan); the row
+// stops appearing in the unmanaged-list view but is preserved in the DB
+// for audit history.
+type DismissDiscoveredCertificateInput struct {
+	ID string `json:"id" jsonschema:"Discovered certificate ID (dc-*)"`
+}
+
 // ── Empty ───────────────────────────────────────────────────────────
 
 type EmptyInput struct{}
