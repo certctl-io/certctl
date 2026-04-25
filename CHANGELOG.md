@@ -4,6 +4,32 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### Bundle 4 (EST/SCEP Hardening): 3 audit findings closed
+
+> First closure bundle from the 2026-04-25 comprehensive audit
+> (`cowork/comprehensive-audit-2026-04-25/`). Hardens the only attack surface
+> reachable by an anonymous network attacker in certctl: the unauthenticated
+> EST + SCEP enrollment endpoints.
+
+#### Added
+
+- **PKCS#7 fuzz targets (Audit H-004)** — 4 new `Fuzz*` test targets covering both the network-reachable hand-rolled ASN.1 parser (`internal/api/handler/scep.go::extractCSRFromPKCS7` + `parseSignedDataForCSR`) and defense-in-depth on the PKCS#7 encoder helpers (`internal/pkcs7/PEMToDERChain`, `ASN1EncodeLength`). Local smoke runs (~2M execs across all 4) found zero panics. Run via `go test -run='^$' -fuzz=Fuzz<Name> -fuzztime=10m`. CWE-1287 + CWE-674 + CWE-770.
+- **EST TLS transport pre-conditions (Audit M-021)** — `internal/api/handler/est.go::verifyESTTransport` enforces `r.TLS != nil`, `HandshakeComplete`, and TLS version ≥ 1.2 before any state mutation in `SimpleEnroll` and `SimpleReEnroll`. Defense-in-depth at the EST trust boundary; the full RFC 7030 §3.2.3 channel binding only applies when EST mTLS is in use, which certctl does not currently support. RFC 9266 (TLS 1.3 `tls-exporter`) and EST mTLS support documented as deferred follow-ups.
+- **EST/SCEP issuer-binding startup validation (Audit L-005)** — `cmd/server/main.go::preflightEnrollmentIssuer` calls `GetCACertPEM(ctx)` at startup with a 10-second timeout. Pre-Bundle-4, an operator binding `CERTCTL_EST_ISSUER_ID` to an ACME / DigiCert / Sectigo / etc. issuer would boot successfully and only fail at first `/est/cacerts` request (those issuer types return explicit error from `GetCACertPEM`). Post-Bundle-4: the server fails-loud at startup with the connector's own error message + `os.Exit(1)`.
+
+#### Tests
+
+- `internal/api/handler/est_transport_test.go` — 5 table cases for `verifyESTTransport`
+- `cmd/server/preflight_test.go` — `TestPreflightEnrollmentIssuer` covering nil-connector / error-from-issuer / empty-PEM / valid cases
+- `internal/api/handler/scep_fuzz_test.go` — `FuzzExtractCSRFromPKCS7`, `FuzzParseSignedDataForCSR`
+- `internal/pkcs7/pkcs7_fuzz_test.go` — `FuzzPEMToDERChain`, `FuzzASN1EncodeLength`
+- `internal/api/handler/est_handler_test.go` (modified) — 7 POST sites stamp `r.TLS` to satisfy the new transport pre-condition
+- `internal/integration/negative_test.go` (modified) — `setupTestServer` wraps the test handler with a fake-TLS-state injector
+
+#### Why this matters
+
+Pre-Bundle-4, certctl exposed an unauthenticated network attack surface (EST simpleenroll / SCEP PKCSReq) that called into a hand-rolled ASN.1 parser with no fuzz coverage and no TLS pre-conditions. An attacker could submit crafted PKCS#7 envelopes targeting parser bugs; replay CSRs across TLS sessions without channel-binding catching it; or cause silent runtime failure if operator misconfigured EST/SCEP issuer wiring (no startup validation). Bundle 4 closes all three.
+
 ### T-1 + Q-1: Final-tail closure of the 2026-04-24 audit — 47/47 (100%)
 
 > The last two findings from the v5 unified audit closed in two independent
