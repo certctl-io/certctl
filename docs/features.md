@@ -1220,6 +1220,10 @@ Latching state prevents refetch-driven dismissal. `localStorage` dismissal key: 
 
 `certctl-cli` — stdlib-only (`flag` + `text/tabwriter`), no Cobra dependency.
 
+### Scope (intentionally narrow)
+
+The CLI focuses on **read-heavy operator triage** (list, get, status, version) and **bulk-action surface** (`certs bulk-revoke`, `import`). It deliberately omits admin CRUD for issuers, targets, owners, teams, agent groups, certificate profiles, renewal policies, policy rules, and notifications — those live in the GUI and the MCP server (rebuild count via `grep -cE 'gomcp\.AddTool\(' internal/mcp/tools.go` for the full operator surface). This split is intentional: CLI is the SSH-into-the-prod-host emergency console; GUI is the day-to-day operator console; MCP is the AI/automation surface. Closes audit finding `cat-i-7c8b28936e3d` — pre-this-doc the narrow scope was correct in code but confused readers who scanned `docs/features.md`'s "CLI commands" count and assumed the CLI was incomplete.
+
 ### Commands
 
 | Command | Description |

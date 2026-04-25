@@ -149,6 +149,8 @@ The agent runs two background loops: a heartbeat (every 60 seconds) to signal it
 
 Retired agents receive `410 Gone` on subsequent heartbeats (`service.ErrAgentRetired`). `cmd/agent` treats 410 as a terminal signal and exits cleanly so retired agents stop phoning home. Migration `000015` flipped `deployment_targets.agent_id` from `ON DELETE CASCADE` to `ON DELETE RESTRICT`, making the old hard-delete path a schema error and forcing all retirement through this contract.
 
+**Registration is by-design pull-only (C-1 closure, cat-b-6177f36636fb).** Agents register themselves at first heartbeat via `install-agent.sh` + `cmd/agent/main.go` — never via the GUI. The `web/src/api/client.ts::registerAgent` client function is intentionally orphan in the dashboard for this reason. It's preserved in `client.ts` (rather than deleted) so future features that want to drive registration from the GUI — for example, a one-click "register proxy agent" panel for network-appliance topologies where the agent runs in a different network zone from the device it manages — can reach the endpoint without a `client.ts` edit. Operators looking to scale agent enrollment use `install-agent.sh` against a config-management system (Ansible, Salt, Puppet) or a baked-in cloud-init script, not the dashboard.
+
 ### Web Dashboard
 
 The web dashboard is the primary operational interface for certctl. It is built with Vite + React + TypeScript and uses TanStack Query for server state management (caching, background refetching, optimistic updates).

@@ -784,6 +784,18 @@ type SchedulerConfig struct {
 	// second.
 	// Setting: CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT environment variable.
 	AwaitingApprovalTimeout time.Duration
+
+	// ShortLivedExpiryCheckInterval is how often the scheduler scans
+	// short-lived certificates and marks expired rows as Expired. Default:
+	// 30 seconds (matches the in-memory default in scheduler.NewScheduler).
+	// C-1 closure (cat-g-7e38f9708e20 + diff-10xmain-2bf4a0a60388):
+	// pre-C-1 the setter scheduler.SetShortLivedExpiryCheckInterval was
+	// defined + tested but never called from cmd/server/main.go, so the
+	// 30-second default was effectively hardcoded. Operators who needed
+	// to tune the cadence (e.g. a high-churn short-lived cert tenant)
+	// had no path. Post-C-1 main.go wires this knob.
+	// Setting: CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL environment variable.
+	ShortLivedExpiryCheckInterval time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -948,6 +960,9 @@ func Load() (*Config, error) {
 			JobTimeoutInterval:        getEnvDuration("CERTCTL_JOB_TIMEOUT_INTERVAL", 10*time.Minute),
 			AwaitingCSRTimeout:        getEnvDuration("CERTCTL_JOB_AWAITING_CSR_TIMEOUT", 24*time.Hour),
 			AwaitingApprovalTimeout:   getEnvDuration("CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT", 168*time.Hour),
+			// C-1 closure: matches the in-memory default at
+			// internal/scheduler/scheduler.go:145 (30 * time.Second).
+			ShortLivedExpiryCheckInterval: getEnvDuration("CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL", 30*time.Second),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
