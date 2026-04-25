@@ -126,6 +126,10 @@ func TestPaginationQuery(t *testing.T) {
 }
 
 func TestTextResult(t *testing.T) {
+	// Bundle-3: textResult wraps the response body in untrusted-data fences.
+	// The fence labels the data as MCP_RESPONSE so LLM consumers can be
+	// instructed to interpret the inner JSON as opaque content rather than
+	// instructions. See internal/mcp/fence.go for the strategy doc.
 	data := json.RawMessage(`{"id":"mc-test","status":"Active"}`)
 	result, metadata, err := textResult(data)
 	if err != nil {
@@ -144,18 +148,37 @@ func TestTextResult(t *testing.T) {
 	if !ok {
 		t.Fatal("expected TextContent type")
 	}
-	if tc.Text != `{"id":"mc-test","status":"Active"}` {
-		t.Errorf("unexpected text content: %s", tc.Text)
+	if !strings.Contains(tc.Text, "--- UNTRUSTED MCP_RESPONSE START") {
+		t.Errorf("missing start fence in text content: %s", tc.Text)
+	}
+	if !strings.Contains(tc.Text, "--- UNTRUSTED MCP_RESPONSE END") {
+		t.Errorf("missing end fence in text content: %s", tc.Text)
+	}
+	if !strings.Contains(tc.Text, `{"id":"mc-test","status":"Active"}`) {
+		t.Errorf("inner body missing from fenced content: %s", tc.Text)
 	}
 }
 
 func TestErrorResult(t *testing.T) {
+	// Bundle-3: errorResult wraps the error message in untrusted-data fences.
+	// Upstream-CA error strings are attacker-controllable (M-004), so the
+	// fence prevents an injected "ignore previous instructions" payload in
+	// a CA error from steering the LLM consumer.
 	result, _, err := errorResult(http.ErrServerClosed)
 	if result != nil {
 		t.Errorf("expected nil result, got %v", result)
 	}
 	if err == nil {
 		t.Fatal("expected non-nil error")
+	}
+	if !strings.Contains(err.Error(), "--- UNTRUSTED MCP_ERROR START") {
+		t.Errorf("missing start fence in error: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), "--- UNTRUSTED MCP_ERROR END") {
+		t.Errorf("missing end fence in error: %s", err.Error())
+	}
+	if !strings.Contains(err.Error(), http.ErrServerClosed.Error()) {
+		t.Errorf("inner error missing from fenced content: %s", err.Error())
 	}
 }
 

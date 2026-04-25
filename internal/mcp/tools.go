@@ -33,16 +33,33 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 
 // ── Helpers ─────────────────────────────────────────────────────────
 
+// textResult is the success-path wrapper used by every MCP tool. Bundle-3
+// (Audit H-002, H-003, M-003, M-004, M-005, CWE-1039 LLM Prompt Injection):
+// the response body returned to the LLM consumer may contain attacker-
+// controllable text — cert subject DN/SANs (CSR submitter controls), agent
+// hostname/OS/arch/IP (agent self-reports), upstream CA error strings (CA
+// controls), audit details + notification bodies (downstream actors). To
+// make the trust boundary explicit, we wrap every body in `--- UNTRUSTED
+// MCP_RESPONSE START ... END ---` fences. LLM consumers that fence
+// untrusted data correctly will see the attack as data, not instructions.
+//
+// See internal/mcp/fence.go for the strategy doc + per-finding rationale.
 func textResult(data json.RawMessage) (*gomcp.CallToolResult, any, error) {
 	return &gomcp.CallToolResult{
 		Content: []gomcp.Content{
-			&gomcp.TextContent{Text: string(data)},
+			&gomcp.TextContent{Text: fenceMCPResponse(string(data))},
 		},
 	}, nil, nil
 }
 
+// errorResult is the failure-path wrapper used by every MCP tool. Bundle-3
+// (M-004 in particular): the wrapped error often originates from an upstream
+// CA whose error string the attacker may control. We fence the error message
+// via fenceMCPError before returning to the LLM consumer. The third return
+// value is what the gomcp framework surfaces; gomcp formats it into a
+// CallToolResult.IsError content automatically.
 func errorResult(err error) (*gomcp.CallToolResult, any, error) {
-	return nil, nil, fmt.Errorf("%w", err)
+	return nil, nil, fmt.Errorf("%s", fenceMCPError(err.Error()))
 }
 
 func paginationQuery(page, perPage int) url.Values {
