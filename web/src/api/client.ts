@@ -2,6 +2,35 @@ import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEv
 
 const BASE = '/api/v1';
 
+// P-1 closure (diff-04x03-d24864996ad4 P2 + cat-b-dc46aadab98e P3):
+// the audit flagged 26+16 orphan client functions. Recon at HEAD
+// found 17 actual orphans (the 26+16 audit numbers conflated; many
+// were eliminated by the B-1 / S-1 / I-2 / D-2 closures since the
+// audit was written). The remaining 17 are all detail-page
+// candidates — singleton-getter `getX(id)` fns that detail pages
+// will need when the corresponding `XPage` grows a `XDetailPage`
+// route. Preserved here (rather than deleted) so the future
+// detail-page work doesn't have to relitigate the client.ts surface.
+//
+// Intentionally-orphan client functions:
+//   getAgentGroup, getAgentGroupMembers, getAuditEvent,
+//   getCertificateDeployments, getDiscoveredCertificate,
+//   getHealthCheck, getHealthCheckHistory, getNetworkScanTarget,
+//   getNotification, getOCSPStatus, getOwner, getPolicy,
+//   getPolicyViolations, getRenewalPolicy, getTeam, registerAgent
+//   (by-design pull-only; see C-1 closure docblock above its export),
+//   updateHealthCheck.
+//
+// CI guardrail at .github/workflows/ci.yml::"Documented orphan
+// client fns sync guard (P-1)" enforces the docblock list ↔
+// export list relationship: every name above must still be
+// declared somewhere in this file, and conversely if a name is
+// removed from the list its export must also be removed (orphans
+// must never silently accumulate).
+//
+// See coverage-gap-audit-2026-04-24-v5/unified-audit.md
+// diff-04x03-d24864996ad4 + cat-b-dc46aadab98e for closure rationale.
+
 // API key stored in memory (not localStorage for security)
 let apiKey: string | null = null;
 
