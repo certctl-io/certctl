@@ -51,6 +51,15 @@ export interface CertificateVersion {
   created_at: string;
 }
 
+// G-2 (P1): `api_key_hash` is intentionally absent from this interface.
+// The server-side struct (internal/domain/connector.go::Agent) carries
+// the field for the auth-lookup path but redacts it via a custom
+// MarshalJSON so it never reaches the JSON wire. Adding `api_key_hash`
+// here would not magically populate it on the wire — and would mislead
+// future contributors into thinking the field is part of the public
+// API contract. See docs/architecture.md ER-diagram note and
+// coverage-gap-audit-2026-04-24-v5/unified-audit.md cat-s5-apikey_leak
+// for the closure rationale.
 export interface Agent {
   id: string;
   name: string;

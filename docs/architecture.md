@@ -348,6 +348,11 @@ erDiagram
     }
 ```
 
+The ER diagram above documents **database shape**, not REST-API wire shape. Several columns are intentionally server-internal and never serialized to clients:
+
+- `agents.api_key_hash` — SHA-256 of the agent's plaintext API key, populated by `service.RegisterAgent` (`hashAPIKey(apiKey)` at `internal/service/agent.go`) and consumed by `repository.AgentRepository::GetByAPIKey` for the auth-lookup. **Not** exposed via the REST API, **not** echoed via CLI / MCP / agent registration response, **never** logged. Enforced by `internal/domain/connector.go::Agent.MarshalJSON` (G-2 audit closure, `cat-s5-apikey_leak`); the OpenAPI Agent schema explicitly excludes the field, the frontend `Agent` interface omits it, and a CI grep guardrail at `.github/workflows/ci.yml` blocks reintroduction.
+- `issuers.config` / `deployment_targets.config` — plaintext jsonb shadow of the AES-GCM-encrypted on-disk blob; the encrypted form lives on `EncryptedConfig []byte` (Go-only field tagged `json:"-"`).
+
 Migrations are idempotent (`IF NOT EXISTS` on all CREATE statements, `ON CONFLICT (id) DO NOTHING` on all seed data) so they're safe to run multiple times — important for Docker Compose where both initdb and the server may run the same SQL.
 
 ## Data Flow: Certificate Lifecycle

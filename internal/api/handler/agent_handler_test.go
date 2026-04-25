@@ -893,3 +893,161 @@ func TestAgentReportJobStatus_ServiceError(t *testing.T) {
 func stringPtr(s string) *string {
 	return &s
 }
+
+// G-2 (P1): cat-s5-apikey_leak audit closure tests. Pre-G-2,
+// Agent.APIKeyHash was tagged `json:"api_key_hash"` and shipped on
+// every wire surface that returned domain.Agent. Post-G-2 the tag is
+// "-" and Agent.MarshalJSON enforces redaction via a marshal-time copy
+// (see internal/domain/connector_test.go for the type-level pin). These
+// four tests are the wire-shape contract — they capture the actual HTTP
+// response body via httptest and assert the credential-derivative hash
+// is absent.
+//
+// One sentinel value (g2HandlerLeakSentinel) flows through every fixture
+// so a single grep over a failing test's output identifies the leak
+// surface immediately.
+const g2HandlerLeakSentinel = "sha256:LEAKED-CREDENTIAL-DERIVATIVE-HANDLER-SENTINEL"
+
+func TestListAgents_DoesNotLeakAPIKeyHash(t *testing.T) {
+	now := time.Now()
+	mock := &MockAgentService{
+		ListAgentsFn: func(page, perPage int) ([]domain.Agent, int64, error) {
+			return []domain.Agent{
+				{ID: "a-1", Name: "agent-one", Hostname: "host-1",
+					Status: domain.AgentStatusOnline, RegisteredAt: now,
+					APIKeyHash: g2HandlerLeakSentinel + "-1"},
+				{ID: "a-2", Name: "agent-two", Hostname: "host-2",
+					Status: domain.AgentStatusOnline, RegisteredAt: now,
+					APIKeyHash: g2HandlerLeakSentinel + "-2"},
+			}, 2, nil
+		},
+	}
+	h := NewAgentHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents?page=1&per_page=50", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	h.ListAgents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListAgents status = %d, want 200", w.Code)
+	}
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("api_key_hash")) {
+		t.Errorf("ListAgents response leaked \"api_key_hash\" key (G-2 regressed):\n%s", body)
+	}
+	if bytes.Contains([]byte(body), []byte(g2HandlerLeakSentinel)) {
+		t.Errorf("ListAgents response leaked sentinel %q:\n%s", g2HandlerLeakSentinel, body)
+	}
+	// Sanity: the non-leaked fields ARE present (handler did serve real data).
+	for _, want := range []string{"a-1", "a-2", "agent-one", "agent-two"} {
+		if !bytes.Contains([]byte(body), []byte(want)) {
+			t.Errorf("ListAgents response missing expected field %q (handler may not be serving data):\n%s", want, body)
+		}
+	}
+}
+
+func TestGetAgent_DoesNotLeakAPIKeyHash(t *testing.T) {
+	now := time.Now()
+	mock := &MockAgentService{
+		GetAgentFn: func(id string) (*domain.Agent, error) {
+			return &domain.Agent{
+				ID: id, Name: "single-agent", Hostname: "single.host",
+				Status: domain.AgentStatusOnline, RegisteredAt: now,
+				APIKeyHash: g2HandlerLeakSentinel,
+			}, nil
+		},
+	}
+	h := NewAgentHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/a-prod-001", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	h.GetAgent(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("GetAgent status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("api_key_hash")) {
+		t.Errorf("GetAgent response leaked \"api_key_hash\" key:\n%s", body)
+	}
+	if bytes.Contains([]byte(body), []byte(g2HandlerLeakSentinel)) {
+		t.Errorf("GetAgent response leaked sentinel:\n%s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte("single-agent")) {
+		t.Errorf("GetAgent response missing the agent name (handler may not be serving data):\n%s", body)
+	}
+}
+
+func TestRegisterAgent_DoesNotLeakAPIKeyHash(t *testing.T) {
+	// Registration is the most likely path for a freshly-hashed key to
+	// leak: the service mints a new APIKeyHash inside RegisterAgent
+	// (service/agent.go:405) and the handler returns the agent struct
+	// verbatim. Pin that the redaction holds even on a "freshly created"
+	// agent payload.
+	now := time.Now()
+	mock := &MockAgentService{
+		RegisterAgentFn: func(in domain.Agent) (*domain.Agent, error) {
+			return &domain.Agent{
+				ID: "agent-new", Name: in.Name, Hostname: in.Hostname,
+				Status: domain.AgentStatusOnline, RegisteredAt: now,
+				APIKeyHash: g2HandlerLeakSentinel,
+			}, nil
+		},
+	}
+	h := NewAgentHandler(mock)
+	body := bytes.NewBufferString(`{"name":"freshly-registered","hostname":"new.host"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/agents", body)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	h.RegisterAgent(w, req)
+
+	if w.Code != http.StatusCreated {
+		t.Fatalf("RegisterAgent status = %d, want 201, body=%s", w.Code, w.Body.String())
+	}
+	respBody := w.Body.String()
+	if bytes.Contains([]byte(respBody), []byte("api_key_hash")) {
+		t.Errorf("RegisterAgent response leaked \"api_key_hash\" key:\n%s", respBody)
+	}
+	if bytes.Contains([]byte(respBody), []byte(g2HandlerLeakSentinel)) {
+		t.Errorf("RegisterAgent response leaked sentinel:\n%s", respBody)
+	}
+	if !bytes.Contains([]byte(respBody), []byte("agent-new")) {
+		t.Errorf("RegisterAgent response missing the new agent ID (handler may not be serving data):\n%s", respBody)
+	}
+}
+
+func TestListRetiredAgents_DoesNotLeakAPIKeyHash(t *testing.T) {
+	// I-004 surface — separate handler from ListAgents; same leak risk.
+	now := time.Now()
+	retiredAt := now.Add(-1 * time.Hour)
+	reason := "test cascade"
+	mock := &MockAgentService{
+		ListRetiredAgentsFn: func(page, perPage int) ([]domain.Agent, int64, error) {
+			return []domain.Agent{
+				{ID: "ret-1", Name: "retired-one", Hostname: "host-r1",
+					Status: domain.AgentStatusOffline, RegisteredAt: now,
+					RetiredAt: &retiredAt, RetiredReason: &reason,
+					APIKeyHash: g2HandlerLeakSentinel},
+			}, 1, nil
+		},
+	}
+	h := NewAgentHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/agents/retired?page=1&per_page=50", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	h.ListRetiredAgents(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("ListRetiredAgents status = %d, want 200, body=%s", w.Code, w.Body.String())
+	}
+	body := w.Body.String()
+	if bytes.Contains([]byte(body), []byte("api_key_hash")) {
+		t.Errorf("ListRetiredAgents response leaked \"api_key_hash\" key:\n%s", body)
+	}
+	if bytes.Contains([]byte(body), []byte(g2HandlerLeakSentinel)) {
+		t.Errorf("ListRetiredAgents response leaked sentinel:\n%s", body)
+	}
+	if !bytes.Contains([]byte(body), []byte("ret-1")) {
+		t.Errorf("ListRetiredAgents response missing the retired agent ID:\n%s", body)
+	}
+}
