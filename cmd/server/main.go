@@ -741,6 +741,17 @@ func main() {
 	})
 	logger.Info("request body size limit enabled", "max_bytes", cfg.Server.MaxBodySize)
 
+	// Security headers middleware — applies HSTS, X-Frame-Options,
+	// X-Content-Type-Options, Referrer-Policy, and a conservative CSP
+	// on every response. H-1 closure (cat-s11-missing_security_headers):
+	// pre-H-1 the server emitted zero security headers; an attacker
+	// could clickjack the dashboard, sniff MIME types on JSON/PEM
+	// responses, or load resources from arbitrary origins via inline
+	// scripts. Defaults are conservative — see internal/api/middleware/
+	// securityheaders.go::SecurityHeadersDefaults() for the rationale
+	// per header.
+	securityHeadersMiddleware := middleware.SecurityHeaders(middleware.SecurityHeadersDefaults())
+
 	// API audit log middleware — records every API call to the audit trail
 	auditAdapter := middleware.NewAuditServiceAdapter(
 		func(ctx context.Context, actor string, actorType string, action string, resourceType string, resourceID string, details map[string]interface{}) error {
@@ -763,6 +774,7 @@ func main() {
 		structuredLogger,
 		middleware.Recovery,
 		bodyLimitMiddleware,
+		securityHeadersMiddleware,
 		corsMiddleware,
 		authMiddleware,
 		auditMiddleware.Middleware,
@@ -809,13 +821,29 @@ func main() {
 	if _, err := os.Stat(webDir + "/index.html"); err != nil {
 		webDir = "./web"
 	}
-	// Health/ready routes bypass the full middleware stack (no auth required).
-	// These are registered on the inner router without auth, but the outer
-	// middleware chain wraps everything. Route them directly to the inner router.
+	// Health/ready routes + EST/SCEP/PKI unauth surface bypass the full
+	// middleware stack (no auth required). These are registered on the
+	// inner router without auth, but the outer middleware chain wraps
+	// everything. Route them directly to the inner router.
+	//
+	// H-1 closure (cat-s5-4936a1cf0118): pre-H-1 the noAuthHandler chain
+	// was RequestID → structuredLogger → Recovery only — missing
+	// bodyLimitMiddleware that the authed apiHandler chain has. The
+	// unauth surface includes EST simpleenroll/simplereenroll (RFC 7030),
+	// SCEP, PKI CRL/OCSP (/.well-known/pki/*), and /health|/ready —
+	// every one of which accepts a request body. Without a body-size
+	// cap, an unauthenticated client can send arbitrary-size payloads
+	// (CSRs, CRL/OCSP requests) and trigger memory pressure on the
+	// server before the handler ever rejects the input. Post-H-1 the
+	// same bodyLimitMiddleware that wraps the authed surface also wraps
+	// the unauth surface — same default cap (CERTCTL_MAX_BODY_SIZE,
+	// default 1MB), same 413 response on overflow.
 	noAuthHandler := middleware.Chain(apiRouter,
 		middleware.RequestID,
 		structuredLogger,
 		middleware.Recovery,
+		bodyLimitMiddleware,
+		securityHeadersMiddleware,
 	)
 
 	dashboardEnabled := false
