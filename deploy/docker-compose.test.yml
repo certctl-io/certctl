@@ -93,6 +93,17 @@ services:
   # ---------------------------------------------------------------------------
   # Database
   # ---------------------------------------------------------------------------
+  #
+  # U-3 (P1, cat-u-seed_initdb_schema_drift, GitHub #10): the test stack used
+  # to mount a hand-curated subset of migrations + seed.sql + a never-checked-in
+  # seed_test.sql into postgres `/docker-entrypoint-initdb.d/`. Same hazard as
+  # the production compose — initdb crashed any time a new migration shipped
+  # that the seed depended on without the mount list being updated. Post-U-3
+  # the schema is built EXCLUSIVELY by the server at startup via
+  # internal/repository/postgres.RunMigrations + RunSeed. Postgres comes up
+  # empty and the server lands the full ladder + baseline seed in one shot.
+  # `start_period: 30s` matches the production compose and shields slow CI
+  # runners from healthcheck flap during initdb.
   postgres:
     image: postgres:16-alpine
     container_name: certctl-test-postgres
@@ -102,19 +113,6 @@ services:
       POSTGRES_PASSWORD: testpass
     volumes:
       - test_postgres_data:/var/lib/postgresql/data
-      - ../migrations/000001_initial_schema.up.sql:/docker-entrypoint-initdb.d/001_schema.sql
-      - ../migrations/000002_agent_metadata.up.sql:/docker-entrypoint-initdb.d/002_agent_metadata.sql
-      - ../migrations/000003_certificate_profiles.up.sql:/docker-entrypoint-initdb.d/003_certificate_profiles.sql
-      - ../migrations/000004_agent_groups.up.sql:/docker-entrypoint-initdb.d/004_agent_groups.sql
-      - ../migrations/000005_revocation.up.sql:/docker-entrypoint-initdb.d/005_revocation.sql
-      - ../migrations/000006_discovery.up.sql:/docker-entrypoint-initdb.d/006_discovery.sql
-      - ../migrations/000007_network_discovery.up.sql:/docker-entrypoint-initdb.d/007_network_discovery.sql
-      - ../migrations/000008_verification.up.sql:/docker-entrypoint-initdb.d/008_verification.sql
-      - ../migrations/000009_issuer_config.up.sql:/docker-entrypoint-initdb.d/009_issuer_config.sql
-      - ../migrations/000010_target_config.up.sql:/docker-entrypoint-initdb.d/010_target_config.sql
-      - ../migrations/seed.sql:/docker-entrypoint-initdb.d/020_seed.sql
-      - ../migrations/seed_test.sql:/docker-entrypoint-initdb.d/025_seed_test.sql
-      # No seed_demo.sql — start with a clean database for real testing
     networks:
       certctl-test:
         ipv4_address: 10.30.50.2
@@ -125,6 +123,7 @@ services:
       interval: 5s
       timeout: 5s
       retries: 5
+      start_period: 30s
     restart: unless-stopped
 
   # ---------------------------------------------------------------------------

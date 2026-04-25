@@ -163,6 +163,50 @@ paths:
         "401":
           description: Unauthorized
 
+  /api/v1/version:
+    get:
+      tags: [Health]
+      summary: Build identity (version, commit, Go runtime)
+      description: |
+        Returns the running server's build identity. Served without
+        auth so rollout systems and blackbox probes can read it without
+        Bearer credentials. U-3 ride-along (cat-u-no_version_endpoint).
+        Excluded from audit logging because rollout polling would
+        otherwise dominate the audit trail.
+
+        The Version field follows a fallback ladder: ldflags-supplied
+        value > VCS commit SHA > "dev". Commit / Modified / BuildTime
+        come from runtime/debug.BuildInfo (Go 1.18+ stamps these on
+        every module-tracked build). GoVersion is runtime.Version().
+      security: []
+      operationId: getVersion
+      responses:
+        "200":
+          description: Build identity
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [version, commit, modified, build_time, go_version]
+                properties:
+                  version:
+                    type: string
+                    description: Release tag (ldflags-supplied) or VCS SHA fallback or "dev"
+                    example: v2.0.51
+                  commit:
+                    type: string
+                    description: Git SHA from runtime/debug.BuildInfo (vcs.revision); empty when not VCS-tracked
+                  modified:
+                    type: boolean
+                    description: True when build had uncommitted changes (vcs.modified)
+                  build_time:
+                    type: string
+                    description: RFC 3339 build timestamp (vcs.time); empty when not VCS-tracked
+                  go_version:
+                    type: string
+                    description: Go toolchain version that compiled the binary (runtime.Version())
+                    example: go1.25.9
+
   # ─── Certificates ────────────────────────────────────────────────────
   /api/v1/certificates:
     get:

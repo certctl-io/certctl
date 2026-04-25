@@ -45,7 +45,7 @@ func TestRenewalPolicyRepository_CRUD(t *testing.T) {
 		RenewalWindowDays:   30,
 		AutoRenew:           true,
 		MaxRetries:          5,
-		RetryInterval:       3600, // stored in retry_interval_minutes column; passthrough
+		RetryInterval:       3600, // stored as seconds in retry_interval_seconds column (renamed in 000017_db_coupling_cleanup, U-3)
 		AlertThresholdsDays: []int{30, 14, 7, 0},
 	}
 

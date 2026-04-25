@@ -4,6 +4,42 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-24
 
+### U-3: GitHub #10 reopened — fresh-clone first-up postgres init failure (P1) — closed end-to-end
+
+> Operator `mikeakasully` cloned v2.0.50 fresh, ran the canonical quickstart `docker compose -f deploy/docker-compose.yml up -d --build`, and postgres reported `unhealthy` indefinitely; dependent containers (certctl-server, certctl-agent) never started. Root cause: the deploy compose stack mounted both a hand-curated subset of `migrations/*.up.sql` and `seed.sql` into postgres `/docker-entrypoint-initdb.d/`. Postgres applied them at initdb time. Once `seed.sql` referenced columns added by migrations *after* the mounted cutoff (e.g., `policy_rules.severity` from migration 000013, which the mount list never included), initdb crashed mid-seed and the container loop wedged. Two sources of truth — the mount list and the in-tree migration ladder — diverged the moment a seed-touching migration shipped, and the only thing that fixed it was hand-editing the compose file every release. The U-3 closure removes the dual source: postgres now boots empty and the server applies the entire migration ladder + seed at startup via `RunMigrations` + `RunSeed`. Same pattern Helm has used since day one. Bundled with four ride-along audit findings whose fixes are in adjacent code (column rename, missing column, dropped orphan columns, new build-identity endpoint) so operators take the schema-change pain only once.
+
+### Breaking Changes
+
+- **`deploy/docker-compose.yml` postgres no longer initdb-mounts the migration files or `seed.sql`.** Operators running on a populated `postgres_data` volume from a pre-U-3 release see no behavioral change (the schema is already in place; `RunMigrations` is `IF NOT EXISTS` and `RunSeed` is `ON CONFLICT DO NOTHING`). Operators running on a *fresh* clone now rely on the server to apply both — which is the bug fix. There is no rollback path other than re-introducing the dual-source-of-truth hazard. See `internal/repository/postgres/db.go::RunSeed` for the runtime contract.
+- **`migrations/000017_db_coupling_cleanup.up.sql` renames `renewal_policies.retry_interval_minutes` → `retry_interval_seconds`.** The column always held seconds; the column name lied (`cat-o-retry_interval_unit_mismatch`). Operators running raw SQL against the old name need to update their queries. The Go layer (`internal/repository/postgres/renewal_policy.go`) is updated in lockstep so the in-tree code path is unaffected.
+- **`migrations/000017_db_coupling_cleanup.up.sql` drops `network_scan_targets.health_check_enabled` and `network_scan_targets.health_check_interval_seconds`.** These columns were declared by a long-ago migration but never wired into Go code (`cat-o-health_check_column_orphans`) — schema noise that confused operators reading raw SQL. Anyone with custom dashboards selecting those columns will break.
+- **The compose demo overlay (`deploy/docker-compose.demo.yml`) no longer initdb-mounts `seed_demo.sql`.** It now sets `CERTCTL_DEMO_SEED=true` and the server applies the demo seed at boot via `RunDemoSeed` after baseline migrations + seed.sql are in place. Same single-source-of-truth pattern as the production path.
+
+### Added
+
+- **Migration `000017_db_coupling_cleanup`** (up + down). Bundles three schema changes in idempotent SQL: (1) rename `renewal_policies.retry_interval_minutes` → `retry_interval_seconds` (DO $$ guard so re-application is safe), (2) add `notification_events.created_at TIMESTAMPTZ NOT NULL DEFAULT NOW()`, (3) drop the orphan `network_scan_targets.health_check_*` columns. Reduces operator-visible "schema-change releases" from four to one.
+- **`internal/repository/postgres.RunSeed`** — runtime equivalent of the deleted initdb mount for `seed.sql`. Called from `cmd/server/main.go` immediately after `RunMigrations`. Idempotent (every INSERT in the shipped seed uses `ON CONFLICT (id) DO NOTHING`); missing-file is a no-op so operators with custom packaging that strips the seed don't break.
+- **`internal/repository/postgres.RunDemoSeed`** + **`config.DatabaseConfig.DemoSeed`** + **`CERTCTL_DEMO_SEED` env var.** Replaces the deleted `seed_demo.sql` initdb mount. The compose demo overlay sets `CERTCTL_DEMO_SEED=true` and the server applies the demo seed after baseline. Same idempotency contract as the baseline path. Default-off so a vanilla deploy never lands fake-history rows.
+- **`GET /api/v1/version` endpoint** + **`internal/api/handler.VersionHandler`**. Returns `{version, commit, modified, build_time, go_version}` from `runtime/debug.ReadBuildInfo()` with ldflags-supplied `Version` taking priority. Wired through the no-auth dispatch in `cmd/server/main.go` so probes and rollout systems can read build identity without Bearer credentials. Audit middleware excludes the path so rollout polls don't dominate the audit trail. Closes `cat-u-no_version_endpoint`.
+- **`notification_events.created_at` column** is now populated by `NotificationRepository.Create` (with a `time.Now()` fallback when the caller leaves it zero) and read back by `scanNotification`. Pre-U-3 the JSON API serialised `0001-01-01T00:00:00Z` — closes `cat-o-notification_created_at_dead_field`.
+- **Five regression tests** for the U-3 contract: `TestRunSeed_AppliesIdempotently`, `TestRunSeed_MissingFileIsNoOp`, `TestRunDemoSeed_AppliesIdempotently`, `TestMigration000017_RetryIntervalRename`, `TestMigration000017_NotificationCreatedAt`, `TestMigration000017_HealthCheckOrphansDropped`, plus `TestNotificationRepository_CreatedAt_IsPersisted` / `TestNotificationRepository_CreatedAt_DefaultsToNow` for the round-trip. All testcontainers-gated (skipped under `-short`). Three handler-layer unit tests pin `/api/v1/version` (`TestVersion_ReturnsBuildInfo`, `TestVersion_RejectsNonGet`, `TestVersion_LdflagsOverride`).
+- **CI regression guardrail** in `.github/workflows/ci.yml` (`Forbidden migration mount in compose initdb (U-3)`) — grep-fails the build if any `migrations/.*\.sql` or `seed.*\.sql` file is re-mounted into `/docker-entrypoint-initdb.d` in any compose file. Catches future drift before a fresh-clone operator hits it.
+
+### Changed
+
+- **`deploy/docker-compose.yml`** + **`deploy/docker-compose.test.yml`** — postgres `volumes:` no longer mount migrations or seed files; postgres healthcheck gains `start_period: 30s`; certctl-server healthcheck gains `start_period: 30s` to absorb the runtime migration + seed application window on first boot.
+- **`deploy/docker-compose.demo.yml`** — replaces the `seed_demo.sql` initdb mount with the `CERTCTL_DEMO_SEED=true` env var on `certctl-server`.
+- **`migrations/seed.sql`** — `INSERT INTO renewal_policies` updated to use the new `retry_interval_seconds` column name (lockstep with migration 000017).
+- **`internal/repository/postgres/renewal_policy.go`** — column references updated to `retry_interval_seconds` across SELECT, INSERT, and UPDATE sites (lockstep with migration 000017).
+
+### Closed audit findings
+
+- `cat-u-seed_initdb_schema_drift` (P1, primary U-3 finding)
+- `cat-o-retry_interval_unit_mismatch` (P1)
+- `cat-o-notification_created_at_dead_field` (P2)
+- `cat-o-health_check_column_orphans` (P1)
+- `cat-u-no_version_endpoint` (P2)
+
 ### G-1: JWT silent auth downgrade — closed end-to-end
 
 > Pre-G-1 the config validator accepted `CERTCTL_AUTH_TYPE=jwt` and the startup log faithfully echoed `"authentication enabled" "type"="jwt"`. Reasonable people read that and concluded JWT was on. It wasn't. The auth-middleware wiring at `cmd/server/main.go` unconditionally routed every request through the api-key bearer middleware regardless of `cfg.Auth.Type`. So `CERTCTL_AUTH_TYPE=jwt` quietly compared incoming `Authorization: Bearer <something>` against whatever string the operator put in `CERTCTL_AUTH_SECRET` — real JWT clients got 401, and operators who treated `CERTCTL_AUTH_SECRET` as a *signing* secret (because they thought they were configuring JWT) had effectively handed an attacker an api-key. A security finding masquerading as a config option. We chose to remove the option rather than ship JWT middleware — the audit-recommended structural fix that closes the hazard. Operators who actually need JWT/OIDC front certctl with an authenticating gateway (oauth2-proxy / Envoy `ext_authz` / Traefik `ForwardAuth` / Pomerium / Authelia) and run the upstream certctl with `CERTCTL_AUTH_TYPE=none`. The same pattern works on docker-compose and Helm.

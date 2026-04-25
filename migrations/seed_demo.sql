@@ -29,7 +29,7 @@ ON CONFLICT (id) DO NOTHING;
 -- ============================================================
 -- 2. Policies
 -- ============================================================
-INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_minutes, alert_thresholds_days, created_at, updated_at) VALUES
+INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_seconds, alert_thresholds_days, created_at, updated_at) VALUES
   ('rp-standard', 'Standard 30-day', 30, true,  3, 60,  '[30, 14, 7, 0]'::jsonb,  NOW() - INTERVAL '180 days', NOW() - INTERVAL '180 days'),
   ('rp-urgent',   'Urgent 14-day',   14, true,  5, 30,  '[14, 7, 3, 0]'::jsonb,   NOW() - INTERVAL '180 days', NOW() - INTERVAL '180 days'),
   ('rp-manual',   'Manual Only',     30, false, 0, 0,   '[30, 14, 7, 0]'::jsonb,  NOW() - INTERVAL '180 days', NOW() - INTERVAL '180 days')

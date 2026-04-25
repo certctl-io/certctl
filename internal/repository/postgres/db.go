@@ -131,3 +131,111 @@ func RunMigrations(db *sql.DB, migrationsPath string) error {
 
 	return nil
 }
+
+// RunSeed reads and executes the baseline seed SQL file from the migrations
+// directory. Designed to run AFTER RunMigrations so every column referenced by
+// the seed is already in place.
+//
+// U-3 (P1, cat-u-seed_initdb_schema_drift): pre-U-3 the deploy compose stack
+// mounted both a hand-curated subset of `migrations/*.up.sql` and `seed.sql`
+// into postgres `/docker-entrypoint-initdb.d/`. Postgres applied them at
+// initdb time. When `seed.sql` was updated to reference columns added by
+// migrations *after* the mounted cutoff (e.g., `policy_rules.severity` from
+// `000013_policy_rule_severity.up.sql`), initdb crashed during the seed step
+// and the container was reported `unhealthy` indefinitely — bare
+// `docker compose -f deploy/docker-compose.yml up -d --build` from a fresh
+// clone of v2.0.50 hit this on the first try (GitHub #10 reopened by
+// mikeakasully). Helm and the example compose files were already runtime-
+// only (Path B) and worked through the same window.
+//
+// Post-U-3 the compose stack drops all initdb mounts; postgres comes up with
+// an empty schema; the server applies all migrations via RunMigrations and
+// then this function applies the seed. Single source of truth, removes the
+// drift hazard architecturally.
+//
+// The seed file is expected at `<migrationsPath>/seed.sql`. Missing-file is
+// treated as a no-op (returns nil) so deployments that explicitly remove the
+// seed (custom packaging, cert-manager managed schemas) don't break.
+//
+// Idempotency: every INSERT in the shipped seed.sql uses
+// `ON CONFLICT (id) DO NOTHING`, so re-running on a populated DB is safe.
+// This function is invoked on every server start, so the contract MUST hold.
+//
+// Demo seed: `seed_demo.sql` is applied separately by RunDemoSeed below
+// when CERTCTL_DEMO_SEED=true (see internal/config/config.go::DemoSeed).
+// Splitting demo from baseline keeps a default deploy from accidentally
+// landing 90-days-of-fake-history into a real customer database, while
+// still giving the demo overlay a single source of truth (no more initdb
+// mounts). The demo seed itself uses ON CONFLICT (id) DO NOTHING so it's
+// idempotent; missing-file is also tolerated (custom packaging may strip
+// seed_demo.sql to shrink the image).
+func RunSeed(db *sql.DB, migrationsPath string) error {
+	if _, err := os.Stat(migrationsPath); os.IsNotExist(err) {
+		return fmt.Errorf("migrations directory not found: %s", migrationsPath)
+	}
+
+	seedPath := filepath.Join(migrationsPath, "seed.sql")
+	content, err := os.ReadFile(seedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Missing seed.sql is acceptable — operators may have removed it
+			// for custom-packaging reasons. Return nil rather than fail-loud.
+			return nil
+		}
+		return fmt.Errorf("failed to read seed file %s: %w", seedPath, err)
+	}
+
+	if _, err := db.Exec(string(content)); err != nil {
+		return fmt.Errorf("failed to execute seed file %s: %w", seedPath, err)
+	}
+
+	return nil
+}
+
+// RunDemoSeed applies the demo overlay seed file
+// (`<migrationsPath>/seed_demo.sql`) on top of the baseline seed.
+//
+// U-3 follow-on: pre-U-3 the demo overlay mounted `seed_demo.sql` into
+// postgres `/docker-entrypoint-initdb.d/` and relied on initdb to apply it
+// alongside the schema. Once U-3 dropped the initdb migration mounts, that
+// path stopped working — postgres comes up empty, and the demo seed
+// references tables (issuers, certificates, etc.) that wouldn't exist yet
+// at initdb time. RunDemoSeed restores the demo capability through the
+// same runtime path RunSeed uses, gated by CERTCTL_DEMO_SEED so production
+// deploys never accidentally land the fake-history rows.
+//
+// Order contract: must run AFTER RunSeed so foreign-key references from
+// demo rows to baseline rows (e.g., demo certificates referencing
+// `rp-default` from baseline) resolve cleanly. The caller in
+// cmd/server/main.go enforces this order.
+//
+// Missing-file is acceptable (returns nil) — operators packaging a
+// production-only image often strip seed_demo.sql to shrink the artifact,
+// and that should not break boot when CERTCTL_DEMO_SEED happens to be set.
+//
+// Idempotency: every INSERT in seed_demo.sql uses
+// `ON CONFLICT (id) DO NOTHING`, so re-running on a populated DB is safe.
+// Server restarts in demo mode therefore re-apply the file harmlessly.
+func RunDemoSeed(db *sql.DB, migrationsPath string) error {
+	if _, err := os.Stat(migrationsPath); os.IsNotExist(err) {
+		return fmt.Errorf("migrations directory not found: %s", migrationsPath)
+	}
+
+	seedPath := filepath.Join(migrationsPath, "seed_demo.sql")
+	content, err := os.ReadFile(seedPath)
+	if err != nil {
+		if os.IsNotExist(err) {
+			// Custom production packaging frequently strips this file.
+			// Fail-soft to preserve the U-3 contract: a missing seed file
+			// must not gate server boot.
+			return nil
+		}
+		return fmt.Errorf("failed to read demo seed file %s: %w", seedPath, err)
+	}
+
+	if _, err := db.Exec(string(content)); err != nil {
+		return fmt.Errorf("failed to execute demo seed file %s: %w", seedPath, err)
+	}
+
+	return nil
+}

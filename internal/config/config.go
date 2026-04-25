@@ -709,6 +709,16 @@ type DatabaseConfig struct {
 	URL            string
 	MaxConnections int
 	MigrationsPath string
+
+	// DemoSeed, when true, makes the server apply
+	// `<MigrationsPath>/seed_demo.sql` after the baseline `seed.sql`. Set
+	// via CERTCTL_DEMO_SEED. The compose demo overlay
+	// (deploy/docker-compose.demo.yml) sets this to keep the demo path
+	// alive after U-3 dropped initdb-mounted seed files. The seed file
+	// uses ON CONFLICT (id) DO NOTHING so re-running on a populated
+	// database is safe; missing-file is a no-op (returns nil) so a
+	// minimal-image deploy that strips seed_demo.sql still boots cleanly.
+	DemoSeed bool
 }
 
 // SchedulerConfig contains scheduler timing configuration.
@@ -921,6 +931,7 @@ func Load() (*Config, error) {
 			URL:            getEnv("CERTCTL_DATABASE_URL", "postgres://localhost/certctl"),
 			MaxConnections: getEnvInt("CERTCTL_DATABASE_MAX_CONNS", 25),
 			MigrationsPath: getEnv("CERTCTL_DATABASE_MIGRATIONS_PATH", "./migrations"),
+			DemoSeed:       getEnvBool("CERTCTL_DEMO_SEED", false),
 		},
 		Scheduler: SchedulerConfig{
 			RenewalCheckInterval:        getEnvDuration("CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL", 1*time.Hour),

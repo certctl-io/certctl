@@ -78,7 +78,7 @@ func insertCertPrereqsRaw(t *testing.T, db *sql.DB, ctx context.Context, suffix 
 	}
 
 	// Create renewal policy
-	_, err = db.ExecContext(ctx, `INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_minutes, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+	_, err = db.ExecContext(ctx, `INSERT INTO renewal_policies (id, name, renewal_window_days, auto_renew, max_retries, retry_interval_seconds, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
 		policyID, "Policy "+suffix, 30, true, 3, 60, now, now)
 	if err != nil {
 		t.Fatalf("insertCertPrereqs: create renewal_policy failed: %v", err)

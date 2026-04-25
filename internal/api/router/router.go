@@ -68,6 +68,11 @@ type HandlerRegistry struct {
 	HealthChecks    *handler.HealthCheckHandler
 	BulkRevocation  handler.BulkRevocationHandler
 	RenewalPolicies handler.RenewalPolicyHandler
+	// Version handles GET /api/v1/version (U-3 ride-along,
+	// cat-u-no_version_endpoint). Wired through the no-auth dispatch in
+	// cmd/server/main.go so probes and rollout systems can read build
+	// identity without Bearer credentials. See handler/version.go.
+	Version handler.VersionHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -86,6 +91,17 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Auth info endpoint (no auth middleware — GUI needs this before login)
 	r.mux.Handle("GET /api/v1/auth/info", middleware.Chain(
 		http.HandlerFunc(reg.Health.AuthInfo),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+	// Version endpoint (no auth middleware — used by rollout probes that
+	// don't carry Bearer tokens; the dispatch layer in cmd/server/main.go
+	// also routes /api/v1/version through the no-auth chain). U-3 ride-along
+	// (cat-u-no_version_endpoint, P2). The handler reads
+	// runtime/debug.BuildInfo for VCS attribution; ldflags-supplied Version
+	// is preferred when present.
+	r.mux.Handle("GET /api/v1/version", middleware.Chain(
+		reg.Version,
 		middleware.CORS,
 		middleware.ContentType,
 	))

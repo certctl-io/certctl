@@ -22,19 +22,37 @@ func NewNotificationRepository(db *sql.DB) *NotificationRepository {
 	return &NotificationRepository{db: db}
 }
 
-// Create stores a new notification
+// Create stores a new notification.
+//
+// U-3 ride-along (cat-o-notification_created_at_dead_field, P2): the
+// `created_at` column is added to notification_events by migration 000017.
+// Pre-U-3 the Go domain.NotificationEvent had a CreatedAt field but the
+// INSERT path never set it AND no DB column existed — the JSON API
+// serialised the field as `0001-01-01T00:00:00Z`, breaking timestamp
+// ordering on operator dashboards and any consumer that filtered by age.
+// Post-U-3 the column exists with a NOT NULL DEFAULT NOW() backstop, and
+// this INSERT explicitly sets it from the domain field. If the caller
+// hasn't populated CreatedAt (zero-value time.Time) we substitute
+// time.Now() so the row never carries the placeholder zero-time forward
+// — the DEFAULT would handle this too, but emitting the value explicitly
+// keeps the wire-level JSON consistent with what the row will hold once
+// scanNotification reads it back, and prevents a clock-skew gap between
+// "Go computed CreatedAt" and "DB applied DEFAULT NOW()" on the read path.
 func (r *NotificationRepository) Create(ctx context.Context, notif *domain.NotificationEvent) error {
 	if notif.ID == "" {
 		notif.ID = uuid.New().String()
 	}
+	if notif.CreatedAt.IsZero() {
+		notif.CreatedAt = time.Now()
+	}
 
 	err := r.db.QueryRowContext(ctx, `
 		INSERT INTO notification_events (
-			id, type, certificate_id, channel, recipient, message, sent_at, status, error
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+			id, type, certificate_id, channel, recipient, message, sent_at, status, error, created_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
 		RETURNING id
 	`, notif.ID, notif.Type, notif.CertificateID, notif.Channel, notif.Recipient,
-		notif.Message, notif.SentAt, notif.Status, notif.Error).Scan(&notif.ID)
+		notif.Message, notif.SentAt, notif.Status, notif.Error, notif.CreatedAt).Scan(&notif.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create notification: %w", err)
@@ -102,12 +120,14 @@ func (r *NotificationRepository) List(ctx context.Context, filter *repository.No
 
 	// Get paginated results. I-005 extends the SELECT with the three retry
 	// columns (retry_count / next_retry_at / last_error) so scanNotification
-	// can populate the new fields on domain.NotificationEvent. The column
-	// order here MUST stay in lockstep with scanNotification below.
+	// can populate the new fields on domain.NotificationEvent. U-3 extends
+	// it once more with `created_at` (column added by migration 000017) so
+	// the field is no longer serialized as 0001-01-01. The column order
+	// here MUST stay in lockstep with scanNotification below.
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
 		SELECT id, type, certificate_id, channel, recipient, message, sent_at, status, error,
-		       retry_count, next_retry_at, last_error
+		       retry_count, next_retry_at, last_error, created_at
 		FROM notification_events
 		%s
 		ORDER BY sent_at DESC NULLS LAST
@@ -162,8 +182,14 @@ func (r *NotificationRepository) UpdateStatus(ctx context.Context, id string, st
 
 // scanNotification scans a notification from a row or rows.
 //
-// I-005 extends the scan list from 9 → 12 columns (adds retry_count,
-// next_retry_at, last_error). Every caller — List and the four new retry
+// I-005 extended the scan list from 9 → 12 columns (adds retry_count,
+// next_retry_at, last_error). U-3 extends it once more to 13 columns by
+// appending `created_at` (column added by migration 000017,
+// cat-o-notification_created_at_dead_field). CreatedAt scans into a
+// non-pointer time.Time because the migration declares the column
+// NOT NULL with DEFAULT NOW().
+//
+// Every caller — List, ListRetryEligible, and the four other I-005 retry
 // methods below — funnels rows through this helper, so the SELECT column
 // order in every query must match the Scan order here exactly. RetryCount
 // scans into an `int` (migration 000016 declares the column NOT NULL with
@@ -176,7 +202,7 @@ func scanNotification(scanner interface {
 	var notif domain.NotificationEvent
 	err := scanner.Scan(&notif.ID, &notif.Type, &notif.CertificateID, &notif.Channel,
 		&notif.Recipient, &notif.Message, &notif.SentAt, &notif.Status, &notif.Error,
-		&notif.RetryCount, &notif.NextRetryAt, &notif.LastError)
+		&notif.RetryCount, &notif.NextRetryAt, &notif.LastError, &notif.CreatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan notification: %w", err)
@@ -248,7 +274,7 @@ func (r *NotificationRepository) ListRetryEligible(ctx context.Context, now time
 
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, type, certificate_id, channel, recipient, message, sent_at, status, error,
-		       retry_count, next_retry_at, last_error
+		       retry_count, next_retry_at, last_error, created_at
 		FROM notification_events
 		WHERE status = 'failed'
 		  AND next_retry_at IS NOT NULL
