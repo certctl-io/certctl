@@ -413,9 +413,15 @@ func TestEmail_SendAlert_ValidationFailure(t *testing.T) {
 
 	// We expect an error because the SMTP server doesn't exist
 	// The exact error depends on network conditions, but we know it should fail
+	//
+	// Q-1 closure (cat-s3-58ce7e9840be): anti-fixture skip — the test
+	// asserts that sending to a non-existent SMTP server fails. If a
+	// captive portal, SOHO router, or test sandbox happens to resolve
+	// smtp.example.com:587 to a black hole that returns success, the
+	// assertion is invalid and we skip rather than false-pass. The
+	// IANA-reserved example.com domain shouldn't resolve to an active
+	// SMTP server in practice; this skip is the defensive fallback.
 	if err == nil {
-		// In some environments this might succeed if the host/port resolves oddly
-		// but in most cases it will fail
 		t.Skip("test requires no service on smtp.example.com:587")
 	}
 }
@@ -487,6 +493,12 @@ func TestEmail_ValidateConfig_ConnectionRefused(t *testing.T) {
 	conn := New(&Config{}, logger)
 
 	err := conn.ValidateConfig(context.Background(), rawConfig)
+	// Q-1 closure (cat-s3-58ce7e9840be): anti-fixture skip — the test
+	// asserts that ValidateConfig fails to reach an SMTP server on a
+	// random high port (54321) that nothing should be listening on.
+	// If the port happens to be occupied (rare in CI, possible on a
+	// dev machine), we skip rather than false-pass. The dial-error
+	// path below is the actual assertion target.
 	if err == nil {
 		t.Skip("test assumes no service on 127.0.0.1:54321")
 	}

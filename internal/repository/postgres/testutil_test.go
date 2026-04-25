@@ -30,6 +30,11 @@ type testDB struct {
 func setupTestDB(t *testing.T) *testDB {
 	t.Helper()
 
+	// Q-1 closure (cat-s3-58ce7e9840be): live PostgreSQL needed via
+	// testcontainers-go (postgres:16-alpine). Run with:
+	//   go test -count=1 ./internal/repository/postgres/... (omit -short)
+	// The short-mode gate keeps it off the default `go test ./... -short`
+	// fast loop where docker-in-docker may not be available.
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}
