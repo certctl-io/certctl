@@ -1121,7 +1121,7 @@ Single SQL `UNION` query replaces the previous "fetch all, filter in Go" approac
 | Agent health check | 2 minutes | Yes | `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | Check agent heartbeat staleness |
 | Notification processor | 1 minute | Yes | `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | Send queued notifications |
 | Notification retry | 2 minutes | Yes | `CERTCTL_NOTIFICATION_RETRY_INTERVAL` | Exponential backoff retry for failed notifications; promote to dead-letter after 5 attempts (I-005) |
-| Short-lived expiry check | 30 seconds | Yes | — | Mark short-lived certs expired |
+| Short-lived expiry check | 30 seconds | Yes | `CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL` | Mark short-lived certs expired (C-1: pre-C-1 the setter was unwired and this env var had no effect; post-C-1 it's read by `cmd/server/main.go::sched.SetShortLivedExpiryCheckInterval`) |
 | Network scan | 6 hours | Opt-in | `CERTCTL_NETWORK_SCAN_ENABLED` | Run network discovery scans |
 | Digest | 24 hours | Opt-in | `CERTCTL_DIGEST_INTERVAL` | Send certificate digest email (does not run on startup) |
 | Endpoint health | 60 seconds | Opt-in | `CERTCTL_HEALTH_CHECK_INTERVAL` | Continuous TLS health probes (M48) |
