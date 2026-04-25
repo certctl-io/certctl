@@ -238,7 +238,13 @@ function NotificationRow({
           <StatusBadge status={n.status} />
           <span className="text-xs text-ink-faint">{n.channel}</span>
         </div>
-        <p className="text-xs text-ink-muted truncate">{n.message || n.subject}</p>
+        {/* D-2 (master): pre-D-2 the fallback was `{n.message || n.subject}`,
+            but `subject` was a TS phantom the Go struct never emitted
+            (`internal/domain/notification.go::NotificationEvent` has only
+            `message`). The fallback always fell through to `message`
+            because `subject` was always undefined. Post-D-2 the dead
+            fallback is dropped along with the phantom field. */}
+        <p className="text-xs text-ink-muted truncate">{n.message}</p>
         {isDead && (
           <div className="flex items-center gap-3 mt-1 text-xs">
             <span className="text-ink-faint">

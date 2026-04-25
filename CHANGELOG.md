@@ -4,6 +4,39 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### D-2: TS ↔ Go type drift cluster — closed end-to-end
+
+> The 2026-04-24 coverage-gap audit flagged five `diff-05x06-*` findings — every one a TypeScript-vs-Go shape mismatch where the on-wire JSON the backend emits and the TS interface in `web/src/api/types.ts` had drifted apart. D-1 master closed the same pattern for `Certificate` (cat-f-ae0d06b6588f, 5 phantom fields trimmed, plus the cat-f-cert_detail_page_key_render_fallback render-site fix). D-2 closes it for the remaining five entities: Agent, Target, DiscoveredCertificate, Issuer, and Notification. The audit's blunt rule "stricter side is the contract" decides the per-entity verdict — for TS phantoms (fields declared on TS, never emitted by Go) the Go side wins and TS gets trimmed; for TS-missing fields (emitted by Go, absent from TS) the Go side still wins and TS gets the addition. Pre-D-2 the failure modes were: phantom fields silently rendered `'—'` at consumer sites (e.g. AgentDetailPage's "Capabilities" + "Tags" sections always rendered empty; IssuersPage rendered `'Unknown'` for every issuer; NotificationsPage's `n.message || n.subject` fallback always fell through), and missing fields forced `(target as any).retired_at` escapes that lost type-checking. Verify-only side task: Certificate / ManagedCertificate confirmed clean since D-1.
+
+### Breaking Changes
+
+None on the wire. The JSON the backend emits is byte-identical pre/post-D-2 — D-2 is purely TS-side reconciliation. The interface shapes change in ways that are TypeScript compile errors at consumer sites that read trimmed phantoms (intentionally — that's the closure mechanism) but no operator-visible behaviour shifts.
+
+### Added
+
+- `Target` interface gains `retired_at?: string | null` and `retired_reason?: string | null` (mirrors the Agent retirement-fields shape and the Go-side `internal/domain/connector.go::DeploymentTarget` I-004 model). An Agent retire cascades to all associated Targets per `service.RetireAgent → repository.RetireTarget`; the GUI can now type-check the retired-state surfacing without `(target as any).retired_at` escapes.
+- `DiscoveredCertificate` interface gains `pem_data?: string`. The Go-side struct (`internal/domain/discovery.go::DiscoveredCertificate.PEMData`, `omitempty`) emits this field on the wire — populated by the agent filesystem scanner, the cloud-secret-manager connectors, and the repo SELECT. Optional because Go uses `omitempty`. Consumers can now reach the raw PEM with type-checked code.
+- **CI regression guardrail extension** in `.github/workflows/ci.yml` (renamed `Forbidden StatusBadge dead-key + TS phantom-field regression guard (D-1 + D-2)`) — adds three new awk-windowed greps over the Agent / Issuer / Notification interfaces in `types.ts` that fail the build if any of the trimmed phantom fields reappear. The Agent regex `\b(last_heartbeat|capabilities|tags|created_at|updated_at)\b` is paired with a `grep -v 'last_heartbeat_at'` filter to avoid false positives on the legitimate Go-emitted heartbeat field.
+
+### Removed
+
+- `Agent` interface — 5 phantom fields trimmed: `last_heartbeat`, `capabilities`, `tags`, `created_at`, `updated_at`. None emitted by `internal/domain/connector.go::Agent`. Two had real consumers in `AgentDetailPage.tsx` (capabilities + tags sections) — both were removed because their guards always evaluated false. The "Updated" InfoRow that read `agent.updated_at` was also dropped (Go has no equivalent timestamp on Agent). `last_heartbeat_at` flipped from required to optional to match Go's `*time.Time omitempty`.
+- `Issuer` interface — phantom `status: string` removed. Go has only `Enabled bool`. Both `IssuersPage.tsx::issuerStatus` and `IssuerDetailPage.tsx::issuerStatus` rewritten to compute `i.enabled ? 'Enabled' : 'Disabled'` exclusively (the pre-D-2 fallback `issuer.status || 'Unknown'` always rendered 'Unknown').
+- `Notification` interface — phantom `subject?: string` removed. The dead `{n.message || n.subject}` fallback at `NotificationsPage.tsx:241` was simplified to `{n.message}`. Test mocks in `NotificationsPage.test.tsx` no longer set the field.
+
+### Audit findings closed
+
+- diff-05x06-7cdf4e78ae24 (P2, Agent TS↔Go drift)
+- diff-05x06-2044a46f4dd0 (P2, Target TS↔DeploymentTarget Go drift)
+- diff-05x06-85ab6b98a2f7 (P2, DiscoveredCertificate TS↔Go drift)
+- diff-05x06-97fab8783a5c (P2, Issuer TS↔Go drift)
+- diff-05x06-caba9eb3620e (P2, Notification TS↔NotificationEvent Go drift)
+- diff-05x06-af18a8d7ef41 (P2, Certificate / ManagedCertificate) — verified no residual drift since D-1; no edit required
+
+### Known follow-ups (deferred from D-2 scope)
+
+A richer Issuer status view that derives from `enabled × test_status` (instead of `enabled` alone) is deferred — a UX scope decision, not a contract drift, and the existing `test_status: 'untested' | 'success' | 'failed'` field is already on the TS interface for whoever picks up that work. Real Agent metadata fields (capabilities advertised at heartbeat time, operator-applied tags) are deferred — D-2 removed the false UI affordance; if/when the product wants real fields, re-introduce in `AgentDetailPage` in the same commit that ships the Go-side change. The `DiscoveredCertificate.pem_data` LIST-response performance optimization (gate emission on the per-id detail path, since pem_data is kilobytes per row) is deferred as a separate backend change — D-2 only closed the contract drift.
+
 ### B-1: Orphan-CRUD client functions + RenewalPolicy GUI gap — closed end-to-end
 
 > The 2026-04-24 coverage-gap audit flagged a cluster of operator-blocking GUI omissions: six client.ts `update*` functions (`updateOwner`, `updateTeam`, `updateAgentGroup`, `updateIssuer`, `updateProfile`, plus the full `*RenewalPolicy` CRUD trio) had backend handlers, OpenAPI operations, and exported TypeScript fetchers — but zero page consumers. Operators wanting to fix a typo in an owner's email, rename a team, retarget an agent group's match rules, or edit a renewal-policy field were forced to either delete-and-recreate (losing FK history and audit-trail continuity) or open a `psql` session against the production database directly. The audit's blunt summary: "every backend feature ships with its GUI surface" — a load-bearing CLAUDE.md invariant — was being violated for five operator-facing entities. B-1 closes that violation by wiring per-page Edit modals onto five existing pages, adding a brand-new `RenewalPoliciesPage` for the rp-* CRUD surface, and deleting one dead duplicate (`exportCertificatePEM`) so the public client surface area stops growing without consumers.

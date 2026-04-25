@@ -1,6 +1,14 @@
 import { describe, it, expect } from 'vitest';
 import { POLICY_TYPES, POLICY_SEVERITIES } from './types';
-import type { Agent, Certificate, CertificateVersion } from './types';
+import type {
+  Agent,
+  Certificate,
+  CertificateVersion,
+  DiscoveredCertificate,
+  Issuer,
+  Notification,
+  Target,
+} from './types';
 
 /**
  * Regression tests for the policy enum tuples.
@@ -85,6 +93,9 @@ describe('Agent interface (I-004 retirement)', () => {
     // Construct an Agent with the retirement fields set. If Phase 2b names
     // them anything other than retired_at / retired_reason, this fails to
     // compile — which is exactly what the Red stage wants.
+    // D-2 (master): the post-D-2 Agent shape no longer carries
+    // last_heartbeat / capabilities / tags / created_at / updated_at —
+    // those were TS phantoms the Go-side struct never emitted.
     const retired: Agent = {
       id: 'ag-1',
       name: 'decom-01',
@@ -94,13 +105,8 @@ describe('Agent interface (I-004 retirement)', () => {
       architecture: 'amd64',
       status: 'Offline',
       version: '2.1.0',
-      last_heartbeat: '2026-01-01T00:00:00Z',
       last_heartbeat_at: '2026-01-01T00:00:00Z',
-      capabilities: [],
-      tags: {},
       registered_at: '2024-01-01T00:00:00Z',
-      created_at: '2024-01-01T00:00:00Z',
-      updated_at: '2026-01-01T00:00:00Z',
       retired_at: '2026-01-01T00:00:00Z',
       retired_reason: 'old hardware',
     };
@@ -111,6 +117,7 @@ describe('Agent interface (I-004 retirement)', () => {
   it('accepts an Agent without retired_at / retired_reason (optional fields)', () => {
     // Active agents should not carry retirement metadata. If Phase 2b makes
     // the fields required, this block fails to compile.
+    // D-2 (master): post-D-2 Agent shape (see sibling describe block).
     const active: Agent = {
       id: 'ag-2',
       name: 'web01',
@@ -120,13 +127,8 @@ describe('Agent interface (I-004 retirement)', () => {
       architecture: 'amd64',
       status: 'Online',
       version: '2.1.0',
-      last_heartbeat: '2026-04-18T12:00:00Z',
       last_heartbeat_at: '2026-04-18T12:00:00Z',
-      capabilities: ['deploy', 'scan'],
-      tags: {},
       registered_at: '2024-06-01T00:00:00Z',
-      created_at: '2024-06-01T00:00:00Z',
-      updated_at: '2026-04-18T12:00:00Z',
     };
     expect(active.retired_at).toBeUndefined();
     expect(active.retired_reason).toBeUndefined();
@@ -218,5 +220,253 @@ describe('Certificate interface (D-5 phantom-fields trim)', () => {
     expect(v.serial_number).toBe('01:02:03');
     expect(v.key_algorithm).toBe('ECDSA');
     expect(v.key_size).toBe(256);
+  });
+});
+
+/**
+ * D-2 (diff-05x06-7cdf4e78ae24, master): Agent TS phantom-fields trim.
+ *
+ * Pre-D-2 the `Agent` interface declared five fields that the Go-side
+ * struct (`internal/domain/connector.go::Agent`) does NOT emit on the
+ * wire: `last_heartbeat`, `capabilities`, `tags`, `created_at`,
+ * `updated_at`. Two of them had real consumers (`AgentDetailPage.tsx`
+ * read `agent.capabilities` and `agent.tags`) — both always rendered the
+ * empty-state branch because the runtime values were always `undefined`.
+ *
+ * Post-D-2 a `agent.capabilities` access is a TS compile error, forcing
+ * every consumer to acknowledge the field is not part of the Agent
+ * contract. The Go-side struct emits exactly: id, name, hostname, status,
+ * last_heartbeat_at (note the `_at` suffix — this is the real heartbeat
+ * field and stays), registered_at, os, architecture, ip_address, version,
+ * retired_at?, retired_reason?.
+ */
+describe('Agent interface (D-2 phantom-fields trim)', () => {
+  it('does NOT declare last_heartbeat / capabilities / tags / created_at / updated_at', () => {
+    // Construct an Agent with ONLY the post-D-2 field set. If a future
+    // PR re-adds any of the five trimmed fields, the excess-property
+    // comments below become live TS errors when uncommented (and the
+    // CI guardrail in .github/workflows/ci.yml fires regardless).
+    const a: Agent = {
+      id: 'ag-test',
+      name: 'web-01',
+      hostname: 'web-01.prod',
+      status: 'Online',
+      last_heartbeat_at: '2026-04-25T12:00:00Z',
+      registered_at: '2024-06-01T00:00:00Z',
+      os: 'linux',
+      architecture: 'amd64',
+      ip_address: '10.0.0.1',
+      version: '2.1.0',
+    };
+    expect(a.id).toBe('ag-test');
+    expect(a.last_heartbeat_at).toBe('2026-04-25T12:00:00Z');
+
+    // Excess-property check (each MUST be a TS error if uncommented):
+    // const broken1: Agent = { ...a, last_heartbeat: '2026-...' }; // ❌ TS2353
+    // const broken2: Agent = { ...a, capabilities: ['deploy'] };   // ❌ TS2353
+    // const broken3: Agent = { ...a, tags: { env: 'prod' } };      // ❌ TS2353
+    // const broken4: Agent = { ...a, created_at: '...' };          // ❌ TS2353
+    // const broken5: Agent = { ...a, updated_at: '...' };          // ❌ TS2353
+  });
+
+  it('keeps last_heartbeat_at (the real Go-emitted heartbeat field)', () => {
+    // Negative-prevention guard: the awk-windowed CI grep for the trimmed
+    // `last_heartbeat` field must NOT trip on the legitimate
+    // `last_heartbeat_at`. This test pins that the legitimate field stays.
+    const a: Agent = {
+      id: 'ag-2',
+      name: 'web-02',
+      hostname: 'web-02.prod',
+      status: 'Offline',
+      registered_at: '2024-06-01T00:00:00Z',
+      os: 'linux',
+      architecture: 'amd64',
+      ip_address: '10.0.0.2',
+      version: '2.1.0',
+    };
+    expect(a.last_heartbeat_at).toBeUndefined();
+  });
+});
+
+/**
+ * D-2 (diff-05x06-2044a46f4dd0, master): Target retirement-fields ADD.
+ *
+ * Pre-D-2 the Go-side `DeploymentTarget` struct
+ * (`internal/domain/connector.go:24`) emitted `retired_at` and
+ * `retired_reason` (I-004 soft-retirement, mirroring the Agent
+ * treatment), but the TS `Target` interface did not declare them.
+ * Consumers wanting to surface the retired state in the GUI had to
+ * use `(target as any).retired_at` escapes that lost type-checking.
+ *
+ * Post-D-2 the TS interface declares both as optional nullable strings,
+ * mirroring the existing Agent retirement-fields shape.
+ */
+describe('Target interface (D-2 retirement fields)', () => {
+  it('accepts retired_at and retired_reason as optional nullable strings', () => {
+    const retired: Target = {
+      id: 't-decom-01',
+      name: 'old-iis-server',
+      type: 'iis',
+      agent_id: 'ag-old',
+      config: {},
+      enabled: false,
+      created_at: '2024-01-01T00:00:00Z',
+      retired_at: '2026-03-01T00:00:00Z',
+      retired_reason: 'replaced by new iis-server',
+    };
+    expect(retired.retired_at).toBe('2026-03-01T00:00:00Z');
+    expect(retired.retired_reason).toBe('replaced by new iis-server');
+  });
+
+  it('accepts a Target without the retirement fields (active row)', () => {
+    const active: Target = {
+      id: 't-1',
+      name: 'iis-server',
+      type: 'iis',
+      agent_id: 'ag-1',
+      config: {},
+      enabled: true,
+      created_at: '2024-01-01T00:00:00Z',
+    };
+    expect(active.retired_at).toBeUndefined();
+    expect(active.retired_reason).toBeUndefined();
+  });
+});
+
+/**
+ * D-2 (diff-05x06-85ab6b98a2f7, master): DiscoveredCertificate pem_data ADD.
+ *
+ * Pre-D-2 the Go-side `DiscoveredCertificate` struct
+ * (`internal/domain/discovery.go::DiscoveredCertificate.PEMData`) emitted
+ * `pem_data` (omitempty — populated by repo SELECT, agent ingestion at
+ * cmd/agent/main.go:1021, and connector scans at
+ * internal/connector/discovery/azurekv/azurekv.go:234), but the TS
+ * `DiscoveredCertificate` interface did not declare it. Consumers wanting
+ * to inspect or download the raw PEM had to use `(d as any).pem_data`.
+ *
+ * Post-D-2 the TS interface declares it as `pem_data?: string`, optional
+ * because the Go side uses `omitempty` (empty string → not emitted).
+ *
+ * Performance note (deferred follow-up): the LIST endpoint also loads
+ * pem_data via the same repo SELECT; for large discovered-cert tables
+ * this can ship kilobytes per row. Optimising the list response to omit
+ * pem_data is a separate backend change.
+ */
+describe('DiscoveredCertificate interface (D-2 pem_data ADD)', () => {
+  it('accepts pem_data as an optional string', () => {
+    const d: DiscoveredCertificate = {
+      id: 'dc-1',
+      fingerprint_sha256: 'a'.repeat(64),
+      common_name: 'discovered.example.com',
+      sans: [],
+      serial_number: '01:02:03',
+      issuer_dn: 'CN=Test CA',
+      subject_dn: 'CN=discovered.example.com',
+      key_algorithm: 'ECDSA',
+      key_size: 256,
+      is_ca: false,
+      source_path: '/etc/ssl/certs/disc.pem',
+      source_format: 'pem',
+      agent_id: 'ag-1',
+      status: 'Unmanaged',
+      first_seen_at: '2026-04-25T12:00:00Z',
+      last_seen_at: '2026-04-25T12:00:00Z',
+      created_at: '2026-04-25T12:00:00Z',
+      updated_at: '2026-04-25T12:00:00Z',
+      pem_data: '-----BEGIN CERTIFICATE-----\nMIIB...\n-----END CERTIFICATE-----\n',
+    };
+    expect(d.pem_data).toContain('BEGIN CERTIFICATE');
+  });
+
+  it('accepts a DiscoveredCertificate without pem_data (list-response shape)', () => {
+    const d: DiscoveredCertificate = {
+      id: 'dc-2',
+      fingerprint_sha256: 'b'.repeat(64),
+      common_name: 'list.example.com',
+      sans: [],
+      serial_number: '04:05:06',
+      issuer_dn: 'CN=Test CA',
+      subject_dn: 'CN=list.example.com',
+      key_algorithm: 'ECDSA',
+      key_size: 256,
+      is_ca: false,
+      source_path: '/etc/ssl/certs/list.pem',
+      source_format: 'pem',
+      agent_id: 'ag-1',
+      status: 'Unmanaged',
+      first_seen_at: '2026-04-25T12:00:00Z',
+      last_seen_at: '2026-04-25T12:00:00Z',
+      created_at: '2026-04-25T12:00:00Z',
+      updated_at: '2026-04-25T12:00:00Z',
+    };
+    expect(d.pem_data).toBeUndefined();
+  });
+});
+
+/**
+ * D-2 (diff-05x06-97fab8783a5c, master): Issuer status phantom trim.
+ *
+ * Pre-D-2 the TS `Issuer` interface declared a required `status: string`
+ * field that the Go-side struct (`internal/domain/connector.go::Issuer`)
+ * never emitted — the Go struct has only `Enabled bool`. The TS interface
+ * comment claimed "Backend returns enabled boolean; status is derived
+ * from this" but no derivation logic existed: `IssuersPage.tsx::~line 23`
+ * read `issuer.status || 'Unknown'` and always rendered 'Unknown'.
+ *
+ * Post-D-2 the `status` field is removed; the consumer now derives the
+ * displayed status from `enabled` at render time.
+ */
+describe('Issuer interface (D-2 status phantom trim)', () => {
+  it('does NOT declare a phantom `status` field — derive from `enabled`', () => {
+    // Construct a fully-populated Issuer with the post-D-2 shape.
+    // If `status` is re-added, this construction fails with "missing
+    // required" (TS2741) when status is required, or the excess-property
+    // comment below trips when it's added back as optional.
+    const i: Issuer = {
+      id: 'iss-test',
+      name: 'Test ACME',
+      type: 'acme',
+      config: {},
+      enabled: true,
+      created_at: '2026-01-01T00:00:00Z',
+    };
+    expect(i.id).toBe('iss-test');
+    expect(i.enabled).toBe(true);
+
+    // Excess-property check:
+    // const broken: Issuer = { ...i, status: 'Active' }; // ❌ TS2353
+  });
+});
+
+/**
+ * D-2 (diff-05x06-caba9eb3620e, master): Notification subject phantom trim.
+ *
+ * Pre-D-2 the TS `Notification` interface declared `subject?: string` —
+ * the field was acknowledged in the existing comment as "a historical
+ * frontend-only field the backend never emits" but kept on the interface
+ * "so legacy fixtures and the pendingNotif test mock still type
+ * correctly." Real consumer at `NotificationsPage.tsx::~line 241` had
+ * `{n.message || n.subject}` as a fallback that always fell through to
+ * `n.message` (since `n.subject` was always undefined).
+ *
+ * Post-D-2 the field is removed; the consumer drops the dead fallback
+ * and the test fixtures drop the dead `subject:` initializer.
+ */
+describe('Notification interface (D-2 subject phantom trim)', () => {
+  it('does NOT declare the phantom `subject` field', () => {
+    const n: Notification = {
+      id: 'no-test',
+      type: 'CertificateExpiring',
+      channel: 'email',
+      recipient: 'ops@example.com',
+      message: 'Certificate api.example.com expires in 14 days',
+      status: 'pending',
+      created_at: '2026-04-25T12:00:00Z',
+    };
+    expect(n.id).toBe('no-test');
+    expect(n.message).toContain('14 days');
+
+    // Excess-property check:
+    // const broken: Notification = { ...n, subject: 'Cert expiring' }; // ❌ TS2353
   });
 });

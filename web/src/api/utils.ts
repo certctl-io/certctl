@@ -8,7 +8,12 @@ export function formatDateTime(iso: string | undefined | null): string {
   return new Date(iso).toLocaleString('en-US', { year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' });
 }
 
-export function timeAgo(iso: string): string {
+// D-2 (master): widened to accept undefined/null since several Go-side
+// timestamp fields are emitted as `omitempty` (e.g. Agent.last_heartbeat_at
+// for never-heartbeated agents). Pre-D-2 the TS interfaces declared
+// these as required strings, masking the case; post-D-2 the optionality
+// is propagated end-to-end and the helper handles it explicitly.
+export function timeAgo(iso: string | undefined | null): string {
   if (!iso) return '—';
   const now = Date.now();
   const then = new Date(iso).getTime();

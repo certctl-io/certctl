@@ -50,12 +50,14 @@ function renderWithQuery(ui: ReactNode) {
   );
 }
 
+// D-2 (master): pre-D-2 these mocks set `subject:` — the field was a TS
+// phantom the Go-side struct never emitted. Post-D-2 the phantom is
+// removed from the Notification interface; the mocks no longer set it.
 const pendingNotif = {
   id: 'notif-001',
   type: 'ExpirationWarning',
   channel: 'Email',
   recipient: 'admin@example.com',
-  subject: 'Certificate expiring',
   message: 'Certificate expiring in 7 days',
   status: 'Pending',
   certificate_id: 'mc-prod-001',
@@ -67,7 +69,6 @@ const deadNotif = {
   type: 'ExpirationWarning',
   channel: 'Email',
   recipient: 'admin@example.com',
-  subject: 'Certificate expiring',
   message: 'Certificate expiring in 7 days',
   status: 'dead',
   certificate_id: 'mc-prod-001',

@@ -270,7 +270,7 @@ jobs:
             exit 1
           fi
 
-      - name: Forbidden StatusBadge dead-key + Certificate phantom-field regression guard (D-1)
+      - name: Forbidden StatusBadge dead-key + TS phantom-field regression guard (D-1 + D-2)
         # D-1 master closed cat-d-359e92c20cbf (Agent: 'Stale' dead key,
         # 'Degraded' missing), cat-d-9f4c8e4a91f1 (Notification: 'dead'
         # missing), cat-d-1447e04732e7 (Cert: 'PendingIssuance' dead
@@ -341,6 +341,84 @@ jobs:
             echo "use latestVersion?.field as the canonical access path."
             echo "See coverage-gap-audit-2026-04-24-v5/unified-audit.md"
             echo "cat-f-ae0d06b6588f for the closure rationale."
+            exit 1
+          fi
+
+          # D-2 master closed five diff-05x06-* type-drift findings:
+          # Agent (5 phantoms), Issuer (1 phantom), Notification (1 phantom)
+          # — TRIM half. The Target (2 missing fields) and DiscoveredCertificate
+          # (1 missing field) — ADD half is pinned by the literal-construction
+          # blocks in web/src/api/types.test.ts, not a CI grep. The phantom-
+          # trim regression vector is an awk-windowed grep per interface
+          # mirroring the D-1 Certificate check above.
+          #
+          # See coverage-gap-audit-2026-04-24-v5/unified-audit.md
+          # diff-05x06-7cdf4e78ae24 (Agent), diff-05x06-97fab8783a5c (Issuer),
+          # diff-05x06-caba9eb3620e (Notification) for the closure rationale.
+
+          # D-2 Agent phantom-field check. The grep matches `last_heartbeat`
+          # but NOT `last_heartbeat_at` (the legitimate Go-emitted field) —
+          # the `\b...\b` boundaries plus the `grep -v 'last_heartbeat_at'`
+          # filter handle that.
+          BAD_AGENT=$(awk '
+            /^export interface Agent \{/ { flag=1; next }
+            flag && /^\}/                 { flag=0 }
+            flag                          { print FILENAME":"NR":"$0 }
+          ' web/src/api/types.ts \
+            | grep -E '\b(last_heartbeat|capabilities|tags|created_at|updated_at)\??\s*:' \
+            | grep -v 'last_heartbeat_at' \
+            || true)
+          if [ -n "$BAD_AGENT" ]; then
+            echo "D-2 regression: Agent TS interface re-added a phantom field:"
+            echo "$BAD_AGENT"
+            echo ""
+            echo "The Go-side internal/domain/connector.go::Agent emits exactly:"
+            echo "id, name, hostname, status, last_heartbeat_at?, registered_at,"
+            echo "os, architecture, ip_address, version, retired_at?, retired_reason?."
+            echo "The five fields blocked by this guard (last_heartbeat,"
+            echo "capabilities, tags, created_at, updated_at) were TS phantoms"
+            echo "the Go struct never emitted. See unified-audit.md"
+            echo "diff-05x06-7cdf4e78ae24 for closure rationale."
+            exit 1
+          fi
+
+          # D-2 Issuer phantom-field check.
+          BAD_ISSUER=$(awk '
+            /^export interface Issuer \{/ { flag=1; next }
+            flag && /^\}/                  { flag=0 }
+            flag                           { print FILENAME":"NR":"$0 }
+          ' web/src/api/types.ts \
+            | grep -E '\bstatus\??\s*:' \
+            || true)
+          if [ -n "$BAD_ISSUER" ]; then
+            echo "D-2 regression: Issuer TS interface re-added a phantom 'status' field:"
+            echo "$BAD_ISSUER"
+            echo ""
+            echo "The Go-side internal/domain/connector.go::Issuer has no 'status'"
+            echo "field — only 'enabled' (bool). Render sites derive the displayed"
+            echo "status from 'enabled' at the call site (see"
+            echo "web/src/pages/IssuersPage.tsx::issuerStatus). See unified-audit.md"
+            echo "diff-05x06-97fab8783a5c for closure rationale."
+            exit 1
+          fi
+
+          # D-2 Notification phantom-field check.
+          BAD_NOTIF=$(awk '
+            /^export interface Notification \{/ { flag=1; next }
+            flag && /^\}/                        { flag=0 }
+            flag                                 { print FILENAME":"NR":"$0 }
+          ' web/src/api/types.ts \
+            | grep -E '\bsubject\??\s*:' \
+            || true)
+          if [ -n "$BAD_NOTIF" ]; then
+            echo "D-2 regression: Notification TS interface re-added a phantom 'subject' field:"
+            echo "$BAD_NOTIF"
+            echo ""
+            echo "The Go-side internal/domain/notification.go::NotificationEvent"
+            echo "has no 'subject' field — only 'message'. Pre-D-2 the consumer"
+            echo "at NotificationsPage.tsx had a dead '|| n.subject' fallback"
+            echo "that always fell through. See unified-audit.md"
+            echo "diff-05x06-caba9eb3620e for closure rationale."
             exit 1
           fi
 

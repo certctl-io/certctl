@@ -67,6 +67,23 @@ export interface CertificateVersion {
 // API contract. See docs/architecture.md ER-diagram note and
 // coverage-gap-audit-2026-04-24-v5/unified-audit.md cat-s5-apikey_leak
 // for the closure rationale.
+//
+// D-2 (diff-05x06-7cdf4e78ae24, master): pre-D-2 this interface declared
+// five fields the Go-side struct (internal/domain/connector.go::Agent)
+// does NOT emit on the wire: `last_heartbeat` (the real field is
+// `last_heartbeat_at`; the bare-name was a sibling typo never rejected
+// at compile time), `capabilities`, `tags`, `created_at`, `updated_at`.
+// Two of them had real consumers (AgentDetailPage rendered
+// `agent.capabilities` and `agent.tags`) — both always rendered the
+// empty-state branch because the runtime values were always undefined.
+// Post-D-2 the interface field set matches the Go-emitted JSON exactly:
+// id, name, hostname, status, last_heartbeat_at, registered_at, os,
+// architecture, ip_address, version, retired_at?, retired_reason?. A
+// `agent.capabilities` access is now a TS compile error. The CI guardrail
+// in .github/workflows/ci.yml (`Forbidden StatusBadge dead-key + TS
+// phantom-field regression guard (D-1 + D-2)`) blocks reintroduction of
+// the trimmed field names while explicitly excluding `last_heartbeat_at`
+// from the `last_heartbeat` regex.
 export interface Agent {
   id: string;
   name: string;
@@ -76,13 +93,8 @@ export interface Agent {
   architecture: string;
   status: string;
   version: string;
-  last_heartbeat: string;
-  last_heartbeat_at: string;
-  capabilities: string[];
-  tags: Record<string, string>;
+  last_heartbeat_at?: string;
   registered_at: string;
-  created_at: string;
-  updated_at: string;
   // I-004: soft-retirement fields. When retired_at is non-null, the agent is
   // tombstoned — it will never heartbeat again and cascaded targets have been
   // retired alongside it. The retired tab on AgentsPage uses these to show the
@@ -159,9 +171,17 @@ export interface Job {
  *                     without chasing server logs.
  *
  * `sent_at` and `error` are the pre-I-005 audit fields on the backend struct.
- * `subject` is a historical frontend-only field the backend never emits; it's
- * kept optional so legacy fixtures and the pendingNotif test mock still type
- * correctly without forcing a rewrite of every existing consumer.
+ *
+ * D-2 (diff-05x06-caba9eb3620e, master): pre-D-2 this interface carried a
+ * phantom `subject?: string` field documented as "kept optional so legacy
+ * fixtures and the pendingNotif test mock still type correctly without
+ * forcing a rewrite of every existing consumer." The Go-side struct
+ * (`internal/domain/notification.go::NotificationEvent`) never emitted it,
+ * so `n.subject` was always `undefined` at runtime. The one real consumer
+ * (NotificationsPage rendering `{n.message || n.subject}`) always fell
+ * through to `n.message`. Post-D-2 the field is removed; the consumer
+ * drops the dead `|| n.subject` fallback and the test fixtures drop the
+ * dead `subject:` initializer. The CI guardrail blocks reintroduction.
  *
  * Status values follow the backend NotificationStatus constants:
  *   pending · sent · failed · dead · read
@@ -174,7 +194,6 @@ export interface Notification {
   type: string;
   channel: string;
   recipient: string;
-  subject?: string;
   message: string;
   status: string;
   certificate_id?: string;
@@ -269,13 +288,21 @@ export interface RenewalPolicy {
   updated_at: string;
 }
 
+// D-2 (diff-05x06-97fab8783a5c, master): pre-D-2 this interface declared
+// a required `status: string` field that the Go-side struct
+// (`internal/domain/connector.go::Issuer`) never emitted — the Go struct
+// has only `Enabled bool`. The TS comment claimed "status is derived from
+// this" but no derivation ever existed: `IssuersPage.tsx` read
+// `issuer.status || 'Unknown'` and always rendered 'Unknown'. Post-D-2
+// the phantom is removed; render sites derive the displayed status from
+// `enabled` (and optionally `test_status`) at the call site. The CI
+// guardrail in .github/workflows/ci.yml blocks reintroduction.
 export interface Issuer {
   id: string;
   name: string;
   type: string;
   config: Record<string, unknown>;
-  status: string;
-  /** Backend returns enabled boolean; status is derived from this */
+  /** Backend returns enabled boolean; render sites derive status labels from this */
   enabled: boolean;
   /** Timestamp of last connection test */
   last_tested_at?: string;
@@ -287,6 +314,14 @@ export interface Issuer {
   updated_at?: string;
 }
 
+// D-2 (diff-05x06-2044a46f4dd0, master): pre-D-2 this interface lacked
+// `retired_at` and `retired_reason` even though the Go-side struct
+// (`internal/domain/connector.go::DeploymentTarget`) emits both as part
+// of the I-004 soft-retirement model. Consumers wanting to surface the
+// retired state had to escape via `(target as any).retired_at`. Post-D-2
+// the TS interface declares both as optional nullable strings, mirroring
+// the Agent retirement-fields shape (an Agent retire cascades to all
+// associated Targets per service.RetireAgent → repository.RetireTarget).
 export interface Target {
   id: string;
   name: string;
@@ -297,6 +332,8 @@ export interface Target {
   last_tested_at?: string;
   test_status?: string;
   source?: string;
+  retired_at?: string | null;
+  retired_reason?: string | null;
   created_at: string;
   updated_at?: string;
 }
@@ -403,6 +440,19 @@ export interface IssuanceRateDataPoint {
 }
 
 // Discovery types
+//
+// D-2 (diff-05x06-85ab6b98a2f7, master): pre-D-2 this interface lacked
+// `pem_data` even though the Go-side struct
+// (`internal/domain/discovery.go::DiscoveredCertificate.PEMData`,
+// json:"pem_data,omitempty") emits it on the wire. The field is
+// populated by the agent's filesystem scanner
+// (cmd/agent/main.go::buildDiscoveryReport), the cloud-secret-manager
+// connectors (e.g. internal/connector/discovery/azurekv/azurekv.go), and
+// the repo SELECT that materialises the row from PostgreSQL. Post-D-2
+// the TS interface declares `pem_data?: string`, optional because the
+// Go side uses `omitempty` (empty string → not emitted). Performance
+// follow-up: the LIST endpoint loads pem_data via the same repo SELECT;
+// a future change should gate emission on the per-id detail path only.
 export interface DiscoveredCertificate {
   id: string;
   fingerprint_sha256: string;
@@ -416,6 +466,7 @@ export interface DiscoveredCertificate {
   key_algorithm: string;
   key_size: number;
   is_ca: boolean;
+  pem_data?: string;
   source_path: string;
   source_format: string;
   agent_id: string;
