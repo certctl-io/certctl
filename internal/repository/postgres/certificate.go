@@ -265,7 +265,7 @@ func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.Man
 	cert, err := r.scanCertificate(ctx, row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query certificate: %w", err)
 	}
@@ -397,7 +397,7 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("certificate not found")
+		return fmt.Errorf("certificate not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -419,7 +419,7 @@ func (r *CertificateRepository) Archive(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("certificate not found")
+		return fmt.Errorf("certificate not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

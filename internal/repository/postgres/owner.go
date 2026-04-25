@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -61,7 +62,7 @@ func (r *OwnerRepository) Get(ctx context.Context, id string) (*domain.Owner, er
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("owner not found")
+			return nil, fmt.Errorf("owner not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query owner: %w", err)
 	}
@@ -110,7 +111,7 @@ func (r *OwnerRepository) Update(ctx context.Context, owner *domain.Owner) error
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("owner not found")
+		return fmt.Errorf("owner not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -130,7 +131,7 @@ func (r *OwnerRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("owner not found")
+		return fmt.Errorf("owner not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

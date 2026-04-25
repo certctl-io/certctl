@@ -110,7 +110,7 @@ func TestExportPEM_Download(t *testing.T) {
 func TestExportPEM_NotFound(t *testing.T) {
 	mockSvc := &MockExportService{
 		ExportPEMFn: func(_ context.Context, _ string) (*service.ExportPEMResult, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 		},
 	}
 	h := NewExportHandler(mockSvc)
@@ -216,7 +216,7 @@ func TestExportPKCS12_EmptyPassword(t *testing.T) {
 func TestExportPKCS12_NotFound(t *testing.T) {
 	mockSvc := &MockExportService{
 		ExportPKCS12Fn: func(_ context.Context, _ string, _ string) ([]byte, error) {
-			return nil, fmt.Errorf("certificate not found")
+			return nil, fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 		},
 	}
 	h := NewExportHandler(mockSvc)

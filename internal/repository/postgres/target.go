@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -89,7 +90,7 @@ func (r *TargetRepository) Get(ctx context.Context, id string) (*domain.Deployme
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("target not found")
+			return nil, fmt.Errorf("target not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query target: %w", err)
 	}
@@ -174,7 +175,7 @@ func (r *TargetRepository) Update(ctx context.Context, target *domain.Deployment
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("target not found")
+		return fmt.Errorf("target not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -194,7 +195,7 @@ func (r *TargetRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("target not found")
+		return fmt.Errorf("target not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

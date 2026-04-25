@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -69,7 +70,7 @@ func (r *IssuerRepository) Get(ctx context.Context, id string) (*domain.Issuer, 
 
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("issuer not found")
+			return nil, fmt.Errorf("issuer not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query issuer: %w", err)
 	}
@@ -169,7 +170,7 @@ func (r *IssuerRepository) Update(ctx context.Context, issuer *domain.Issuer) er
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("issuer not found")
+		return fmt.Errorf("issuer not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -189,7 +190,7 @@ func (r *IssuerRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("issuer not found")
+		return fmt.Errorf("issuer not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

@@ -1,6 +1,7 @@
 package postgres
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
@@ -62,7 +63,7 @@ func (r *JobRepository) Get(ctx context.Context, id string) (*domain.Job, error)
 	job, err := scanJob(row)
 	if err != nil {
 		if err == sql.ErrNoRows {
-			return nil, fmt.Errorf("job not found")
+			return nil, fmt.Errorf("job not found: %w", repository.ErrNotFound)
 		}
 		return nil, fmt.Errorf("failed to query job: %w", err)
 	}
@@ -123,7 +124,7 @@ func (r *JobRepository) Update(ctx context.Context, job *domain.Job) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("job not found")
+		return fmt.Errorf("job not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -143,7 +144,7 @@ func (r *JobRepository) Delete(ctx context.Context, id string) error {
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("job not found")
+		return fmt.Errorf("job not found: %w", repository.ErrNotFound)
 	}
 
 	return nil
@@ -232,7 +233,7 @@ func (r *JobRepository) UpdateStatus(ctx context.Context, id string, status doma
 	}
 
 	if rows == 0 {
-		return fmt.Errorf("job not found")
+		return fmt.Errorf("job not found: %w", repository.ErrNotFound)
 	}
 
 	return nil

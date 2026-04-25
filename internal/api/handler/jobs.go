@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"encoding/json"
 	"errors"
@@ -167,7 +168,7 @@ func (h JobHandler) ApproveJob(w http.ResponseWriter, r *http.Request) {
 				requestID)
 			return
 		}
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return
 		}
@@ -213,7 +214,7 @@ func (h JobHandler) RejectJob(w http.ResponseWriter, r *http.Request) {
 	actor := resolveActor(r.Context())
 
 	if err := h.svc.RejectJob(r.Context(), jobID, body.Reason, actor); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Job not found", requestID)
 			return
 		}

@@ -522,7 +522,7 @@ func TestRevokeCertificate_AlreadyRevoked(t *testing.T) {
 func TestRevokeCertificate_NotFound(t *testing.T) {
 	handler, mock := newCertHandlerWithMock()
 	mock.RevokeCertificateFn = func(_ context.Context, id string, reason string, _ string) error {
-		return fmt.Errorf("certificate not found")
+		return fmt.Errorf("certificate not found: %w", ErrMockNotFound)
 	}
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/mc-missing/revoke", strings.NewReader(`{"reason":"keyCompromise"}`))

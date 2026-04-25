@@ -113,7 +113,7 @@ func (r *HealthCheckRepository) Get(ctx context.Context, id string) (*domain.End
 		&check.CreatedAt, &check.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("health check not found: %s", id)
+		return nil, fmt.Errorf("health check not found: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get health check: %w", err)
@@ -299,7 +299,7 @@ func (r *HealthCheckRepository) GetByEndpoint(ctx context.Context, endpoint stri
 		&check.CreatedAt, &check.UpdatedAt,
 	)
 	if err == sql.ErrNoRows {
-		return nil, fmt.Errorf("health check not found for endpoint: %s", endpoint)
+		return nil, fmt.Errorf("health check not found for endpoint: %w", repository.ErrNotFound)
 	}
 	if err != nil {
 		return nil, fmt.Errorf("get health check by endpoint: %w", err)

@@ -33,7 +33,7 @@ func (m *MockAgentGroupService) GetAgentGroup(_ context.Context, id string) (*do
 	if m.GetAgentGroupFn != nil {
 		return m.GetAgentGroupFn(id)
 	}
-	return nil, fmt.Errorf("not found")
+	return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
 func (m *MockAgentGroupService) CreateAgentGroup(_ context.Context, group domain.AgentGroup) (*domain.AgentGroup, error) {

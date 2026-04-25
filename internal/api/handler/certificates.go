@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"context"
 	"encoding/json"
 	"log/slog"
@@ -298,7 +299,7 @@ func (h CertificateHandler) UpdateCertificate(w http.ResponseWriter, r *http.Req
 
 	updated, err := h.svc.UpdateCertificate(r.Context(), id, cert)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}
@@ -327,7 +328,7 @@ func (h CertificateHandler) ArchiveCertificate(w http.ResponseWriter, r *http.Re
 	}
 
 	if err := h.svc.ArchiveCertificate(r.Context(), id); err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}
@@ -373,7 +374,7 @@ func (h CertificateHandler) GetCertificateVersions(w http.ResponseWriter, r *htt
 
 	versions, total, err := h.svc.GetCertificateVersions(r.Context(), certID, page, perPage)
 	if err != nil {
-		if strings.Contains(err.Error(), "not found") {
+		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)
 			return
 		}

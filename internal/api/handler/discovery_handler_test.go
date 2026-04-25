@@ -300,7 +300,7 @@ func TestGetDiscovered_Success(t *testing.T) {
 			if id == "dcert-1" {
 				return cert, nil
 			}
-			return nil, fmt.Errorf("not found")
+			return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -331,7 +331,7 @@ func TestGetDiscovered_Success(t *testing.T) {
 func TestGetDiscovered_NotFound(t *testing.T) {
 	mock := &MockDiscoveryService{
 		GetDiscoveredFn: func(ctx context.Context, id string) (*domain.DiscoveredCertificate, error) {
-			return nil, fmt.Errorf("not found")
+			return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -412,7 +412,7 @@ func TestClaimDiscovered_MissingManagedCertID(t *testing.T) {
 func TestClaimDiscovered_NotFound(t *testing.T) {
 	mock := &MockDiscoveryService{
 		ClaimDiscoveredFn: func(ctx context.Context, id string, managedCertID string, actor string) error {
-			return fmt.Errorf("discovered certificate not found")
+			return fmt.Errorf("discovered certificate not found: %w", ErrMockNotFound)
 		},
 	}
 
@@ -442,7 +442,7 @@ func TestDismissDiscovered_Success(t *testing.T) {
 			if id == "dcert-1" {
 				return nil
 			}
-			return fmt.Errorf("not found")
+			return fmt.Errorf("not found: %w", ErrMockNotFound)
 		},
 	}
 
