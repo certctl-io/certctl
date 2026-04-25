@@ -1141,13 +1141,30 @@ API Endpoints:
 - **`GET /api/v1/digest/preview`** — Render digest HTML for preview (no email sent)
 - **`POST /api/v1/digest/send`** — Trigger digest send immediately (outside of schedule)
 
+> **Note (HTTPS-only as of v2.2):** The `curl` examples in this section
+> and below all target the HTTPS-only control plane. Extract the
+> docker-compose self-signed bootstrap CA bundle once and reuse it on
+> every call:
+>
+> ```bash
+> export CA=/tmp/certctl-ca.crt
+> docker compose -f deploy/docker-compose.yml exec -T certctl-server \
+>   cat /etc/certctl/tls/ca.crt > "$CA"
+> ```
+>
+> Then pass `--cacert "$CA"` (or `-k` for one-off smoke tests, never in
+> production). The same pattern is documented in
+> [`quickstart.md`](quickstart.md). Pre-U-2 these examples used `http://`
+> and silently failed against the HTTPS listener; post-U-2 they speak
+> HTTPS with the operator-managed CA bundle.
+
 Example:
 ```bash
 # Preview digest
-curl http://localhost:8443/api/v1/digest/preview | jq '.html'
+curl --cacert "$CA" https://localhost:8443/api/v1/digest/preview | jq '.html'
 
 # Send digest immediately
-curl -X POST http://localhost:8443/api/v1/digest/send
+curl --cacert "$CA" -X POST https://localhost:8443/api/v1/digest/send
 ```
 
 Each notifier is enabled by its configuration env var:
@@ -1294,24 +1311,24 @@ The agent scans these directories on startup and every 6 hours, looking for cert
 
 ```bash
 # List discovered certificates (filter by agent, status)
-curl -s "http://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-01&status=new" | jq .
+curl --cacert "$CA" -s "https://localhost:8443/api/v1/discovered-certificates?agent_id=agent-nginx-01&status=new" | jq .
 
 # Get discovery detail
-curl -s http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID | jq .
 
 # Claim a discovered cert (link to managed certificate)
-curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/claim \
   -H "Content-Type: application/json" \
   -d '{"managed_certificate_id": "mc-api-prod"}' | jq .
 
 # Dismiss a discovery
-curl -s -X POST http://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/dismiss | jq .
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/discovered-certificates/DISCOVERY_ID/dismiss | jq .
 
 # View discovery scan history
-curl -s http://localhost:8443/api/v1/discovery-scans | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/discovery-scans | jq .
 
 # Summary counts (new, claimed, dismissed)
-curl -s http://localhost:8443/api/v1/discovery-summary | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/discovery-summary | jq .
 ```
 
 ### Use Cases
@@ -1340,7 +1357,7 @@ Network scan targets can be managed from the **Network Scans** dashboard page (c
 
 ```bash
 # Create a scan target for your internal network (or use the dashboard's "+ New Target" button)
-curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/network-scan-targets \
   -H "Content-Type: application/json" \
   -d '{
     "name": "Production Web Servers",
@@ -1365,26 +1382,26 @@ curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
 
 ```bash
 # List all scan targets
-curl -s http://localhost:8443/api/v1/network-scan-targets | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/network-scan-targets | jq .
 
 # Create a scan target
-curl -s -X POST http://localhost:8443/api/v1/network-scan-targets \
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/network-scan-targets \
   -H "Content-Type: application/json" \
   -d '{"name": "DMZ", "cidrs": ["172.16.0.0/24"], "ports": [443]}' | jq .
 
 # Get a specific target (includes last_scan_at, last_scan_certs_found)
-curl -s http://localhost:8443/api/v1/network-scan-targets/nst-dmz | jq .
+curl --cacert "$CA" -s https://localhost:8443/api/v1/network-scan-targets/nst-dmz | jq .
 
 # Trigger an immediate scan (doesn't wait for scheduler)
-curl -s -X POST http://localhost:8443/api/v1/network-scan-targets/nst-dmz/scan | jq .
+curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/network-scan-targets/nst-dmz/scan | jq .
 
 # Update scan configuration
-curl -s -X PUT http://localhost:8443/api/v1/network-scan-targets/nst-dmz \
+curl --cacert "$CA" -s -X PUT https://localhost:8443/api/v1/network-scan-targets/nst-dmz \
   -H "Content-Type: application/json" \
   -d '{"ports": [443, 8443, 9443], "timeout_ms": 3000}' | jq .
 
 # Delete a scan target
-curl -s -X DELETE http://localhost:8443/api/v1/network-scan-targets/nst-dmz
+curl --cacert "$CA" -s -X DELETE https://localhost:8443/api/v1/network-scan-targets/nst-dmz
 ```
 
 ### Scheduler Integration

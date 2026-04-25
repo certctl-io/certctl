@@ -36,7 +36,14 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=${TARGETARCH} go build \
 # Stage 2: Runtime
 FROM alpine:3.19
 
-RUN apk add --no-cache ca-certificates curl
+# U-2: `procps` ships pgrep, which the HEALTHCHECK below uses to verify the
+# agent process is alive. Pre-U-2 the deploy/docker-compose.yml agent
+# HEALTHCHECK called `pgrep -f certctl-agent` against this image but
+# pgrep wasn't installed — the compose probe was a latent always-fail.
+# Adding procps here fixes both the new image-level HEALTHCHECK and the
+# pre-existing compose override. Adds ~250KB to the image; acceptable for
+# observability parity with the server image.
+RUN apk add --no-cache ca-certificates curl procps
 
 RUN addgroup -g 1000 certctl && \
     adduser -D -u 1000 -G certctl certctl
@@ -50,5 +57,20 @@ RUN mkdir -p /var/lib/certctl/keys && \
     chown -R certctl:certctl /app /var/lib/certctl
 
 USER certctl
+
+# Image-level HEALTHCHECK for bare `docker run` / Docker Swarm / Nomad / ECS.
+#
+# U-2 (P1, cat-u-healthcheck_protocol_mismatch — adjacent fix): the agent
+# has no HTTP listener (it polls the server via outbound HTTPS), so a
+# process-presence check is the correct primitive. Pre-U-2 the agent image
+# shipped with no HEALTHCHECK at all, so bare-`docker run` operators got
+# zero health signal and orchestrators that key off Docker's HEALTHCHECK
+# (Swarm, Nomad, ECS) saw the container reported as `none`. The compose
+# override at deploy/docker-compose.yml:173 used the same `pgrep -f
+# certctl-agent` shape; we mirror it here so the published image has
+# parity with the compose stack and the override on docker-compose.yml
+# becomes redundant-but-correct rather than load-bearing.
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD pgrep -f certctl-agent > /dev/null || exit 1
 
 ENTRYPOINT ["/app/agent"]
