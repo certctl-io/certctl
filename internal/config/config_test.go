@@ -458,6 +458,8 @@ func TestValidate_InvalidAuthType(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -477,6 +479,8 @@ func TestValidate_APIKeyAuth_MissingSecret(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -484,24 +488,132 @@ func TestValidate_APIKeyAuth_MissingSecret(t *testing.T) {
 	}
 }
 
-func TestValidate_JWTAuth_MissingSecret(t *testing.T) {
-	cfg := &Config{
-		Server:   validServerConfig(t),
-		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
-		Log:      LogConfig{Level: "info", Format: "json"},
-		Auth:     AuthConfig{Type: "jwt", Secret: ""},
-		Keygen:   KeygenConfig{Mode: "agent"},
-		Scheduler: SchedulerConfig{
-			RenewalCheckInterval:        1 * time.Hour,
-			JobProcessorInterval:        30 * time.Second,
-			AgentHealthCheckInterval:    2 * time.Minute,
-			NotificationProcessInterval: 1 * time.Minute,
-		},
+// TestValidate_JWTAuth_RejectedDedicated locks down the G-1 fix: pre-G-1
+// `CERTCTL_AUTH_TYPE=jwt` was accepted by the validator (the bare error
+// path was the empty-secret one previously). Post-G-1 the literal "jwt"
+// value is rejected with a dedicated diagnostic regardless of whether
+// Secret is set, because there is no JWT middleware in the binary —
+// operators who need JWT/OIDC must front certctl with an authenticating
+// gateway.
+//
+// Two table rows pin the contract: missing-secret cannot paper over the
+// rejection (the dedicated error fires first, before the secret check),
+// and a populated secret also cannot paper over it. Both paths must
+// hit the dedicated G-1 diagnostic, not the generic "invalid auth
+// type" or "auth secret is required".
+func TestValidate_JWTAuth_RejectedDedicated(t *testing.T) {
+	t.Parallel()
+	cases := []struct {
+		name   string
+		secret string
+	}{
+		{"jwt rejected (no secret)", ""},
+		{"jwt rejected (with secret — operator can't paper over)", "anything"},
 	}
-	if err := cfg.Validate(); err == nil {
-		t.Error("Validate() should return error when jwt auth has empty secret")
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Server:   validServerConfig(t),
+				Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+				Log:      LogConfig{Level: "info", Format: "json"},
+				Auth:     AuthConfig{Type: "jwt", Secret: tc.secret},
+				Keygen:   KeygenConfig{Mode: "agent"},
+				Scheduler: SchedulerConfig{
+					RenewalCheckInterval:        1 * time.Hour,
+					JobProcessorInterval:        30 * time.Second,
+					AgentHealthCheckInterval:    2 * time.Minute,
+					NotificationProcessInterval: 1 * time.Minute,
+					NotificationRetryInterval:   2 * time.Minute,
+					RetryInterval:               5 * time.Minute,
+				},
+			}
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatal("Validate() returned nil; expected dedicated G-1 rejection")
+			}
+			const wantSubstr = "CERTCTL_AUTH_TYPE=jwt is no longer accepted"
+			if !strings.Contains(err.Error(), wantSubstr) {
+				t.Errorf("Validate() = %v\nwant substring %q (the dedicated G-1 diagnostic)", err, wantSubstr)
+			}
+		})
 	}
 }
+
+// TestValidAuthTypesDoesNotContainJWT is a property-level guard against
+// a future PR silently re-introducing "jwt" into the allowed set. If
+// someone adds JWT back to ValidAuthTypes(), this test fails immediately
+// with a pointer at the audit finding. The matching CI grep guardrail
+// in .github/workflows/ci.yml provides a secondary check at build time.
+func TestValidAuthTypesDoesNotContainJWT(t *testing.T) {
+	t.Parallel()
+	for _, at := range ValidAuthTypes() {
+		if at == "jwt" {
+			t.Fatalf("jwt is in ValidAuthTypes — silent auth downgrade regressed (G-1)")
+		}
+	}
+}
+
+// TestValidAuthTypesIsExactly_APIKey_None pins the current allowed set.
+// If a future change adds a new auth type, this test must be updated
+// alongside the validator and the helm-chart `validateAuthType` helper —
+// keeping all three surfaces in sync.
+func TestValidAuthTypesIsExactly_APIKey_None(t *testing.T) {
+	t.Parallel()
+	got := ValidAuthTypes()
+	if len(got) != 2 {
+		t.Fatalf("ValidAuthTypes() returned %d entries, want 2: %v", len(got), got)
+	}
+	want := map[AuthType]bool{AuthTypeAPIKey: true, AuthTypeNone: true}
+	for _, at := range got {
+		if !want[at] {
+			t.Errorf("unexpected auth type in ValidAuthTypes: %q", at)
+		}
+	}
+}
+
+// TestValidate_GenericInvalidAuthType ensures that values outside the
+// allowed set (other than the special-cased "jwt") still surface the
+// generic "invalid auth type" error. Pins that the dedicated G-1
+// rejection didn't accidentally swallow non-jwt typos.
+func TestValidate_GenericInvalidAuthType(t *testing.T) {
+	t.Parallel()
+	for _, badType := range []string{"", "garbage", "oidc", "mtls", "API-KEY"} {
+		t.Run("type="+badType, func(t *testing.T) {
+			cfg := &Config{
+				Server:   validServerConfig(t),
+				Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+				Log:      LogConfig{Level: "info", Format: "json"},
+				Auth:     AuthConfig{Type: badType, Secret: "x"},
+				Keygen:   KeygenConfig{Mode: "agent"},
+				Scheduler: SchedulerConfig{
+					RenewalCheckInterval:        1 * time.Hour,
+					JobProcessorInterval:        30 * time.Second,
+					AgentHealthCheckInterval:    2 * time.Minute,
+					NotificationProcessInterval: 1 * time.Minute,
+					NotificationRetryInterval:   2 * time.Minute,
+					RetryInterval:               5 * time.Minute,
+				},
+			}
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate(type=%q) returned nil; expected invalid-auth-type rejection", badType)
+			}
+			if !strings.Contains(err.Error(), "invalid auth type") {
+				t.Errorf("Validate(type=%q) = %v; want \"invalid auth type\" error", badType, err)
+			}
+			if strings.Contains(err.Error(), "G-1 silent auth") {
+				t.Errorf("Validate(type=%q) = %v; should not hit the dedicated G-1 path for non-jwt values", badType, err)
+			}
+		})
+	}
+}
+
+// G-1 (P1): no need to add `TestValidate_NoneAuth_AcceptsEmptySecret` or
+// `TestValidate_APIKeyAuth_RequiresSecret` here — the pre-existing tests
+// `TestValidate_AuthTypeNone` (above) and `TestValidate_APIKeyAuth_MissingSecret`
+// (above) already cover those paths. Documented for the next reader: the
+// G-1 fix flipped jwt off but did not disturb either the
+// none-bypasses-secret or the api-key-requires-secret behavior.
 
 func TestValidate_InvalidKeygenMode(t *testing.T) {
 	cfg := &Config{
@@ -515,6 +627,8 @@ func TestValidate_InvalidKeygenMode(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -544,6 +658,8 @@ func TestValidate_InvalidPort(t *testing.T) {
 					JobProcessorInterval:        30 * time.Second,
 					AgentHealthCheckInterval:    2 * time.Minute,
 					NotificationProcessInterval: 1 * time.Minute,
+					NotificationRetryInterval:   2 * time.Minute,
+					RetryInterval:               5 * time.Minute,
 				},
 			}
 			if err := cfg.Validate(); err == nil {
@@ -574,6 +690,8 @@ func TestValidate_TLSCertPathEmpty(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	err := cfg.Validate()
@@ -605,6 +723,8 @@ func TestValidate_TLSKeyPathEmpty(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	err := cfg.Validate()
@@ -637,6 +757,8 @@ func TestValidate_TLSCertFileMissing(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	err := cfg.Validate()
@@ -668,6 +790,8 @@ func TestValidate_TLSKeyFileMissing(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	err := cfg.Validate()
@@ -701,6 +825,8 @@ func TestValidate_TLSMismatchedPair(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	err := cfg.Validate()
@@ -724,6 +850,8 @@ func TestValidate_EmptyDatabaseURL(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -743,6 +871,8 @@ func TestValidate_InvalidLogLevel(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -762,6 +892,8 @@ func TestValidate_InvalidLogFormat(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {
@@ -840,6 +972,8 @@ func TestValidate_DatabaseMaxConnectionsZero(t *testing.T) {
 			JobProcessorInterval:        30 * time.Second,
 			AgentHealthCheckInterval:    2 * time.Minute,
 			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
 		},
 	}
 	if err := cfg.Validate(); err == nil {

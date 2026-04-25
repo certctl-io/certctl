@@ -117,8 +117,14 @@ func HashAPIKey(key string) string {
 }
 
 // AuthConfig holds configuration for the Auth middleware.
+//
+// G-1 (P1): valid Type values are "api-key" or "none" only. "jwt" was
+// removed because no JWT middleware ships with certctl (silent auth
+// downgrade pre-G-1). The single source of truth for the allowed set
+// lives at internal/config.AuthType / config.ValidAuthTypes() — prefer
+// those constants over string literals when comparing.
 type AuthConfig struct {
-	Type   string // "api-key", "jwt", "none"
+	Type   string // "api-key" or "none" (see config.AuthType constants)
 	Secret string // The raw API key or comma-separated list of valid API keys
 }
 

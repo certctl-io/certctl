@@ -246,8 +246,8 @@ helm install certctl certctl/ \
 |--------|---------|-------------|
 | `server.replicas` | 1 | Number of server replicas |
 | `server.port` | 8443 | Server port |
-| `server.auth.type` | api-key | Authentication type |
-| `server.auth.apiKey` | "" | API key (REQUIRED) |
+| `server.auth.type` | api-key | Authentication type — `api-key` or `none` (G-1: `jwt` removed; for JWT/OIDC use a fronting authenticating gateway, see `docs/architecture.md` and `docs/upgrade-to-v2-jwt-removal.md`) |
+| `server.auth.apiKey` | "" | API key (REQUIRED when `auth.type=api-key`) |
 | `server.logging.level` | info | Log level |
 | `server.logging.format` | json | Log format |
 

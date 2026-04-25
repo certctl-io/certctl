@@ -162,30 +162,14 @@ func TestAuthInfo_ReturnsAuthType_None(t *testing.T) {
 	}
 }
 
-func TestAuthInfo_ReturnsAuthType_JWT(t *testing.T) {
-	handler := NewHealthHandler("jwt")
-
-	req, err := http.NewRequest(http.MethodGet, "/api/v1/auth/info", nil)
-	if err != nil {
-		t.Fatalf("NewRequest failed: %v", err)
-	}
-
-	w := httptest.NewRecorder()
-	handler.AuthInfo(w, req)
-
-	var result map[string]interface{}
-	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
-		t.Fatalf("failed to decode response: %v", err)
-	}
-
-	if result["auth_type"] != "jwt" {
-		t.Errorf("auth_type = %q, want jwt", result["auth_type"])
-	}
-
-	if required, ok := result["required"].(bool); !ok || !required {
-		t.Errorf("required = %v, want true", result["required"])
-	}
-}
+// G-1 (P1): the prior `TestAuthInfo_ReturnsAuthType_JWT` asserted the
+// handler echoed "jwt" — using the silent-auth-downgrade value as a
+// test fixture, which baked the lie into the regression suite. The
+// test is removed because "jwt" is now rejected at config-load time
+// (see internal/config/config_test.go::TestValidate_JWTAuth_RejectedDedicated)
+// and never reaches this handler. The pre-existing
+// `TestAuthInfo_ReturnsAuthType_APIKey` above (line ~107) covers the
+// api-key happy path; nothing else needs replacing here.
 
 func TestAuthCheck_ReturnsOK(t *testing.T) {
 	handler := NewHealthHandler("api-key")

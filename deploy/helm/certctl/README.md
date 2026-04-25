@@ -86,6 +86,40 @@ helm upgrade <release> deploy/helm/certctl/ \
   --set server.auth.apiKey='new-key'
 ```
 
+### JWT / OIDC via authenticating gateway
+
+certctl's in-process auth surface is intentionally narrow: `server.auth.type=api-key` for production deployments and `server.auth.type=none` for development. There is no in-process JWT, OIDC, mTLS, or SAML middleware. (`server.auth.type=jwt` was accepted pre-G-1 but silently routed every request through the api-key bearer middleware — silent auth downgrade. The chart now fails at `helm install`/`helm upgrade` template time via the `certctl.validateAuthType` helper if you set it. See [`../../../docs/upgrade-to-v2-jwt-removal.md`](../../../docs/upgrade-to-v2-jwt-removal.md) if you previously had this in your values.)
+
+For deployments that need JWT/OIDC, the canonical Kubernetes-flavored shape is to put oauth2-proxy in front of the certctl Service, attach an authenticating Ingress middleware, and run certctl with `server.auth.type=none`:
+
+```bash
+# 1. Install oauth2-proxy (or any OIDC-terminating sidecar) in the same namespace
+helm install oauth2-proxy oauth2-proxy/oauth2-proxy \
+  --namespace certctl \
+  --set config.clientID="$OIDC_CLIENT_ID" \
+  --set config.clientSecret="$OIDC_CLIENT_SECRET" \
+  --set config.cookieSecret="$(openssl rand -base64 32)" \
+  --set config.configFile='|
+    provider = "oidc"
+    oidc_issuer_url = "https://your-issuer/"
+    upstreams = ["http://<release>-server.certctl.svc.cluster.local:8443"]
+    pass_authorization_header = true
+    set_authorization_header = true
+    email_domains = ["*"]
+  '
+
+# 2. Install certctl with type=none (gateway terminates auth)
+helm install certctl deploy/helm/certctl/ \
+  --namespace certctl \
+  --set server.auth.type=none \
+  --set postgresql.auth.password="$(openssl rand -base64 24)"
+
+# 3. Attach an Ingress that routes through oauth2-proxy
+#    (Traefik ForwardAuth, nginx auth_request, Envoy ext_authz, etc.)
+```
+
+Same root pattern works with Pomerium, Authelia, Caddy `forward_auth`, Apache `mod_auth_openidc`, or any service-mesh `ext_authz`. See [`../../../docs/architecture.md`](../../../docs/architecture.md) "Authenticating-gateway pattern" for the full design rationale and [`../../../docs/upgrade-to-v2-jwt-removal.md`](../../../docs/upgrade-to-v2-jwt-removal.md) for the migration walkthrough.
+
 ### TLS certificate sourcing
 
 By default the chart provisions a self-signed cert via the same init-container pattern as the docker-compose deploy. For production, supply an operator-managed Secret (cert-manager, internal CA, etc.) — see [`docs/tls.md`](../../../docs/tls.md) for the full provisioning matrix and [`docs/upgrade-to-tls.md`](../../../docs/upgrade-to-tls.md) for upgrade-from-HTTP procedures.
