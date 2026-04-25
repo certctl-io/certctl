@@ -34,6 +34,21 @@
 // is an explicit opt-out for bootstrap scenarios — there is no silent
 // plaintext downgrade, matching the server-side pre-flight guard added in
 // Phase 5 (task #203).
+//
+// Q-1 closure (cat-s3-58ce7e9840be): this file contains 11 `t.Skip("Requires
+// X — manual test")` markers across the Part10..Part37 subtests
+// (Sub-CA, ARI, Vault, DigiCert, CLI binary, MCP-server binary,
+// scheduler-timing, docker-log inspection, and three browser-UI parts).
+// Each marks a subtest that exercises a path requiring real external
+// services or human-in-the-loop verification — they were never meant
+// to run unattended in CI. The file-level `//go:build qa` tag at line 1
+// already keeps them out of the default `go test ./...` invocation;
+// the runtime t.Skip is the second-line guard for operators who run
+// `-tags qa` against a stack that doesn't have the required external
+// service available. The audit recommendation was "audit each skip and
+// decide" — for these 11, the decision is **document-skip**: the gating
+// is correct, and the t.Skip messages already name the missing
+// precondition. No restructuring needed.
 package integration_test
 
 import (

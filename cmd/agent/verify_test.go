@@ -391,7 +391,13 @@ func TestVerifyDeployment_FingerprintComparison(t *testing.T) {
 	}))
 	defer server.Close()
 
-	// Get the server's TLS certificate from TLS config
+	// Q-1 closure (cat-s3-58ce7e9840be): defensive skip — httptest.NewTLSServer
+	// always provisions a self-signed certificate at construction time, so this
+	// branch is currently unreachable in practice. Kept as a guard against
+	// future test-server constructions that swap in a custom *tls.Config with
+	// no Certificates slice (the path below dereferences server.TLS.Certificates[0]
+	// and would panic). The skip preserves the assertion logic for the normal
+	// fixture path; if it ever fires, it's a fixture bug, not a product bug.
 	if len(server.TLS.Certificates) == 0 {
 		t.Skip("no TLS certificates configured on test server")
 	}

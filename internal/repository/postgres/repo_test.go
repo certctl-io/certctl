@@ -1937,6 +1937,9 @@ func seedPendingJobs(t *testing.T, ctx context.Context, db *sql.DB, certID strin
 // semantics: a single call transitions Pending rows to Running atomically, and
 // the rows returned to the caller reflect the post-update state.
 func TestJobRepository_ClaimPendingJobs_FlipsToRunning(t *testing.T) {
+	// Q-1 closure (cat-s3-58ce7e9840be): exercises the SKIP-LOCKED claim
+	// SQL against a live PostgreSQL via testcontainers-go. Run with:
+	//   go test -count=1 ./internal/repository/postgres/... (omit -short)
 	if testing.Short() {
 		t.Skip("integration test requires PostgreSQL")
 	}
@@ -1993,6 +1996,9 @@ func TestJobRepository_ClaimPendingJobs_FlipsToRunning(t *testing.T) {
 // an atomic progress counter before exiting, so transient SKIP-LOCKED zeros do
 // not cause premature termination.
 func TestJobRepository_ClaimPendingJobs_ConcurrentDisjoint(t *testing.T) {
+	// Q-1 closure (cat-s3-58ce7e9840be): concurrent claim semantics
+	// require true row-level locking — only PostgreSQL provides this.
+	// Run with: go test -count=1 ./internal/repository/postgres/... (omit -short)
 	if testing.Short() {
 		t.Skip("integration test requires PostgreSQL")
 	}
@@ -2100,6 +2106,10 @@ func TestJobRepository_ClaimPendingJobs_ConcurrentDisjoint(t *testing.T) {
 // Running; AwaitingCSR rows are returned but their state is preserved (the CSR
 // submission path drives their next transition).
 func TestJobRepository_ClaimPendingByAgentID_TransitionsDeployments(t *testing.T) {
+	// Q-1 closure (cat-s3-58ce7e9840be): Pending→Running deployment-job
+	// transition vs CSR-flow preservation requires the live PostgreSQL
+	// transactional semantics. Run with:
+	//   go test -count=1 ./internal/repository/postgres/... (omit -short)
 	if testing.Short() {
 		t.Skip("integration test requires PostgreSQL")
 	}

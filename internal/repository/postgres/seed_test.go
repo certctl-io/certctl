@@ -84,6 +84,9 @@ func TestRunSeed_AppliesIdempotently(t *testing.T) {
 // We point at a directory that exists (empty temp dir) but contains no
 // seed.sql. RunSeed must return nil silently.
 func TestRunSeed_MissingFileIsNoOp(t *testing.T) {
+	// Q-1 closure (cat-s3-58ce7e9840be): RunSeed opens a *sql.DB connection
+	// against the live PostgreSQL testcontainer. Run with:
+	//   go test -count=1 ./internal/repository/postgres/... (omit -short)
 	if testing.Short() {
 		t.Skip("skipping integration test in short mode")
 	}

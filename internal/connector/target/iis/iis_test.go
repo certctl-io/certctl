@@ -81,7 +81,13 @@ func TestIISConnector_ValidateConfig_Success(t *testing.T) {
 	// We test the validation logic up to that point by checking the error message.
 	err := connector.ValidateConfig(context.Background(), rawConfig)
 	if err != nil {
-		// If it's just a "powershell not found" error, that's expected on Linux
+		// Q-1 closure (cat-s3-58ce7e9840be): platform-gated skip — IIS
+		// connector dispatches via powershell.exe; the binary only exists
+		// on Windows hosts. This branch lets the test pass on Linux/macOS
+		// CI runners where powershell.exe isn't available; on Windows
+		// runners the assertion below runs normally. The iis_connector.go
+		// production code has the same platform check; this skip mirrors
+		// it at test-fixture level.
 		if strings.Contains(err.Error(), "powershell.exe not found") {
 			t.Skip("Skipping: powershell.exe not available (non-Windows)")
 		}
@@ -212,6 +218,9 @@ func TestIISConnector_ValidateConfig_DefaultValues(t *testing.T) {
 
 	err := connector.ValidateConfig(context.Background(), rawConfig)
 	if err != nil {
+		// Q-1 closure (cat-s3-58ce7e9840be): same platform-gate as
+		// TestIIS_ValidateConfig_Empty above; mirrors the production
+		// LookPath("powershell.exe") guard in iis_connector.go.
 		if strings.Contains(err.Error(), "powershell.exe not found") {
 			t.Skip("Skipping: powershell.exe not available (non-Windows)")
 		}

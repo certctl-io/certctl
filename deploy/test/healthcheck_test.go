@@ -28,6 +28,23 @@
 // The tests skip cleanly with t.Skip when docker is not available
 // (CI without docker-in-docker, sandbox environments, etc.) so they
 // don't block local development on machines without docker.
+//
+// Q-1 closure (cat-s3-58ce7e9840be): this file's 5 t.Skip sites are
+// audited and intentional:
+//
+//   - Line 85, 146, 207: `if !dockerAvailable(t)` skips when `docker info`
+//     fails. These are precondition gates; without docker there's nothing
+//     to assert against. Run via: `docker info >/dev/null && go test
+//     -tags integration ./deploy/test/...`.
+//   - Line 209-210: `if testing.Short()` keeps the ~45s runtime probe
+//     off the default `go test ./... -short` path. Run via: omit -short.
+//   - Line 212: hard t.Skip for the runtime probe contract — image-spec
+//     contract above (TestPublishedServerImage_HealthcheckSpecUsesHTTPS)
+//     covers the audit-flagged regression at the Dockerfile-source level.
+//     Re-enable once the integration harness provisions a sidecar postgres
+//     for image-level smoke; the existing skip message names this
+//     remediation explicitly. Tracked via the in-source TODO (intentional,
+//     not abandoned).
 package integration_test
 
 import (
