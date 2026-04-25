@@ -19,12 +19,15 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-/** Derive display status from backend enabled boolean */
+// Derive display status from backend `enabled` boolean.
+//
+// D-2 (diff-05x06-97fab8783a5c, master): pre-D-2 the fall-through here
+// was `issuer.status || 'Unknown'`, but `Issuer.status` was a TS phantom
+// the Go-side struct never emitted (see types.ts::Issuer docblock for the
+// full closure rationale). Post-D-2 the phantom is gone; this function
+// derives the displayed status from `enabled` exclusively.
 function issuerStatus(issuer: Issuer): string {
-  if (issuer.enabled !== undefined) {
-    return issuer.enabled ? 'Enabled' : 'Disabled';
-  }
-  return issuer.status || 'Unknown';
+  return issuer.enabled ? 'Enabled' : 'Disabled';
 }
 
 export default function IssuerDetailPage() {

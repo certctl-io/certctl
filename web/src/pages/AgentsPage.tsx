@@ -15,7 +15,12 @@ import ErrorState from '../components/ErrorState';
 import { timeAgo } from '../api/utils';
 import type { Agent, AgentDependencyCounts } from '../api/types';
 
-function heartbeatStatus(lastHeartbeat: string): string {
+// D-2 (master): the `lastHeartbeat` parameter accepts undefined because
+// the Go-side struct emits `last_heartbeat_at` as `omitempty` (never-
+// heartbeated agents omit the field). Mirror of the same helper in
+// AgentDetailPage.tsx — kept as twin definitions to avoid a shared-
+// helper PR detour during D-2; consolidate in a follow-up if desired.
+function heartbeatStatus(lastHeartbeat: string | undefined): string {
   if (!lastHeartbeat) return 'Offline';
   const ago = Date.now() - new Date(lastHeartbeat).getTime();
   if (ago < 5 * 60 * 1000) return 'Online';

@@ -15,7 +15,12 @@ function InfoRow({ label, value }: { label: string; value: React.ReactNode }) {
   );
 }
 
-function heartbeatStatus(lastHeartbeat: string): string {
+// D-2 (master): the `lastHeartbeat` parameter accepts undefined because
+// the Go-side struct emits `last_heartbeat_at` as `omitempty` (a never-
+// heartbeated agent omits the field entirely). Pre-D-2 the TS interface
+// declared the field as required, masking this case. Post-D-2 the empty
+// case is explicit at both the type level and the function signature.
+function heartbeatStatus(lastHeartbeat: string | undefined): string {
   if (!lastHeartbeat) return 'Offline';
   const ago = Date.now() - new Date(lastHeartbeat).getTime();
   if (ago < 5 * 60 * 1000) return 'Online';
@@ -89,8 +94,15 @@ export default function AgentDetailPage() {
                 </span>
               ) : '—'
             } />
-            <InfoRow label="Registered" value={formatDateTime(agent.created_at)} />
-            <InfoRow label="Updated" value={formatDateTime(agent.updated_at)} />
+            {/* D-2 (master): pre-D-2 these rows used `agent.created_at`
+                + `agent.updated_at` — TS phantoms that the Go-side
+                struct (`internal/domain/connector.go::Agent`) never
+                emitted. The "Registered" row now reads from the real
+                Go-emitted `registered_at` field; the "Updated" row is
+                dropped because the Go struct has no equivalent
+                update-timestamp on Agent (heartbeats are tracked via
+                `last_heartbeat_at` above). */}
+            <InfoRow label="Registered" value={formatDateTime(agent.registered_at)} />
           </div>
 
           {/* System Info */}
@@ -100,26 +112,17 @@ export default function AgentDetailPage() {
             <InfoRow label="Architecture" value={agent.architecture || '—'} />
             <InfoRow label="IP Address" value={<span className="font-mono text-xs">{agent.ip_address || '—'}</span>} />
             <InfoRow label="Agent Version" value={agent.version || '—'} />
-            {agent.capabilities?.length ? (
-              <div className="mt-4">
-                <p className="text-xs text-ink-muted mb-2">Capabilities</p>
-                <div className="flex flex-wrap gap-2">
-                  {agent.capabilities.map((c) => (
-                    <span key={c} className="badge badge-info">{c}</span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
-            {agent.tags && Object.keys(agent.tags).length > 0 ? (
-              <div className="mt-4">
-                <p className="text-xs text-ink-muted mb-2">Tags</p>
-                <div className="flex flex-wrap gap-2">
-                  {Object.entries(agent.tags).map(([k, v]) => (
-                    <span key={k} className="badge badge-neutral">{k}: {v}</span>
-                  ))}
-                </div>
-              </div>
-            ) : null}
+            {/* D-2 (master): the previous "Capabilities" + "Tags" sections
+                rendered `agent.capabilities` and `agent.tags`, both of
+                which were TS phantom fields the Go-side struct
+                (`internal/domain/connector.go::Agent`) never emitted.
+                Both sections always rendered as the empty-state fallback
+                (the `?.length ?` and `Object.keys(...).length > 0`
+                guards always evaluated false). Removed in D-2 master.
+                If/when the backend grows real Agent metadata fields
+                (capabilities advertised at heartbeat time, operator-
+                applied tags), re-introduce here in the same commit that
+                ships the Go-side change. */}
           </div>
         </div>
 

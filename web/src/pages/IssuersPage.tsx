@@ -14,13 +14,19 @@ import TypeSelector from '../components/issuer/TypeSelector';
 import ConfigForm from '../components/issuer/ConfigForm';
 import ConfigDetailModal from '../components/issuer/ConfigDetailModal';
 
-/** Derive display status from backend enabled boolean */
+// Derive display status from backend `enabled` boolean.
+//
+// D-2 (diff-05x06-97fab8783a5c, master): pre-D-2 the fall-through chain
+// here was `issuer.status || 'Unknown'`, which always rendered 'Unknown'
+// because the Go-side struct never emitted a `status` field — the TS
+// interface comment claimed status was "derived from enabled" but no
+// derivation existed. Post-D-2 the phantom `Issuer.status` is gone and
+// this function is the canonical derivation site. `enabled` is a
+// required boolean on Go's Issuer struct so the `!== undefined` guard
+// is now belt-and-suspenders rather than load-bearing, but kept for
+// defensive rendering against malformed responses.
 function issuerStatus(issuer: Issuer): string {
-  if (issuer.enabled !== undefined) {
-    return issuer.enabled ? 'Enabled' : 'Disabled';
-  }
-  // Fallback for legacy data that may have status string
-  return issuer.status || 'Unknown';
+  return issuer.enabled ? 'Enabled' : 'Disabled';
 }
 
 export default function IssuersPage() {
