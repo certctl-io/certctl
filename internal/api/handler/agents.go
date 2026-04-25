@@ -40,13 +40,22 @@ type AgentService interface {
 }
 
 // AgentHandler handles HTTP requests for agent operations.
+//
+// Bundle-5 / Audit H-007: BootstrapToken is the pre-shared secret enforced
+// on RegisterAgent. Empty = warn-mode pass-through; non-empty triggers the
+// constant-time compare in verifyBootstrapToken. See agent_bootstrap.go.
 type AgentHandler struct {
-	svc AgentService
+	svc            AgentService
+	BootstrapToken string
 }
 
 // NewAgentHandler creates a new AgentHandler with a service dependency.
-func NewAgentHandler(svc AgentService) AgentHandler {
-	return AgentHandler{svc: svc}
+//
+// Bundle-5 / Audit H-007: bootstrapToken (may be empty for warn-mode) gates
+// the registration endpoint. main.go reads cfg.Auth.AgentBootstrapToken and
+// passes it here.
+func NewAgentHandler(svc AgentService, bootstrapToken string) AgentHandler {
+	return AgentHandler{svc: svc, BootstrapToken: bootstrapToken}
 }
 
 // ListAgents lists all registered agents.
@@ -118,6 +127,12 @@ func (h AgentHandler) GetAgent(w http.ResponseWriter, r *http.Request) {
 
 // RegisterAgent registers a new agent.
 // POST /api/v1/agents
+//
+// Bundle-5 / Audit H-007 / CWE-306 + CWE-288: bootstrap-token gate runs
+// BEFORE body parse so an unauthenticated probe can't even cause a JSON
+// allocation. When CERTCTL_AGENT_BOOTSTRAP_TOKEN is set on the server,
+// callers must include `Authorization: Bearer <token>`. See
+// agent_bootstrap.go for the verification helper.
 func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -125,6 +140,13 @@ func (h AgentHandler) RegisterAgent(w http.ResponseWriter, r *http.Request) {
 	}
 
 	requestID := middleware.GetRequestID(r.Context())
+
+	// Bundle-5 / H-007: bootstrap-token gate. Returns 401 with a fixed
+	// error string on miss so a token spray can't infer credential shape.
+	if err := verifyBootstrapToken(r, h.BootstrapToken); err != nil {
+		ErrorWithRequestID(w, http.StatusUnauthorized, "invalid_or_missing_bootstrap_token", requestID)
+		return
+	}
 
 	var agent domain.Agent
 	if err := json.NewDecoder(r.Body).Decode(&agent); err != nil {

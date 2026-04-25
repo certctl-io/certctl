@@ -97,7 +97,7 @@ func TestRegisterHandlers_RoutesDispatch(t *testing.T) {
 		Notifications: handler.NotificationHandler{},
 		Stats:         handler.StatsHandler{},
 		Metrics:       handler.MetricsHandler{},
-		Health:        handler.NewHealthHandler("api-key"),
+		Health:        handler.NewHealthHandler("api-key", nil),
 		Discovery:     handler.DiscoveryHandler{},
 		NetworkScan:   handler.NetworkScanHandler{},
 		Verification:  handler.VerificationHandler{},
@@ -275,7 +275,7 @@ func TestRegisterHandlers_RoutesDispatch(t *testing.T) {
 func TestRegisterHandlers_UnregisteredRoute(t *testing.T) {
 	r := New()
 	reg := HandlerRegistry{
-		Health: handler.NewHealthHandler("api-key"),
+		Health: handler.NewHealthHandler("api-key", nil),
 	}
 	r.RegisterHandlers(reg)
 

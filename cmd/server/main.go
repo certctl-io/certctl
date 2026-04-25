@@ -69,6 +69,19 @@ func main() {
 		"server_host", cfg.Server.Host,
 		"server_port", cfg.Server.Port)
 
+	// Bundle-5 / Audit H-007: deprecation WARN when the agent bootstrap
+	// token is unset. Pre-Bundle-5 there was no token at all; the v2.0.x
+	// default keeps the warn-mode pass-through so existing demo deploys
+	// keep working, but operators must set CERTCTL_AGENT_BOOTSTRAP_TOKEN
+	// before v2.2.0 lands. This is a one-shot startup line — the
+	// per-request path stays silent so a busy registration endpoint
+	// doesn't flood the log.
+	if cfg.Auth.AgentBootstrapToken == "" {
+		logger.Warn("agent bootstrap token unset (CERTCTL_AGENT_BOOTSTRAP_TOKEN) — agents may self-register without authentication; this default will become deny-by-default in v2.2.0; generate one with: openssl rand -hex 32")
+	} else {
+		logger.Info("agent bootstrap token configured (length redacted; constant-time compare on POST /api/v1/agents)")
+	}
+
 	// Initialize database connection pool
 	db, err := postgres.NewDB(cfg.Database.URL)
 	if err != nil {
@@ -433,7 +446,7 @@ func main() {
 	certificateHandler := handler.NewCertificateHandler(certificateService)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
 	targetHandler := handler.NewTargetHandler(targetService)
-	agentHandler := handler.NewAgentHandler(agentService)
+	agentHandler := handler.NewAgentHandler(agentService, cfg.Auth.AgentBootstrapToken)
 	jobHandler := handler.NewJobHandler(jobService)
 	policyHandler := handler.NewPolicyHandler(policyService)
 	// G-1: RenewalPolicyHandler — /api/v1/renewal-policies CRUD. Value-returning
@@ -448,7 +461,9 @@ func main() {
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	statsHandler := handler.NewStatsHandler(statsService)
 	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
-	healthHandler := handler.NewHealthHandler(cfg.Auth.Type)
+	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
+	// connectivity via PingContext. /health stays shallow (liveness signal).
+	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
 	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
 	// answers GET /api/v1/version with build identity (ldflags Version,
 	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
@@ -945,8 +960,22 @@ func main() {
 	sig := <-sigChan
 	logger.Info("received shutdown signal", "signal", sig.String())
 
-	// Graceful shutdown
-	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 30*time.Second)
+	// Graceful shutdown.
+	//
+	// Bundle-5 / Audit M-011: pre-Bundle-5 the timeout was hard-coded
+	// 30s, so high-volume operators couldn't extend the audit-flush
+	// window without forking the binary. Now configurable via
+	// CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS (default 30s preserves prior
+	// behaviour). The same context governs HTTP server shutdown +
+	// scheduler completion + audit flush. WARN-log on deadline exceeded;
+	// never exit hard — operator gets visibility, server still completes
+	// shutdown.
+	shutdownTimeout := time.Duration(cfg.Server.AuditFlushTimeoutSeconds) * time.Second
+	if shutdownTimeout <= 0 {
+		shutdownTimeout = 30 * time.Second
+	}
+	logger.Info("graceful shutdown budget", "timeout_seconds", int(shutdownTimeout/time.Second))
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), shutdownTimeout)
 	defer shutdownCancel()
 
 	cancel() // Stop scheduler
