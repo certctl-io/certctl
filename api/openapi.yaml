@@ -3687,8 +3687,18 @@ components:
         registered_at:
           type: string
           format: date-time
-        api_key_hash:
-          type: string
+        # G-2 (P1): the `api_key_hash` field was REMOVED from this
+        # schema after cat-s5-apikey_leak audit closure. The DB column
+        # still exists (migrations/000001_initial_schema.up.sql) and
+        # the server still populates the in-memory struct for the
+        # auth-lookup path (repository.AgentRepository::GetByAPIKey),
+        # but the JSON wire shape no longer carries it — see
+        # internal/domain/connector.go::Agent::APIKeyHash + MarshalJSON
+        # for the redaction enforcement and docs/architecture.md ER
+        # diagram for the database-vs-API distinction. Do NOT re-add
+        # the field here without first removing the JSON-shape redaction
+        # in the domain package; the CI guardrail at
+        # .github/workflows/ci.yml will block re-introduction either way.
         os:
           type: string
         architecture:

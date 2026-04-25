@@ -46,7 +46,26 @@ type Agent struct {
 	Status          AgentStatus `json:"status"`
 	LastHeartbeatAt *time.Time  `json:"last_heartbeat_at,omitempty"`
 	RegisteredAt    time.Time   `json:"registered_at"`
-	APIKeyHash      string      `json:"api_key_hash"`
+	// APIKeyHash is the SHA-256 of the agent's plaintext API key,
+	// populated by service.RegisterAgent (`hashAPIKey(apiKey)`) and
+	// consumed by repository.AgentRepository::GetByAPIKey at auth time.
+	// It is server-internal: never serialized to clients, never echoed
+	// via CLI / MCP / agent registration response, never logged.
+	//
+	// G-2 (P1): pre-G-2 the field was tagged `json:"api_key_hash"` and
+	// shipped on every /api/v1/agents response (cat-s5-apikey_leak). Even
+	// SHA-256 should not be shipped to clients — it gives an offline
+	// brute-force target if API-key entropy is low (certctl doesn't enforce
+	// a minimum on operator-supplied keys), and there is no business reason
+	// for any client to ever receive it. Post-G-2 the JSON tag is "-" and
+	// Agent.MarshalJSON below zeroes the field on a copy before delegating
+	// to the default marshal — defense in depth so a future tag-revert by
+	// refactor cannot reopen the leak. The DB column, repo SELECT/INSERT/
+	// UPDATE paths, and service-side hashing are unchanged. See
+	// docs/architecture.md ER diagram (which documents DB shape, not API
+	// shape) and coverage-gap-audit-2026-04-24-v5/unified-audit.md
+	// cat-s5-apikey_leak for the full closure rationale.
+	APIKeyHash      string      `json:"-"`
 	OS              string      `json:"os"`
 	Architecture    string      `json:"architecture"`
 	IPAddress       string      `json:"ip_address"`
@@ -58,6 +77,31 @@ type Agent struct {
 	// "should we filter this row from active listings?".
 	RetiredAt     *time.Time `json:"retired_at,omitempty"`
 	RetiredReason *string    `json:"retired_reason,omitempty"`
+}
+
+// MarshalJSON implements json.Marshaler. It explicitly zeros APIKeyHash
+// before serialization to defense-in-depth the `json:"-"` tag above.
+//
+// G-2 (P1): pre-G-2 the field was tagged `json:"api_key_hash"` and
+// shipped on every /api/v1/agents response (cat-s5-apikey_leak). Post-G-2
+// the tag is "-" and this method enforces redaction even if the tag is
+// reverted by a future refactor — the receiver is by-value so the
+// APIKeyHash = "" assignment mutates only the marshal-time copy, never
+// the caller's original. The type-alias trick (`type alias Agent`)
+// breaks the recursive MarshalJSON call that would otherwise stack-
+// overflow. Both *Agent and Agent receivers route through here because
+// the json package looks the method up via reflect.Value, and a value
+// receiver satisfies both kinds of pointer.
+//
+// Auditor's note for the next reader: do NOT remove this method even if
+// the json:"-" tag stays. The CI guardrail at .github/workflows/ci.yml
+// also blocks reintroduction at the tag site, but this method is the
+// last line of defense for serialization paths that bypass struct tags
+// (e.g., a future MarshalJSON on a parent struct that embeds Agent).
+func (a Agent) MarshalJSON() ([]byte, error) {
+	type alias Agent // breaks recursion: alias has no MarshalJSON method
+	a.APIKeyHash = ""
+	return json.Marshal(alias(a))
 }
 
 // IsRetired returns true when this agent has been soft-retired.
