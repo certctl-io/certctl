@@ -2,7 +2,41 @@
 
 All notable changes to certctl are documented in this file. Dates use ISO 8601. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [unreleased] — 2026-04-24
+## [unreleased] — 2026-04-25
+
+### D-1: StatusBadge enum drift + Certificate phantom fields — closed end-to-end
+
+> The dashboard silently lied in five places. Agents in the `Degraded` state (the only Go-side AgentStatus that means "needs operator attention") rendered as default neutral grey because StatusBadge mapped `Stale` (a key Go has never emitted) to yellow and let the real `Degraded` value fall through to the dictionary default. Dead-letter notifications (`status: 'dead'`, retries exhausted) rendered as default neutral, visually equated with `read` (operator-acknowledged). The Certificate badge map carried a `PendingIssuance` key that no Go enum value ever emits — dead key, latent confusion vector. CertificateDetailPage's Key Algorithm and Key Size rows always rendered `—` even when the data was a single fetch away, because the lookup went through `cert.key_algorithm` directly — and the underlying `Certificate` TypeScript interface declared five optional fields (`serial_number`, `fingerprint_sha256`, `key_algorithm`, `key_size`, `issued_at`) that Go's `ManagedCertificate` has never carried (those values live on `CertificateVersion`). Five findings, two files, one frontend rebuild. Pre-D-1 the only reason this didn't trip a regression suite was that the regression suite never asserted "every Go-emitted enum value gets a non-default StatusBadge class" — D-1 fixes the visual lies and adds a 38-case Vitest property test that walks every Go enum and pins the contract.
+
+### Breaking Changes
+
+- **`Certificate` TypeScript interface no longer declares `serial_number?`, `fingerprint_sha256?`, `key_algorithm?`, `key_size?`, or `issued_at?`.** The Go `ManagedCertificate` (`internal/domain/certificate.go`) has never emitted these fields on list responses; they live on `CertificateVersion` and are reachable via `getCertificateVersions(id)`. Pre-D-5 (the cat-f phantom-fields finding) the optional declarations made `cert.X` always-undefined on lists, and downstream consumers silently rendered `—` for every cert. Post-D-5 a `cert.X` access for any of the five fields is a TypeScript compile error, forcing every consumer to acknowledge the version-fallback pattern. The OpenAPI `ManagedCertificate` schema was already correct — only the TS type was drifted.
+- **StatusBadge no longer maps `Stale` (Agent) or `PendingIssuance` (Certificate).** Both were dead keys — no Go enum value emits them. Operators with custom CSS hooked off `.badge-warning` for `Stale` will see the same color come back via the new `Degraded` mapping (same class), but JS/TS code that switches on the literal `'Stale'` will need to switch on `'Degraded'` instead. The `PendingIssuance` deletion has no documented downstream consumer.
+
+### Added
+
+- **`web/src/components/StatusBadge.tsx`: `Degraded` (Agent) → `badge-warning` and `dead` (Notification) → `badge-danger`.** First mappings restore the color contract for the two real Go-side values that previously fell through to the dictionary default. The `Degraded` mapping cross-references `internal/domain/connector.go::AgentStatusDegraded`; the `dead` mapping cross-references `internal/domain/notification.go::NotificationStatusDead`.
+- **`web/src/components/StatusBadge.test.tsx`: 38-case Vitest property test.** Iterates every Go-side enum value (`AgentStatus`, `CertificateStatus`, `JobStatus`, `NotificationStatus`, `DiscoveryStatus`, `HealthStatus`) plus the two frontend-synthesized `Enabled`/`Disabled` labels, asserts every value gets a non-default class (or, for the five intentionally-neutral terminal values like `Archived`/`Cancelled`/`read`, an explicit `badge badge-neutral`). Includes negative assertions on the deleted `Stale` and `PendingIssuance` keys (must fall through to neutral) and specific UX-correctness assertions on the operator-attention semantics (`dead` → danger, `Degraded` → warning).
+- **`web/src/api/types.test.ts`: D-5 Certificate phantom-fields trim regression.** A `Certificate` literal construction pinned post-trim, plus a sibling `CertificateVersion` literal pinning that the trimmed fields still live on the version envelope. The `tsc --noEmit` gate in CI is the primary enforcement; the test is the documentation of intent.
+- **CI regression guardrail in `.github/workflows/ci.yml` (`Forbidden StatusBadge dead-key + Certificate phantom-field regression guard (D-1)`).** Two grep blocks: (1) catches `Stale: 'badge-...'` or `PendingIssuance: 'badge-...'` in `web/src/components/StatusBadge.tsx`; (2) uses an awk-scoped window over the `export interface Certificate {` block in `web/src/api/types.ts` to catch any of the five phantom fields reappearing — explicitly excludes the `CertificateVersion` block which legitimately carries them. Verified locally on the post-fix tree (passes) and against synthetic regressions (each fires the guardrail).
+
+### Changed
+
+- **`web/src/pages/CertificateDetailPage.tsx`: Key Algorithm and Key Size rows now read from `latestVersion?.key_algorithm` / `latestVersion?.key_size`.** Mirrors the existing `latestVersion` fallback used for `serial_number` and `fingerprint_sha256` earlier in the same file. Pre-D-4 these rows accessed `cert.key_algorithm` and `cert.key_size` directly — both phantom fields per D-5 — so the rows always rendered `—`. The same file's `serial_number` / `fingerprint_sha256` / `issued_at` derivations were also simplified to drop the now-impossible `cert.X || latestVersion?.X` cert-side leg.
+- **`web/src/components/StatusBadge.tsx` adds a leading docblock** naming the Go-side source-of-truth file for every status family it maps (`AgentStatus`, `CertificateStatus`, `JobStatus`, `NotificationStatus`, `DiscoveryStatus`, `HealthStatus`) and pointing at the property test as the regression vector for future enum changes.
+- **`api/openapi.yaml::ManagedCertificate`** gets a leading comment cross-referencing the D-5 closure and explaining why per-issuance fields legitimately don't appear here (they live on `CertificateVersion`). Schema property list unchanged — the OpenAPI spec was already correct.
+
+### Closed audit findings
+
+- `cat-d-359e92c20cbf` (P1 primary) — Agent: `Stale` dead key + `Degraded` neutral fallthrough
+- `cat-d-9f4c8e4a91f1` (P2) — Notification: `dead` missing
+- `cat-d-1447e04732e7` (P3) — Certificate: `PendingIssuance` dead key
+- `cat-f-cert_detail_page_key_render_fallback` (P2) — render-site uses `cert.key_algorithm` directly
+- `cat-f-ae0d06b6588f` (P2) — Certificate TS phantom fields (root cause)
+
+### Known follow-ups (deferred from D-1 scope)
+
+The audit's broader type-drift cluster (`diff-05x06-7cdf4e78ae24` Agent TS, `diff-05x06-2044a46f4dd0` DeploymentTarget TS, `diff-05x06-caba9eb3620e` Notification TS, `diff-05x06-85ab6b98a2f7` DiscoveredCertificate TS, `diff-05x06-97fab8783a5c` Issuer TS) is out of D-1 scope. Recon for those is per-type field-by-field diff Go ↔ TS — codegen-shaped, not edit-shaped — and warrants its own D-2 master prompt.
 
 ### U-3: GitHub #10 reopened — fresh-clone first-up postgres init failure (P1) — closed end-to-end
 
