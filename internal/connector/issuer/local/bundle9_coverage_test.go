@@ -334,11 +334,12 @@ func TestHashPublicKey_ECDSA_RoundTripPin(t *testing.T) {
 				t.Fatalf("ecdsaToECDH: %v", err)
 			}
 			ecdhBytes := ecdhPub.Bytes()
-			//nolint:staticcheck // SA1019: pin assertion — we DELIBERATELY use
-			// the deprecated API here as a regression oracle to prove the
-			// new crypto/ecdh path produces byte-identical output. If
-			// elliptic.Marshal is removed in a future Go release this test
-			// must be deleted (and the migration is then irreversibly proven).
+			// Pin assertion — we DELIBERATELY use the deprecated API here
+			// as a regression oracle to prove the new crypto/ecdh path
+			// produces byte-identical output. If elliptic.Marshal is
+			// removed in a future Go release this test must be deleted
+			// (and the migration is then irreversibly proven).
+			//lint:ignore SA1019 deliberate regression oracle for M-028 round-trip pin
 			legacy := elliptic.Marshal(k.Curve, k.X, k.Y)
 			if !bytes.Equal(ecdhBytes, legacy) {
 				t.Fatalf("ECDH .Bytes() != legacy elliptic.Marshal output\n new: %x\n old: %x", ecdhBytes, legacy)

@@ -263,6 +263,18 @@ func extractCSRFields(csrDER []byte) ([]byte, string, string, error) {
 	// Attributes is []pkix.AttributeTypeAndValueSET where each has Type (OID)
 	// and Value ([][]pkix.AttributeTypeAndValue). The challenge password value
 	// is stored as a string in the inner AttributeTypeAndValue.Value field.
+	//
+	// Audit M-028 carve-out: Go's stdlib deprecates `csr.Attributes` for the
+	// specific use case of parsing the "requestedExtensions" CSR attribute
+	// (OID 1.2.840.113549.1.9.14), pointing callers at `csr.Extensions` /
+	// `csr.ExtraExtensions`. challengePassword (OID 1.2.840.113549.1.9.7)
+	// per RFC 2985 §5.4.1 is a SEPARATE CSR attribute that cannot be
+	// retrieved via Extensions. There is no non-deprecated stdlib API for
+	// it; callers either accept the deprecation warning or parse the raw
+	// `csr.RawAttributes` ASN.1 themselves. We accept the warning; the
+	// staticcheck.conf and golangci-lint rules suppress SA1019 for this
+	// specific line per the audit closure note.
+	//lint:ignore SA1019 RFC 2985 challengePassword has no non-deprecated stdlib API; see comment above.
 	for _, attr := range csr.Attributes {
 		if attr.Type.Equal(oidChallengePassword) {
 			if len(attr.Value) > 0 && len(attr.Value[0]) > 0 {

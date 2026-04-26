@@ -44,9 +44,8 @@ func TestMain_HealthEndpointBypassesAuth(t *testing.T) {
 	})
 
 	// Build the handler chain the same way main.go does
-	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
-		Type:   "api-key",
-		Secret: "test-secret-key",
+	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+		{Name: "test", Key: "test-secret-key"},
 	})
 
 	// API handler with auth
@@ -160,9 +159,8 @@ func TestMain_AuthMiddlewareRejectsUnauthorized(t *testing.T) {
 	})
 
 	// Wrap with auth middleware
-	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
-		Type:   "api-key",
-		Secret: "test-secret-key",
+	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+		{Name: "test", Key: "test-secret-key"},
 	})
 
 	chainedHandler := middleware.Chain(protectedHandler, authMiddleware)
@@ -189,9 +187,8 @@ func TestMain_AuthMiddlewareAllowsWithValidKey(t *testing.T) {
 	})
 
 	// Wrap with auth middleware
-	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
-		Type:   "api-key",
-		Secret: testKey,
+	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+		{Name: "test", Key: testKey},
 	})
 
 	chainedHandler := middleware.Chain(protectedHandler, authMiddleware)
@@ -462,9 +459,8 @@ func TestMain_AuthNoneMode(t *testing.T) {
 	})
 
 	// Wrap with auth middleware in "none" mode
-	authMiddleware := middleware.NewAuth(middleware.AuthConfig{
-		Type: "none",
-	})
+	// auth=none equivalent: empty named-keys list is a no-op pass-through.
+	authMiddleware := middleware.NewAuthWithNamedKeys(nil)
 
 	chainedHandler := middleware.Chain(protectedHandler, authMiddleware)
 
