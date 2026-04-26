@@ -23,8 +23,19 @@ func NewAuditService(auditRepo repository.AuditRepository) *AuditService {
 }
 
 // RecordEvent records an audit event with actor, action, and resource information.
+//
+// Bundle-6 / Audit H-008 + M-022 / CWE-532: every details map flows through
+// RedactDetailsForAudit BEFORE marshaling. The redactor scrubs credential
+// keys (api_key, password, token, *_pem, eab_secret, ...) and PII keys
+// (email, phone, ssn, name, address, ip_address, ...) and surfaces a
+// `redacted_keys` array so operators can audit the redactor itself during
+// a compliance review. See internal/service/audit_redact.go.
 func (s *AuditService) RecordEvent(ctx context.Context, actor string, actorType domain.ActorType, action string, resourceType string, resourceID string, details map[string]interface{}) error {
-	detailsJSON, err := json.Marshal(details)
+	// Bundle-6: scrub credentials + PII before persistence. Returns nil
+	// for nil/empty input, preserving pre-Bundle-6 behaviour for callers
+	// that pass nil details.
+	redacted := RedactDetailsForAudit(details)
+	detailsJSON, err := json.Marshal(redacted)
 	if err != nil {
 		detailsJSON = []byte("{}")
 	}
