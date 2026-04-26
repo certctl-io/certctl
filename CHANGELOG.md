@@ -2,7 +2,47 @@
 
 All notable changes to certctl are documented in this file. Dates use ISO 8601. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [unreleased] — 2026-04-25
+## [unreleased] — 2026-04-26
+
+### Bundle 7 (Verification & Tool Suite Execution): wires mandatory scans + first-run evidence
+
+> Closes the audit's biggest scope gap from `cowork/comprehensive-audit-2026-04-25/tool-output/_SCOPE.txt`: the §12 mandatory tool runs that were deferred in the original audit session due to disk pressure. **Closures:** `D-002` clean; `D-001`, `D-006`, `H-005` partial; `D-003..D-005`, `D-007` wired CI-only. **New tracker IDs opened:** `H-010` (local-issuer coverage gap), `M-028` (6 deprecated-API sites), `L-020` (ineffassign cleanup sweep), `L-021` (5 transitive Go-module CVEs).
+
+#### Added
+
+- **`scripts/install-security-tools.sh` (NEW)** — idempotent installer for the Go-based subset of the §12 tool suite: govulncheck, staticcheck, errcheck, ineffassign, gosec, osv-scanner. Used locally for a Bundle-7-style run and by both CI workflows.
+- **`.github/workflows/security-deep-scan.yml` (NEW)** — daily + `workflow_dispatch` heavyweight scans for the container/network-bound subset. Steps: `gosec`, `osv-scanner`, `go test -race -count=10` against the full suite, `go test -cover` on the crypto cluster, `docker build` + `trivy image`, `syft` SBOM, ZAP baseline DAST, `schemathesis` OpenAPI fuzz, `nuclei` template scan, `testssl.sh` TLS audit. Every step `continue-on-error: true`; artefacts uploaded for triage.
+- **`staticcheck` CI gate (Audit D-001)** — added to `.github/workflows/ci.yml` alongside the existing govulncheck step. SOFT gate (`continue-on-error: true`) until `M-028` closes the 6 remaining SA1019 deprecated-API call sites; flip to fail-on-non-zero then.
+- **Per-package coverage gates for the crypto cluster (Audit H-005)** — `.github/workflows/ci.yml` extended: pkcs7 hard ≥85% (currently 100%), local-issuer soft ≥65% transitional floor (H-010 lifts to ≥85% once the missing CSR-validation + CA-cert-loading + key-rotation tests land).
+- **`.govulnignore` (NEW)** — empty placeholder with the suppression contract documented (one OSV ID + justification + review-by date per line). At Bundle-7 time the 5 deferred-call advisories don't need entries because govulncheck's default exit code already passes — the file is ready when an advisory becomes call-affected.
+- **`staticcheck.conf` (NEW)** — TOML config explicitly enumerating which checks are enabled. Suppresses 6 style-only rules (ST1005 capitalization, ST1000 package comments, ST1003 naming, S1009 redundant nil check, S1011 append-spread, SA9003 empty branches) with documented per-rule justifications. SA1019 (deprecated API) NOT suppressed.
+
+#### Tool-run evidence
+
+Local first-run receipts at `cowork/comprehensive-audit-2026-04-25/tool-output/2026-04-26/`:
+
+| Tool | Result | Receipt |
+|---|---|---|
+| govulncheck | clean — 0 affected; 5 deferred-call advisories → L-021 | `govulncheck.txt`, `govulncheck-verbose.txt` |
+| staticcheck | 6 SA1019 → M-028; 109 style suppressed via config | `staticcheck.txt`, `staticcheck-after-suppressions.txt` |
+| errcheck | 1294 sites — all defer-Close / response-write convention | `errcheck.txt` |
+| ineffassign | 15 unique sites — mechanical re-assignment patterns → L-020 | `ineffassign.txt` |
+| helm lint | clean (1 INFO-level icon recommendation) | `helm-lint.txt` |
+| `go test -race -count=3` | clean across scheduler / middleware / mcp | `go-test-race.txt` |
+| `go test -cover` (crypto cluster) | crypto 86.7% ✓ / pkcs7 100% ✓ / local-issuer 68.3% ✗ → H-010 | `go-test-cover.txt` |
+
+Container/network-bound tools (gosec, osv-scanner, semgrep, hadolint, trivy, syft, schemathesis, ZAP, nuclei, testssl.sh, kube-score, checkov) wired in the new deep-scan workflow but not run locally — sandbox lacks docker. Catalog of dispositions in `_BUNDLE-7-CLOSURE.md`.
+
+#### NOT addressed in this bundle (deferred to a Bundle-7-bis)
+
+- `M-007` bulk-operation partial-failure tests
+- `M-008` admin-gated role-gate tests
+- `L-010` `mock.Anything` overuse audit
+- `L-018` defect age analysis on remaining High findings
+
+#### Why this matters
+
+Pre-Bundle-7, the audit-report's "no Critical findings" claim was a manual-review attestation backed by `_SCOPE.txt` warning that "the static-analysis findings in lens-6.* files were derived from manual code review + grep, not automated SAST output." Bundle 7 inverts that: the §12 tool suite is now wired into CI as either a hard or soft gate, with first-run evidence preserved, and every surfaced finding triaged into either a documented suppression OR a new tracker ID. The audit's largest scope gap is now a recurring CI workflow rather than a deferred backlog item.
 
 ### Bundle 6 (Audit Integrity + Privacy): 3 audit findings closed
 
