@@ -5,7 +5,6 @@ import (
 	"errors"
 	"net/http"
 	"strings"
-	"sync"
 )
 
 // Bundle-5 / Audit H-007 / CWE-306 + CWE-288:
@@ -42,9 +41,9 @@ import (
 // Handlers translate this into HTTP 401 with a fixed error string.
 var ErrBootstrapTokenInvalid = errors.New("invalid or missing agent bootstrap token")
 
-// bootstrapWarnOnce gates the one-shot deprecation WARN to a single emission
-// per process so a busy registration endpoint doesn't flood the log.
-var bootstrapWarnOnce sync.Once
+// Operator-visible deprecation WARN for the warn-mode default lives in
+// cmd/server/main.go — emitted once at startup, not per-request, so a
+// busy registration endpoint doesn't flood the log.
 
 // verifyBootstrapToken returns nil when the request should proceed and
 // ErrBootstrapTokenInvalid when it should be rejected.

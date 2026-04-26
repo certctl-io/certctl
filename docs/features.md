@@ -88,6 +88,35 @@ Preflight responses include `Access-Control-Max-Age` for caching.
 |---|---|---|
 | `CERTCTL_MAX_BODY_SIZE` | `1048576` (1 MB) | Maximum request body in bytes |
 
+### Agent Bootstrap Token
+
+<!-- Source: internal/api/handler/agent_bootstrap.go (Bundle-5 / Audit H-007) -->
+
+Pre-shared secret enforced on `POST /api/v1/agents`. When set, the registration handler requires `Authorization: Bearer <token>` and verifies via `crypto/subtle.ConstantTimeCompare` BEFORE the JSON body parse — defeats both timing oracles and unauth payload allocation. Mismatch / missing / malformed → `401 invalid_or_missing_bootstrap_token`.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_AGENT_BOOTSTRAP_TOKEN` | `""` (warn-mode pass-through) | Bearer token agents must present on first registration. v2.2.0 will require it; unset emits a one-shot startup deprecation WARN. Generate with `openssl rand -hex 32`. |
+
+### Graceful Shutdown Audit Flush
+
+<!-- Source: cmd/server/main.go (Bundle-5 / Audit M-011) -->
+
+On SIGTERM / SIGINT, the server drains in-flight audit recordings before closing the DB pool. The drain budget is shared with the HTTP server graceful shutdown.
+
+| Env Var | Default | Description |
+|---|---|---|
+| `CERTCTL_AUDIT_FLUSH_TIMEOUT_SECONDS` | `30` | Total budget (seconds) for HTTP shutdown + scheduler completion + audit-event drain. WARN-log on deadline exceeded; never exit hard. |
+
+### Liveness vs Readiness Probes
+
+<!-- Source: internal/api/handler/health.go (Bundle-5 / Audit H-006) -->
+
+| Endpoint | Purpose | Probe |
+|---|---|---|
+| `GET /health` | Liveness — process alive only. Returns 200 unconditionally; never restart pods for DB hiccups. | k8s `livenessProbe` |
+| `GET /ready` | Readiness — runs `db.PingContext` with 2 s ceiling. Returns 503 + `{"status":"db_unavailable"}` when DB unreachable so k8s drains the pod. | k8s `readinessProbe` |
+
 ### Query Features
 
 All list endpoints support:
