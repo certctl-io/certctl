@@ -445,23 +445,40 @@ func (a *Agent) executeCSRJob(ctx context.Context, job JobItem) {
 		"job_id", job.ID,
 		"certificate_id", job.CertificateID)
 
-	// Step 2: Store private key to disk with secure permissions
+	// Step 2: Store private key to disk with secure permissions.
+	//
+	// Bundle-9 / Audit L-002 + L-003: marshal+write through helpers that
+	// (a) zeroize the in-heap DER buffer immediately after the PEM block is
+	// constructed so the private scalar's exposure window is bounded by
+	// this function call, and (b) assert the key directory is mode 0700
+	// before any write touches disk. Also defer-clear the PEM buffer for
+	// the same reason — the encoded key isn't sensitive in transit (it's
+	// going to disk) but lingers on the heap if we don't.
 	keyPath := filepath.Join(a.config.KeyDir, job.CertificateID+".key")
-	privKeyDER, err := x509.MarshalECPrivateKey(privKey)
-	if err != nil {
-		a.logger.Error("failed to marshal private key",
-			"job_id", job.ID,
-			"error", err)
-		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key marshal failed: %v", err)); reportErr != nil {
+	if err := ensureAgentKeyDirSecure(filepath.Dir(keyPath)); err != nil {
+		a.logger.Error("agent key dir hardening failed", "job_id", job.ID, "error", err)
+		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key dir hardening failed: %v", err)); reportErr != nil {
 			a.logger.Error("failed to report job status to server", "job_id", job.ID, "status", "Failed", "error", reportErr)
 		}
 		return
 	}
-
-	privKeyPEM := pem.EncodeToMemory(&pem.Block{
-		Type:  "EC PRIVATE KEY",
-		Bytes: privKeyDER,
-	})
+	var privKeyPEM []byte
+	if marshalErr := marshalAgentKeyAndZeroize(privKey, func(der []byte) error {
+		privKeyPEM = pem.EncodeToMemory(&pem.Block{
+			Type:  "EC PRIVATE KEY",
+			Bytes: der,
+		})
+		return nil
+	}); marshalErr != nil {
+		a.logger.Error("failed to marshal private key",
+			"job_id", job.ID,
+			"error", marshalErr)
+		if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("key marshal failed: %v", marshalErr)); reportErr != nil {
+			a.logger.Error("failed to report job status to server", "job_id", job.ID, "status", "Failed", "error", reportErr)
+		}
+		return
+	}
+	defer clear(privKeyPEM)
 
 	if err := os.WriteFile(keyPath, privKeyPEM, 0600); err != nil {
 		a.logger.Error("failed to write private key to disk",
