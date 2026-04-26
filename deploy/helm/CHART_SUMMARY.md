@@ -17,7 +17,7 @@ A production-ready Helm chart for deploying certctl (self-hosted certificate lif
 - **Chart Version**: 0.1.0
 - **App Version**: 2.1.0
 - **Type**: application
-- **License**: BSL-1.1 (converts to Apache 2.0 in 2033)
+- **License**: BSL-1.1
 
 ## File Structure
 
@@ -458,4 +458,3 @@ For issues, questions, or contributions:
 ## License
 
 BSL-1.1 (Business Source License)
-Converts to Apache 2.0 on March 14, 2033

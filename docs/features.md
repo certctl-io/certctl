@@ -1540,4 +1540,4 @@ Pre-mapped to three compliance frameworks in `docs/`:
 | Deployment model | Pull-only | Server never initiates outbound to agents/targets |
 | Service decomposition | Facade/delegation | `CertificateService` delegates to `RevocationSvc` + `CAOperationsSvc` |
 | Handler wiring | `HandlerRegistry` struct (20 fields) | Replaced 18-positional-parameter function |
-| License | BSL 1.1 | Source-available, converts to Apache 2.0 in March 2033 |
+| License | BSL 1.1 | Source-available; not for use in competing managed services |

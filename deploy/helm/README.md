@@ -513,4 +513,4 @@ For issues, questions, or contributions, visit:
 
 ## License
 
-BSL-1.1 (converts to Apache 2.0 in 2033)
+BSL-1.1

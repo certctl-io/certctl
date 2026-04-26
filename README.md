@@ -402,7 +402,7 @@ Kubernetes cert-manager external issuer, cloud infrastructure targets, extended 
 
 ## License
 
-Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not use certctl's certificate management functionality as part of a commercial offering to third parties, whether hosted, managed, embedded, bundled, or integrated. The BSL 1.1 license converts automatically to Apache 2.0 on March 14, 2033.
+Certctl is licensed under the [Business Source License 1.1](LICENSE). The source code is publicly available and free to use, modify, and self-host. The one restriction: you may not use certctl's certificate management functionality as part of a commercial offering to third parties, whether hosted, managed, embedded, bundled, or integrated.
 
 For licensing inquiries: certctl@proton.me
 
