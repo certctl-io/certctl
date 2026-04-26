@@ -825,6 +825,77 @@ jobs:
           ALLOWLIST_SIZE=$(echo "$ALLOW" | tr '|' '\n' | wc -l)
           echo "T-1 page-coverage guardrail: clean (allowlist size: $ALLOWLIST_SIZE pages deferred)."
 
+      - name: Bundle-8 / L-015 target=_blank rel=noopener regression guard
+        # Audit L-015 / CWE-1022 (reverse-tabnabbing): every <a target="_blank">
+        # MUST carry rel="noopener noreferrer" so a malicious page at the
+        # target URL cannot navigate the opener window via window.opener.
+        # At Bundle-8 close (commit b566355→) all 3 sites in the codebase
+        # already comply — this guard prevents regression. The
+        # ExternalLink component (web/src/components/ExternalLink.tsx)
+        # is the recommended way to add new external links.
+        run: |
+          set -e
+          OFFENDERS=$(grep -rnE 'target=["'"'"']?_blank["'"'"']?' web/src/ 2>/dev/null \
+            | grep -v 'noopener noreferrer' \
+            | grep -v 'web/src/components/ExternalLink.tsx' \
+            || true)
+          if [ -n "$OFFENDERS" ]; then
+            echo "L-015 regression: target=\"_blank\" without rel=\"noopener noreferrer\":"
+            echo "$OFFENDERS"
+            echo ""
+            echo "Either add rel=\"noopener noreferrer\" inline,"
+            echo "or migrate to <ExternalLink> from web/src/components/ExternalLink.tsx."
+            exit 1
+          fi
+          echo "L-015 target=_blank guardrail: clean."
+
+      - name: Bundle-8 / L-019 dangerouslySetInnerHTML regression guard
+        # Audit L-019 / CWE-79 (XSS): no production code may use
+        # dangerouslySetInnerHTML directly. At Bundle-8 close the codebase
+        # has 0 sites; future genuine needs MUST route through
+        # web/src/utils/safeHtml.ts::sanitizeHtml.
+        run: |
+          set -e
+          OFFENDERS=$(grep -rnE 'dangerouslySetInnerHTML' web/src/ 2>/dev/null \
+            | grep -v 'web/src/utils/safeHtml.ts' \
+            || true)
+          if [ -n "$OFFENDERS" ]; then
+            echo "L-019 regression: dangerouslySetInnerHTML used outside safeHtml.ts:"
+            echo "$OFFENDERS"
+            echo ""
+            echo "Route through web/src/utils/safeHtml.ts::sanitizeHtml — see file"
+            echo "header for the activation procedure (DOMPurify dependency)."
+            exit 1
+          fi
+          echo "L-019 dangerouslySetInnerHTML guardrail: clean."
+
+      - name: Bundle-8 / M-009 mutation invalidation contract guard
+        # Audit M-009: every useMutation must either invalidate the
+        # queries it changes OR document why no invalidation is needed.
+        # SOFT guard — counts useMutation sites and asserts the budget
+        # doesn't grow without a corresponding invalidateQueries / setQueryData /
+        # useTrackedMutation reference. Stricter per-site enforcement is
+        # tracked as M-029 (covers the long-tail useListParams + useTrackedMutation
+        # migration of the existing 56 useMutation sites).
+        run: |
+          set -e
+          MUTATIONS=$(grep -rcE 'useMutation\(|useTrackedMutation\(' web/src/ 2>/dev/null \
+            | awk -F: '{s+=$2} END{print s}')
+          INVALIDATIONS=$(grep -rcE 'invalidateQueries|setQueryData|removeQueries|invalidates:' web/src/ 2>/dev/null \
+            | awk -F: '{s+=$2} END{print s}')
+          echo "M-009 budget — useMutation sites: $MUTATIONS / invalidation sites: $INVALIDATIONS"
+          # At Bundle-8 close: 56 useMutation + 70 invalidation. We allow
+          # +5 mutations growth before requiring invalidation parity. If
+          # the gap widens, audit the new mutation sites for missing
+          # invalidation pairs.
+          BUDGET=$((INVALIDATIONS + 5))
+          if [ "$MUTATIONS" -gt "$BUDGET" ]; then
+            echo "M-009 regression: $MUTATIONS useMutation sites exceeds invalidation budget ($BUDGET)."
+            echo "New mutations should pair with invalidateQueries/setQueryData OR migrate to"
+            echo "useTrackedMutation (web/src/hooks/useTrackedMutation.ts) with explicit invalidates."
+            exit 1
+          fi
+
       - name: Forbidden env-var docs drift regression guard (G-3)
         # G-3 master closed cat-g-163dae19bc59 (docs-only env vars
         # phantom in features.md), cat-g-b8f8f8796159 (6 config-only
