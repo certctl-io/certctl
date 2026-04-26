@@ -60,11 +60,20 @@ Two endpoints are served without auth so the GUI can detect auth mode before log
 
 Token bucket algorithm protecting the control plane from misbehaving clients.
 
+Bundle B (Audit M-025 / OWASP ASVS L2 §11.2.1): per-key keying. Each
+authenticated caller gets a bucket keyed on their API-key name; each
+unauthenticated source IP gets its own bucket. Bucket creation is
+on-demand under a `sync.RWMutex`; no eviction (the leak is bounded by
+realistic operator IP fan-out — appropriate for the OWASP ASVS L2 threat
+model of abuse-by-known-clients, not infinite-cardinality scanners).
+
 | Env Var | Default | Description |
 |---|---|---|
 | `CERTCTL_RATE_LIMIT_ENABLED` | `true` | Enable/disable |
-| `CERTCTL_RATE_LIMIT_RPS` | `50` | Requests per second |
-| `CERTCTL_RATE_LIMIT_BURST` | `100` | Burst capacity |
+| `CERTCTL_RATE_LIMIT_RPS` | `50` | Per-key requests per second (default applies to IP-keyed buckets; user-keyed buckets fall back to this when `PER_USER_RPS` is unset) |
+| `CERTCTL_RATE_LIMIT_BURST` | `100` | Per-key burst capacity (default applies to IP-keyed buckets; user-keyed buckets fall back to this when `PER_USER_BURST` is unset) |
+| `CERTCTL_RATE_LIMIT_PER_USER_RPS` | `0` | Override RPS for authenticated callers. `0` means "use `RATE_LIMIT_RPS`". Set higher than `RATE_LIMIT_RPS` to grant authenticated clients a more generous budget than anonymous probes. |
+| `CERTCTL_RATE_LIMIT_PER_USER_BURST` | `0` | Override burst for authenticated callers. `0` means "use `RATE_LIMIT_BURST`". |
 
 Exceeded requests receive `429 Too Many Requests` with a `Retry-After` header.
 
