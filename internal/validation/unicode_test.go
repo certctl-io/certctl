@@ -36,15 +36,15 @@ func TestValidateUnicodeSafe_RejectsRTLOverride(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"LRE", "good‪com"},
-		{"RLE", "good‫com"},
-		{"PDF", "good‬com"},
-		{"LRO", "good‭com"},
-		{"RLO", "good‮com"},
-		{"LRI", "good⁦com"},
-		{"RLI", "good⁧com"},
-		{"FSI", "good⁨com"},
-		{"PDI", "good⁩com"},
+		{"LRE", "good\u202Acom"},
+		{"RLE", "good\u202Bcom"},
+		{"PDF", "good\u202Ccom"},
+		{"LRO", "good\u202Dcom"},
+		{"RLO", "good\u202Ecom"},
+		{"LRI", "good\u2066com"},
+		{"RLI", "good\u2067com"},
+		{"FSI", "good\u2068com"},
+		{"PDI", "good\u2069com"},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
@@ -64,10 +64,10 @@ func TestValidateUnicodeSafe_RejectsZeroWidth(t *testing.T) {
 		name string
 		in   string
 	}{
-		{"ZWSP", "good​com"},
-		{"ZWNJ", "good‌com"},
-		{"ZWJ", "good‍com"},
-		{"WJ", "good⁠com"},
+		{"ZWSP", "good\u200Bcom"},
+		{"ZWNJ", "good\u200Ccom"},
+		{"ZWJ", "good\u200Dcom"},
+		{"WJ", "good\u2060com"},
 		{"BOM", "good\uFEFFcom"},
 	}
 	for _, c := range cases {
@@ -141,7 +141,7 @@ func TestValidateUnicodeSafe_AcceptsPureNonASCII(t *testing.T) {
 }
 
 func TestValidateUnicodeSafe_ErrorMentionsByteOffset(t *testing.T) {
-	in := "good‮evil.com"
+	in := "good\u202Eevil.com"
 	err := ValidateUnicodeSafe(in)
 	if err == nil {
 		t.Fatal("expected rejection")
