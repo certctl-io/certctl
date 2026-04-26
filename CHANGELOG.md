@@ -4,6 +4,42 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-25
 
+### Bundle 6 (Audit Integrity + Privacy): 3 audit findings closed
+
+> Closure bundle from the 2026-04-25 comprehensive audit
+> (`cowork/comprehensive-audit-2026-04-25/`). Hardens the audit trail
+> against tampering and minimizes PII exposure in one cohesive change —
+> closes HIPAA §164.312(b), GDPR Art. 32, and the audit-leak finding
+> H-008 with two complementary controls that apply automatically.
+> Closes H-008 + M-017 + M-022.
+
+#### Added
+
+- **`migrations/000018_audit_events_worm.up.sql` (NEW, Audit M-017 / HIPAA §164.312(b))** — DB-level append-only enforcement on `audit_events`. Two layers: (1) `audit_events_block_modification()` PL/pgSQL function fired by a `BEFORE UPDATE OR DELETE` trigger raises `check_violation` with a diagnostic citing the rationale + a HINT pointing at the compliance-superuser pattern; (2) `REVOKE UPDATE, DELETE ON audit_events FROM certctl` for defence-in-depth, wrapped in a `pg_roles` existence check so test fixtures and single-superuser setups stay idempotent. Pre-Bundle-6 enforcement was app-layer only — a buggy migration script, a manual `psql` session, or an attacker with the app role's DB credentials could rewrite history. Compliance superusers (legal hold, GDPR right-to-be-forgotten, statutory purges) use a separate role provisioned out-of-band — pattern documented in `docs/compliance.md` (NOT auto-created; operators provision per their compliance policy).
+- **`internal/service/audit_redact.go::RedactDetailsForAudit` (NEW, Audit H-008 + M-022 / CWE-532 / GDPR Art. 32)** — service-layer redactor chokepoint. Walks every `details` map BEFORE marshaling to JSONB. Two case-insensitive deny-lists: `credentialKeys` (~30 entries — `api_key`, `password`, `token`, `*_pem`, `eab_secret`, `acme_account_key`, `signature`, `bootstrap_token`, ...) replaced with `"[REDACTED:CREDENTIAL]"`; `piiKeys` (~20 entries — `email`, `phone`, `ssn`, `dob`, `name`, `address`, `postal_code`, `ip_address`, ...) replaced with `"[REDACTED:PII]"`. Recurses into nested maps + arrays; mutation-free (caller's map unchanged); surfaces a `redacted_keys` array listing scrubbed dotted-paths so operators can audit the redactor itself during a compliance review without exposing values (satisfies GDPR Art. 30 records-of-processing transparency).
+- **`migrations/000018_audit_events_worm.down.sql` (NEW)** — clean teardown for dev resets; not for production use.
+
+#### Changed
+
+- **`internal/service/audit.go::RecordEvent`** — now routes every `details` map through `RedactDetailsForAudit` before marshaling. No call-site changes required at any of the ~25 existing `RecordEvent` invocations across the service layer.
+
+#### Tests
+
+- `internal/service/audit_redact_test.go` (NEW, ~250 LOC) — every credential key, every PII key, nested maps, nested arrays, case-insensitivity, mutation-free invariant, JSON round-trip safety, no-redaction path (clean output for the common case), scalar pass-through (no panic on int/bool/nil).
+- `internal/repository/postgres/audit_worm_test.go` (NEW, testcontainers, gated by `testing.Short()`) — pins WORM contract: INSERT succeeds, UPDATE fails with `check_violation`, DELETE fails with `check_violation`, second INSERT after blocked modification still succeeds (no trigger-state corruption).
+
+#### Documentation
+
+- `docs/compliance.md` — new section "Audit-Trail Integrity & Privacy (Bundle 6)" with the two-layer enforcement table, verification `psql` snippet, compliance-superuser SQL pattern, redactor before/after JSON example, and a maintenance note for adding new credential-bearing fields.
+
+#### Why this matters
+
+Pre-Bundle-6, three compliance gaps and one direct security finding sat unfixed: (1) any host with the app role's DB credentials could rewrite the audit table — there was no DB-level append-only enforcement, only app-layer convention; (2) future service-layer call sites that accidentally passed a credential field in `RecordEvent` details would persist plaintext to the append-only audit table; (3) routine routes captured PII (email, phone, etc.) far beyond the GDPR Art. 32 minimization threshold via similar paths. Bundle 6 closes all three at once because they share the same code path (audit middleware + audit_events table) and the same fix shape (deny-list redaction + DB constraint).
+
+#### Backwards compatibility
+
+Trigger applies forward only — existing rows unchanged. `nil`/empty `details` from `RecordEvent` callers → `nil` out (preserves prior behaviour for the many existing call sites that pass nil). Compliance superusers (provisioned out-of-band) bypass the trigger by design.
+
 ### Bundle 5 (Operational Liveness + Bootstrap): 4 audit findings closed
 
 > Closure bundle from the 2026-04-25 comprehensive audit
