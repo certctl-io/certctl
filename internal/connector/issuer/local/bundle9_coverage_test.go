@@ -395,7 +395,7 @@ func TestValidateCSRUnicode_RejectsCNHomograph(t *testing.T) {
 func TestValidateCSRUnicode_RejectsDNSNameRTL(t *testing.T) {
 	csr := &x509.CertificateRequest{
 		Subject:  pkix.Name{CommonName: "ok.com"},
-		DNSNames: []string{"good‮evil.com"},
+		DNSNames: []string{"good\u202Eevil.com"},
 	}
 	err := validateCSRUnicode(csr, nil)
 	if err == nil {
@@ -409,7 +409,7 @@ func TestValidateCSRUnicode_RejectsDNSNameRTL(t *testing.T) {
 func TestValidateCSRUnicode_RejectsEmailZeroWidth(t *testing.T) {
 	csr := &x509.CertificateRequest{
 		Subject:        pkix.Name{CommonName: "ok.com"},
-		EmailAddresses: []string{"good​bad@example.com"},
+		EmailAddresses: []string{"good\u200Bbad@example.com"},
 	}
 	err := validateCSRUnicode(csr, nil)
 	if err == nil {
@@ -424,7 +424,7 @@ func TestValidateCSRUnicode_RejectsAdditionalSAN(t *testing.T) {
 	csr := &x509.CertificateRequest{
 		Subject: pkix.Name{CommonName: "ok.com"},
 	}
-	err := validateCSRUnicode(csr, []string{"good‮evil.com"})
+	err := validateCSRUnicode(csr, []string{"good\u202Eevil.com"})
 	if err == nil {
 		t.Fatal("expected rejection for additional SAN RTL")
 	}

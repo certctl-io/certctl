@@ -1,4 +1,4 @@
-.PHONY: help build run test lint clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build
+.PHONY: help build run test lint verify clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build
 
 # Default target - show help
 help:
@@ -15,6 +15,7 @@ help:
 	@echo "  make test-verbose   Run tests with verbose output"
 	@echo "  make lint           Run linter (golangci-lint)"
 	@echo "  make fmt            Format code with gofmt"
+	@echo "  make verify         Pre-commit gate: fmt + vet + lint + test (CI-parity)"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate-up     Run migrations (requires DB_URL)"
@@ -96,6 +97,24 @@ fmt:
 vet:
 	@echo "Running go vet..."
 	go vet ./...
+
+# verify: aggregate pre-commit gate. Mirrors what CI enforces, so
+# running `make verify` locally before committing prevents the
+# class of breakages that ship green-locally / red-on-CI (e.g.
+# Bundle-9's ST1018 invisible-Unicode-literal hits, which `go vet`
+# alone cannot catch — staticcheck under golangci-lint does).
+verify:
+	@echo "==> fmt"
+	@go fmt ./... | { ! grep -q '.'; } || (echo "gofmt produced changes — commit them" && exit 1)
+	@echo "==> go vet ./..."
+	@go vet ./...
+	@echo "==> golangci-lint run ./... (incl. staticcheck ST*)"
+	@which golangci-lint > /dev/null || (echo "Installing golangci-lint..." && go install github.com/golangci/golangci-lint/cmd/golangci-lint@latest)
+	@golangci-lint run ./... --timeout 5m
+	@echo "==> go test -short ./..."
+	@go test -short -count=1 ./...
+	@echo ""
+	@echo "verify: PASS — safe to commit"
 
 # Database targets (requires migrate tool)
 migrate-up:
