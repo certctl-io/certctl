@@ -1,0 +1,149 @@
+name: security-deep-scan
+
+# Bundle-7 / Audit D-001..D-007:
+# Slow / containerized scans on a daily schedule + manual dispatch.
+# Per-PR fast gates live in ci.yml; this workflow runs the heavyweight
+# tools that need docker, network egress to scanner registries, or
+# longer wall-clock budgets than a per-PR check tolerates.
+#
+# Scope:
+#   trivy image          container CVE + secret scan
+#   syft SBOM            CycloneDX SBOM artefact upload
+#   ZAP baseline         DAST baseline against a live deploy_test stack
+#   nuclei               template-based vuln scan against the same stack
+#   schemathesis         OpenAPI fuzz against the running server
+#   testssl.sh           TLS configuration audit
+#   race detector x10    full -count=10 race run on the entire test suite
+#   gosec                Go security static analysis (slow first run)
+#
+# Each step is best-effort — failures are uploaded as artefacts but do
+# NOT block the workflow. Triage happens via the Bundle-7 receipt
+# directory under cowork/comprehensive-audit-2026-04-25/tool-output/.
+
+on:
+  schedule:
+    - cron: '0 6 * * *'   # daily 06:00 UTC
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload to GitHub code scanning
+
+jobs:
+  deep-scan:
+    runs-on: ubuntu-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+
+      - name: Install Go-based tools
+        run: bash scripts/install-security-tools.sh
+        continue-on-error: true
+
+      # --- Static analysis (slow paths) ---
+
+      - name: gosec
+        run: |
+          $(go env GOPATH)/bin/gosec -fmt sarif -out gosec.sarif ./... || true
+        continue-on-error: true
+
+      - name: osv-scanner (multi-ecosystem CVE)
+        run: |
+          $(go env GOPATH)/bin/osv-scanner -r --format json --output osv-scanner.json . || true
+        continue-on-error: true
+
+      # --- Race detector at -count=10 (D-002) ---
+
+      - name: go test -race -count=10 (full suite)
+        run: |
+          go test -race -count=10 -short ./... 2>&1 | tee go-test-race.txt
+        continue-on-error: true
+
+      # --- Coverage receipts for crypto cluster (H-005) ---
+
+      - name: go test -cover (crypto cluster)
+        run: |
+          go test -cover -covermode=atomic \
+            ./internal/crypto/... \
+            ./internal/pkcs7/... \
+            ./internal/connector/issuer/local/... \
+            2>&1 | tee go-test-cover.txt
+
+      # --- Container + supply chain (D-001 partial, D-006 partial) ---
+
+      - name: Build certctl image
+        run: docker build -t certctl:deep-scan .
+        continue-on-error: true
+
+      - name: trivy image scan
+        run: |
+          docker run --rm -v "$PWD":/src aquasec/trivy:latest image \
+            --format json --output /src/trivy.json certctl:deep-scan || true
+        continue-on-error: true
+
+      - name: syft SBOM
+        run: |
+          docker run --rm -v "$PWD":/src anchore/syft:latest dir:/src \
+            -o cyclonedx-json > syft.cyclonedx.json || true
+        continue-on-error: true
+
+      # --- DAST against a live stack (D-004) ---
+
+      - name: docker compose up (test stack)
+        run: |
+          docker compose -f deploy/docker-compose.yml up -d
+          sleep 20
+        continue-on-error: true
+
+      - name: ZAP baseline
+        uses: zaproxy/action-baseline@v0.10.0
+        with:
+          target: 'https://localhost:8443'
+        continue-on-error: true
+
+      - name: schemathesis (OpenAPI fuzz)
+        run: |
+          pip install schemathesis
+          schemathesis run --base-url https://localhost:8443 \
+            --hypothesis-max-examples=50 api/openapi.yaml || true
+        continue-on-error: true
+
+      - name: nuclei
+        run: |
+          docker run --rm --network host projectdiscovery/nuclei:latest \
+            -u https://localhost:8443 -j -o nuclei.json || true
+        continue-on-error: true
+
+      # --- TLS audit (D-005) ---
+
+      - name: testssl.sh
+        run: |
+          docker run --rm -v "$PWD":/data drwetter/testssl.sh:latest \
+            --jsonfile /data/testssl.json https://localhost:8443 || true
+        continue-on-error: true
+
+      - name: docker compose down
+        run: docker compose -f deploy/docker-compose.yml down || true
+        if: always()
+
+      # --- Upload everything as artefacts ---
+
+      - name: Upload deep-scan receipts
+        uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: security-deep-scan-${{ github.run_id }}
+          path: |
+            gosec.sarif
+            osv-scanner.json
+            go-test-race.txt
+            go-test-cover.txt
+            trivy.json
+            syft.cyclonedx.json
+            nuclei.json
+            testssl.json
+          retention-days: 30
