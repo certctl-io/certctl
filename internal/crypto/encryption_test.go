@@ -309,21 +309,23 @@ func TestDeriveKey_DifferentSaltsProduceDifferentKeys(t *testing.T) {
 
 // TestEncryptIfKeySet_ProducesV2Format asserts the exact v2 wire-format bytes:
 // magic(0x02) || salt(16) || nonce(12) || ciphertext+tag.
-func TestEncryptIfKeySet_ProducesV2Format(t *testing.T) {
+// TestEncryptIfKeySet_ProducesV3Format pins the Bundle B / M-001 write
+// path: every fresh blob carries magic byte 0x03 and the v3 layout.
+func TestEncryptIfKeySet_ProducesV3Format(t *testing.T) {
 	blob, _, err := EncryptIfKeySet([]byte("hello"), "any-passphrase")
 	if err != nil {
 		t.Fatalf("EncryptIfKeySet failed: %v", err)
 	}
 
-	const minLen = 1 + v2SaltSize + 12 + 16 // magic + salt + nonce + GCM tag (16)
+	const minLen = 1 + v3SaltSize + 12 + 16 // magic + salt + nonce + GCM tag (16)
 	if len(blob) < minLen {
-		t.Fatalf("v2 blob too short: got %d, want >= %d", len(blob), minLen)
+		t.Fatalf("v3 blob too short: got %d, want >= %d", len(blob), minLen)
 	}
-	if blob[0] != v2Magic {
-		t.Fatalf("v2 blob must start with magic byte 0x%02x, got 0x%02x", v2Magic, blob[0])
+	if blob[0] != v3Magic {
+		t.Fatalf("v3 blob must start with magic byte 0x%02x, got 0x%02x", v3Magic, blob[0])
 	}
 	if IsLegacyFormat(blob) {
-		t.Fatal("IsLegacyFormat must return false for a freshly produced v2 blob")
+		t.Fatal("IsLegacyFormat must return false for a freshly produced v3 blob")
 	}
 }
 
@@ -342,13 +344,13 @@ func TestEncryptIfKeySet_SaltIsRandom(t *testing.T) {
 		t.Fatalf("EncryptIfKeySet #2 failed: %v", err)
 	}
 
-	salt1 := blob1[1 : 1+v2SaltSize]
-	salt2 := blob2[1 : 1+v2SaltSize]
+	salt1 := blob1[1 : 1+v3SaltSize]
+	salt2 := blob2[1 : 1+v3SaltSize]
 	if bytes.Equal(salt1, salt2) {
 		t.Fatal("two EncryptIfKeySet invocations must produce distinct per-ciphertext salts")
 	}
 	if bytes.Equal(blob1, blob2) {
-		t.Fatal("two v2 blobs with same (passphrase, plaintext) must differ end-to-end")
+		t.Fatal("two v3 blobs with same (passphrase, plaintext) must differ end-to-end")
 	}
 }
 

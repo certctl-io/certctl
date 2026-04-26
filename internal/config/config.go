@@ -924,13 +924,21 @@ type AuthConfig struct {
 }
 
 // RateLimitConfig contains rate limiting configuration.
+//
+// Bundle B / Audit M-025 (OWASP ASVS L2 §11.2.1): pre-bundle the rate
+// limiter was global (a single token bucket shared across every request);
+// post-bundle it is per-key with separate budgets for IP-keyed and
+// user-keyed buckets. RPS / BurstSize are PER-KEY budgets.
 type RateLimitConfig struct {
 	// Enabled controls whether rate limiting is enforced on API endpoints.
 	// Default: true. Set to false to disable rate limits (not recommended for production).
 	// Setting: CERTCTL_RATE_LIMIT_ENABLED environment variable.
 	Enabled bool
 
-	// RPS is the target requests per second allowed per client (token bucket rate).
+	// RPS is the target requests per second allowed PER KEY (token bucket
+	// rate). For unauthenticated callers the key is the source IP; for
+	// authenticated callers the key is the API-key name (UserKey context
+	// value populated by NewAuthWithNamedKeys).
 	// Default: 50. Higher values allow burst throughput; lower values restrict load.
 	// Setting: CERTCTL_RATE_LIMIT_RPS environment variable.
 	RPS float64
@@ -940,6 +948,18 @@ type RateLimitConfig struct {
 	// Must be at least as large as RPS. Higher = more lenient burst handling.
 	// Setting: CERTCTL_RATE_LIMIT_BURST environment variable.
 	BurstSize int
+
+	// PerUserRPS overrides RPS for authenticated callers. When zero, RPS is
+	// used for both keying dimensions. Set this higher than RPS to grant
+	// authenticated clients a more generous budget than anonymous probes.
+	// Default: 0 (use RPS).
+	// Setting: CERTCTL_RATE_LIMIT_PER_USER_RPS environment variable.
+	PerUserRPS float64
+
+	// PerUserBurstSize overrides BurstSize for authenticated callers. When
+	// zero, BurstSize is used. Default: 0 (use BurstSize).
+	// Setting: CERTCTL_RATE_LIMIT_PER_USER_BURST environment variable.
+	PerUserBurstSize int
 }
 
 // CORSConfig contains CORS configuration.
@@ -1011,9 +1031,11 @@ func Load() (*Config, error) {
 			AgentBootstrapToken: getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
 		},
 		RateLimit: RateLimitConfig{
-			Enabled:   getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
-			RPS:       getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
-			BurstSize: getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
+			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
+			RPS:              getEnvFloat("CERTCTL_RATE_LIMIT_RPS", 50),
+			BurstSize:        getEnvInt("CERTCTL_RATE_LIMIT_BURST", 100),
+			PerUserRPS:       getEnvFloat("CERTCTL_RATE_LIMIT_PER_USER_RPS", 0),
+			PerUserBurstSize: getEnvInt("CERTCTL_RATE_LIMIT_PER_USER_BURST", 0),
 		},
 		CORS: CORSConfig{
 			AllowedOrigins: getEnvList("CERTCTL_CORS_ORIGINS", nil),

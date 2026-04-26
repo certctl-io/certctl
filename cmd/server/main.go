@@ -827,9 +827,14 @@ func main() {
 
 	// Add rate limiter if enabled
 	if cfg.RateLimit.Enabled {
+		// Bundle B / Audit M-025: per-user / per-IP keying. PerUser{RPS,Burst}
+		// fall back to RPS / BurstSize when zero; see middleware.NewRateLimiter
+		// for the bucket-creation contract.
 		rateLimiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
-			RPS:       cfg.RateLimit.RPS,
-			BurstSize: cfg.RateLimit.BurstSize,
+			RPS:              cfg.RateLimit.RPS,
+			BurstSize:        cfg.RateLimit.BurstSize,
+			PerUserRPS:       cfg.RateLimit.PerUserRPS,
+			PerUserBurstSize: cfg.RateLimit.PerUserBurstSize,
 		})
 		middlewareStack = []func(http.Handler) http.Handler{
 			middleware.RequestID,

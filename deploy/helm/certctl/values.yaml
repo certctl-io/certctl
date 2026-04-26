@@ -314,6 +314,34 @@ postgresql:
     #       helm install <release> ...  # PVC re-creates empty, initdb seeds new password
     password: ""
 
+  # ─────────────────────────────────────────────────────────────────────
+  # Bundle B / Audit M-018 (PCI-DSS Req 4 / CWE-319): TLS to Postgres
+  # ─────────────────────────────────────────────────────────────────────
+  # postgresql.tls.mode is wired into the database-url sslmode parameter
+  # (see templates/_helpers.tpl::certctl.databaseURL).
+  #
+  # Acceptable values (lib/pq):
+  #   disable     — no TLS (default, preserves in-cluster pod-to-pod
+  #                 traffic on the K8s pod network).
+  #   require     — TLS required, no certificate verification.
+  #   verify-ca   — TLS required + verify CA chain.
+  #   verify-full — TLS required + verify CA chain + verify hostname.
+  #
+  # PCI-DSS Req 4 v4.0 §2.2.5 requires verify-ca or verify-full when the
+  # database carries sensitive data crossing untrusted networks (RDS,
+  # Cloud SQL, cross-VPC, etc). The bundled Helm Postgres runs in the
+  # same pod network as certctl-server; sslmode=disable is acceptable
+  # there only when the cluster CNI provides L2/L3 encryption (Cilium
+  # WireGuard, Calico Wireguard, Tailscale operator, etc).
+  #
+  # When mode != disable AND tls.caSecretRef is set, the CA bundle is
+  # mounted at /etc/postgresql-ca/ca.crt and the server's PGSSLROOTCERT
+  # env points there. caSecretRef must reference an existing Secret with
+  # a "ca.crt" key.
+  tls:
+    mode: disable
+    # caSecretRef: ""  # Secret with ca.crt key (required for verify-ca/verify-full)
+
   # Storage configuration
   storage:
     size: 10Gi

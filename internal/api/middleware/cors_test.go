@@ -6,6 +6,76 @@ import (
 	"testing"
 )
 
+// Bundle B / Audit M-013 (CWE-942) regression pins.
+//
+// The audit-finding text reads: "CORS configuration default allows all
+// origins if env-var unset". Phase 0 recon proves that claim is WRONG —
+// internal/api/middleware/middleware.go::NewCORS already denies when
+// len(cfg.AllowedOrigins) == 0 (no Access-Control-Allow-Origin header is
+// emitted, so same-origin policy applies). Bundle B's M-013 closure is
+// "verified-already-clean": these tests pin the deny-by-default contract
+// in BOTH shapes (nil slice and empty slice) so a future refactor that
+// inverts the default fails CI.
+
+// TestNewCORS_NilOriginsDeniesAll pins the deny-by-default contract for
+// the nil-slice shape (which is what propagates from a missing
+// CERTCTL_CORS_ORIGINS env var via internal/config/config.go::getEnvList).
+func TestNewCORS_NilOriginsDeniesAll(t *testing.T) {
+	mw := NewCORS(CORSConfig{AllowedOrigins: nil})
+	handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(http.StatusOK)
+	}))
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/certificates", nil)
+	req.Header.Set("Origin", "https://attacker.example.com")
+	rr := httptest.NewRecorder()
+	handler.ServeHTTP(rr, req)
+	if got := rr.Header().Get("Access-Control-Allow-Origin"); got != "" {
+		t.Errorf("nil AllowedOrigins must NOT emit Access-Control-Allow-Origin, got %q", got)
+	}
+	if got := rr.Header().Get("Vary"); got != "" {
+		t.Errorf("nil AllowedOrigins must NOT emit Vary, got %q", got)
+	}
+}
+
+// TestNewCORS_M013_ContractDocumentedInOrder pins the documented dispatch
+// order so a refactor cannot silently invert the cases:
+//
+//	1. len(AllowedOrigins) == 0  → deny (no CORS headers)
+//	2. AllowedOrigins == ["*"]   → allow all (Access-Control-Allow-Origin: *)
+//	3. else                      → exact-match allowlist with Vary: Origin
+//
+// If a refactor accidentally falls through to the allow-all branch when
+// AllowedOrigins is empty, this test fails on case 1.
+func TestNewCORS_M013_ContractDocumentedInOrder(t *testing.T) {
+	cases := []struct {
+		name           string
+		origins        []string
+		incomingOrigin string
+		wantHeader     string // "" means no header expected
+	}{
+		{"deny_empty_slice", []string{}, "https://app.example.com", ""},
+		{"deny_nil", nil, "https://app.example.com", ""},
+		{"allow_all_with_star", []string{"*"}, "https://app.example.com", "*"},
+		{"exact_allow_match", []string{"https://app.example.com"}, "https://app.example.com", "https://app.example.com"},
+		{"exact_deny_mismatch", []string{"https://app.example.com"}, "https://attacker.example.com", ""},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			mw := NewCORS(CORSConfig{AllowedOrigins: tc.origins})
+			handler := mw(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				w.WriteHeader(http.StatusOK)
+			}))
+			req := httptest.NewRequest(http.MethodGet, "/", nil)
+			req.Header.Set("Origin", tc.incomingOrigin)
+			rr := httptest.NewRecorder()
+			handler.ServeHTTP(rr, req)
+			if got := rr.Header().Get("Access-Control-Allow-Origin"); got != tc.wantHeader {
+				t.Errorf("got Access-Control-Allow-Origin=%q, want %q (incoming origin=%q)", got, tc.wantHeader, tc.incomingOrigin)
+			}
+		})
+	}
+}
+
 // TestNewCORS_EmptyOriginList denies CORS by default (secure default).
 func TestNewCORS_EmptyOriginList(t *testing.T) {
 	mw := NewCORS(CORSConfig{AllowedOrigins: []string{}})

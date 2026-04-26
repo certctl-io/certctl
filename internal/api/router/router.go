@@ -43,6 +43,49 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 	r.Register(pattern, http.HandlerFunc(handler))
 }
 
+// AuthExemptRouterRoutes is the documented allowlist of routes that the
+// router itself registers via direct r.mux.Handle calls (NOT via r.Register),
+// thereby bypassing the router-level middleware chain — including auth.
+//
+// Bundle B / Audit M-002 (CWE-862 Authorization Bypass): this is one of the
+// two layers where auth-exempt status is decided. The complete picture:
+//
+//  1. Router layer (this constant) — direct mux.Handle registrations in
+//     RegisterHandlers below. Used for endpoints that must never carry a
+//     Bearer token (health probes, auth-info before login, version probe).
+//
+//  2. Dispatch layer (cmd/server/main.go::buildFinalHandler) — URL-prefix
+//     dispatch that routes /.well-known/pki/*, /.well-known/est/*, and
+//     /scep[/...]* through the no-auth handler chain. Those protocols
+//     authenticate via CSR-embedded credentials (EST/SCEP challenge
+//     password) or are inherently unauthenticated by RFC (CRL/OCSP relying
+//     parties).
+//
+// Every entry in this slice has a justification. Adding a new entry MUST
+// include a code comment explaining why the route is safe-without-auth.
+// The TestRouter_AuthExemptAllowlist regression test below pins the slice
+// to the actual mux.Handle calls — adding an undocumented bypass fails CI.
+var AuthExemptRouterRoutes = []string{
+	"GET /health",            // K8s/Docker liveness probe; cannot carry Bearer
+	"GET /ready",             // K8s/Docker readiness probe; cannot carry Bearer
+	"GET /api/v1/auth/info",  // GUI calls before login to detect auth mode
+	"GET /api/v1/version",    // Rollout probes need build identity without key
+}
+
+// AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
+// that cmd/server/main.go::buildFinalHandler routes through the no-auth
+// handler chain. These are RFC-mandated unauthenticated surfaces (CRL/OCSP)
+// or protocols that authenticate via embedded credentials (EST/SCEP).
+//
+// Bundle B / Audit M-002: complement to AuthExemptRouterRoutes. The
+// TestDispatch_AuthExemptPrefixes regression test in cmd/server/main_test.go
+// pins this slice to buildFinalHandler's actual dispatch logic.
+var AuthExemptDispatchPrefixes = []string{
+	"/.well-known/pki",  // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
+	"/.well-known/est",  // RFC 7030 EST — auth via mTLS or CSR-embedded creds
+	"/scep",             // RFC 8894 SCEP — auth via challengePassword in CSR
+}
+
 // HandlerRegistry groups all API handler dependencies for router registration.
 type HandlerRegistry struct {
 	Certificates   handler.CertificateHandler
