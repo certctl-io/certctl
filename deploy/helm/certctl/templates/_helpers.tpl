@@ -112,9 +112,24 @@ PostgreSQL image
 
 {{/*
 Database connection string
+
+Bundle B / Audit M-018 (PCI-DSS Req 4 / CWE-319):
+  - postgresql.tls.mode is the operator-facing knob.
+    Default: "disable" (preserves the in-cluster Helm-bundled-Postgres
+    behavior; pod-to-pod traffic stays on the K8s pod network and is
+    encrypted by the CNI when the cluster is configured with a TLS-aware
+    CNI such as Cilium WireGuard).
+  - Operators on PCI-DSS-scoped clusters or operators using an external
+    managed Postgres (RDS, Cloud SQL, Azure DB) MUST set
+    postgresql.tls.mode to "require", "verify-ca", or "verify-full" and
+    point postgresql.tls.caSecretRef at a Secret containing the
+    server-ca.crt under key "ca.crt".
+  - The connection string sslmode parameter is wired from
+    postgresql.tls.mode without further translation.
 */}}
 {{- define "certctl.databaseURL" -}}
-postgres://{{ .Values.postgresql.auth.username }}:$(POSTGRES_PASSWORD)@{{ include "certctl.fullname" . }}-postgres:5432/{{ .Values.postgresql.auth.database }}?sslmode=disable
+{{- $sslMode := default "disable" .Values.postgresql.tls.mode -}}
+postgres://{{ .Values.postgresql.auth.username }}:$(POSTGRES_PASSWORD)@{{ include "certctl.fullname" . }}-postgres:5432/{{ .Values.postgresql.auth.database }}?sslmode={{ $sslMode }}
 {{- end }}
 
 {{/*

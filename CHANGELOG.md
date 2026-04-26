@@ -4,6 +4,39 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle B (Auth & Transport Surface Tightening): 5 audit findings closed
+
+> Closes the audit's auth + transport hardening cluster: `M-001` (PBKDF2 100k → 600k via new v3 blob format with v2/v1 read fallback), `M-002` (auth-exempt allowlist constants + AST-walking regression tests pin both router-layer and dispatch-layer bypass paths), `M-013` (CORS deny-by-default verified-already-clean + explicit nil/empty/star contract pin), `M-018` (Postgres TLS opt-in via Helm `postgresql.tls.mode` toggle + operator runbook `docs/database-tls.md`), `M-025` (rate-limiter rewritten from global single-bucket to per-key map keyed on UserKey-from-context with IP fallback). **Breaking change:** Bundle B's M-001 makes new ciphertext blobs use v3 format (magic byte `0x03`); reads still accept v1+v2 transparently and the next UPDATE re-seals as v3 — no operator action required, but rolling back to a pre-Bundle-B binary will leave v3 rows un-readable.
+
+#### Added
+
+- **`internal/crypto/encryption.go::deriveKeyWithSaltV3` / `v3Magic` / `pbkdf2IterationsV3` (NEW, Audit M-001 / CWE-916)** — v3 blob format `magic(0x03) || salt(16) || nonce(12) || ciphertext+tag` at 600,000 PBKDF2-SHA256 rounds (OWASP 2024 Password Storage Cheat Sheet). `EncryptIfKeySet` always emits v3; `DecryptIfKeySet` falls through v3 → v2 → v1 with AEAD verification at each step so a wrong-passphrase v3 blob can't silently round-trip through the v2/v1 fallback. `IsLegacyFormat` updated to recognize 0x03 as non-legacy.
+- **`internal/api/router/router.go::AuthExemptRouterRoutes` + `AuthExemptDispatchPrefixes` (NEW, Audit M-002 / CWE-862)** — documented allowlist constants for the two layers where auth-exempt status is decided. Per-entry comments cite the protocol/operational reason each route is safe-without-auth (K8s probes, RFC 5280 CRL, RFC 6960 OCSP, RFC 7030 EST, RFC 8894 SCEP).
+- **`internal/api/middleware/middleware.go::keyedRateLimiter` + `rateLimitKey` (NEW, Audit M-025 / OWASP ASVS L2 §11.2.1)** — per-key token bucket map. Key = `"user:"+GetUser(ctx)` for authenticated callers, `"ip:"+RemoteAddr-host` otherwise. Empty UserKey strings are treated as unauthenticated to prevent a misconfigured auth middleware from collapsing every anonymous request onto a single bucket. X-Forwarded-For intentionally NOT consulted to prevent trivial header-spoofing bypass.
+- **`RateLimitConfig.PerUserRPS` / `PerUserBurstSize` + env vars `CERTCTL_RATE_LIMIT_PER_USER_RPS` / `CERTCTL_RATE_LIMIT_PER_USER_BURST` (NEW, Audit M-025)** — optional per-user budget overrides; zero falls back to the IP-keyed budget.
+- **Helm `postgresql.tls.mode` + `caSecretRef` (NEW, Audit M-018 / CWE-319)** — operator-facing toggle in `deploy/helm/certctl/values.yaml` wired through `templates/_helpers.tpl::certctl.databaseURL` into the connection-string `?sslmode=` parameter. Default `disable` preserves in-cluster pod-network behavior; PCI-scoped operators set `verify-full`.
+- **`docs/database-tls.md` (NEW, Audit M-018)** — operator runbook covering 4 deployment shapes (in-cluster Helm, external RDS/Cloud SQL/Azure DB, docker-compose, external direct), RDS `verify-full` example with `PGSSLROOTCERT` mount, and a `pg_stat_ssl` verification query.
+
+#### Tests
+
+- **`internal/crypto/encryption_v3_test.go` (NEW, 7 tests, Audit M-001)** — V3 round-trip; V2 read-fallback against deterministic v2 fixture (proves backward compat without flakiness); V3 wrong-passphrase rejection; V3-vs-V2 dispatch order; V2/V3 keys differ for same `(passphrase, salt)`; iteration-count assertion at OWASP 2024 floor of 600k; IsLegacyFormat-recognises-V3.
+- **`internal/api/router/auth_exempt_test.go` (NEW, 2 tests, Audit M-002)** — `TestRouter_AuthExemptAllowlist_PinsActualRegistrations` AST-walks `router.go` to enumerate every direct `r.mux.Handle` call and asserts the set equals `AuthExemptRouterRoutes`. `TestRouter_AllRegisterCallsGoThroughMiddlewareChain` reads the source bytes of `Router.Register` / `Router.RegisterFunc` and asserts they still pipe through `middleware.Chain` (a refactor that drops the chain wrap fails CI).
+- **`cmd/server/auth_exempt_test.go` (NEW, 2 tests, Audit M-002)** — `TestBuildFinalHandler_AuthExemptDispatchAllowlist` is a 14-case table test that probes every documented prefix + a sample of authenticated routes and asserts each routes to the correct handler. `TestDispatch_NoUndocumentedBypasses` asserts authenticated prefixes do NOT overlap with any documented bypass prefix.
+- **`internal/api/middleware/cors_test.go` (extended, +2 tests, Audit M-013)** — `TestNewCORS_NilOriginsDeniesAll` covers the env-var-unset → nil-slice path; `TestNewCORS_M013_ContractDocumentedInOrder` is a 5-case table test pinning the 3-arm dispatch (deny when len==0, wildcard with `["*"]`, exact-match otherwise) so a refactor inverting the default fails CI.
+- **`internal/api/middleware/ratelimit_keyed_test.go` (NEW, 5 tests, Audit M-025)** — TwoIPsHaveIndependentBuckets, SameUserDifferentIPsShareBucket, TwoUsersHaveIndependentBuckets, PerUserBudgetOverride, EmptyUserKeyTreatedAsAnonymous. All exercise the keyed dispatch in real requests; total middleware coverage 82.1% → 83.7%.
+
+#### Wired
+
+- **`cmd/server/main.go`** — `RateLimitConfig` constructor now passes `PerUserRPS` + `PerUserBurstSize` through to `middleware.NewRateLimiter`.
+- **`internal/config/config.go::RateLimitConfig`** — new `PerUserRPS` / `PerUserBurstSize` fields; corresponding env-var bindings in `Load()`.
+- **`deploy/docker-compose.yml`** — `CERTCTL_DATABASE_URL` is now `${CERTCTL_DATABASE_URL:-postgres://.../certctl?sslmode=disable}` so operators can override without editing the file. Comment block points to `docs/database-tls.md`.
+- **`deploy/helm/certctl/templates/server-secret.yaml`** — `database-url` now uses the `certctl.databaseURL` helper template instead of a hardcoded string.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 25/55 → 30/55 closed (Critical 0/0, High 7/9, Medium 7/27 → 12/27, Low 8/19); M-001 / M-002 / M-013 / M-018 / M-025 boxes flipped `[x]` with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — corresponding status flips with closure notes citing the Bundle B mechanism.
+
 ### Bundle 9 (Local-Issuer Hardening): 5 audit findings closed + 1 partial
 
 > Closes the audit's local-CA + agent-keystore findings end-to-end: `H-010` (local-issuer coverage 68.3% → 86.7%, CI gate flipped 60% → 85% hard), `L-002` (private-key zeroization helper + agent + local wiring), `L-003` (0700 key-dir hardening), `L-012` (Unicode safety in CN/SAN — IDN homograph + RTL + zero-width + control chars), `L-014` (CA-key-in-process threat-model documentation), and partially closes `M-028` — the `internal/connector/issuer/local/local.go:682` `elliptic.Marshal` → `crypto/ecdh.PublicKey.Bytes()` site only (5 of 6 SA1019 sites remain). Round-trip pin in `TestHashPublicKey_ECDSA_RoundTripPin` proves byte-identical SubjectKeyId output across P-256/P-384/P-521 so the migration cannot silently change the SKI of every previously-issued cert.

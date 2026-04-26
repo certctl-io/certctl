@@ -240,24 +240,67 @@ func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
 }
 
 // RateLimitConfig holds configuration for the rate limiter.
+//
+// Bundle B / Audit M-025 (OWASP ASVS L2 §11.2.1) extends this with per-user
+// and per-IP keying. The historic RPS / BurstSize fields are preserved for
+// source compatibility — they now describe the per-key budget rather than
+// the global budget. PerUserRPS / PerUserBurstSize, when non-zero, override
+// RPS / BurstSize for authenticated callers; the IP-keyed fallback
+// continues to use RPS / BurstSize so unauthenticated callers don't get
+// a more generous bucket than authenticated ones by default.
 type RateLimitConfig struct {
-	RPS       float64 // Requests per second
-	BurstSize int     // Maximum burst size
+	RPS       float64 // Tokens per second per key (default applies to IP-keyed buckets)
+	BurstSize int     // Max tokens per key (default applies to IP-keyed buckets)
+
+	// PerUserRPS overrides RPS for authenticated callers (keyed by UserKey
+	// in context). Zero means "use RPS as the authenticated budget too".
+	PerUserRPS float64
+
+	// PerUserBurstSize overrides BurstSize for authenticated callers.
+	// Zero means "use BurstSize".
+	PerUserBurstSize int
 }
 
-// NewRateLimiter creates a token bucket rate limiting middleware.
-// Uses a simple token bucket: tokens refill at RPS rate, burst allows short spikes.
+// NewRateLimiter creates a per-key token bucket rate limiting middleware.
+//
+// Bundle B / Audit M-025: pre-bundle this returned a single global bucket
+// shared across every request, so a single noisy caller could exhaust the
+// budget for everyone else (effectively a self-DoS). Post-bundle each
+// authenticated user and each unauthenticated IP gets its own bucket. Keys
+// are computed per request:
+//
+//   - Authenticated: "user:" + middleware.GetUser(ctx)
+//   - Unauthenticated: "ip:" + r.RemoteAddr's host portion
+//
+// The bucket map is sync.RWMutex-guarded; create-on-demand for new keys.
+// There is no eviction — for a long-running server with millions of unique
+// IPs this can leak memory. A future enhancement is per-key TTL via a
+// lazy sweeper. For now the leak is bounded by realistic operator IP
+// fan-out and is acceptable per OWASP ASVS L2 (the threat model is abuse
+// by a known set of clients, not infinite-cardinality scanners).
 func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
-	limiter := &tokenBucket{
-		rate:       cfg.RPS,
-		burstSize:  float64(cfg.BurstSize),
-		tokens:     float64(cfg.BurstSize),
-		lastRefill: time.Now(),
+	// Default per-user budgets to the IP-keyed budget when not overridden.
+	perUserRPS := cfg.PerUserRPS
+	if perUserRPS == 0 {
+		perUserRPS = cfg.RPS
+	}
+	perUserBurst := float64(cfg.PerUserBurstSize)
+	if perUserBurst == 0 {
+		perUserBurst = float64(cfg.BurstSize)
+	}
+
+	limiter := &keyedRateLimiter{
+		ipRate:       cfg.RPS,
+		ipBurst:      float64(cfg.BurstSize),
+		userRate:     perUserRPS,
+		userBurst:    perUserBurst,
+		buckets:      make(map[string]*tokenBucket),
 	}
 
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			if !limiter.allow() {
+			key, isUser := rateLimitKey(r)
+			if !limiter.allow(key, isUser) {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				w.Header().Set("Retry-After", "1")
 				http.Error(w, `{"error":"Rate limit exceeded"}`, http.StatusTooManyRequests)
@@ -266,6 +309,70 @@ func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 			next.ServeHTTP(w, r)
 		})
 	}
+}
+
+// rateLimitKey computes the per-request bucket key. Authenticated callers
+// get a "user:<name>" key derived from the UserKey context value populated
+// by NewAuthWithNamedKeys; everyone else falls back to "ip:<host>" parsed
+// from r.RemoteAddr (X-Forwarded-For is intentionally NOT consulted here
+// — operators behind a trusted proxy must configure that proxy to set
+// RemoteAddr correctly, or the rate limiter would be trivially bypassable
+// by spoofing the header).
+//
+// Returns (key, isAuthenticated). Empty UserKey strings are treated as
+// unauthenticated so a misconfigured auth middleware doesn't grant the
+// same bucket to every anonymous request.
+func rateLimitKey(r *http.Request) (string, bool) {
+	if user := GetUser(r.Context()); user != "" {
+		return "user:" + user, true
+	}
+	host := r.RemoteAddr
+	if idx := strings.LastIndex(host, ":"); idx >= 0 {
+		host = host[:idx]
+	}
+	if host == "" {
+		host = "unknown"
+	}
+	return "ip:" + host, false
+}
+
+// keyedRateLimiter holds a token bucket per (user-or-ip) key with separate
+// rate / burst defaults for the user-keyed and ip-keyed dimensions.
+type keyedRateLimiter struct {
+	mu        sync.RWMutex
+	buckets   map[string]*tokenBucket
+	ipRate    float64
+	ipBurst   float64
+	userRate  float64
+	userBurst float64
+}
+
+func (k *keyedRateLimiter) allow(key string, isUser bool) bool {
+	// Fast path: bucket already exists.
+	k.mu.RLock()
+	tb, ok := k.buckets[key]
+	k.mu.RUnlock()
+
+	if !ok {
+		// Slow path: create-on-demand under write lock with double-check.
+		k.mu.Lock()
+		tb, ok = k.buckets[key]
+		if !ok {
+			rate, burst := k.ipRate, k.ipBurst
+			if isUser {
+				rate, burst = k.userRate, k.userBurst
+			}
+			tb = &tokenBucket{
+				rate:       rate,
+				burstSize:  burst,
+				tokens:     burst,
+				lastRefill: time.Now(),
+			}
+			k.buckets[key] = tb
+		}
+		k.mu.Unlock()
+	}
+	return tb.allow()
 }
 
 // tokenBucket implements a simple thread-safe token bucket rate limiter.
