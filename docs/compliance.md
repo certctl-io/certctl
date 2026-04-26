@@ -32,6 +32,85 @@ If you're preparing for an audit and certctl is already deployed, use the "Opera
 | PCI-DSS 4.0 | Cardholder data protection | TLS lifecycle, key management, immutable logging, access control |
 | NIST SP 800-57 | Cryptographic key management | Agent-side keygen, key isolation, algorithm selection, revocation |
 
+## Audit-Trail Integrity & Privacy (Bundle 6)
+
+Two complementary controls protect the `audit_events` table against tampering and minimize PII exposure. Both apply automatically — no operator action is required at install time, but operators must understand the contract before responding to a legal-hold or retention request.
+
+### Append-Only Enforcement (HIPAA §164.312(b))
+
+<!-- Source: migrations/000018_audit_events_worm.up.sql -->
+
+`audit_events` rows cannot be modified or deleted by the application role. Two layers:
+
+| Layer | Mechanism | Surface |
+|---|---|---|
+| **DB trigger** | `audit_events_block_modification()` raises `check_violation` on `BEFORE UPDATE OR DELETE` | Catches any UPDATE / DELETE — including direct `psql` from the app role |
+| **App-role grant** | `REVOKE UPDATE, DELETE ON audit_events FROM certctl` | Defence-in-depth; the app role can't even attempt the modification |
+
+**Verification.** From a `psql` session connected as the `certctl` app role:
+
+```sql
+UPDATE audit_events SET actor = 'tampered' WHERE id = 'audit-001';
+-- ERROR:  audit_events is append-only (Bundle-6 / M-017 / HIPAA §164.312(b))
+-- HINT:   Use a compliance superuser role for legitimate retention operations.
+```
+
+**Compliance superuser pattern.** Legitimate retention work (legal hold, GDPR right-to-be-forgotten, statutory purges) requires a separate PostgreSQL role provisioned out-of-band that bypasses the trigger. Certctl does NOT auto-create this role — operators provision it per their compliance policy. Suggested shape:
+
+```sql
+-- One-time setup by a DBA. Stored procedure pattern keeps the
+-- compliance superuser audit-able too: every invocation should
+-- itself land in audit_events.
+CREATE ROLE certctl_compliance LOGIN PASSWORD '<strong-secret>';
+GRANT UPDATE, DELETE ON audit_events TO certctl_compliance;
+-- (optional) provision SECURITY DEFINER stored procedures that
+-- (a) record the retention reason in audit_events as the FIRST step
+-- (b) then perform the UPDATE/DELETE
+-- (c) all under the certctl_compliance role's grants.
+```
+
+### Body Redaction (GDPR Art. 32, CWE-532)
+
+<!-- Source: internal/service/audit_redact.go -->
+
+`AuditService.RecordEvent` routes every `details` map through `RedactDetailsForAudit` BEFORE marshaling to the JSONB column. Two deny-lists:
+
+| Category | Match | Replacement | Examples |
+|---|---|---|---|
+| **Credentials** | case-insensitive key match | `"[REDACTED:CREDENTIAL]"` | `api_key`, `password`, `token`, `*_pem`, `eab_secret`, `acme_account_key`, `signature` |
+| **PII** | case-insensitive key match | `"[REDACTED:PII]"` | `email`, `phone`, `ssn`, `dob`, `name`, `address`, `postal_code`, `ip_address` |
+
+Nested maps and arrays are walked recursively — sensitive keys at any depth get scrubbed. The redactor is mutation-free (the caller's original map is unchanged) so service-layer code that reuses the map elsewhere is safe.
+
+**Operator visibility — `redacted_keys` array.** The redacted map includes a `redacted_keys` array listing every dotted-path that was scrubbed. This surfaces the redaction footprint to compliance auditors without exposing values. Example before/after:
+
+```jsonc
+// Caller's input map (e.g., from a service handler):
+{
+  "action": "create_issuer",
+  "issuer_id": "iss-acme-prod",
+  "config": {
+    "endpoint": "https://acme.example.com",
+    "eab_secret": "abc123secret",
+    "contact": { "email": "ops@example.com", "role": "admin" }
+  }
+}
+
+// Persisted in audit_events.details:
+{
+  "action": "create_issuer",
+  "issuer_id": "iss-acme-prod",
+  "config": {
+    "endpoint": "https://acme.example.com",
+    "eab_secret": "[REDACTED:CREDENTIAL]",
+    "contact": { "email": "[REDACTED:PII]", "role": "admin" }
+  },
+  "redacted_keys": ["config.eab_secret", "config.contact.email"]
+}
+```
+
+**Maintenance.** When introducing a new credential-bearing field anywhere in the codebase, add the key name to `credentialKeys` (or `piiKeys`) in `internal/service/audit_redact.go`. The unit test suite in `audit_redact_test.go` exercises every entry and proves case-insensitivity + JSON round-trip safety.
+
 ## certctl Pro (V3) Enhancements
 
 Several compliance-relevant features are planned for certctl Pro:
