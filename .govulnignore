@@ -1,0 +1,21 @@
+# Bundle-7 / Audit D-001 / govulncheck suppressions.
+#
+# Format: one OSV ID per line, with a comment justifying the suppression.
+# Every entry needs:
+#   - the OSV ID (GO-YYYY-NNNN)
+#   - one-line "what is it"
+#   - one-line "why we're not affected" (must reference call-graph evidence)
+#   - "review-by" date (YYYY-MM-DD) — re-triage on/after this date
+#
+# Triage rule: only suppress an advisory if `govulncheck ./...` (NOT
+# verbose) reports it as a deferred-call vulnerability ("packages you
+# import" or "modules you require", not "Your code is affected by").
+#
+# At Bundle-7 time (2026-04-26): the 5 advisories surfaced are all in
+# transitive deps and govulncheck confirms our code does not call them.
+# Documented here for tracking; no entries needed because the default
+# fail-on-non-zero gate already passes (govulncheck distinguishes
+# called vs uncalled and only exits non-zero when the latter calls in).
+#
+# Example (do not enable unless the advisory becomes call-affected):
+# GO-2026-4441  # transitive: golang.org/x/crypto pre-v0.40 — net/ssh terrapin downgrade; we don't use net/ssh; review 2026-07-01

@@ -42,7 +42,30 @@ jobs:
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
       - name: Run govulncheck
+        # Bundle-7 / D-001 partial: govulncheck distinguishes called-vs-uncalled
+        # advisories. Default exit code is non-zero only when YOUR code calls
+        # the vulnerable function — deferred-call advisories show up in the
+        # output but don't fail the gate. See .govulnignore for the
+        # suppression contract if a triaged false-positive needs to be muted.
         run: govulncheck ./...
+
+      - name: Install staticcheck (Bundle-7 / D-001)
+        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+
+      - name: Run staticcheck
+        # Bundle-7 / D-001: Go static analysis additive to vet. Suppressed
+        # rules live in staticcheck.conf with documented justifications;
+        # adding a new entry requires an explicit security review.
+        #
+        # SOFT gate (continue-on-error: true) until M-028 closes the 6
+        # remaining SA1019 deprecated-API sites:
+        #   - cmd/server/main_test.go × 3: middleware.NewAuth → NewAuthWithNamedKeys
+        #   - internal/api/handler/scep.go: csr.Attributes → Extensions
+        #   - internal/connector/issuer/local/local.go: elliptic.Marshal → crypto/ecdh
+        # When M-028 ships, flip continue-on-error to false to make this
+        # a hard gate. Until then, the step still annotates findings on PRs.
+        continue-on-error: true
+        run: staticcheck ./...
 
       - name: Forbidden auth-type literal regression guard (G-1)
         # G-1 closed the JWT silent auth downgrade by removing "jwt" from the
@@ -590,6 +613,17 @@ jobs:
           CRYPTO_COV=$(go tool cover -func=coverage.out | grep 'internal/crypto' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
           echo "Crypto package coverage: ${CRYPTO_COV}%"
 
+          # Bundle-7 / Audit H-005 — extended crypto-cluster gates per CLAUDE.md.
+          # internal/pkcs7/ is at 100% at HEAD (encoder-only, exhaustively tested
+          # via Bundle-4 fuzz targets + unit tests). internal/connector/issuer/local/
+          # is at 68.3% at HEAD; H-010 tracks the gap and will lift this floor
+          # to 85% once the missing CSR-validation + CA-cert-loading tests land.
+          PKCS7_COV=$(go tool cover -func=coverage.out | grep 'internal/pkcs7' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "PKCS7 package coverage: ${PKCS7_COV}%"
+
+          LOCAL_ISSUER_COV=$(go tool cover -func=coverage.out | grep 'internal/connector/issuer/local' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "Local-issuer coverage: ${LOCAL_ISSUER_COV}%"
+
           # Fail if thresholds not met
           if [ "$(echo "$SERVICE_COV < 55" | bc -l)" -eq 1 ]; then
             echo "::error::Service layer coverage ${SERVICE_COV}% is below 55% threshold"
@@ -609,6 +643,18 @@ jobs:
           fi
           if [ "$(echo "$CRYPTO_COV < 85" | bc -l)" -eq 1 ]; then
             echo "::error::Crypto package coverage ${CRYPTO_COV}% is below 85% threshold"
+            exit 1
+          fi
+          # Bundle-7 / H-005: pkcs7 hard gate (currently 100% — protects regressions).
+          if [ "$(echo "$PKCS7_COV < 85" | bc -l)" -eq 1 ]; then
+            echo "::error::PKCS7 package coverage ${PKCS7_COV}% is below 85% threshold"
+            exit 1
+          fi
+          # Bundle-7 / H-005 / H-010: local-issuer SOFT gate at 65% — H-010
+          # tracks the gap from 68.3% (HEAD) → 85% (CLAUDE.md target). Once
+          # H-010's missing test cases land, raise this floor to 85.
+          if [ "$(echo "$LOCAL_ISSUER_COV < 65" | bc -l)" -eq 1 ]; then
+            echo "::error::Local-issuer coverage ${LOCAL_ISSUER_COV}% is below 65% transitional floor (H-010 will raise to 85%)"
             exit 1
           fi
           echo "Coverage thresholds passed!"
