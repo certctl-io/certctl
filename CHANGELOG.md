@@ -4,6 +4,37 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle 8 (Frontend Hardening): 2 audit findings closed + 3 partial + 1 new ID opened
+
+> Closes the audit's remaining frontend findings — `L-015` (target="_blank" rel-noopener) and `L-019` (dangerouslySetInnerHTML) verified-already-clean at HEAD with new chokepoints + CI grep guards preventing regression. Partial closures for `M-009` (mutation invalidation), `M-010` (filter/sort/pagination consistency), `M-026` (XSS deep-dive on 14 untested pages) — Bundle 8 ships the helpers + contract tests + soft CI budget guard; per-page migrations of the existing 56 useMutation sites + ~14 list pages + 14 T-1-deferred pages tracked as new finding `M-029`.
+
+#### Added
+
+- **`web/src/components/ExternalLink.tsx` (NEW, Audit L-015 / CWE-1022)** — single chokepoint anchor that hardcodes `target="_blank"` + `rel="noopener noreferrer"`. Future external-link additions should use this component; the CI grep guard fails the build if any new bare `target="_blank"` lands without the rel pair outside this file.
+- **`web/src/utils/safeHtml.ts::sanitizeHtml` (NEW, Audit L-019 / CWE-79)** — placeholder chokepoint for any future code that needs `dangerouslySetInnerHTML`. Throws by default with a clear "add dompurify" activation-procedure message; the CI grep guard fails the build if any new `dangerouslySetInnerHTML` lands outside this file. At Bundle-8 time the codebase has 0 sites — the placeholder is preventive.
+- **`web/src/hooks/useListParams.ts` (NEW, Audit M-010)** — URL-state hook for filter / sort / pagination on list pages. Canonicalises the existing `DashboardPage` `useSearchParams` pattern with the contract `?page=2&page_size=25&sort=-created_at&filter[status]=active`. 7-test Vitest suite covers default omission, garbage-value rejection, filter-resets-page invariant, resetParams.
+- **`web/src/hooks/useTrackedMutation.ts` (NEW, Audit M-009)** — `useMutation` wrapper whose discriminated-union type REQUIRES the caller to declare `invalidates: QueryKey[]` OR `invalidates: 'noop'` + `noopReason: string`. Migrating the 56 existing useMutation sites to the wrapper tracked as `M-029`.
+- **CI regression guards (`.github/workflows/ci.yml`)** — three new steps: "Bundle-8 / L-015 target=_blank rel=noopener" (greps web/src for any bare target=_blank); "Bundle-8 / L-019 dangerouslySetInnerHTML" (greps web/src outside safeHtml.ts); "Bundle-8 / M-009 mutation invalidation contract" (soft budget guard: useMutation sites must not exceed invalidation sites + 5).
+
+#### Tests
+
+- 4 new Vitest test files / 15 tests passing: `ExternalLink.test.tsx` (target/rel preservation), `safeHtml.test.ts` (placeholder throws + activation-hint message), `useListParams.test.tsx` (URL contract), `useTrackedMutation.test.tsx` (invalidate-then-onSuccess + noop variant).
+
+#### Verified at HEAD (no code change required)
+
+- **L-015** — all 3 `target="_blank"` sites in `web/src/pages/OnboardingWizard.tsx` already carry `rel="noopener noreferrer"`. CI guard now prevents regression.
+- **L-019** — 0 `dangerouslySetInnerHTML` sites anywhere in `web/src/`. CI guard now prevents regression.
+
+#### Partially addressed (helpers shipped, per-page migrations tracked as M-029)
+
+- **M-009** — 56 useMutation sites across `web/src/`; soft CI budget guard at HEAD (61 mutations / 87 budget). Per-site migration to `useTrackedMutation` is incremental.
+- **M-010** — `CertificatesPage.tsx` and other list pages still use local `useState` for pagination. Per-page migration to `useListParams` is incremental.
+- **M-026** — 14 T-1-deferred pages still don't have explicit XSS-hardening test blocks. Adding them is incremental.
+
+#### Why this matters
+
+Pre-Bundle-8, the audit-report flagged 5 frontend findings — 2 of them (`L-015`, `L-019`) turned out to already be clean at HEAD but had no enforcement, so a careless future commit could regress. Bundle 8 verifies the clean state, ships the chokepoint helpers, and adds CI guards that fail on regression. The 3 partial findings (`M-009`, `M-010`, `M-026`) require touching every list page + every mutation site — a single PR scope of 5-7 days of mechanical migration work that's better done incrementally per page than as one large bundle. The new finding `M-029` tracks that backlog explicitly so future PRs can chip away at it without reopening this audit.
+
 ### Bundle 7 (Verification & Tool Suite Execution): wires mandatory scans + first-run evidence
 
 > Closes the audit's biggest scope gap from `cowork/comprehensive-audit-2026-04-25/tool-output/_SCOPE.txt`: the §12 mandatory tool runs that were deferred in the original audit session due to disk pressure. **Closures:** `D-002` clean; `D-001`, `D-006`, `H-005` partial; `D-003..D-005`, `D-007` wired CI-only. **New tracker IDs opened:** `H-010` (local-issuer coverage gap), `M-028` (6 deprecated-API sites), `L-020` (ineffassign cleanup sweep), `L-021` (5 transitive Go-module CVEs).
