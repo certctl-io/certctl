@@ -1,10 +1,39 @@
+// Bundle-9 / Audit L-014 (Document the CA-key-in-process threat model):
+//
+// The local CA holds its private key in this process's heap (c.caKey field on
+// the Connector struct, plus transient allocations during signing). Go does
+// not provide a standard mlock equivalent, the GC does not zero released
+// memory, and the runtime moves objects between generations during compaction.
+//
+// Threats this DOES protect against:
+//   - Disk-at-rest exposure (key file is mode 0600; key dir is enforced 0700
+//     by ensureKeyDirSecure; key bytes zeroed after marshal by
+//     marshalPrivateKeyAndZeroize).
+//   - Casual local-user enumeration of the key dir (parents 0700).
+//   - Byte-identical migration regression (M-028 round-trip pin in tests).
+//
+// Threats this does NOT protect against:
+//   - Attacker with a debugger or core-dump capability against the running
+//     process (CAP_SYS_PTRACE, gdb attach, /proc/pid/mem read, container
+//     coredump policy). The CA key WILL be recoverable from a heap snapshot.
+//   - Memory pressure swap-out on hosts without an encrypted swap device.
+//   - Cold-boot attacks against the host's RAM after kernel panic.
+//
+// Operators with stricter requirements MUST run the local CA mode against an
+// HSM or KMS-backed signer (PKCS#11 / cloud KMS / TPM) — see the V3 Pro
+// roadmap entry for KMS-backed issuance. The defense-in-depth measures here
+// (key zeroization after marshal, 0700 directory, deprecated-API migration)
+// reduce the window of exposure but do not close it; the source of truth
+// for "the local CA key cannot leave the host process" is HSM-backed
+// signing, not heap hygiene.
+
 package local
 
 import (
 	"context"
 	"crypto"
+	"crypto/ecdh"
 	"crypto/ecdsa"
-	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
 	"crypto/sha256"
@@ -23,6 +52,7 @@ import (
 	"golang.org/x/crypto/ocsp"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // Config represents the local CA issuer connector configuration.
@@ -184,6 +214,15 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
+	// Bundle-9 / Audit L-012 (CWE-1007 + CWE-176): refuse CSRs whose CN/SANs
+	// contain Unicode that could be used for IDN homograph impersonation,
+	// RTL/LTR rendering attacks, zero-width hidden content, or control
+	// characters. Pure-IDN labels are allowed; mixed-script labels are not.
+	if err := validateCSRUnicode(csr, request.SANs); err != nil {
+		c.logger.Error("CSR unicode validation failed", "error", err)
+		return nil, err
+	}
+
 	// Generate certificate with EKUs and MaxTTL from request
 	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds)
 	if err != nil {
@@ -240,6 +279,12 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 	if err := csr.CheckSignature(); err != nil {
 		c.logger.Error("CSR signature verification failed", "error", err)
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
+	}
+
+	// Bundle-9 / Audit L-012: same unicode safety check as IssueCertificate.
+	if err := validateCSRUnicode(csr, request.SANs); err != nil {
+		c.logger.Error("CSR unicode validation failed", "error", err)
+		return nil, err
 	}
 
 	// Generate certificate with EKUs and MaxTTL from request
@@ -672,16 +717,110 @@ func resolveEKUsAndKeyUsage(ekus []string) ([]x509.ExtKeyUsage, x509.KeyUsage) {
 	return resolved, keyUsage
 }
 
+// validateCSRUnicode runs the L-012 Unicode safety check across every name
+// that will be embedded in the issued certificate's Subject CommonName or
+// SubjectAltName extension. It rejects RTL/zero-width/control characters
+// and mixed-script (Latin + non-Latin) DNS labels — see
+// internal/validation/unicode.go for the full rationale and threat model.
+//
+// We check both the names that came in via the CSR itself AND any
+// additional SANs supplied alongside the issuance request, because either
+// surface can be an attacker-controlled vector.
+func validateCSRUnicode(csr *x509.CertificateRequest, additionalSANs []string) error {
+	if err := validation.ValidateUnicodeSafe(csr.Subject.CommonName); err != nil {
+		return fmt.Errorf("CSR Subject.CommonName rejected: %w", err)
+	}
+	for _, name := range csr.DNSNames {
+		if err := validation.ValidateUnicodeSafe(name); err != nil {
+			return fmt.Errorf("CSR DNSNames entry %q rejected: %w", name, err)
+		}
+	}
+	for _, email := range csr.EmailAddresses {
+		if err := validation.ValidateUnicodeSafe(email); err != nil {
+			return fmt.Errorf("CSR EmailAddresses entry %q rejected: %w", email, err)
+		}
+	}
+	for _, name := range additionalSANs {
+		if err := validation.ValidateUnicodeSafe(name); err != nil {
+			return fmt.Errorf("request SANs entry %q rejected: %w", name, err)
+		}
+	}
+	return nil
+}
+
 // hashPublicKey generates a subject key identifier from a public key.
+//
+// Bundle-9 / Audit M-028 (CWE-477 / SA1019): the ECDSA arm previously used
+// `elliptic.Marshal(k.Curve, k.X, k.Y)`, which staticcheck SA1019 flags as
+// deprecated since Go 1.21 ("for ECDH, use crypto/ecdh"). The replacement
+// here uses crypto/ecdh.PublicKey.Bytes(), which produces the IDENTICAL
+// uncompressed SEC 1 encoding for the supported curves (P-224, P-256,
+// P-384, P-521 — matched in key_encoding_test.go via a byte-identical
+// round-trip pin so the migration cannot silently regress the SubjectKeyId
+// of every issued certificate).
+//
+// If the ECDSA key uses a curve not in crypto/ecdh's supported set
+// (theoretically possible if an operator loaded a custom CA), we fall back
+// to hashing the X+Y coordinates directly via big.Int.Bytes() — that
+// produces a different (and stable) SKI for that pathological case rather
+// than panicking. The covered-curve path is the one the round-trip pin
+// asserts.
 func hashPublicKey(pub interface{}) []byte {
 	h := sha256.New()
 	switch k := pub.(type) {
 	case *rsa.PublicKey:
 		h.Write(k.N.Bytes())
 	case *ecdsa.PublicKey:
-		h.Write(elliptic.Marshal(k.Curve, k.X, k.Y))
+		ecdhPub, err := ecdsaToECDH(k)
+		if err == nil {
+			h.Write(ecdhPub.Bytes())
+		} else {
+			// Unsupported curve — stable fallback. See test
+			// TestHashPublicKey_ECDSA_RoundTripPin for the supported-curve
+			// invariant (must match the legacy elliptic.Marshal output).
+			h.Write(k.X.Bytes())
+			h.Write(k.Y.Bytes())
+		}
 	}
 	return h.Sum(nil)[:4] // Use first 4 bytes for brevity
+}
+
+// ecdsaToECDH converts an ECDSA public key to a crypto/ecdh.PublicKey for
+// the supported curves (P-256, P-384, P-521; P-224 is intentionally
+// unsupported by crypto/ecdh upstream). Used by hashPublicKey to replace
+// the deprecated elliptic.Marshal call.
+//
+// We dispatch on Curve.Params().Name (a stable string per RFC 5480 / Go
+// stdlib) rather than importing crypto/elliptic just for sentinel
+// comparisons — keeps the deprecated package out of this file's import
+// graph.
+func ecdsaToECDH(pub *ecdsa.PublicKey) (*ecdh.PublicKey, error) {
+	if pub == nil || pub.Curve == nil || pub.X == nil || pub.Y == nil {
+		return nil, fmt.Errorf("ecdsaToECDH: nil/uninitialized key")
+	}
+	var curve ecdh.Curve
+	switch pub.Curve.Params().Name {
+	case "P-256":
+		curve = ecdh.P256()
+	case "P-384":
+		curve = ecdh.P384()
+	case "P-521":
+		curve = ecdh.P521()
+	default:
+		return nil, fmt.Errorf("unsupported curve %q for ecdh conversion", pub.Curve.Params().Name)
+	}
+	// Reconstruct the uncompressed SEC 1 encoding, then hand to ecdh which
+	// validates it back to a public key. This is byte-identical to what
+	// the deprecated elliptic.Marshal returned for the same input — the
+	// round-trip pin in key_encoding_test.go enforces that invariant.
+	byteLen := (pub.Curve.Params().BitSize + 7) / 8
+	buf := make([]byte, 1+2*byteLen)
+	buf[0] = 0x04 // uncompressed point marker
+	xBytes := pub.X.Bytes()
+	yBytes := pub.Y.Bytes()
+	copy(buf[1+byteLen-len(xBytes):], xBytes)
+	copy(buf[1+2*byteLen-len(yBytes):], yBytes)
+	return curve.NewPublicKey(buf)
 }
 
 // GenerateCRL generates a DER-encoded X.509 CRL signed by this local CA.

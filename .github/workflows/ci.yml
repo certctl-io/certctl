@@ -655,16 +655,19 @@ jobs:
           # the global-run number visible here for trend-watching but not
           # gating because 0% is a measurement artifact, not a regression.
           echo "PKCS7 package coverage (global run, informational): ${PKCS7_COV}%"
-          # Bundle-7 / H-005 / H-010: local-issuer SOFT gate. Local
-          # `go test -cover ./internal/connector/issuer/local/...` scoped to
-          # that package reported 68.3% at Bundle-7 close, but the global
-          # run averages per-function and produces a slightly lower number
-          # (~64.6%). Floor set at 60% to absorb that measurement variance
-          # without false-failing CI. H-010 lifts this to 85% once the
-          # missing CSR-validation + CA-cert-loading + key-rotation tests
-          # land.
-          if [ "$(echo "$LOCAL_ISSUER_COV < 60" | bc -l)" -eq 1 ]; then
-            echo "::error::Local-issuer coverage ${LOCAL_ISSUER_COV}% is below 60% transitional floor (H-010 will raise to 85%)"
+          # Bundle-9 / H-010 closure: local-issuer HARD gate at 85%. The
+          # transitional 60% floor (Bundle-7) was an explicit promise in the
+          # CI config that H-010 would raise it once CSR-validation + CA-
+          # cert-loading + key-rotation + key-encoding pin tests landed.
+          # Bundle-9 ships those tests (bundle9_coverage_test.go) and lifts
+          # the package-scoped run to ~86.7%; the global run averages a few
+          # points lower (per-function arithmetic), so the gate is set to 85
+          # with the live `go test -cover` number being the source of truth.
+          # If this gate trips, the fix is to add tests, NOT to lower the
+          # floor — every percentage point under 85 is a regression on the
+          # H-010 closure invariant.
+          if [ "$(echo "$LOCAL_ISSUER_COV < 85" | bc -l)" -eq 1 ]; then
+            echo "::error::Local-issuer coverage ${LOCAL_ISSUER_COV}% is below 85% (H-010 closure floor — add tests, do not lower the gate)"
             exit 1
           fi
           echo "Coverage thresholds passed!"

@@ -4,6 +4,34 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle 9 (Local-Issuer Hardening): 5 audit findings closed + 1 partial
+
+> Closes the audit's local-CA + agent-keystore findings end-to-end: `H-010` (local-issuer coverage 68.3% → 86.7%, CI gate flipped 60% → 85% hard), `L-002` (private-key zeroization helper + agent + local wiring), `L-003` (0700 key-dir hardening), `L-012` (Unicode safety in CN/SAN — IDN homograph + RTL + zero-width + control chars), `L-014` (CA-key-in-process threat-model documentation), and partially closes `M-028` — the `internal/connector/issuer/local/local.go:682` `elliptic.Marshal` → `crypto/ecdh.PublicKey.Bytes()` site only (5 of 6 SA1019 sites remain). Round-trip pin in `TestHashPublicKey_ECDSA_RoundTripPin` proves byte-identical SubjectKeyId output across P-256/P-384/P-521 so the migration cannot silently change the SKI of every previously-issued cert.
+
+#### Added
+
+- **`internal/validation/unicode.go::ValidateUnicodeSafe` (NEW, Audit L-012 / CWE-1007 + CWE-176)** — single chokepoint that rejects RTL/LTR override chars (`U+202A..U+202E`, `U+2066..U+2069`), zero-width chars (`U+200B..U+200D`, `U+2060`, `U+FEFF`), control chars (`<0x20`, `0x7F..0x9F`), and per-DNS-label Latin+non-Latin-letter mixes (the classic Cyrillic-а-in-apple homograph). Pure-IDN labels are allowed. Errors cite the rune codepoint + byte offset so operators can locate the violation in their CSR.
+- **`internal/connector/issuer/local/keymem.go::marshalPrivateKeyAndZeroize` (NEW, Audit L-002 / CWE-226)** — wraps `x509.MarshalECPrivateKey` with `defer clear(der)`; bounds the heap-resident private-scalar exposure window to the duration of the caller-supplied `onDER` callback. Used by both the local-CA path and (mirrored as `marshalAgentKeyAndZeroize` in `cmd/agent/keymem.go`) the agent's per-cert key-write site.
+- **`internal/connector/issuer/local/keystore.go::ensureKeyDirSecure` (NEW, Audit L-003 / CWE-732)** — creates the key directory at mode `0700` if absent, accepts existing owner-only modes, chmod-tightens any 077-permissive leaf with re-stat verification, and fail-loud-refuses empty/root/dot paths. Mirrored as `ensureAgentKeyDirSecure` in `cmd/agent/keymem.go` and wired ahead of every `os.WriteFile(keyPath, ..., 0600)` site in the agent.
+- **`internal/connector/issuer/local/local.go::ecdsaToECDH` (NEW, Audit M-028 / CWE-477 partial)** — replaces the deprecated `elliptic.Marshal(k.Curve, k.X, k.Y)` call inside `hashPublicKey` with `crypto/ecdh.PublicKey.Bytes()`. Dispatches on `Curve.Params().Name` to avoid importing `crypto/elliptic` for sentinel comparisons. Supports P-256/P-384/P-521; P-224 returns an unsupported-curve error and the caller falls back to a stable X+Y `big.Int.Bytes()` hash so SKI generation never panics.
+- **L-014 file-header doc comment in `internal/connector/issuer/local/local.go`** — explicit threat-model carve-out documenting what the bundled defense-in-depth measures (disk-at-rest 0600, key-dir 0700, key-bytes-zeroed-after-marshal, M-028 round-trip pin) DO and DO NOT protect against. Operators with stricter requirements (debugger/core-dump/CAP_SYS_PTRACE attacker; unencrypted swap; cold-boot RAM) are directed to the V3 Pro KMS-backed-issuance roadmap entry — heap hygiene is defense-in-depth, not the source of truth.
+- **CI hard gate on local-issuer coverage at 85% (`.github/workflows/ci.yml`)** — flipped the Bundle-7 transitional `LOCAL_ISSUER_COV < 60` floor to `< 85` with explicit "add tests, do not lower the gate" comment. The Bundle-9 closure invariant is that every percentage point under 85 is a regression, not a calibration drift.
+
+#### Tests
+
+- **`internal/connector/issuer/local/bundle9_coverage_test.go` (NEW, ~30 subtests)** — lifts `internal/connector/issuer/local/` coverage from 68.3% (pre-bundle baseline) to 86.7% (package-scoped `go test -cover`). Targets every previously-uncovered hotspot. **`TestHashPublicKey_ECDSA_RoundTripPin` is the regression oracle** that pins the new `crypto/ecdh.PublicKey.Bytes()` output to the legacy `elliptic.Marshal` output across P-256/P-384/P-521 (with explicit `//nolint:staticcheck` on the SA1019 reference) — guarantees the M-028 migration cannot silently change the SubjectKeyId of every previously-issued cert.
+- **`internal/validation/unicode_test.go` (NEW, 8 test functions)** — exercises every rejection arm of `ValidateUnicodeSafe`. U+FEFF (BOM) uses the `﻿` escape sequence in source because Go's parser rejects literal BOM bytes inside string literals; all other invisible chars are written as literals (the file-header doc comment notes this).
+
+#### Wired
+
+- **`cmd/agent/main.go`** — agent's per-cert key-write path now calls `ensureAgentKeyDirSecure(filepath.Dir(keyPath))` before writing, marshals via `marshalAgentKeyAndZeroize` (which `defer clear(der)` immediately), and `defer clear(privKeyPEM)` on the encoded buffer for symmetry.
+- **`internal/connector/issuer/local/local.go`** — both `IssueCertificate` and `RenewCertificate` CSR-acceptance paths invoke `validateCSRUnicode(csr, request.SANs)` after `csr.CheckSignature()` and before `c.generateCertificate()`. The validator covers CSR Subject CommonName + DNSNames + EmailAddresses + request-side additional SANs.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 20/55 → 25/55 closed (Critical 0/0, High 6/9 → 7/9, Medium 7/27 unchanged, Low 4/19 → 8/19); H-010 + L-002 + L-003 + L-012 + L-014 boxes flipped `[x]` with closure notes; M-028 annotated as partial-closed (1 of 6 sites migrated).
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — corresponding status flips with closure notes citing the Bundle-9 mechanism.
+
 ### Bundle 8 (Frontend Hardening): 2 audit findings closed + 3 partial + 1 new ID opened
 
 > Closes the audit's remaining frontend findings — `L-015` (target="_blank" rel-noopener) and `L-019` (dangerouslySetInnerHTML) verified-already-clean at HEAD with new chokepoints + CI grep guards preventing regression. Partial closures for `M-009` (mutation invalidation), `M-010` (filter/sort/pagination consistency), `M-026` (XSS deep-dive on 14 untested pages) — Bundle 8 ships the helpers + contract tests + soft CI budget guard; per-page migrations of the existing 56 useMutation sites + ~14 list pages + 14 T-1-deferred pages tracked as new finding `M-029`.
