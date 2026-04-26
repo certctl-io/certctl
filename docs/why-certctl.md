@@ -114,6 +114,6 @@ See the [Quickstart Guide](quickstart.md) for a full walkthrough, or explore the
 
 ## License
 
-certctl is source-available under the [Business Source License 1.1](../LICENSE). Free for any use except offering a competing managed service. Converts to Apache 2.0 on March 14, 2033.
+certctl is source-available under the [Business Source License 1.1](../LICENSE). Free for any use except offering a competing managed service.
 
 You own your data, your keys, and your deployment.

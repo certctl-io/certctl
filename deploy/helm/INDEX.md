@@ -231,4 +231,4 @@ kubectl logs -l app.kubernetes.io/component=server -f
 
 ## License
 
-All files are covered under the BSL-1.1 license (converts to Apache 2.0 in 2033).
+All files are covered under the BSL-1.1 license.
