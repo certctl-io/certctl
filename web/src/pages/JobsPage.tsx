@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getJobs, cancelJob, approveRenewal, rejectRenewal } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -73,7 +74,6 @@ export default function JobsPage() {
   const [statusFilter, setStatusFilter] = useState('');
   const [typeFilter, setTypeFilter] = useState('');
   const [rejectingJob, setRejectingJob] = useState<Job | null>(null);
-  const queryClient = useQueryClient();
 
   const params: Record<string, string> = {};
   if (statusFilter) params.status = statusFilter;
@@ -85,20 +85,20 @@ export default function JobsPage() {
     refetchInterval: 10000,
   });
 
-  const cancelMutation = useMutation({
+  const cancelMutation = useTrackedMutation({
     mutationFn: cancelJob,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+    invalidates: [['jobs']],
   });
 
-  const approveMutation = useMutation({
+  const approveMutation = useTrackedMutation({
     mutationFn: approveRenewal,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['jobs'] }),
+    invalidates: [['jobs']],
   });
 
-  const rejectMutation = useMutation({
+  const rejectMutation = useTrackedMutation({
     mutationFn: ({ id, reason }: { id: string; reason: string }) => rejectRenewal(id, reason),
+    invalidates: [['jobs']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['jobs'] });
       setRejectingJob(null);
     },
   });

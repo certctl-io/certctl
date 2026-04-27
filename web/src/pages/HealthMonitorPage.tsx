@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   listHealthChecks,
   createHealthCheck,
@@ -139,7 +140,6 @@ function SummaryBar({ summary }: { summary: HealthCheckSummary }) {
 export default function HealthMonitorPage() {
   const [showCreate, setShowCreate] = useState(false);
   const [statusFilter, setStatusFilter] = useState<string | undefined>();
-  const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['health-checks', statusFilter],
@@ -153,29 +153,26 @@ export default function HealthMonitorPage() {
     refetchInterval: 30000,
   });
 
-  const createMutation = useMutation({
+  // Every health-check mutation invalidates the same two queries: the list
+  // (rows reflect new state) and the summary (counts reflect new state).
+  const healthCheckInvalidates = [['health-checks'], ['health-checks-summary']];
+
+  const createMutation = useTrackedMutation({
     mutationFn: createHealthCheck,
+    invalidates: healthCheckInvalidates,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health-checks'] });
-      queryClient.invalidateQueries({ queryKey: ['health-checks-summary'] });
       setShowCreate(false);
     },
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteHealthCheck,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health-checks'] });
-      queryClient.invalidateQueries({ queryKey: ['health-checks-summary'] });
-    },
+    invalidates: healthCheckInvalidates,
   });
 
-  const acknowledgeMutation = useMutation({
+  const acknowledgeMutation = useTrackedMutation({
     mutationFn: acknowledgeHealthCheck,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['health-checks'] });
-      queryClient.invalidateQueries({ queryKey: ['health-checks-summary'] });
-    },
+    invalidates: healthCheckInvalidates,
   });
 
   const columns: Column<EndpointHealthCheck>[] = [
