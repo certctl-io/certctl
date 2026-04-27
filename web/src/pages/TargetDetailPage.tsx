@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getTarget, getJobs, updateTarget, testTargetConnection } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -70,23 +71,20 @@ function SourceBadge({ source }: { source?: string }) {
 
 export default function TargetDetailPage() {
   const { id } = useParams<{ id: string }>();
-  const queryClient = useQueryClient();
   const [isEditing, setIsEditing] = useState(false);
   const [editName, setEditName] = useState('');
 
-  const updateMutation = useMutation({
+  const updateMutation = useTrackedMutation({
     mutationFn: (data: Partial<{ name: string }>) => updateTarget(id!, data),
+    invalidates: [['target', id]],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['target', id] });
       setIsEditing(false);
     },
   });
 
-  const testMutation = useMutation({
+  const testMutation = useTrackedMutation({
     mutationFn: () => testTargetConnection(id!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['target', id] });
-    },
+    invalidates: [['target', id]],
   });
 
   const { data: target, isLoading, error, refetch } = useQuery({

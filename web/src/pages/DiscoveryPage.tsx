@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getDiscoveredCertificates,
   getDiscoverySummary,
@@ -110,7 +111,6 @@ export default function DiscoveryPage() {
   const [agentFilter, setAgentFilter] = useState('');
   const [claimingCert, setClaimingCert] = useState<DiscoveredCertificate | null>(null);
   const [showScans, setShowScans] = useState(false);
-  const queryClient = useQueryClient();
 
   const params: Record<string, string> = {};
   if (statusFilter) params.status = statusFilter;
@@ -139,22 +139,18 @@ export default function DiscoveryPage() {
     queryFn: () => getAgents({ per_page: '200' }),
   });
 
-  const claimMutation = useMutation({
+  const claimMutation = useTrackedMutation({
     mutationFn: ({ id, managedCertId }: { id: string; managedCertId: string }) =>
       claimDiscoveredCertificate(id, managedCertId),
+    invalidates: [['discovered-certificates'], ['discovery-summary']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['discovered-certificates'] });
-      queryClient.invalidateQueries({ queryKey: ['discovery-summary'] });
       setClaimingCert(null);
     },
   });
 
-  const dismissMutation = useMutation({
+  const dismissMutation = useTrackedMutation({
     mutationFn: dismissDiscoveredCertificate,
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['discovered-certificates'] });
-      queryClient.invalidateQueries({ queryKey: ['discovery-summary'] });
-    },
+    invalidates: [['discovered-certificates'], ['discovery-summary']],
   });
 
   const formatExpiry = (notAfter?: string) => {

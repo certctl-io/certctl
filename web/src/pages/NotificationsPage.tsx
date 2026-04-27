@@ -1,5 +1,6 @@
 import { useState, useMemo } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getNotifications, markNotificationRead, requeueNotification } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -22,7 +23,6 @@ export default function NotificationsPage() {
   const [typeFilter, setTypeFilter] = useState('');
   const [statusFilter, setStatusFilter] = useState('');
   const [activeTab, setActiveTab] = useState<ActiveTab>('all');
-  const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useQuery({
     // I-005: queryKey carries the active tab so TanStack Query treats
@@ -43,9 +43,9 @@ export default function NotificationsPage() {
     refetchInterval: 30000,
   });
 
-  const markRead = useMutation({
+  const markRead = useTrackedMutation({
     mutationFn: markNotificationRead,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    invalidates: [['notifications']],
   });
 
   // I-005: requeue a dead notification. Invalidates both tab cache entries
@@ -60,9 +60,9 @@ export default function NotificationsPage() {
   // assertion fails on the extra argument. Keep the arrow even if the context
   // object later becomes structurally empty — the contract pins a single-arg
   // call and the page must not leak mutation machinery into API boundaries.
-  const requeue = useMutation({
+  const requeue = useTrackedMutation({
     mutationFn: (id: string) => requeueNotification(id),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['notifications'] }),
+    invalidates: [['notifications']],
   });
 
   const notifications = data?.data || [];

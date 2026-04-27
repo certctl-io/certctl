@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
   BarChart, Bar, LineChart, Line, PieChart, Pie, Cell,
@@ -81,15 +82,21 @@ function DigestCard() {
   const [previewHtml, setPreviewHtml] = useState<string | null>(null);
   const [showPreview, setShowPreview] = useState(false);
 
-  const previewMutation = useMutation({
+  const previewMutation = useTrackedMutation({
     mutationFn: previewDigest,
+    invalidates: 'noop',
+    noopReason: 'previewDigest is read-only — server renders HTML; no cached query touched',
     onSuccess: (html) => {
       setPreviewHtml(html);
       setShowPreview(true);
     },
   });
 
-  const sendMutation = useMutation({ mutationFn: sendDigest });
+  const sendMutation = useTrackedMutation({
+    mutationFn: sendDigest,
+    invalidates: 'noop',
+    noopReason: 'sendDigest dispatches an email server-side; no cached client query reflects digest-send state',
+  });
 
   return (
     <>
