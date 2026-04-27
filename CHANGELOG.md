@@ -4,6 +4,44 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle Q (Coverage Audit Closure — Property-Based Pilot + Hygiene): L-001 + L-002 + L-003 + L-004 + I-001 closed
+
+> Five small closures: cmd/cli round-out (7.1% → 63.5%), awssm round-out (78.2% → 96.0%), gopter property-based pilot, multi-agent architecture diagram update, and informational test-naming CI guard. All Low-tier and Info-tier audit findings now closed.
+
+#### Q.1 — cmd/cli dispatch coverage (L-001 closed)
+
+`cmd/cli/dispatch_test.go` adds ~30 dispatch tests covering every arm in `handleCerts`, `handleAgents`, `handleJobs`, `handleImport`, `handleStatus`. Strategy: `httptest.NewTLSServer` mocks the API; `cli.NewClient(server.URL, "test-key", "json", "", true)` constructs an insecure-skip-verify client to skip cert chain validation. Each test pins both the "missing-args usage print" path (returns nil) and the "happy path delegation" path (asserts request method + URL substring). Result: cmd/cli line coverage jumps **7.1% → 63.5%** — well above the ≥30% gate.
+
+#### Q.2 — awssm round-out (L-002 closed)
+
+`internal/connector/discovery/awssm/awssm_edge_test.go` rounds out the previously-uncovered paths: `New()` (real-client construction, nil cfg, nil logger), `extractKeyInfo` (ECDSA / Ed25519 / unknown — was RSA-only), `processSecret` filter arms (NamePrefix mismatch, TagFilter mismatch, empty-value short-circuit, GetSecretValue error propagation), `realSMClient` stub-contract pin (ListSecrets / GetSecretValue / NewRealSMClient — pins the documented "stub returns empty + nil" contract so a future SDK wire-up doesn't silently break callers), and `buildDiscoveredCertEntry` EmailAddresses → SAN extraction. Result: awssm coverage jumps **78.2% → 96.0%** — well above the ≥85% gate.
+
+#### Q.3 — Property-based testing pilot (L-003 closed)
+
+`gopter@v0.2.11` added to `go.mod`. Two property-based test files shipped:
+
+- `internal/crypto/encryption_property_test.go` — two properties: round-trip (`DecryptIfKeySet(EncryptIfKeySet(x, k), k) == x` for any plaintext + non-empty passphrase) and wrong-passphrase rejection (`DecryptIfKeySet(blob, wrongKey)` never returns nil error AND non-empty plaintext that bytes-equals the original). 50 + 30 successful test budgets — full PBKDF2 600k rounds × 50 iters ≈ 15s on -race CI. Skipped under `-short` to keep developer-loop fast.
+- `internal/pkcs7/length_property_test.go` — three properties on `ASN1EncodeLength`: round-trip (`decodeLength(encode(x)) == x` for x ∈ [0, 2³¹−1]; decoder defined inline since production code only needs the encoder); short-form structural invariant (length < 128 produces 1 byte equal to length); long-form structural invariant (length ≥ 128 produces output[0] with high bit set + N = first byte & 0x7f indicating remainder length). 500 successful tests in <10ms.
+
+Strategy is "pilot" — one working property test per pattern. Full adoption (FSM transitions, more parsers, etc.) is post-Q backlog; gopter is non-blocking in CI for now.
+
+#### Q.4 — Architecture diagram multi-agent update (L-004 closed)
+
+`docs/qa-test-guide.md::Architecture` ASCII diagram updated to show "certctl-agent (×N)" + a callout explaining seed_demo.sql provisions 12 agent rows (1 active container, 2 retired, 9 reserved/sentinel) for Parts 04, 05, 55 + FSM coverage. Strengthening #7 from `qa-doc-strengthening.md` applied. Operators running parallel-agent topologies guided to set `AGENT_COUNT=N` and re-derive seed counts via `make qa-stats`.
+
+#### Q.5 — Test-naming CI guard (I-001 closed)
+
+`.github/workflows/ci.yml` Test-naming convention guard added after the QA-doc seed-count drift guard. Greps for `func Test<X>(` patterns missing the `<X>_<Scenario>` suffix; prints first 20 non-conformant tests as `::warning::` annotations. **Informational** (`continue-on-error: true`) — does not fail the build. Promotion to hard-fail tracked as I-001-extended once the team adopts the convention repo-wide. Excludes `TestMain` (Go's special init hook) and `TestProperty_*` (gopter naming convention from Q.3).
+
+#### Verification
+
+- `python3 -c "import yaml; yaml.safe_load(...)"` clean on ci.yml.
+- `go vet ./cmd/cli/... ./internal/connector/discovery/awssm/... ./internal/crypto/... ./internal/pkcs7/...` clean.
+- `go test -short -count=1` clean across all four packages.
+- `go test -count=1 -timeout=60s ./internal/crypto/... ./internal/pkcs7/...` (no `-short`) PASSes both property-test packages — crypto in 15.4s (50 + 30 × 600k PBKDF2 rounds), pkcs7 in 5ms.
+
+Audit deliverables: gap-backlog.md strikethroughs L-001 / L-002 / L-003 / L-004 / I-001 with per-finding closure note. closure-plan.md flips Bundle Q `[x]` with per-item breakdown.
+
 ### Bundle P (Coverage Audit Closure — QA Doc Strengthening): M-007 + M-009 + M-010 + M-011 + M-012 closed; M-008 deferred
 
 > Six structural strengthenings applied to the QA documentation surface, raising acquisition-readiness QA-doc score 4.0 → 4.7. M-008 (per-RFC test-vector subsections under Parts 21 + 24) deferred as "Bundle P.2-extended" — out of session budget.

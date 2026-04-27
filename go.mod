@@ -10,6 +10,7 @@ require (
 )
 
 require (
+	github.com/leanovate/gopter v0.2.11
 	github.com/masterzen/winrm v0.0.0-20250927112105-5f8e6c707321
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.45.0

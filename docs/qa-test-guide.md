@@ -39,18 +39,34 @@ either manual-only by design or pending QA-suite coverage:
 ## Architecture
 
 ```
-┌────────────────────────┐     ┌──────────────────────────┐
-│  qa_test.go            │────▶│  certctl demo stack      │
-│  (//go:build qa)       │     │  docker-compose.yml +    │
-│                        │     │  docker-compose.demo.yml │
-│  TestQA(t *testing.T)  │     │                          │
-│   ├─ Part01_Infra      │     │  ┌─ certctl-server :8443 │
-│   ├─ Part02_Auth       │     │  ├─ postgres :5432       │
-│   ├─ Part03_CertCRUD   │     │  └─ certctl-agent        │
-│   ├─ ...               │     └──────────────────────────┘
-│   └─ Part52_HelmChart  │
-└────────────────────────┘
+┌────────────────────────┐     ┌─────────────────────────────────┐
+│  qa_test.go            │────▶│  certctl demo stack             │
+│  (//go:build qa)       │     │  docker-compose.yml +           │
+│                        │     │  docker-compose.demo.yml        │
+│  TestQA(t *testing.T)  │     │                                 │
+│   ├─ Part01_Infra      │     │  ┌─ certctl-server :8443        │
+│   ├─ Part02_Auth       │     │  ├─ postgres :5432              │
+│   ├─ Part03_CertCRUD   │     │  └─ certctl-agent (×N)          │
+│   ├─ ...               │     │      ↑ seed_demo.sql provisions │
+│   └─ Part52_HelmChart  │     │        12 agent rows (1 active, │
+└────────────────────────┘     │        2 retired, 9 reserved /  │
+                               │        sentinel) for the soft-  │
+                               │        retire / FSM coverage    │
+                               │        Parts 55–56 exercise.    │
+                               └─────────────────────────────────┘
 ```
+
+> **Multi-agent demo stack (Bundle Q / L-004 closure).** The demo
+> stack runs a single live `certctl-agent` container by default but
+> the database is seeded with 12 agent rows (`migrations/seed_demo.sql`,
+> grep `mc-* | ag-*` IDs). The "(×N)" notation reflects the seed-data
+> reality: Parts 04 (Agents Listing), 05 (Agent Heartbeats), 55
+> (Agent Soft-Retirement), and FSM coverage tables in
+> `coverage-audit-2026-04-27/tables/fsm-coverage.md` exercise the full
+> multi-agent population, not the one live container. Operators
+> running the QA suite in a parallel-agent topology should set
+> `AGENT_COUNT=N` in compose-override and re-derive the seed counts
+> via `make qa-stats`.
 
 Key design choices:
 
