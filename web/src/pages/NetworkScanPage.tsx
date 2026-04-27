@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getNetworkScanTargets,
   createNetworkScanTarget,
@@ -119,7 +120,6 @@ function CreateScanTargetModal({ onClose, onCreate }: {
 
 export default function NetworkScanPage() {
   const [showCreate, setShowCreate] = useState(false);
-  const queryClient = useQueryClient();
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['network-scan-targets'],
@@ -127,28 +127,31 @@ export default function NetworkScanPage() {
     refetchInterval: 30000,
   });
 
-  const createMutation = useMutation({
+  // Every network-scan-target mutation invalidates the same list query.
+  const scanTargetInvalidates = [['network-scan-targets']];
+
+  const createMutation = useTrackedMutation({
     mutationFn: createNetworkScanTarget,
+    invalidates: scanTargetInvalidates,
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['network-scan-targets'] });
       setShowCreate(false);
     },
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteNetworkScanTarget,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['network-scan-targets'] }),
+    invalidates: scanTargetInvalidates,
   });
 
-  const toggleMutation = useMutation({
+  const toggleMutation = useTrackedMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) =>
       updateNetworkScanTarget(id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['network-scan-targets'] }),
+    invalidates: scanTargetInvalidates,
   });
 
-  const scanMutation = useMutation({
+  const scanMutation = useTrackedMutation({
     mutationFn: triggerNetworkScan,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['network-scan-targets'] }),
+    invalidates: scanTargetInvalidates,
   });
 
   const columns: Column<NetworkScanTarget>[] = [

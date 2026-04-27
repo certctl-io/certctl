@@ -1,6 +1,7 @@
 import { useEffect, useState, useMemo } from 'react';
 import { Link } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getIssuers, testIssuerConnection, deleteIssuer, createIssuer, updateIssuer } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -30,7 +31,6 @@ function issuerStatus(issuer: Issuer): string {
 }
 
 export default function IssuersPage() {
-  const queryClient = useQueryClient();
   const [testResult, setTestResult] = useState<{ id: string; ok: boolean; msg: string } | null>(null);
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [preselectedType, setPreselectedType] = useState<string | null>(null);
@@ -54,22 +54,27 @@ export default function IssuersPage() {
     queryFn: () => getIssuers(),
   });
 
-  const testMutation = useMutation({
+  // testIssuerConnection updates last_tested_at and test_status server-side;
+  // invalidating ['issuers'] refetches the list so the timestamp + status
+  // columns reflect the new probe state. The local setTestResult banner
+  // still surfaces the immediate pass/fail to the operator.
+  const testMutation = useTrackedMutation({
     mutationFn: testIssuerConnection,
+    invalidates: [['issuers']],
     onSuccess: (_data, id) => setTestResult({ id, ok: true, msg: 'Connection successful' }),
     onError: (err: Error, id) => setTestResult({ id, ok: false, msg: err.message }),
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteIssuer,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['issuers'] }),
+    invalidates: [['issuers']],
   });
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: (data: { name: string; type: string; config: Record<string, unknown> }) =>
       createIssuer(data),
+    invalidates: [['issuers']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issuers'] });
       setShowCreateModal(false);
       setPreselectedType(null);
     },
@@ -80,10 +85,10 @@ export default function IssuersPage() {
   // docblock above. Sends `{ name, type, config }` to satisfy the backend
   // PUT contract (the handler decodes into a full domain.Issuer struct);
   // type + config are preserved by reading them from the editing target.
-  const updateMutation = useMutation({
+  const updateMutation = useTrackedMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Issuer> }) => updateIssuer(id, data),
+    invalidates: [['issuers']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['issuers'] });
       setEditingIssuer(null);
     },
   });
