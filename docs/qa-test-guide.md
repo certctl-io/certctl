@@ -6,6 +6,24 @@
 
 ---
 
+## Test Suite Health (regenerate via `make qa-stats`)
+
+> Snapshot at HEAD. Re-run `make qa-stats` to refresh; CI's QA-doc drift guards (`.github/workflows/ci.yml`) catch out-of-date Part / cert / issuer counts on every PR. **Last regenerated: 2026-04-27 (Bundle P).**
+
+| Metric | Value | Target | Status |
+|---|---|---|---|
+| Backend test files | 221 | n/a | ℹ |
+| Backend `Test*` functions | 2,454 | n/a | ℹ |
+| Backend `t.Run` subtests | 778 | n/a | ℹ |
+| Frontend test files | 38 | n/a | ℹ |
+| Fuzz targets | 11 | ≥10 (one per hand-rolled parser) | ✓ |
+| `t.Skip` sites | 60 | each carries valid rationale (Bundle O audit) | ✓ |
+| `qa_test.go` Part_* subtests | 53 | tracks `testing-guide.md` Parts (3 `## Part 15-17` covered indirectly via Parts 42–46) | ✓ |
+| `testing-guide.md` Parts | 56 | n/a | ℹ |
+| Existential cluster line cov (post-Bundle-J + L.B + Bundle 0.7) | acme 55.6%, stepca 90.4%, local-issuer ≥86%, crypto ≥85% | ≥95% | △ ACME below; tracked in `coverage-matrix.md` |
+| Mutation kill rate (Existential) | unmeasured (operator-runnable per Strengthening #5) | ≥90% | ⚠ |
+| Race detector clean (`-count=10`) | partial (`-count=3` clean per Phase 0) | 0 races | ⚠ |
+
 ## What Is This File?
 
 `deploy/test/qa_test.go` is a single Go test file (~1700 lines) that automates as much of `docs/testing-guide.md` as possible against a running certctl Docker Compose demo stack. It replaces the legacy `qa-smoke-test.sh` bash script.
@@ -158,6 +176,21 @@ This table shows what each Part tests and what's left for manual verification.
 skipped Parts, 4 Parts not yet automated (23, 24, 55, 56), and an unspecified count of manual-only
 flows (GUI, scheduler timing, Docker log inspection). Run `grep -cE '^## Part [0-9]+:' docs/testing-guide.md`
 and `grep -cE 't\.Run\("Part[0-9]+_' deploy/test/qa_test.go` to re-verify.
+
+## Coverage by Risk Class
+
+A buyer's QA lead reading this doc wants "where are the existential bugs caught?" — Bundle P / Strengthening #1 surfaces that view directly. The table below classifies each Part by risk class so reviewers can answer the existential-coverage question in one glance.
+
+| Risk class | Description | Parts in scope | Automation status |
+|---|---|---|---|
+| **Existential** (Critical paths — bugs would compromise CA, leak keys, mis-issue, bypass revocation) | Crypto, PKCS#7, local-issuer, OCSP/CRL, agent keygen, CSR validation | 5 (Revocation), 21 (EST), 23 (S/MIME EKU), 24 (OCSP/CRL), 47 (Digest with cert content), 53 (K8s Secrets), 54 (AWS PCA) | 5/7 automated; Parts 23 + 24 pending (Bundle I Skip stubs in `qa_test.go`; manual playbook in `testing-guide.md`) |
+| **High** (FSM corruption, credential leak, authn/z weakening) | Renewal, jobs, agents, issuers, deployment, scheduler | 4, 7, 8, 9, 18, 19, 20, 22, 25, 28, 29, 32, 33, 48, 49, 55, 56 | 14/17 automated; CLI / MCP / scheduler-loop are inherently SKIP (require compiled binaries / Docker logs); Parts 55 + 56 pending |
+| **Medium** (Operational pain or silent data drift) | Targets, notifiers, observability, error handling, performance, regression | 14, 15-17, 30, 31, 38, 39, 40, 41, 42, 43, 44, 45, 46 | 14/14 automated (15-17 indirect via Parts 42–46) |
+| **Low** (Hygiene) | Documentation, docs verification | 40 (Documentation), 50 (Onboarding) | 2/2 automated |
+| **Frontend** (XSS, render correctness, mutation contracts) | GUI testing | 35, 36-37 | 0/3 automated in this suite (Vitest covers separately under `web/`); this doc punts to manual + Vitest |
+| **Compliance** (PCI / SOC2 / HIPAA-relevant) | Audit trail, body-size limits, request limits, Helm chart deploy posture | 27, 32, 51, 52 | 4/4 automated |
+
+This is the table acquisition reviewers screenshot for their report. When a new Part lands in `testing-guide.md`, classify it here; the QA-doc Part-count drift guard (`.github/workflows/ci.yml::QA-doc Part-count drift guard`) catches the count mismatch.
 
 ## Test Categories
 
@@ -333,6 +366,56 @@ The `fileExists` and `fileContains` helpers read from `CERTCTL_QA_REPO_DIR` (def
 CERTCTL_QA_REPO_DIR=/absolute/path/to/certctl go test -tags qa -v ./...
 ```
 
+## Release Day Sign-Off Matrix
+
+Before tagging a release, the QA-on-call engineer signs off on each row. This matrix replaces the previous ad-hoc release checklist and ties test execution directly to release approval. Acquisition-grade releases have this kind of matrix; the doc previously didn't.
+
+| Sign-off | Evidence | Owner | Result | Date |
+|---|---|---|---|---|
+| `make verify` clean on master | CI run URL | Eng-on-call | ☐ | |
+| `go test -tags qa ./deploy/test/...` ≥ 95% pass rate (skips counted as pass) | Test output | QA-on-call | ☐ | |
+| `go test -race -count=10 ./internal/...` 0 races | `tool-output/race-x10.txt` | QA-on-call | ☐ | |
+| Coverage ≥ thresholds in `ci.yml` (service / handler / crypto / local-issuer / acme / stepca / mcp) | `tool-output/cover-summary.txt` | QA-on-call | ☐ | |
+| Helm chart `helm lint && helm template` clean | `tool-output/helm.txt` | DevOps-on-call | ☐ | |
+| All `t.Skip` sites have current rationales (see Bundle O audit; CI guard catches new orphans) | `make qa-stats` t.Skip count | QA-on-call | ☐ | |
+| Frontend: Vitest run clean; per-page coverage ≥ 70% | `web/tool-output/vitest.txt` | Frontend-on-call | ☐ | |
+| Manual Parts 23, 24, 55, 56 executed (or explicit defer with rationale) | This sheet | QA-on-call | ☐ | |
+| Demo stack `docker compose up -d --build` smoke (`/health` 200, `/ready` 200) | curl receipt | QA-on-call | ☐ | |
+| `govulncheck ./...` clean (or deferred-call advisories tracked in `gap-backlog`) | `tool-output/govulncheck.json` | Security-on-call | ☐ | |
+| QA-doc drift guards green (Part-count + cert-count) | CI run URL | QA-on-call | ☐ | |
+| FSM transition coverage tables (`coverage-audit-2026-04-27/tables/fsm-coverage.md`) — Existential FSMs ≥80% legal + 100% illegal | This sheet | QA-on-call | ☐ | |
+
+**Sign-off owner:** ______________________ &nbsp;&nbsp;**Date:** ______ &nbsp;&nbsp;**Tag:** v__.__.__
+
+## Mutation Testing Targets & Kill Rate
+
+Mutation testing exposes which assertions are actually load-bearing — tests can pass against broken code if mutations survive, which is a coverage trap. The audit's Phase 0 attempted to run `go-mutesting` on the Existential cluster but was blocked by a Go 1.25 / arm64 incompatibility in `osutil@v1.6.1` (uses `syscall.Dup2` which is undefined on linux/arm64). The operator-runnable workaround uses a fork that targets `unix.Dup3` instead.
+
+| Package | Risk class | Target kill rate | Last measured | Tool |
+|---|---|---|---|---|
+| `internal/crypto` | Existential | ≥90% | unmeasured (sandbox-blocked, operator-runnable) | go-mutesting |
+| `internal/pkcs7` | Existential | ≥90% | unmeasured | go-mutesting |
+| `internal/connector/issuer/local` | Existential | ≥90% | unmeasured | go-mutesting |
+| `internal/connector/issuer/acme` | Existential | ≥80% (catch-up; failure-mode coverage 55.6% per Bundle J) | unmeasured | go-mutesting |
+| `internal/connector/issuer/stepca` | Existential | ≥85% (post-Bundle-L.B coverage at 90.4%) | unmeasured | go-mutesting |
+| `internal/api/middleware` | High | ≥80% | unmeasured | go-mutesting |
+| `internal/validation` | Existential (CWE-78 / CWE-113 boundary) | ≥90% | unmeasured | go-mutesting |
+| `web/src/utils/safeHtml.ts` | Frontend (XSS gate) | ≥90% | unmeasured | Stryker |
+
+### Operator command (per package)
+
+```bash
+# Use the avito-tech fork that supports linux/arm64 + Go 1.25.
+go install github.com/avito-tech/go-mutesting/cmd/go-mutesting@latest
+
+mkdir -p tool-output
+$(go env GOPATH)/bin/go-mutesting --debug ./internal/crypto/... \
+  > tool-output/mutation-crypto.txt 2>&1
+grep -oE 'mutation score is [0-9.]+' tool-output/mutation-crypto.txt | tail -1
+```
+
+**Acceptance:** ≥80% (Existential) / ≥70% (High). Anything below is a Medium finding; triage entries go in `coverage-audit-2026-04-27/gap-backlog.md`. This subsection moves mutation testing from "future work" to "documented release gate."
+
 ## Adding New Tests
 
 When a new feature ships:
@@ -346,6 +429,7 @@ When a new feature ships:
 
 ## Version History
 
+- **v1.3** (April 2026, post-Bundle-P) — QA Doc Strengthening shipped. New top-of-doc Test Suite Health dashboard (regenerated via `make qa-stats`). New Coverage by Risk Class table after the Coverage Map. New Release Day Sign-Off Matrix and Mutation Testing Targets sections. CI seed-count + Part-count drift guards land in `.github/workflows/ci.yml` so future doc drift fails CI. Bundle P closes M-007 / M-010 / M-011 / M-012 (structural strengthening) + M-008 (Mutation Testing Targets).
 - **v1.2** (April 2026, post-coverage-audit) — Documented Parts 55–56 (I-004 Agent Soft-Retirement, I-005 Notification Retry & Dead-Letter) and surfaced Parts 23–24 (S/MIME & EKU; OCSP/CRL) as not-yet-automated. 56 Parts total in `testing-guide.md`; 49 live `Part_*` automation wrappers in `qa_test.go` + 4 new `Skip` stubs for Parts 23/24/55/56 = 53 wrappers (Parts 15–17 remain covered by source-checks in Parts 42–46). Reconciled seed-data section to actual `seed_demo.sql` counts (12 agents, 13 issuers; certs were already accurate at 32). Bundle I of the 2026-04-27 coverage-audit closure plan.
 - **v1.1** (April 2026) — Added Parts 53–54 (M47: Kubernetes Secrets target + AWS ACM PCA issuer). 54 Parts total, ~164 automated subtests.
 - **v1.0** (April 2026) — Initial release covering all 52 Parts of testing-guide.md v2.1. Replaces `qa-smoke-test.sh`.
