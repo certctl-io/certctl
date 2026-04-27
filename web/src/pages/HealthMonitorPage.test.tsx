@@ -55,7 +55,7 @@ describe('HealthMonitorPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
     vi.mocked(client.listHealthChecks).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 100 } as never);
     renderWithQuery(<HealthMonitorPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Health/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: /Health Monitor/i })).toBeInTheDocument();
     });
   });
 

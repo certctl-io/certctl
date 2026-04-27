@@ -54,7 +54,7 @@ describe('AgentFleetPage — render + XSS hardening (M-026 / M-029 Pass 3)', () 
     vi.mocked(client.getAgents).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<AgentFleetPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Agent/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: /Agent Fleet Overview/i })).toBeInTheDocument();
     });
   });
 

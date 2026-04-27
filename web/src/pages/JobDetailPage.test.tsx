@@ -65,7 +65,7 @@ describe('JobDetailPage — render + XSS hardening (M-026 / M-029 Pass 3)', () =
     vi.mocked(client.getAuditEvents).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 10 } as never);
     renderRoute(<JobDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText(/j-xss-001/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: /j-xss-001/ })).toBeInTheDocument();
     });
   });
 

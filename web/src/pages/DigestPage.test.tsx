@@ -52,7 +52,7 @@ describe('DigestPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     vi.mocked(client.previewDigest).mockResolvedValue('<p>Today 5 certs expire</p>' as never);
     renderWithQuery(<DigestPage />);
     await waitFor(() => {
-      expect(screen.getByText('Certificate Digest')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Certificate Digest' })).toBeInTheDocument();
     });
   });
 
@@ -65,7 +65,7 @@ describe('DigestPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
       // Wait for the preview surface to render (the page settles into
       // either the preview pane or an error pane — either way the
       // page-load cycle is done by the time the header text appears).
-      expect(screen.getByText('Certificate Digest')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Certificate Digest' })).toBeInTheDocument();
     });
 
     // No live script with our marker may be attached to the DOM, AND no
@@ -82,7 +82,7 @@ describe('DigestPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     vi.mocked(client.previewDigest).mockRejectedValue(new Error('preview failed') as never);
     renderWithQuery(<DigestPage />);
     await waitFor(() => {
-      expect(screen.getByText('Certificate Digest')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Certificate Digest' })).toBeInTheDocument();
     });
   });
 });

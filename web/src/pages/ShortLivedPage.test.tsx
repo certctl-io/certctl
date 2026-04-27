@@ -66,7 +66,7 @@ describe('ShortLivedPage — render + XSS hardening (M-026 / M-029 Pass 3)', () 
     vi.mocked(client.getProfiles).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<ShortLivedPage />);
     await waitFor(() => {
-      expect(screen.getByText('Short-Lived Credentials')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Short-Lived Credentials' })).toBeInTheDocument();
     });
   });
 
@@ -86,7 +86,7 @@ describe('ShortLivedPage — render + XSS hardening (M-026 / M-029 Pass 3)', () 
 
     renderWithQuery(<ShortLivedPage />);
     await waitFor(() => {
-      expect(screen.getByText('Short-Lived Credentials')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Short-Lived Credentials' })).toBeInTheDocument();
     });
 
     const liveScripts = document.querySelectorAll('script[data-xss="shortlived"]');

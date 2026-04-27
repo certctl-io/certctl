@@ -54,7 +54,7 @@ describe('JobsPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     vi.mocked(client.getJobs).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<JobsPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Jobs/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Jobs' })).toBeInTheDocument();
     });
   });
 

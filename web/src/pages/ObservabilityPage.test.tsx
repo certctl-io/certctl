@@ -70,7 +70,7 @@ describe('ObservabilityPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
 
     renderWithQuery(<ObservabilityPage />);
     await waitFor(() => {
-      expect(screen.getByText('Observability')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Observability' })).toBeInTheDocument();
     });
   });
 
@@ -94,7 +94,7 @@ describe('ObservabilityPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
 
     renderWithQuery(<ObservabilityPage />);
     await waitFor(() => {
-      expect(screen.getByText('Observability')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Observability' })).toBeInTheDocument();
     });
 
     const liveScripts = document.querySelectorAll('script[data-xss="observability"]');
