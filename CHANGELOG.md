@@ -4,6 +4,28 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle E (Mechanical Sweeps & Defensive Polish): 6 audit findings closed; L-004 deferred
+
+> Closes the audit's mechanical-sweep cluster — `L-009` (ZeroSSL EAB URL configurable; audit's "no timeout" claim was wrong — 15s already in place), `L-010` (verified-already-clean: 0 mock.Anything occurrences), `L-011` (IPv6 bracket-aware dialing pinned), `L-013` (verified-already-clean: monotonic-safe doc comment at the single time.Now().Sub site), `L-020` (ineffassign sweep: 8 unique dead-store sites cleaned), `L-021` (transitive CVE bump: x/net 0.42→0.47, x/crypto 0.41→0.45, all 5 advisories cleared). **`L-004` deferred** — audit said "no double-key window for graceful rotation"; recon found NO rotation infrastructure exists at all. Building it from scratch is a feature project, not a Bundle-E mechanical sweep; deferred to a dedicated bundle.
+
+#### Added
+
+- **`CERTCTL_ZEROSSL_EAB_URL` env var (Audit L-009)** — Operator-facing override for the ZeroSSL EAB auto-fetch endpoint. Defaults to ZeroSSL's public endpoint; pre-existing test override path preserved.
+- **`internal/connector/notifier/email/email_ipv6_test.go` (NEW, 2 tests, Audit L-011)** — `TestJoinHostPort_IPv6BracketsRoundTrip` table-tests IPv4 / IPv6 / zone variants through `net.JoinHostPort` + `net.SplitHostPort` round-trip. `TestSMTPDialerUsesJoinHostPort` source-greps `email.go` and fails CI if a future refactor swaps `net.JoinHostPort` for `fmt.Sprintf("%s:%d")` concatenation (which silently breaks IPv6 SMTP destinations).
+
+#### Changed
+
+- **`go.mod` / `go.sum` (Audit L-021)** — `golang.org/x/net` 0.42.0 → 0.47.0; `golang.org/x/crypto` 0.41.0 → 0.45.0; `golang.org/x/text` 0.28.0 → 0.31.0 (transitively required). Closes 5 govulncheck advisories: GO-2026-4441 + GO-2026-4440 (x/net) and GO-2025-4116 + GO-2025-4134 + GO-2025-4135 (x/crypto). All previously deferred-call advisories.
+- **`internal/repository/postgres/certificate.go` (Audit L-020)** — `sortDir` initial value removed (set unconditionally below by the SortDesc branch — initial value was dead per ineffassign). `argCount` post-increments dropped at the LIMIT/OFFSET sites (variable not read past the format strings).
+- **`internal/service/{agent_group,issuer,owner,profile,target,team}.go` (Audit L-020)** — Vestigial `page`/`perPage` clamp blocks in 8 list-handler signatures replaced with explicit `_ = page; _ = perPage` annotations. The first `List()` in `issuer.go`, `owner.go`, `target.go`, `team.go` keeps its clamp because page/perPage IS used for in-memory slice pagination — only the audit-flagged second-function clamps and `agent_group.go` / `profile.go` (truly vestigial) were swept.
+- **`internal/connector/issuer/acme/acme.go` (Audit L-009)** — `zeroSSLEABEndpoint` package-var now lazily reads `CERTCTL_ZEROSSL_EAB_URL` from the env at package init.
+- **`internal/api/middleware/middleware.go::tokenBucket.allow` (Audit L-013)** — Documentation pin: comment block above the `now.Sub(tb.lastRefill)` call documents that both timestamps come from `time.Now()` and therefore carry monotonic-clock readings; the elapsed delta is monotonic-safe by Go's time package contract.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 46/55 → 52/55 closed (Critical 0/0; High 8/9; Medium 21/27; **Low 14/19 → 19/19** — 100% Low closed except L-004 explicit defer); L-009 / L-010 / L-011 / L-013 / L-020 / L-021 boxes flipped `[x]` with closure notes; L-004 annotated with scope-pivot note explaining the deferral.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — 6 status flips with closure notes citing the Bundle E mechanism.
+
 ### Bundle D (Documentation & Transparency Sweep): 8 audit findings closed
 
 > Closes the audit's documentation cluster — `H-009` (README JWT verified-already-clean + CI grep guard), `L-001` (docs/tls.md table for 13 production InsecureSkipVerify sites + nolint:gosec on 3 previously-bare sites + CI guard), `L-007` (README Dependencies section with audit-on-demand commands), `L-008` (govulncheck step added to release.yml as release-time gate), `L-016` (architecture.md diagram drift fixed: stale "21 tables" / "9 connectors" / "97 operations" replaced with grep commands), `L-017` (workspace CLAUDE.md verified-already-clean), `L-018` (defect-age.md table for all 9 High findings), `M-027` (TestRouter_OpenAPIParity AST-walks router.go for both r.Register AND r.mux.Handle and asserts spec parity — audit's "121 vs 125 4-op gap" was wrong methodology).

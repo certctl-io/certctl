@@ -130,9 +130,11 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 		return nil, 0, fmt.Errorf("failed to count certificates: %w", err)
 	}
 
-	// Determine sort field and direction
+	// Determine sort field and direction. Bundle E / Audit L-020:
+	// sortDir is set unconditionally below by the SortDesc branch; the
+	// previous initial value was an ineffectual assignment (CWE-563).
 	sortField := "created_at"
-	sortDir := "DESC"
+	var sortDir string
 	sortFieldMap := map[string]string{
 		"notAfter":    "expires_at",
 		"expiresAt":   "expires_at",
@@ -163,16 +165,16 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 	var limitClause string
 	var offset int
 	if filter.Cursor != "" {
-		// Cursor-based pagination
+		// Cursor-based pagination. Bundle E / Audit L-020: argCount is
+		// not read past this point so the post-increment is dropped.
 		limitClause = fmt.Sprintf("LIMIT $%d", argCount)
 		args = append(args, pageSize)
-		argCount++
 	} else {
-		// Page-based pagination
+		// Page-based pagination. Bundle E / Audit L-020: same as above
+		// for the +=2 post-increment.
 		offset = (filter.Page - 1) * pageSize
 		limitClause = fmt.Sprintf("LIMIT $%d OFFSET $%d", argCount, argCount+1)
 		args = append(args, pageSize, offset)
-		argCount += 2
 	}
 
 	query := fmt.Sprintf(`

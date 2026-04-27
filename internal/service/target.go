@@ -263,12 +263,12 @@ func (s *TargetService) TestConnection(ctx context.Context, id string) error {
 
 // ListTargets returns paginated targets (handler interface method).
 func (s *TargetService) ListTargets(ctx context.Context, page, perPage int) ([]domain.DeploymentTarget, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 50
-	}
+	// Bundle E / Audit L-020: page/perPage are unused; the underlying repo
+	// List() does not yet take pagination params. Marked explicitly so
+	// ineffassign sees no dead store and future maintainers see the
+	// vestigial params rather than a misleading default-applied clamp.
+	_ = page
+	_ = perPage
 
 	targets, err := s.targetRepo.List(ctx)
 	if err != nil {

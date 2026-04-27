@@ -629,12 +629,12 @@ func (s *IssuerService) buildEnvVarSeeds(cfg *config.Config) []*domain.Issuer {
 
 // ListIssuers returns paginated issuers (handler interface method).
 func (s *IssuerService) ListIssuers(ctx context.Context, page, perPage int) ([]domain.Issuer, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 50
-	}
+	// Bundle E / Audit L-020: page/perPage are unused; the underlying repo
+	// List() does not yet take pagination params. Marked explicitly so
+	// ineffassign sees no dead store and future maintainers see the
+	// vestigial params rather than a misleading default-applied clamp.
+	_ = page
+	_ = perPage
 
 	issuers, err := s.issuerRepo.List(ctx)
 	if err != nil {
