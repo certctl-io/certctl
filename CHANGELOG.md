@@ -2,7 +2,29 @@
 
 All notable changes to certctl are documented in this file. Dates use ISO 8601. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [unreleased] — 2026-04-26
+## [unreleased] — 2026-04-27
+
+### Bundle 0.7 (Coverage Audit Closure): cmd/agent key-handling regression coverage — C-008 closed
+
+> Phase 0 of the 2026-04-27 coverage audit's closure plan triggered a halt-condition: `cmd/agent/keymem.go`'s two security-critical functions were at 0.0% / 11.1% line coverage despite being defense-in-depth for agent private-key memory hygiene (Bundle 9 / Audit L-002 + L-003 — agent edition). Bundle 0.7 was inserted before Bundle J as mandatory; this entry closes finding **C-008** (`CRTCTL-COVAUDIT-2026-04-27-0034`).
+
+`cmd/agent/keymem_test.go` (~510 LoC, 17 top-level test functions) ships:
+
+- **`marshalAgentKeyAndZeroize` regression coverage** — happy path, nil-key guard (asserts `onDER` is NOT invoked), upstream error propagation via `errors.Is`, and the **DER-buffer-zeroized-after-return invariant** verified observably: capture the slice header inside `onDER` (sharing the backing array, NOT a deep copy), then assert every byte reads `0x00` after the function returns. Pinned for both the happy path AND the `onDER`-error path. A future refactor that drops the `defer clear(der)` line would break the test even if the simpler assertions still pass. Also adds a "contract violator" defense test: a buggy caller that retains the slice past `onDER` reads zeros, not the private scalar.
+- **`ensureAgentKeyDirSecure` regression coverage** — 13-row table-driven matrix covering empty/dot/root refuse with documented error wrap, create-with-0700, create-nested-0700, accept-existing-0700 (no-op short-circuit), tighten 0750/0755/0777 to 0700, accept-existing-0500/0400 (owner-only-no-write `mode&0o077 == 0` branch, no chmod), `filepath.Clean` normalization (trailing slash + dot prefix). Plus PathIsAFile (documents current behavior — function chmod's a file path silently, not a correctness bug per current call sites but a hardening candidate filed against any future refactor), Idempotent, Concurrent (`-race` clean across 8 goroutines), Stat/Mkdir/Chmod error-propagation paths (root-required ones `t.Skip` cleanly on non-root CI rather than being absent), and Format-includes-cleaned-path debuggability assertion.
+- **End-to-end smoke** (`TestKeymem_AgentMainFlowSmoke`) replaying `cmd/agent/main.go`'s composition: `ensureAgentKeyDirSecure` → `marshalAgentKeyAndZeroize`.
+
+Coverage delta:
+
+| | Pre-Bundle-0.7 | Post-Bundle-0.7 | Gate | Met? |
+|---|---|---|---|---|
+| `cmd/agent/keymem.go::marshalAgentKeyAndZeroize` | 0.0% | **85.7%** | ≥85% | ✓ |
+| `cmd/agent/keymem.go::ensureAgentKeyDirSecure` | 11.1% | **94.4%** | ≥85% | ✓ |
+| `cmd/agent` overall | 54.3% | **57.7%** (+3.4pp) | (≥75% stretch) | △ partial |
+
+Verification: `go test -race -count=3 ./cmd/agent/...` clean (0 races); `gofmt -l` clean; `go vet ./cmd/agent/...` clean; `staticcheck ./cmd/agent/...` clean. The cmd/agent overall ≥75% stretch target is unachievable from a keymem-only test file (the package's bulk — `Run`, `main`, `executeCSRJob`, `executeDeploymentJob`, `verifyAndReportDeployment` — is unrelated to key-handling and dominates the denominator); the remaining lift is tracked as a follow-on cmd/agent flow-test bundle.
+
+Audit deliverable updates: `coverage-audit-2026-04-27/findings.yaml` flips C-008 `open` → `closed` with closure note + post-Bundle coverage numbers; `gap-backlog.md` adds a closure log entry and partial-closure note on H-006; `coverage-matrix.md` updates the cmd/agent row from "NOT MEASURED" to 57.7%; `coverage-report.md::Phase 0 Results` appends a Bundle 0.7 closure block with the coverage delta table and pinned-invariant list; `coverage-audit-closure-plan.md` checklist ticks Bundle 0.7. **Bundle J (ACME failure-mode coverage) unblocked.**
 
 ### Bundle H (M-029 Drain — AUDIT FULLY CLOSED): 1 audit finding closed across 3 passes
 
