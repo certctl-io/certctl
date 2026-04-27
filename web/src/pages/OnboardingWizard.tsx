@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { useNavigate, Link } from 'react-router-dom';
 import {
   getIssuers, getAgents, getProfiles, getOwners, getTeams, getRenewalPolicies,
@@ -112,7 +113,6 @@ function IssuerStep({ onNext, onSkip, onIssuerCreated }: {
   onSkip: () => void;
   onIssuerCreated: (issuer: Issuer) => void;
 }) {
-  const queryClient = useQueryClient();
   const [selectedType, setSelectedType] = useState<string | null>(null);
   const [configValues, setConfigValues] = useState<Record<string, unknown>>({});
   const [issuerName, setIssuerName] = useState('');
@@ -131,23 +131,27 @@ function IssuerStep({ onNext, onSkip, onIssuerCreated }: {
 
   const typeConfig = selectedType ? issuerTypes.find(t => t.id === selectedType) : null;
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: () => createIssuer({
       name: issuerName || `${typeConfig?.name || selectedType} Issuer`,
       type: selectedType!,
       config: configValues as Record<string, unknown>,
     }),
+    invalidates: [['issuers']],
     onSuccess: (issuer) => {
       setCreatedIssuer(issuer);
       onIssuerCreated(issuer);
-      queryClient.invalidateQueries({ queryKey: ['issuers'] });
       setError('');
     },
     onError: (err: Error) => setError(err.message),
   });
 
-  const testMutation = useMutation({
+  // testIssuerConnection updates last_tested_at server-side; refresh the
+  // issuers list so the timestamp + status columns reflect the new probe.
+  // The local setTestResult banner still surfaces the immediate pass/fail.
+  const testMutation = useTrackedMutation({
     mutationFn: () => testIssuerConnection(createdIssuer!.id),
+    invalidates: [['issuers']],
     onSuccess: () => setTestResult({ ok: true, msg: 'Connection successful' }),
     onError: (err: Error) => setTestResult({ ok: false, msg: err.message }),
   });
@@ -402,15 +406,14 @@ function CreateTeamModalInline({ isOpen, onClose, onCreated }: {
   onClose: () => void;
   onCreated: (teamId: string) => void;
 }) {
-  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [description, setDescription] = useState('');
   const [error, setError] = useState('');
 
-  const mutation = useMutation({
+  const mutation = useTrackedMutation({
     mutationFn: () => createTeam({ name: name.trim(), description: description.trim() }),
+    invalidates: [['teams']],
     onSuccess: (team) => {
-      queryClient.invalidateQueries({ queryKey: ['teams'] });
       setName('');
       setDescription('');
       setError('');
@@ -475,20 +478,19 @@ function CreateOwnerModalInline({ isOpen, onClose, onCreated, teams }: {
   onCreated: (ownerId: string) => void;
   teams: { id: string; name: string }[];
 }) {
-  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [email, setEmail] = useState('');
   const [teamId, setTeamId] = useState('');
   const [error, setError] = useState('');
 
-  const mutation = useMutation({
+  const mutation = useTrackedMutation({
     mutationFn: () => createOwner({
       name: name.trim(),
       email: email.trim(),
       team_id: teamId || undefined,
     }),
+    invalidates: [['owners']],
     onSuccess: (owner) => {
-      queryClient.invalidateQueries({ queryKey: ['owners'] });
       setName('');
       setEmail('');
       setTeamId('');
@@ -574,7 +576,6 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
   onSkip: () => void;
   createdIssuerId: string | null;
 }) {
-  const queryClient = useQueryClient();
   const [name, setName] = useState('');
   const [commonName, setCommonName] = useState('');
   const [sans, setSans] = useState('');
@@ -608,7 +609,7 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
 
   const hasAgents = (agents?.data?.length ?? 0) > 0;
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: async () => {
       const sanList = sans.split(',').map(s => s.trim()).filter(Boolean);
       const cert = await createCertificate({
@@ -626,10 +627,9 @@ function CertificateStep({ onNext, onSkip, createdIssuerId }: {
       await triggerRenewal(cert.id);
       return cert;
     },
+    invalidates: [['certificates'], ['dashboard-summary']],
     onSuccess: (cert) => {
       setCreated(true);
-      queryClient.invalidateQueries({ queryKey: ['certificates'] });
-      queryClient.invalidateQueries({ queryKey: ['dashboard-summary'] });
       setTimeout(() => onNext(cert.common_name), 1500);
     },
     onError: (err: Error) => setError(err.message),

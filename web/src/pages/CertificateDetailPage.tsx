@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
@@ -159,7 +160,6 @@ function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certI
 }
 
 function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { certId: string; currentPolicyId: string; currentProfileId: string }) {
-  const queryClient = useQueryClient();
   const [editing, setEditing] = useState(false);
   const [policyId, setPolicyId] = useState(currentPolicyId);
   const [profileId, setProfileId] = useState(currentProfileId);
@@ -181,13 +181,13 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
     enabled: editing,
   });
 
-  const saveMutation = useMutation({
+  const saveMutation = useTrackedMutation({
     mutationFn: () => updateCertificate(certId, {
       renewal_policy_id: policyId,
       certificate_profile_id: profileId,
     }),
+    invalidates: [['certificate', certId]],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['certificate', certId] });
       setEditing(false);
     },
   });
@@ -257,7 +257,6 @@ function InlinePolicyEditor({ certId, currentPolicyId, currentProfileId }: { cer
 export default function CertificateDetailPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
-  const queryClient = useQueryClient();
   const [showDeploy, setShowDeploy] = useState(false);
   const [deployTargetId, setDeployTargetId] = useState('');
   const [showRevoke, setShowRevoke] = useState(false);
@@ -291,38 +290,34 @@ export default function CertificateDetailPage() {
     enabled: !!cert?.certificate_profile_id,
   });
 
-  const renewMutation = useMutation({
+  const renewMutation = useTrackedMutation({
     mutationFn: () => triggerRenewal(id!),
-    onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['certificate', id] });
-      queryClient.invalidateQueries({ queryKey: ['certificates'] });
-    },
+    invalidates: [['certificate', id], ['certificates']],
   });
 
-  const deployMutation = useMutation({
+  const deployMutation = useTrackedMutation({
     mutationFn: () => triggerDeployment(id!, deployTargetId),
+    invalidates: [['certificate', id]],
     onSuccess: () => {
       setShowDeploy(false);
       setDeployTargetId('');
-      queryClient.invalidateQueries({ queryKey: ['certificate', id] });
     },
   });
 
-  const archiveMutation = useMutation({
+  const archiveMutation = useTrackedMutation({
     mutationFn: () => archiveCertificate(id!),
+    invalidates: [['certificates']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['certificates'] });
       navigate('/certificates');
     },
   });
 
-  const revokeMutation = useMutation({
+  const revokeMutation = useTrackedMutation({
     mutationFn: () => revokeCertificate(id!, revokeReason),
+    invalidates: [['certificate', id], ['certificates']],
     onSuccess: () => {
       setShowRevoke(false);
       setRevokeReason('unspecified');
-      queryClient.invalidateQueries({ queryKey: ['certificate', id] });
-      queryClient.invalidateQueries({ queryKey: ['certificates'] });
     },
   });
 
