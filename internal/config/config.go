@@ -1527,6 +1527,33 @@ func (c *Config) GetLogLevel() slog.Level {
 // The ":admin" suffix is optional; if present, the key has admin privileges.
 // Returns a typed []NamedAPIKey so main.go can pass it directly to the
 // middleware layer without type assertion gymnastics.
+//
+// Audit L-004 (CWE-924) — graceful key rotation contract:
+//
+//	Two entries MAY share the same Name during a rotation overlap window:
+//	    CERTCTL_API_KEYS_NAMED="alice:OLDKEY:admin,alice:NEWKEY:admin"
+//	When duplicates appear, both keys validate at the auth middleware
+//	(NewAuthWithNamedKeys iterates every entry on every request, so the
+//	match is by hash regardless of name collisions). Both produce the
+//	same UserKey context value (the shared name), which keeps the audit
+//	trail and per-user rate-limit bucket (Bundle B M-025) consistent
+//	across the rollover.
+//
+//	The duplicate-name path is restricted: every entry sharing a name
+//	MUST carry the same admin flag — mixing admin=true with admin=false
+//	under the same identity would let a non-admin caller present the
+//	admin-flagged key and bypass the gate (or vice-versa). The contract
+//	is "rotate ONE key at a time"; the privilege level stays constant
+//	within the overlap window.
+//
+//	Exact (name,key) duplicates are still rejected — that's a typo,
+//	not a rotation. Rotation requires DIFFERENT keys under the same
+//	name.
+//
+//	Once the rollover is complete, the operator removes the OLDKEY
+//	entry and restarts. Single-entry steady state resumes.
+//
+//	See docs/security.md::API key rotation for the full operator runbook.
 func ParseNamedAPIKeys(input string) ([]NamedAPIKey, error) {
 	if input == "" {
 		return nil, nil
@@ -1534,7 +1561,17 @@ func ParseNamedAPIKeys(input string) ([]NamedAPIKey, error) {
 
 	parts := splitComma(input)
 	var keys []NamedAPIKey
-	seen := make(map[string]bool)
+	// nameToAdmin pins the admin flag for any name we've seen before; it
+	// is consulted on subsequent duplicate-name entries to enforce the
+	// "matching admin" contract above.
+	nameToAdmin := make(map[string]bool)
+	// nameSeen records whether we've seen a name at all (used to
+	// distinguish first-occurrence from duplicate-occurrence; we need
+	// this separate from nameToAdmin because admin=false is a valid
+	// recorded state).
+	nameSeen := make(map[string]bool)
+	// pairSeen rejects exact (name,key) duplicates as typos.
+	pairSeen := make(map[string]bool)
 
 	for _, part := range parts {
 		part = trimSpace(part)
@@ -1566,13 +1603,28 @@ func ParseNamedAPIKeys(input string) ([]NamedAPIKey, error) {
 			return nil, fmt.Errorf("invalid key name: %s (must be alphanumeric, hyphens, underscores)", name)
 		}
 
-		if seen[name] {
-			return nil, fmt.Errorf("duplicate key name: %s", name)
-		}
-		seen[name] = true
-
 		if key == "" {
 			return nil, fmt.Errorf("empty key for name: %s", name)
+		}
+
+		// Typo guard: same (name,key) pair twice is never legitimate —
+		// rotation requires DIFFERENT keys under the same name.
+		pairKey := name + "\x00" + key
+		if pairSeen[pairKey] {
+			return nil, fmt.Errorf("duplicate (name,key) entry for name %q — rotation requires DIFFERENT keys under the same name", name)
+		}
+		pairSeen[pairKey] = true
+
+		// Duplicate-name path: allowed iff admin flag matches the prior
+		// entry for the same name (L-004 rotation overlap contract).
+		if nameSeen[name] {
+			priorAdmin := nameToAdmin[name]
+			if priorAdmin != admin {
+				return nil, fmt.Errorf("duplicate key name %q with mismatched admin flag — rotation overlap requires both entries carry the same privilege level (prior=%v, this=%v)", name, priorAdmin, admin)
+			}
+		} else {
+			nameSeen[name] = true
+			nameToAdmin[name] = admin
 		}
 
 		keys = append(keys, NamedAPIKey{
@@ -1580,6 +1632,23 @@ func ParseNamedAPIKeys(input string) ([]NamedAPIKey, error) {
 			Key:   key,
 			Admin: admin,
 		})
+	}
+
+	// Rotation-window observability: emit a one-shot startup INFO log
+	// per name with multiple entries so operators can see the active
+	// overlap state in logs. (Single-entry steady state stays silent.)
+	nameCounts := make(map[string]int)
+	for _, k := range keys {
+		nameCounts[k.Name]++
+	}
+	for name, count := range nameCounts {
+		if count > 1 {
+			slog.Info("api-key rotation window active",
+				"name", name,
+				"entries", count,
+				"see", "docs/security.md::api-key-rotation",
+			)
+		}
 	}
 
 	return keys, nil

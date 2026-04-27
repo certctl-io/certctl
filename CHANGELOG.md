@@ -4,9 +4,30 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
-### Bundle F (Compliance Tail + CI Gate Hardening): 2 audit findings closed — Audit closure complete
+### Bundle G (Final Audit Closure): 5 audit findings closed — L-004 + D-003/4/5/7
 
-> Closes `M-023` (legacy EST/SCEP TLS 1.2 reverse-proxy operator runbook in `docs/legacy-est-scep.md`) and `M-024` (govulncheck CI step flipped from soft to hard gate after Bundle E cleared the L-021 advisories). **The 2026-04-25 audit's bundle era ends with this commit.** Score: 51/55 closed (93%); High 9/9 (100%); Medium 26/27 (96%); Low 19/19 (100%); Deferred 4/7. Remaining open IDs are all explicitly tracked: M-029 (frontend per-page migration backlog — closes per-PR incrementally), L-004 (rotation infra deferred to dedicated bundle), D-003/4/5/7 (deferred-tool integrations — wired CI-only or sandbox-blocked, no further bundle work needed).
+> Closes the final-closure cluster of the 2026-04-25 audit. Supersedes the prior "L-004 deferred to dedicated bundle / v3 Pro deliverable" framing in Bundle E and Bundle F entries: recon confirmed the rotation primitive can ship as a parser-contract relaxation plus an operator runbook, no schema or DB-resident key store needed. Also closes the four remaining Deferred (Info) tool integrations — D-003 (mutation testing) and D-007 (semgrep) needed actual wiring added to `.github/workflows/security-deep-scan.yml` (the recon-time claim that they were already wired turned out to be false), and D-004 (DAST) and D-005 (testssl.sh) close on publishing the operator runbook that promotes them from "wired CI-only, no local-run validation" to "wired CI-only + operator runbook published". **Score: 51/55 → 54/55 closed (98%); deferred 4/7 → 7/7 (100%).** All severity-graded findings closed except M-029 (frontend per-page migration backlog, by design incremental).
+
+#### Changed
+
+- **`internal/config/config.go::ParseNamedAPIKeys` (Audit L-004 / CWE-924)** — Duplicate-name handling relaxed to support the rotation overlap window. Two entries can now share a `name` iff their admin flag matches; mismatched-admin entries are rejected at startup (privilege-escalation guard — a non-admin must not share an identity with an admin); exact `(name, key)` duplicates are still rejected (typo guard — rotation requires DIFFERENT keys under the same name). Single-entry steady state and configs with all-distinct names parse exactly as before. A startup INFO log per name with ≥2 entries makes the active rotation window observable: `INFO api-key rotation window active name=<name> entries=<n> see=docs/security.md::api-key-rotation`. The auth middleware (`internal/api/middleware/middleware.go::NewAuthWithNamedKeys`) was already shaped correctly for the multi-entry case — it iterates all entries with constant-time hash comparison and produces the same `UserKey` + `AdminKey` context value for either bearer — so Bundle B's M-025 per-user rate limiter automatically inherits the property that both keys feed the same bucket during the rollover (UserKey-keyed, not key-keyed).
+- **`.github/workflows/security-deep-scan.yml` (Audit D-003 + D-007)** — Two new steps added to the daily deep-scan workflow. (1) `Install go-mutesting` + `go-mutesting (crypto cluster)` runs the mutation tester against `./internal/crypto/...`, `./internal/pkcs7/...`, `./internal/connector/issuer/local/...` and writes the per-package summary into `go-mutesting.txt` (D-003). (2) `semgrep p/react-security (frontend)` runs `returntocorp/semgrep:latest semgrep --config=p/react-security --json /src/web/src` after the docker-compose teardown and writes the results to `semgrep-react.json` (D-007). Both new artefacts added to the `Upload deep-scan receipts` step's path list. Bundle 7's closure claim that these were wired turned out to be false on recon — Bundle G fixes the gap.
+
+#### Added
+
+- **`internal/config/config_l004_rotation_test.go` (NEW, 5 tests)** — Pins the parser contract end-to-end: `TestL004_DualKeyRotation_SameAdmin_Accepted` (4 subtests: both-admin / both-non-admin / three-keys / mixed-with-other-users); `TestL004_DualKeyRotation_AdminMismatch_Rejected` (2 subtests, error must cite "mismatched admin flag"); `TestL004_DualKeyRotation_IdenticalNameAndKey_Rejected` (typo guard); `TestL004_DualKeyRotation_SteadyStateUnchanged` (3 subtests covering single / two-distinct / three-distinct); `TestL004_DualKeyRotation_PreservesAllEntries` (round-trip pin — every input entry appears in parsed output).
+- **`internal/api/middleware/auth_l004_rotation_test.go` (NEW, 3 tests)** — Pins the auth-middleware side of the contract: `TestL004_AuthMiddleware_BothKeysValidate` asserts both `OLDKEY` and `NEWKEY` route to the protected handler with the same `UserKey` and `Admin` context value during the overlap; `TestL004_AuthMiddleware_PostRotationOldKeyRejected` asserts the old bearer fails 401 once the operator removes the old entry; `TestL004_AuthMiddleware_DualUserKeyedRateLimit` is the invariant that protects Bundle B's M-025 per-user rate-limit bucket — both rotation entries MUST produce the same `UserKey` value, else a client rotating its key would get a fresh bucket and bypass the limit.
+- **`docs/security.md::API key rotation` section (Audit L-004)** — Operator runbook for the zero-downtime rotation: 6 numbered steps (generate the new key with `openssl rand -hex 32` → append the new entry alongside the existing one in `CERTCTL_API_KEYS_NAMED` → restart → roll clients to the new key → remove the old entry → restart). Includes "What the contract guarantees" (same-name same-admin allowed; mismatched-admin rejected; (name,key) duplicate rejected; single-entry steady state unchanged) and an explicit "What the contract does NOT do" carve-out (no automatic OLDKEY expiration, no GUI/API for key management, no revocation list — keys remain env-var-only by design).
+- **`docs/testing-strategy.md` (NEW, Audit D-003 + D-004 + D-005 + D-007)** — Consolidated operator runbook for the security deep-scan suite. Documents the CI workflow split (per-PR `ci.yml` fast gates vs. daily `security-deep-scan.yml` heavyweight gates), then per-tool sections for `go-mutesting` (mutation testing — installation command, target packages, 80% kill-ratio acceptance, triage path), ZAP baseline (DAST against `docker compose up` — local-run command, zero-HIGH/CRITICAL acceptance, WARN/INFO triage), `testssl.sh` (TLS audit — local-run + `jq` severity filter), and `semgrep p/react-security` (frontend XSS / unsafe-link patterns — local-run + `// nosem:` justification path). Includes a cadence table cross-referencing each tool's trigger, wall-clock budget, and ownership.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score **51/55 → 54/55** closed (98%); deferred **4/7 → 7/7** (100%); L-004 box flipped `[x]` with full closure note; D-003 / D-004 / D-005 / D-007 boxes flipped `[x]` citing the wiring + runbook mechanism. Score-line preamble rewritten to remove the "L-004 v3 Pro / scope-deferred" framing — the only remaining open finding is M-029 (incremental by design).
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — L-004 status `deferred_v3_pro` → `closed`; D-003 / D-004 / D-005 / D-007 status flipped to `closed` with per-finding closure notes; new `bundle-G-final-closure` entry added to `closure_log`.
+
+### Bundle F (Compliance Tail + CI Gate Hardening): 2 audit findings closed
+
+> Closes `M-023` (legacy EST/SCEP TLS 1.2 reverse-proxy operator runbook in `docs/legacy-est-scep.md`) and `M-024` (govulncheck CI step flipped from soft to hard gate after Bundle E cleared the L-021 advisories). At publish time this entry framed the audit's bundle era as ending with Bundle F at 51/55 closed and listed L-004 + D-003/4/5/7 as still-open — that framing is **superseded by Bundle G above**, which closes all five via the parser-contract relaxation, the missing CI-workflow wiring, and the consolidated operator runbook in `docs/testing-strategy.md`.
 
 #### Added
 
@@ -16,19 +37,9 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 - **`.github/workflows/ci.yml::Run govulncheck` (Audit M-024)** — Renamed to `Run govulncheck (M-024 hard gate)`; comment block updated to document why the deferred-call carve-out the original prompt designed isn't needed (Bundle E cleared the L-021 advisory backlog). Default `govulncheck ./...` exit-code semantics now act as the NIST SSDF PW.7.2 gate.
 
-#### Audit endgame
+#### Audit endgame (superseded by Bundle G)
 
-After Bundle F merges, the audit's bundle era is complete. Open finding tally:
-
-| Category | Closed | Open | Status |
-|---|---|---|---|
-| Critical | 0 / 0 | 0 | n/a — none identified |
-| **High** | **9 / 9** | **0** | **100% closed** |
-| Medium | 26 / 27 | 1 | M-029 closes incrementally per-PR |
-| **Low** | **19 / 19** | **0** | **100% closed** (L-004 has explicit scope-pivot defer) |
-| Deferred | 4 / 7 | 3 | D-003/4/5/7 — wired CI-only or sandbox-blocked |
-
-**51 / 55 = 93% closed.** The remaining items don't require further bundle work — M-029 is a per-PR migration backlog and the deferred-tool items are operationally complete (the tools run on a daily CI schedule via `security-deep-scan.yml`).
+The Bundle F-time tally was 51/55 with L-004 deferred and D-003/4/5/7 still open. **Bundle G (above) closes all five**, taking the post-Bundle-G tally to **54/55 closed (98%) + 7/7 deferred (100%)**. The only remaining open item is M-029, which is by-design incremental and closes per-PR as each frontend page migration ships.
 
 #### Audit Deliverables Updated
 
