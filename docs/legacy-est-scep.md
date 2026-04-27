@@ -80,10 +80,12 @@ server {
 
     location ~ ^/\.well-known/(est|pki) {
         # Forward the client cert (if presented) to certctl over the
-        # private hop. certctl's EST handler reads X-SSL-Client-Cert
-        # only when the connection's source IP is in
-        # CERTCTL_EST_PROXY_TRUSTED_SOURCES — without that allowlist
-        # the header is ignored to prevent spoofing.
+        # private hop. The current certctl implementation IGNORES the
+        # X-SSL-Client-Cert header (header-agnostic by default — see
+        # the certctl-side configuration section below). EST/SCEP
+        # authentication still works correctly because both protocols
+        # carry their own auth (CSR signature for EST, challengePassword
+        # for SCEP) inside the request body.
         proxy_set_header X-SSL-Client-Cert  $ssl_client_escaped_cert;
         proxy_set_header X-Forwarded-For    $remote_addr;
         proxy_set_header X-Forwarded-Proto  $scheme;
@@ -132,26 +134,34 @@ backend certctl_backend
 
 ## certctl-side configuration
 
-Two env vars on the certctl process control the proxy-trust contract:
+The current implementation is **header-agnostic**: certctl ignores any
+`X-SSL-Client-Cert` / `X-Forwarded-For` headers from the proxy. EST
+authentication still happens via in-protocol CSR signature + profile
+policy (RFC 7030 §3.2.3); SCEP authentication still happens via the
+`challengePassword` attribute embedded in the CSR (RFC 8894 §3.2). Both
+mechanisms are inside the request body and survive the reverse-proxy
+hop without server-side header trust.
 
-```
-# Comma-separated CIDR ranges that certctl will trust to set
-# X-SSL-Client-Cert and X-Forwarded-For headers. Any other source has
-# those headers stripped before reaching the EST/SCEP handlers.
-# Default: empty (no proxy trust — header-spoofing attempt = 403).
-CERTCTL_EST_PROXY_TRUSTED_SOURCES=10.0.0.0/24
+**Why this is the correct default:** trusting a proxy-supplied header
+for client identity opens a header-spoofing attack surface that requires
+careful design (CIDR allowlist of trusted proxies, fail-closed defaults,
+explicit operator opt-in). The Bundle F closure of M-023 ships the
+TLS-bridge guidance as documentation only; a future commit can extend
+certctl with proxy-header trust if and when an operator demonstrates a
+deployment shape that requires it. Until that lands, the runbook above
+is operationally complete: legacy EST and SCEP clients continue to
+authenticate via their in-protocol mechanisms, and the reverse proxy is
+purely a TLS-version bridge.
 
-# When set, the certctl EST handler treats X-SSL-Client-Cert as
-# authoritative for client identity (instead of requiring an inbound
-# mTLS handshake). MUST be paired with CERTCTL_EST_PROXY_TRUSTED_SOURCES.
-CERTCTL_EST_TRUST_PROXY_CLIENT_CERT_HEADER=true
-```
-
-The two-key contract is intentional: setting `TRUST_PROXY_CLIENT_CERT_HEADER`
-without a non-empty `TRUSTED_SOURCES` is rejected at startup with a
-fail-loud error. Spoofing the `X-SSL-Client-Cert` header is the obvious
-attack against this configuration and the dual-knob design forces an
-operator to think about it.
+If your deployment requires proxy-supplied client identity (e.g., the
+proxy terminates mTLS and you want certctl to record the client-cert
+subject in the audit trail beyond what the CSR carries), open an issue
+and a future commit will add a header-trust contract behind two
+fail-closed env vars: a CIDR allowlist of trusted proxies, plus an
+explicit opt-in toggle. Both knobs would be required together; setting
+only one would fail loud at startup. Until that work ships, the
+header-agnostic default described above is the only supported
+configuration.
 
 ## PCI-DSS Req 4 §2.2.5 attestation
 
