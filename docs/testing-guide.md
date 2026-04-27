@@ -3522,7 +3522,7 @@ MIIBQDCBqAIBADAtMQswCQYDVQQGEwJVUzELMAkGA1UECBMCVVQxETAPBgNVBAcTCFNh...
 
 certctl pin: `internal/api/handler/est_handler_test.go` — happy-path test must use this exact byte sequence (or a deterministic CSR with known SHA-256) and assert the cert chain returned re-validates against the issued cert's `Subject.CommonName` matching the CSR's CN.
 
-**Test vector — /serverkeygen response (RFC 7030 §4.4.2 — when CERTCTL_EST_KEYGEN_MODE=server):**
+**Test vector — /serverkeygen response (RFC 7030 §4.4.2 — when CERTCTL_KEYGEN_MODE=server):**
 
 > Source: RFC 7030 §4.4.2. Response is multipart/mixed with two parts: (1) `application/pkcs8` (encrypted private key, base64) and (2) `application/pkcs7-mime; smime-type=certs-only` (the issued cert + chain). Response Content-Type: `multipart/mixed; boundary=<random>`.
 
@@ -4035,7 +4035,7 @@ ASN.1 DER: A2 16 04 14 <20 bytes SHA-1 of responder pubkey>
            [2] context-specific tag for byKey
 ```
 
-certctl pin: by default, certctl uses byName (the CA signs OCSP responses directly). Delegated-responder mode requires `CERTCTL_OCSP_DELEGATED_RESPONDER_CERT_PATH` and the corresponding cert MUST have the `id-pkix-ocsp-nocheck` extension (RFC 6960 §4.2.2.2.1). Test must assert both modes produce wire-conformant ResponderID.
+certctl pin: by default, certctl uses byName (the CA signs OCSP responses directly). Delegated-responder mode (forward-looking; not in v2) would require an additional issuer-bound responder cert with the `id-pkix-ocsp-nocheck` extension (RFC 6960 §4.2.2.2.1). Test must assert byName produces wire-conformant ResponderID — the byKey arm becomes a positive test once delegated-responder support lands.
 
 **Test vector — OCSP nonce extension (RFC 6960 §4.4.1):**
 
@@ -4059,7 +4059,7 @@ certctl pin: assert nonce echo when client sends one; assert no nonce extension 
 >
 > nextUpdate is OPTIONAL by RFC but RFC 5280 §5.1.2.5 strongly RECOMMENDS its inclusion. CA/B Forum BR §7.2.2 makes nextUpdate REQUIRED for publicly-trusted CAs. certctl emits nextUpdate unconditionally.
 
-certctl pin: `internal/connector/issuer/local/local.go::GenerateCRL` — assert emitted CRL includes `nextUpdate`, that `nextUpdate > thisUpdate`, and that the gap matches `CERTCTL_CRL_VALIDITY_DURATION` (default 7 days).
+certctl pin: `internal/connector/issuer/local/local.go::GenerateCRL` — assert emitted CRL includes `nextUpdate`, that `nextUpdate > thisUpdate`, and that the gap matches the connector's hard-coded validity period (currently 7 days; a configurable knob is forward-looking).
 
 **Test vector — CRL revocation reason code (RFC 5280 §5.3.1):**
 
@@ -4080,9 +4080,9 @@ certctl pin: `internal/service/certificate_service.go::Revoke` validates reason 
 
 **Test vector — CRL Issuing Distribution Point extension (RFC 5280 §5.2.5):**
 
-> Source: RFC 5280 §5.2.5. The IDP extension MAY be marked critical. When present, it identifies the CRL distribution point and reasons covered. certctl emits IDP when `CERTCTL_CRL_PARTITIONED=true` (per-issuer partitioned CRLs); default is no IDP (full CRL).
+> Source: RFC 5280 §5.2.5. The IDP extension MAY be marked critical. When present, it identifies the CRL distribution point and reasons covered. certctl v2 emits no IDP (full CRL); per-issuer partitioned CRLs with IDP are forward-looking.
 
-certctl pin: assert default mode produces no IDP extension; assert partitioned mode produces a critical IDP extension with `distributionPoint.fullName.uniformResourceIdentifier` matching `https://<host>/.well-known/pki/crl/<issuer_id>`.
+certctl pin: assert v2 mode produces no IDP extension. The partitioned-mode assertion (critical IDP extension with `distributionPoint.fullName.uniformResourceIdentifier` matching `https://<host>/.well-known/pki/crl/<issuer_id>`) becomes a positive test once partitioned CRL support lands.
 
 **Test vector — Delta CRL handling (RFC 5280 §5.2.4):**
 
