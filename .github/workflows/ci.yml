@@ -1003,32 +1003,42 @@ jobs:
           fi
           echo "L-019 dangerouslySetInnerHTML guardrail: clean."
 
-      - name: Bundle-8 / M-009 mutation invalidation contract guard
-        # Audit M-009: every useMutation must either invalidate the
-        # queries it changes OR document why no invalidation is needed.
-        # SOFT guard — counts useMutation sites and asserts the budget
-        # doesn't grow without a corresponding invalidateQueries / setQueryData /
-        # useTrackedMutation reference. Stricter per-site enforcement is
-        # tracked as M-029 (covers the long-tail useListParams + useTrackedMutation
-        # migration of the existing 56 useMutation sites).
+      - name: Bundle-8 / M-009 + M-029 Pass 1 mutation contract guard (hard zero)
+        # Audit M-009 + M-029 Pass 1 closure:
+        #
+        # Pre-Bundle-8 the codebase had 56 bare useMutation sites with
+        # discretionary invalidation. Bundle 8 shipped the useTrackedMutation
+        # wrapper (web/src/hooks/useTrackedMutation.ts) that requires every
+        # caller to declare `invalidates: QueryKey[] | 'noop'`. M-029 Pass 1
+        # then migrated all 56 sites to the wrapper across 6 batches.
+        #
+        # This guard pins the contract going forward: every useMutation call
+        # in src/ MUST be inside useTrackedMutation.ts (the wrapper itself
+        # is the only legitimate caller of useMutation). Any bare useMutation
+        # call elsewhere is a regression — adding a new mutation site means
+        # going through the wrapper so the invalidates contract is enforced
+        # per-site, not by a soft budget guard.
+        #
+        # If you genuinely need raw useMutation (extremely unlikely — the
+        # wrapper supports invalidates: 'noop' for fire-and-forget mutations),
+        # update this guard's exclusion list and document the carve-out.
         run: |
           set -e
-          MUTATIONS=$(grep -rcE 'useMutation\(|useTrackedMutation\(' web/src/ 2>/dev/null \
-            | awk -F: '{s+=$2} END{print s}')
-          INVALIDATIONS=$(grep -rcE 'invalidateQueries|setQueryData|removeQueries|invalidates:' web/src/ 2>/dev/null \
-            | awk -F: '{s+=$2} END{print s}')
-          echo "M-009 budget — useMutation sites: $MUTATIONS / invalidation sites: $INVALIDATIONS"
-          # At Bundle-8 close: 56 useMutation + 70 invalidation. We allow
-          # +5 mutations growth before requiring invalidation parity. If
-          # the gap widens, audit the new mutation sites for missing
-          # invalidation pairs.
-          BUDGET=$((INVALIDATIONS + 5))
-          if [ "$MUTATIONS" -gt "$BUDGET" ]; then
-            echo "M-009 regression: $MUTATIONS useMutation sites exceeds invalidation budget ($BUDGET)."
-            echo "New mutations should pair with invalidateQueries/setQueryData OR migrate to"
-            echo "useTrackedMutation (web/src/hooks/useTrackedMutation.ts) with explicit invalidates."
+          BARE=$(grep -rnE '\buseMutation\(' web/src/ 2>/dev/null | grep -v 'web/src/hooks/useTrackedMutation\.ts' || true)
+          if [ -n "$BARE" ]; then
+            echo "M-009 hard-zero regression: bare useMutation() call(s) outside the wrapper:"
+            echo "$BARE"
+            echo
+            echo "Every mutation must go through useTrackedMutation"
+            echo "(web/src/hooks/useTrackedMutation.ts) with explicit"
+            echo "invalidates: QueryKey[] | 'noop'. See file header for usage."
             exit 1
           fi
+          # Sanity counts (informational, not a gate).
+          TRACKED=$(grep -rcE '\buseTrackedMutation\(' web/src/ 2>/dev/null | awk -F: '{s+=$2} END{print s}')
+          INVALIDATIONS=$(grep -rcE 'invalidateQueries|setQueryData|removeQueries|invalidates:' web/src/ 2>/dev/null | awk -F: '{s+=$2} END{print s}')
+          echo "M-009 hard-zero: bare useMutation sites = 0 (wrapper-internal call excluded)."
+          echo "M-009 informational: useTrackedMutation sites = $TRACKED; invalidation surface = $INVALIDATIONS."
 
       - name: Forbidden env-var docs drift regression guard (G-3)
         # G-3 master closed cat-g-163dae19bc59 (docs-only env vars
