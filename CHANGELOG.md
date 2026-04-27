@@ -4,6 +4,70 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle L (Coverage Audit Closure — cmd/server + StepCA + Repo + CI raise #1)
+
+> Three sub-bundles + CI threshold raise. **L.B closes C-005** (StepCA 52.1% → 90.4%); **L.A defers C-003** (cmd/server needs production-code refactor before tests can move it); **L.C is operator-required** (testcontainers blocked in sandbox); **L.CI raises CI thresholds** for ACME, StepCA, and MCP based on Bundles J/L.B/K.
+
+#### L.B — StepCA failure-mode + JWE coverage (C-005 closed)
+
+`internal/connector/issuer/stepca/jwe_failure_test.go` (~580 LoC). The novel piece: a **test-side RFC 3394 AES Key Wrap implementation** that constructs a valid step-ca-shaped PBES2-HS256+A128KW + A128GCM provisioner-key JWE in-test. This unlocks hermetic round-trip testing of the four previously-0%-covered JWE/AES helpers.
+
+Coverage delta:
+
+| | Pre-Bundle-L.B | Post-Bundle-L.B |
+|---|---|---|
+| `internal/connector/issuer/stepca` overall | 52.1% | **90.4%** (+38.3pp; +5.4 above 85% target) |
+| `decryptProvisionerKey` | 0.0% | **89.7%** |
+| `aesKeyUnwrap` | 0.0% | **100.0%** |
+| `jwkToECDSA` | 0.0% | **100.0%** |
+| `loadProvisionerKey` | 0.0% | **76.9%** |
+
+Tests added (24 functions):
+
+- **JWE round-trip:** `TestDecryptProvisionerKey_RoundTrip` constructs a valid JWE for a known EC key + password, decrypts, and asserts every byte of the recovered private scalar D + public X/Y matches the original. Hits all four 0%-coverage functions in one test.
+- **decryptProvisionerKey negative paths (10 cases):** malformed JSON, bad protected b64, malformed header JSON, unsupported alg ("RSA-OAEP"), unsupported enc ("A256CBC"), bad p2s b64, bad encrypted_key b64, bad IV b64, bad ciphertext b64, bad tag b64.
+- **Wrong-password path:** confirms AES key unwrap integrity-check failure surfaces with `AES key unwrap failed` wrap.
+- **aesKeyUnwrap negative paths (4 cases):** too short (<24 bytes), not multiple of 8, bad KEK size (17 bytes — invalid for AES), bad integrity check IV (all-zero ciphertext).
+- **jwkToECDSA negative paths (3 cases):** unsupported curve ("secp192r1"), bad x/y/d base64.
+- **jwkToECDSA all-supported curves:** P-256, P-384, P-521 round-trip.
+- **loadProvisionerKey:** round-trip via `t.TempDir()` JWE fixture file + file-not-found path.
+- **IssueCertificate failure modes (4 cases):** network-error (closed server), 5xx, 401 Unauthorized, 403 Forbidden.
+- **RevokeCertificate failure modes (3 cases):** network-error, 5xx, 403.
+
+Verification: `go vet` clean; `go test -short -count=1` PASS at 90.4% coverage; `go test -race -count=1` PASS, 0 races.
+
+#### L.A — cmd/server startup coverage (C-003 deferred)
+
+cmd/server's 16.1% baseline is dominated by `main()`'s 1041-LoC startup body which is 0%-covered. The other named functions in cmd/server (`preflightSCEPChallengePassword`, `preflightEnrollmentIssuer`, `buildFinalHandler`, plus all of `tls.go`) are already at 85–100% coverage. A "test-only" bundle cannot move the headline meaningfully — it requires extracting `main()` into a testable `Run(*Config)` helper with injected dependencies, which is a production-code refactor.
+
+`findings.yaml::CRTCTL-COVAUDIT-2026-04-27-0003::status` flips from `open` to `deferred` with the rationale + tracked as a follow-on "Bundle L.A-extended" that combines a refactor commit with the test commit.
+
+#### L.C — Repository round-out (C-004 operator-required)
+
+Repository tests use testcontainers-go against PostgreSQL 16 Alpine; the sandbox cannot run Docker. Operator-runnable command:
+
+```
+go test -tags integration ./internal/repository/postgres/...
+```
+
+If any per-file coverage <75%, add CRUD + FK-violation + unique-constraint tests per the existing finding sketch.
+
+#### L.CI — CI threshold raise #1
+
+`.github/workflows/ci.yml` adds three new package-coverage floors based on Bundles J / L.B / K:
+
+| Package | Floor | Rationale |
+|---|---|---|
+| `internal/connector/issuer/acme` | ≥50% | Bundle J partial-closure floor; bumps to 85 when Pebble-mock lands |
+| `internal/connector/issuer/stepca` | ≥80% | Bundle L.B closure floor with 10pp margin from 90.4% |
+| `internal/mcp` | ≥85% | Bundle K closure floor with 8pp margin from 93.1% |
+
+Each gate fails CI with a "do not lower the gate, add tests" message, matching the L-010 (`internal/connector/issuer/local`) pattern. cmd/server raise is deferred until Bundle L.A-extended lands.
+
+YAML validated via `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"`.
+
+Audit deliverable updates: `findings.yaml` flips C-005 closed + C-003 deferred (+ retains C-004 as operator-pending); `gap-backlog.md` adds full Bundle L closure-log entry covering all four sub-bundles + updates the C-003/C-004/C-005 rows; `coverage-matrix.md` adds the post-Bundle-L.B StepCA row at 90.4%; `closure-plan.md` ticks Bundle L `[~]` with per-sub-bundle status breakdown.
+
 ### Bundle K (Coverage Audit Closure — MCP Per-Tool Coverage): C-002 closed
 
 > Lifts `internal/mcp` line coverage from **28.0% → 93.1%** (+65.1pp; +8.1pp above the 85% acquisition target). Closes finding C-002 — the highest-leverage High-tier coverage gap in the audit.
