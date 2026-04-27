@@ -4,6 +4,57 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle M (Coverage Audit Closure — Connector Failure-Mode Round): 3 of 4 sub-batches
+
+> Closes H-001 (F5 ≥85%) and H-003 (Email ≥70%); partial-closes H-002 (SSH); defers H-004 (cloud-discovery) as scope-management.
+
+#### M.F5 — F5 BIG-IP iControl REST realclient (H-001 closed)
+
+`internal/connector/target/f5/f5_realclient_test.go` (~430 LoC, 23 tests). The existing `f5_test.go` tests the Connector via the F5Client interface using a hand-rolled mock; the realF5Client HTTP methods (~11 of them) sat at 0% coverage because the existing tests bypass HTTP entirely. Bundle M.F5 builds a `realF5Client` pointing at an `httptest.Server` returning canned iControl REST responses and exercises every method end-to-end.
+
+| | Pre | Post |
+|---|---|---|
+| `internal/connector/target/f5` overall | 44.6% | **90.1%** (+45.5pp; +5.1 above 85% target) |
+| `Authenticate` | 0.0% | **100.0%** (happy + 5xx + network + malformed-JSON + empty-token) |
+| `doRequest` | 0.0% | **95.2%** (incl. **401-retry** path verified end-to-end) |
+| `UploadFile` | 0.0% | **100.0%** (Content-Range header asserted) |
+| `InstallCert` / `InstallKey` | 0.0% | **100.0%** |
+| `CreateTransaction` / `CommitTransaction` | 0.0% | **100.0%** |
+| `UpdateSSLProfile` | 0.0% | **93.8%** (incl. X-F5-REST-Overriding-Collection header on transID) |
+| `GetSSLProfile` / `DeleteCert` / `DeleteKey` | 0.0% | **88.9%–91.7%** |
+
+Plus a context-cancel test (UploadFile with 50ms timeout against a 2s server) that pins graceful cancellation.
+
+#### M.SSH — SSH/SFTP target connector (H-002 partial-closed)
+
+`internal/connector/target/ssh/ssh_realclient_test.go` (~150 LoC, 13 tests). Coverage 55.2% → **71.6%** (+16.4pp; below 85% target).
+
+Functions covered: `New` / `NewWithClient` / `applyDefaults` 100%; `buildAuthMethods` 100% (password / key-inline / key-from-path / file-not-found / no-key-configured / parse-failure / unsupported-method); `WriteFile` / `Execute` / `StatFile` not-connected guards 100%; `Close` idempotency 100%.
+
+**Why partial-closed:** `realSSHClient.Connect()` (~50 LoC including `net.DialTimeout` + `ssh.NewClientConn` + `sftp.NewClient`) cannot be exercised without a live SSH server. An embedded `golang.org/x/crypto/ssh` server fixture would be ~1000 LoC of test infrastructure (handshake, keyboard-interactive auth, channel multiplexing). Out of scope for Bundle M; tracked as a follow-on "Bundle M.SSH-extended".
+
+#### M.Email — Email notifier (H-003 closed)
+
+`internal/connector/notifier/email/email_failure_test.go` (~340 LoC, 15 tests). Coverage 39.7% → **70.5%** (+30.8pp; +0.5 above 70% target).
+
+Engineering technique: a hand-rolled minimal SMTP server (`net.Listen("tcp", "127.0.0.1:0")` + a goroutine that handles EHLO/AUTH/MAIL/RCPT/DATA/QUIT and writes canned 2xx/3xx/5xx responses based on a per-test `failOn` map). Real SMTP servers (Postfix, Exim, etc.) are 50K+-LoC products; this fake responds to the subset `net/smtp.Client.Mail/Rcpt/Data/Quit` actually exercises.
+
+Tests added:
+
+- **Header-injection guards (CWE-113):** `sendEmail` and `sendHTMLEmail` reject CR/LF/NUL in From/To/Subject before any SMTP I/O. Six tests pin all three field × two functions.
+- **Connection refused** for both `sendEmail` and `sendHTMLEmail` (closed listener).
+- **Happy paths:** `SendAlert` / `SendEvent` full SMTP transactions.
+- **Server-side failures:** `SendEvent_RcptRejected` (RCPT 550 mailbox unavailable), `SendAlert_DataWriteFailure` (DATA 554 transaction failed).
+- **Authentication:** `SendEmail_WithAuth` exercises the AUTH PLAIN path; `SendEmail_AuthFailure` pins the AUTH 535 wrap.
+
+#### M.Cloud — AzureKV + GCP-SM discovery (H-004 deferred)
+
+AzureKV at 41.2%, GCP-SM at 43.1%. Same approach as M.F5 (httptest.Server mocking the cloud REST API + OAuth2 token endpoint) is straightforward but the two cloud connectors together would add another ~600 LoC of tests + ~200 LoC of mock infrastructure — exceeds Bundle M's session budget. Tracked as a follow-on "Bundle M.Cloud-extended" against the same H-004 row in `findings.yaml`.
+
+Verification across all three sub-batches: `go vet` clean, `gofmt -l` clean, `staticcheck -checks all` clean (excluding pre-existing ST1000 hits in master), `go test -short -count=1` PASS, `go test -race -count=1` PASS, 0 races.
+
+Audit deliverable updates: `findings.yaml` flips `-0008` (F5) and `-0010` (Email) status `open` → `closed` with full closure_notes; `-0009` (SSH) → `partial_closed`; `-0011` (Cloud) retained as deferred. `gap-backlog.md` strikethroughs H-001 + H-003, partial-strike on H-002, deferred-marker on H-004 + Bundle M closure-log entry covering all four sub-batches. `coverage-matrix.md` adds three new rows for F5 / SSH / Email at the post-Bundle-M coverage. `closure-plan.md` ticks Bundle M `[~]` with per-sub-batch status breakdown.
+
 ### Bundle L (Coverage Audit Closure — cmd/server + StepCA + Repo + CI raise #1)
 
 > Three sub-bundles + CI threshold raise. **L.B closes C-005** (StepCA 52.1% → 90.4%); **L.A defers C-003** (cmd/server needs production-code refactor before tests can move it); **L.C is operator-required** (testcontainers blocked in sandbox); **L.CI raises CI thresholds** for ACME, StepCA, and MCP based on Bundles J/L.B/K.
