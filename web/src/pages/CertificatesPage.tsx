@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
+import { useListParams } from '../hooks/useListParams';
 import { useNavigate } from 'react-router-dom';
 import { getCertificates, createCertificate, revokeCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates, bulkRenewCertificates, bulkReassignCertificates } from '../api/client';
 import { useAuth } from '../components/AuthProvider';
@@ -395,29 +396,29 @@ export default function CertificatesPage() {
   // with 403, but we also hide the button in the GUI to avoid a misleading
   // affordance. Authoritative gate remains server-side.
   const { admin } = useAuth();
-  const [statusFilter, setStatusFilter] = useState('');
-  const [envFilter, setEnvFilter] = useState('');
-  const [issuerFilter, setIssuerFilter] = useState('');
-  const [ownerFilter, setOwnerFilter] = useState('');
-  const [profileFilter, setProfileFilter] = useState('');
-  // F-1 closure (cat-e-610251c8f72d): pre-F-1 the page exposed only 5 of
-  // the backend handler's 17 supported query filters. Three new operator-
-  // facing filters added: team_id (already first-class elsewhere),
-  // expires_before (drives the "expiring in N days" workflow), and a
-  // sort selector (defaults to backend ordering). Audit-recommended
-  // minimum-add per the closure rationale; remaining filters
-  // (agent_id, expires_after, created_after, updated_after, cursor,
-  // fields, sort_desc) are deferred until a consumer use case
-  // demands them — over-stuffing the toolbar is its own UX cost.
-  const [teamFilter, setTeamFilter] = useState('');
-  const [expiresBefore, setExpiresBefore] = useState('');
-  const [sortBy, setSortBy] = useState('');
-  // F-1 closure (cat-k-e85d1099b2d7): pre-F-1 the page rendered the
-  // first 50 certs returned by the backend with no way to advance.
-  // The reusable DataTable pagination prop (added in this same
-  // commit) takes the page + per_page state declared here.
-  const [page, setPage] = useState(1);
-  const [perPage, setPerPage] = useState(50);
+  // M-029 Pass 2 (Audit M-010): filter / sort / pagination state migrated
+  // from 9 local useState hooks to useListParams — URL-resident state is
+  // deep-linkable, browser-back-correct, and the hook auto-resets page
+  // to 1 on filter / sort / pageSize change (preserving the F-1 contract
+  // that previously had to be hand-rolled at every onChange site).
+  //
+  // F-1 closure (cat-e-610251c8f72d) preserved: the 8 operator-facing
+  // filters (status / environment / issuer_id / owner_id / profile_id /
+  // team_id / expires_before / sort) all flow through filters[] with
+  // their existing keys. Default page size stays at 50 to match the
+  // pre-migration F-1 baseline (the hook's global default is 25, but
+  // the page-level default takes precedence).
+  const { params: listParams, setPage, setPageSize, setFilter } = useListParams({ pageSize: 50 });
+  const statusFilter = listParams.filters.status ?? '';
+  const envFilter = listParams.filters.environment ?? '';
+  const issuerFilter = listParams.filters.issuer_id ?? '';
+  const ownerFilter = listParams.filters.owner_id ?? '';
+  const profileFilter = listParams.filters.profile_id ?? '';
+  const teamFilter = listParams.filters.team_id ?? '';
+  const expiresBefore = listParams.filters.expires_before ?? '';
+  const sortBy = listParams.filters.sort ?? '';
+  const page = listParams.page;
+  const perPage = listParams.pageSize;
   const [showCreate, setShowCreate] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [showBulkRevoke, setShowBulkRevoke] = useState(false);
@@ -564,7 +565,7 @@ export default function CertificatesPage() {
       <div className="px-6 py-3 flex gap-3 border-b border-surface-border/50">
         <select
           value={statusFilter}
-          onChange={e => setStatusFilter(e.target.value)}
+          onChange={e => setFilter('status', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All statuses</option>
@@ -577,7 +578,7 @@ export default function CertificatesPage() {
         </select>
         <select
           value={envFilter}
-          onChange={e => setEnvFilter(e.target.value)}
+          onChange={e => setFilter('environment', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All environments</option>
@@ -587,7 +588,7 @@ export default function CertificatesPage() {
         </select>
         <select
           value={issuerFilter}
-          onChange={e => setIssuerFilter(e.target.value)}
+          onChange={e => setFilter('issuer_id', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All issuers</option>
@@ -597,7 +598,7 @@ export default function CertificatesPage() {
         </select>
         <select
           value={ownerFilter}
-          onChange={e => setOwnerFilter(e.target.value)}
+          onChange={e => setFilter('owner_id', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All owners</option>
@@ -607,7 +608,7 @@ export default function CertificatesPage() {
         </select>
         <select
           value={profileFilter}
-          onChange={e => setProfileFilter(e.target.value)}
+          onChange={e => setFilter('profile_id', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All profiles</option>
@@ -618,7 +619,7 @@ export default function CertificatesPage() {
         {/* F-1 closure (cat-e-610251c8f72d): team / expires_before / sort */}
         <select
           value={teamFilter}
-          onChange={e => { setTeamFilter(e.target.value); setPage(1); }}
+          onChange={e => setFilter('team_id', e.target.value)}
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
           <option value="">All teams</option>
@@ -629,13 +630,13 @@ export default function CertificatesPage() {
         <input
           type="date"
           value={expiresBefore}
-          onChange={e => { setExpiresBefore(e.target.value); setPage(1); }}
+          onChange={e => setFilter('expires_before', e.target.value)}
           title="Expires before (drives the 'expiring in N days' workflow)"
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         />
         <select
           value={sortBy}
-          onChange={e => { setSortBy(e.target.value); setPage(1); }}
+          onChange={e => setFilter('sort', e.target.value)}
           title="Sort order"
           className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm text-ink"
         >
@@ -664,7 +665,10 @@ export default function CertificatesPage() {
               perPage,
               total: data?.total ?? 0,
               onPageChange: setPage,
-              onPerPageChange: (n) => { setPerPage(n); setPage(1); },
+              // useListParams.setPageSize auto-drops the page param from
+              // the URL (page resets to 1 implicitly), preserving the
+              // F-1 contract without a manual setPage(1) call.
+              onPerPageChange: setPageSize,
             }}
           />
         )}
