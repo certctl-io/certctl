@@ -4,6 +4,66 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle J-extended (Coverage Audit Extension): ACME 55.6% → 85.4% via Pebble-style mock — C-001 fully closed
+
+> Closes the deferred ≥85% target on `internal/connector/issuer/acme` that Bundle J originally partial-closed at 55.6%. The remaining gap was `IssueCertificate` + `solveAuthorizations*` + `authorizeOrderWithProfile`'s JWS-POST branch — all uncoverable without a Pebble-style ACME mock. This extension ships that mock.
+
+#### What shipped
+
+`internal/connector/issuer/acme/pebble_mock_test.go` (~900 LoC). Hermetic in-process ACME server with:
+
+- **RFC 8555 state machine** — newAccount (handles `onlyReturnExisting=true` for `GetReg(ctx, "")` lookups, returning HTTP 200 vs 201 for the right path) + newOrder (with profile field passthrough) + authz (per-identifier, configurable `pending`/`valid` start state) + challenge (POST flips status + propagates to parent authz + recomputes order readiness) + finalize (parses JWS payload, decodes CSR, signs against fixture CA) + cert (returns PEM chain) + order-poll + account-self.
+- **JWS envelope parsing** — base64url-decode protected header + payload, no signature verification (the stdlib client signs correctly; the test value is exercising connector code, not fuzzing stdlib JWS).
+- **Nonce ring** — tracks issued/consumed; replays return `urn:ietf:params:acme:error:badNonce` with a fresh nonce.
+- **In-process CA fixture** — self-signed ECDSA P-256 root used to sign issued certs; chain returned at /cert/<id>.
+- **Mock DNSSolver** — implements `Present` / `CleanUp` / `PresentPersist` for DNS-01 + DNS-PERSIST-01 tests.
+
+#### Tests (13 new)
+
+- `IssueCertificate_HappyPath` — single-domain, no profile
+- `IssueCertificate_MultiSAN` — 3 SANs in one cert
+- `IssueCertificate_WithProfile` — exercises `authorizeOrderWithProfile` (profile=`tlsserver`)
+- `RenewCertificate_DelegatesToIssue` — confirms RenewCertificate flow
+- `GetOrderStatus_HappyPath` — confirms order URI returned by issuance is queryable
+- `NewAccountFailure_ReturnsError` — connector reports clean error when newAccount returns 400
+- `FinalizeProcessingStuck_RecoversToValid` — connector's WaitOrder fallback path on Pebble-style processing-state
+- `FinalizeReturnsInvalid_FailsClean` — order-invalid surfaces as error
+- `ContextCancel_DuringIssuance` — pre-cancelled ctx propagates
+- `BadCSR_RejectedByMock` — malformed CSR fails before mock POST
+- `IssueCertificate_HTTP01ChallengeFlow` — exercises `solveAuthorizationsHTTP01` + `startChallengeServer`; `HTTPPort: 0` for free-port binding
+- `IssueCertificate_DNS01ChallengeFlow` + `DNS01_PresentFails_PropagatesError` + `DNS01_NoSolver_FailsClean`
+- `IssueCertificate_DNSPersist01ChallengeFlow` + `DNSPersist01_FallbackToDNS01_WhenChallengeNotOffered` + `DNSPersist01_NoSolver_FailsClean`
+
+#### Per-function coverage deltas (vs. pre-Bundle-J baseline)
+
+| Function | Pre-J | Post-J | Post-J-extended |
+|---|---|---|---|
+| `IssueCertificate` | 0.0% | 6.4% | **100.0%** |
+| `solveAuthorizations` | 0.0% | 0.0% | **100.0%** |
+| `solveAuthorizationsHTTP01` | 0.0% | 0.0% | **88.4%** |
+| `solveAuthorizationsDNS01` | 0.0% | 0.0% | **91.4%** |
+| `solveAuthorizationsDNSPersist01` | 0.0% | 0.0% | **87.0%** |
+| `authorizeOrderWithProfile` | 0.0% | 21.3% | **92.5%** |
+| `GetOrderStatus` | 0.0% | 37.5% | **100.0%** |
+| `startChallengeServer` | 0.0% | 30.4% | **100.0%** |
+
+Package overall: **41.8% → 55.6% → 85.4%** (+43.6pp; +0.4 above 85% gate).
+
+#### Verification
+
+- `go test -count=1 -timeout=20s ./internal/connector/issuer/acme/...`: PASS in 1.4s
+- `go test -short -count=1 -cover ./internal/connector/issuer/acme/...`: 85.4%
+- `go vet ./internal/connector/issuer/acme/...`: clean
+
+#### Audit deliverables
+
+- `findings.yaml` C-001: `partial_closed` → **`closed`** with full closure note enumerating all 13 tests + per-function deltas
+- `gap-backlog.md` C-001: full strikethrough with closure note
+- `coverage-audit-2026-04-27/extension-progress.md`: J-extended marked DONE
+
+Closes: C-001 (ACME Existential coverage)
+Bundle: J-extended (Coverage Audit Extension)
+
 ### Bundle S — Extension pipeline (partial: 4 of 7 + R-CI raise pending)
 
 > Four extensions shipped this session against the post-Bundle-R audit state. Three still pending due to scope (J-extended Pebble mock, N.A/B-extended 8 connectors, N.C-extended service+handler round-out). R-CI-extended raise deferred until prior extensions complete. Acquisition-readiness 4.3 → ~4.4 (modest lift; full +0.4-0.5 contingent on remaining extensions).
