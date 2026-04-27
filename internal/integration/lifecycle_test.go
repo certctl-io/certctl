@@ -764,6 +764,14 @@ func (m *mockJobRepository) ListTimedOutAwaitingJobs(ctx context.Context, csrCut
 	return jobs, nil
 }
 
+// ListJobsWithOfflineAgents is the Bundle C / Audit M-016 integration-mock
+// stub. The lifecycle integration test does not exercise the offline-agent
+// reaper path; the unit-level test in internal/service covers it. Here we
+// just satisfy the JobRepository interface so the package compiles.
+func (m *mockJobRepository) ListJobsWithOfflineAgents(ctx context.Context, agentCutoff time.Time) ([]*domain.Job, error) {
+	return nil, nil
+}
+
 type mockAuditRepository struct {
 	events []*domain.AuditEvent
 }
