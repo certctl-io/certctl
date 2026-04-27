@@ -66,6 +66,7 @@ const xssCert = {
   renewal_policy_id: 'rp-xss',
   expires_at: new Date(Date.now() + 30 * 86400000).toISOString(),
   created_at: new Date().toISOString(),
+  updated_at: new Date().toISOString(),
   not_before: new Date(Date.now() - 86400000).toISOString(),
   not_after: new Date(Date.now() + 30 * 86400000).toISOString(),
   serial_number: xssPayload,

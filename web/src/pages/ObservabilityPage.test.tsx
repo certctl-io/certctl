@@ -52,7 +52,18 @@ describe('ObservabilityPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
 
   it('renders the page header when metrics + health resolve', async () => {
     vi.mocked(client.getMetrics).mockResolvedValue({
-      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString() },
+      gauge: {
+        certificate_total: 0,
+        certificate_active: 0,
+        certificate_expiring_soon: 0,
+        certificate_expired: 0,
+        certificate_revoked: 0,
+        agent_total: 0,
+        agent_online: 0,
+        job_pending: 0,
+      },
+      counter: { job_completed_total: 0, job_failed_total: 0 },
+      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString(), measured_at: new Date().toISOString() },
     } as never);
     vi.mocked(client.getHealth).mockResolvedValue({ status: 'ok' } as never);
     vi.mocked(client.getPrometheusMetrics).mockResolvedValue('# HELP up The current up state\nup 1\n' as never);
@@ -65,7 +76,18 @@ describe('ObservabilityPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
 
   it('does NOT execute <script> payloads in health.status / Prometheus text', async () => {
     vi.mocked(client.getMetrics).mockResolvedValue({
-      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString() },
+      gauge: {
+        certificate_total: 0,
+        certificate_active: 0,
+        certificate_expiring_soon: 0,
+        certificate_expired: 0,
+        certificate_revoked: 0,
+        agent_total: 0,
+        agent_online: 0,
+        job_pending: 0,
+      },
+      counter: { job_completed_total: 0, job_failed_total: 0 },
+      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString(), measured_at: new Date().toISOString() },
     } as never);
     vi.mocked(client.getHealth).mockResolvedValue({ status: xssPayload } as never);
     vi.mocked(client.getPrometheusMetrics).mockResolvedValue(xssPayload as never);
@@ -85,7 +107,18 @@ describe('ObservabilityPage — render + XSS hardening (M-026 / M-029 Pass 3)', 
 
   it('renders the literal Prometheus payload as escaped text', async () => {
     vi.mocked(client.getMetrics).mockResolvedValue({
-      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString() },
+      gauge: {
+        certificate_total: 0,
+        certificate_active: 0,
+        certificate_expiring_soon: 0,
+        certificate_expired: 0,
+        certificate_revoked: 0,
+        agent_total: 0,
+        agent_online: 0,
+        job_pending: 0,
+      },
+      counter: { job_completed_total: 0, job_failed_total: 0 },
+      uptime: { uptime_seconds: 3600, server_started: new Date().toISOString(), measured_at: new Date().toISOString() },
     } as never);
     vi.mocked(client.getHealth).mockResolvedValue({ status: 'ok' } as never);
     vi.mocked(client.getPrometheusMetrics).mockResolvedValue(xssPayload as never);
