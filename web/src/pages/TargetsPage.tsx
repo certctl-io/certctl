@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Link } from 'react-router-dom';
-import { useMutation, useQuery, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getTargets, createTarget, deleteTarget, getAgents } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -242,13 +243,14 @@ function CreateTargetWizard({ onClose, onSuccess }: { onClose: () => void; onSuc
     return result;
   };
 
-  const mutation = useMutation({
+  const mutation = useTrackedMutation({
     mutationFn: () => createTarget({
       name,
       type: targetType,
       agent_id: agentId,
       config: buildConfigPayload(),
     }),
+    invalidates: [['targets']],
     onSuccess: () => onSuccess(),
     onError: (err: Error) => setError(err.message),
   });
@@ -407,9 +409,9 @@ export default function TargetsPage() {
     queryFn: () => getTargets(),
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteTarget,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['targets'] }),
+    invalidates: [['targets']],
   });
 
   const columns: Column<Target>[] = [
