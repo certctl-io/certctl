@@ -238,16 +238,17 @@ func TestGetRenewalInfo_DirectoryUnreachable(t *testing.T) {
 	}
 }
 
-// TestGetRenewalInfo_ARI5xx pins the non-2xx (other than 404) branch.
+// TestGetRenewalInfo_ARI5xx pins the non-2xx (other than 404) branch. The
+// directory handler emits an absolute URL pointing back at the same test
+// server's /renewalInfo path, which 5xx's all requests.
 func TestGetRenewalInfo_ARI5xx(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/directory":
+		if r.URL.Path == "/directory" {
 			w.Header().Set("Content-Type", "application/json")
-			_, _ = io.WriteString(w, `{"renewalInfo":"/acme/renewalInfo"}`)
-		default:
-			http.Error(w, "boom", http.StatusInternalServerError)
+			fmt.Fprintf(w, `{"renewalInfo":%q}`, "http://"+r.Host+"/renewalInfo")
+			return
 		}
+		http.Error(w, "boom", http.StatusInternalServerError)
 	}))
 	defer ts.Close()
 
@@ -257,36 +258,7 @@ func TestGetRenewalInfo_ARI5xx(t *testing.T) {
 		ChallengeType: "http-01",
 		ARIEnabled:    true,
 	})
-	// Rewrite the renewalInfo URL to point at the test server so the relative
-	// path "/acme/renewalInfo" resolves against ts.URL.
-	c.config.DirectoryURL = ts.URL + "/directory"
 	certPEM := makeTestCertPEM(t)
-
-	// Override the directory response to advertise an absolute URL on ts.
-	ts.Close()
-	ts2 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case strings.HasSuffix(r.URL.Path, "/directory"):
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"renewalInfo":%q}`, r.Host) // bogus but parseable
-			// Better: emit absolute URL pointing at our own /renewalInfo.
-		}
-	}))
-	ts2.Close()
-
-	// Simpler approach: have the directory handler return an absolute URL
-	// pointing at ts3 (which 5xx's all renewalInfo requests).
-	ts3 := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		// Catch-all 500 for any path other than /directory
-		if r.URL.Path == "/directory" {
-			w.Header().Set("Content-Type", "application/json")
-			fmt.Fprintf(w, `{"renewalInfo":%q}`, "http://"+r.Host+"/renewalInfo")
-			return
-		}
-		http.Error(w, "boom", http.StatusInternalServerError)
-	}))
-	defer ts3.Close()
-	c.config.DirectoryURL = ts3.URL + "/directory"
 
 	_, err := c.GetRenewalInfo(context.Background(), certPEM)
 	if err == nil {
