@@ -896,6 +896,34 @@ jobs:
           fi
           echo "QA-doc seed-count drift guard: clean."
 
+      # Bundle Q / I-001 closure — test-naming convention guard (informational).
+      # The convention is `Test<Func>_<Scenario>_<ExpectedResult>`. This step
+      # prints any non-conformant tests but does NOT fail the build until the
+      # team adopts the convention repo-wide. Set `continue-on-error: true`
+      # so a regression here doesn't block PRs; remove the flag to promote
+      # to hard-fail in a future commit.
+      - name: Test-naming convention guard (informational)
+        continue-on-error: true
+        run: |
+          # Non-conformant: function names of the shape `func Test<X>(` where
+          # the first underscore-separated token after `Test` is missing —
+          # i.e. tests not adopting the Test<Func>_<Scenario>_<ExpectedResult>
+          # convention. We intentionally exclude TestMain (Go's special
+          # test-init hook) and the legacy property-test naming TestProperty_*.
+          NON_CONFORMANT=$(grep -rnE '^func Test[A-Z][A-Za-z0-9]+\(' --include='*_test.go' . \
+            | grep -vE 'func Test[A-Z][A-Za-z0-9]+_[A-Z]' \
+            | grep -vE 'func TestMain\(|func TestProperty_' \
+            || true)
+          if [ -n "$NON_CONFORMANT" ]; then
+            COUNT=$(echo "$NON_CONFORMANT" | wc -l)
+            echo "::warning::Test naming convention drift (informational, $COUNT sites):"
+            echo "$NON_CONFORMANT" | head -20
+            echo "..."
+            echo "Tests should follow Test<Func>_<Scenario>_<ExpectedResult> per docs/qa-test-guide.md."
+          else
+            echo "Test-naming convention guard: clean."
+          fi
+
   frontend-build:
     name: Frontend Build
     runs-on: ubuntu-latest
