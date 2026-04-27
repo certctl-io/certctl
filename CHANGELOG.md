@@ -4,6 +4,33 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle I (Coverage Audit Closure — QA Doc Cleanup): H-007 + H-008 closed
+
+> Applied Patches 1–7 from `coverage-audit-2026-04-27/tables/qa-doc-patches.md` to bring `docs/qa-test-guide.md` and `deploy/test/qa_test.go` back in sync with the code at HEAD. Acquisition-readiness QA-doc score lifts 2.5 → 4.0.
+
+`docs/qa-test-guide.md` updates:
+
+- **Patch 1 — Headline.** "covers all 54 Parts" → "49 of 56 Parts" + 4-not-yet-automated callout (Parts 23, 24, 55, 56).
+- **Patch 2 — Totals line.** Replaced the static "~164 automated subtests" prose with a verified-2026-04-27 breakdown + recompute commands so the line stops drifting on every release.
+- **Patch 3 — Coverage Map.** Added rows for Parts 23 (S/MIME & EKU), 24 (OCSP/CRL), 55 (Agent Soft-Retirement), 56 (Notification Retry & Dead-Letter) — each annotated "0 (NOT AUTOMATED)" with a `docs/testing-guide.md::Part N` pointer.
+- **Patch 4 — What This Test Does NOT Cover.** New "Not Yet Automated (Parts 23, 24, 55, 56)" subsection enumerating the gaps and their manual-test rationale.
+- **Patch 5 — Seed Data Reference.** Re-anchored against authoritative HEAD `migrations/seed_demo.sql` counts: **32 certs (already correct), 12 agents (was 9 — 8 named ag-* + server-scanner sentinel + 3 cloud-discovery sentinels), 13 issuers (was 9), 8 targets (already correct), 4 network scan targets (already correct).** Replaced narrow ID enumerations with `sed | grep` recompute commands so future seed additions don't silently drift the doc. Added a maintenance-note pointer to the proposed CI guard (Strengthening #6). Bundle I's Phase 0 recon discovered the original patch's anticipated counts (66 certs, 18 agents) were themselves drifted — the patch's recompute commands used overbroad regex that matched mc-* IDs across non-managed-certificates tables; corrected on the fly.
+- **Patch 6 — Version History.** Added v1.2 entry citing Parts 55–56 documentation and Parts 23–24 not-yet-automated surfacing.
+- Bonus fix: the integration_test comparison row "32 certs, 8 agents" → "32 certs, 12 agents, 13 issuers, 8 targets, realistic history".
+
+`deploy/test/qa_test.go` updates (Patch 7):
+
+- 4 new `t.Run("PartN_*", …)` blocks for Parts 23, 24, 55, 56. Each calls `t.Skip` with a `docs/testing-guide.md::Part N` pointer + automation-candidates list. The Skip-with-rationale form keeps Part numbering consistent in test output, makes the manual-test pointer machine-readable, and surfaces the gap to maintainers. Replacing each Skip with a real test body is gap-backlog work; this commit only closes the doc-vs-test drift.
+
+Verification gates met:
+- `grep -cE '^## Part [0-9]+:' docs/testing-guide.md` == 56 ✓
+- `grep -cE 't\.Run\("Part[0-9]+_' deploy/test/qa_test.go` == 53 ✓ (49 live + 4 new Skip stubs)
+- `go vet -tags qa ./deploy/test/...` clean
+- `go test -tags qa -run='__nope__' ./deploy/test/...` PASS (compile)
+- The full `go test -tags qa -run='TestQA/Part(23|24|55|56)' -v` SKIP-grep gate requires the live demo stack and is operator-runnable; the test bodies trivially `t.Skip` when reached.
+
+Audit deliverable updates: `findings.yaml` flips H-007 (`-0014`) and H-008 (`-0015`) status `open` → `closed` with closure_note + corrected counts; `gap-backlog.md` strikethroughs both rows + adds Bundle I closure-log entry; `tables/qa-doc-drift.md` gains a "PATCHES APPLIED 2026-04-27" header marker (preserved as audit-time snapshot, not retro-edited); `acquisition-readiness.md` "QA documentation rigor" criterion: 2.5 → 4.0; `coverage-audit-closure-plan.md` checklist ticks Bundle I.
+
 ### Bundle 0.7 (Coverage Audit Closure): cmd/agent key-handling regression coverage — C-008 closed
 
 > Phase 0 of the 2026-04-27 coverage audit's closure plan triggered a halt-condition: `cmd/agent/keymem.go`'s two security-critical functions were at 0.0% / 11.1% line coverage despite being defense-in-depth for agent private-key memory hygiene (Bundle 9 / Audit L-002 + L-003 — agent edition). Bundle 0.7 was inserted before Bundle J as mandatory; this entry closes finding **C-008** (`CRTCTL-COVAUDIT-2026-04-27-0034`).
