@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getRenewalPolicies,
   createRenewalPolicy,
@@ -174,7 +175,6 @@ function PolicyFormModal({ title, initial, isOpen, onClose, onSubmit, isSaving, 
 }
 
 export default function RenewalPoliciesPage() {
-  const queryClient = useQueryClient();
   const [showCreate, setShowCreate] = useState(false);
   const [editing, setEditing] = useState<RenewalPolicy | null>(null);
 
@@ -183,25 +183,25 @@ export default function RenewalPoliciesPage() {
     queryFn: () => getRenewalPolicies(),
   });
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: createRenewalPolicy,
+    invalidates: [['renewal-policies']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['renewal-policies'] });
       setShowCreate(false);
     },
   });
 
-  const updateMutation = useMutation({
+  const updateMutation = useTrackedMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<RenewalPolicy> }) => updateRenewalPolicy(id, data),
+    invalidates: [['renewal-policies']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['renewal-policies'] });
       setEditing(null);
     },
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteRenewalPolicy,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['renewal-policies'] }),
+    invalidates: [['renewal-policies']],
     // Backend surfaces ErrRenewalPolicyInUse as a 409. We surface as an
     // alert so the operator sees "this policy is still attached to N
     // certificates" and can re-target those certs to another policy

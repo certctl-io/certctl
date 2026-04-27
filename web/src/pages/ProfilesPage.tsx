@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getProfiles, deleteProfile, createProfile, updateProfile } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -300,23 +301,23 @@ export default function ProfilesPage() {
     queryFn: () => getProfiles(),
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteProfile,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['profiles'] }),
+    invalidates: [['profiles']],
   });
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: createProfile,
+    invalidates: [['profiles']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] });
       setShowCreate(false);
     },
   });
 
-  const updateMutation = useMutation({
+  const updateMutation = useTrackedMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<CertificateProfile> }) => updateProfile(id, data),
+    invalidates: [['profiles']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['profiles'] });
       setEditingProfile(null);
     },
   });

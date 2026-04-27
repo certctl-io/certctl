@@ -1,5 +1,6 @@
 import { useEffect, useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getOwners, getTeams, deleteOwner, createOwner, updateOwner } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -210,24 +211,24 @@ export default function OwnersPage() {
     queryFn: () => getTeams(),
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deleteOwner,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['owners'] }),
+    invalidates: [['owners']],
     onError: (err: Error) => alert(`Delete failed: ${err.message}`),
   });
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: createOwner,
+    invalidates: [['owners']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['owners'] });
       setShowCreate(false);
     },
   });
 
-  const updateMutation = useMutation({
+  const updateMutation = useTrackedMutation({
     mutationFn: ({ id, data }: { id: string; data: Partial<Owner> }) => updateOwner(id, data),
+    invalidates: [['owners']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['owners'] });
       setEditingOwner(null);
     },
   });
