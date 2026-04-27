@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
-import { useQuery, useMutation } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getIssuer, testIssuerConnection, getCertificates } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
@@ -46,9 +47,9 @@ export default function IssuerDetailPage() {
     enabled: !!id,
   });
 
-  const testMutation = useMutation({
+  const testMutation = useTrackedMutation({
     mutationFn: () => testIssuerConnection(id!),
-    onSuccess: () => refetch(),
+    invalidates: [['issuer', id]],
   });
 
   if (error) {

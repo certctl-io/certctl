@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { useNavigate } from 'react-router-dom';
 import { getCertificates, createCertificate, revokeCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates, bulkRenewCertificates, bulkReassignCertificates } from '../api/client';
 import { useAuth } from '../components/AuthProvider';
@@ -73,7 +74,7 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
         : `${Math.round(selectedProfile.max_ttl_seconds / 86400)}d`
     : null;
 
-  const mutation = useMutation({
+  const mutation = useTrackedMutation({
     mutationFn: () => {
       const payload: Record<string, unknown> = { ...form };
       // Convert comma-separated SANs to array
@@ -95,6 +96,7 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
       }
       return createCertificate(payload);
     },
+    invalidates: [['certificates']],
     onSuccess: () => onSuccess(),
     onError: (err: Error) => setError(err.message),
   });

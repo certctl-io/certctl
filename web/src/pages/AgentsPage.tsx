@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import {
   getAgents,
   listRetiredAgents,
@@ -45,7 +46,6 @@ type ModalMode =
 
 export default function AgentsPage() {
   const navigate = useNavigate();
-  const qc = useQueryClient();
   const [tab, setTab] = useState<TabKey>('active');
   const [modal, setModal] = useState<ModalMode>({ kind: 'closed' });
 
@@ -67,12 +67,11 @@ export default function AgentsPage() {
   // and we invalidate both queries on success so the retired tab refreshes and
   // the active tab drops the row. 409s are converted into modal.mode=blocked so
   // the operator can escalate to force; everything else becomes modal.mode=error.
-  const mutation = useMutation({
+  const mutation = useTrackedMutation({
     mutationFn: (input: { agent: Agent; force?: boolean; reason?: string }) =>
       retireAgent(input.agent.id, { force: input.force, reason: input.reason }),
+    invalidates: [['agents'], ['agents', 'retired']],
     onSuccess: () => {
-      qc.invalidateQueries({ queryKey: ['agents'] });
-      qc.invalidateQueries({ queryKey: ['agents', 'retired'] });
       setModal({ kind: 'closed' });
     },
   });
