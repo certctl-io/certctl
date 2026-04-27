@@ -175,9 +175,40 @@ The client did not trust the CA that signed the server cert. Either mount the CA
 **Client side: `tls: first record does not look like a TLS handshake`**
 The client is speaking plaintext HTTP to an HTTPS server (or vice-versa). Check that `CERTCTL_SERVER_URL` starts with `https://`. If you are upgrading from a pre-v2.2 release and your agents are old, they will surface this error until you roll the DaemonSet — see [`upgrade-to-tls.md`](upgrade-to-tls.md).
 
+## InsecureSkipVerify justifications (Audit L-001)
+
+`crypto/tls.Config.InsecureSkipVerify` short-circuits standard certificate
+chain validation. Each production use site below has a justification —
+the shape is "this code path is fundamentally pre-trust or
+trust-from-context, and chain validation in the stdlib path is not the
+right tool". Test-only sites are not enumerated here.
+
+The CI grep guard `Forbidden bare InsecureSkipVerify regression guard
+(L-001)` in `.github/workflows/ci.yml` fails the build if any new
+`InsecureSkipVerify: true` lands in a non-test file without a
+`//nolint:gosec` comment carrying a justification — adding a new entry
+to this table is the right way to extend the surface.
+
+| Site (file:line) | Trigger | Justification |
+|---|---|---|
+| `cmd/agent/main.go:59,125,136,1259,1262` | `--insecure-skip-verify` CLI flag | Dev escape hatch; docs/tls.md and the agent install script direct operators to use a real CA bundle in production. The server emits a startup WARN when set. |
+| `cmd/agent/verify.go:70,78` | TLS deployment verification probe | The agent is verifying that its own freshly-deployed cert is being served. The chain may be self-signed or signed by an upstream the agent host doesn't trust; what matters is the leaf-cert match against what the agent just deployed. The verifier compares the served leaf bytes to the expected leaf, not the chain. |
+| `internal/tlsprobe/probe.go:33,47,54` | Network scanner / discovery probe | Discovery's job is to find every cert on the network, including expired, self-signed, and not-yet-deployed certs. Validating the chain would silently skip the broken-cert results that are precisely what operators want to know about. |
+| `internal/mcp/client.go:35` | MCP CLI `--insecure` flag | Dev escape hatch for local-only MCP testing against a self-signed control plane. |
+| `internal/cli/client.go:39` | `certctl --insecure` flag | Same shape as the agent flag — local dev only. |
+| `internal/connector/target/f5/f5.go:128` | F5 BIG-IP iControl REST | F5 default install ships with a self-signed cert; operators who haven't replaced it use `config.Insecure`. The connector logs this on every dial and the operator-facing config docs this. |
+| `internal/connector/issuer/acme/acme.go:146` | Pebble (ACME test server) | Hard-coded for tests that drive against Pebble locally. Pebble issues self-signed; verifying the chain would defeat the purpose. |
+| `internal/service/network_scan.go:460` | Network scanner probe | Same rationale as `tlsprobe/probe.go` above — discovery surfaces broken certs by design. |
+
+**What is NOT covered by this list:** `*_test.go` files use
+`InsecureSkipVerify` freely against `httptest.Server` instances; that's a
+test-fixture pattern, not a production trust decision. The grep guard
+ignores `_test.go`.
+
 ## Related docs
 
 - [`upgrade-to-tls.md`](upgrade-to-tls.md) — one-step cutover from pre-HTTPS releases
 - [`quickstart.md`](quickstart.md) — docker-compose walkthrough with HTTPS examples
 - [`test-env.md`](test-env.md) — integration test environment (also HTTPS-only)
+- [`security.md`](security.md) — overall security posture, OCSP Must-Staple guidance, encryption-at-rest spec
 - Milestone spec: `prompts/https-everywhere-milestone.md` (authoritative source for locked decisions)

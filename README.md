@@ -406,6 +406,18 @@ Certctl is licensed under the [Business Source License 1.1](LICENSE). The source
 
 For licensing inquiries: certctl@proton.me
 
+## Dependencies
+
+Backend dependency footprint is auditable on demand:
+
+```
+go list -m all | wc -l   # total module count (direct + transitive)
+go mod why <path>        # explain why a particular module is pulled in
+govulncheck ./...        # vulnerability scan (CI runs this on every commit)
+```
+
+The release-time SBOM is published as a syft-produced cyclonedx file alongside each release artifact in `.github/workflows/release.yml`.
+
 ---
 
 If certctl solves a problem you have, [star the repo](https://github.com/shankar0123/certctl) to help others find it. Questions, bugs, or feature requests — [open an issue](https://github.com/shankar0123/certctl/issues).

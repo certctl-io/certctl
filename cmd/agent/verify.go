@@ -75,7 +75,7 @@ func verifyDeployment(
 		// calls, issuer connector communication, or any operation that trusts the
 		// certificate. The verification result compares SHA-256 fingerprints only.
 		// See TICKET-016 for full security audit rationale.
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, //nolint:gosec // verification probe; documented above + docs/tls.md L-001 table
 		ServerName:        targetHost, // For SNI
 	})
 	if err != nil {

@@ -66,7 +66,7 @@ flowchart TB
     end
 
     subgraph "Data Store"
-        PG[("PostgreSQL 16\n21 tables\nTEXT primary keys")]
+        PG[("PostgreSQL 16\nTEXT primary keys")]
     end
 
     subgraph "Agent Fleet"
@@ -645,7 +645,7 @@ type Connector interface {
 }
 ```
 
-Built-in issuers (9 connectors): **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts), **Vault PKI** (HashiCorp Vault's PKI secrets engine via /sign API with token auth), **DigiCert** (commercial CA via CertCentral REST API with async order processing), **Sectigo SCM** (async order model with 3-header auth), **Google CAS** (Cloud Certificate Authority Service with OAuth2 service account auth), and **AWS ACM Private CA** (synchronous issuance via ACM PCA API). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required.
+Built-in issuers (live count: `ls -d internal/connector/issuer/*/ | wc -l`): **Local CA** (self-signed or sub-CA mode using `crypto/x509`), **ACME v2** (HTTP-01, DNS-01, and DNS-PERSIST-01 challenges, compatible with Let's Encrypt, ZeroSSL, Sectigo, Google Trust Services, and any ACME-compliant CA), **step-ca** (Smallstep private CA via native /sign API with JWK provisioner auth), **OpenSSL/Custom CA** (script-based signing delegating to user-provided shell scripts), **Vault PKI** (HashiCorp Vault's PKI secrets engine via /sign API with token auth), **DigiCert** (commercial CA via CertCentral REST API with async order processing), **Sectigo SCM** (async order model with 3-header auth), **Google CAS** (Cloud Certificate Authority Service with OAuth2 service account auth), **AWS ACM Private CA** (synchronous issuance via ACM PCA API), **Entrust** (mTLS client cert auth, sync/approval-pending), **GlobalSign Atlas HVCA** (mTLS + API key/secret dual auth), and **EJBCA** (Keyfactor open-source self-hosted CA, dual auth: mTLS or OAuth2). The ACME connector uses `golang.org/x/crypto/acme`, generates an ECDSA P-256 account key, handles account registration with ToS acceptance and optional External Account Binding (EAB) for CAs that require it (ZeroSSL, Google Trust Services, SSL.com), order creation, challenge solving (HTTP-01 via built-in server, DNS-01 via script-based hooks, DNS-PERSIST-01 via standing TXT records with auto-fallback to DNS-01), order finalization, and DER-to-PEM chain conversion. For ZeroSSL, EAB credentials are auto-fetched from ZeroSSL's public API when the directory URL is detected as ZeroSSL and no EAB credentials are provided — zero-friction onboarding with no dashboard visit required.
 
 **ACME Renewal Information (ARI, RFC 9773):** The ACME connector supports CA-directed renewal timing via the `GetRenewalInfo()` method. Instead of using fixed thresholds (e.g., renew 30 days before expiry), the CA tells certctl when to renew by providing a `suggestedWindow` with start and end times. This is useful for distributing renewal load during maintenance windows and coordinating mass-revocation scenarios. Enable with `CERTCTL_ACME_ARI_ENABLED=true`. Cert ID is computed as `base64url(SHA-256(DER cert))` per RFC 9773. If the CA doesn't support ARI (404 from the ARI endpoint), certctl automatically falls back to threshold-based renewal — no operator intervention required. Errors from the CA are logged as warnings.
 
@@ -932,7 +932,15 @@ All endpoints are under `/api/v1/` and follow consistent patterns:
 
 Resources: certificates, issuers, targets, agents, jobs, policies, profiles, teams, owners, agent-groups, audit, notifications, discovered-certificates, discovery-scans, network-scan-targets, stats, metrics.
 
-The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml` with 97 operations across `/api/v1/` and `/.well-known/est/` (includes auth, 7 discovery endpoints, 6 network scan endpoints, Prometheus metrics, 4 EST enrollment endpoints, 2 digest endpoints, 2 verification endpoints, 2 export endpoints), all request/response schemas, and pagination conventions. The server also registers `/health` and `/ready` outside the OpenAPI spec, bringing the total route count to 107. See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
+The full API is documented in an OpenAPI 3.1 specification at `api/openapi.yaml`. The router-vs-spec parity is pinned by the `TestRouter_OpenAPIParity` regression test (Bundle D / M-027), which AST-walks `internal/api/router/router.go` for every `r.Register` AND direct `r.mux.Handle` registration and asserts the set matches the spec's `paths:` block exactly. Live counts:
+
+```
+grep -cE 'r\.Register\("[A-Z]' internal/api/router/router.go    # r.Register sites
+grep -cE 'r\.mux\.Handle\("[A-Z]' internal/api/router/router.go # r.mux.Handle sites (auth-exempt: health/ready/auth-info/version)
+grep -cE '^\s+operationId:' api/openapi.yaml                   # documented operations
+```
+
+See the [OpenAPI Guide](openapi.md) for usage with Swagger UI and SDK generation.
 
 Jobs support additional action endpoints: `POST /api/v1/jobs/{id}/cancel`, `POST /api/v1/jobs/{id}/approve`, `POST /api/v1/jobs/{id}/reject`.
 

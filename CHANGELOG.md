@@ -4,6 +4,31 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle D (Documentation & Transparency Sweep): 8 audit findings closed
+
+> Closes the audit's documentation cluster — `H-009` (README JWT verified-already-clean + CI grep guard), `L-001` (docs/tls.md table for 13 production InsecureSkipVerify sites + nolint:gosec on 3 previously-bare sites + CI guard), `L-007` (README Dependencies section with audit-on-demand commands), `L-008` (govulncheck step added to release.yml as release-time gate), `L-016` (architecture.md diagram drift fixed: stale "21 tables" / "9 connectors" / "97 operations" replaced with grep commands), `L-017` (workspace CLAUDE.md verified-already-clean), `L-018` (defect-age.md table for all 9 High findings), `M-027` (TestRouter_OpenAPIParity AST-walks router.go for both r.Register AND r.mux.Handle and asserts spec parity — audit's "121 vs 125 4-op gap" was wrong methodology).
+
+#### Added
+
+- **`internal/api/router/openapi_parity_test.go` (NEW, 1 test, Audit M-027)** — `TestRouter_OpenAPIParity` AST-walks `router.go` for every `r.Register` AND direct `r.mux.Handle` registration and walks `api/openapi.yaml`'s `paths:` block; asserts the two `(METHOD, PATH)` sets are identical (modulo a documented `SpecParityExceptions` allowlist, currently empty). Adding a route without updating the spec fails CI permanently.
+- **`docs/tls.md::InsecureSkipVerify justifications` table (Audit L-001)** — Per-site rationale for all 13 production `InsecureSkipVerify: true` sites. Test-only sites are out of scope.
+- **`docs/security.md` cross-reference to L-001 table** — Bundle C added the file; Bundle D wires the docs/tls.md back-reference.
+- **`README.md` Dependencies section (Audit L-007)** — Three audit-on-demand commands: `go list -m all | wc -l`, `go mod why <path>`, `govulncheck ./...`. SBOM publication via syft+cyclonedx in release.yml referenced.
+- **`cowork/comprehensive-audit-2026-04-25/defect-age.md` (NEW, Audit L-018)** — Tabulates all 9 High findings with first-mentioned commit, closing bundle, and days-open. 8 of 9 closed within 24h of audit publication.
+- **CI regression guards (`.github/workflows/ci.yml`)** — Three new steps: "Forbidden README JWT advertising regression guard (H-009)" greps README for JWT-as-supported phrasing; "Forbidden bare InsecureSkipVerify regression guard (L-001)" fails build if any new `InsecureSkipVerify: true` lands without `//nolint:gosec` on the same or preceding line.
+- **`.github/workflows/release.yml::Install govulncheck` + `Run govulncheck (release gate)` (Audit L-008)** — Release-time vulnerability scan. Default exit code (called-vuln only) keeps the gate aligned with deferred-call advisory tracking on master.
+
+#### Changed
+
+- **`docs/architecture.md` (Audit L-016)** — System-components diagram's stale "21 tables" annotation removed; connector-architecture prose's "9 connectors" replaced with `ls -d internal/connector/issuer/*/ | wc -l` reference + current 12-issuer enumeration (added Entrust / GlobalSign / EJBCA which were missing); API-design prose's "97 operations" / "107 total" replaced with three grep commands citing live counts.
+- **`cmd/agent/verify.go:78`, `internal/tlsprobe/probe.go:54`, `internal/service/network_scan.go:460` (Audit L-001)** — Each previously-bare `InsecureSkipVerify: true` now carries a `//nolint:gosec // documented above + docs/tls.md L-001 table` comment so the new CI guard passes and the justification is attached to the call site.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 38/55 → 46/55 closed (Critical 0/0; **High 7/9 → 8/9**; **Medium 20/27 → 21/27**; **Low 8/19 → 14/19**); H-009 / M-027 / L-001 / L-007 / L-008 / L-016 / L-017 / L-018 boxes flipped `[x]` with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — 8 status flips with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/defect-age.md` — new file (L-018 deliverable).
+
 ### Bundle C (Renewal/Reliability cluster): 7 audit findings closed
 
 > Closes the audit's renewal/reliability cluster — `M-006` (idempotent migration 000014), `M-007` (3 partial-failure tests across bulk-revoke / bulk-renew / bulk-reassign), `M-008` (admin-gated handler enumeration pin, verified-already-clean), `M-015` (cardinality invariant pinned at struct level via reflect, verified-already-clean), `M-016` (new ListJobsWithOfflineAgents repo method + ReapJobsWithOfflineAgents service path + scheduler wiring), `M-019` (configurable ARI HTTP timeout + 4 dispatch tests, audit-claim verified wrong), `M-020` (rate limiter on noAuthHandler chain + Must-Staple operator runbook). M-028 was already closed by the Bundle B CI follow-up.

@@ -51,7 +51,7 @@ func ProbeTLS(ctx context.Context, address string, timeout time.Duration) ProbeR
 		// connector communication, or any operation that trusts the certificate.
 		// The endpoint's certificate chain is extracted and analyzed, not validated.
 		// See TICKET-016 for full security audit rationale.
-		InsecureSkipVerify: true,
+		InsecureSkipVerify: true, //nolint:gosec // discovery probe; documented above + docs/tls.md L-001 table
 	})
 	if err != nil {
 		result.Error = err.Error()

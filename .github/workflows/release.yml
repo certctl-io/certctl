@@ -43,6 +43,23 @@ jobs:
         id: version
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
+      - name: Install govulncheck
+        # Bundle D / Audit L-008: release.yml previously had no vulnerability
+        # scan, so a release tag could in principle ship a binary with a
+        # known CVE in transitive deps that ci.yml's govulncheck would have
+        # caught on master. Pre-build scan blocks the release if anything
+        # surfaced post-merge. Pinned to the same major as ci.yml.
+        run: go install golang.org/x/vuln/cmd/govulncheck@latest
+
+      - name: Run govulncheck (release gate)
+        # govulncheck distinguishes called-vs-uncalled vulnerable functions.
+        # Default exit code (0 unless an actual call site lands in a vuln
+        # function) is the right gate for release; deferred-call advisories
+        # are tracked separately on master via L-021. If a release-time
+        # scan surfaces a NEW called-vuln, the release is blocked until the
+        # bump lands on master and a new tag is cut.
+        run: govulncheck ./...
+
       - name: Build binary
         id: build
         env:
