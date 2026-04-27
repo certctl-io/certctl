@@ -967,11 +967,16 @@ jobs:
         # already comply — this guard prevents regression. The
         # ExternalLink component (web/src/components/ExternalLink.tsx)
         # is the recommended way to add new external links.
+        #
+        # Test files (web/src/**/*.test.{ts,tsx}) are excluded so test
+        # docstrings or fixture data describing the attack vector by
+        # name don't trip the guard — symmetric with the L-019 guard.
         run: |
           set -e
           OFFENDERS=$(grep -rnE 'target=["'"'"']?_blank["'"'"']?' web/src/ 2>/dev/null \
             | grep -v 'noopener noreferrer' \
             | grep -v 'web/src/components/ExternalLink.tsx' \
+            | grep -vE '\.test\.(ts|tsx)(:[0-9]+)?:' \
             || true)
           if [ -n "$OFFENDERS" ]; then
             echo "L-015 regression: target=\"_blank\" without rel=\"noopener noreferrer\":"
@@ -984,14 +989,23 @@ jobs:
           echo "L-015 target=_blank guardrail: clean."
 
       - name: Bundle-8 / L-019 dangerouslySetInnerHTML regression guard
-        # Audit L-019 / CWE-79 (XSS): no production code may use
+        # Audit L-019 / CWE-79 (XSS): no PRODUCTION code may use
         # dangerouslySetInnerHTML directly. At Bundle-8 close the codebase
         # has 0 sites; future genuine needs MUST route through
         # web/src/utils/safeHtml.ts::sanitizeHtml.
+        #
+        # Test files (web/src/**/*.test.{ts,tsx}) are explicitly excluded:
+        # the M-029 Pass 3 XSS-hardening test docstrings legitimately cite
+        # the attack vector by name to explain what the test is guarding
+        # against (e.g. "a careless refactor to dangerouslySetInnerHTML
+        # would let an attacker-controlled CSR deliver an XSS payload").
+        # Tests describing the threat aren't using it; the guard's intent
+        # is production code only.
         run: |
           set -e
           OFFENDERS=$(grep -rnE 'dangerouslySetInnerHTML' web/src/ 2>/dev/null \
             | grep -v 'web/src/utils/safeHtml.ts' \
+            | grep -vE '\.test\.(ts|tsx)(:[0-9]+)?:' \
             || true)
           if [ -n "$OFFENDERS" ]; then
             echo "L-019 regression: dangerouslySetInnerHTML used outside safeHtml.ts:"
@@ -1024,7 +1038,14 @@ jobs:
         # update this guard's exclusion list and document the carve-out.
         run: |
           set -e
-          BARE=$(grep -rnE '\buseMutation\(' web/src/ 2>/dev/null | grep -v 'web/src/hooks/useTrackedMutation\.ts' || true)
+          # Test files (web/src/**/*.test.{ts,tsx}) are excluded so existing
+          # useMutation-mocking test patterns and the wrapper's own unit
+          # tests don't trip the production guard — symmetric with L-015
+          # and L-019 above.
+          BARE=$(grep -rnE '\buseMutation\(' web/src/ 2>/dev/null \
+            | grep -v 'web/src/hooks/useTrackedMutation\.ts' \
+            | grep -vE '\.test\.(ts|tsx)(:[0-9]+)?:' \
+            || true)
           if [ -n "$BARE" ]; then
             echo "M-009 hard-zero regression: bare useMutation() call(s) outside the wrapper:"
             echo "$BARE"
@@ -1037,7 +1058,7 @@ jobs:
           # Sanity counts (informational, not a gate).
           TRACKED=$(grep -rcE '\buseTrackedMutation\(' web/src/ 2>/dev/null | awk -F: '{s+=$2} END{print s}')
           INVALIDATIONS=$(grep -rcE 'invalidateQueries|setQueryData|removeQueries|invalidates:' web/src/ 2>/dev/null | awk -F: '{s+=$2} END{print s}')
-          echo "M-009 hard-zero: bare useMutation sites = 0 (wrapper-internal call excluded)."
+          echo "M-009 hard-zero: bare useMutation sites = 0 (wrapper-internal call + test files excluded)."
           echo "M-009 informational: useTrackedMutation sites = $TRACKED; invalidation surface = $INVALIDATIONS."
 
       - name: Forbidden env-var docs drift regression guard (G-3)
