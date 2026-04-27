@@ -29,8 +29,8 @@ func buildDigicertConnector(t *testing.T, baseURL string) *digicert.Connector {
 
 func TestDigicert_GetOrderStatus_404_ReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/user/me":
+		switch r.URL.Path {
+		case "/user/me":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":1}`))
 		default:
@@ -48,8 +48,8 @@ func TestDigicert_GetOrderStatus_404_ReturnsError(t *testing.T) {
 
 func TestDigicert_GetOrderStatus_MalformedJSON_ReturnsError(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/user/me":
+		switch r.URL.Path {
+		case "/user/me":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":1}`))
 		default:
@@ -67,8 +67,8 @@ func TestDigicert_GetOrderStatus_MalformedJSON_ReturnsError(t *testing.T) {
 
 func TestDigicert_GetOrderStatus_IssuedButCertIDMissing(t *testing.T) {
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/user/me":
+		switch r.URL.Path {
+		case "/user/me":
 			w.WriteHeader(http.StatusOK)
 			_, _ = w.Write([]byte(`{"id":1}`))
 		default:
