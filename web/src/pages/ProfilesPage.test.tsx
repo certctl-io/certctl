@@ -55,7 +55,7 @@ describe('ProfilesPage — render + XSS hardening (M-026 / M-029 Pass 3)', () =>
     vi.mocked(client.getProfiles).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<ProfilesPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Profile/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: /Certificate Profiles/i })).toBeInTheDocument();
     });
   });
 

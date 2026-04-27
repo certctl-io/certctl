@@ -96,7 +96,7 @@ describe('CertificateDetailPage — render + XSS hardening (M-026 / M-029 Pass 3
     vi.mocked(client.getCertificate).mockResolvedValue({ ...xssCert, common_name: 'plain.example.com' } as never);
     renderRoute(<CertificateDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText('plain.example.com')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'plain.example.com' })).toBeInTheDocument();
     });
   });
 

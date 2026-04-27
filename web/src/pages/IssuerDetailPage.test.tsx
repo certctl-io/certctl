@@ -62,7 +62,7 @@ describe('IssuerDetailPage — render + XSS hardening (M-026 / M-029 Pass 3)', (
     vi.mocked(client.getCertificates).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderRoute(<IssuerDetailPage />);
     await waitFor(() => {
-      expect(screen.getByText('Plain Name')).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Plain Name' })).toBeInTheDocument();
     });
   });
 

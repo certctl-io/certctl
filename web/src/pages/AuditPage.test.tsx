@@ -63,7 +63,7 @@ describe('AuditPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     vi.mocked(client.getAuditEvents).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<AuditPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Audit/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Audit Trail' })).toBeInTheDocument();
     });
   });
 
@@ -77,7 +77,7 @@ describe('AuditPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
 
     renderWithQuery(<AuditPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Audit/)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Audit Trail' })).toBeInTheDocument();
     });
 
     const liveScripts = document.querySelectorAll('script[data-xss="audit"]');

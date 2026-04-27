@@ -39,7 +39,7 @@ const xssScanTarget = {
   id: 'ns-xss-001',
   name: xssPayload,
   network_range: xssPayload,
-  ports: '443,8443',
+  ports: [443, 8443],
   agent_id: xssPayload,
   enabled: true,
   last_scan_at: new Date().toISOString(),
@@ -58,7 +58,7 @@ describe('NetworkScanPage — render + XSS hardening (M-026 / M-029 Pass 3)', ()
     vi.mocked(client.getNetworkScanTargets).mockResolvedValue({ data: [], total: 0, page: 1, per_page: 50 } as never);
     renderWithQuery(<NetworkScanPage />);
     await waitFor(() => {
-      expect(screen.getByText(/Network/i)).toBeInTheDocument();
+      expect(screen.getByRole('heading', { level: 2, name: 'Network Scanning' })).toBeInTheDocument();
     });
   });
 
