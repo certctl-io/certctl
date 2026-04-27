@@ -745,6 +745,30 @@ jobs:
           LOCAL_ISSUER_COV=$(go tool cover -func=coverage.out | grep 'internal/connector/issuer/local' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
           echo "Local-issuer coverage: ${LOCAL_ISSUER_COV}%"
 
+          # Bundle-J / Coverage-Audit C-001 (partial-closed) — ACME failure-mode
+          # batch lifts internal/connector/issuer/acme from 41.8% to ~55.6%
+          # (per-package package-scoped run). The global per-file average can
+          # come in lower because this awk pattern divides by file count
+          # rather than weighting by line count, but with the failure-mode
+          # tests landed every file in the package has at least 50% coverage.
+          # Floor set at 50 to accommodate the global-run arithmetic; bumps
+          # to 85 when Bundle J-extended (Pebble-style mock) lands and the
+          # IssueCertificate / solveAuthorizations* flows are exercisable.
+          ACME_COV=$(go tool cover -func=coverage.out | grep 'internal/connector/issuer/acme' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "ACME issuer coverage: ${ACME_COV}%"
+
+          # Bundle-L.B / Coverage-Audit C-005 — StepCA failure-mode + JWE
+          # round-trip tests lift internal/connector/issuer/stepca from
+          # 52.1% to 90.4% (per-package run). Floor at 80 with margin.
+          STEPCA_COV=$(go tool cover -func=coverage.out | grep 'internal/connector/issuer/stepca' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "StepCA issuer coverage: ${STEPCA_COV}%"
+
+          # Bundle-K / Coverage-Audit C-002 — MCP per-tool dispatch via
+          # in-memory transport lifts internal/mcp from 28.0% to 93.1%
+          # (per-package run). Floor at 85.
+          MCP_COV=$(go tool cover -func=coverage.out | grep 'internal/mcp/' | awk '{print $NF}' | sed 's/%//' | awk '{sum+=$1; n++} END {if(n>0) printf "%.1f", sum/n; else print "0"}')
+          echo "MCP coverage: ${MCP_COV}%"
+
           # Fail if thresholds not met
           if [ "$(echo "$SERVICE_COV < 55" | bc -l)" -eq 1 ]; then
             echo "::error::Service layer coverage ${SERVICE_COV}% is below 55% threshold"
@@ -789,6 +813,22 @@ jobs:
           # H-010 closure invariant.
           if [ "$(echo "$LOCAL_ISSUER_COV < 85" | bc -l)" -eq 1 ]; then
             echo "::error::Local-issuer coverage ${LOCAL_ISSUER_COV}% is below 85% (H-010 closure floor — add tests, do not lower the gate)"
+            exit 1
+          fi
+          # Bundle L.CI threshold raise #1 — post-Bundles J / L.B / K floors.
+          # Each gate is set with margin below the verified package-scoped
+          # coverage so the global per-file-average arithmetic doesn't false-
+          # positive on a single low-coverage file dragging the mean.
+          if [ "$(echo "$ACME_COV < 50" | bc -l)" -eq 1 ]; then
+            echo "::error::ACME issuer coverage ${ACME_COV}% is below 50% (Bundle J partial-closure floor — add Pebble-mock tests, do not lower the gate)"
+            exit 1
+          fi
+          if [ "$(echo "$STEPCA_COV < 80" | bc -l)" -eq 1 ]; then
+            echo "::error::StepCA issuer coverage ${STEPCA_COV}% is below 80% (Bundle L.B closure floor — add tests, do not lower the gate)"
+            exit 1
+          fi
+          if [ "$(echo "$MCP_COV < 85" | bc -l)" -eq 1 ]; then
+            echo "::error::MCP coverage ${MCP_COV}% is below 85% (Bundle K closure floor — add tests, do not lower the gate)"
             exit 1
           fi
           echo "Coverage thresholds passed!"
