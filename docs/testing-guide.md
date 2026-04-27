@@ -3488,6 +3488,46 @@ curl -s -H "Authorization: Bearer $API_KEY" \
 **Expected:** Profile ID appears in audit event details when configured.
 **PASS if** `profile_id` present in audit details.
 
+### 21.99: RFC 7030 Test Vectors (Bundle P.2-extended)
+
+**What:** Per-RFC test vectors that pin certctl's EST implementation against the wire-level shapes RFC 7030 mandates. Each vector cites the RFC section + provides the canonical request/response shape so a reviewer can spot drift without re-reading the RFC.
+
+**Why:** EST is consumed by network appliances (Cisco, Aruba) that don't tolerate non-conformant servers. A single wrong content-type or missing PKCS#7 framing breaks enrollment for the device class with no useful error.
+
+**Test vector — /cacerts response framing (RFC 7030 §4.1.3):**
+
+> Source: RFC 7030 §4.1.3. Response MUST be `application/pkcs7-mime; smime-type=certs-only` with `Content-Transfer-Encoding: base64`. Body is a PKCS#7 SignedData with `certificates` populated and `signerInfos` empty.
+
+```
+HTTP/1.1 200 OK
+Content-Type: application/pkcs7-mime; smime-type=certs-only
+Content-Transfer-Encoding: base64
+
+MIIBpgYJKoZIhvcNAQcCoIIBlzCCAZMCAQExADALBgkqhkiG9w0BBwGggYwwggGI...
+```
+
+certctl pin: `internal/api/handler/est_handler.go::handleCACerts` — assert exact `Content-Type` substring; assert response body is base64 PEM-stripped; assert `pkcs7.Parse(decoded).Certificates` length matches the expected chain.
+
+**Test vector — /simpleenroll request framing (RFC 7030 §4.2.1):**
+
+> Source: RFC 7030 §4.2.1. Request body is a PKCS#10 CertificationRequest, base64-encoded, with `Content-Type: application/pkcs10` and `Content-Transfer-Encoding: base64`. The CSR is bound to the authenticated TLS client identity.
+
+```
+POST /.well-known/est/simpleenroll HTTP/1.1
+Content-Type: application/pkcs10
+Content-Transfer-Encoding: base64
+
+MIIBQDCBqAIBADAtMQswCQYDVQQGEwJVUzELMAkGA1UECBMCVVQxETAPBgNVBAcTCFNh...
+```
+
+certctl pin: `internal/api/handler/est_handler_test.go` — happy-path test must use this exact byte sequence (or a deterministic CSR with known SHA-256) and assert the cert chain returned re-validates against the issued cert's `Subject.CommonName` matching the CSR's CN.
+
+**Test vector — /serverkeygen response (RFC 7030 §4.4.2 — when CERTCTL_EST_KEYGEN_MODE=server):**
+
+> Source: RFC 7030 §4.4.2. Response is multipart/mixed with two parts: (1) `application/pkcs8` (encrypted private key, base64) and (2) `application/pkcs7-mime; smime-type=certs-only` (the issued cert + chain). Response Content-Type: `multipart/mixed; boundary=<random>`.
+
+certctl pin: server-keygen mode is **demo-only** and logs a warning. Test must assert log contains "warning: CERTCTL_KEYGEN_MODE=server is demo-only" + response framing matches the multipart/mixed shape with both required parts present.
+
 ---
 
 ## Part 22: Certificate Export (PEM & PKCS#12)
@@ -3723,6 +3763,93 @@ go test ./internal/service/ -run TestCSRRenewal -v
 **Expected:** Tests covering EKU resolution from profiles and issuance with non-default EKUs pass.
 **PASS if** exit code 0.
 
+### 23.99: RFC 5280 Test Vectors — SubjectAltName & ExtendedKeyUsage (Bundle P.2-extended)
+
+**What:** Wire-level test vectors that pin certctl's SAN encoder + EKU resolver against the byte shapes RFC 5280 mandates. SAN encoding has six type variants (RFC 5280 §4.2.1.6); EKU is a SEQUENCE OF OID (§4.2.1.12). Each vector cites the section and gives the expected ASN.1 byte sequence.
+
+**Why:** SAN/EKU bugs are silent — the cert validates as a generic X.509 object but the relying party rejects it. A buyer's PKI conformance suite (Microsoft IIS, OpenSSL `s_client`, Mozilla NSS) catches these on day one.
+
+**Test vector — IPv4 SAN encoding (RFC 5280 §4.2.1.6, GeneralName CHOICE iPAddress):**
+
+> Source: RFC 5280 §4.2.1.6. iPAddress is `[7] OCTET STRING` containing exactly 4 bytes for IPv4 (network byte order, big-endian).
+
+```
+SAN value: 192.0.2.1
+ASN.1 DER: 87 04 C0 00 02 01
+           ^^ ^^ ^^^^^^^^^^^^^^
+           |  |  |
+           |  |  4 bytes of IPv4 in network byte order
+           |  length = 4
+           context-specific tag [7] for iPAddress
+```
+
+certctl pin: `internal/connector/issuer/local/local_test.go` — issue a cert with `SANs: ["192.0.2.1"]`, parse the cert's `Extensions[SubjectAltName].Value`, assert `[7]04 C0 00 02 01` substring present.
+
+**Test vector — IPv6 SAN encoding (RFC 5280 §4.2.1.6):**
+
+> Source: RFC 5280 §4.2.1.6. iPAddress for IPv6 is exactly 16 bytes (network byte order). Mixed v4-mapped (e.g. `::ffff:192.0.2.1`) is **NOT** valid for SAN — must be encoded as v4 (4 bytes) or v6 (16 bytes).
+
+```
+SAN value: 2001:db8::1
+ASN.1 DER: 87 10 20 01 0D B8 00 00 00 00 00 00 00 00 00 00 00 01
+```
+
+certctl pin: assert that `2001:db8::1` produces 16-byte iPAddress; assert that `::ffff:192.0.2.1` is canonicalized to the 4-byte IPv4 form (Go's `net.ParseIP` does this).
+
+**Test vector — DNS SAN with internationalized domain (RFC 5280 §4.2.1.6 + RFC 3490):**
+
+> Source: RFC 5280 §4.2.1.6. dNSName is `[2] IA5String`. Internationalized domain names must be A-label encoded (Punycode, xn-- prefix) per RFC 3490; UTF-8 in the IA5String violates the type and breaks RFC 5280 conformance.
+
+```
+Input:    bücher.example
+Encoded:  xn--bcher-kva.example  (A-label)
+ASN.1 DER: 82 14 78 6E 2D 2D 62 63 68 65 72 2D 6B 76 61 2E 65 78 61 6D 70 6C 65
+           ^^ ^^
+           |  length = 20
+           context-specific tag [2] for dNSName
+```
+
+certctl pin: SAN sanitizer must reject UTF-8 input and require pre-encoded Punycode, OR transparently A-label-encode and emit a warning. Test must assert the wire form contains `78 6E 2D 2D` (hex for "xn--").
+
+**Test vector — otherName SAN (RFC 5280 §4.2.1.6, GeneralName CHOICE otherName):**
+
+> Source: RFC 5280 §4.2.1.6. otherName is `[0] AnotherName ::= SEQUENCE { type-id OBJECT IDENTIFIER, value [0] EXPLICIT ANY }`. Used for UPN (User Principal Name, OID 1.3.6.1.4.1.311.20.2.3) and similar Microsoft AD extensions.
+
+```
+otherName: UPN "alice@corp.local"
+ASN.1 DER: A0 22 06 0A 2B 06 01 04 01 82 37 14 02 03 A0 14 0C 12
+           61 6C 69 63 65 40 63 6F 72 70 2E 6C 6F 63 61 6C
+```
+
+certctl pin: assert UPN otherName is rejected by default profiles (RFC 5280 strict mode) and only accepted when profile.allowed_san_otherName_oids includes `1.3.6.1.4.1.311.20.2.3`.
+
+**Test vector — EKU encoding (RFC 5280 §4.2.1.12):**
+
+> Source: RFC 5280 §4.2.1.12. ExtendedKeyUsage is `SEQUENCE SIZE(1..MAX) OF KeyPurposeId`. KeyPurposeId is an OBJECT IDENTIFIER. Standard OIDs:
+>
+> - `1.3.6.1.5.5.7.3.1` — id-kp-serverAuth
+> - `1.3.6.1.5.5.7.3.2` — id-kp-clientAuth
+> - `1.3.6.1.5.5.7.3.3` — id-kp-codeSigning
+> - `1.3.6.1.5.5.7.3.4` — id-kp-emailProtection
+> - `1.3.6.1.5.5.7.3.8` — id-kp-timeStamping
+> - `1.3.6.1.5.5.7.3.9` — id-kp-OCSPSigning
+
+```
+EKU = serverAuth + clientAuth
+ASN.1 DER: 30 14 06 08 2B 06 01 05 05 07 03 01 06 08 2B 06 01 05 05 07 03 02
+           ^^ ^^
+           |  total length = 20
+           SEQUENCE
+```
+
+certctl pin: every issuer connector test that sets EKUs must assert the cert's `ExtKeyUsage` slice values match the canonical Go constants (`x509.ExtKeyUsageServerAuth`, `…ClientAuth`, etc.).
+
+**Test vector — EKU criticality (RFC 5280 §4.2.1.12):**
+
+> Source: RFC 5280 §4.2.1.12. EKU MAY be critical or non-critical. CA/B Forum BR §7.1.2.7 requires EKU to be **critical** in TLS server certificates issued for public trust. certctl's Local CA emits non-critical EKU by default (private trust); profile must opt-in critical via `profile.eku_critical = true`.
+
+certctl pin: `internal/connector/issuer/local/local_test.go::TestEKUCriticality` — assert non-critical EKU when profile.eku_critical is false; assert critical EKU when true.
+
 ---
 
 ## Part 24: OCSP Responder & DER CRL
@@ -3864,6 +3991,104 @@ go test ./internal/connector/issuer/local/ -run "TestGenerateCRL|TestSignOCSP" -
 
 **Expected:** All tests pass (8 service tests, handler tests, connector tests).
 **PASS if** exit code 0 for all three test suites.
+
+### 24.99: RFC 6960 / 5280 Test Vectors — OCSP & CRL (Bundle P.2-extended)
+
+**What:** Wire-level test vectors that pin certctl's OCSP responder + DER CRL generator against the byte shapes RFC 6960 (OCSP) and RFC 5280 §5 (CRL) mandate. Each vector cites the section + provides a canonical ASN.1 byte snippet a reviewer can spot-check against `openssl ocsp` / `openssl crl` output.
+
+**Why:** OCSP/CRL conformance bugs surface in the wild as silent revocation-status checks failing — the cert is treated as good even after revocation. This is high-impact because it defeats the revocation guarantee the platform exists to provide.
+
+**Test vector — OCSP response status (RFC 6960 §4.2.2.3):**
+
+> Source: RFC 6960 §4.2.2.3. OCSPResponseStatus is `ENUMERATED { successful (0), malformedRequest (1), internalError (2), tryLater (3), sigRequired (5), unauthorized (6) }`. tryLater (3) is the correct response when the responder is not currently able to produce a response (e.g., signing key being rotated, backend DB unreachable).
+
+```
+Successful response (status 0):
+ASN.1 DER: 30 03 0A 01 00
+           ^^ ^^ ^^ ^^ ^^
+           |  |  |  |  ENUMERATED value 0 = successful
+           |  |  |  ENUMERATED length = 1
+           |  |  ENUMERATED tag
+           |  responseStatus length = 3
+           SEQUENCE wrapper
+
+tryLater response (status 3):
+ASN.1 DER: 30 03 0A 01 03
+```
+
+certctl pin: `internal/api/handler/ocsp_handler.go::handleOCSP` — when `ocspService.Sign` returns `ErrResponderNotReady`, the handler must emit `0A 01 03` ENUMERATED tryLater, not a 503 HTTP status. Browsers and intermediaries treat 5xx as retryable network errors; tryLater is the OCSP-protocol-level retryable signal.
+
+**Test vector — OCSP signed-by-CA vs delegated-responder (RFC 6960 §4.2.2.2):**
+
+> Source: RFC 6960 §4.2.2.2. ResponderID identifies the signer of the OCSPResponse. Two CHOICE arms:
+>
+> - `[1] byName Name` — responder is the CA itself; subject DN matches the CA cert's subject
+> - `[2] byKey KeyHash OCTET STRING` — responder is a delegated OCSP responder; KeyHash is the SHA-1 of the responder cert's BIT STRING SubjectPublicKey
+
+```
+ResponderID: byKey for delegated responder
+ASN.1 DER: A2 16 04 14 <20 bytes SHA-1 of responder pubkey>
+           ^^ ^^ ^^ ^^
+           |  |  |  OCTET STRING length = 20 (SHA-1 size)
+           |  |  OCTET STRING tag
+           |  total length
+           [2] context-specific tag for byKey
+```
+
+certctl pin: by default, certctl uses byName (the CA signs OCSP responses directly). Delegated-responder mode requires `CERTCTL_OCSP_DELEGATED_RESPONDER_CERT_PATH` and the corresponding cert MUST have the `id-pkix-ocsp-nocheck` extension (RFC 6960 §4.2.2.2.1). Test must assert both modes produce wire-conformant ResponderID.
+
+**Test vector — OCSP nonce extension (RFC 6960 §4.4.1):**
+
+> Source: RFC 6960 §4.4.1. The id-pkix-ocsp-nonce extension `1.3.6.1.5.5.7.48.1.2` cryptographically binds request to response. If the request includes a nonce, the response MUST echo it back. Modern browsers (Chrome, Firefox) skip nonce inclusion to enable response caching; conformant responders handle both nonce-present and nonce-absent requests.
+
+```
+Nonce extension in OCSP response:
+ASN.1 DER: 30 1D 06 09 2B 06 01 05 05 07 30 01 02 04 10 <16 random bytes>
+           ^^ ^^ ^^ ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^ ^^ ^^
+           |  |  |  OID 1.3.6.1.5.5.7.48.1.2 (nonce)  |  16 bytes
+           |  |  OID tag                              OCTET STRING
+           |  total
+           SEQUENCE
+```
+
+certctl pin: assert nonce echo when client sends one; assert no nonce extension when client doesn't send one (don't fabricate a fresh nonce — that breaks cache-friendly clients).
+
+**Test vector — CRL TBSCertList structure (RFC 5280 §5.1.2):**
+
+> Source: RFC 5280 §5.1.2. TBSCertList contains version (2 = v2), signature AlgorithmIdentifier, issuer Name, thisUpdate / nextUpdate Time, revokedCertificates SEQUENCE, and optional crlExtensions.
+>
+> nextUpdate is OPTIONAL by RFC but RFC 5280 §5.1.2.5 strongly RECOMMENDS its inclusion. CA/B Forum BR §7.2.2 makes nextUpdate REQUIRED for publicly-trusted CAs. certctl emits nextUpdate unconditionally.
+
+certctl pin: `internal/connector/issuer/local/local.go::GenerateCRL` — assert emitted CRL includes `nextUpdate`, that `nextUpdate > thisUpdate`, and that the gap matches `CERTCTL_CRL_VALIDITY_DURATION` (default 7 days).
+
+**Test vector — CRL revocation reason code (RFC 5280 §5.3.1):**
+
+> Source: RFC 5280 §5.3.1. CRLReason is `ENUMERATED { unspecified (0), keyCompromise (1), cACompromise (2), affiliationChanged (3), superseded (4), cessationOfOperation (5), certificateHold (6), removeFromCRL (8), privilegeWithdrawn (9), aACompromise (10) }`.
+>
+> The unused-reason `7` is reserved per RFC 5280; certctl must reject any input attempting reason=7 with a 400 Bad Request.
+
+```
+Revocation reason: keyCompromise
+ASN.1 DER (extension value): 0A 01 01
+                             ^^ ^^ ^^
+                             |  |  ENUMERATED value 1 = keyCompromise
+                             |  length = 1
+                             ENUMERATED tag
+```
+
+certctl pin: `internal/service/certificate_service.go::Revoke` validates reason is in {0, 1, 2, 3, 4, 5, 6, 8, 9, 10}. Test must assert reason=7 (reserved) and reason=11+ (out of range) both return ErrInvalidRevocationReason.
+
+**Test vector — CRL Issuing Distribution Point extension (RFC 5280 §5.2.5):**
+
+> Source: RFC 5280 §5.2.5. The IDP extension MAY be marked critical. When present, it identifies the CRL distribution point and reasons covered. certctl emits IDP when `CERTCTL_CRL_PARTITIONED=true` (per-issuer partitioned CRLs); default is no IDP (full CRL).
+
+certctl pin: assert default mode produces no IDP extension; assert partitioned mode produces a critical IDP extension with `distributionPoint.fullName.uniformResourceIdentifier` matching `https://<host>/.well-known/pki/crl/<issuer_id>`.
+
+**Test vector — Delta CRL handling (RFC 5280 §5.2.4):**
+
+> Source: RFC 5280 §5.2.4. Delta CRLs reference a base CRL via the DeltaCRLIndicator extension (criticality REQUIRED). certctl does **not** emit delta CRLs in v2 — every CRL is a full CRL. The test must assert NO DeltaCRLIndicator extension is present in any certctl-issued CRL (RFC 5280 §5.2.4 mandates the extension be critical when present, so its presence on a non-delta CRL would be a parsing error in relying parties).
+
+certctl pin: assert `crl.Extensions` contains no OID `2.5.29.27` (id-ce-deltaCRLIndicator).
 
 ---
 
