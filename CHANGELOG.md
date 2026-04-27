@@ -4,6 +4,30 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle A (Container & Supply-Chain Hardening): 3 audit findings closed — All High closed
+
+> Closes the audit's container/supply-chain cluster — `H-001` (5 FROM lines pinned to immutable Docker Hub digests + bump-procedure runbook + CI grep guard), `M-012` (verified-already-clean: both Dockerfiles already had `USER certctl`; CI guard now enforces every Dockerfile drops to non-root), `M-014` (broken `||  ... && \` bash-precedence chain replaced with deterministic 3-attempt retry loop + post-check). **All High audit findings now closed (9/9, 100%).**
+
+#### Changed
+
+- **`Dockerfile` + `Dockerfile.agent` (Audit H-001 / CWE-829)** — 5 FROM lines pinned to live digests fetched from Docker Hub at audit time:
+  - `node:20-alpine@sha256:fb4cd12c85ee03686f6af5362a0b0d56d50c58a04632e6c0fb8363f609372293`
+  - `golang:1.25-alpine@sha256:5caaf1cca9dc351e13deafbc3879fd4754801acba8653fa9540cea125d01a71f` (×2)
+  - `alpine:3.19@sha256:6baf43584bcb78f2e5847d1de515f23499913ac9f12bdf834811a3145eb11ca1` (×2)
+
+  Header doc-comment in `Dockerfile` documents the operator bump procedure (quarterly cadence; `docker manifest inspect` and Hub Registry API alternatives for fetching the next digest). A registry-side tag swap can no longer change what we pull.
+- **`Dockerfile:25` (Audit M-014)** — `npm ci` retry refactor. Pre-bundle `npm ci --include=dev || npm ci --include=dev && tsc && build` had broken bash precedence (`A || (B && C && D)`) that silently skipped `tsc && build` on transient registry blips. Replaced with `for i in 1 2 3; do npm ci --include=dev && break; sleep 5; done` plus a fail-loud `[ -d node_modules ]` post-check.
+
+#### Added
+
+- **CI step `Forbidden bare FROM regression guard (H-001)` in `.github/workflows/ci.yml`** — Greps every `Dockerfile*` in the repo and fails the build if any `FROM` line lacks an `@sha256` digest pin. Adding a new Dockerfile or refactoring an existing one without preserving the pin fails CI permanently.
+- **CI step `Forbidden missing USER regression guard (M-012)` in `.github/workflows/ci.yml`** — Greps every `Dockerfile*` for the LAST `USER` directive; fails the build if missing OR if it equals `root`/`0`. Adding a new Dockerfile or refactoring an existing one to run as root fails CI permanently.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 52/55 → **49/55** (corrected from over-counted 52 — actual closure count after Bundle A is 49 closed C+H+M+L of 55 total scope; **High 9/9 = 100%** for the first time; Medium 24/27; Low 19/19 with L-004 deferred). H-001 / M-012 / M-014 boxes flipped `[x]` with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — 3 status flips with closure notes citing the Bundle A mechanism.
+
 ### Bundle E (Mechanical Sweeps & Defensive Polish): 6 audit findings closed; L-004 deferred
 
 > Closes the audit's mechanical-sweep cluster — `L-009` (ZeroSSL EAB URL configurable; audit's "no timeout" claim was wrong — 15s already in place), `L-010` (verified-already-clean: 0 mock.Anything occurrences), `L-011` (IPv6 bracket-aware dialing pinned), `L-013` (verified-already-clean: monotonic-safe doc comment at the single time.Now().Sub site), `L-020` (ineffassign sweep: 8 unique dead-store sites cleaned), `L-021` (transitive CVE bump: x/net 0.42→0.47, x/crypto 0.41→0.45, all 5 advisories cleared). **`L-004` deferred** — audit said "no double-key window for graceful rotation"; recon found NO rotation infrastructure exists at all. Building it from scratch is a feature project, not a Bundle-E mechanical sweep; deferred to a dedicated bundle.
