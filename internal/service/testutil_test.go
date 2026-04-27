@@ -157,20 +157,22 @@ func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 
 // mockJobRepo is a test implementation of JobRepository
 type mockJobRepo struct {
-	mu                sync.Mutex
-	Jobs              map[string]*domain.Job
-	StatusUpdates     map[string]domain.JobStatus
-	CreateErr         error
-	UpdateErr         error
-	UpdateErrorByID   map[string]error
-	UpdateErrorByIDMu sync.Mutex
-	UpdateStatusErr   error
-	GetErr            error
-	ListErr           error
-	ListByStatusErr   error
-	DeleteErr         error
-	ListTimedOutErr   error
-	Updated           []*domain.Job
+	mu                      sync.Mutex
+	Jobs                    map[string]*domain.Job
+	Agents                  map[string]*domain.Agent
+	StatusUpdates           map[string]domain.JobStatus
+	CreateErr               error
+	UpdateErr               error
+	UpdateErrorByID         map[string]error
+	UpdateErrorByIDMu       sync.Mutex
+	UpdateStatusErr         error
+	GetErr                  error
+	ListErr                 error
+	ListByStatusErr         error
+	DeleteErr               error
+	ListTimedOutErr         error
+	ListOfflineAgentJobsErr error
+	Updated                 []*domain.Job
 }
 
 func (m *mockJobRepo) List(ctx context.Context) ([]*domain.Job, error) {
@@ -382,6 +384,34 @@ func (m *mockJobRepo) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, a
 			if j.CreatedAt.Before(approvalCutoff) {
 				jobs = append(jobs, j)
 			}
+		}
+	}
+	return jobs, nil
+}
+
+// ListJobsWithOfflineAgents returns Running jobs whose owning agent's
+// last_heartbeat_at is older than agentCutoff. The mock walks Jobs +
+// Agents the same way the real repo does. Bundle C / Audit M-016.
+func (m *mockJobRepo) ListJobsWithOfflineAgents(ctx context.Context, agentCutoff time.Time) ([]*domain.Job, error) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if m.ListOfflineAgentJobsErr != nil {
+		return nil, m.ListOfflineAgentJobsErr
+	}
+	var jobs []*domain.Job
+	for _, j := range m.Jobs {
+		if j.Status != domain.JobStatusRunning {
+			continue
+		}
+		if j.AgentID == nil || *j.AgentID == "" {
+			continue
+		}
+		ag, ok := m.Agents[*j.AgentID]
+		if !ok || ag.LastHeartbeatAt == nil {
+			continue
+		}
+		if ag.LastHeartbeatAt.Before(agentCutoff) {
+			jobs = append(jobs, j)
 		}
 	}
 	return jobs, nil

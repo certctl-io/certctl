@@ -237,6 +237,58 @@ func (s *JobService) RetryFailedJobs(ctx context.Context, maxRetries int) error 
 	return nil
 }
 
+// ReapJobsWithOfflineAgents transitions jobs in Running status whose
+// owning agent has been silent longer than agentTTL to Failed with
+// reason "agent_offline". Bundle C / Audit M-016 (CWE-754): closes the
+// gap left by ReapTimedOutJobs (which only handles AwaitingCSR /
+// AwaitingApproval). I-001's retry loop then auto-promotes eligible
+// Failed jobs back to Pending so a healthy agent can claim them.
+func (s *JobService) ReapJobsWithOfflineAgents(ctx context.Context, agentTTL time.Duration) error {
+	if agentTTL <= 0 {
+		return fmt.Errorf("ReapJobsWithOfflineAgents: agentTTL must be positive, got %s", agentTTL)
+	}
+	cutoff := time.Now().Add(-agentTTL)
+
+	staleJobs, err := s.jobRepo.ListJobsWithOfflineAgents(ctx, cutoff)
+	if err != nil {
+		return fmt.Errorf("list jobs with offline agents: %w", err)
+	}
+
+	var reaped int
+	for _, job := range staleJobs {
+		oldStatus := job.Status
+		errMsg := fmt.Sprintf("agent offline (no heartbeat for >%s)", agentTTL)
+
+		job.Status = domain.JobStatusFailed
+		job.LastError = &errMsg
+
+		if err := s.jobRepo.Update(ctx, job); err != nil {
+			s.logger.Error("failed to transition offline-agent job",
+				"job_id", job.ID, "agent_id", job.AgentID, "error", err)
+			continue
+		}
+
+		if s.auditService != nil {
+			if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+				"job_offline_agent_reap", "job", job.ID,
+				map[string]interface{}{
+					"old_status":     string(oldStatus),
+					"new_status":     string(domain.JobStatusFailed),
+					"timeout_reason": "agent_offline",
+					"agent_id":       job.AgentID,
+				}); auditErr != nil {
+				s.logger.Error("failed to record offline-agent reap audit event",
+					"job_id", job.ID, "error", auditErr)
+			}
+		}
+		reaped++
+	}
+
+	s.logger.Info("offline-agent job reaper completed",
+		"reaped", reaped, "total_stale", len(staleJobs))
+	return nil
+}
+
 // ReapTimedOutJobs transitions jobs stuck in AwaitingCSR or AwaitingApproval
 // to Failed if they've exceeded their TTL. I-001's retry loop then auto-promotes
 // eligible Failed jobs back to Pending (closes coverage gap I-003).

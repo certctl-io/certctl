@@ -66,6 +66,18 @@ type Config struct {
 	// When enabled, the connector queries the CA's ARI endpoint to get CA-directed renewal timing.
 	ARIEnabled bool `json:"ari_enabled,omitempty"`
 
+	// ARIHTTPTimeoutSeconds bounds the per-request timeout on ARI HTTP calls.
+	// Bundle C / Audit M-019: a CA whose ARI endpoint is unreachable or
+	// stalls indefinitely must not stall the renewal scheduler — the
+	// fallback path is threshold-based renewal, which only kicks in once
+	// the ARI request errors out. The audit's "no fallback timeout" claim
+	// was wrong (a 15s default has been in place since the ARI feature
+	// shipped), but the previous timeout was hardcoded; this knob makes
+	// it configurable per-issuer for operators on flaky-CA networks.
+	// Defaults to 15 when zero. CERTCTL_ACME_ARI_HTTP_TIMEOUT_SECONDS in
+	// the env-driven build path.
+	ARIHTTPTimeoutSeconds int `json:"ari_http_timeout_seconds,omitempty"`
+
 	// Insecure skips TLS certificate verification when connecting to the ACME directory.
 	// Only use for testing with self-signed ACME servers like Pebble.
 	Insecure bool `json:"insecure,omitempty"`

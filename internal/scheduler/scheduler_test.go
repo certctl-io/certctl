@@ -165,6 +165,15 @@ func (m *mockJobService) ReapTimedOutJobs(ctx context.Context, csrTTL, approvalT
 	return nil
 }
 
+// ReapJobsWithOfflineAgents is the Bundle C / Audit M-016 stub. The
+// existing scheduler tests do not exercise this path; the offline-agent
+// reaper has its own end-to-end test in internal/service. Here we just
+// satisfy the JobReaperService interface so the scheduler tests still
+// compile.
+func (m *mockJobService) ReapJobsWithOfflineAgents(ctx context.Context, agentTTL time.Duration) error {
+	return nil
+}
+
 // mockAgentService is a mock implementation for testing.
 type mockAgentService struct {
 	mu          sync.Mutex
