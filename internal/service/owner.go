@@ -127,12 +127,12 @@ func (s *OwnerService) Delete(ctx context.Context, id string, actor string) erro
 
 // ListOwners returns paginated owners (handler interface method).
 func (s *OwnerService) ListOwners(ctx context.Context, page, perPage int) ([]domain.Owner, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 50
-	}
+	// Bundle E / Audit L-020: page/perPage are unused; the underlying repo
+	// List() does not yet take pagination params. Marked explicitly so
+	// ineffassign sees no dead store and future maintainers see the
+	// vestigial params rather than a misleading default-applied clamp.
+	_ = page
+	_ = perPage
 
 	owners, err := s.ownerRepo.List(ctx)
 	if err != nil {

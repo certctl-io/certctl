@@ -389,6 +389,14 @@ func (tb *tokenBucket) allow() bool {
 	tb.mu.Lock()
 	defer tb.mu.Unlock()
 
+	// Bundle E / Audit L-013 (monotonic clock): both `now` and
+	// `tb.lastRefill` come from `time.Now()`, which carries a
+	// monotonic-clock reading per the time package contract. `t1.Sub(t2)`
+	// uses the monotonic component when both ts have it, so this elapsed
+	// computation is NOT affected by wall-clock drift, NTP slew, DST, or
+	// `clock_settime` adjustments. The audit's general concern about
+	// `time.Now().Sub` was about wall-clock-only deltas across process
+	// boundaries; this is intra-process and monotonic-safe.
 	now := time.Now()
 	elapsed := now.Sub(tb.lastRefill).Seconds()
 	tb.tokens += elapsed * tb.rate

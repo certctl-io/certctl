@@ -16,6 +16,7 @@ import (
 	"net"
 	"net/http"
 	"net/url"
+	"os"
 	"strings"
 	"sync"
 	"time"
@@ -302,9 +303,23 @@ func (c *Connector) ensureClient(ctx context.Context) error {
 	return nil
 }
 
-// zeroSSLEABEndpoint is the ZeroSSL API endpoint for auto-generating EAB credentials.
-// Variable (not const) to allow test overrides.
-var zeroSSLEABEndpoint = "https://api.zerossl.com/acme/eab-credentials-email"
+// zeroSSLEABEndpoint is the ZeroSSL API endpoint for auto-generating EAB
+// credentials. Variable (not const) to allow test overrides AND operator
+// overrides at startup via the CERTCTL_ZEROSSL_EAB_URL env var.
+//
+// Bundle E / Audit L-009: pre-bundle the URL was hardcoded; if ZeroSSL
+// changed the endpoint or an operator wanted to point at an internal
+// proxy/mirror, only a code change would have done it. Now any non-empty
+// CERTCTL_ZEROSSL_EAB_URL at process start replaces the default. The
+// HTTP client at the call site already enforces a 15-second timeout
+// (line ~329) — audit's "no timeout" claim was incorrect; the timeout
+// has been in place since the auto-EAB feature shipped.
+var zeroSSLEABEndpoint = func() string {
+	if v := os.Getenv("CERTCTL_ZEROSSL_EAB_URL"); v != "" {
+		return v
+	}
+	return "https://api.zerossl.com/acme/eab-credentials-email"
+}()
 
 // isZeroSSL returns true if the ACME directory URL points to ZeroSSL.
 func isZeroSSL(directoryURL string) bool {

@@ -127,12 +127,12 @@ func (s *TeamService) Delete(ctx context.Context, id string, actor string) error
 
 // ListTeams returns paginated teams (handler interface method).
 func (s *TeamService) ListTeams(ctx context.Context, page, perPage int) ([]domain.Team, int64, error) {
-	if page < 1 {
-		page = 1
-	}
-	if perPage < 1 {
-		perPage = 50
-	}
+	// Bundle E / Audit L-020: page/perPage are unused; the underlying repo
+	// List() does not yet take pagination params. Marked explicitly so
+	// ineffassign sees no dead store and future maintainers see the
+	// vestigial params rather than a misleading default-applied clamp.
+	_ = page
+	_ = perPage
 
 	teams, err := s.teamRepo.List(ctx)
 	if err != nil {
