@@ -888,13 +888,29 @@ func main() {
 	// same bodyLimitMiddleware that wraps the authed surface also wraps
 	// the unauth surface — same default cap (CERTCTL_MAX_BODY_SIZE,
 	// default 1MB), same 413 response on overflow.
-	noAuthHandler := middleware.Chain(apiRouter,
+	//
+	// Bundle C / Audit M-020 (CWE-770): rate limiter added to the noAuth
+	// chain. Pre-bundle the unauth surface had NO rate limit — an attacker
+	// could DoS the OCSP responder, which for fail-open relying parties
+	// constitutes a revocation bypass (every cert appears valid when the
+	// responder is unreachable). The same per-key keyed bucket from
+	// Bundle B / M-025 is reused; the per-source-IP keying applies because
+	// none of these endpoints are authenticated.
+	noAuthMiddleware := []func(http.Handler) http.Handler{
 		middleware.RequestID,
 		structuredLogger,
 		middleware.Recovery,
 		bodyLimitMiddleware,
 		securityHeadersMiddleware,
-	)
+	}
+	if cfg.RateLimit.Enabled {
+		noAuthRateLimiter := middleware.NewRateLimiter(middleware.RateLimitConfig{
+			RPS:       cfg.RateLimit.RPS,
+			BurstSize: cfg.RateLimit.BurstSize,
+		})
+		noAuthMiddleware = append(noAuthMiddleware, noAuthRateLimiter)
+	}
+	noAuthHandler := middleware.Chain(apiRouter, noAuthMiddleware...)
 
 	dashboardEnabled := false
 	if _, err := os.Stat(webDir + "/index.html"); err == nil {

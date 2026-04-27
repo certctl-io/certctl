@@ -67,6 +67,12 @@ type CloudDiscoveryServicer interface {
 // JobReaperService defines the interface for job timeout reaping used by the scheduler.
 type JobReaperService interface {
 	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
+	// Bundle C / Audit M-016 (CWE-754): closes the gap left by ReapTimedOutJobs
+	// (which only handles AwaitingCSR / AwaitingApproval). Jobs in Running
+	// status whose owning agent has been silent for longer than agentTTL get
+	// transitioned to Failed with reason "agent_offline" so I-001's retry
+	// loop can re-queue them on a healthy agent.
+	ReapJobsWithOfflineAgents(ctx context.Context, agentTTL time.Duration) error
 }
 
 // Scheduler manages background jobs and periodic tasks for the certificate control plane.
@@ -97,6 +103,9 @@ type Scheduler struct {
 	healthCheckInterval           time.Duration
 	cloudDiscoveryInterval        time.Duration
 	jobTimeoutInterval            time.Duration
+	// agentOfflineJobTTL: per-tick threshold for reaping Running jobs whose
+	// owning agent has been silent. Bundle C / Audit M-016. Defaults below.
+	agentOfflineJobTTL time.Duration
 	awaitingCSRTimeout            time.Duration
 	awaitingApprovalTimeout       time.Duration
 
@@ -148,6 +157,9 @@ func NewScheduler(
 		healthCheckInterval:           60 * time.Second,
 		cloudDiscoveryInterval:        6 * time.Hour,
 		jobTimeoutInterval:            10 * time.Minute,
+		// 5 minutes is 5×agentHealthCheckInterval default of 1m; an agent
+		// must miss multiple heartbeats before its in-flight jobs are reaped.
+		agentOfflineJobTTL: 5 * time.Minute,
 	}
 }
 
@@ -231,6 +243,16 @@ func (s *Scheduler) SetCloudDiscoveryInterval(d time.Duration) {
 // SetJobReaperService sets the job reaper service (I-003).
 func (s *Scheduler) SetJobReaperService(jr JobReaperService) {
 	s.jobReaper = jr
+}
+
+// SetAgentOfflineJobTTL sets the threshold past which a Running job whose
+// owning agent has gone silent is reaped to Failed. Bundle C / Audit M-016.
+// Zero or negative values are ignored (the default of 5 minutes is kept).
+func (s *Scheduler) SetAgentOfflineJobTTL(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.agentOfflineJobTTL = d
 }
 
 // SetJobTimeoutInterval sets the job timeout reaper tick interval (I-003).
@@ -503,6 +525,15 @@ func (s *Scheduler) jobTimeoutLoop(ctx context.Context) {
 // When no JobReaperService has been wired (e.g. in tests that don't exercise
 // I-003) the call is a safe no-op, preserving the always-on loop topology
 // described in I-003 without forcing every consumer to wire a reaper.
+//
+// Bundle C / Audit M-016: the reaping cycle now has TWO arms:
+//
+//  1. ReapTimedOutJobs handles AwaitingCSR / AwaitingApproval timeouts (I-003).
+//  2. ReapJobsWithOfflineAgents handles Running jobs whose owning agent has
+//     gone silent (M-016). Reuses the same agentHealthCheckTimeout as the
+//     mark-stale-agents-offline path for consistency: if the agent is judged
+//     offline by AgentService.MarkStaleAgentsOffline, its in-flight jobs
+//     should be reaped on the same cadence.
 func (s *Scheduler) runJobTimeout(ctx context.Context) {
 	if s.jobReaper == nil {
 		return
@@ -515,6 +546,20 @@ func (s *Scheduler) runJobTimeout(ctx context.Context) {
 			"interval", s.jobTimeoutInterval.String())
 	} else {
 		s.logger.Debug("job timeout reaper completed")
+	}
+	// Second arm: offline-agent reaper. Uses agentOfflineTimeout (defaults to
+	// 5 minutes — same value the agent-health-check path uses to flip an
+	// agent to Offline). A sensible default of 5×agentHealthCheckInterval
+	// catches agents that miss multiple consecutive heartbeats while leaving
+	// a single missed beat as a transient blip that does NOT reap.
+	offlineCtx, offlineCancel := context.WithTimeout(ctx, 2*time.Minute)
+	defer offlineCancel()
+	if err := s.jobReaper.ReapJobsWithOfflineAgents(offlineCtx, s.agentOfflineJobTTL); err != nil {
+		s.logger.Error("offline-agent job reaper failed",
+			"error", err,
+			"agent_offline_ttl", s.agentOfflineJobTTL.String())
+	} else {
+		s.logger.Debug("offline-agent job reaper completed")
 	}
 }
 

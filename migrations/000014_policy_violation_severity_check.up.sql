@@ -24,6 +24,14 @@
 -- can DROP it by name without ambiguity; un-named CHECK constraints use
 -- a synthesized PostgreSQL name that varies by environment.
 
+-- Bundle C / Audit M-006 (CWE-913): idempotency guard. Drop-if-exists
+-- before ADD so a re-run of this migration against a partially-applied
+-- DB doesn't fail with "constraint already exists". Mirrors the down
+-- migration's DROP CONSTRAINT IF EXISTS shape and the M-7 idempotent-
+-- index idiom.
+ALTER TABLE policy_violations
+    DROP CONSTRAINT IF EXISTS policy_violations_severity_check;
+
 ALTER TABLE policy_violations
     ADD CONSTRAINT policy_violations_severity_check
     CHECK (severity IN ('Warning', 'Error', 'Critical'));

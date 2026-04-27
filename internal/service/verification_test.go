@@ -81,6 +81,11 @@ func (m *mockVerificationJobRepo) ListTimedOutAwaitingJobs(ctx context.Context, 
 	return nil, nil
 }
 
+// Bundle C / Audit M-016: stub for the new offline-agent reaper repo method.
+func (m *mockVerificationJobRepo) ListJobsWithOfflineAgents(ctx context.Context, agentCutoff time.Time) ([]*domain.Job, error) {
+	return nil, nil
+}
+
 // newVerificationTestService creates a VerificationService wired with test doubles.
 func newVerificationTestService(jobs map[string]*domain.Job, jobRepoErr error) (*VerificationService, *mockVerificationJobRepo, *mockAuditRepo) {
 	jobRepo := &mockVerificationJobRepo{jobs: jobs, err: jobRepoErr}

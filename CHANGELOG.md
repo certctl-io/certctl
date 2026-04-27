@@ -4,6 +4,38 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle C (Renewal/Reliability cluster): 7 audit findings closed
+
+> Closes the audit's renewal/reliability cluster — `M-006` (idempotent migration 000014), `M-007` (3 partial-failure tests across bulk-revoke / bulk-renew / bulk-reassign), `M-008` (admin-gated handler enumeration pin, verified-already-clean), `M-015` (cardinality invariant pinned at struct level via reflect, verified-already-clean), `M-016` (new ListJobsWithOfflineAgents repo method + ReapJobsWithOfflineAgents service path + scheduler wiring), `M-019` (configurable ARI HTTP timeout + 4 dispatch tests, audit-claim verified wrong), `M-020` (rate limiter on noAuthHandler chain + Must-Staple operator runbook). M-028 was already closed by the Bundle B CI follow-up.
+
+#### Added
+
+- **`internal/repository/postgres/job.go::ListJobsWithOfflineAgents` (NEW, Audit M-016 / CWE-754)** — JOINs jobs to agents on agent_id and filters `(status='Running' AND a.last_heartbeat_at < agentCutoff)`. Server-keygen jobs (no agent_id) excluded by design.
+- **`internal/service/job.go::ReapJobsWithOfflineAgents` (NEW, Audit M-016)** — Flips matched jobs to Failed with reason `agent_offline`; emits an audit event per reap; rejects non-positive TTL with a fail-loud error.
+- **`Scheduler.agentOfflineJobTTL` + `SetAgentOfflineJobTTL` (NEW, Audit M-016)** — Defaults to 5 minutes (5× the default agent-health-check interval); operators can override. The existing `runJobTimeout` cycle now calls both reaper arms.
+- **`Config.ARIHTTPTimeoutSeconds` + `Connector.ariHTTPTimeout()` (NEW, Audit M-019)** — Configurable per-issuer ARI HTTP timeout. Defaults to 15s when zero (preserves the pre-bundle default). `CERTCTL_ACME_ARI_HTTP_TIMEOUT_SECONDS` env var path.
+- **`router.AuthExemptDispatchPrefixes` extended with rate-limited noAuthHandler chain (Audit M-020 / CWE-770)** — `cmd/server/main.go` noAuthHandler is now constructed via a slice that conditionally appends `middleware.NewRateLimiter` when `cfg.RateLimit.Enabled`. Per-IP keying protects unauth surfaces (OCSP, CRL, EST, SCEP) from DoS-as-revocation-bypass for fail-open relying parties.
+- **`docs/security.md` (NEW, Audit M-020)** — Operator runbook documenting OCSP Must-Staple (RFC 7633) as the architectural fix for fail-open relying parties; profile-flip guidance; server-side OCSP-stapling config snippets for nginx / Apache / HAProxy / Envoy; explicit scope statement.
+
+#### Tests
+
+- **`internal/api/handler/bulk_partial_failure_test.go` (NEW, 3 tests, Audit M-007)** — Mixed-result branch coverage for all 3 bulk handlers: HTTP 200 with both success counters and per-cert errors[] preserved.
+- **`internal/api/handler/m008_admin_gate_test.go` (NEW, 2 tests, Audit M-008)** — Walks every handler `.go` file, asserts every `middleware.IsAdmin` call site is in `AdminGatedHandlers` (with required test triplet) or `InformationalIsAdminCallers` (justified). Pin against future bypass.
+- **`internal/domain/m015_cardinality_test.go` (NEW, 2 tests, Audit M-015)** — reflect-based pin on `ManagedCertificate.{CertificateProfileID,RenewalPolicyID,IssuerID,OwnerID}` and `RenewalPolicy.CertificateProfileID` kind=String. Schema change to N:N would have to update renewal.go's lookup loop in the same commit.
+- **`internal/connector/issuer/acme/ari_timeout_test.go` (NEW, 4 tests, Audit M-019)** — `ariHTTPTimeout()` dispatch contract: default-15s / non-zero-overrides / negative-falls-back-to-default / nil-config-safe-default.
+- **`internal/service/job_offline_agent_reaper_test.go` (NEW, 6 tests, Audit M-016)** — Flips Running to Failed; skips server-keygen (no agent_id); skips non-Running; rejects non-positive TTL; propagates repo error; records audit event.
+
+#### Changed
+
+- **`migrations/000014_policy_violation_severity_check.up.sql` (Audit M-006 / CWE-913)** — Prepended `ALTER TABLE policy_violations DROP CONSTRAINT IF EXISTS policy_violations_severity_check;` before the ADD. Re-runs on partially-applied DBs now succeed.
+- **`internal/connector/issuer/acme/ari.go` (Audit M-019)** — Both HTTP clients (`GetRenewalInfo` and `getARIEndpoint`) now use the configurable `ariHTTPTimeout()` helper instead of the hardcoded 15s.
+- **`cmd/server/main.go` noAuthHandler construction (Audit M-020)** — From fixed `middleware.Chain(...)` to conditional slice with rate-limiter append. Backwards-compatible: when `cfg.RateLimit.Enabled=false` the chain reduces to the prior shape.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 31/55 → 38/55 closed (Critical 0/0; High 7/9; **Medium 13/27 → 20/27**; Low 8/19); M-006/M-007/M-008/M-015/M-016/M-019/M-020 boxes flipped `[x]` with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — corresponding status flips with closure notes citing the Bundle C mechanism.
+
 ### Bundle B (Auth & Transport Surface Tightening): 5 audit findings closed
 
 > Closes the audit's auth + transport hardening cluster: `M-001` (PBKDF2 100k → 600k via new v3 blob format with v2/v1 read fallback), `M-002` (auth-exempt allowlist constants + AST-walking regression tests pin both router-layer and dispatch-layer bypass paths), `M-013` (CORS deny-by-default verified-already-clean + explicit nil/empty/star contract pin), `M-018` (Postgres TLS opt-in via Helm `postgresql.tls.mode` toggle + operator runbook `docs/database-tls.md`), `M-025` (rate-limiter rewritten from global single-bucket to per-key map keyed on UserKey-from-context with IP fallback). **Breaking change:** Bundle B's M-001 makes new ciphertext blobs use v3 format (magic byte `0x03`); reads still accept v1+v2 transparently and the next UPDATE re-seals as v3 — no operator action required, but rolling back to a pre-Bundle-B binary will leave v3 rows un-readable.

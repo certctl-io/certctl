@@ -607,6 +607,48 @@ func (r *JobRepository) ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff,
 	return jobs, nil
 }
 
+// ListJobsWithOfflineAgents returns jobs in Running status whose owning
+// agent's last_heartbeat_at is older than agentCutoff. Bundle C / Audit
+// M-016 (CWE-754): closes the gap that ListTimedOutAwaitingJobs left
+// open — jobs claimed by an agent that subsequently dies sit in Running
+// indefinitely. The query joins jobs to agents on agent_id and filters
+// to (status='Running' AND agent.last_heartbeat_at < agentCutoff).
+//
+// Jobs without an agent_id (server-side keygen path) are intentionally
+// excluded: they have no agent to be "offline".
+func (r *JobRepository) ListJobsWithOfflineAgents(ctx context.Context, agentCutoff time.Time) ([]*domain.Job, error) {
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT j.id, j.type, j.certificate_id, j.target_id, j.agent_id, j.status,
+		       j.attempts, j.max_attempts, j.last_error, j.scheduled_at,
+		       j.started_at, j.completed_at, j.created_at
+		FROM jobs j
+		JOIN agents a ON a.id = j.agent_id
+		WHERE j.status = $1
+		  AND j.agent_id IS NOT NULL
+		  AND a.last_heartbeat_at IS NOT NULL
+		  AND a.last_heartbeat_at < $2
+		ORDER BY j.started_at ASC NULLS FIRST
+	`, domain.JobStatusRunning, agentCutoff)
+
+	if err != nil {
+		return nil, fmt.Errorf("failed to query jobs with offline agents: %w", err)
+	}
+	defer rows.Close()
+
+	var jobs []*domain.Job
+	for rows.Next() {
+		job, err := scanJob(rows)
+		if err != nil {
+			return nil, err
+		}
+		jobs = append(jobs, job)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("error iterating offline-agent job rows: %w", err)
+	}
+	return jobs, nil
+}
+
 // scanJob scans a job from a row or rows
 func scanJob(scanner interface {
 	Scan(...interface{}) error

@@ -271,6 +271,17 @@ type JobRepository interface {
 	// Failed; I-001's retry loop then auto-promotes eligible Failed jobs back to Pending.
 	// I-003 coverage-gap closure.
 	ListTimedOutAwaitingJobs(ctx context.Context, csrCutoff, approvalCutoff time.Time) ([]*domain.Job, error)
+
+	// ListJobsWithOfflineAgents returns jobs in Running status whose owning
+	// agent's last_heartbeat_at is older than agentCutoff. Bundle C / Audit
+	// M-016 (CWE-754): the existing ListTimedOutAwaitingJobs scope only
+	// covers AwaitingCSR / AwaitingApproval — jobs that were claimed by an
+	// agent and then stalled because the agent itself died (host crash,
+	// container OOM, network partition) sit in Running indefinitely with
+	// no recovery path. The reaper loop transitions these to Failed with
+	// reason "agent_offline" so I-001's retry loop can re-queue them on
+	// a healthy agent.
+	ListJobsWithOfflineAgents(ctx context.Context, agentCutoff time.Time) ([]*domain.Job, error)
 }
 
 // RenewalPolicyRepository defines operations for managing renewal policies.

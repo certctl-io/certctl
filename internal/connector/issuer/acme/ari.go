@@ -49,7 +49,7 @@ func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer
 		return nil, fmt.Errorf("create ARI request: %w", err)
 	}
 
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := &http.Client{Timeout: c.ariHTTPTimeout()}
 	resp, err := httpClient.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("ARI request failed: %w", err)
@@ -115,12 +115,22 @@ func computeARICertID(certPEM string) (string, error) {
 	return certID, nil
 }
 
+// ariHTTPTimeout returns the per-request timeout for ARI HTTP calls. Bundle C
+// / Audit M-019: configurable via Config.ARIHTTPTimeoutSeconds (env var
+// CERTCTL_ACME_ARI_HTTP_TIMEOUT_SECONDS), defaults to 15 seconds.
+func (c *Connector) ariHTTPTimeout() time.Duration {
+	if c.config != nil && c.config.ARIHTTPTimeoutSeconds > 0 {
+		return time.Duration(c.config.ARIHTTPTimeoutSeconds) * time.Second
+	}
+	return 15 * time.Second
+}
+
 // getARIEndpoint constructs the ARI endpoint URL from the ACME directory.
 // It fetches the directory JSON and extracts the "renewalInfo" field if available.
 // Falls back to a standard URL pattern if the directory doesn't advertise renewalInfo.
 func (c *Connector) getARIEndpoint(ctx context.Context, certID string) (string, error) {
 	// Try to fetch and parse the directory
-	httpClient := &http.Client{Timeout: 15 * time.Second}
+	httpClient := &http.Client{Timeout: c.ariHTTPTimeout()}
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, c.config.DirectoryURL, nil)
 	if err != nil {
 		return "", fmt.Errorf("create directory request: %w", err)
