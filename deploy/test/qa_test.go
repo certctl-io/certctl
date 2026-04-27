@@ -1049,6 +1049,26 @@ func TestQA(t *testing.T) {
 	})
 
 	// ===================================================================
+	// Part 23: S/MIME & EKU Support — manual test (no automation yet)
+	// ===================================================================
+	t.Run("Part23_SMIMEEku", func(t *testing.T) {
+		t.Skip("Part 23 (S/MIME & EKU) is documented in docs/testing-guide.md::Part 23 " +
+			"as a manual test. Automation candidates: profile creation with SMIME EKU; " +
+			"issuance request with mismatched EKU should 400; issued cert MUST contain " +
+			"SMIMECapabilities extension when profile.allow_smime=true.")
+	})
+
+	// ===================================================================
+	// Part 24: OCSP Responder & DER CRL — manual test (no automation yet)
+	// ===================================================================
+	t.Run("Part24_OCSPCRL", func(t *testing.T) {
+		t.Skip("Part 24 (OCSP/CRL) is documented in docs/testing-guide.md::Part 24 " +
+			"as a manual test. Automation candidates: GET /.well-known/pki/ocsp/{issuer}/{serial} " +
+			"returns RFC 6960 OCSPResponse; DER CRL response is valid ASN.1 and signed by issuing CA; " +
+			"Must-Staple cert returns OCSP for fail-open relying parties.")
+	})
+
+	// ===================================================================
 	// Part 25: Certificate Discovery
 	// ===================================================================
 	t.Run("Part25_Discovery", func(t *testing.T) {
@@ -1885,6 +1905,26 @@ func TestQA(t *testing.T) {
 		t.Run("SeedDemoData", func(t *testing.T) {
 			fileContains(t, "migrations/seed_demo.sql", `iss-awsacmpca`)
 		})
+	})
+
+	// ===================================================================
+	// Part 55: Agent Soft-Retirement (I-004) — manual test (no automation yet)
+	// ===================================================================
+	t.Run("Part55_AgentSoftRetire", func(t *testing.T) {
+		t.Skip("Part 55 (Agent Soft-Retirement) is documented in docs/testing-guide.md::Part 55 " +
+			"as a manual test. Automation candidates: POST /api/v1/agents/{id}/retire with " +
+			"soft=true does not delete; foreign-key cascade behavior on certs owned by retired " +
+			"agent; reactivation flow restores agent status.")
+	})
+
+	// ===================================================================
+	// Part 56: Notification Retry & Dead-Letter Queue (I-005) — manual test (no automation yet)
+	// ===================================================================
+	t.Run("Part56_NotificationDeadLetter", func(t *testing.T) {
+		t.Skip("Part 56 (Notification Retry/Dead-Letter) is documented in docs/testing-guide.md::Part 56 " +
+			"as a manual test. Automation candidates: notification with N consecutive failures " +
+			"transitions to status=DeadLetter; POST /api/v1/notifications/{id}/requeue resets to " +
+			"Pending; idempotency under concurrent retry; alert on dead-letter buildup.")
 	})
 }
 

@@ -10,11 +10,13 @@
 
 `deploy/test/qa_test.go` is a single Go test file (~1700 lines) that automates as much of `docs/testing-guide.md` as possible against a running certctl Docker Compose demo stack. It replaces the legacy `qa-smoke-test.sh` bash script.
 
-It covers **all 54 Parts** of the testing guide:
+It covers **49 of 56 Parts** of the testing guide as automation; the remaining 7 are
+either manual-only by design or pending QA-suite coverage:
 
-- **~164 automated subtests** — API calls, database queries, source file checks, performance benchmarks
-- **11 skipped Parts** — with documented reasons (external CAs, Windows, browser-only, etc.)
-- **Remaining ~282 manual tests** — GUI flows, scheduler timing, Docker log inspection — must be done by a human following `docs/testing-guide.md`
+- **49 `Part_*` automation wrappers**, **~159 leaf subtests** — API calls, database queries, source file checks, performance benchmarks
+- **11 fully skipped Parts** — with documented reasons (external CAs, Windows, browser-only, etc.) — see "What This Test Does NOT Cover" below
+- **4 Parts NOT YET AUTOMATED** — Parts 23 (S/MIME & EKU), 24 (OCSP/CRL), 55 (Agent Soft-Retirement), 56 (Notification Retry & Dead-Letter) — must be tested manually per `docs/testing-guide.md` until QA-suite automation lands
+- **Manual-only flows** in addition: GUI flows, scheduler timing, Docker log inspection — must be done by a human following `docs/testing-guide.md`
 
 ## Architecture
 
@@ -118,6 +120,8 @@ This table shows what each Part tests and what's left for manual verification.
 | 20 | Post-Deployment Verification | 1 | 404 on nonexistent job verification | TLS probing, fingerprint comparison |
 | 21 | EST Server | 2 | CACerts (200 + content-type), CSRAttrs (200/204) | simpleenroll with CSR, simplereenroll, PKCS#7 parsing |
 | 22 | Certificate Export | 3 | PEM export, PKCS#12 export, 404 on nonexistent | Download mode, file content validation |
+| 23 | S/MIME & EKU Support | 0 (NOT AUTOMATED) | — | S/MIME profile creation; EKU enforcement on issuance; SMIMECapabilities extension presence in issued cert; rejection of profile-violating EKU on CSR. Test manually per `docs/testing-guide.md::Part 23` |
+| 24 | OCSP Responder & DER CRL | 0 (NOT AUTOMATED) | — | OCSP request/response (RFC 6960), DER CRL generation, status (Good/Revoked/Unknown), Must-Staple coordination. Test manually per `docs/testing-guide.md::Part 24` |
 | 25 | Certificate Discovery | 5 | List discovered, summary, list scan targets, create target, invalid CIDR 400 | Agent filesystem scan, claim/dismiss workflow |
 | 26 | Enhanced Query API | 4 | Sort descending, cursor pagination, time-range filter, invalid sort field | Field projection correctness, cursor token cycling |
 | 27 | Request Body Size Limits | 1 | 2MB body rejected (413/400) | Exact limit boundary (1MB) |
@@ -147,8 +151,13 @@ This table shows what each Part tests and what's left for manual verification.
 | 52 | Helm Chart | 5 | Chart.yaml, values.yaml, 4 templates exist, securityContext, health probes | `helm template` rendering, `helm install` |
 | 53 | Kubernetes Secrets Target Connector (M47) | 18 | Config validation (namespace DNS-1123, secret name DNS subdomain, label keys, required fields), deployment (create/update Secret, chain concatenation, error propagation), validation (serial comparison, not-found, empty cert) | GUI target wizard KubernetesSecrets fields (namespace, secret_name, labels, kubeconfig_path), Helm RBAC toggle, TargetDetailPage type label |
 | 54 | AWS ACM Private CA Issuer Connector (M47) | 23 | Config validation (region, CA ARN regex, signing algorithm whitelist, validity_days, defaults), issuance (full flow, empty CSR, errors), renewal (reuses issuance), revocation (reason mapping, default, errors), GetOrderStatus completed, GetCACertPEM (success/chain/error), GetRenewalInfo nil | GUI issuer wizard AWSACMPCA fields (region, ca_arn, signing_algorithm, validity_days, template_arn), seed data visibility, create issuer flow |
+| 55 | Agent Soft-Retirement (I-004) | 0 (NOT AUTOMATED) | — | Soft-retire vs hard-retire; force flag; reason capture; foreign-key cascade behavior on retired-agent cert ownership; reactivation. Test manually per `docs/testing-guide.md::Part 55` |
+| 56 | Notification Retry & Dead-Letter Queue (I-005) | 0 (NOT AUTOMATED) | — | Retry loop with exponential backoff, dead-letter transition after N retries, requeue endpoint (`POST /api/v1/notifications/{id}/requeue`), idempotency on retry. Test manually per `docs/testing-guide.md::Part 56` |
 
-**Totals:** ~164 automated subtests, 11 fully skipped Parts, ~282 manual tests remaining.
+**Totals (verified 2026-04-27):** 49 `Part_*` automation wrappers, ~159 leaf subtests, 11 fully
+skipped Parts, 4 Parts not yet automated (23, 24, 55, 56), and an unspecified count of manual-only
+flows (GUI, scheduler timing, Docker log inspection). Run `grep -cE '^## Part [0-9]+:' docs/testing-guide.md`
+and `grep -cE 't\.Run\("Part[0-9]+_' deploy/test/qa_test.go` to re-verify.
 
 ## Test Categories
 
@@ -181,6 +190,17 @@ Timed API requests with threshold assertions:
 ## What This Test Does NOT Cover
 
 These gaps must be filled by manual testing per `docs/testing-guide.md`:
+
+### Not Yet Automated (Parts 23, 24, 55, 56)
+
+These Parts are documented in `docs/testing-guide.md` but have no `Part_*` automation
+in `qa_test.go` yet. They are operator-runnable from the manual playbook; QA-suite
+automation should land before the next acquisition-grade release.
+
+- **Part 23: S/MIME & EKU Support** — profile-driven EKU enforcement; SMIMECapabilities extension
+- **Part 24: OCSP Responder & DER CRL** — OCSP request/response correctness, CRL generation, Must-Staple coordination
+- **Part 55: Agent Soft-Retirement (I-004)** — soft vs hard retire, FK cascade, reactivation
+- **Part 56: Notification Retry & Dead-Letter Queue (I-005)** — retry semantics, dead-letter transition, requeue
 
 ### External CA Integrations (Parts 10–13)
 - **Sub-CA mode** — requires CA cert+key files on disk
@@ -221,7 +241,7 @@ Both files live in `deploy/test/` in the same Go package (`integration_test`):
 | **Build tag** | `//go:build qa` | `//go:build integration` |
 | **Target stack** | Demo (`docker-compose.yml` + `docker-compose.demo.yml`) | Test (`docker-compose.test.yml`) |
 | **Port** | 8443 | Different (test stack config) |
-| **Seed data** | `seed_demo.sql` (32 certs, 8 agents, realistic history) | Minimal (created by tests) |
+| **Seed data** | `seed_demo.sql` (32 certs, 12 agents, 13 issuers, 8 targets, realistic history) | Minimal (created by tests) |
 | **CA backends** | Local CA only (demo mode) | Pebble ACME, step-ca, NGINX |
 | **Purpose** | Release QA — broad coverage, spot checks | Functional — end-to-end issuance, renewal, revocation against real CAs |
 | **Run frequency** | Before each release tag | CI on every PR |
@@ -232,20 +252,53 @@ They are complementary. Integration tests prove the machinery works. QA tests pr
 
 The QA tests depend on `migrations/seed_demo.sql`. Key IDs used:
 
-### Certificates (32 total)
-`mc-api-prod`, `mc-web-prod`, `mc-pay-prod`, `mc-dash-prod`, `mc-data-prod`, `mc-search-prod`, `mc-admin-prod`, `mc-blog-prod`, `mc-docs-prod`, `mc-status-prod`, `mc-grpc-prod`, `mc-vault-prod`, `mc-consul-prod`, `mc-shop-prod`, `mc-auth-prod`, `mc-cdn-prod`, `mc-mail-prod`, `mc-ci-prod`, `mc-legacy-prod`, `mc-old-api`, `mc-wiki-prod`, `mc-api-stg`, `mc-web-stg`, `mc-pay-stg`, `mc-api-dev`, `mc-grafana-prod`, `mc-vpn-prod`, `mc-wildcard-prod`, `mc-compromised`, `mc-edge-eu`, `mc-k8s-ingress`, `mc-smime-bob`
+### Certificates (32 total in `managed_certificates`)
 
-### Agents (9 total)
-`ag-web-prod`, `ag-web-staging`, `ag-lb-prod`, `ag-iis-prod`, `ag-data-prod`, `ag-edge-01`, `ag-k8s-prod`, `ag-mac-dev`, `server-scanner` (sentinel)
+The full canonical list is generated by:
+```
+sed -n '/^INSERT INTO managed_certificates/,/^;/p' migrations/seed_demo.sql \
+  | grep -oE "^\s*\('mc-[a-z0-9_-]+" | sed -E "s/^\s*\('//" | sort -u
+```
 
-### Issuers (9 total)
-`iss-local`, `iss-acme-le`, `iss-stepca`, `iss-acme-zs`, `iss-openssl`, `iss-vault`, `iss-digicert`, `iss-sectigo`, `iss-googlecas`
+Hand-listing is unsustainable as the seed grows; tests reference IDs by lookup, not by enumeration.
+Sample IDs: `mc-api-prod`, `mc-web-prod`, `mc-pay-prod`, `mc-compromised`, `mc-smime-bob`, `mc-edge-eu`, `mc-k8s-ingress`, `mc-wildcard-prod`. See `migrations/seed_demo.sql:147` onward.
 
-### Targets (8 total)
+### Agents (12 total in `agents` table)
+
+8 named workload agents + 1 server-side sentinel + 3 cloud-discovery sentinels:
+
+- **Workload agents:** `ag-web-prod`, `ag-web-staging`, `ag-lb-prod`, `ag-iis-prod`, `ag-data-prod`, `ag-edge-01`, `ag-k8s-prod`, `ag-mac-dev`
+- **Server-side sentinel:** `server-scanner`
+- **Cloud-discovery sentinels:** `cloud-aws-sm`, `cloud-azure-kv`, `cloud-gcp-sm`
+
+Full list via:
+```
+sed -n '/^INSERT INTO agents/,/^;/p' migrations/seed_demo.sql \
+  | grep -oE "^\s*\('[a-z][a-z0-9_-]+" | sed -E "s/^\s*\('//"
+```
+
+(The `agent_groups` table also contains entries with `ag-*` IDs — `ag-linux-prod`, `ag-windows`, `ag-datacenter-a`, `ag-arm64`, `ag-manual` — but those are *group* IDs, not agents. Don't confuse the two.)
+
+### Issuers (13 total)
+
+`iss-local`, `iss-acme-le`, `iss-stepca`, `iss-acme-zs`, `iss-openssl`, `iss-vault`, `iss-digicert`, `iss-sectigo`, `iss-googlecas`, `iss-awsacmpca`, `iss-entrust`, `iss-globalsign`, `iss-ejbca`.
+
+Full list via:
+```
+sed -n '/^INSERT INTO issuers/,/^;/p' migrations/seed_demo.sql \
+  | grep -oE "^\s*\('iss-[a-z0-9_-]+" | sed -E "s/^\s*\('//"
+```
+
+### Targets (8 total in `deployment_targets`)
 `tgt-nginx-prod`, `tgt-nginx-staging`, `tgt-haproxy-prod`, `tgt-apache-prod`, `tgt-iis-prod`, `tgt-traefik-prod`, `tgt-caddy-prod`, `tgt-nginx-data`
 
-### Network Scan Targets (4 total)
+### Network Scan Targets (4 total in `network_scan_targets`)
 `nst-dc1-web`, `nst-dc2-apps`, `nst-dmz`, `nst-edge`
+
+**Maintenance note:** when adding new seed rows, also update this section, OR remove the
+per-table counts and rely on the `sed | grep` commands so the doc stops drifting on every
+seed-data change. A CI guard that fails when the doc count diverges from the seed file is
+proposed in `coverage-audit-2026-04-27/tables/qa-doc-strengthening.md` (Strengthening #6).
 
 ## Troubleshooting
 
@@ -293,5 +346,6 @@ When a new feature ships:
 
 ## Version History
 
-- **v1.0** (April 2026) — Initial release covering all 52 Parts of testing-guide.md v2.1. Replaces `qa-smoke-test.sh`.
+- **v1.2** (April 2026, post-coverage-audit) — Documented Parts 55–56 (I-004 Agent Soft-Retirement, I-005 Notification Retry & Dead-Letter) and surfaced Parts 23–24 (S/MIME & EKU; OCSP/CRL) as not-yet-automated. 56 Parts total in `testing-guide.md`; 49 live `Part_*` automation wrappers in `qa_test.go` + 4 new `Skip` stubs for Parts 23/24/55/56 = 53 wrappers (Parts 15–17 remain covered by source-checks in Parts 42–46). Reconciled seed-data section to actual `seed_demo.sql` counts (12 agents, 13 issuers; certs were already accurate at 32). Bundle I of the 2026-04-27 coverage-audit closure plan.
 - **v1.1** (April 2026) — Added Parts 53–54 (M47: Kubernetes Secrets target + AWS ACM PCA issuer). 54 Parts total, ~164 automated subtests.
+- **v1.0** (April 2026) — Initial release covering all 52 Parts of testing-guide.md v2.1. Replaces `qa-smoke-test.sh`.
