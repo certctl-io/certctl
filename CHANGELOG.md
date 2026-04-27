@@ -4,6 +4,38 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle N (Coverage Audit Closure — Mid-tier Round-Out): partial — M-001 partial, M-002/M-003 deferred
+
+> Stubs-coverage tests shipped across 8 issuer connectors. Modest 1-3pp coverage lifts; full M-001 closure (all 9 connectors at ≥85%) requires per-CA failure-mode mock work that exceeds this session's budget. Service/handler round-out (M-002, M-003) and CI threshold raise #2 deferred until follow-on work lifts the underlying coverage.
+
+#### Stubs coverage (8 connectors)
+
+Each connector gets a `<conn>_stubs_test.go` (~50 LoC) pinning the not-supported `issuer.Connector` interface methods (`GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`, `GetRenewalInfo`). Most CAs delegate CRL/OCSP/CA-cert distribution to their managed services, so these methods are documented stubs that return errors. Pinning them ensures the stubs aren't silently replaced with no-ops in a future refactor.
+
+| Connector | Pre | Post | Δ |
+|---|---|---|---|
+| `digicert` | 79.3% | 81.0% | +1.7pp |
+| `ejbca` | 75.8% | 76.5% | +0.7pp |
+| `entrust` | 70.8% | 70.8% | (stubs already covered) |
+| `sectigo` | 78.0% | 79.4% | +1.4pp |
+| `vault` | 81.0% | **84.1%** | +3.1pp |
+| `openssl` | 76.9% | 78.0% | +1.1pp |
+| `googlecas` | 81.0% | **83.4%** | +2.4pp |
+| `globalsign` | 75.9% | 78.2% | +2.3pp |
+
+`awsacmpca` not included — its 0%-coverage hotspots are stubClient methods (used when the AWS SDK isn't initialized), structurally different from the other 8 connectors' interface stubs. Already at 83.5%, near target.
+
+**Why the gates aren't yet met:** the stub functions are tiny (1-2 lines each, mostly `return nil, fmt.Errorf("not supported")`). Lifting each connector to ≥85% requires per-connector failure-mode test files mirroring **Bundle J's ACME pattern** (`httptest.Server` + canned 401 / 403 / 429+Retry-After / 5xx / malformed responses against the actual `IssueCertificate` / `RevokeCertificate` / `GetOrderStatus` paths). That's ~200-300 LoC × 9 connectors = ~2000-2700 LoC of bespoke per-CA mock work. Tracked as follow-on "Bundle N.A-extended / N.B-extended."
+
+**Deferred:**
+
+- **N.C (M-002 + M-003):** `internal/service` (70.5%) and `internal/api/handler` (79.4%) round-out **not yet started**. Tracked as "Bundle N.C-extended."
+- **N.CI (CI threshold raise #2):** the prescribed raises (service 55→80, handler 60→80, issuer/* glob → 80) require the underlying coverage to actually be at those levels first. Service + handler are still below their proposed floors; issuer connectors average ~78% (range 70.8–84.1) below the proposed 80% floor. Raising prematurely would fail CI immediately. Tracked as "Bundle N.CI-extended" — gates raise once the follow-on bundles lift the underlying packages.
+
+Verification: `go vet ./internal/connector/issuer/{digicert,ejbca,entrust,sectigo,vault,openssl,googlecas,globalsign}/...` clean; `gofmt -l` clean; `go test -short -count=1` PASS for all 8 connectors.
+
+Audit deliverables: `gap-backlog.md::M-001` row marked partial-strikethrough with the per-connector coverage table; closure-log entry covers all four sub-batches' status; `closure-plan.md` Bundle N marked `[~]` with per-sub-batch breakdown. M-002 and M-003 row tooltip updated to reflect deferred status.
+
 ### Bundle M.Cloud (Coverage Audit Closure — AzureKV + GCP-SM): H-004 closed
 
 > Closes the deferred 4th sub-batch from Bundle M. **Bundle M is now FULLY CLOSED across all 4 sub-batches.**
