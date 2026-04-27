@@ -4,6 +4,48 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle J (Coverage Audit Closure — ACME Existential Coverage): C-001 *partial-closed*
+
+> Lifts `internal/connector/issuer/acme` line coverage from **41.8% → 55.6%** (+13.8pp) by pinning every failure mode the audit's gap-backlog explicitly listed under C-001. Hermetic — every test uses `httptest.Server` (no Let's Encrypt staging, no ZeroSSL sandbox, no Pebble). Closes the failure-mode dimension of C-001; the residual ≥85%-target gap is documented as a follow-on Pebble-style mock bundle.
+
+`internal/connector/issuer/acme/acme_failure_test.go` (~700 LoC, 23 new test functions). Notable:
+
+- **EAB auto-fetch failure modes:** network-error (closed server), malformed-JSON, 5xx, 401, `success=false` with upstream message preserved. Plus an `ensureClient` integration test confirming the auto-fetch failure propagates with a `auto-fetch ZeroSSL EAB credentials` wrap.
+- **ARI failure modes:** directory-unreachable (fallback URL exercised), ARI 5xx, ARI 404 (returns `nil, nil` short-circuit per RFC 9773 — CA doesn't support ARI), ARI malformed JSON, ARI empty `suggestedWindow` (RFC 9773 §4.1 invariant violation), directory-malformed-JSON falls back to `constructARIURLFallback`, invalid-cert-PEM (cert-ID computation failure), and a happy-path with non-zero suggestedWindow + explanationURL.
+- **Profile-order failure modes:** directory discovery failure on the JWS-POST branch (profile-set path); empty-profile fast-path delegates to `client.AuthorizeOrder`.
+- **fetchNonce:** no-URL, missing Replay-Nonce header, network-error, happy-path.
+- **Always-error V1 paths:** `RevokeCertificate` (DER-not-supplied), `GenerateCRL`, `SignOCSPResponse`, `GetCACertPEM`.
+- **ensureClient propagation:** `IssueCertificate`, `RenewCertificate`, `GetOrderStatus` all surface `ACME client init` wrap when ensureClient fails (e.g. EAB decode error).
+- **Challenge handler** (HTTP-01): known-token serves the keyAuth, unknown-token returns 404; exercised via `httptest.Server` (port-binding-free).
+- **`presentPersistRecord`:** no-solver short-circuit + DNSSolver fallback (when the solver is not a `*ScriptDNSSolver`).
+- **Defense-in-depth:** error-message path scanned for HMAC key bytes — pins that wrapped errors don't leak the decoded HMAC scalar.
+
+Engineering technique: a `preWiredConnector` test fixture pre-sets `c.client` and `c.accountKey` so calls into `ensureClient` short-circuit (the `if c.client != nil { return nil }` early return). This lets tests exercise post-init code paths (ARI, profile, revoke, getOrderStatus) without standing up a full ACME registration mock.
+
+Per-function coverage delta:
+
+| Function | Pre-Bundle-J | Post-Bundle-J |
+|---|---|---|
+| `GetRenewalInfo` | 11.4% | **91.4%** |
+| `getARIEndpoint` | 0.0% | **82.4%** |
+| `computeARICertID` | 50.0% | **100.0%** |
+| `RenewCertificate` | 0.0% | **100.0%** |
+| `RevokeCertificate` | 0.0% | **80.0%** |
+| `presentPersistRecord` | 0.0% | **80.0%** |
+| `fetchZeroSSLEAB` | 80.8% | **88.5%** |
+| `fetchNonce` | 78.6% | **92.9%** |
+| `ensureClient` | 79.3% | **86.2%** |
+| `GetOrderStatus` | 0.0% | 37.5% |
+| `IssueCertificate` | 0.0% | 6.4% (entry-error only; full flow requires Pebble-mock) |
+| `solveAuthorizations*` | 0.0% | 0.0% (Pebble-mock required) |
+| `authorizeOrderWithProfile` | 19.1% | 21.3% (only Discover-fail branch reached) |
+
+Verification: `go vet ./internal/connector/issuer/acme/...` clean; `gofmt -l` clean; `staticcheck` clean; `go test -short -timeout=60s ./internal/connector/issuer/acme/...` PASS, no flakes.
+
+**Why partial:** the residual ~30pp gap to the ≥85% target lives entirely in `IssueCertificate` (~115 LoC) + `solveAuthorizations[HTTP01|DNS01|DNSPersist01]` (~280 LoC) + `authorizeOrderWithProfile`'s JWS-POST branch — all of which require an in-process ACME server that handles JWS-signed POST validation, the nonce dance, full newAccount registration, newOrder, authorization polling, finalize, and cert delivery. That's ~300-500 LoC of mock infrastructure plus ~500 LoC of test cases — the prompt scoped Bundle J at 4 engineer-days but a Pebble-from-scratch is realistically 6-8 days when the JWS validation is built up properly. C-001's `findings.yaml::status` flips from `open` → `partial_closed`; the remaining work is tracked as a follow-on "Bundle J-extended."
+
+Audit deliverable updates: `findings.yaml::CRTCTL-COVAUDIT-2026-04-27-0001::status` open → partial_closed with closure_note + per-function coverage table; `gap-backlog.md` adds Bundle J closure-log entry + updates the C-001 row to `Partial-closed`; `coverage-matrix.md` ACME row 41.8% → 55.6%; `closure-plan.md` Bundle J checkbox marked `[~]` (partial) with achieved-vs-remaining breakdown.
+
 ### Bundle I (Coverage Audit Closure — QA Doc Cleanup): H-007 + H-008 closed
 
 > Applied Patches 1–7 from `coverage-audit-2026-04-27/tables/qa-doc-patches.md` to bring `docs/qa-test-guide.md` and `deploy/test/qa_test.go` back in sync with the code at HEAD. Acquisition-readiness QA-doc score lifts 2.5 → 4.0.
