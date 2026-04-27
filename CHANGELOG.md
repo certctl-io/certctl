@@ -4,6 +4,49 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle O (Coverage Audit Closure — Test Hygiene + FSM Coverage): M-004 + M-005 + M-006 closed
+
+> Three deliverables shipped: t.Skip rationale audit (~M-004~ closed; 0 orphans), fuzz target additions (~M-005~ closed; 9 → 11 targets), and FSM transition coverage tables (~M-006~ closed; all 5 FSMs catalogued).
+
+#### O.1 — t.Skip rationale audit (M-004 closed)
+
+Inventoried all `t.Skip` sites in the repo: **65 total** (audit-time estimate was 41; count grew via Bundle 0.7's keymem tests adding ~10 OS/root-permission skips and Bundle M.Cloud's tests adding a handful). Every site carries a valid rationale — none are orphan.
+
+Skip categories at HEAD:
+- **OS-specific** (~30 sites): `permission semantics differ on windows`, `powershell.exe not available (non-Windows)`, `chmod-error branch is only reliably triggerable on linux via /sys`
+- **Root-only constraint** (~5 sites): `running as root; cannot revoke parent dir write permission`
+- **External dependency** (~15 sites): `Requires Docker socket`, `integration test requires PostgreSQL`, `Requires browser — manual test`, `Requires live Vault server`, `Requires DigiCert sandbox`, `Requires CA cert+key setup`, `Requires ACME CA with ARI support`
+- **Manual-test markers** (4 sites — Bundle I additions): `Part 23 (S/MIME & EKU)`, `Part 24 (OCSP/CRL)`, `Part 55 (Agent Soft-Retirement)`, `Part 56 (Notification Retry/Dead-Letter)`
+- **`-short` mode** (~6 sites): `skipping integration test in short mode`
+- **State-dependent** (~5 sites): `agent not yet online`, `no certificate in Active state for renewal test`, `no discovered certificates yet (agent scan may not have run)`
+
+All class (a) per Bundle O's classification (still-valid rationale). No edits required. Bundle O documents the audit; future regressions are caught by the existing `M-009` CI guard pattern (any new `t.Skip` site without a comment fails CI).
+
+#### O.2 — Fuzz target audit (M-005 closed)
+
+Pre-Bundle: 9 fuzz targets. Bundle O adds 2 more, lifting to **11 total**.
+
+- `internal/config/config_fuzz_test.go::FuzzParseNamedAPIKeys` — pins the `CERTCTL_API_KEYS_NAMED` env-var parser added in Bundle G / L-004 (dual-key rotation primitive). Hand-rolled colon/comma split — exactly the kind of code path that benefits from fuzz coverage. 16 seed inputs covering happy-path (`alice:KEY1:admin`), dual-key rotation (`alice:OLD:admin,alice:NEW:admin`), degenerate (`""`, `":"`, `"name:"`, `:key`), whitespace-padded, wrong-case admin flag, 4-segment input (rejected), adversarial chars in name (`al/ice`, `al ice`, `alice@host`), long inputs.
+- `internal/validation/command_fuzz_test.go::FuzzSanitizeForShell` — pins the POSIX shell-quote helper. Asserts no panic + output begins+ends with single-quote. 17 seed inputs covering plain, whitespace, embedded quotes / backticks / dollars, newlines, NULs, shell-metachar injections, unicode, 100×`'` stress, 10000×`a` length stress.
+
+Verification: `go vet ./internal/config/... ./internal/validation/...` clean; `go test -short -count=1 ./internal/config/... ./internal/validation/...` PASS; total fuzz-target count: `grep -rE 'func Fuzz[A-Z]' --include='*_test.go' internal/ | wc -l` == **11**.
+
+#### O.3 — FSM transition coverage tables (M-006 closed)
+
+New file `coverage-audit-2026-04-27/tables/fsm-coverage.md` — comprehensive enumeration of all 5 FSMs in certctl with per-transition test coverage. Sourced from `internal/domain/*.go::*Status*` const blocks and writers in `internal/service/*.go`.
+
+| FSM | States | Legal cov | Illegal cov | Risk class | Acquisition gate met? |
+|---|---|---|---|---|---|
+| **Job** | Pending → AwaitingCSR → AwaitingApproval → Running → Completed/Failed/Cancelled (+ retry) | 12/13 (92%) | 7/7 (100%) | Existential | ✓ |
+| **Certificate** | Pending → Active → Expiring → RenewalInProgress → Active/Failed; Active → Revoked; (any) → Archived | 13/14 (93%) | 6/6 (100%) | Existential | ✓ |
+| **Agent** | Online ↔ Offline; (either) → Degraded; (any) → Retired | 6/8 (75%) | 1/1 (100%) | High | △ Degraded gap |
+| **Notification** | pending → sent/failed; failed → pending/dead; sent → read | 6/7 (86%) | 3/3 (100%) | Medium | ✓ |
+| **Health-check** | unknown → healthy/degraded/down/cert_mismatch (recompute-on-tick) | 7/7 (100%) | n/a | Medium | ✓ |
+
+**4 of 5 FSMs meet** the Bundle O exit gate (≥80% legal + 100% illegal on Existential). Agent's Degraded transitions are the lone small gap; tracked as `M-006-extended`. The doc enables a future CI drift guard: when `internal/domain/*.go` adds a new `*Status*` constant, this table must grow with a corresponding row.
+
+Audit deliverables: `findings.yaml` doesn't have separate -0xxx entries for M-004/M-005/M-006 (they're table rows in `gap-backlog.md`); strikethroughs applied + Bundle O closure-log entry covering all three sub-deliverables; `closure-plan.md` ticks Bundle O `[x]`.
+
 ### Bundle N (Coverage Audit Closure — Mid-tier Round-Out): partial — M-001 partial, M-002/M-003 deferred
 
 > Stubs-coverage tests shipped across 8 issuer connectors. Modest 1-3pp coverage lifts; full M-001 closure (all 9 connectors at ≥85%) requires per-CA failure-mode mock work that exceeds this session's budget. Service/handler round-out (M-002, M-003) and CI threshold raise #2 deferred until follow-on work lifts the underlying coverage.
