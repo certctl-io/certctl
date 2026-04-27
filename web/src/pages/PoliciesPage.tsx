@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { getPolicies, updatePolicy, deletePolicy, createPolicy } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
@@ -161,20 +162,20 @@ export default function PoliciesPage() {
     queryFn: () => getPolicies(),
   });
 
-  const toggleMutation = useMutation({
+  const toggleMutation = useTrackedMutation({
     mutationFn: ({ id, enabled }: { id: string; enabled: boolean }) => updatePolicy(id, { enabled }),
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
+    invalidates: [['policies']],
   });
 
-  const deleteMutation = useMutation({
+  const deleteMutation = useTrackedMutation({
     mutationFn: deletePolicy,
-    onSuccess: () => queryClient.invalidateQueries({ queryKey: ['policies'] }),
+    invalidates: [['policies']],
   });
 
-  const createMutation = useMutation({
+  const createMutation = useTrackedMutation({
     mutationFn: createPolicy,
+    invalidates: [['policies']],
     onSuccess: () => {
-      queryClient.invalidateQueries({ queryKey: ['policies'] });
       setShowCreate(false);
     },
   });
