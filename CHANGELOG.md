@@ -4,6 +4,34 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle M.Cloud (Coverage Audit Closure — AzureKV + GCP-SM): H-004 closed
+
+> Closes the deferred 4th sub-batch from Bundle M. **Bundle M is now FULLY CLOSED across all 4 sub-batches.**
+
+| | Pre | Post |
+|---|---|---|
+| `internal/connector/discovery/azurekv` | 41.2% | **85.6%** (+44.4pp; +15.6 above 70% target) |
+| `internal/connector/discovery/gcpsm` | 43.1% | **83.4%** (+40.3pp; +13.4 above 70% target) |
+
+**Engineering technique:** both Azure KV and GCP Secret Manager use hardcoded API URLs (`login.microsoftonline.com` for Azure AD, `oauth2.googleapis.com` + `secretmanager.googleapis.com` for GCP). To test these end-to-end without modifying production code, each test file ships a `rewritingTransport` — a custom `http.RoundTripper` that intercepts every outbound request and rewrites Host to point at an `httptest.Server`, while preserving Path + Query. For GCP specifically, the service-account JSON file written to `t.TempDir()` carries `token_uri` pointing at the test server (clean override path that needs no transport rewrite for the auth call itself).
+
+**`azurekv_failure_test.go`** (~280 LoC, 13 tests):
+- `getAccessToken`: happy + cached-reuse (5-min buffer pinned via call-count assertion) + 401 + malformed JSON + empty-token + network-error
+- `ListCertificates`: happy + token-failure + 5xx + malformed JSON + **multi-page pagination** (asserts both pages fetched via `nextLink`)
+- `GetCertificate`: happy (round-trip with synthesized DER cert in CER field) + 404 + malformed JSON
+- `New` constructor
+
+**`gcpsm_failure_test.go`** (~430 LoC, 19 tests):
+- `loadServiceAccountKey`: happy + file-not-found + malformed JSON + bad-PEM + empty-private-key (returns saKey but nil rsaKey path)
+- `getAccessToken`: happy (full JWT-bearer assertion flow) + cached-reuse + 401 + malformed JSON + empty-token + load-credentials-failure
+- `ListSecrets`: happy + token-failure + 5xx + malformed JSON
+- `AccessSecretVersion`: happy (base64 round-trip of payload) + 404 + bad-base64-payload
+- `Name` / `Type` identity check
+
+Verification: `go vet` clean, `gofmt -l` clean, `staticcheck -checks all` clean (excluding pre-existing ST1005 hits in `azurekv.go` lines 148–162 — capitalized error strings predating Bundle M), `go test -short -count=1` PASS, `go test -race -count=1` PASS, 0 races.
+
+Audit deliverables: `findings.yaml::CRTCTL-COVAUDIT-2026-04-27-0011` flips status `open` → `closed` with full closure_note + per-connector coverage table. `gap-backlog.md` strikethroughs H-004 + adds Bundle M.Cloud closure-log entry. `coverage-matrix.md` adds two new rows for AzureKV and GCP-SM. `closure-plan.md` flips Bundle M `[~]` → `[x]` (all 4 sub-batches now closed).
+
 ### Bundle M (Coverage Audit Closure — Connector Failure-Mode Round): 3 of 4 sub-batches
 
 > Closes H-001 (F5 ≥85%) and H-003 (Email ≥70%); partial-closes H-002 (SSH); defers H-004 (cloud-discovery) as scope-management.
