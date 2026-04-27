@@ -39,10 +39,15 @@ func TestProperty_EncryptDecryptRoundTrip(t *testing.T) {
 	properties := gopter.NewProperties(parameters)
 
 	properties.Property("DecryptIfKeySet(EncryptIfKeySet(x, k), k) == x", prop.ForAll(
-		func(plaintext []byte, passphrase string) bool {
-			// Empty passphrase is the documented sentinel — skip.
-			if passphrase == "" {
-				return true
+		func(plaintext []byte, passphraseRaw string) bool {
+			// Sanitize inside (no SuchThat → no discards). Empty passphrase
+			// is documented sentinel; substitute a non-empty default.
+			passphrase := passphraseRaw
+			if len(passphrase) == 0 {
+				passphrase = "default-key"
+			}
+			if len(passphrase) > 50 {
+				passphrase = passphrase[:50]
 			}
 			blob, ok, err := EncryptIfKeySet(plaintext, passphrase)
 			if err != nil || !ok {
@@ -58,11 +63,8 @@ func TestProperty_EncryptDecryptRoundTrip(t *testing.T) {
 		},
 		// Plaintext: arbitrary byte slices including empty.
 		gen.SliceOf(gen.UInt8()),
-		// Passphrase: ASCII alpha, length 1..63 (avoid pathological lengths
-		// blowing up PBKDF2 budgets in the property runner).
-		gen.AlphaString().SuchThat(func(s string) bool {
-			return len(s) > 0 && len(s) < 64
-		}),
+		// Passphrase: arbitrary ASCII alpha; length sanitized inside the predicate.
+		gen.AlphaString(),
 	))
 
 	properties.TestingRun(t)
@@ -76,11 +78,21 @@ func TestProperty_WrongPassphraseRejected(t *testing.T) {
 	parameters.MinSuccessfulTests = 30 // 30 × 600k PBKDF2 × 2 (encrypt+decrypt) ≈ 5s
 	properties := gopter.NewProperties(parameters)
 
+	// Generate a single passphrase + a deterministic-different mutation.
+	// Sanitize length inside the predicate (no SuchThat) so gopter never
+	// discards a case — prior version triggered "Gave up after only 26
+	// passed tests, 132 discarded" under -race because SuchThat on
+	// AlphaString rejected too many cases.
 	properties.Property("Decrypt with wrong passphrase never returns plaintext", prop.ForAll(
-		func(plaintext []byte, k1, k2 string) bool {
-			if k1 == "" || k2 == "" || k1 == k2 {
-				return true
+		func(plaintext []byte, k1raw string) bool {
+			k1 := k1raw
+			if len(k1) == 0 {
+				k1 = "default-key"
 			}
+			if len(k1) > 50 {
+				k1 = k1[:50]
+			}
+			k2 := "wrong-" + k1 // guaranteed != k1
 			blob, _, err := EncryptIfKeySet(plaintext, k1)
 			if err != nil {
 				return false
@@ -97,8 +109,7 @@ func TestProperty_WrongPassphraseRejected(t *testing.T) {
 			return true
 		},
 		gen.SliceOf(gen.UInt8()),
-		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && len(s) < 64 }),
-		gen.AlphaString().SuchThat(func(s string) bool { return len(s) > 0 && len(s) < 64 }),
+		gen.AlphaString(),
 	))
 
 	properties.TestingRun(t)

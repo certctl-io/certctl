@@ -420,16 +420,16 @@ func TestAgent_MarkRetired_ClosesSignalOnce(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 func TestGetEnvDefault_FallsBackToDefault(t *testing.T) {
-	t.Setenv("CERTCTL_NONEXISTENT_TEST_VAR", "")
-	got := getEnvDefault("CERTCTL_NONEXISTENT_TEST_VAR", "fallback")
+	t.Setenv("TESTONLY_AGENT_NONEXISTENT_VAR", "")
+	got := getEnvDefault("TESTONLY_AGENT_NONEXISTENT_VAR", "fallback")
 	if got != "fallback" {
 		t.Errorf("expected fallback, got %q", got)
 	}
 }
 
 func TestGetEnvDefault_UsesEnvWhenSet(t *testing.T) {
-	t.Setenv("CERTCTL_TEST_VAR", "from-env")
-	got := getEnvDefault("CERTCTL_TEST_VAR", "fallback")
+	t.Setenv("TESTONLY_AGENT_VAR", "from-env")
+	got := getEnvDefault("TESTONLY_AGENT_VAR", "fallback")
 	if got != "from-env" {
 		t.Errorf("expected from-env, got %q", got)
 	}
@@ -438,8 +438,8 @@ func TestGetEnvDefault_UsesEnvWhenSet(t *testing.T) {
 func TestGetEnvBoolDefault_TruthyValues(t *testing.T) {
 	for _, v := range []string{"1", "t", "true", "yes", "on", "TRUE", "True"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv("CERTCTL_BOOL_TEST", v)
-			if !getEnvBoolDefault("CERTCTL_BOOL_TEST", false) {
+			t.Setenv("TESTONLY_AGENT_BOOL", v)
+			if !getEnvBoolDefault("TESTONLY_AGENT_BOOL", false) {
 				t.Errorf("expected true for %q", v)
 			}
 		})
@@ -449,8 +449,8 @@ func TestGetEnvBoolDefault_TruthyValues(t *testing.T) {
 func TestGetEnvBoolDefault_FalsyValues(t *testing.T) {
 	for _, v := range []string{"0", "f", "false", "no", "off"} {
 		t.Run(v, func(t *testing.T) {
-			t.Setenv("CERTCTL_BOOL_TEST", v)
-			if getEnvBoolDefault("CERTCTL_BOOL_TEST", true) {
+			t.Setenv("TESTONLY_AGENT_BOOL", v)
+			if getEnvBoolDefault("TESTONLY_AGENT_BOOL", true) {
 				t.Errorf("expected false for %q", v)
 			}
 		})
@@ -458,15 +458,15 @@ func TestGetEnvBoolDefault_FalsyValues(t *testing.T) {
 }
 
 func TestGetEnvBoolDefault_UnrecognizedReturnsDefault(t *testing.T) {
-	t.Setenv("CERTCTL_BOOL_TEST", "frobnicate")
-	if !getEnvBoolDefault("CERTCTL_BOOL_TEST", true) {
+	t.Setenv("TESTONLY_AGENT_BOOL", "frobnicate")
+	if !getEnvBoolDefault("TESTONLY_AGENT_BOOL", true) {
 		t.Errorf("expected default(true) for unrecognized value")
 	}
 }
 
 func TestGetEnvBoolDefault_EmptyReturnsDefault(t *testing.T) {
-	t.Setenv("CERTCTL_BOOL_TEST", "")
-	if !getEnvBoolDefault("CERTCTL_BOOL_TEST", true) {
+	t.Setenv("TESTONLY_AGENT_BOOL", "")
+	if !getEnvBoolDefault("TESTONLY_AGENT_BOOL", true) {
 		t.Errorf("expected default(true) for empty value")
 	}
 }
