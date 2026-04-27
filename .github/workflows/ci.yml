@@ -41,12 +41,23 @@ jobs:
       - name: Install govulncheck
         run: go install golang.org/x/vuln/cmd/govulncheck@latest
 
-      - name: Run govulncheck
+      - name: Run govulncheck (M-024 hard gate)
         # Bundle-7 / D-001 partial: govulncheck distinguishes called-vs-uncalled
         # advisories. Default exit code is non-zero only when YOUR code calls
         # the vulnerable function — deferred-call advisories show up in the
-        # output but don't fail the gate. See .govulnignore for the
-        # suppression contract if a triaged false-positive needs to be muted.
+        # output but don't fail the gate.
+        #
+        # Bundle F / Audit M-024 (NIST SSDF PW.7.2): the govulncheck step
+        # is now a hard CI gate (no `continue-on-error`). Bundle E's
+        # transitive bumps (x/net 0.42→0.47, x/crypto 0.41→0.45) cleared
+        # the 5 deferred-call advisories that were previously on the
+        # exception list, so the carve-out the original Bundle F prompt
+        # designed is unnecessary — a clean `govulncheck ./...` is the
+        # right gate. If a future advisory lands in a function our code
+        # does call, this step fails the build until either upstream
+        # ships a fix OR we cut the dep. Deferred-call advisories that
+        # legitimately can't be remediated yet should be added to the
+        # NIST SSDF deviation log in docs/security.md, not silenced here.
         run: govulncheck ./...
 
       - name: Install staticcheck (Bundle-7 / D-001)
