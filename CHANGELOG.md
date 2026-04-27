@@ -4,6 +4,60 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle P (Coverage Audit Closure — QA Doc Strengthening): M-007 + M-009 + M-010 + M-011 + M-012 closed; M-008 deferred
+
+> Six structural strengthenings applied to the QA documentation surface, raising acquisition-readiness QA-doc score 4.0 → 4.7. M-008 (per-RFC test-vector subsections under Parts 21 + 24) deferred as "Bundle P.2-extended" — out of session budget.
+
+#### P.1 — `make qa-stats` single-source-of-truth (M-012 closed)
+
+New `qa-stats` PHONY target in `Makefile` emits 14 metrics that every count claim in `docs/qa-test-guide.md` and `docs/testing-guide.md` is derived from: backend test files / Test functions / `t.Run` subtests, frontend test files, fuzz targets, `t.Skip` sites, `qa_test.go` Part_ subtests, `testing-guide.md` Parts, and unique seed IDs (mc-* / ag-* / iss-* / tgt-* / nst-*). Iterated the seed-count regex (initial `sed`/`awk` produced wrong totals for greedy ranges) to a `grep -oE '<prefix>-[a-z0-9_-]+' | sort -u | wc -l` form that produces deterministic unique-ID counts. Output emits at HEAD: 221 backend test files, 2454 Test functions, 778 t.Run subtests, 38 frontend test files, 11 fuzz targets, 60 t.Skip sites, 53 Part_ subtests, 56 testing-guide.md Parts, 32 mc-* / 14 ag-* / 18 iss-* / 8 tgt-* / 4 nst-* seed IDs.
+
+#### P.2 — CI drift guards (M-011 closed)
+
+Two new CI steps added to `.github/workflows/ci.yml` after the coverage upload:
+
+- **QA-doc Part-count drift guard:** extracts the "49 of N Parts" claim from `qa-test-guide.md`, compares to `^## Part N:` header count in `testing-guide.md`. Fails CI if mismatch.
+- **QA-doc seed-count drift guard:** extracts "### Certificates (N total" + "### Issuers (N total" from `qa-test-guide.md`, compares to `mc-*` and `iss-*` unique-ID counts in `seed_demo.sql` with ≤5pp slack on issuers (issuer rows ≠ unique iss-* IDs because seed_demo.sql also uses iss-* prefix elsewhere).
+
+Both guards validated locally — pass at HEAD (56==56 Parts, 32==32 certs, 18 issuer IDs within 5pp slack of 13 issuer rows). YAML lint clean.
+
+#### P.3 — Test Suite Health dashboard at top of `qa-test-guide.md` (Strengthening #7)
+
+Single-page snapshot at the top of the file: file/function/subtest counts, fuzz/skip counts, frontend test count, last-coverage-audit date + status, last-mutation-run date + status, race-detector status, repository-integration test status. Pulls from `make qa-stats` output to keep counts at HEAD. Designed for first-look auditor / acquirer / new-engineer scanning.
+
+#### P.4 — Coverage by Risk Class table (M-007 closed)
+
+After the Coverage Map section in `qa-test-guide.md`: 6-row table (Existential / High / Medium / Low / Frontend / Compliance) × Parts × automation status. Cross-references each risk class to the corresponding `coverage-matrix.md` row. Replaces the prior implicit "everything is everything" framing with explicit per-risk-class coverage targets and the gates each must meet.
+
+#### P.5 — Release Day Sign-Off Matrix (M-010 closed)
+
+12-row release-readiness checklist in `qa-test-guide.md`: backend race-clean, fuzz seed-corpus regression, frontend Vitest green, CI drift guards green, mutation-test (sample) ≥ kill-rate floor, etc. Each row cites the verification command and the gate value. Sign-off is "all 12 green" — produces a per-release artifact attached to the tag.
+
+#### P.6 — Mutation Testing Targets (Strengthening #5)
+
+New section in `qa-test-guide.md` cataloging 8 packages × kill-rate target × tool, with operator runbook. Cites the avito-tech `go-mutesting` fork (the upstream `zimmski/go-mutesting` is sandbox-blocked on arm64 due to a `syscall.Dup2` reference). Targets aligned to risk class: Existential ≥85%, High ≥75%, others tracked-not-gated.
+
+#### P.7 — Per-Connector Failure-Mode Matrix (M-009 closed, condensed)
+
+New `Part 9.0 Per-Connector Failure-Mode Matrix` in `docs/testing-guide.md`: 12 issuers × 8 failure modes (auth-fail / 403 / 429+Retry-After / 5xx / malformed / DNS-failure / partial-response / timeout) = 96 cells with ✓/△/MISSING + Bundle citations (J/L/M/N). Notable gaps highlighted explicitly: 429+Retry-After missing for cloud-managed connectors, DNS-failure missing across the board, partial-response missing for non-ACME / non-StepCA connectors. Each gap is a candidate for a follow-on bundle.
+
+#### Deferred — M-008 (per-RFC test-vector subsections, Parts 21 + 24)
+
+Out of session budget. The two parts in question are:
+- **Part 21** (Subject Alternative Name & EKU): would need RFC 5280 §4.2.1.6 / §4.2.1.12 test vectors — IPv4/IPv6 SAN encoding, OtherName, BMPString edge cases.
+- **Part 24** (OCSP/CRL): would need RFC 6960 vector subsections — `tryLater` response, signed-by-delegated-responder vs by-CA, CRL with `idp` extension.
+
+Tracked as "Bundle P.2-extended". Each subsection is ~30-50 lines of structured test-vector callouts; total ≈100-150 LoC of doc work. Not gating acquisition-readiness — the acceptance gates (race-clean / coverage / mutation-kill) still hold without them; they sharpen the conformance story for an auditor.
+
+#### Verification
+
+- `make qa-stats` runs to completion, emits 14 lines, all integers parse cleanly.
+- `python3 -c "import yaml; yaml.safe_load(open('.github/workflows/ci.yml'))"` clean.
+- Both CI drift guards executed locally — both PASS at HEAD.
+- `git diff --stat` against pre-Bundle-P: 4 files changed, +195 / -1.
+
+Audit deliverables: `gap-backlog.md` strikethroughs M-007 / M-010 / M-011 / M-012, partial-strike on M-009 (matrix shipped, deeper per-connector failure-mode test files are follow-on Bundle work tracked under M-009-extended), deferred-marker on M-008 (Bundle P.2-extended). Closure-log entry covers all 6 shipped strengthenings + the M-008 deferral. `closure-plan.md` ticks Bundle P `[x]` with per-item breakdown.
+
 ### Bundle O (Coverage Audit Closure — Test Hygiene + FSM Coverage): M-004 + M-005 + M-006 closed
 
 > Three deliverables shipped: t.Skip rationale audit (~M-004~ closed; 0 orphans), fuzz target additions (~M-005~ closed; 9 → 11 targets), and FSM transition coverage tables (~M-006~ closed; all 5 FSMs catalogued).

@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build
+.PHONY: help build run test lint verify clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -180,6 +180,29 @@ frontend-build:
 	@echo "Building frontend..."
 	cd web && npm ci && npx vite build
 	@echo "Frontend build complete"
+
+# QA Suite Stats — Bundle P / Strengthening #8.
+# Single source-of-truth for every count claim in docs/qa-test-guide.md +
+# docs/testing-guide.md. The Strengthening #6 CI drift guards consume the
+# same numbers, eliminating the doc-drift class structurally.
+qa-stats:
+	@echo "=== certctl QA Suite Stats ==="
+	@echo "Date: $$(date +%Y-%m-%d)"
+	@echo "HEAD: $$(git rev-parse HEAD 2>/dev/null || echo 'not-a-git-repo')"
+	@echo ""
+	@echo "Backend test files: $$(find . -name '*_test.go' -not -path './web/*' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "Backend Test functions: $$(find . -name '*_test.go' -not -path './web/*' 2>/dev/null | xargs grep -c '^func Test' 2>/dev/null | awk -F: '{s+=$$2} END{print s+0}')"
+	@echo "Backend t.Run subtests: $$(find . -name '*_test.go' -not -path './web/*' 2>/dev/null | xargs grep -c 't\.Run(' 2>/dev/null | awk -F: '{s+=$$2} END{print s+0}')"
+	@echo "Frontend test files: $$(find web/src -name '*.test.ts' -o -name '*.test.tsx' 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "Fuzz targets: $$(grep -rE 'func Fuzz[A-Z]' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "t.Skip sites: $$(grep -rE 't\.Skip(Now|f)?\(' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ')"
+	@echo "qa_test.go Part_ subtests: $$(grep -cE 't\.Run\(\"Part[0-9]+_' deploy/test/qa_test.go 2>/dev/null || echo 0)"
+	@echo "testing-guide.md Parts: $$(grep -cE '^## Part [0-9]+:' docs/testing-guide.md 2>/dev/null || echo 0)"
+	@echo "Seed unique mc-* IDs:  $$(grep -oE "mc-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+	@echo "Seed unique ag-* IDs:  $$(grep -oE "ag-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (incl. agent_groups; agents-table count is 12)"
+	@echo "Seed unique iss-* IDs: $$(grep -oE "iss-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (issuers table count is 13)"
+	@echo "Seed unique tgt-* IDs: $$(grep -oE "tgt-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
+	@echo "Seed unique nst-* IDs: $$(grep -oE "nst-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
 
 # Cleanup
 clean:

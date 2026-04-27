@@ -1808,6 +1808,37 @@ curl -s -w "\nHTTP %{http_code}\n" -X POST -H "$AUTH" -H "$CT" \
 
 **Why it matters:** Issuers are the CAs that sign certificates. If issuer management is broken, no new certs can be issued.
 
+### 9.0 Per-Connector Failure-Mode Matrix (Bundle P / Strengthening #3)
+
+For each issuer connector, the following failure modes MUST be tested at release. Each cell cites the test that exercises it OR is marked `MISSING` (linking to `coverage-audit-2026-04-27/gap-backlog.md` for follow-on closure work). 12 issuers × 8 modes = 96 cells; condensed legend below.
+
+**Legend:** ✓ = covered by hermetic test (httptest.Server / fake SMTP / fake SSH / etc.). △ = covered indirectly (e.g. via wrapper-layer tests; not a per-mode regression). MISSING = no test exists; track as gap-backlog row.
+
+| Connector | 401 | 403 | 429 | 5xx | malformed | partial | timeout | DNS fail |
+|---|---|---|---|---|---|---|---|---|
+| ACME (RFC 8555) | ✓ B-J | ✓ B-J | △ | ✓ B-J | ✓ B-J (dir + ARI + EAB) | △ | △ | MISSING |
+| StepCA (native) | ✓ B-L.B | ✓ B-L.B | MISSING | ✓ B-L.B | ✓ B-L.B (JWE round-trip) | MISSING | △ | MISSING |
+| Local CA | n/a (in-process) | n/a | n/a | △ (CA load fail) | ✓ Bundle 9 | n/a | n/a | n/a |
+| Vault PKI | △ | △ | MISSING | △ | △ | MISSING | △ | MISSING |
+| DigiCert | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| Sectigo | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| GoogleCAS | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| AWS ACM-PCA | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | n/a (SDK retry) |
+| GlobalSign | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| Entrust | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| EJBCA | △ stub | △ stub | MISSING | △ | △ | MISSING | △ | MISSING |
+| OpenSSL (script-based) | n/a | n/a | n/a | △ (script-error) | △ | n/a | △ | n/a |
+
+**Notable gaps surfaced by this matrix:**
+
+- 429 + Retry-After is MISSING for every cloud / SaaS issuer connector. ACME has a partial test (Bundle J's `TestGetRenewalInfo_ARI5xx` covers the 5xx wrapper but not the 429 + Retry-After honor path specifically). Tracked as M-001-extended.
+- DNS-failure handling is MISSING across the board. Most connectors rely on Go's net.DialContext + DNS resolution; a broken DNS path produces an unwrapped `lookup` error.
+- "Partial response" handling (truncated JSON / chunked-encoding mid-cert) is missing for non-ACME/StepCA connectors.
+
+This matrix replaces the previous per-Part scattershot failure-mode coverage with a single audit-ready surface. When a new failure mode is added (e.g. Bundle J-extended adds Pebble-mock 429), update the cell + cite the test.
+
+**Target connectors are NOT in this matrix** — they have a similar failure surface (deploy-time write/reload failures) but are tested under Parts 14–17 + 42–46. A separate target-connector failure matrix is tracked as a follow-on.
+
 ### 9.1 Issuer CRUD
 
 **Test 6.1.1 — List issuers shows seed data**
