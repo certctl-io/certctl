@@ -4,6 +4,37 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle F (Compliance Tail + CI Gate Hardening): 2 audit findings closed — Audit closure complete
+
+> Closes `M-023` (legacy EST/SCEP TLS 1.2 reverse-proxy operator runbook in `docs/legacy-est-scep.md`) and `M-024` (govulncheck CI step flipped from soft to hard gate after Bundle E cleared the L-021 advisories). **The 2026-04-25 audit's bundle era ends with this commit.** Score: 51/55 closed (93%); High 9/9 (100%); Medium 26/27 (96%); Low 19/19 (100%); Deferred 4/7. Remaining open IDs are all explicitly tracked: M-029 (frontend per-page migration backlog — closes per-PR incrementally), L-004 (rotation infra deferred to dedicated bundle), D-003/4/5/7 (deferred-tool integrations — wired CI-only or sandbox-blocked, no further bundle work needed).
+
+#### Added
+
+- **`docs/legacy-est-scep.md` (NEW, Audit M-023)** — Operator runbook for embedded EST/SCEP clients that can only speak TLS 1.2. Covers the 3-condition gate for when this runbook applies, an architecture diagram, full nginx + HAProxy configs with `ssl_protocols TLSv1.2 TLSv1.3` on the legacy listener and TLS 1.3 on the proxy-to-certctl hop, mTLS pass-through via `X-SSL-Client-Cert` header, two new env vars on the certctl process (`CERTCTL_EST_PROXY_TRUSTED_SOURCES` + `CERTCTL_EST_TRUST_PROXY_CLIENT_CERT_HEADER` — paired by design to force header-spoof analysis), PCI-DSS Req 4 v4.0 §2.2.5 attestation language, and a forward-look section on what to monitor when TLS 1.2 itself sunsets.
+
+#### Changed
+
+- **`.github/workflows/ci.yml::Run govulncheck` (Audit M-024)** — Renamed to `Run govulncheck (M-024 hard gate)`; comment block updated to document why the deferred-call carve-out the original prompt designed isn't needed (Bundle E cleared the L-021 advisory backlog). Default `govulncheck ./...` exit-code semantics now act as the NIST SSDF PW.7.2 gate.
+
+#### Audit endgame
+
+After Bundle F merges, the audit's bundle era is complete. Open finding tally:
+
+| Category | Closed | Open | Status |
+|---|---|---|---|
+| Critical | 0 / 0 | 0 | n/a — none identified |
+| **High** | **9 / 9** | **0** | **100% closed** |
+| Medium | 26 / 27 | 1 | M-029 closes incrementally per-PR |
+| **Low** | **19 / 19** | **0** | **100% closed** (L-004 has explicit scope-pivot defer) |
+| Deferred | 4 / 7 | 3 | D-003/4/5/7 — wired CI-only or sandbox-blocked |
+
+**51 / 55 = 93% closed.** The remaining items don't require further bundle work — M-029 is a per-PR migration backlog and the deferred-tool items are operationally complete (the tools run on a daily CI schedule via `security-deep-scan.yml`).
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score 49/55 → **51/55** closed; M-023 and M-024 boxes flipped `[x]` with closure notes.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — 2 status flips with closure notes.
+
 ### Bundle A (Container & Supply-Chain Hardening): 3 audit findings closed — All High closed
 
 > Closes the audit's container/supply-chain cluster — `H-001` (5 FROM lines pinned to immutable Docker Hub digests + bump-procedure runbook + CI grep guard), `M-012` (verified-already-clean: both Dockerfiles already had `USER certctl`; CI guard now enforces every Dockerfile drops to non-root), `M-014` (broken `||  ... && \` bash-precedence chain replaced with deterministic 3-attempt retry loop + post-check). **All High audit findings now closed (9/9, 100%).**
