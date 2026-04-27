@@ -4,6 +4,74 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-26
 
+### Bundle H (M-029 Drain — AUDIT FULLY CLOSED): 1 audit finding closed across 3 passes
+
+> Closes the last remaining open finding from the 2026-04-25 audit. **Score: 54/55 → 55/55 (100%); deferred 7/7 (100%); AUDIT CLOSED.** The M-029 frontend per-page migration backlog was framed by Bundle 8 as incremental ("closes per-PR as each page ships"); Bundle H shipped all three passes end-to-end across 9 merged commits to master rather than spread per-PR.
+
+#### Pass 1: useMutation → useTrackedMutation (56 sites, 6 batches)
+
+All 56 bare `useMutation` call sites in `web/src/` migrated to the Bundle 8 wrapper, which enforces the M-009 invalidation contract per-site via a discriminated-union type (`invalidates: QueryKey[] | 'noop'`). The wrapper invalidates BEFORE invoking the caller's onSuccess, so user code drops the redundant `qc.invalidateQueries` calls and lets the wrapper's contract become the source of truth.
+
+| Batch | Pages migrated | Sites | Commit |
+|---|---|---|---|
+| 1 | AgentsPage, CertificatesPage, DigestPage, IssuerDetailPage | 4 | `08ffbad` |
+| 2 | DashboardPage, DiscoveryPage, NotificationsPage, TargetDetailPage, TargetsPage | 10 | `73c6883` |
+| 3 | HealthMonitorPage, AgentGroupsPage, JobsPage | 9 | `64c6cd0` |
+| 4 | OwnersPage, PoliciesPage, ProfilesPage, RenewalPoliciesPage, TeamsPage | 15 | `d5541fe` |
+| 5 | IssuersPage, NetworkScanPage | 8 | `1c960ff` |
+| 6 | CertificateDetailPage, OnboardingWizard | 10 | `1baefd4` |
+
+Total Pass 1: **56 → 0 bare `useMutation` sites**; 0 → 61 `useTrackedMutation` sites. (Pass 1's count grew net positive because some 5-mutation pages collapsed two `qc.invalidateQueries` calls into one `invalidates` array literal.)
+
+After Pass 1 completed, `0266f2b` tightened the `.github/workflows/ci.yml` M-009 guard from a soft-budget gate (`useMutation ≤ invalidations + 5`) to a hard-zero invariant: any bare `useMutation` call in `web/src/` outside `web/src/hooks/useTrackedMutation.ts` (the wrapper itself) fails CI immediately. Strictly stronger than the prior +5 budget; failure mode also improves — operators get the exact `file:line` of the offending bare call instead of a count delta.
+
+#### Pass 2: useState pagination → useListParams (1 site, 1 commit)
+
+Bundle 8's recon estimate of ~14 list pages turned out to be wrong: **only `CertificatesPage` had real UI-driven pagination state** (`setPage`/`setPerPage` with 7 filter `useState` hooks). Most other pages either fetch filter-dropdown sidecars with hardcoded `per_page` (not pagination) or were already using `useSearchParams` directly.
+
+`99f52a6` collapses CertificatesPage's 9 useState hooks (statusFilter, envFilter, issuerFilter, ownerFilter, profileFilter, teamFilter, expiresBefore, sortBy, page, perPage) into a single `useListParams({ pageSize: 50 })` call. Effect:
+
+- All 8 filter onChange handlers now call `setFilter('<key>', value)`.
+- `setFilter` automatically resets page to 1 on every filter / sort change, so the manual `setPage(1)` calls at three sites (team / expires_before / sort) are no longer needed — the F-1 contract is now hook-enforced.
+- Pagination handler simplified: `onPerPageChange: setPageSize` (the hook drops the page param from the URL when pageSize changes).
+- All filter / sort / pagination state is now URL-resident (`?filter[status]=Active&page=2&page_size=50`) — deep-link + browser-back correct.
+
+The existing CertificatesPage.test.tsx F-1 contract tests (5 cases: getCertificates params for team_id, expires_before, sort, plus page-reset on filter and per_page change) all continue to pass against the new shape.
+
+#### Pass 3: Per-page render + XSS-hardening test files for the 14 T-1-deferred pages (3 batches)
+
+Each new test:
+
+- Renders the page with mock data containing `<script data-xss="<page-name>">window.__xss_pwned__=1;</script>` payloads in every text-rendering field.
+- Asserts `document.querySelectorAll('script[data-xss="<page-name>"]')` is empty post-render.
+- Asserts `window.__xss_pwned__` stays undefined (no global side-effect from the script body).
+- Asserts `document.body.textContent` contains the literal `<script data-xss=...>` substring (proving the page surfaces the data without rendering it as HTML).
+
+| Batch | Pages | Files |
+|---|---|---|
+| A (5 simpler) | DigestPage, LoginPage, ShortLivedPage, AuditPage, ObservabilityPage | 5 |
+| B (4 detail) | CertificateDetailPage, IssuerDetailPage, TargetDetailPage, JobDetailPage | 4 |
+| C (5 list, FINAL) | HealthMonitorPage, JobsPage, NetworkScanPage, ProfilesPage, AgentFleetPage | 5 |
+
+Recon: `for f in src/pages/*.tsx; do case "$f" in *.test.tsx) ;; *) base="${f%.tsx}"; [ -f "${base}.test.tsx" ] || echo "$f" ;; esac; done` returns empty — every `src/pages/*.tsx` source file now has a `*.test.tsx` peer.
+
+#### Audit endgame — FULLY CLOSED
+
+| Category | Closed | Open | Status |
+|---|---|---|---|
+| Critical | 0 / 0 | 0 | n/a — none identified |
+| **High** | **9 / 9** | **0** | **100% closed** |
+| **Medium** | **27 / 27** | **0** | **100% closed** |
+| **Low** | **19 / 19** | **0** | **100% closed** |
+| **Deferred** | **7 / 7** | **0** | **100% operationally complete** |
+
+**55 / 55 = 100% closed.** Every severity-graded finding plus every deferred-tool integration is closed. The audit folder `cowork/comprehensive-audit-2026-04-25/` is preserved as the historical record; future audits start a new dated folder.
+
+#### Audit Deliverables Updated
+
+- `cowork/comprehensive-audit-2026-04-25/audit-report.md` — score line **54/55 → 55/55 (100%) AUDIT CLOSED**; M-029 box flipped `[x]` with full closure note citing all 9 commits.
+- `cowork/comprehensive-audit-2026-04-25/findings.yaml` — M-029 status `open` → `closed` with closure note covering all 3 passes; new `bundle-H-final-closure` entry added to `closure_log`.
+
 ### Bundle G (Final Audit Closure): 5 audit findings closed — L-004 + D-003/4/5/7
 
 > Closes the final-closure cluster of the 2026-04-25 audit. Supersedes the prior "L-004 deferred to dedicated bundle / v3 Pro deliverable" framing in Bundle E and Bundle F entries: recon confirmed the rotation primitive can ship as a parser-contract relaxation plus an operator runbook, no schema or DB-resident key store needed. Also closes the four remaining Deferred (Info) tool integrations — D-003 (mutation testing) and D-007 (semgrep) needed actual wiring added to `.github/workflows/security-deep-scan.yml` (the recon-time claim that they were already wired turned out to be false), and D-004 (DAST) and D-005 (testssl.sh) close on publishing the operator runbook that promotes them from "wired CI-only, no local-run validation" to "wired CI-only + operator runbook published". **Score: 51/55 → 54/55 closed (98%); deferred 4/7 → 7/7 (100%).** All severity-graded findings closed except M-029 (frontend per-page migration backlog, by design incremental).
