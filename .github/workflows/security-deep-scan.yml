@@ -9,12 +9,14 @@ name: security-deep-scan
 # Scope:
 #   trivy image          container CVE + secret scan
 #   syft SBOM            CycloneDX SBOM artefact upload
-#   ZAP baseline         DAST baseline against a live deploy_test stack
+#   ZAP baseline         DAST baseline against a live deploy_test stack (D-004)
 #   nuclei               template-based vuln scan against the same stack
 #   schemathesis         OpenAPI fuzz against the running server
-#   testssl.sh           TLS configuration audit
-#   race detector x10    full -count=10 race run on the entire test suite
+#   testssl.sh           TLS configuration audit (D-005)
+#   race detector x10    full -count=10 race run on the entire test suite (D-002)
 #   gosec                Go security static analysis (slow first run)
+#   go-mutesting         mutation testing on crypto cluster (D-003)
+#   semgrep p/react-security  frontend XSS / dangerouslySetInnerHTML / target=_blank ruleset (D-007)
 #
 # Each step is best-effort — failures are uploaded as artefacts but do
 # NOT block the workflow. Triage happens via the Bundle-7 receipt
@@ -73,6 +75,30 @@ jobs:
             ./internal/connector/issuer/local/... \
             2>&1 | tee go-test-cover.txt
 
+      # --- Mutation testing on crypto cluster (D-003) ---
+      #
+      # Operator runbook: docs/testing-strategy.md::Mutation testing.
+      # Tool: go-mutesting (https://github.com/zimmski/go-mutesting). Each
+      # package is mutated independently; the per-package summary line
+      # (`The mutation score is X.YZ`) is grep-extracted into the receipt.
+      # Acceptance threshold: ≥80% kill ratio per package; surviving
+      # mutants get triaged in cowork/comprehensive-audit-2026-04-25/
+      # d003-mutation-results.md (per-mutant action item or
+      # equivalent-mutation justification).
+
+      - name: Install go-mutesting
+        run: go install github.com/zimmski/go-mutesting/cmd/go-mutesting@latest
+        continue-on-error: true
+
+      - name: go-mutesting (crypto cluster)
+        run: |
+          : > go-mutesting.txt
+          for pkg in ./internal/crypto/... ./internal/pkcs7/... ./internal/connector/issuer/local/...; do
+            echo "=== $pkg ===" | tee -a go-mutesting.txt
+            $(go env GOPATH)/bin/go-mutesting "$pkg" 2>&1 | tee -a go-mutesting.txt || true
+          done
+        continue-on-error: true
+
       # --- Container + supply chain (D-001 partial, D-006 partial) ---
 
       - name: Build certctl image
@@ -130,6 +156,22 @@ jobs:
         run: docker compose -f deploy/docker-compose.yml down || true
         if: always()
 
+      # --- Frontend XSS / unsafe-link ruleset (D-007) ---
+      #
+      # Operator runbook: docs/testing-strategy.md::Frontend semgrep.
+      # Bundle 8 already verified `dangerouslySetInnerHTML` count at
+      # zero and the `target="_blank"` rel-noopener pin via grep
+      # guards in ci.yml — semgrep p/react-security adds defence in
+      # depth (it catches escape patterns the grep guards don't see,
+      # e.g., href={user_input}, eval, document.write).
+
+      - name: semgrep p/react-security (frontend)
+        run: |
+          docker run --rm -v "$PWD":/src returntocorp/semgrep:latest \
+            semgrep --config=p/react-security --json /src/web/src \
+            > semgrep-react.json 2>semgrep-react.stderr || true
+        continue-on-error: true
+
       # --- Upload everything as artefacts ---
 
       - name: Upload deep-scan receipts
@@ -142,8 +184,11 @@ jobs:
             osv-scanner.json
             go-test-race.txt
             go-test-cover.txt
+            go-mutesting.txt
             trivy.json
             syft.cyclonedx.json
             nuclei.json
             testssl.json
+            semgrep-react.json
+            semgrep-react.stderr
           retention-days: 30
