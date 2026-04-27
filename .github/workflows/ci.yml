@@ -166,6 +166,54 @@ jobs:
             exit 1
           fi
 
+      - name: Forbidden bare FROM regression guard (H-001)
+        # Bundle A / Audit H-001 (CWE-829): every FROM line in every
+        # Dockerfile in the repo MUST carry an @sha256:... digest pin in
+        # addition to the human-readable tag. A registry-side tag swap
+        # cannot then change what we pull. This step grep-fails the
+        # build if any new FROM lands without the @sha256 suffix.
+        run: |
+          set -e
+          # Match any "FROM image[:tag]" that does NOT contain @sha256.
+          # Strip comments and blank lines defensively.
+          BAD=$(find . -name 'Dockerfile*' -not -path './web/node_modules/*' \
+                  -exec grep -HnE '^FROM\s+[^@#]+(\s+AS\s+\S+)?\s*$' {} \; || true)
+          if [ -n "$BAD" ]; then
+            echo "::error::Dockerfile has bare FROM (no @sha256 digest pin):"
+            echo "$BAD"
+            echo ""
+            echo "Pin every FROM to an immutable digest. See the bump"
+            echo "procedure in Dockerfile's header comment (Bundle A / H-001)."
+            exit 1
+          fi
+
+      - name: Forbidden missing USER regression guard (M-012)
+        # Bundle A / Audit M-012 (CWE-250): every Dockerfile in the repo
+        # MUST end with a `USER <non-root>` directive before the
+        # ENTRYPOINT/CMD so the container never runs as uid=0. This step
+        # grep-fails the build if any Dockerfile is missing such a USER.
+        # `USER root` and `USER 0` are explicitly rejected.
+        run: |
+          set -e
+          BAD=""
+          for df in $(find . -name 'Dockerfile*' -not -path './web/node_modules/*'); do
+            # Find the LAST USER directive in the file.
+            last_user=$(grep -E '^USER\s+\S+' "$df" | tail -1 | awk '{print $2}')
+            if [ -z "$last_user" ]; then
+              BAD="$BAD\n$df: no USER directive at all"
+              continue
+            fi
+            if [ "$last_user" = "root" ] || [ "$last_user" = "0" ]; then
+              BAD="$BAD\n$df: terminal USER is $last_user (must drop privileges)"
+              continue
+            fi
+          done
+          if [ -n "$BAD" ]; then
+            echo "::error::Dockerfile USER-drop regression:"
+            echo -e "$BAD"
+            exit 1
+          fi
+
       - name: Forbidden README JWT advertising regression guard (H-009)
         # H-009 closed by Bundle D as verified-already-clean: at audit time
         # the README does NOT advertise JWT support (certctl does not ship
