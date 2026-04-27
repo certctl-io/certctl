@@ -102,8 +102,8 @@ func aesKeyWrap(t *testing.T, kek, plaintext []byte) []byte {
 func buildJWE(t *testing.T, password string, key *ecdsa.PrivateKey, kid string) []byte {
 	t.Helper()
 	// 1. Build the JWK and serialize to JSON (this is the "plaintext" of the JWE)
-	xBytes := key.PublicKey.X.Bytes()
-	yBytes := key.PublicKey.Y.Bytes()
+	xBytes := key.X.Bytes()
+	yBytes := key.Y.Bytes()
 	dBytes := key.D.Bytes()
 	// Pad to fixed-size for P-256 (32 bytes)
 	pad := func(b []byte, size int) []byte {
@@ -238,10 +238,10 @@ func TestDecryptProvisionerKey_RoundTrip(t *testing.T) {
 	if got.D.Cmp(key.D) != 0 {
 		t.Errorf("private scalar D mismatch")
 	}
-	if got.PublicKey.X.Cmp(key.PublicKey.X) != 0 {
+	if got.X.Cmp(key.X) != 0 {
 		t.Errorf("public X mismatch")
 	}
-	if got.PublicKey.Y.Cmp(key.PublicKey.Y) != 0 {
+	if got.Y.Cmp(key.Y) != 0 {
 		t.Errorf("public Y mismatch")
 	}
 }
