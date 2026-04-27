@@ -4,6 +4,41 @@ All notable changes to certctl are documented in this file. Dates use ISO 8601. 
 
 ## [unreleased] — 2026-04-27
 
+### Bundle S — Extension pipeline (partial: 4 of 7 + R-CI raise pending)
+
+> Four extensions shipped this session against the post-Bundle-R audit state. Three still pending due to scope (J-extended Pebble mock, N.A/B-extended 8 connectors, N.C-extended service+handler round-out). R-CI-extended raise deferred until prior extensions complete. Acquisition-readiness 4.3 → ~4.4 (modest lift; full +0.4-0.5 contingent on remaining extensions).
+
+#### Bundle I-001-extended (M-Q closure follow-on): test-naming guard promoted to hard-fail with relaxed convention
+
+`.github/workflows/ci.yml` Test-naming convention guard flipped from `continue-on-error: true` to hard-fail. Convention RELAXED: the original audit's `Test<Func>_<Scenario>_<ExpectedResult>` triple-token form was overzealous — single-Function pin tests like `TestNewAgent` follow Go's standard convention. The new guard catches genuine bugs (`func TestX[a-z]...` which Go's test runner silently skips). 0 hits at HEAD; safe to flip. The audit's prescription is preserved in `docs/qa-test-guide.md` as RECOMMENDED for parameterized scenarios but not gated repo-wide.
+
+#### Bundle M.SSH-extended (H-002 closure): SSH 71.6% → 90.2%
+
+`internal/connector/target/ssh/ssh_server_fixture_test.go` (~628 LoC, 14 tests) ships an embedded `golang.org/x/crypto/ssh` ServerConn + `pkg/sftp.NewServer` fixture bound to `net.Listen("tcp", "127.0.0.1:0")`. Same hand-rolled in-process protocol-server pattern as M.Email's SMTP fixture. ed25519 host keys; password + key auth; optional toggles for `rejectAuth` / `dropOnHandshake` / `failExec` / `failSFTP` failure modes. Coverage delta per-function: Connect 0%→~95%; Execute 25%→~95%; WriteFile 15.4%→~95%; StatFile 33.3%→~95%; Close 42.9%→~95%. Package overall: 71.6% → 90.2% (+18.6pp; +5.2 above 85% gate). H-002 status flips `partial_closed` → `closed`.
+
+#### Bundle 0.7-extended (cmd/agent overall round-out): 57.7% → 73.1%
+
+`cmd/agent/dispatch_test.go` (~640 LoC, 18 tests) lifts cmd/agent overall line coverage 57.7% → 73.1% (+15.4pp). Same httptest-backed pattern as the existing `agent_test.go`. Per-function deltas: executeCSRJob 14.1%→64.1%; executeDeploymentJob 46.7%→66.7%; Run 0%→62.2%; markRetired / getEnvDefault / getEnvBoolDefault all 0%→100%; verifyAndReportDeployment partial. Test groups: executeCSRJob happy path + empty-CN + CSR-rejection-400; executeDeploymentJob fetch-fail + key-missing + unknown-target; markRetired sync.Once safety; getEnv* every truthy/falsy spelling; Run context-cancel + 410-Gone retire signal; verifyAndReportDeployment probe-fail + nil-target. Remaining gap to 75% is `main()` (os.Exit) — tracked as `cmd/agent-main-extended`.
+
+#### Bundle P.2-extended (M-008 closure): RFC test-vector subsections
+
+Pure doc work. Three subsections added to `docs/testing-guide.md`:
+
+- **Part 21.99** — RFC 7030 EST test vectors: /cacerts response framing (§4.1.3), /simpleenroll request framing (§4.2.1), /serverkeygen multipart response (§4.4.2)
+- **Part 23.99** — RFC 5280 SAN/EKU vectors: IPv4/IPv6/IDN-Punycode/otherName SAN encoding (§4.2.1.6); EKU OIDs + criticality (§4.2.1.12 + CA/B Forum BR §7.1.2.7)
+- **Part 24.99** — RFC 6960 OCSP / RFC 5280 §5 CRL vectors: OCSP status (§4.2.2.3 tryLater), ResponderID byKey/byName (§4.2.2.2), nonce echo (§4.4.1); CRL TBSCertList (§5.1.2), reason codes (§5.3.1, reserved 7 + out-of-range), IDP extension (§5.2.5), no-delta-CRL (§5.2.4)
+
+Each vector cites RFC section + provides ASN.1 byte snippet where relevant + names the certctl pin location (file + test name). +225 lines; 56 Parts unchanged. M-008 fully closed.
+
+#### Pending extensions
+
+These are tracked in `coverage-audit-2026-04-27/extension-progress.md` for a continuation session:
+
+- **J-extended** — Pebble-style ACME mock (4-6 hr; ACME 55.6% → ≥85%)
+- **N.A/B-extended** — per-CA failure-mode mocks for 8 issuers (6-8 hr; ~2500 LoC)
+- **N.C-extended** — service+handler round-out (3-4 hr; service 70.5% → ≥80%, handler 79.4% → ≥80%)
+- **R-CI-extended raise** — final +7pp threshold jumps (deferred until J + N.C land)
+
 ### Bundle R (Coverage Audit Final Closure + CI raise checkpoint #3): audit closed 33/33; acquisition-readiness 4.3/5
 
 > Closes the 2026-04-27 coverage audit. CI threshold raise #3 applied (defensible against post-Q measurements). Coverage matrix Post-Closure Summary appended. Acquisition-readiness final score: **4.3 / 5** — passing tech DD clean. The +0.2-0.7 gap to "exemplary, no DD asks" requires three operator-only workstation measurements that the agent sandbox can't run.
