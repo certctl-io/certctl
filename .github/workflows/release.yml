@@ -334,75 +334,21 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Create release with notes
+        # generate_release_notes: true asks GitHub to auto-generate the
+        # "What's Changed" section from PRs+commits between this tag and the
+        # previous one. The hardcoded body below appends a per-release
+        # supply-chain verification block (Cosign / SLSA / SBOM steps with the
+        # current version baked into the commands) plus a single link to the
+        # README's Quick Start section for install/upgrade instructions.
+        # We deliberately do NOT duplicate install instructions here — the
+        # README is the source of truth for those, and inlining them in every
+        # release page produces the kind of "every release looks identical"
+        # noise that gives operators no signal about what actually changed.
         uses: softprops/action-gh-release@v2
         with:
           generate_release_notes: true
           body: |
-            ## Installation
-
-            ### Quick Install (Linux/macOS)
-
-            ```bash
-            curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
-            ```
-
-            ### Manual Binary Download
-
-            Download the appropriate binary for your OS and architecture:
-
-            - **Linux x86_64**: `certctl-agent-linux-amd64`
-            - **Linux ARM64**: `certctl-agent-linux-arm64`
-            - **macOS x86_64**: `certctl-agent-darwin-amd64`
-            - **macOS ARM64 (Apple Silicon)**: `certctl-agent-darwin-arm64`
-
-            Then make it executable and start the service:
-
-            ```bash
-            chmod +x certctl-agent-linux-amd64
-            sudo mv certctl-agent-linux-amd64 /usr/local/bin/certctl-agent
-            ```
-
-            ## Docker Images
-
-            Pull pre-built Docker images for server and agent:
-
-            ```bash
-            docker pull ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
-            docker pull ghcr.io/shankar0123/certctl-agent:${{ steps.version.outputs.VERSION }}
-            ```
-
-            Or use the latest tag:
-
-            ```bash
-            docker pull ghcr.io/shankar0123/certctl-server:latest
-            docker pull ghcr.io/shankar0123/certctl-agent:latest
-            ```
-
-            ## Docker Compose Quick Start
-
-            ```bash
-            git clone https://github.com/shankar0123/certctl.git
-            cd certctl
-            cp deploy/.env.example deploy/.env
-            docker compose -f deploy/docker-compose.yml up -d
-            ```
-
-            ## Server Binaries
-
-            Pre-compiled server binaries are also available for direct installation:
-
-            - **Linux x86_64**: `certctl-server-linux-amd64`
-            - **Linux ARM64**: `certctl-server-linux-arm64`
-            - **macOS x86_64**: `certctl-server-darwin-amd64`
-            - **macOS ARM64 (Apple Silicon)**: `certctl-server-darwin-arm64`
-
-            ## CLI & MCP Server Binaries
-
-            The `certctl-cli` (REST API wrapper) and `certctl-mcp-server` (Model Context
-            Protocol bridge) binaries ship for all four platforms as well:
-
-            - `certctl-cli-{linux,darwin}-{amd64,arm64}`
-            - `certctl-mcp-server-{linux,darwin}-{amd64,arm64}`
+            > **Install / upgrade:** see the [Quick Start section in the README](https://github.com/shankar0123/certctl/blob/master/README.md#quick-start) for Docker Compose, agent install, Helm, and binary download instructions.
 
             ## Verifying this release
 
@@ -463,15 +409,3 @@ jobs:
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               "$IMAGE"
             ```
-
-            ## Helm Chart
-
-            Deploy certctl to Kubernetes using Helm:
-
-            ```bash
-            helm repo add certctl https://github.com/shankar0123/certctl/tree/master/deploy/helm
-            helm repo update
-            helm install certctl certctl/certctl
-            ```
-
-            See `deploy/helm/certctl/` for values customization.
