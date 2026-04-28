@@ -817,6 +817,32 @@ The control plane only handles public material: certificates, chains, and CSRs.
 
 **Server keygen mode (`CERTCTL_KEYGEN_MODE=server`, demo only):** The control plane generates RSA-2048 keys server-side within `processRenewalServerKeygen`. Private keys are stored in `certificate_versions.csr_pem`. A log warning is emitted at startup. Use only for Local CA development/demo.
 
+### CA Signing Abstraction
+
+The local issuer's CA private key is wrapped behind the `signer.Signer` interface in `internal/crypto/signer/`. Every CA-signing call site — leaf certificate issuance (`x509.CreateCertificate`), CRL generation (`x509.CreateRevocationList`), and OCSP response signing (`ocsp.CreateResponse`) — accesses the key through this interface rather than touching `crypto.Signer` directly. The interface embeds the stdlib `crypto.Signer` and adds a single `Algorithm() Algorithm` method so call sites can pick the matching `x509.SignatureAlgorithm` without reflecting on the concrete key type.
+
+```
+                                          ┌─────────────────────────────────┐
+                                          │  signer.Driver (pluggable)      │
+                                          ├─────────────────────────────────┤
+internal/connector/issuer/local           │  signer.FileDriver  (default)   │
+   c.caSigner signer.Signer  ──────────►  │    PEM key on disk              │
+                                          │                                 │
+                                          │  signer.MemoryDriver  (tests)   │
+                                          │    in-memory only               │
+                                          │                                 │
+                                          │  signer.PKCS11Driver  (V3-Pro)  │
+                                          │    HSM token (future)           │
+                                          │                                 │
+                                          │  signer.CloudKMSDriver (V3-Pro) │
+                                          │    AWS / GCP / Azure (future)   │
+                                          └─────────────────────────────────┘
+```
+
+Today only `FileDriver` (production) and `MemoryDriver` (tests) ship. The interface exists so PKCS#11/HSM and cloud-KMS drivers can land in follow-on packages (`internal/crypto/signer/pkcs11`, etc.) without modifying any call site or any other driver. The L-014 file-on-disk threat-model carve-out documented at the top of `internal/connector/issuer/local/local.go` applies to `FileDriver`-backed signers; alternative drivers that keep the key inside an HSM token or cloud KMS close the disk-exposure leg of the threat model entirely.
+
+Behavior equivalence between the wrapped Signer and the raw `crypto.Signer` is pinned by `internal/crypto/signer/equivalence_test.go`: RSA signing is byte-strict equal (PKCS#1 v1.5 is deterministic), ECDSA signing is structurally equal (TBSCertificate / TBSRevocationList byte-equal; signature value differs because ECDSA uses random `k`).
+
 ### Authentication
 
 - **API clients → Server**: API key in `Authorization: Bearer` header, or `none` for demo mode. Applies to every path under `/api/v1/*`.

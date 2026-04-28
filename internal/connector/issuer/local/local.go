@@ -1,9 +1,11 @@
 // Bundle-9 / Audit L-014 (Document the CA-key-in-process threat model):
 //
-// The local CA holds its private key in this process's heap (c.caKey field on
-// the Connector struct, plus transient allocations during signing). Go does
-// not provide a standard mlock equivalent, the GC does not zero released
-// memory, and the runtime moves objects between generations during compaction.
+// The local CA holds its private key in this process's heap (c.caSigner
+// field on the Connector struct — historically c.caKey before the Signer
+// abstraction was introduced — plus transient allocations during signing).
+// Go does not provide a standard mlock equivalent, the GC does not zero
+// released memory, and the runtime moves objects between generations
+// during compaction.
 //
 // Threats this DOES protect against:
 //   - Disk-at-rest exposure (key file is mode 0600; key dir is enforced 0700
@@ -26,12 +28,26 @@
 // reduce the window of exposure but do not close it; the source of truth
 // for "the local CA key cannot leave the host process" is HSM-backed
 // signing, not heap hygiene.
+//
+// Defense-in-depth carve-out — the file-on-disk leg:
+//
+// The above measures harden the file-on-disk + heap-resident key flow
+// (signer.FileDriver). The Signer interface in internal/crypto/signer/
+// is the seam that lets operators replace this flow entirely:
+//   - signer.FileDriver: the current behavior (key on disk, hardening above).
+//   - signer.PKCS11Driver (future): key never leaves the HSM token.
+//   - signer.CloudKMSDriver (future): key never leaves the cloud KMS.
+//
+// When the key lives in a hardware token / KMS, the file-on-disk caveats
+// above DO NOT APPLY — the key is not on disk and not in the certctl
+// process heap. The L-014 threat-model assumptions documented here
+// describe the file-driver case; alternative drivers close the
+// disk-exposure leg of the threat model.
 
 package local
 
 import (
 	"context"
-	"crypto"
 	"crypto/ecdh"
 	"crypto/ecdsa"
 	"crypto/rand"
@@ -52,6 +68,7 @@ import (
 	"golang.org/x/crypto/ocsp"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/crypto/signer"
 	"github.com/shankar0123/certctl/internal/validation"
 )
 
@@ -104,11 +121,11 @@ type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	mu         sync.RWMutex
-	caKey      crypto.Signer // RSA or ECDSA private key
+	caSigner   signer.Signer // wraps the historical caKey crypto.Signer; same lifecycle, same heap residency, same L-014 carve-out
 	caCert     *x509.Certificate
 	caCertPEM  string
-	subCA      bool                // true when loaded from disk (sub-CA mode)
-	revokedMap map[string]bool     // serial -> revoked status
+	subCA      bool            // true when loaded from disk (sub-CA mode)
+	revokedMap map[string]bool // serial -> revoked status
 }
 
 // New creates a new local CA connector with the given configuration and logger.
@@ -360,7 +377,7 @@ func (c *Connector) ensureCA(ctx context.Context) error {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 
-	if c.caKey != nil {
+	if c.caSigner != nil {
 		return nil // CA already initialized
 	}
 
@@ -434,13 +451,17 @@ func (c *Connector) loadCAFromDisk() error {
 		return fmt.Errorf("invalid CA private key PEM")
 	}
 
-	caKey, err := parsePrivateKey(keyBlock)
+	caKey, err := signer.ParsePrivateKey(keyBlock)
 	if err != nil {
 		return fmt.Errorf("failed to parse CA private key: %w", err)
 	}
+	caSigner, err := signer.Wrap(caKey)
+	if err != nil {
+		return fmt.Errorf("failed to wrap CA private key as signer: %w", err)
+	}
 
 	// Encode CA cert PEM for chain responses
-	c.caKey = caKey
+	c.caSigner = caSigner
 	c.caCert = caCert
 	c.caCertPEM = string(certPEM)
 	c.subCA = true
@@ -459,10 +480,21 @@ func (c *Connector) loadCAFromDisk() error {
 func (c *Connector) generateSelfSignedCA() error {
 	c.logger.Info("generating self-signed CA (ephemeral mode)", "common_name", c.config.CACommonName)
 
-	// Generate CA private key
+	// Generate CA private key. RSA-2048 has been the historical default
+	// since the local issuer shipped; preserving the algorithm here is
+	// part of the Signer-refactor's no-behavior-change guarantee.
 	caKey, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		return fmt.Errorf("failed to generate CA key: %w", err)
+	}
+	// Wrap the freshly-generated key behind the Signer interface so the
+	// CreateCertificate call below uses the same access pattern as every
+	// other CA-signing call site (interface-level Public() + Sign()).
+	// Wrap is infallible for RSA-2048; the err return is propagated for
+	// completeness against future Algorithm enum changes.
+	caSigner, err := signer.Wrap(caKey)
+	if err != nil {
+		return fmt.Errorf("failed to wrap CA private key as signer: %w", err)
 	}
 
 	// Create CA certificate
@@ -478,8 +510,11 @@ func (c *Connector) generateSelfSignedCA() error {
 		IsCA:                  true,
 	}
 
-	// Self-sign the CA certificate
-	caCertBytes, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &caKey.PublicKey, caKey)
+	// Self-sign the CA certificate via the Signer interface. The
+	// underlying byte sequence is identical to the historical
+	// (&caKey.PublicKey, caKey) form because Wrap returns a thin
+	// adapter that delegates Sign and Public to the same crypto.Signer.
+	caCertBytes, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, caSigner.Public(), caSigner)
 	if err != nil {
 		return fmt.Errorf("failed to create CA certificate: %w", err)
 	}
@@ -495,7 +530,7 @@ func (c *Connector) generateSelfSignedCA() error {
 		Bytes: caCertBytes,
 	})
 
-	c.caKey = caKey
+	c.caSigner = caSigner
 	c.caCert = caCert
 	c.caCertPEM = string(caCertPEM)
 
@@ -506,28 +541,12 @@ func (c *Connector) generateSelfSignedCA() error {
 	return nil
 }
 
-// parsePrivateKey parses a PEM block into an RSA or ECDSA private key.
-func parsePrivateKey(block *pem.Block) (crypto.Signer, error) {
-	switch block.Type {
-	case "RSA PRIVATE KEY":
-		return x509.ParsePKCS1PrivateKey(block.Bytes)
-	case "EC PRIVATE KEY":
-		return x509.ParseECPrivateKey(block.Bytes)
-	case "PRIVATE KEY":
-		// PKCS#8 — can contain RSA or ECDSA
-		key, err := x509.ParsePKCS8PrivateKey(block.Bytes)
-		if err != nil {
-			return nil, fmt.Errorf("failed to parse PKCS#8 key: %w", err)
-		}
-		signer, ok := key.(crypto.Signer)
-		if !ok {
-			return nil, fmt.Errorf("PKCS#8 key is not a signing key")
-		}
-		return signer, nil
-	default:
-		return nil, fmt.Errorf("unsupported private key type: %s (expected RSA PRIVATE KEY, EC PRIVATE KEY, or PRIVATE KEY)", block.Type)
-	}
-}
+// parsePrivateKey moved to internal/crypto/signer/parse.go as part of the
+// Signer abstraction work. The exported wrapper there
+// (signer.ParsePrivateKey) is the single source of truth for PEM
+// private-key parsing inside certctl. Do not reintroduce a parallel
+// implementation here; the loadCAFromDisk path above calls into the
+// signer package directly.
 
 // generateCertificate creates an X.509 certificate signed by the local CA.
 // It uses the CSR subject and adds any additional SANs from the request.
@@ -610,7 +629,7 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 	}
 
 	// Sign certificate with CA
-	certBytes, err := x509.CreateCertificate(rand.Reader, template, c.caCert, csr.PublicKey, c.caKey)
+	certBytes, err := x509.CreateCertificate(rand.Reader, template, c.caCert, csr.PublicKey, c.caSigner)
 	if err != nil {
 		return nil, "", "", fmt.Errorf("failed to sign certificate: %w", err)
 	}
@@ -846,7 +865,7 @@ func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.Revok
 		NextUpdate:                now.Add(24 * time.Hour),
 	}
 
-	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, c.caCert, c.caKey)
+	crlBytes, err := x509.CreateRevocationList(rand.Reader, template, c.caCert, c.caSigner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create CRL: %w", err)
 	}
@@ -884,7 +903,7 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 		template.Status = ocsp.Unknown
 	}
 
-	respBytes, err := ocsp.CreateResponse(c.caCert, c.caCert, template, c.caKey)
+	respBytes, err := ocsp.CreateResponse(c.caCert, c.caCert, template, c.caSigner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OCSP response: %w", err)
 	}
