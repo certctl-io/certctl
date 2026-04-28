@@ -116,6 +116,27 @@ type CRLCacheRepository interface {
 	ListGenerationEvents(ctx context.Context, issuerID string, limit int) ([]*domain.CRLGenerationEvent, error)
 }
 
+// OCSPResponderRepository persists per-issuer OCSP-responder cert + key
+// pointers for the dedicated-responder-cert flow (RFC 6960 §2.6 +
+// §4.2.2.2). One row per issuer; rotation overwrites in place.
+//
+// Schema lives in migrations/000020_ocsp_responder.up.sql.
+type OCSPResponderRepository interface {
+	// Get returns the current responder for an issuer, or (nil, nil)
+	// when no row exists yet (caller treats as "needs bootstrap").
+	Get(ctx context.Context, issuerID string) (*domain.OCSPResponder, error)
+
+	// Put inserts or replaces the responder row for an issuer. ON
+	// CONFLICT updates every field so a rotation atomically replaces
+	// the prior cert without a window where the row is missing.
+	Put(ctx context.Context, responder *domain.OCSPResponder) error
+
+	// ListExpiring returns responders whose not_after is within the
+	// given grace window (used by the rotation scheduler to find
+	// responders due for rotation).
+	ListExpiring(ctx context.Context, grace time.Duration, now time.Time) ([]*domain.OCSPResponder, error)
+}
+
 // IssuerRepository defines operations for managing certificate issuers.
 type IssuerRepository interface {
 	// List returns all issuers, optionally filtered.
