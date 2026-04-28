@@ -140,8 +140,12 @@ func algorithmFromKey(pub crypto.PublicKey) (Algorithm, error) {
 		case elliptic.P384():
 			return AlgorithmECDSAP384, nil
 		default:
+			// ecdsa.PublicKey embeds elliptic.Curve, so Params() resolves
+			// through the embedded field. Spelled this way to satisfy
+			// staticcheck QF1008 (could remove embedded field "Curve" from
+			// selector); functionally identical to k.Curve.Params().
 			name := "unknown"
-			if p := k.Curve.Params(); p != nil {
+			if p := k.Params(); p != nil {
 				name = p.Name
 			}
 			return "", fmt.Errorf("%w: ECDSA curve %s (supported: P-256, P-384)",
