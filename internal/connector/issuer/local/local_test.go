@@ -3,6 +3,7 @@ package local_test
 import (
 	"context"
 	"crypto/ecdsa"
+	"crypto/ed25519"
 	"crypto/elliptic"
 	"crypto/rand"
 	"crypto/rsa"
@@ -1169,4 +1170,91 @@ func TestSignOCSPResponse_SubCA(t *testing.T) {
 	}
 
 	t.Log("SubCA OCSP response generated successfully")
+}
+
+// TestSubCA_LoadCAFromDisk_RejectsUnsupportedKeyAlgorithm pins the new
+// signer.Wrap error path introduced when local.go was refactored to
+// route every CA-signing call through the Signer interface. The
+// historical parsePrivateKey accepted any PKCS#8 key that satisfied
+// crypto.Signer (including Ed25519). The new flow keeps that
+// parse-time acceptance but adds a Wrap step that enforces the
+// certctl-supported algorithm enum (RSA-2048/3072/4096, ECDSA-P256/P384).
+//
+// This test confirms an Ed25519 sub-CA key fails LOUDLY at load time
+// with a clear "wrap CA private key as signer" error — instead of
+// either crashing later at sign time or silently producing a cert
+// chain certctl cannot revalidate. Pins both:
+//   - the new error path coverage (recovers the 0.5pp drop introduced
+//     by the parsePrivateKey deletion)
+//   - the contract that loaded sub-CA keys MUST be in the supported
+//     algorithm enum
+func TestSubCA_LoadCAFromDisk_RejectsUnsupportedKeyAlgorithm(t *testing.T) {
+	logger := slog.New(slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug}))
+	ctx := context.Background()
+	tmpDir := t.TempDir()
+
+	// Build a valid CA cert signed by RSA so cert-validation passes...
+	rsaKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa keygen: %v", err)
+	}
+	caTemplate := &x509.Certificate{
+		SerialNumber:          big.NewInt(42),
+		Subject:               pkix.Name{CommonName: "Mismatched-Key Test CA"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		KeyUsage:              x509.KeyUsageCertSign | x509.KeyUsageCRLSign,
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	certDER, err := x509.CreateCertificate(rand.Reader, caTemplate, caTemplate, &rsaKey.PublicKey, rsaKey)
+	if err != nil {
+		t.Fatalf("create cert: %v", err)
+	}
+	certPath := filepath.Join(tmpDir, "ca.crt")
+	if err := os.WriteFile(certPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: certDER}), 0o600); err != nil {
+		t.Fatalf("write cert: %v", err)
+	}
+
+	// ...but write an UNRELATED Ed25519 key to disk. The Connector's
+	// loadCAFromDisk does not enforce key-cert key match — it only
+	// validates the cert and parses the key. The newly-introduced
+	// signer.Wrap step is what rejects Ed25519.
+	_, edPriv, err := ed25519.GenerateKey(rand.Reader)
+	if err != nil {
+		t.Fatalf("ed25519 keygen: %v", err)
+	}
+	edDER, err := x509.MarshalPKCS8PrivateKey(edPriv)
+	if err != nil {
+		t.Fatalf("marshal ed25519 PKCS#8: %v", err)
+	}
+	keyPath := filepath.Join(tmpDir, "ca.key")
+	if err := os.WriteFile(keyPath, pem.EncodeToMemory(&pem.Block{Type: "PRIVATE KEY", Bytes: edDER}), 0o600); err != nil {
+		t.Fatalf("write key: %v", err)
+	}
+
+	conn := local.New(&local.Config{
+		CACommonName: "Mismatched-Key Test CA",
+		ValidityDays: 90,
+		CACertPath:   certPath,
+		CAKeyPath:    keyPath,
+	}, logger)
+
+	// IssueCertificate triggers ensureCA → loadCAFromDisk → ParsePrivateKey
+	// (succeeds for Ed25519 PKCS#8) → signer.Wrap (rejects Ed25519).
+	dummyKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	csrTpl := &x509.CertificateRequest{Subject: pkix.Name{CommonName: "leaf.example.com"}}
+	csrDER, _ := x509.CreateCertificateRequest(rand.Reader, csrTpl, dummyKey)
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	_, err = conn.IssueCertificate(ctx, issuer.IssuanceRequest{
+		CommonName: "leaf.example.com",
+		CSRPEM:     csrPEM,
+	})
+	if err == nil {
+		t.Fatal("expected IssueCertificate to fail for Ed25519 sub-CA key, got nil")
+	}
+	if !strings.Contains(err.Error(), "wrap CA private key as signer") {
+		t.Fatalf("expected error to mention 'wrap CA private key as signer', got: %v", err)
+	}
 }

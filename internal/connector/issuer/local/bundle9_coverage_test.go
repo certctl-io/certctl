@@ -23,6 +23,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/crypto/signer"
 )
 
 // Bundle-9 / Audit H-010 + L-002 + L-003 + L-012 + M-028 regression suite.
@@ -133,7 +134,7 @@ func TestGetRenewalInfo_ReturnsNilNil(t *testing.T) {
 func TestParsePrivateKey_RSAPKCS1(t *testing.T) {
 	k := mustGenRSAKey(t)
 	der := x509.MarshalPKCS1PrivateKey(k)
-	signer, err := parsePrivateKey(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der})
+	signer, err := signer.ParsePrivateKey(&pem.Block{Type: "RSA PRIVATE KEY", Bytes: der})
 	if err != nil {
 		t.Fatalf("parsePrivateKey RSA PKCS1: %v", err)
 	}
@@ -148,7 +149,7 @@ func TestParsePrivateKey_ECPrivateKey(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal: %v", err)
 	}
-	signer, err := parsePrivateKey(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
+	signer, err := signer.ParsePrivateKey(&pem.Block{Type: "EC PRIVATE KEY", Bytes: der})
 	if err != nil {
 		t.Fatalf("parsePrivateKey EC: %v", err)
 	}
@@ -163,7 +164,7 @@ func TestParsePrivateKey_PKCS8RSA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal pkcs8: %v", err)
 	}
-	signer, err := parsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	signer, err := signer.ParsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 	if err != nil {
 		t.Fatalf("parsePrivateKey PKCS8: %v", err)
 	}
@@ -178,7 +179,7 @@ func TestParsePrivateKey_PKCS8ECDSA(t *testing.T) {
 	if err != nil {
 		t.Fatalf("marshal pkcs8: %v", err)
 	}
-	signer, err := parsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
+	signer, err := signer.ParsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: der})
 	if err != nil {
 		t.Fatalf("parsePrivateKey PKCS8 ECDSA: %v", err)
 	}
@@ -188,7 +189,7 @@ func TestParsePrivateKey_PKCS8ECDSA(t *testing.T) {
 }
 
 func TestParsePrivateKey_UnknownType(t *testing.T) {
-	_, err := parsePrivateKey(&pem.Block{Type: "DSA PRIVATE KEY", Bytes: []byte{1, 2, 3}})
+	_, err := signer.ParsePrivateKey(&pem.Block{Type: "DSA PRIVATE KEY", Bytes: []byte{1, 2, 3}})
 	if err == nil {
 		t.Fatal("expected error on unknown PEM type")
 	}
@@ -198,7 +199,7 @@ func TestParsePrivateKey_UnknownType(t *testing.T) {
 }
 
 func TestParsePrivateKey_MalformedPKCS8(t *testing.T) {
-	_, err := parsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{0xff, 0xff, 0xff}})
+	_, err := signer.ParsePrivateKey(&pem.Block{Type: "PRIVATE KEY", Bytes: []byte{0xff, 0xff, 0xff}})
 	if err == nil {
 		t.Fatal("expected error on malformed PKCS8")
 	}
@@ -855,4 +856,3 @@ func TestGenerateCertificate_WithMaxTTLCap(t *testing.T) {
 		t.Errorf("MaxTTL cap not honored, got window %s", got)
 	}
 }
-
