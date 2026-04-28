@@ -78,6 +78,44 @@ type RevocationRepository interface {
 	MarkIssuerNotified(ctx context.Context, id string) error
 }
 
+// CRLCacheRepository persists pre-generated CRLs so the
+// /.well-known/pki/crl/{issuer_id} endpoint can serve from cache rather
+// than regenerating per request. Populated by the scheduler's
+// crlGenerationLoop (internal/scheduler) and read by the
+// CRLCacheService (internal/service/crl_cache.go) on every CRL fetch.
+//
+// Schema lives in migrations/000019_crl_cache.up.sql.
+type CRLCacheRepository interface {
+	// Get returns the cached CRL for an issuer, or a nil entry +
+	// nil error when no cache row exists yet (caller treats this as a
+	// miss and triggers an immediate generation).
+	Get(ctx context.Context, issuerID string) (*domain.CRLCacheEntry, error)
+
+	// Put inserts or replaces the cache row for an issuer. The DB's
+	// PRIMARY KEY on issuer_id collapses the upsert to a single
+	// statement (ON CONFLICT DO UPDATE).
+	Put(ctx context.Context, entry *domain.CRLCacheEntry) error
+
+	// NextCRLNumber atomically returns the next CRL number for an
+	// issuer (1 if the issuer has never had a CRL, else max+1). RFC
+	// 5280 §5.2.3 requires CRL numbers be monotonically increasing
+	// within an issuer; the atomic-fetch-then-store happens inside a
+	// single SQL statement so concurrent generations of the same
+	// issuer can't produce duplicate numbers.
+	NextCRLNumber(ctx context.Context, issuerID string) (int64, error)
+
+	// RecordGenerationEvent appends a row to crl_generation_events.
+	// Both successful and failed generations get an event so operators
+	// can grep for "why isn't this issuer's CRL refreshing." Event ID
+	// is set by the DB (BIGSERIAL); callers do not pre-assign it.
+	RecordGenerationEvent(ctx context.Context, evt *domain.CRLGenerationEvent) error
+
+	// ListGenerationEvents returns the most recent N events for an
+	// issuer, newest first. Used by the GUI's per-issuer "recent
+	// generations" panel.
+	ListGenerationEvents(ctx context.Context, issuerID string, limit int) ([]*domain.CRLGenerationEvent, error)
+}
+
 // IssuerRepository defines operations for managing certificate issuers.
 type IssuerRepository interface {
 	// List returns all issuers, optionally filtered.
