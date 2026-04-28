@@ -1,0 +1,81 @@
+name: CodeQL
+
+# Public-facing SAST baseline that complements the existing security-deep-scan
+# workflow (gosec, osv-scanner, trivy, ZAP, semgrep, schemathesis, nuclei,
+# testssl) with cross-file Go and JavaScript dataflow analysis. Results land
+# in the repository's Security → Code scanning tab as a public signal — any
+# operator/security team auditing certctl can see the scan history and
+# triage state without asking.
+#
+# Why CodeQL in addition to gosec:
+#   - gosec is single-file pattern matching (catches obvious issues like
+#     `os/exec.Command(userInput)`); CodeQL does interprocedural taint
+#     tracking (catches the same issue when the userInput is laundered
+#     through several function calls or struct fields).
+#   - GitHub-native; no third-party SaaS license gate (works for BSL 1.1
+#     and other source-available licenses, unlike Aikido / Snyk / SonarCloud
+#     free tiers which require OSI-approved licenses).
+#   - SARIF results auto-deduplicate and persist on PRs, so reviewers see
+#     "this PR introduces N new findings" rather than re-running ad hoc.
+#
+# Findings that are intentional (e.g., the SSH connector's
+# InsecureIgnoreHostKey, ACME DNS solver's intentional shell-out to operator-
+# supplied scripts) get suppressed via inline `// codeql[<rule-id>]`
+# comments OR via a `.github/codeql/codeql-config.yml` query-pack tweak —
+# document the rationale in the same commit that adds the suppression so
+# the public scan-tab readers see the threat-model justification.
+
+on:
+  push:
+    branches: [master]
+  pull_request:
+    branches: [master]
+  schedule:
+    # Weekly Sunday 06:00 UTC, in addition to push/PR coverage. Catches
+    # rule-pack updates from CodeQL upstream (their Go/JS rulesets ship
+    # new queries on a roughly-monthly cadence).
+    - cron: '0 6 * * 0'
+
+permissions:
+  contents: read
+  security-events: write   # SARIF upload to GitHub code scanning
+  actions: read
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language: [go, javascript-typescript]
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5
+        with:
+          # Match ci.yml + release.yml + security-deep-scan.yml.
+          go-version: '1.25.9'
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3
+        with:
+          languages: ${{ matrix.language }}
+          # Use the security-and-quality query suite — security finds plus
+          # maintainability/correctness issues that the smaller security-extended
+          # suite skips. Comparable scope to what Aikido / SonarCloud run.
+          queries: security-and-quality
+
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3
+
+      - name: Perform CodeQL Analysis
+        uses: github/codeql-action/analyze@v3
+        with:
+          category: "/language:${{ matrix.language }}"
+          # SARIF upload is implicit (and is what populates the Security tab).
