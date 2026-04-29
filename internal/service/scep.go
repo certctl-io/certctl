@@ -49,8 +49,16 @@ func (s *SCEPService) SetProfileRepo(repo repository.CertificateProfileRepositor
 
 // GetCACaps returns the capabilities of this SCEP server.
 // RFC 8894 Section 3.5.2: GetCACaps returns a list of capabilities, one per line.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 5.1: extended from the
+// initial value (POSTPKIOperation+SHA-256+AES+SCEPStandard) to additionally
+// advertise SHA-512 (now-implemented modern digest alternative) and Renewal
+// (the messageType-17 dispatch from Phase 4). ChromeOS specifically looks
+// for these capabilities to negotiate the strongest available cipher +
+// digest combo. Order is by historical convention; clients walk the list
+// linearly.
 func (s *SCEPService) GetCACaps(ctx context.Context) string {
-	return "POSTPKIOperation\nSHA-256\nAES\nSCEPStandard\n"
+	return "POSTPKIOperation\nSHA-256\nSHA-512\nAES\nSCEPStandard\nRenewal\n"
 }
 
 // GetCACert returns the PEM-encoded CA certificate chain for this SCEP server.
@@ -298,4 +306,136 @@ func containsAnyOf(s string, needles ...string) bool {
 		}
 	}
 	return false
+}
+
+// RenewalReqWithEnvelope processes a SCEP RenewalReq from the RFC 8894 path.
+// RFC 8894 §3.3.1.2 — re-enrollment with an existing valid cert. Distinct
+// from PKCSReq because the signerInfo is signed by the EXISTING cert
+// (proving possession), not by a transient self-signed device key.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 4.2.
+//
+// Functionally identical to PKCSReqWithEnvelope but with two differences:
+//
+//  1. Audit action is `scep_renewalreq` (vs `scep_pkcsreq`) — operators
+//     can grep the audit log to distinguish initial enrollments from
+//     renewals.
+//
+//  2. The signing cert presented as POPO MUST chain to the issuer's CA
+//     (the cert was previously issued by THIS issuer, not a self-signed
+//     throwaway). Verified against the issuer's GetCACertPEM chain via
+//     x509.Certificate.Verify. A signing cert that doesn't chain is
+//     mapped to BadMessageCheck per the same RFC 8894 §3.3.2.2 semantics
+//     as an EnvelopedData decrypt failure (integrity-check failure).
+//
+// Returns *SCEPResponseEnvelope (same contract as PKCSReqWithEnvelope);
+// nil signals 'invalid challenge password' for HTTP 403 translation.
+func (s *SCEPService) RenewalReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	resp := &domain.SCEPResponseEnvelope{
+		TransactionID:  envelope.TransactionID,
+		RecipientNonce: envelope.SenderNonce,
+	}
+
+	// Same challenge-password gate as PKCSReqWithEnvelope. Defense in depth
+	// even though the RenewalReq path additionally verifies the signing
+	// cert chain — a stolen/leaked challenge password combined with a
+	// previously-issued cert (e.g. from a compromised device) would still
+	// allow renewal otherwise. The two checks are independent.
+	if s.challengePassword == "" {
+		s.logger.Warn("SCEP renewal rejected: server has no challenge password configured (RFC 8894 path)",
+			"transaction_id", envelope.TransactionID)
+		return nil
+	}
+	if subtle.ConstantTimeCompare([]byte(challengePassword), []byte(s.challengePassword)) != 1 {
+		s.logger.Warn("SCEP renewal rejected: invalid challenge password (RFC 8894 path)",
+			"transaction_id", envelope.TransactionID)
+		return nil
+	}
+
+	// Verify the signing cert chains to the issuer's CA. Without this gate
+	// any self-signed cert with a valid challenge password could trigger a
+	// renewal — defeating the 'proof of prior issuance' contract RenewalReq
+	// is supposed to provide.
+	if err := s.verifyRenewalSignerCertChain(ctx, envelope.SignerCert); err != nil {
+		s.logger.Warn("SCEP renewal rejected: signer cert chain invalid",
+			"transaction_id", envelope.TransactionID,
+			"error", err.Error(),
+		)
+		resp.Status = domain.SCEPStatusFailure
+		resp.FailInfo = domain.SCEPFailBadMessageCheck
+		return resp
+	}
+
+	// Reuse the existing processEnrollment for the actual issuance work
+	// — RenewalReq is functionally a re-issuance with a different audit
+	// action and chain-validation precondition.
+	result, err := s.processEnrollment(ctx, csrPEM, envelope.TransactionID, "scep_renewalreq")
+	if err != nil {
+		resp.Status = domain.SCEPStatusFailure
+		resp.FailInfo = mapServiceErrorToFailInfo(err)
+		return resp
+	}
+	resp.Status = domain.SCEPStatusSuccess
+	resp.Result = result
+	return resp
+}
+
+// verifyRenewalSignerCertChain confirms the device's signing cert (the cert
+// presented as POPO in the SignerInfo) was previously issued by the
+// configured issuer. Used by RenewalReqWithEnvelope to enforce the 'must
+// have a previously-issued cert' contract RFC 8894 §3.3.1.2 implies.
+//
+// A self-signed throwaway cert (initial-enrollment shape) fails this check
+// — that's an indicator the client meant to send PKCSReq, not RenewalReq.
+// Operators see the audit-log entry; the client sees BadMessageCheck.
+func (s *SCEPService) verifyRenewalSignerCertChain(ctx context.Context, signerCertDER []byte) error {
+	if len(signerCertDER) == 0 {
+		return fmt.Errorf("signer cert is empty (no POPO cert in SignerInfo)")
+	}
+	signerCert, err := x509.ParseCertificate(signerCertDER)
+	if err != nil {
+		return fmt.Errorf("parse signer cert: %w", err)
+	}
+
+	// Pull the issuer's CA chain via the existing IssuerConnector
+	// surface. Failure here is a deploy bug (the issuer connector lost
+	// its CA cert mid-flight) rather than a client error — surface as
+	// the same generic failure to avoid leaking server state.
+	caPEM, err := s.issuer.GetCACertPEM(ctx)
+	if err != nil {
+		return fmt.Errorf("get CA cert PEM: %w", err)
+	}
+	pool := x509.NewCertPool()
+	if !pool.AppendCertsFromPEM([]byte(caPEM)) {
+		return fmt.Errorf("CA cert PEM contains no parseable certs")
+	}
+	opts := x509.VerifyOptions{
+		Roots:     pool,
+		KeyUsages: []x509.ExtKeyUsage{x509.ExtKeyUsageAny},
+	}
+	if _, err := signerCert.Verify(opts); err != nil {
+		return fmt.Errorf("signer cert chain validation failed: %w", err)
+	}
+	return nil
+}
+
+// GetCertInitialWithEnvelope handles SCEP polling requests. RFC 8894 §3.3.3
+// — the client polls when the prior PKCSReq returned Status=Pending.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 4.3.
+//
+// v1 of this bundle returns FAILURE+badCertID for all GetCertInitial
+// requests since deferred-issuance isn't supported (every PKCSReq either
+// succeeds or fails synchronously — no Pending state in the existing
+// service-layer issuance pipeline). The wiring stays in place for a
+// future enhancement (e.g. 'queue for manual approval' workflows).
+func (s *SCEPService) GetCertInitialWithEnvelope(_ context.Context, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	s.logger.Info("SCEP GetCertInitial received — deferred-issuance not supported in v1, returning badCertID",
+		"transaction_id", envelope.TransactionID)
+	return &domain.SCEPResponseEnvelope{
+		Status:         domain.SCEPStatusFailure,
+		FailInfo:       domain.SCEPFailBadCertID,
+		TransactionID:  envelope.TransactionID,
+		RecipientNonce: envelope.SenderNonce,
+	}
 }

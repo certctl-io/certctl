@@ -55,6 +55,7 @@ import (
 	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
+	"encoding/asn1"
 	"encoding/json"
 	"encoding/pem"
 	"fmt"
@@ -332,7 +333,7 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	}
 
 	// Generate certificate with EKUs and MaxTTL from request
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds)
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds, request.MustStaple)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -396,7 +397,7 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 	}
 
 	// Generate certificate with EKUs and MaxTTL from request
-	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds)
+	cert, certPEM, serial, err := c.generateCertificate(csr, request.SANs, request.EKUs, request.MaxTTLSeconds, request.MustStaple)
 	if err != nil {
 		c.logger.Error("failed to generate certificate", "error", err)
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
@@ -643,7 +644,7 @@ func (c *Connector) generateSelfSignedCA() error {
 // It uses the CSR subject and adds any additional SANs from the request.
 // If ekus is non-empty, those EKUs are used instead of the default serverAuth+clientAuth.
 // If maxTTLSeconds > 0, the certificate validity is capped to that duration.
-func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string, ekus []string, maxTTLSeconds int) (*x509.Certificate, string, string, error) {
+func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additionalSANs []string, ekus []string, maxTTLSeconds int, mustStaple bool) (*x509.Certificate, string, string, error) {
 	// Generate random serial number
 	serialNum, err := rand.Int(rand.Reader, new(big.Int).Lsh(big.NewInt(1), 159))
 	if err != nil {
@@ -719,6 +720,21 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 		}
 	}
 
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6: must-staple
+	// extension per RFC 7633. When the bound CertificateProfile has
+	// MustStaple=true, the issued cert carries id-pe-tlsfeature with
+	// the TLS Feature `status_request` (5). Browsers + modern TLS
+	// libraries that see this extension fail-closed when OCSP stapling
+	// is missing — defense against revocation-bypass via OCSP
+	// blackholing.
+	if mustStaple {
+		template.ExtraExtensions = append(template.ExtraExtensions, pkix.Extension{
+			Id:       oidMustStaple,
+			Critical: false,
+			Value:    mustStapleExtensionValue,
+		})
+	}
+
 	// Sign certificate with CA
 	certBytes, err := x509.CreateCertificate(rand.Reader, template, c.caCert, csr.PublicKey, c.caSigner)
 	if err != nil {
@@ -767,6 +783,26 @@ func isEmail(s string) bool {
 }
 
 // ekuNameToX509 maps EKU string names (from domain.ValidEKUs) to x509.ExtKeyUsage constants.
+// SCEP RFC 8894 + Intune master bundle Phase 5.6: must-staple extension
+// constants per RFC 7633 §6.
+//
+// id-pe-tlsfeature OID: 1.3.6.1.5.5.7.1.24.
+var oidMustStaple = asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 1, 24}
+
+// mustStapleExtensionValue is the pre-encoded DER for SEQUENCE OF INTEGER
+// containing a single value 5 (the TLS Feature for status_request, RFC
+// 7633 §6 referencing IANA TLS ExtensionType registry).
+//
+// Wire bytes:
+//
+//	0x30 0x03         -- SEQUENCE, length 3
+//	0x02 0x01 0x05    --   INTEGER 5 (status_request)
+//
+// Pre-encoded as a constant rather than asn1.Marshal'd at runtime: the
+// extension value is fixed, byte-stable across Go versions, and tested by
+// pinning the exact bytes against RFC 7633 §6.
+var mustStapleExtensionValue = []byte{0x30, 0x03, 0x02, 0x01, 0x05}
+
 var ekuNameToX509 = map[string]x509.ExtKeyUsage{
 	"serverAuth":      x509.ExtKeyUsageServerAuth,
 	"clientAuth":      x509.ExtKeyUsageClientAuth,

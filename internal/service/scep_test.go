@@ -26,6 +26,18 @@ func TestSCEPService_GetCACaps(t *testing.T) {
 	if !strings.Contains(caps, "SCEPStandard") {
 		t.Errorf("expected SCEPStandard in caps, got: %s", caps)
 	}
+	// SCEP RFC 8894 Phase 5.1 additions — pin the new caps so a future
+	// 'simplify caps' refactor doesn't quietly remove ChromeOS-required
+	// negotiation flags.
+	if !strings.Contains(caps, "SHA-512") {
+		t.Errorf("expected SHA-512 in caps (Phase 5.1 addition), got: %s", caps)
+	}
+	if !strings.Contains(caps, "AES") {
+		t.Errorf("expected AES in caps, got: %s", caps)
+	}
+	if !strings.Contains(caps, "Renewal") {
+		t.Errorf("expected Renewal in caps (Phase 5.1 addition — RenewalReq messageType support), got: %s", caps)
+	}
 }
 
 func TestSCEPService_GetCACert_Success(t *testing.T) {

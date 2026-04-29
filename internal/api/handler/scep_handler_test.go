@@ -59,6 +59,22 @@ func (m *mockSCEPService) PKCSReqWithEnvelope(ctx context.Context, csrPEM string
 	}
 }
 
+// RenewalReqWithEnvelope + GetCertInitialWithEnvelope added in Phase 4 to
+// satisfy the extended SCEPService interface. Same MVP-only test fixture
+// rules apply — these stubs mirror PKCSReqWithEnvelope's shape.
+func (m *mockSCEPService) RenewalReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	return m.PKCSReqWithEnvelope(ctx, csrPEM, challengePassword, envelope)
+}
+
+func (m *mockSCEPService) GetCertInitialWithEnvelope(_ context.Context, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	return &domain.SCEPResponseEnvelope{
+		Status:         domain.SCEPStatusFailure,
+		FailInfo:       domain.SCEPFailBadCertID,
+		TransactionID:  envelope.TransactionID,
+		RecipientNonce: envelope.SenderNonce,
+	}
+}
+
 func TestSCEP_GetCACaps_Success(t *testing.T) {
 	svc := &mockSCEPService{}
 	h := NewSCEPHandler(svc)

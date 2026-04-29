@@ -39,6 +39,19 @@ type SCEPService interface {
 	// failures. Returns nil to signal 'invalid challenge password' (caller
 	// translates to HTTP 403, matching the MVP path's wire shape).
 	PKCSReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
+
+	// RenewalReqWithEnvelope processes a SCEP RenewalReq (RFC 8894 §3.3.1.2)
+	// from the RFC 8894 path. Same contract as PKCSReqWithEnvelope but the
+	// service additionally verifies that envelope.SignerCert chains to the
+	// issuer's CA — RenewalReq requires a previously-issued cert as POPO.
+	RenewalReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
+
+	// GetCertInitialWithEnvelope handles SCEP polling requests (RFC 8894
+	// §3.3.3). The v1 implementation always returns FAILURE+badCertID
+	// because deferred-issuance isn't supported (every PKCSReq either
+	// succeeds or fails synchronously); wiring is in place for a future
+	// 'queue for manual approval' workflow.
+	GetCertInitialWithEnvelope(ctx context.Context, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
 }
 
 // SCEPHandler handles HTTP requests for the SCEP protocol (RFC 8894).
@@ -196,14 +209,44 @@ func (h SCEPHandler) pkiOperation(w http.ResponseWriter, r *http.Request) {
 	// backward-compat contract for lightweight clients.
 	if h.raCert != nil && h.raKey != nil {
 		if envelope, csrPEM, challengePassword, ok := h.tryParseRFC8894(body); ok {
-			resp := h.svc.PKCSReqWithEnvelope(r.Context(), csrPEM, challengePassword, envelope)
+			// SCEP RFC 8894 + Intune master bundle Phase 4.1: dispatch on
+			// the parsed messageType. PKCSReq + RenewalReq exercise the
+			// full enrollment pipeline (different audit actions + chain
+			// validation for renewal); GetCertInitial is the polling
+			// shape (v1 stub returns badCertID since deferred-issuance
+			// isn't supported); unknown messageType returns CertRep with
+			// FAILURE+badRequest per RFC 8894 §3.3.2.2.
+			var resp *domain.SCEPResponseEnvelope
+			switch envelope.MessageType {
+			case domain.SCEPMessageTypePKCSReq:
+				resp = h.svc.PKCSReqWithEnvelope(r.Context(), csrPEM, challengePassword, envelope)
+			case domain.SCEPMessageTypeRenewalReq:
+				resp = h.svc.RenewalReqWithEnvelope(r.Context(), csrPEM, challengePassword, envelope)
+			case domain.SCEPMessageTypeGetCertInitial:
+				resp = h.svc.GetCertInitialWithEnvelope(r.Context(), envelope)
+			default:
+				// Unknown messageType — emit a CertRep+FAILURE so the
+				// client sees a structured response rather than a vague
+				// 400. RFC 8894 §3.2.1.4.1 enumerates the valid types;
+				// anything else is a malformed client.
+				resp = &domain.SCEPResponseEnvelope{
+					Status:         domain.SCEPStatusFailure,
+					FailInfo:       domain.SCEPFailBadRequest,
+					TransactionID:  envelope.TransactionID,
+					RecipientNonce: envelope.SenderNonce,
+				}
+			}
 			if resp == nil {
-				// nil signals 'invalid challenge password'. RFC 8894 §3.3.1
-				// is silent on whether to return a CertRep or an HTTP error
-				// for this case; we mirror the MVP path's HTTP 403 wire
-				// shape so the client sees a clear auth failure rather than
-				// trying to interpret a structurally-valid CertRep+failInfo
-				// (which conflates 'wrong secret' with 'wrong CSR shape').
+				// nil signals 'invalid challenge password' from the
+				// service layer (only PKCSReq + RenewalReq paths can
+				// return nil — GetCertInitial always returns a
+				// CertRep). RFC 8894 §3.3.1 is silent on whether to
+				// return a CertRep or an HTTP error for the wrong-
+				// password case; we mirror the MVP path's HTTP 403
+				// wire shape so the client sees a clear auth failure
+				// rather than trying to interpret a structurally-valid
+				// CertRep+failInfo (which conflates 'wrong secret'
+				// with 'wrong CSR shape').
 				ErrorWithRequestID(w, http.StatusForbidden, "Invalid challenge password", requestID)
 				return
 			}
@@ -336,9 +379,15 @@ func (h SCEPHandler) tryParseRFC8894(body []byte) (*domain.SCEPRequestEnvelope, 
 // the RFC 2985 §5.4.1 challengePassword (OID 1.2.840.113549.1.9.7).
 // Returns empty string when missing.
 //
-//nolint:staticcheck // SA1019: RFC 2985 challengePassword has no non-deprecated stdlib API; mirrors extractCSRFields.
+// SA1019 carve-out: csr.Attributes is deprecated by Go's stdlib for the
+// requestedExtensions attribute, but RFC 2985 challengePassword (OID
+// 1.2.840.113549.1.9.7) is a SEPARATE CSR attribute that cannot be
+// retrieved via csr.Extensions. There is no non-deprecated stdlib API
+// for it; the same `lint:ignore SA1019` line precedent set by
+// extractCSRFields applies here.
 func extractChallengePasswordFromCSR(csr *x509.CertificateRequest) string {
 	oidChallengePassword := asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 7}
+	//lint:ignore SA1019 RFC 2985 challengePassword has no non-deprecated stdlib API; see extractCSRFields docblock for the M-028 audit closure rationale.
 	for _, attr := range csr.Attributes {
 		if attr.Type.Equal(oidChallengePassword) {
 			if len(attr.Value) > 0 && len(attr.Value[0]) > 0 {

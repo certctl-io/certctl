@@ -54,8 +54,15 @@ type IssuanceRequest struct {
 	CommonName    string   `json:"common_name"`
 	SANs          []string `json:"sans"`
 	CSRPEM        string   `json:"csr_pem"`
-	EKUs          []string `json:"ekus,omitempty"`           // e.g., "serverAuth", "clientAuth", "emailProtection"
+	EKUs          []string `json:"ekus,omitempty"`            // e.g., "serverAuth", "clientAuth", "emailProtection"
 	MaxTTLSeconds int      `json:"max_ttl_seconds,omitempty"` // 0 = no cap (use issuer default)
+	// MustStaple, when true, instructs the issuer to add the RFC 7633
+	// must-staple extension (id-pe-tlsfeature) to the issued cert.
+	// Plumbed from CertificateProfile.MustStaple at the service layer.
+	// Issuers that don't support extension injection (Vault, EJBCA, etc.)
+	// silently ignore this — must-staple is a local-issuer-only feature
+	// in V2 since upstream connectors enforce their own extension policy.
+	MustStaple bool `json:"must_staple,omitempty"`
 }
 
 // IssuanceResult contains the result of a successful certificate issuance.
@@ -73,9 +80,13 @@ type RenewalRequest struct {
 	CommonName    string   `json:"common_name"`
 	SANs          []string `json:"sans"`
 	CSRPEM        string   `json:"csr_pem"`
-	EKUs          []string `json:"ekus,omitempty"`           // e.g., "serverAuth", "clientAuth", "emailProtection"
+	EKUs          []string `json:"ekus,omitempty"`            // e.g., "serverAuth", "clientAuth", "emailProtection"
 	MaxTTLSeconds int      `json:"max_ttl_seconds,omitempty"` // 0 = no cap (use issuer default)
 	OrderID       *string  `json:"order_id,omitempty"`
+	// MustStaple — same semantics as IssuanceRequest.MustStaple. The
+	// renewal pipeline plumbs through the same CertificateProfile.MustStaple
+	// field so renewed certs match their initial-issuance extension set.
+	MustStaple bool `json:"must_staple,omitempty"`
 }
 
 // RevocationRequest contains the parameters for revoking a certificate.

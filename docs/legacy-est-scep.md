@@ -201,6 +201,167 @@ becomes a compliance failure:
 - https://www.pcisecuritystandards.org/news_events/
 - https://nvlpubs.nist.gov/nistpubs/SpecialPublications/  (SP 800-52 revisions)
 
+## SCEP RFC 8894 native implementation (post-2026-04-29)
+
+Prior to this bundle, certctl's SCEP server parsed `PKCS#7 SignedData` and
+treated the encapsulated content as a raw `PKCS#10 CSR` (the file-internal
+"MVP" comment at `internal/api/handler/scep.go:217` flagged this). That
+worked for lightweight MDM agents but failed against ChromeOS and most
+production MDM clients which expect full RFC 8894 wire format:
+`SignedData` wrapping an `EnvelopedData` encrypting the CSR to the RA
+cert's public key, with `signerInfo` POPO over the auth-attrs.
+
+The new RFC 8894 path runs FIRST; on any parse failure it falls through
+to the legacy MVP raw-CSR path so existing operators see no behavior
+change for their lightweight clients.
+
+### Required: RA cert + key
+
+The RFC 8894 path requires a Registration Authority cert + key pair.
+Clients encrypt their CSR to the RA cert's public key (RFC 8894 §3.2.2);
+the certctl server uses the RA key to decrypt and to sign the outbound
+CertRep PKIMessage signerInfo (RFC 8894 §3.3.2).
+
+| Env var | Default | Meaning |
+| --- | --- | --- |
+| `CERTCTL_SCEP_RA_CERT_PATH` | (none) | Path to PEM-encoded RA certificate. **Required when `CERTCTL_SCEP_ENABLED=true`.** |
+| `CERTCTL_SCEP_RA_KEY_PATH` | (none) | Path to PEM-encoded RA private key matching `CERTCTL_SCEP_RA_CERT_PATH`. File MUST be mode `0600` (preflight refuses world-readable). |
+
+Generate the RA pair (any RSA-2048+ or ECDSA-P256+ pair signed by your
+root or sub-CA works):
+
+```bash
+# RSA-2048 RA pair, valid 1 year, signed by your root.
+openssl req -new -newkey rsa:2048 -nodes -keyout ra.key -out ra.csr \
+  -subj "/CN=corp-ca-RA"
+openssl x509 -req -in ra.csr -days 365 \
+  -CA root.crt -CAkey root.key -CAcreateserial \
+  -extfile <(printf "extendedKeyUsage=emailProtection,1.3.6.1.5.5.7.3.4") \
+  -out ra.crt
+
+chmod 0600 ra.key       # required — preflight rejects world-readable keys
+chmod 0644 ra.crt
+mv ra.key ra.crt /etc/certctl/scep/
+
+export CERTCTL_SCEP_ENABLED=true
+export CERTCTL_SCEP_RA_CERT_PATH=/etc/certctl/scep/ra.crt
+export CERTCTL_SCEP_RA_KEY_PATH=/etc/certctl/scep/ra.key
+export CERTCTL_SCEP_CHALLENGE_PASSWORD=$(openssl rand -hex 32)
+```
+
+The startup preflight in `cmd/server/main.go::preflightSCEPRACertKey`
+validates: file existence, key file mode 0600, cert/key match, cert
+non-expired, RSA-or-ECDSA public-key algorithm. Failures `os.Exit(1)`
+with a structured log line identifying the offending profile.
+
+### Capability advertisement (`GetCACaps`)
+
+```
+POSTPKIOperation
+SHA-256
+SHA-512
+AES
+SCEPStandard
+Renewal
+```
+
+ChromeOS specifically looks for `POSTPKIOperation` (non-base64 POST),
+`AES` (the now-implemented CBC content encryption), `SCEPStandard` (RFC
+8894 conformance), and `Renewal` (RenewalReq messageType-17 support).
+Older Cisco IOS clients also accept `SHA-256` and `SHA-512` per RFC 8894
+§3.5.2.
+
+### Supported messageTypes
+
+| Type | RFC 8894 § | Behavior |
+| --- | --- | --- |
+| `PKCSReq` (19) | §3.3.1 | Initial enrollment. Signer cert is the device's transient self-signed key. |
+| `RenewalReq` (17) | §3.3.1.2 | Re-enrollment. Signer cert MUST be a previously-issued cert from this issuer; service-side `verifyRenewalSignerCertChain` enforces. |
+| `GetCertInitial` (20) | §3.3.3 | Polling for pending requests. v1 returns `FAILURE+badCertID` because deferred-issuance isn't supported (every PKCSReq either succeeds or fails synchronously). |
+| `CertRep` (3) | §3.3.2 | Server response — never inbound. |
+
+### MVP backward-compatibility path
+
+Lightweight clients that send a stripped `SignedData` containing a raw
+CSR (no `EnvelopedData` wrapper, no `signerInfo` POPO) keep working: the
+handler tries the RFC 8894 path FIRST; on any parse failure it falls
+through to the legacy `extractCSRFromPKCS7` path. The legacy path uses
+the CSR's `challengePassword` attribute the same way as the RFC 8894
+path. Operators with existing lightweight-client deploys see zero
+behavior change.
+
+### Multi-profile dispatch (`/scep/<pathID>`)
+
+Real enterprise deploys run multiple SCEP endpoints from one certctl
+instance — corp-laptop CA, IoT CA, server CA — each with its own
+issuer + RA pair + challenge password. Configure via:
+
+```
+CERTCTL_SCEP_PROFILES=corp,iot,server
+CERTCTL_SCEP_PROFILE_CORP_ISSUER_ID=iss-corp-laptop
+CERTCTL_SCEP_PROFILE_CORP_PROFILE_ID=prof-corp-tls
+CERTCTL_SCEP_PROFILE_CORP_CHALLENGE_PASSWORD=...
+CERTCTL_SCEP_PROFILE_CORP_RA_CERT_PATH=/etc/certctl/scep/corp-ra.crt
+CERTCTL_SCEP_PROFILE_CORP_RA_KEY_PATH=/etc/certctl/scep/corp-ra.key
+# ... per profile name in CERTCTL_SCEP_PROFILES
+```
+
+The router exposes `/scep/corp`, `/scep/iot`, `/scep/server`. The legacy
+`/scep` root remains for the single-profile flat-env-var case (when
+`CERTCTL_SCEP_PROFILES` is unset). Per-profile preflight validates each
+RA pair independently; failures log the offending PathID.
+
+### ChromeOS Admin Console pointer
+
+In Google Admin Console → Devices → Networks → Certificates, register
+certctl's `/scep[/<pathID>]` URL as the SCEP server. Enter the challenge
+password from `CERTCTL_SCEP_CHALLENGE_PASSWORD` (or per-profile
+`CERTCTL_SCEP_PROFILE_<NAME>_CHALLENGE_PASSWORD`). ChromeOS pulls
+`GetCACert` first to retrieve the RA cert, then enrolls via
+PKIOperation.
+
+### RA cert rotation
+
+The RA cert is loaded once at startup and persisted in the handler's
+struct field; rotation requires a server restart (mirrors the
+`CERTCTL_TLS_CERT_PATH` precedent in `cmd/server/tls.go`). The
+recommended cadence is annual rotation with a 30-day overlap during
+which both old + new RA certs are listed in `GetCACert`'s response (set
+the cert chain accordingly in your sub-CA hierarchy).
+
+### Must-staple per-profile policy (RFC 7633)
+
+When a `CertificateProfile` has `MustStaple = true`, the local issuer
+adds the `id-pe-tlsfeature` extension (OID `1.3.6.1.5.5.7.1.24`,
+non-critical, value `SEQUENCE OF INTEGER {5}`) to every issued cert.
+Browsers + modern TLS libraries that see this extension fail-closed on
+missing OCSP stapling responses — defense against revocation-bypass via
+OCSP blackholing.
+
+**Default policy:** `false`. Operators opt in once they've confirmed the
+TLS reverse proxy / load balancer staples OCSP responses. NGINX,
+HAProxy, Envoy all support stapling but it requires explicit config —
+turning must-staple on without verifying the TLS path will hard-fail
+browsers.
+
+Recommended for: Intune-deployed device certs (modern TLS clients);
+SCEP profiles serving general / legacy clients (ChromeOS, IoT) should
+stay `false` until the TLS path is verified.
+
+### Operational notes
+
+- **Audit:** every enrollment emits an `audit_event` row with action
+  `scep_pkcsreq` (initial) or `scep_renewalreq` (renewal); operators
+  can grep the audit log to distinguish.
+- **Body-size cap:** `http.MaxBytesReader` middleware caps request
+  bodies at `CERTCTL_MAX_BODY_SIZE` (default 1MB); SCEP PKIMessages are
+  typically <50KB so the default cap is generous.
+- **HTTPS-only:** the SCEP endpoint inherits the TLS-1.3-pinned control
+  plane; there is no plaintext fallback.
+- **Forward reference:** for Microsoft Intune deployments specifically,
+  see [`scep-intune.md`](scep-intune.md) (the doc Phase 11 of the
+  master bundle ships).
+
 ## Related docs
 
 - [`tls.md`](tls.md) — the certctl-internal TLS configuration (HTTPS-only

@@ -17,9 +17,26 @@ type CertificateProfile struct {
 	RequiredSANPatterns  []string           `json:"required_san_patterns"`
 	SPIFFEURIPattern     string             `json:"spiffe_uri_pattern"`
 	AllowShortLived      bool               `json:"allow_short_lived"`
-	Enabled              bool               `json:"enabled"`
-	CreatedAt            time.Time          `json:"created_at"`
-	UpdatedAt            time.Time          `json:"updated_at"`
+	// MustStaple, when true, causes the local issuer to add the RFC 7633
+	// must-staple extension (id-pe-tlsfeature, OID 1.3.6.1.5.5.7.1.24) to
+	// every certificate issued under this profile. Browsers + modern TLS
+	// libraries that see this extension MUST fail-closed on missing OCSP
+	// stapling responses — defense against revocation-bypass via OCSP
+	// blackholing.
+	//
+	// Default: false. Operators opt in once they've confirmed their TLS
+	// reverse proxy / load balancer staples OCSP responses (NGINX,
+	// HAProxy, Envoy, etc. all support stapling but it requires explicit
+	// config). Setting must-staple by default would break customer
+	// deployments where the TLS path doesn't staple — browsers hard-fail.
+	//
+	// Recommended for: Intune-deployed device certs (modern TLS clients);
+	// SCEP profiles serving general/legacy clients (ChromeOS, IoT) should
+	// stay false until the TLS path is verified.
+	MustStaple bool      `json:"must_staple"`
+	Enabled    bool      `json:"enabled"`
+	CreatedAt  time.Time `json:"created_at"`
+	UpdatedAt  time.Time `json:"updated_at"`
 }
 
 // KeyAlgorithmRule defines an allowed key algorithm and its minimum key size.
