@@ -498,10 +498,11 @@ otherwise.
   typically <50KB so the default cap is generous.
 - **HTTPS-only:** the SCEP endpoint inherits the TLS-1.3-pinned control
   plane; there is no plaintext fallback.
-- **Forward reference:** for the deeper Intune integration writeup
-  (architecture, migration playbook, troubleshooting,
-  Microsoft-support-statement), see [`scep-intune.md`](scep-intune.md)
-  (Phase 11 of the master bundle).
+- **For Microsoft Intune deployments, see [`scep-intune.md`](scep-intune.md)** —
+  architecture, NDES-replacement migration playbook, Intune SCEP profile
+  field mapping, trust-anchor extraction recipe, troubleshooting matrix,
+  operational monitoring, V3-Pro deferrals, and the Microsoft support
+  statement (with Microsoft Learn URLs procurement teams ask for).
 
 ## Related docs
 

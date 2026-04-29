@@ -831,6 +831,48 @@ The control plane only handles public material: certificates, chains, and CSRs.
 
 **Server keygen mode (`CERTCTL_KEYGEN_MODE=server`, demo only):** The control plane generates RSA-2048 keys server-side within `processRenewalServerKeygen`. Private keys are stored in `certificate_versions.csr_pem`. A log warning is emitted at startup. Use only for Local CA development/demo.
 
+### Microsoft Intune Connector trust anchor (per-profile, opt-in)
+
+When the SCEP server is sitting behind a Microsoft Intune Certificate
+Connector — i.e. certctl is acting as a drop-in NDES replacement —
+each per-profile dispatcher carries its own **trust anchor pool**:
+the public certs the operator extracted from the Connector's
+installation. Every Intune-flavored enrollment goes through:
+
+```
+                          ┌─────────────────────────────────┐
+                          │ Per-profile TrustAnchorHolder    │
+                          │ (RWMutex pool, SIGHUP-reloadable) │
+                          └────────────┬────────────────────┘
+                                       │ Get()
+                                       ▼
+device → SCEP PKIMessage → handler → SCEPService.dispatchIntuneChallenge
+                                       │
+                                       ├─► intune.ValidateChallenge (sig + iat/exp + audience)
+                                       ├─► claim.DeviceMatchesCSR (set-equality)
+                                       ├─► intune.ReplayCache.CheckAndInsert
+                                       ├─► intune.PerDeviceRateLimiter.Allow
+                                       └─► (V3-Pro) ComplianceCheck hook
+                                       │
+                                       ▼
+                              processEnrollment → IssuerConnector
+```
+
+The trust anchor file is mode-0600 on disk; certctl loads it at
+startup via `intune.LoadTrustAnchor` (refuses to boot on empty
+bundle / parse error / past-`NotAfter` cert) and reloads atomically
+on `SIGHUP` (mirrors the server TLS-cert hot-reload pattern). A bad
+reload keeps the OLD pool in place — operators get a recoverable
+failure window rather than a service-down. The admin GUI's SCEP
+Intune Monitoring tab + admin endpoints
+(`GET /api/v1/admin/scep/intune/stats`,
+`POST /api/v1/admin/scep/intune/reload-trust`) are M-008 admin-gated;
+non-admin Bearer callers get HTTP 403 because the trust-anchor
+expiries are sensitive operational metadata.
+
+See [`scep-intune.md`](scep-intune.md) for the full migration playbook
++ Microsoft support statement.
+
 ### CA Signing Abstraction
 
 The local issuer's CA private key is wrapped behind the `signer.Signer` interface in `internal/crypto/signer/`. Every CA-signing call site — leaf certificate issuance (`x509.CreateCertificate`), CRL generation (`x509.CreateRevocationList`), and OCSP response signing (`ocsp.CreateResponse`) — accesses the key through this interface rather than touching `crypto.Signer` directly. The interface embeds the stdlib `crypto.Signer` and adds a single `Algorithm() Algorithm` method so call sites can pick the matching `x509.SignatureAlgorithm` without reflecting on the concrete key type.
