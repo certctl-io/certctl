@@ -172,15 +172,24 @@ func (s *SCEPService) processEnrollment(ctx context.Context, csrPEM string, tran
 		"transaction_id", transactionID,
 		"issuer", s.issuerID)
 
-	// Resolve MaxTTL from profile
-	var maxTTLSeconds int
+	// Resolve MaxTTL + must-staple from profile.
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: thread
+	// profile.MustStaple through to the issuer so the local issuer can
+	// add the RFC 7633 id-pe-tlsfeature extension. Without this read the
+	// CertificateProfile.MustStaple field would be a stored-but-ignored
+	// "lying field" that operators set without behavior change.
+	var (
+		maxTTLSeconds int
+		mustStaple    bool
+	)
 	if profile != nil {
 		maxTTLSeconds = profile.MaxTTLSeconds
+		mustStaple = profile.MustStaple
 	}
 
 	// Issue the certificate via the configured issuer connector
 	// SCEP enrollments use profile EKUs if available, otherwise default (serverAuth + clientAuth fallback)
-	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
+	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds, mustStaple)
 	if err != nil {
 		s.logger.Error("SCEP enrollment failed",
 			"action", auditAction,

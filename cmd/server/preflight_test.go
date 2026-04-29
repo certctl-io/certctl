@@ -14,10 +14,10 @@ type fakeIssuerConn struct {
 	caCertErr error
 }
 
-func (f *fakeIssuerConn) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*service.IssuanceResult, error) {
+func (f *fakeIssuerConn) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*service.IssuanceResult, error) {
 	return nil, nil
 }
-func (f *fakeIssuerConn) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*service.IssuanceResult, error) {
+func (f *fakeIssuerConn) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*service.IssuanceResult, error) {
 	return nil, nil
 }
 func (f *fakeIssuerConn) RevokeCertificate(ctx context.Context, serial string, reason string) error {

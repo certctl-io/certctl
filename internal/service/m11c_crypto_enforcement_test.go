@@ -213,7 +213,7 @@ func TestIssuerConnectorAdapter_IssueCertificate_MaxTTLForwarded(t *testing.T) {
 	mock := &mockConnectorLayerIssuer{}
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	_, err := adapter.IssueCertificate(context.Background(), "test.example.com", nil, "csr", nil, 7200)
+	_, err := adapter.IssueCertificate(context.Background(), "test.example.com", nil, "csr", nil, 7200, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -230,7 +230,7 @@ func TestIssuerConnectorAdapter_RenewCertificate_MaxTTLForwarded(t *testing.T) {
 	mock := &mockConnectorLayerIssuer{}
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	_, err := adapter.RenewCertificate(context.Background(), "renew.example.com", nil, "csr", nil, 14400)
+	_, err := adapter.RenewCertificate(context.Background(), "renew.example.com", nil, "csr", nil, 14400, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -247,7 +247,7 @@ func TestIssuerConnectorAdapter_IssueCertificate_ZeroMaxTTL(t *testing.T) {
 	mock := &mockConnectorLayerIssuer{}
 	adapter := NewIssuerConnectorAdapter(mock)
 
-	_, err := adapter.IssueCertificate(context.Background(), "test.example.com", nil, "csr", nil, 0)
+	_, err := adapter.IssueCertificate(context.Background(), "test.example.com", nil, "csr", nil, 0, false)
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
@@ -366,11 +366,16 @@ func TestSCEPService_NoProfileRepo_PassesThrough(t *testing.T) {
 type capturingIssuerConnector struct {
 	lastMaxTTLSeconds int
 	lastEKUs          []string
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: capture
+	// must-staple too so the integration test can prove the wire reaches
+	// the connector for both PKCSReq and renewal paths.
+	lastMustStaple bool
 }
 
-func (c *capturingIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
+func (c *capturingIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
 	c.lastMaxTTLSeconds = maxTTLSeconds
 	c.lastEKUs = ekus
+	c.lastMustStaple = mustStaple
 	now := time.Now()
 	return &IssuanceResult{
 		Serial:    "test-serial",
@@ -381,8 +386,8 @@ func (c *capturingIssuerConnector) IssueCertificate(ctx context.Context, commonN
 	}, nil
 }
 
-func (c *capturingIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
-	return c.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
+func (c *capturingIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
+	return c.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds, mustStaple)
 }
 
 func (c *capturingIssuerConnector) RevokeCertificate(ctx context.Context, serial string, reason string) error {

@@ -43,11 +43,18 @@ func (s *RenewalService) SetTargetRepo(repo repository.TargetRepository) {
 // inversion. Use IssuerConnectorAdapter to bridge between the two.
 type IssuerConnector interface {
 	// IssueCertificate issues a new certificate using the provided CSR PEM.
-	// maxTTLSeconds caps the certificate validity period (0 = no cap, use issuer default).
-	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error)
+	// maxTTLSeconds caps the certificate validity period (0 = no cap, use
+	// issuer default). mustStaple, when true, instructs the issuer to add
+	// the RFC 7633 id-pe-tlsfeature extension to the issued cert (only the
+	// local issuer honors this; upstream connectors silently ignore it).
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up.
+	IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error)
 	// RenewCertificate renews a certificate using the provided CSR PEM.
-	// maxTTLSeconds caps the certificate validity period (0 = no cap, use issuer default).
-	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error)
+	// maxTTLSeconds caps the certificate validity period (0 = no cap, use
+	// issuer default). mustStaple has the same semantics as on
+	// IssueCertificate so renewed certs match their initial-issuance
+	// extension set when the bound profile changed mid-lifetime.
+	RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error)
 	// RevokeCertificate revokes a certificate by serial number with an optional reason.
 	RevokeCertificate(ctx context.Context, serial string, reason string) error
 	// GenerateCRL generates a DER-encoded X.509 CRL from the given revocation entries.
@@ -446,18 +453,25 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		Bytes: x509.MarshalPKCS1PrivateKey(privKey),
 	}))
 
-	// Resolve EKUs and MaxTTL from the certificate profile
-	var ekus []string
-	var maxTTLSeconds int
+	// Resolve EKUs + MaxTTL + must-staple from the certificate profile.
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: thread
+	// must-staple through the renewal path too so renewed certs match
+	// their initial-issuance extension set.
+	var (
+		ekus          []string
+		maxTTLSeconds int
+		mustStaple    bool
+	)
 	if cert.CertificateProfileID != "" && s.profileRepo != nil {
 		if profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID); profileErr == nil && profile != nil {
 			ekus = profile.AllowedEKUs
 			maxTTLSeconds = profile.MaxTTLSeconds
+			mustStaple = profile.MustStaple
 		}
 	}
 
 	// Call issuer connector to renew
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds, mustStaple)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer renewal failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {
@@ -564,18 +578,23 @@ func (s *RenewalService) CompleteAgentCSRRenewal(ctx context.Context, job *domai
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
 
-	// Resolve EKUs and MaxTTL from the certificate profile (for S/MIME, email certs, etc.)
-	var ekus []string
-	var maxTTLSeconds int
+	// Resolve EKUs + MaxTTL + must-staple from the certificate profile.
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up.
+	var (
+		ekus          []string
+		maxTTLSeconds int
+		mustStaple    bool
+	)
 	if profile != nil {
 		if len(profile.AllowedEKUs) > 0 {
 			ekus = profile.AllowedEKUs
 		}
 		maxTTLSeconds = profile.MaxTTLSeconds
+		mustStaple = profile.MustStaple
 	}
 
 	// Sign the agent-submitted CSR via issuer
-	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds)
+	result, err := connector.RenewCertificate(ctx, cert.CommonName, cert.SANs, csrPEM, ekus, maxTTLSeconds, mustStaple)
 	if err != nil {
 		s.failJob(ctx, job, fmt.Sprintf("issuer signing failed: %v", err))
 		if notifErr := s.notificationSvc.SendRenewalNotification(ctx, cert, false, err); notifErr != nil {

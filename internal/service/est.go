@@ -139,15 +139,22 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 		"sans", strings.Join(sans, ","),
 		"issuer", s.issuerID)
 
-	// Resolve MaxTTL from profile
-	var maxTTLSeconds int
+	// Resolve MaxTTL + must-staple from profile.
+	// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: thread
+	// profile.MustStaple through to the issuer so the local issuer can
+	// add the RFC 7633 id-pe-tlsfeature extension.
+	var (
+		maxTTLSeconds int
+		mustStaple    bool
+	)
 	if profile != nil {
 		maxTTLSeconds = profile.MaxTTLSeconds
+		mustStaple = profile.MustStaple
 	}
 
 	// Issue the certificate via the configured issuer connector
 	// EST enrollments use profile EKUs if available, otherwise default (serverAuth + clientAuth fallback)
-	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
+	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds, mustStaple)
 	if err != nil {
 		s.logger.Error("EST enrollment failed",
 			"action", auditAction,

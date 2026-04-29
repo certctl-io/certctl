@@ -1254,9 +1254,25 @@ type mockIssuerConnector struct {
 	// LastOCSPSignRequest captures the last request passed to SignOCSPResponse.
 	// Tests use this to assert CertStatus (0=good, 1=revoked, 2=unknown).
 	LastOCSPSignRequest *OCSPSignRequest
+
+	// LastMustStaple records the must-staple bool from the most recent
+	// Issue/Renew call so tests can assert the service-layer wire from
+	// CertificateProfile.MustStaple → IssuerConnector reaches the
+	// connector. SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up.
+	LastMustStaple bool
 }
 
-func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
+// LastMustStaple records the must-staple bool from the most recent
+// IssueCertificate / RenewCertificate call. Set by both methods so tests
+// can assert the wire from CertificateProfile.MustStaple → service →
+// IssuerConnector reaches the connector. SCEP RFC 8894 + Intune master
+// bundle Phase 5.6 follow-up.
+//
+// (Field added to mockIssuerConnector struct above; declared via the
+// pointer receiver so existing test fixtures don't need re-zeroing.)
+
+func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
+	m.LastMustStaple = mustStaple
 	if m.Err != nil {
 		return nil, m.Err
 	}
@@ -1273,11 +1289,12 @@ func (m *mockIssuerConnector) IssueCertificate(ctx context.Context, commonName s
 	}, nil
 }
 
-func (m *mockIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
+func (m *mockIssuerConnector) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
+	m.LastMustStaple = mustStaple
 	if m.Err != nil {
 		return nil, m.Err
 	}
-	return m.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds)
+	return m.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds, mustStaple)
 }
 
 func (m *mockIssuerConnector) RevokeCertificate(ctx context.Context, serial string, reason string) error {

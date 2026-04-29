@@ -194,13 +194,18 @@ func (s *AgentService) SubmitCSR(ctx context.Context, agentID string, certID str
 				return fmt.Errorf("CSR validation failed: %w", csrErr)
 			}
 
-			// Resolve MaxTTL from profile
-			var maxTTLSeconds int
+			// Resolve MaxTTL + must-staple from profile.
+			// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up.
+			var (
+				maxTTLSeconds int
+				mustStaple    bool
+			)
 			if profile != nil {
 				maxTTLSeconds = profile.MaxTTLSeconds
+				mustStaple = profile.MustStaple
 			}
 
-			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM), ekus, maxTTLSeconds)
+			result, err := connector.IssueCertificate(ctx, cert.CommonName, cert.SANs, string(csrPEM), ekus, maxTTLSeconds, mustStaple)
 			if err != nil {
 				return fmt.Errorf("issuer signing failed: %w", err)
 			}

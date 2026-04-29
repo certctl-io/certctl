@@ -20,13 +20,19 @@ func NewIssuerConnectorAdapter(c issuer.Connector) IssuerConnector {
 
 // IssueCertificate delegates to the underlying connector's IssueCertificate method,
 // translating between service-layer and connector-layer types.
-func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
+//
+// SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: mustStaple flows
+// through to the IssuanceRequest.MustStaple field. Only the local issuer
+// honors it (RFC 7633 id-pe-tlsfeature extension); upstream connectors
+// silently ignore the field.
+func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
 	result, err := a.connector.IssueCertificate(ctx, issuer.IssuanceRequest{
 		CommonName:    commonName,
 		SANs:          sans,
 		CSRPEM:        csrPEM,
 		EKUs:          ekus,
 		MaxTTLSeconds: maxTTLSeconds,
+		MustStaple:    mustStaple,
 	})
 	if err != nil {
 		return nil, err
@@ -42,13 +48,14 @@ func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonNam
 
 // RenewCertificate delegates to the underlying connector's RenewCertificate method,
 // translating between service-layer and connector-layer types.
-func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int) (*IssuanceResult, error) {
+func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
 	result, err := a.connector.RenewCertificate(ctx, issuer.RenewalRequest{
 		CommonName:    commonName,
 		SANs:          sans,
 		CSRPEM:        csrPEM,
 		EKUs:          ekus,
 		MaxTTLSeconds: maxTTLSeconds,
+		MustStaple:    mustStaple,
 	})
 	if err != nil {
 		return nil, err
