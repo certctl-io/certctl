@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto"
 	"crypto/tls"
 	"crypto/x509"
 	"fmt"
@@ -791,7 +792,19 @@ func main() {
 			if profile.ProfileID != "" {
 				scepService.SetProfileID(profile.ProfileID)
 			}
-			scepHandlers[profile.PathID] = handler.NewSCEPHandler(scepService)
+			scepHandler := handler.NewSCEPHandler(scepService)
+			// SCEP RFC 8894 Phase 2.3: load the per-profile RA pair so the
+			// handler can run the new RFC 8894 PKIMessage path. Preflight
+			// already validated the pair (file mode 0600 + cert/key match
+			// + non-expired + RSA-or-ECDSA). Failure here is a deploy bug
+			// the operator needs to know about — fail loud at startup.
+			raCert, raKey, err := loadSCEPRAPair(profile.RACertPath, profile.RAKeyPath)
+			if err != nil {
+				profileLog.Error("startup refused: SCEP profile RA pair load failed despite preflight pass — likely a TOCTOU between preflight + here, or filesystem changed mid-boot", "error", err)
+				os.Exit(1)
+			}
+			scepHandler.SetRAPair(raCert, raKey)
+			scepHandlers[profile.PathID] = scepHandler
 			endpoint := "/scep"
 			if profile.PathID != "" {
 				endpoint = "/scep/" + profile.PathID
@@ -1140,6 +1153,38 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
 	}
 	return nil
+}
+
+// loadSCEPRAPair reads the RA cert PEM + key PEM and returns the parsed
+// x509.Certificate + crypto.PrivateKey ready for the SCEP handler's RFC
+// 8894 path. Called AFTER preflightSCEPRACertKey passed; failures here
+// indicate a TOCTOU race or a filesystem change between preflight and
+// the load (rare).
+//
+// Cert PEM may carry a chain (CA + RA + intermediate); we use the FIRST
+// CERTIFICATE block, matching the RFC 8894 §3.5.1 single-cert convention
+// for the GetCACert response.
+func loadSCEPRAPair(certPath, keyPath string) (*x509.Certificate, crypto.PrivateKey, error) {
+	certPEM, err := os.ReadFile(certPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read RA cert: %w", err)
+	}
+	keyPEM, err := os.ReadFile(keyPath)
+	if err != nil {
+		return nil, nil, fmt.Errorf("read RA key: %w", err)
+	}
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse RA pair: %w", err)
+	}
+	if len(pair.Certificate) == 0 {
+		return nil, nil, fmt.Errorf("RA cert PEM contained no certificate blocks")
+	}
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return nil, nil, fmt.Errorf("parse RA cert: %w", err)
+	}
+	return leaf, pair.PrivateKey, nil
 }
 
 // preflightSCEPRACertKey validates the RA cert/key pair the RFC 8894 SCEP

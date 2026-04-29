@@ -43,6 +43,14 @@ func (s *scepProfileMockService) PKCSReq(_ context.Context, _, _, _ string) (*do
 	return nil, nil
 }
 
+// PKCSReqWithEnvelope was added to the SCEPService interface in SCEP RFC 8894
+// + Intune master bundle Phase 2.4. The router-level tests don't drive the
+// RFC 8894 path; this stub satisfies the interface so the per-profile
+// dispatch tests still compile.
+func (s *scepProfileMockService) PKCSReqWithEnvelope(_ context.Context, _, _ string, env *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	return &domain.SCEPResponseEnvelope{Status: domain.SCEPStatusSuccess, TransactionID: env.TransactionID}
+}
+
 func TestRouter_RegisterSCEPHandlers_LegacyEmptyPathIDMapsToRoot(t *testing.T) {
 	r := New()
 	svc := &scepProfileMockService{tag: "legacy"}

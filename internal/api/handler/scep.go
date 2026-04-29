@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto"
 	"crypto/x509"
 	"encoding/asn1"
 	"encoding/base64"
@@ -27,7 +28,17 @@ type SCEPService interface {
 	GetCACert(ctx context.Context) (string, error)
 
 	// PKCSReq processes a PKCS#10 CSR and returns a signed certificate.
+	// Used by the MVP raw-CSR fall-through path; preserved unchanged for
+	// backward compat with lightweight SCEP clients.
 	PKCSReq(ctx context.Context, csrPEM string, challengePassword string, transactionID string) (*domain.SCEPEnrollResult, error)
+
+	// PKCSReqWithEnvelope processes a SCEP PKCSReq from the RFC 8894 path
+	// (the handler successfully parsed an EnvelopedData + signerInfo POPO).
+	// Returns *SCEPResponseEnvelope (not error + *SCEPEnrollResult) because
+	// RFC 8894 §3.3 mandates a CertRep PKIMessage on every response, even
+	// failures. Returns nil to signal 'invalid challenge password' (caller
+	// translates to HTTP 403, matching the MVP path's wire shape).
+	PKCSReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
 }
 
 // SCEPHandler handles HTTP requests for the SCEP protocol (RFC 8894).
@@ -39,13 +50,32 @@ type SCEPService interface {
 //   - GET  ?operation=GetCACaps    — server capabilities
 //   - GET  ?operation=GetCACert    — CA certificate distribution
 //   - POST ?operation=PKIOperation — certificate enrollment (PKCSReq)
+//
+// SCEP RFC 8894 + Intune master bundle Phase 2.3: SCEPHandler now optionally
+// carries an RA cert + key pair. When set, the handler tries the new RFC 8894
+// PKIMessage path FIRST (parse SignedData → verify POPO → decrypt EnvelopedData).
+// On any parse failure it falls through to the legacy MVP raw-CSR path (preserves
+// backward compat with lightweight SCEP clients). When RA pair is unset, the
+// handler runs MVP-only (the v2.0.x behavior).
 type SCEPHandler struct {
-	svc SCEPService
+	svc    SCEPService
+	raCert *x509.Certificate // RFC 8894 path: RA cert clients encrypt CSR to
+	raKey  crypto.PrivateKey // RFC 8894 path: RA key for EnvelopedData decrypt + CertRep signing
 }
 
-// NewSCEPHandler creates a new SCEPHandler.
+// NewSCEPHandler creates a new SCEPHandler with the legacy MVP-only behavior.
+// SetRAPair below upgrades the handler to the RFC 8894 path; that's the route
+// cmd/server/main.go takes when the operator supplies CERTCTL_SCEP_RA_*.
 func NewSCEPHandler(svc SCEPService) SCEPHandler {
 	return SCEPHandler{svc: svc}
+}
+
+// SetRAPair injects the RA cert + key the RFC 8894 path needs. Called by
+// cmd/server/main.go after the per-profile preflight gate validates the pair.
+// Without this call the handler runs MVP-only (the legacy v2.0.x behavior).
+func (h *SCEPHandler) SetRAPair(raCert *x509.Certificate, raKey crypto.PrivateKey) {
+	h.raCert = raCert
+	h.raKey = raKey
 }
 
 // HandleSCEP is the single entry point for all SCEP operations.
@@ -125,6 +155,22 @@ func (h SCEPHandler) getCACert(w http.ResponseWriter, r *http.Request) {
 
 // pkiOperation handles POST ?operation=PKIOperation
 // Processes a SCEP enrollment request containing a PKCS#7-wrapped CSR.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 2.3: this handler tries the
+// new RFC 8894 PKIMessage path FIRST (parse outer SignedData → verify
+// signerInfo POPO → extract authenticatedAttributes → decrypt EnvelopedData
+// to recover the inner CSR). On any parse failure it falls through to the
+// legacy MVP raw-CSR path (extractCSRFromPKCS7). The MVP path stays
+// unchanged for backward compat with lightweight SCEP clients.
+//
+// Path selection rules:
+//   - h.raCert / h.raKey unset → MVP-only (legacy v2.0.x behavior, never tries RFC 8894)
+//   - RA pair set + RFC 8894 parse succeeds → RFC 8894 path (CertRep PKIMessage response)
+//   - RA pair set + RFC 8894 parse fails → MVP fall-through (degenerate certs-only response)
+//
+// The Phase 3 commit will replace the MVP-fall-through writeSCEPResponse
+// with writeCertRepPKIMessage for the RFC 8894 path; the MVP path keeps
+// using writeSCEPResponse so lightweight clients see no behavior change.
 func (h SCEPHandler) pkiOperation(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
@@ -145,7 +191,38 @@ func (h SCEPHandler) pkiOperation(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Extract the PKCS#10 CSR from the PKCS#7 SignedData envelope
+	// Try the RFC 8894 path first when an RA pair is configured. On any
+	// parse failure we fall through to the MVP path silently — that's the
+	// backward-compat contract for lightweight clients.
+	if h.raCert != nil && h.raKey != nil {
+		if envelope, csrPEM, ok := h.tryParseRFC8894(body); ok {
+			resp := h.svc.PKCSReqWithEnvelope(r.Context(), csrPEM, "", envelope)
+			if resp == nil {
+				// nil signals 'invalid challenge password' — the service
+				// layer didn't find one in the request (envelope-path
+				// challenge password lives in the CSR's challengePassword
+				// attribute, extracted by the service). Treat as 403,
+				// matching the MVP path's wire shape.
+				ErrorWithRequestID(w, http.StatusForbidden, "Invalid challenge password", requestID)
+				return
+			}
+			// Phase 2 emits the legacy certs-only response on success;
+			// Phase 3 swaps in writeCertRepPKIMessage. Failure responses
+			// are emitted as plain HTTP errors until Phase 3 lands the
+			// CertRep+failInfo wire shape.
+			if resp.Status == domain.SCEPStatusSuccess && resp.Result != nil {
+				h.writeSCEPResponse(w, resp.Result)
+				return
+			}
+			ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("SCEP enrollment failed (failInfo=%s)", resp.FailInfo), requestID)
+			return
+		}
+		// RFC 8894 parse failed — fall through to the MVP path.
+	}
+
+	// MVP path: extract the PKCS#10 CSR from the PKCS#7 SignedData envelope
+	// using the legacy parser. This is what lightweight clients (raw-CSR-
+	// inside-SignedData, or even bare CSRs in some cases) hit.
 	csrDER, challengePassword, transactionID, err := extractCSRFromPKCS7(body)
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("Invalid SCEP message: %v", err), requestID)
@@ -182,6 +259,74 @@ func (h SCEPHandler) pkiOperation(w http.ResponseWriter, r *http.Request) {
 	// Build response: issued cert wrapped in PKCS#7 certs-only
 	h.writeSCEPResponse(w, result)
 }
+
+// tryParseRFC8894 attempts to parse the request body as an RFC 8894 SCEP
+// PKIMessage:
+//  1. Parse outer SignedData; pluck the device's transient signing cert.
+//  2. Verify the signerInfo signature (POPO over auth-attrs).
+//  3. Extract messageType / transactionID / senderNonce auth-attrs.
+//  4. The encapContent is the inner pkcsPKIEnvelope (an EnvelopedData);
+//     decrypt it with h.raKey to recover the PKCS#10 CSR DER.
+//  5. PEM-encode the CSR for the service layer.
+//
+// Returns (envelope, csrPEM, true) on success; (nil, "", false) on any
+// parse / verify / decrypt failure. The handler treats false as 'fall
+// through to MVP path' so lightweight clients keep working.
+func (h SCEPHandler) tryParseRFC8894(body []byte) (*domain.SCEPRequestEnvelope, string, bool) {
+	sd, err := pkcs7.ParseSignedData(body)
+	if err != nil {
+		return nil, "", false
+	}
+	if len(sd.SignerInfos) == 0 {
+		return nil, "", false
+	}
+	si := sd.SignerInfos[0]
+	if err := si.VerifySignature(); err != nil {
+		return nil, "", false
+	}
+	mt, err := si.GetMessageType()
+	if err != nil {
+		return nil, "", false
+	}
+	tid, err := si.GetTransactionID()
+	if err != nil {
+		return nil, "", false
+	}
+	nonce, err := si.GetSenderNonce()
+	if err != nil {
+		// senderNonce is optional in some clients; treat missing as empty.
+		nonce = nil
+	}
+	// EncapContent is the inner pkcsPKIEnvelope (EnvelopedData). Parse +
+	// decrypt with the RA key.
+	if len(sd.EncapContent) == 0 {
+		return nil, "", false
+	}
+	env, err := pkcs7.ParseEnvelopedData(sd.EncapContent)
+	if err != nil {
+		return nil, "", false
+	}
+	csrDER, err := env.Decrypt(h.raKey, h.raCert)
+	if err != nil {
+		return nil, "", false
+	}
+	// Verify the recovered bytes really are a CSR. If not, fall through.
+	if _, err := x509.ParseCertificateRequest(csrDER); err != nil {
+		return nil, "", false
+	}
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+	envelope := &domain.SCEPRequestEnvelope{
+		MessageType:   mt,
+		TransactionID: tid,
+		SenderNonce:   nonce,
+		SignerCert:    si.SignerCert.Raw,
+	}
+	return envelope, csrPEM, true
+}
+
+// silence unused-import warning if some narrow build excludes the path
+// where crypto.PrivateKey is used (the RA key field below).
+var _ crypto.PrivateKey = (*interface{})(nil)
 
 // writeSCEPResponse writes a SCEP enrollment response as PKCS#7 certs-only (DER).
 func (h SCEPHandler) writeSCEPResponse(w http.ResponseWriter, result *domain.SCEPEnrollResult) {

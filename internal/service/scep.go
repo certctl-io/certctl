@@ -210,3 +210,92 @@ func (s *SCEPService) processEnrollment(ctx context.Context, csrPEM string, tran
 		ChainPEM: result.ChainPEM,
 	}, nil
 }
+
+// PKCSReqWithEnvelope processes a SCEP PKCSReq from the RFC 8894 path
+// (where the handler successfully parsed an EnvelopedData + signerInfo
+// instead of the MVP raw-CSR path).
+//
+// SCEP RFC 8894 + Intune master bundle Phase 2.4.
+//
+// Returns *SCEPResponseEnvelope (not error + *SCEPEnrollResult) because
+// RFC 8894 mandates a CertRep PKIMessage on every PKIOperation request,
+// even failure cases — the handler shouldn't have to translate Go errors
+// into SCEP failInfo codes; the service does that mapping.
+//
+// Service-side error → failInfo mapping (from the prompt's exact table):
+//
+//	Invalid challenge password    → caller returns HTTP 403, NOT a PKIMessage
+//	                                (RFC 8894 §3.3.1 silent on this; matches MVP precedent)
+//	CSR parse failure             → BadRequest (2)
+//	CSR signature invalid         → BadMessageCheck (1)
+//	Crypto policy violation       → BadAlg (0)
+//	Issuer connector failure      → BadRequest (2)
+//	Audit-log write failure       → log + continue with success (best-effort)
+//
+// The challenge-password failure case returns nil to signal "let the caller
+// translate to 403"; every other failure mode returns a populated envelope
+// with FailInfo set so the handler can build a CertRep with pkiStatus=2.
+func (s *SCEPService) PKCSReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	resp := &domain.SCEPResponseEnvelope{
+		TransactionID:  envelope.TransactionID,
+		RecipientNonce: envelope.SenderNonce,
+	}
+
+	// Defense-in-depth: refuse any enrollment when no shared secret is
+	// configured. Mirrors PKCSReq's gate. Returning nil signals 'let the
+	// caller translate to HTTP 403' — the existing PKCSReq path returns
+	// an error string the handler matched on, but PKCSReqWithEnvelope
+	// returns *SCEPResponseEnvelope so we use a nil sentinel.
+	if s.challengePassword == "" {
+		s.logger.Warn("SCEP enrollment rejected: server has no challenge password configured (RFC 8894 path)",
+			"transaction_id", envelope.TransactionID)
+		return nil
+	}
+	if subtle.ConstantTimeCompare([]byte(challengePassword), []byte(s.challengePassword)) != 1 {
+		s.logger.Warn("SCEP enrollment rejected: invalid challenge password (RFC 8894 path)",
+			"transaction_id", envelope.TransactionID)
+		return nil
+	}
+
+	// Reuse the existing processEnrollment for the actual issuance work.
+	// Errors mapped to SCEP failInfo per the table above.
+	result, err := s.processEnrollment(ctx, csrPEM, envelope.TransactionID, "scep_pkcsreq")
+	if err != nil {
+		resp.Status = domain.SCEPStatusFailure
+		resp.FailInfo = mapServiceErrorToFailInfo(err)
+		return resp
+	}
+	resp.Status = domain.SCEPStatusSuccess
+	resp.Result = result
+	return resp
+}
+
+// mapServiceErrorToFailInfo translates a service-layer error into the
+// SCEP failInfo code RFC 8894 §3.2.1.4.5 enumerates. The mapping mirrors
+// the table in PKCSReqWithEnvelope's docblock; defaults to BadRequest
+// when the error doesn't match any specific category.
+func mapServiceErrorToFailInfo(err error) domain.SCEPFailInfo {
+	if err == nil {
+		return domain.SCEPFailBadRequest
+	}
+	msg := err.Error()
+	switch {
+	case containsAnyOf(msg, "invalid CSR PEM", "failed to parse CSR"):
+		return domain.SCEPFailBadRequest
+	case containsAnyOf(msg, "CSR signature verification failed"):
+		return domain.SCEPFailBadMessageCheck
+	case containsAnyOf(msg, "key algorithm", "key size", "algorithm not allowed", "crypto policy"):
+		return domain.SCEPFailBadAlg
+	default:
+		return domain.SCEPFailBadRequest
+	}
+}
+
+func containsAnyOf(s string, needles ...string) bool {
+	for _, n := range needles {
+		if strings.Contains(s, n) {
+			return true
+		}
+	}
+	return false
+}

@@ -36,6 +36,29 @@ func (m *mockSCEPService) PKCSReq(ctx context.Context, csrPEM string, challengeP
 	return m.EnrollResult, m.EnrollErr
 }
 
+// PKCSReqWithEnvelope is the RFC 8894 envelope-aware variant added in SCEP
+// RFC 8894 + Intune master bundle Phase 2.4. The MVP-only handler tests
+// don't exercise this path (RA pair is unset), so this stub is only here
+// to satisfy the interface; behavior mirrors PKCSReq's success/failure
+// based on the same EnrollResult / EnrollErr fields the existing tests
+// already populate.
+func (m *mockSCEPService) PKCSReqWithEnvelope(ctx context.Context, csrPEM string, challengePassword string, envelope *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope {
+	if m.EnrollErr != nil {
+		return &domain.SCEPResponseEnvelope{
+			Status:         domain.SCEPStatusFailure,
+			FailInfo:       domain.SCEPFailBadRequest,
+			TransactionID:  envelope.TransactionID,
+			RecipientNonce: envelope.SenderNonce,
+		}
+	}
+	return &domain.SCEPResponseEnvelope{
+		Status:         domain.SCEPStatusSuccess,
+		Result:         m.EnrollResult,
+		TransactionID:  envelope.TransactionID,
+		RecipientNonce: envelope.SenderNonce,
+	}
+}
+
 func TestSCEP_GetCACaps_Success(t *testing.T) {
 	svc := &mockSCEPService{}
 	h := NewSCEPHandler(svc)
