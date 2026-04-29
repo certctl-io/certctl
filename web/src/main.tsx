@@ -32,6 +32,7 @@ import ObservabilityPage from './pages/ObservabilityPage';
 import JobDetailPage from './pages/JobDetailPage';
 import IssuerDetailPage from './pages/IssuerDetailPage';
 import TargetDetailPage from './pages/TargetDetailPage';
+import SCEPAdminPage from './pages/SCEPAdminPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -79,6 +80,12 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="health-monitor" element={<HealthMonitorPage />} />
                   <Route path="digest" element={<DigestPage />} />
                   <Route path="observability" element={<ObservabilityPage />} />
+                  {/* SCEP RFC 8894 + Intune master bundle Phase 9.4: per-profile
+                      Intune Monitoring tab. Route is unconditional; the page
+                      itself renders an "Admin access required" banner for
+                      non-admin callers and skips the underlying API calls so
+                      the server never sees a 403-prone request. */}
+                  <Route path="scep/intune" element={<SCEPAdminPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

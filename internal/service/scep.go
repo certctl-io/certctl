@@ -9,6 +9,8 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
@@ -48,8 +50,202 @@ type SCEPService struct {
 	intuneValidity    time.Duration             // optional override on top of the challenge's exp
 	intuneReplayCache *intune.ReplayCache       // nonce-keyed; catches duplicate submission
 	intuneRateLimiter *intune.PerDeviceRateLimiter
-	complianceCheck   ComplianceCheck // V3-Pro plug-in seam; nil-default no-op
+	complianceCheck   ComplianceCheck   // V3-Pro plug-in seam; nil-default no-op
+	intuneCounters    *intuneCounterTab // per-status atomic counters for the admin endpoint
+	pathID            string            // SCEP profile path ID; surfaced by admin endpoints
 }
+
+// intuneCounterTab is the in-memory equivalent of the
+// `certctl_scep_intune_enrollments_total{status="..."}` metric the
+// master prompt's Phase 8.4 mentions. We don't take a Prometheus
+// dependency here (the project doesn't currently expose /metrics; that's
+// a separate decision); operators who want scraping can wrap these with
+// a prom.Collector later. For Phase 9 the in-memory counters drive the
+// admin GUI's "Intune Monitoring" tab via GET /api/v1/admin/scep/intune/stats.
+//
+// Concurrency: every field is read/written via sync/atomic so the
+// dispatcher's hot path stays lock-free.
+type intuneCounterTab struct {
+	success         atomic.Uint64
+	signatureFailed atomic.Uint64
+	expired         atomic.Uint64
+	notYetValid     atomic.Uint64
+	wrongAudience   atomic.Uint64
+	replay          atomic.Uint64
+	unknownVersion  atomic.Uint64
+	malformed       atomic.Uint64
+	rateLimited     atomic.Uint64
+	claimMismatch   atomic.Uint64
+	complianceErr   atomic.Uint64
+}
+
+// snapshot returns a zero-allocation copy of the current counter values
+// keyed by the same status labels intuneFailReason emits.
+func (c *intuneCounterTab) snapshot() map[string]uint64 {
+	if c == nil {
+		return map[string]uint64{}
+	}
+	return map[string]uint64{
+		"success":           c.success.Load(),
+		"signature_invalid": c.signatureFailed.Load(),
+		"expired":           c.expired.Load(),
+		"not_yet_valid":     c.notYetValid.Load(),
+		"wrong_audience":    c.wrongAudience.Load(),
+		"replay":            c.replay.Load(),
+		"unknown_version":   c.unknownVersion.Load(),
+		"malformed":         c.malformed.Load(),
+		"rate_limited":      c.rateLimited.Load(),
+		"claim_mismatch":    c.claimMismatch.Load(),
+		"compliance_failed": c.complianceErr.Load(),
+	}
+}
+
+// inc advances the counter that matches the given fail-reason label
+// (must be one of the strings intuneFailReason returns). Unknown labels
+// fall through to "malformed" so an enum drift doesn't silently lose
+// counts.
+func (c *intuneCounterTab) inc(label string) {
+	if c == nil {
+		return
+	}
+	switch label {
+	case "success":
+		c.success.Add(1)
+	case "signature_invalid":
+		c.signatureFailed.Add(1)
+	case "expired":
+		c.expired.Add(1)
+	case "not_yet_valid":
+		c.notYetValid.Add(1)
+	case "wrong_audience":
+		c.wrongAudience.Add(1)
+	case "replay":
+		c.replay.Add(1)
+	case "unknown_version":
+		c.unknownVersion.Add(1)
+	case "rate_limited":
+		c.rateLimited.Add(1)
+	case "claim_mismatch":
+		c.claimMismatch.Add(1)
+	case "compliance_failed":
+		c.complianceErr.Add(1)
+	default:
+		c.malformed.Add(1)
+	}
+}
+
+// IntuneTrustAnchorInfo is the per-cert public summary of one trust
+// anchor in the holder's pool. Matches the shape the admin endpoint
+// returns to the GUI.
+type IntuneTrustAnchorInfo struct {
+	Subject      string    `json:"subject"`
+	NotBefore    time.Time `json:"not_before"`
+	NotAfter     time.Time `json:"not_after"`
+	DaysToExpiry int       `json:"days_to_expiry"`
+	Expired      bool      `json:"expired"`
+}
+
+// IntuneStatsSnapshot is the per-profile observability view the admin
+// GET endpoint hands back. SCEPService.IntuneStats() builds one of
+// these on demand under no contention with the dispatcher hot path.
+type IntuneStatsSnapshot struct {
+	PathID            string                  `json:"path_id"`
+	IssuerID          string                  `json:"issuer_id"`
+	Enabled           bool                    `json:"enabled"`
+	TrustAnchorPath   string                  `json:"trust_anchor_path,omitempty"`
+	TrustAnchors      []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
+	Audience          string                  `json:"audience,omitempty"`
+	ChallengeValidity time.Duration           `json:"challenge_validity_ns,omitempty"`
+	RateLimitDisabled bool                    `json:"rate_limit_disabled"`
+	ReplayCacheSize   int                     `json:"replay_cache_size"`
+	Counters          map[string]uint64       `json:"counters"`
+	GeneratedAt       time.Time               `json:"generated_at"`
+}
+
+// SetPathID records the SCEP profile path ID this service instance
+// serves. Admin endpoints surface the PathID per row so operators can
+// triage which profile a stat or failure belongs to. Empty PathID maps
+// to the legacy `/scep` root.
+func (s *SCEPService) SetPathID(pathID string) { s.pathID = pathID }
+
+// PathID returns the SCEP profile path ID this service serves. Empty
+// for the legacy `/scep` root.
+func (s *SCEPService) PathID() string { return s.pathID }
+
+// IssuerID returns the issuer this service binds to. Useful for the
+// admin endpoint's per-profile rendering.
+func (s *SCEPService) IssuerID() string { return s.issuerID }
+
+// IntuneStats returns the per-profile observability snapshot. Safe for
+// concurrent callers; the snapshot is taken under no contention with
+// the dispatcher hot path. Returns a zero-value snapshot with
+// Enabled=false on profiles that never called SetIntuneIntegration.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9.1.
+func (s *SCEPService) IntuneStats(now time.Time) IntuneStatsSnapshot {
+	out := IntuneStatsSnapshot{
+		PathID:      s.pathID,
+		IssuerID:    s.issuerID,
+		Enabled:     s.intuneEnabled,
+		Counters:    s.intuneCounters.snapshot(),
+		GeneratedAt: now.UTC(),
+	}
+	if !s.intuneEnabled {
+		return out
+	}
+	out.Audience = s.intuneAudience
+	out.ChallengeValidity = s.intuneValidity
+	if s.intuneRateLimiter != nil {
+		out.RateLimitDisabled = s.intuneRateLimiter.Disabled()
+	}
+	if s.intuneReplayCache != nil {
+		out.ReplayCacheSize = s.intuneReplayCache.Len()
+	}
+	if s.intuneTrust != nil {
+		out.TrustAnchorPath = s.intuneTrust.Path()
+		certs := s.intuneTrust.Get()
+		out.TrustAnchors = make([]IntuneTrustAnchorInfo, 0, len(certs))
+		for _, c := range certs {
+			info := IntuneTrustAnchorInfo{
+				Subject:   c.Subject.CommonName,
+				NotBefore: c.NotBefore,
+				NotAfter:  c.NotAfter,
+				Expired:   now.After(c.NotAfter),
+			}
+			if !info.Expired {
+				info.DaysToExpiry = int(c.NotAfter.Sub(now).Hours() / 24)
+			}
+			out.TrustAnchors = append(out.TrustAnchors, info)
+		}
+	}
+	return out
+}
+
+// ReloadIntuneTrust triggers the same Reload the SIGHUP watcher would
+// run. Returns the parse error if the new file is invalid; the OLD
+// pool stays in place (TrustAnchorHolder.Reload's documented
+// fail-safe). Returns a typed error when this profile has Intune
+// disabled so the admin endpoint can surface a 400 / 409.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9.2.
+func (s *SCEPService) ReloadIntuneTrust() error {
+	if !s.intuneEnabled || s.intuneTrust == nil {
+		return ErrSCEPProfileIntuneDisabled
+	}
+	return s.intuneTrust.Reload()
+}
+
+// ErrSCEPProfileIntuneDisabled is returned by ReloadIntuneTrust when
+// invoked on a profile that has Intune turned off. Lets the admin
+// handler distinguish "operator targeted the wrong profile" (HTTP 409)
+// from "trust anchor file is broken" (HTTP 500 + the underlying
+// parse-error string).
+var ErrSCEPProfileIntuneDisabled = errors.New("scep profile: intune dispatcher not enabled")
+
+// the once + mu fields keep IntuneStats accessor lookup-stable in case
+// future refactors add background mutators of intuneCounters; both are
+// currently unused by the runtime path.
+var _ = sync.Once{}
 
 // ComplianceCheck is the optional gate that pings Intune's compliance API
 // (or any custom policy backend) to confirm the device is in good standing
@@ -111,6 +307,9 @@ func (s *SCEPService) SetIntuneIntegration(
 	s.intuneValidity = validity
 	s.intuneReplayCache = replayCache
 	s.intuneRateLimiter = rateLimiter
+	if s.intuneCounters == nil {
+		s.intuneCounters = &intuneCounterTab{}
+	}
 }
 
 // IntuneEnabled reports whether this service instance is wired for Intune
@@ -204,6 +403,11 @@ type intuneEnrollOutcome struct {
 // path through the Intune mode runs through the same gate sequence so an
 // operator gets the same audit shape regardless of which SCEP message
 // type the device sent.
+//
+// Phase 9.1: every typed return path also bumps the per-status atomic
+// counter on s.intuneCounters so the admin GUI's stats endpoint reflects
+// real enrollment traffic. The success path bumps "success" once when
+// the outer caller invokes processEnrollment — see PKCSReq below.
 func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string, challengePassword string, transactionID string) intuneEnrollOutcome {
 	if !s.intuneEnabled || !looksIntuneShaped(challengePassword) {
 		return intuneEnrollOutcome{decided: false}
@@ -214,6 +418,7 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 		// instead of silently falling through to the static path.
 		s.logger.Error("SCEP enrollment rejected: Intune mode enabled but no trust anchor holder wired",
 			"transaction_id", transactionID)
+		s.intuneCounters.inc("signature_invalid")
 		return intuneEnrollOutcome{decided: true, err: intune.ErrChallengeSignature}
 	}
 
@@ -224,6 +429,7 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 	if err != nil {
 		s.logger.Warn("SCEP enrollment rejected: Intune challenge validation failed",
 			"transaction_id", transactionID, "reason", intuneFailReason(err), "error", err)
+		s.intuneCounters.inc(intuneFailReason(err))
 		return intuneEnrollOutcome{decided: true, err: err}
 	}
 
@@ -236,6 +442,7 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 			intune.ErrChallengeExpired, claim.IssuedAt.Format(time.RFC3339), s.intuneValidity)
 		s.logger.Warn("SCEP enrollment rejected: Intune challenge older than operator validity cap",
 			"transaction_id", transactionID, "error", err)
+		s.intuneCounters.inc("expired")
 		return intuneEnrollOutcome{decided: true, err: err}
 	}
 
@@ -249,11 +456,13 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 		// CSR parse failure surfaces as a "malformed" intune metric label
 		// (the wrapping helps the audit log distinguish it from a
 		// challenge-malformed failure).
+		s.intuneCounters.inc("malformed")
 		return intuneEnrollOutcome{decided: true, err: fmt.Errorf("%w: CSR parse: %v", intune.ErrChallengeMalformed, perr)}
 	}
 	if mErr := claim.DeviceMatchesCSR(csr); mErr != nil {
 		s.logger.Warn("SCEP enrollment rejected: Intune claim does not match CSR",
 			"transaction_id", transactionID, "error", mErr)
+		s.intuneCounters.inc("claim_mismatch")
 		return intuneEnrollOutcome{decided: true, err: mErr}
 	}
 
@@ -264,6 +473,7 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 			err := fmt.Errorf("%w: nonce=%q", intune.ErrChallengeReplay, claim.Nonce)
 			s.logger.Warn("SCEP enrollment rejected: Intune challenge nonce replay",
 				"transaction_id", transactionID, "subject", claim.Subject)
+			s.intuneCounters.inc("replay")
 			return intuneEnrollOutcome{decided: true, err: err}
 		}
 	}
@@ -275,6 +485,7 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 		if rlErr := s.intuneRateLimiter.Allow(claim.Subject, claim.Issuer, now); rlErr != nil {
 			s.logger.Warn("SCEP enrollment rejected: Intune per-device rate limit exceeded",
 				"transaction_id", transactionID, "subject", claim.Subject, "issuer", claim.Issuer)
+			s.intuneCounters.inc("rate_limited")
 			return intuneEnrollOutcome{decided: true, err: rlErr}
 		}
 	}
@@ -286,15 +497,24 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 		if cerr != nil {
 			s.logger.Error("Intune compliance check returned error; failing closed",
 				"transaction_id", transactionID, "subject", claim.Subject, "error", cerr)
+			s.intuneCounters.inc("compliance_failed")
 			return intuneEnrollOutcome{decided: true, err: fmt.Errorf("intune compliance check: %w", cerr)}
 		}
 		if !compliant {
 			s.logger.Warn("SCEP enrollment rejected: device non-compliant per Intune compliance check",
 				"transaction_id", transactionID, "subject", claim.Subject, "reason", reason)
+			s.intuneCounters.inc("compliance_failed")
 			return intuneEnrollOutcome{decided: true, err: fmt.Errorf("intune compliance: %s", reason)}
 		}
 	}
 
+	// Success leg — increment the success counter so the admin GUI's
+	// stats endpoint reflects every legitimate enrollment. The actual
+	// processEnrollment call is made by the caller (PKCSReq* /
+	// RenewalReqWithEnvelope); we credit success here so a downstream
+	// processEnrollment failure (issuer connector outage, etc.) doesn't
+	// double-count — that's a separate non-Intune metric.
+	s.intuneCounters.inc("success")
 	return intuneEnrollOutcome{decided: true, claim: claim}
 }
 

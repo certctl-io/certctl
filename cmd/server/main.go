@@ -656,6 +656,14 @@ func main() {
 	<-startedChan
 	logger.Info("scheduler started")
 
+	// SCEP RFC 8894 + Intune master bundle Phase 9: per-profile SCEPService
+	// map shared between the SCEP startup loop (which populates it) and the
+	// AdminSCEPIntune handler (which reads from it). We declare it here so
+	// the HandlerRegistry below can hand the same map to the admin
+	// handler — the SCEP loop adds entries later by reference, and the
+	// admin endpoint observes the populated state at request time.
+	scepServices := map[string]*service.SCEPService{}
+
 	// Build the API router with all handlers
 	apiRouter := router.New()
 	apiRouter.RegisterHandlers(router.HandlerRegistry{
@@ -695,6 +703,16 @@ func main() {
 				}
 				return ids
 			}),
+		),
+		// SCEP RFC 8894 + Intune master bundle Phase 9.2: admin endpoint
+		// for the per-profile Intune Monitoring tab. The implementation
+		// holds a reference to scepServices declared above; the SCEP
+		// startup loop populates the map by PathID during boot, so the
+		// handler observes whatever profiles exist at request time. On a
+		// deploy without SCEP enabled the map stays empty and the GET
+		// stats endpoint returns an empty profiles array.
+		AdminSCEPIntune: handler.NewAdminSCEPIntuneHandler(
+			handler.NewAdminSCEPIntuneServiceImpl(scepServices),
 		),
 	})
 	// Register EST (RFC 7030) handlers if enabled
@@ -818,9 +836,17 @@ func main() {
 			preflightCancel()
 			scepService := service.NewSCEPService(profile.IssuerID, issuerConn, auditService, profileLog, profile.ChallengePassword)
 			scepService.SetProfileRepo(profileRepo)
+			scepService.SetPathID(profile.PathID)
 			if profile.ProfileID != "" {
 				scepService.SetProfileID(profile.ProfileID)
 			}
+			// SCEP RFC 8894 + Intune master bundle Phase 9.3: publish this
+			// service into the shared scepServices map so the AdminSCEPIntune
+			// handler can find it by PathID. The map was declared above
+			// HandlerRegistry construction; the admin handler holds the
+			// same map by reference, so adding here makes the new profile
+			// visible at the next admin GET.
+			scepServices[profile.PathID] = scepService
 			scepHandler := handler.NewSCEPHandler(scepService)
 			// SCEP RFC 8894 Phase 2.3: load the per-profile RA pair so the
 			// handler can run the new RFC 8894 PKIMessage path. Preflight

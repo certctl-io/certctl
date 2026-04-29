@@ -127,6 +127,14 @@ type HandlerRegistry struct {
 	// Responder Phase 5 — admin-gated ops surface for the
 	// scheduler-driven CRL pre-generation pipeline.
 	AdminCRLCache handler.AdminCRLCacheHandler
+	// AdminSCEPIntune handles the per-profile Microsoft Intune Connector
+	// observability + reload endpoints. SCEP RFC 8894 + Intune master
+	// bundle Phase 9.2.
+	//   GET  /api/v1/admin/scep/intune/stats         → per-profile snapshot
+	//   POST /api/v1/admin/scep/intune/reload-trust  → SIGHUP-equivalent
+	// Both endpoints are admin-gated (M-008 pin updated to include
+	// admin_scep_intune.go).
+	AdminSCEPIntune handler.AdminSCEPIntuneHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -296,6 +304,12 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// scheduler-driven CRL pre-generation cache. Admin-gated inside
 	// the handler (M-003 pattern); non-admin callers get 403.
 	r.Register("GET /api/v1/admin/crl/cache", http.HandlerFunc(reg.AdminCRLCache.ListCache))
+	// SCEP RFC 8894 + Intune master bundle Phase 9.2. Both endpoints are
+	// admin-gated at the handler layer; the M-008 regression scanner pins
+	// the gate set and TestM008_AdminGatedHandlers_HaveTripletTests
+	// enforces the per-handler test triplet.
+	r.Register("GET /api/v1/admin/scep/intune/stats", http.HandlerFunc(reg.AdminSCEPIntune.Stats))
+	r.Register("POST /api/v1/admin/scep/intune/reload-trust", http.HandlerFunc(reg.AdminSCEPIntune.ReloadTrust))
 
 	// Notifications routes: /api/v1/notifications
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))

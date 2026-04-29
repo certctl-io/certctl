@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -295,6 +295,22 @@ export const fetchCRL = (issuerId: string) => {
 // React-Query enabled flag on useAuth().admin at the call site.
 export const getAdminCRLCache = () =>
   fetchJSON<CRLCacheResponse>(`${BASE}/admin/crl/cache`);
+
+// SCEP RFC 8894 + Intune master bundle Phase 9.2 admin endpoint mirror.
+//
+// Backend handler: internal/api/handler/admin_scep_intune.go.
+// Both endpoints are M-008 admin-gated; the SCEPAdminPage component
+// gates the React-Query `enabled` flag on useAuth().admin so non-admin
+// callers never see the page (the route itself is also conditional on
+// the admin flag in main.tsx).
+export const getAdminSCEPIntuneStats = () =>
+  fetchJSON<IntuneStatsResponse>(`${BASE}/admin/scep/intune/stats`);
+
+export const reloadAdminSCEPIntuneTrust = (pathID: string) =>
+  fetchJSON<IntuneReloadTrustResponse>(`${BASE}/admin/scep/intune/reload-trust`, {
+    method: 'POST',
+    body: JSON.stringify({ path_id: pathID }),
+  });
 
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {

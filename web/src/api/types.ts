@@ -626,3 +626,53 @@ export interface CRLCacheResponse {
   row_count: number;
   generated_at: string;
 }
+
+// SCEP RFC 8894 + Intune master bundle Phase 9.2: admin observability
+// payload mirror for the per-profile Intune dispatcher.
+//
+// Backend types live at internal/service/scep.go (IntuneStatsSnapshot +
+// IntuneTrustAnchorInfo) and the handler glue in
+// internal/api/handler/admin_scep_intune.go. Both endpoints are admin-
+// gated (M-008 pin in m008_admin_gate_test.go) — the GUI hides the
+// SCEP Intune surface entirely (rather than letting it 403 noisily) by
+// gating the React-Query enabled flag on useAuth().admin at the call site.
+export interface IntuneTrustAnchorInfo {
+  subject: string;
+  not_before: string;
+  not_after: string;
+  days_to_expiry: number;
+  expired: boolean;
+}
+
+// IntuneStatsSnapshot — one row per configured SCEP profile. Profiles
+// where Intune is disabled appear with enabled=false; the remaining
+// fields stay zero/empty so the GUI can render a "Not enabled" pill.
+export interface IntuneStatsSnapshot {
+  path_id: string;
+  issuer_id: string;
+  enabled: boolean;
+  trust_anchor_path?: string;
+  trust_anchors?: IntuneTrustAnchorInfo[];
+  audience?: string;
+  challenge_validity_ns?: number;
+  rate_limit_disabled: boolean;
+  replay_cache_size: number;
+  // Counter labels match intuneFailReason() in the backend dispatcher:
+  // success / signature_invalid / expired / not_yet_valid / wrong_audience /
+  // replay / unknown_version / malformed / rate_limited / claim_mismatch /
+  // compliance_failed.
+  counters: Record<string, number>;
+  generated_at: string;
+}
+
+export interface IntuneStatsResponse {
+  profiles: IntuneStatsSnapshot[];
+  profile_count: number;
+  generated_at: string;
+}
+
+export interface IntuneReloadTrustResponse {
+  reloaded: boolean;
+  path_id: string;
+  reloaded_at: string;
+}

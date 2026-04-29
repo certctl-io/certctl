@@ -732,6 +732,104 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/admin/scep/intune/stats:
+    get:
+      tags: [SCEP]
+      summary: Per-profile Microsoft Intune dispatcher observability (admin)
+      description: |
+        Returns one snapshot per configured SCEP profile (Intune-enabled
+        or not). Profiles where Intune is disabled appear with
+        `enabled=false`; profiles where Intune is enabled additionally
+        carry the trust anchor pool's per-cert expiry, the audience
+        binding, the per-status enrollment counters
+        (success / signature_invalid / claim_mismatch / expired /
+        wrong_audience / replay / rate_limited / malformed /
+        compliance_failed / not_yet_valid / unknown_version), the
+        in-memory replay-cache size, and the per-device-rate-limit
+        opt-out flag.
+
+        Admin-gated (M-008 pattern) — non-admin Bearer callers get 403
+        because the trust-anchor expiries and per-status counters are
+        sensitive operational metadata. SCEP RFC 8894 + Intune master
+        bundle Phase 9.2.
+      operationId: listSCEPIntuneStats
+      responses:
+        "200":
+          description: Per-profile Intune stats snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      type: object
+                  profile_count:
+                    type: integer
+                  generated_at:
+                    type: string
+                    format: date-time
+        "403":
+          description: Admin access required
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/admin/scep/intune/reload-trust:
+    post:
+      tags: [SCEP]
+      summary: Reload a SCEP profile's Intune trust anchor (admin)
+      description: |
+        Triggers the same Reload that the SIGHUP watcher would run for
+        the named profile. The body MUST be `{"path_id": "<pathID>"}`;
+        an empty body targets the legacy `/scep` root profile (PathID="").
+
+        Returns 200 + `{"reloaded": true, ...}` on success; 404 when the
+        path_id doesn't match any configured SCEP profile; 409 when the
+        profile exists but Intune is disabled on it (no trust anchor to
+        reload); 500 when the underlying file fails to parse — in which
+        case the holder retains the OLD pool so enrollment keeps working
+        off the previous trust anchor while the operator fixes the file.
+
+        Admin-gated (M-008 pattern). SCEP RFC 8894 + Intune master
+        bundle Phase 9.2.
+      operationId: reloadSCEPIntuneTrust
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path_id:
+                  type: string
+                  description: SCEP profile PathID (empty string = legacy /scep root)
+      responses:
+        "200":
+          description: Trust anchor reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reloaded:
+                    type: boolean
+                  path_id:
+                    type: string
+                  reloaded_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Invalid JSON body
+        "403":
+          description: Admin access required
+        "404":
+          description: SCEP profile not found for the given path_id
+        "409":
+          description: SCEP profile exists but Intune is disabled
+        "500":
+          description: Trust anchor reload failed (the OLD pool is retained)
+
   /.well-known/pki/ocsp/{issuer_id}:
     post:
       tags: [CRL & OCSP]
