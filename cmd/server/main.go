@@ -725,71 +725,87 @@ func main() {
 			"endpoints", "/.well-known/est/{cacerts,simpleenroll,simplereenroll,csrattrs}")
 	}
 
-	// Register SCEP (RFC 8894) handlers if enabled
+	// Register SCEP (RFC 8894) handlers if enabled.
+	//
+	// SCEP RFC 8894 Phase 1.5: multi-profile dispatch. Config.Validate()
+	// guarantees cfg.SCEP.Profiles is non-empty when cfg.SCEP.Enabled is true
+	// (the legacy single-profile flat fields are merged into Profiles[0] by
+	// the backward-compat shim in Load()). Each profile gets its own service
+	// + handler instance, registered at /scep (PathID="") or /scep/<PathID>.
 	if cfg.SCEP.Enabled {
-		// H-2 fix: fail closed at startup when SCEP is enabled without a
-		// challenge password configured. Previously the service-layer guard
-		// at internal/service/scep.go:72-79 skipped the password check when
-		// s.challengePassword == "", meaning any client that could reach the
-		// /scep endpoint could enroll an arbitrary CSR against the configured
-		// issuer (CWE-306, missing authentication for a critical function).
-		// Refuse to start instead: the operator must set
-		// CERTCTL_SCEP_CHALLENGE_PASSWORD (or disable SCEP) before the control
-		// plane can boot.
-		if err := preflightSCEPChallengePassword(cfg.SCEP.Enabled, cfg.SCEP.ChallengePassword); err != nil {
-			logger.Error(
-				"startup refused: SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is not set "+
-					"(would allow unauthenticated certificate enrollment, CWE-306). "+
-					"Set a non-empty challenge password or disable SCEP before restarting.",
-				"error", err,
+		// Iterate the profiles and build a {pathID -> handler} map for the
+		// router. Each profile triggers the same per-profile preflight gates
+		// (challenge password presence, RA pair validity, issuer reachability).
+		// Failures log the offending PathID so a multi-profile deploy can
+		// pinpoint which profile broke startup.
+		scepHandlers := make(map[string]handler.SCEPHandler, len(cfg.SCEP.Profiles))
+		for i, profile := range cfg.SCEP.Profiles {
+			profile := profile // shadow for closure-safety even though no closures escape
+			profileLog := logger.With(
+				"scep_profile_index", i,
+				"scep_profile_pathid", profile.PathID,
+				"scep_profile_issuer_id", profile.IssuerID,
 			)
-			os.Exit(1)
-		}
-		// SCEP RFC 8894 Phase 1: validate the RA cert/key pair before booting.
-		// Without a valid pair the new RFC 8894 PKIMessage path (EnvelopedData
-		// decryption + CertRep signing) cannot run; fail loud at startup rather
-		// than silently falling through to the MVP raw-CSR path on every
-		// request. preflightSCEPRACertKey checks: file existence, key file mode
-		// 0600 (defense-in-depth against world-readable RA key), cert/key
-		// algorithm match, RA cert not expired, RA cert public-key algorithm is
-		// CMS-compatible (RSA or ECDSA per RFC 8894 §3.5.2). Mirrors
-		// preflightSCEPChallengePassword's fail-loud-then-os.Exit(1) pattern.
-		if err := preflightSCEPRACertKey(cfg.SCEP.Enabled, cfg.SCEP.RACertPath, cfg.SCEP.RAKeyPath); err != nil {
-			logger.Error(
-				"startup refused: SCEP RA cert/key preflight failed "+
-					"(RFC 8894 §3.2.2 EnvelopedData + §3.3.2 CertRep require an RA pair). "+
-					"Generate the RA pair per docs/legacy-est-scep.md, set "+
-					"CERTCTL_SCEP_RA_CERT_PATH + CERTCTL_SCEP_RA_KEY_PATH, then restart.",
-				"error", err,
-			)
-			os.Exit(1)
-		}
-		issuerConn, ok := issuerRegistry.Get(cfg.SCEP.IssuerID)
-		if !ok {
-			logger.Error("SCEP issuer not found in registry", "issuer_id", cfg.SCEP.IssuerID)
-			os.Exit(1)
-		}
-		// Bundle-4 / L-005: validate the issuer can actually serve a CA certificate
-		// at startup. Same rationale as EST above.
-		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := preflightEnrollmentIssuer(preflightCtx, "SCEP", cfg.SCEP.IssuerID, issuerConn); err != nil {
+			// H-2 fix per profile: fail closed at startup when this profile has
+			// no challenge password. preflightSCEPChallengePassword stays
+			// unchanged; we just call it once per profile.
+			if err := preflightSCEPChallengePassword(true, profile.ChallengePassword); err != nil {
+				profileLog.Error(
+					"startup refused: SCEP profile has empty challenge password "+
+						"(would allow unauthenticated certificate enrollment, CWE-306). "+
+						"Set CERTCTL_SCEP_PROFILE_<NAME>_CHALLENGE_PASSWORD or remove the profile.",
+					"error", err,
+				)
+				os.Exit(1)
+			}
+			// SCEP RFC 8894 Phase 1: per-profile RA cert/key preflight. Same
+			// six checks as the legacy single-profile path; reports the
+			// offending PathID via the profile-scoped logger.
+			if err := preflightSCEPRACertKey(true, profile.RACertPath, profile.RAKeyPath); err != nil {
+				profileLog.Error(
+					"startup refused: SCEP profile RA cert/key preflight failed "+
+						"(RFC 8894 §3.2.2 EnvelopedData + §3.3.2 CertRep require a per-profile RA pair). "+
+						"Generate the RA pair per docs/legacy-est-scep.md and set "+
+						"CERTCTL_SCEP_PROFILE_<NAME>_RA_CERT_PATH + _RA_KEY_PATH for this profile.",
+					"error", err,
+				)
+				os.Exit(1)
+			}
+			issuerConn, ok := issuerRegistry.Get(profile.IssuerID)
+			if !ok {
+				profileLog.Error("SCEP profile issuer not found in registry")
+				os.Exit(1)
+			}
+			// Bundle-4 / L-005: validate the issuer can actually serve a CA
+			// certificate. Per profile, in case different profiles bind
+			// different issuers.
+			preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := preflightEnrollmentIssuer(preflightCtx, "SCEP", profile.IssuerID, issuerConn); err != nil {
+				preflightCancel()
+				profileLog.Error("startup refused: SCEP profile issuer cannot serve CA certificate", "error", err)
+				os.Exit(1)
+			}
 			preflightCancel()
-			logger.Error("startup refused: SCEP issuer cannot serve CA certificate", "error", err)
-			os.Exit(1)
+			scepService := service.NewSCEPService(profile.IssuerID, issuerConn, auditService, profileLog, profile.ChallengePassword)
+			scepService.SetProfileRepo(profileRepo)
+			if profile.ProfileID != "" {
+				scepService.SetProfileID(profile.ProfileID)
+			}
+			scepHandlers[profile.PathID] = handler.NewSCEPHandler(scepService)
+			endpoint := "/scep"
+			if profile.PathID != "" {
+				endpoint = "/scep/" + profile.PathID
+			}
+			profileLog.Info("SCEP profile enabled",
+				"endpoint", endpoint+"?operation={GetCACaps,GetCACert,PKIOperation}",
+				"challenge_password_set", profile.ChallengePassword != "",
+				"ra_cert_path", profile.RACertPath,
+			)
 		}
-		preflightCancel()
-		scepService := service.NewSCEPService(cfg.SCEP.IssuerID, issuerConn, auditService, logger, cfg.SCEP.ChallengePassword)
-		scepService.SetProfileRepo(profileRepo)
-		if cfg.SCEP.ProfileID != "" {
-			scepService.SetProfileID(cfg.SCEP.ProfileID)
-		}
-		scepHandler := handler.NewSCEPHandler(scepService)
-		apiRouter.RegisterSCEPHandlers(scepHandler)
+		apiRouter.RegisterSCEPHandlers(scepHandlers)
 		logger.Info("SCEP server enabled",
-			"issuer_id", cfg.SCEP.IssuerID,
-			"profile_id", cfg.SCEP.ProfileID,
-			"challenge_password_set", cfg.SCEP.ChallengePassword != "",
-			"endpoints", "/scep?operation={GetCACaps,GetCACert,PKIOperation}")
+			"profile_count", len(scepHandlers),
+		)
 	}
 
 	// Register RFC 5280 CRL and RFC 6960 OCSP handlers under /.well-known/pki/.

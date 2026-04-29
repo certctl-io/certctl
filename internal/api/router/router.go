@@ -376,16 +376,53 @@ func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
 }
 
 // RegisterSCEPHandlers sets up SCEP (RFC 8894) routes.
-// SCEP uses a single endpoint with operation-based dispatch via query parameters.
-// Authentication is via the challengePassword attribute in the PKCS#10 CSR, not
-// via HTTP Bearer tokens or TLS client certs. cmd/server/main.go's finalHandler
-// routes /scep* through the no-auth middleware chain (M-001 audit 2026-04-19,
-// option D), and Config.Validate() refuses to start the server if SCEP is enabled
-// without a non-empty CERTCTL_SCEP_CHALLENGE_PASSWORD (H-2, CWE-306).
-func (r *Router) RegisterSCEPHandlers(scep handler.SCEPHandler) {
-	// SCEP uses a single path; the handler dispatches on ?operation= query param
-	r.Register("GET /scep", http.HandlerFunc(scep.HandleSCEP))
-	r.Register("POST /scep", http.HandlerFunc(scep.HandleSCEP))
+// SCEP uses a single endpoint per profile with operation-based dispatch via
+// query parameters. Authentication is via the challengePassword attribute in
+// the PKCS#10 CSR, not via HTTP Bearer tokens or TLS client certs.
+// cmd/server/main.go's finalHandler routes /scep* through the no-auth
+// middleware chain (M-001 audit 2026-04-19, option D), and Config.Validate()
+// refuses to start the server if any SCEP profile is enabled without a
+// non-empty challenge password (H-2, CWE-306).
+//
+// SCEP RFC 8894 Phase 1.5: the handlers map is keyed by SCEPProfileConfig.PathID.
+// Empty PathID maps to the legacy /scep root for backward compatibility;
+// non-empty PathID values map to /scep/<pathID>. Registering N profiles
+// produces 2N routes (GET + POST per profile). Validate() guards PathID
+// uniqueness + slug-shape so this loop never gets a collision or an invalid
+// path segment.
+//
+// The auth-exempt prefix `/scep` in AuthExemptDispatchPrefixes already covers
+// every /scep[/...] path via prefix-match, so the multi-profile routes inherit
+// the no-auth dispatch from the same dispatch table — no router-side change
+// to the auth-exempt list is required.
+func (r *Router) RegisterSCEPHandlers(handlers map[string]handler.SCEPHandler) {
+	// Legacy /scep route for the empty-PathID profile is registered with
+	// literal strings so the openapi-parity scanner (Bundle D / Audit M-027,
+	// see openapi_parity_test.go) sees `GET /scep` + `POST /scep` as
+	// AST literals exactly the way it did pre-Phase-1.5. The scanner walks
+	// for *ast.BasicLit string args to r.Register, so dynamically-built
+	// paths would not appear in its index. Keeping the empty-PathID case
+	// static preserves the spec parity contract for the documented
+	// /scep endpoint that openapi.yaml still describes.
+	if h, ok := handlers[""]; ok {
+		r.Register("GET /scep", http.HandlerFunc(h.HandleSCEP))
+		r.Register("POST /scep", http.HandlerFunc(h.HandleSCEP))
+	}
+	// Multi-profile routes register dynamically. These per-deployment paths
+	// (/scep/<pathID>) aren't in openapi.yaml because the path segment is
+	// operator-defined; the spec covers the canonical /scep root only. The
+	// parity scanner correctly skips dynamic routes (it only checks literals).
+	for pathID, h := range handlers {
+		if pathID == "" {
+			continue // already handled by the static block above
+		}
+		hCopy := h // h is captured by value — SCEPHandler is a small struct
+		// (one interface field) so the per-iteration copy is cheap and avoids
+		// any loop-variable-capture surprise if SCEPHandler ever grows
+		// pointer receivers in the future.
+		r.Register("GET /scep/"+pathID, http.HandlerFunc(hCopy.HandleSCEP))
+		r.Register("POST /scep/"+pathID, http.HandlerFunc(hCopy.HandleSCEP))
+	}
 }
 
 // RegisterPKIHandlers sets up RFC 5280 CRL and RFC 6960 OCSP routes under

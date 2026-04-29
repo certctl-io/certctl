@@ -664,17 +664,50 @@ type ESTConfig struct {
 }
 
 // SCEPConfig controls the RFC 8894 Simple Certificate Enrollment Protocol server.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 1.5: this type was originally a
+// single flat struct with one IssuerID + one RA pair + one challenge password
+// (the shape of v2.0.x). Real enterprise deployments need to expose multiple
+// SCEP endpoints from one certctl instance — corp-laptop CA, server CA, IoT
+// CA — each with its own issuer + RA pair + challenge password + URL path
+// (/scep/<pathID>). The Profiles slice carries that. Existing operators see
+// no behavior change: when Profiles is empty AND the legacy single-profile
+// fields below are set, ConfigLoad synthesizes a single-element Profiles[0]
+// with PathID="" (which maps to the legacy /scep root path).
 type SCEPConfig struct {
 	// Enabled controls whether SCEP endpoints are available for device enrollment.
 	// Default: false (SCEP disabled). Set to true to enable SCEP endpoints under /scep/.
 	Enabled bool
 
-	// IssuerID selects which issuer connector processes SCEP certificate requests.
-	// Default: "iss-local". Must reference a configured issuer.
+	// Profiles is the multi-endpoint configuration. Each profile gets its own
+	// URL path (/scep/<PathID>), its own RA cert + key, its own challenge
+	// password, and its own bound issuer. Population sources, in priority order:
+	//
+	//   1. Explicit list via CERTCTL_SCEP_PROFILES (e.g. "corp,iot,server").
+	//   2. Backward-compat shim: when CERTCTL_SCEP_PROFILES is unset AND the
+	//      legacy flat fields below have ChallengePassword OR RACertPath set,
+	//      ConfigLoad synthesizes a single-element Profiles[0] with PathID=""
+	//      so /scep continues to route the same way it did pre-Phase-1.5.
+	//
+	// Validate() iterates Profiles and refuses to boot if any profile is
+	// malformed (empty ChallengePassword, missing RA pair, invalid PathID).
+	// Each profile's ChallengePassword + RA pair are independently mandatory
+	// — the profile-load shim never silently borrows from a sibling profile.
+	Profiles []SCEPProfileConfig
+
+	// Legacy single-profile fields — preserved for backward compatibility. New
+	// operators should populate Profiles directly via the indexed env-var form.
+	// These fields are merged into Profiles[0] by ConfigLoad when Profiles is
+	// empty AND any of these fields are non-zero.
+
+	// IssuerID selects which issuer connector processes SCEP certificate requests
+	// for the legacy single-profile config. Default: "iss-local". Must reference a
+	// configured issuer.
 	IssuerID string
 
-	// ProfileID optionally constrains SCEP enrollments to a specific certificate profile.
-	// Leave empty to allow SCEP to use any configured issuer's defaults.
+	// ProfileID optionally constrains SCEP enrollments to a specific certificate profile
+	// for the legacy single-profile config. Leave empty to allow SCEP to use any
+	// configured issuer's defaults.
 	ProfileID string
 
 	// ChallengePassword is the shared secret used to authenticate SCEP enrollment requests.
@@ -688,6 +721,9 @@ type SCEPConfig struct {
 	// allow any client that can reach /scep to enroll a CSR against the configured
 	// issuer. The service-layer PKCSReq path also rejects this configuration
 	// defense-in-depth.
+	//
+	// Legacy single-profile field; merged into Profiles[0].ChallengePassword by
+	// ConfigLoad when Profiles is empty.
 	ChallengePassword string
 
 	// RACertPath is the path to a PEM-encoded RA (Registration Authority)
@@ -714,7 +750,52 @@ type SCEPConfig struct {
 	// a world-readable RA key as defense-in-depth against credential leak. The
 	// server only ever reads this file at startup; rotation requires a restart
 	// (per the existing CERTCTL_TLS_CERT_PATH precedent in cmd/server/tls.go).
+	//
+	// Legacy single-profile field; merged into Profiles[0].RAKeyPath by
+	// ConfigLoad when Profiles is empty.
 	RAKeyPath string
+}
+
+// SCEPProfileConfig is one SCEP endpoint's configuration. Each profile is
+// bound to one issuer + one optional certctl CertificateProfile + one RA
+// pair + one challenge password (the per-profile Intune trust anchor lands
+// here in Phase 8 of the master bundle).
+//
+// Multi-profile motivation: a real enterprise deployment exposes distinct
+// SCEP endpoints to distinct fleets — corp-laptop CA bound to one issuer
+// with one challenge password; IoT CA bound to a different issuer with a
+// different challenge password — so a single set of credentials can never
+// enroll across CA boundaries by accident. Each SCEPProfileConfig drives
+// a separate handler + service instance built at server startup.
+type SCEPProfileConfig struct {
+	// PathID is the URL segment after /scep/. Empty string maps to the legacy
+	// /scep root for backward compatibility (so existing operators with the
+	// flat single-profile config see no URL change). Non-empty values MUST
+	// be a single path-safe slug ([a-z0-9-], no slashes); validated at
+	// startup by Config.Validate(). Multi-profile deployments typically use
+	// short tokens like "corp", "iot", "server" — the URL becomes
+	// /scep/corp, /scep/iot, /scep/server.
+	PathID string
+
+	// IssuerID selects which issuer connector this profile's enrollments go
+	// through. Must reference a configured issuer.
+	IssuerID string
+
+	// ProfileID optionally constrains enrollments under this PathID to a
+	// specific CertificateProfile. Leave empty to allow the issuer's defaults.
+	ProfileID string
+
+	// ChallengePassword is the per-profile shared secret. Same constant-time
+	// compare semantics as the flat field; empty value at validate time fails
+	// the boot.
+	ChallengePassword string
+
+	// RACertPath / RAKeyPath are the per-profile RA pair used by the RFC 8894
+	// EnvelopedData decryption + CertRep signing path. Same preflight semantics
+	// as the legacy flat fields (file existence, key mode 0600, cert/key
+	// match, expiry, RSA-or-ECDSA alg).
+	RACertPath string
+	RAKeyPath  string
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -1151,6 +1232,12 @@ func Load() (*Config, error) {
 			// existing CERTCTL_SCEP_* prefix convention.
 			RACertPath: getEnv("CERTCTL_SCEP_RA_CERT_PATH", ""),
 			RAKeyPath:  getEnv("CERTCTL_SCEP_RA_KEY_PATH", ""),
+			// SCEP RFC 8894 Phase 1.5: multi-profile dispatch. When
+			// CERTCTL_SCEP_PROFILES is set (e.g. "corp,iot"), each name
+			// expands to per-profile env vars CERTCTL_SCEP_PROFILE_<NAME>_*.
+			// When unset, the legacy single-profile flat fields above are
+			// merged into Profiles[0] by mergeSCEPLegacyIntoProfiles below.
+			Profiles: loadSCEPProfilesFromEnv(),
 		},
 		Verification: VerificationConfig{
 			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
@@ -1283,11 +1370,112 @@ func Load() (*Config, error) {
 	}
 	cfg.Auth.NamedKeys = named
 
+	// SCEP RFC 8894 Phase 1.5: backward-compat shim. When the operator hasn't
+	// set CERTCTL_SCEP_PROFILES (so loadSCEPProfilesFromEnv returned nil) but
+	// the legacy single-profile flat fields (ChallengePassword OR RACertPath)
+	// are populated, synthesize a single-element Profiles[0] with PathID=""
+	// so /scep continues to dispatch the same way it did pre-Phase-1.5. Done
+	// AFTER the field-by-field load so it can read from the populated cfg.SCEP
+	// struct.
+	mergeSCEPLegacyIntoProfiles(&cfg.SCEP)
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
 
 	return cfg, nil
+}
+
+// loadSCEPProfilesFromEnv reads the indexed CERTCTL_SCEP_PROFILES env var
+// (e.g. "corp,iot,server") and expands each name into a SCEPProfileConfig
+// populated from CERTCTL_SCEP_PROFILE_<NAME>_*. Returns nil when the
+// CERTCTL_SCEP_PROFILES env var is unset or empty — in that case the
+// legacy-shim path (mergeSCEPLegacyIntoProfiles, called from Load after the
+// initial config build) populates Profiles[0] from the flat fields if needed.
+//
+// PathID for each profile is the lowercased trimmed name from the
+// CERTCTL_SCEP_PROFILES list (e.g. "Corp" -> "corp"). Validation that the
+// PathID is path-safe ([a-z0-9-]+) lives in Config.Validate() so the loader
+// can stay free of error returns.
+func loadSCEPProfilesFromEnv() []SCEPProfileConfig {
+	raw := strings.TrimSpace(os.Getenv("CERTCTL_SCEP_PROFILES"))
+	if raw == "" {
+		return nil
+	}
+	names := strings.Split(raw, ",")
+	out := make([]SCEPProfileConfig, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		// The env-var key is the upper-cased name (CERTCTL_SCEP_PROFILE_CORP_*),
+		// but the URL path segment is the lower-cased name to match the
+		// path-safe slug constraint enforced in Validate.
+		envName := strings.ToUpper(n)
+		pathID := strings.ToLower(n)
+		out = append(out, SCEPProfileConfig{
+			PathID:            pathID,
+			IssuerID:          getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_ISSUER_ID", ""),
+			ProfileID:         getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_PROFILE_ID", ""),
+			ChallengePassword: getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_CHALLENGE_PASSWORD", ""),
+			RACertPath:        getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_RA_CERT_PATH", ""),
+			RAKeyPath:         getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_RA_KEY_PATH", ""),
+		})
+	}
+	return out
+}
+
+// mergeSCEPLegacyIntoProfiles is the backward-compat shim. When Profiles is
+// empty AND any legacy single-profile field is populated, synthesise a
+// single-element Profiles[0] with PathID="" so /scep dispatches identically
+// to the pre-Phase-1.5 deploy. No-op when Profiles is non-empty (the operator
+// explicitly opted into the structured form via CERTCTL_SCEP_PROFILES) or
+// when SCEP is disabled.
+//
+// "Any legacy field populated" means at least one of ChallengePassword,
+// RACertPath, RAKeyPath is non-empty. IssuerID has a non-empty default
+// ("iss-local") so it can't be the trigger; ProfileID is optional. The
+// trigger set matches what the Validate() refuse cares about.
+func mergeSCEPLegacyIntoProfiles(c *SCEPConfig) {
+	if c == nil || !c.Enabled || len(c.Profiles) > 0 {
+		return
+	}
+	hasLegacy := c.ChallengePassword != "" || c.RACertPath != "" || c.RAKeyPath != ""
+	if !hasLegacy {
+		return
+	}
+	c.Profiles = []SCEPProfileConfig{{
+		PathID:            "", // empty pathID maps to the legacy /scep root
+		IssuerID:          c.IssuerID,
+		ProfileID:         c.ProfileID,
+		ChallengePassword: c.ChallengePassword,
+		RACertPath:        c.RACertPath,
+		RAKeyPath:         c.RAKeyPath,
+	}}
+}
+
+// validSCEPPathID reports whether s is a valid SCEP profile path segment.
+// The empty string is allowed (legacy root /scep). Non-empty values must
+// be ASCII lowercase letters / digits / hyphens with no leading/trailing
+// hyphen — keeps URL-construction trivial at the router layer and avoids
+// percent-encoding surprises for SCEP clients that build the URL by string
+// concat rather than url.PathEscape.
+func validSCEPPathID(s string) bool {
+	if s == "" {
+		return true // empty maps to legacy /scep root
+	}
+	if s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
 }
 
 // Validate checks that the configuration is valid.
@@ -1433,7 +1621,13 @@ func (c *Config) Validate() error {
 	// enabled: an empty shared secret would allow any client that can reach /scep to
 	// enroll a CSR against the configured issuer (anonymous issuance).
 	if c.SCEP.Enabled && c.SCEP.ChallengePassword == "" {
-		return fmt.Errorf("SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty — refuse to start (CWE-306: anonymous SCEP issuance is insecure; set a non-empty shared secret or disable SCEP with CERTCTL_SCEP_ENABLED=false). This gate duplicates cmd/server/main.go:preflightSCEPChallengePassword for defense in depth")
+		// Phase 1.5: only enforce the legacy single-profile gate when the
+		// operator has NOT opted into the structured Profiles form. When
+		// CERTCTL_SCEP_PROFILES is set, the per-profile loop below covers
+		// the same gate per profile (with per-profile error messages).
+		if len(c.SCEP.Profiles) == 0 {
+			return fmt.Errorf("SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty — refuse to start (CWE-306: anonymous SCEP issuance is insecure; set a non-empty shared secret or disable SCEP with CERTCTL_SCEP_ENABLED=false). This gate duplicates cmd/server/main.go:preflightSCEPChallengePassword for defense in depth")
+		}
 	}
 
 	// SCEP RFC 8894 Phase 1: RA cert + key are mandatory when SCEP is enabled.
@@ -1444,7 +1638,41 @@ func (c *Config) Validate() error {
 	// depth with cmd/server/main.go::preflightSCEPRACertKey which additionally
 	// validates file mode + cert/key match + expiry + algorithm.
 	if c.SCEP.Enabled && (c.SCEP.RACertPath == "" || c.SCEP.RAKeyPath == "") {
-		return fmt.Errorf("SCEP is enabled but RA cert/key path missing — refuse to start (RFC 8894 §3.2.2 requires an RA cert clients can encrypt their CSR to and an RA key the server uses to decrypt + sign CertRep): set both CERTCTL_SCEP_RA_CERT_PATH and CERTCTL_SCEP_RA_KEY_PATH or disable SCEP with CERTCTL_SCEP_ENABLED=false. See docs/legacy-est-scep.md for the openssl recipe to generate the RA pair. This gate duplicates cmd/server/main.go:preflightSCEPRACertKey for defense in depth")
+		// Phase 1.5: only refuse on the legacy flat fields when neither the
+		// flat fields nor the structured Profiles slice are populated. When
+		// the operator opts into the structured form via CERTCTL_SCEP_PROFILES,
+		// the per-profile checks below cover the same gate.
+		if len(c.SCEP.Profiles) == 0 {
+			return fmt.Errorf("SCEP is enabled but RA cert/key path missing — refuse to start (RFC 8894 §3.2.2 requires an RA cert clients can encrypt their CSR to and an RA key the server uses to decrypt + sign CertRep): set both CERTCTL_SCEP_RA_CERT_PATH and CERTCTL_SCEP_RA_KEY_PATH or disable SCEP with CERTCTL_SCEP_ENABLED=false. See docs/legacy-est-scep.md for the openssl recipe to generate the RA pair. This gate duplicates cmd/server/main.go:preflightSCEPRACertKey for defense in depth")
+		}
+	}
+
+	// SCEP RFC 8894 Phase 1.5: per-profile validation. When the structured
+	// Profiles slice is populated (either via CERTCTL_SCEP_PROFILES or via
+	// the legacy-shim merge in Load), iterate each profile and refuse boot
+	// if any is malformed. PathID format, ChallengePassword presence, and
+	// RA pair presence are all gated here; preflight validates the RA files
+	// themselves (mode, match, expiry, alg).
+	if c.SCEP.Enabled {
+		seenPath := map[string]bool{}
+		for i, p := range c.SCEP.Profiles {
+			if !validSCEPPathID(p.PathID) {
+				return fmt.Errorf("SCEP profile %d (%q) has invalid PathID — refuse to start: must be empty (legacy /scep root) or a path-safe slug matching [a-z0-9-]+ with no leading/trailing hyphen (got %q)", i, p.PathID, p.PathID)
+			}
+			if seenPath[p.PathID] {
+				return fmt.Errorf("SCEP profile %d duplicates PathID %q — refuse to start: each profile must have a unique URL segment so the router can dispatch unambiguously", i, p.PathID)
+			}
+			seenPath[p.PathID] = true
+			if p.ChallengePassword == "" {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has empty CHALLENGE_PASSWORD — refuse to start (CWE-306: per-profile shared secret is the sole application-layer auth boundary; an empty password would allow any client reaching /scep/%s to enroll a CSR against issuer %q)", i, p.PathID, p.PathID, p.IssuerID)
+			}
+			if p.RACertPath == "" || p.RAKeyPath == "" {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) missing RA cert/key path — refuse to start (RFC 8894 §3.2.2): set CERTCTL_SCEP_PROFILE_<NAME>_RA_CERT_PATH and _RA_KEY_PATH for every profile listed in CERTCTL_SCEP_PROFILES, or remove the profile from the list", i, p.PathID)
+			}
+			if p.IssuerID == "" {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has empty IssuerID — refuse to start: each SCEP profile must bind to a configured issuer", i, p.PathID)
+			}
+		}
 	}
 
 	// Validate scheduler intervals
