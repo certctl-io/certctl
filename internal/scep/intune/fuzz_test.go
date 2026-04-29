@@ -51,6 +51,6 @@ func FuzzParseChallenge(f *testing.F) {
 		// execute; pass a non-empty placeholder so signature-verify
 		// gets exercised against arbitrary input.
 		bundle := []*x509.Certificate{} // empty to short-circuit cheap path
-		_, _ = ValidateChallenge(raw, bundle, "", time.Now())
+		_, _ = ValidateChallenge(raw, ValidateOptions{Trust: bundle, Now: time.Now()})
 	})
 }

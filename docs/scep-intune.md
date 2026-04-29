@@ -84,9 +84,14 @@ PKIMessage with the documented `pkiStatus`/`failInfo` codes (per RFC
    payload prelude. v1 (current Connector format, no `version` key)
    routes to `unmarshalChallengeV1`. Future v2 plugs in a sibling
    parser without touching the validator.
-4. **Time bounds** — `now ≥ iat AND now < exp`. Configurable cap on
+4. **Time bounds** — `now+tolerance ≥ iat AND now-tolerance < exp`.
+   The `±tolerance` window is configurable per profile via
+   `INTUNE_CLOCK_SKEW_TOLERANCE` (default 60s, covers modest clock
+   drift between the Connector host and certctl). Configurable cap on
    top via `INTUNE_CHALLENGE_VALIDITY` (defense-in-depth against a
-   Connector that mints long-validity challenges).
+   Connector that mints long-validity challenges). The validator
+   refuses `tolerance ≥ ChallengeValidity` at startup-validation time
+   to keep the cap meaningful.
 5. **Audience pin** — `claim.aud == INTUNE_AUDIENCE` (skipped when
    `INTUNE_AUDIENCE` is empty for proxy/load-balancer scenarios).
 6. **CSR binding** — `claim.DeviceMatchesCSR(csr)` checks
@@ -156,6 +161,9 @@ so the production validation step is a manual run-book item.
    CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true
    CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH=/etc/certctl/intune-corp.pem
    CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_AUDIENCE=https://certctl.example.com/scep/corp
+   CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CHALLENGE_VALIDITY=60m
+   CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE=60s   # ±tolerance on iat/exp; raise on poorly-NTP-synced fleets, lower to enforce strict time
+   CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_PER_DEVICE_RATE_LIMIT_24H=3
    ```
 
    Restart certctl. The startup preflight refuses to boot if the

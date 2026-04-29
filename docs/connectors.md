@@ -331,6 +331,58 @@ Note: EST and SCEP are not connectors — they are protocol handlers (`internal/
 
 **SCEP RA cert + key (post-2026-04-29):** the SCEP server's RFC 8894 path requires an RA cert/key pair (`CERTCTL_SCEP_RA_CERT_PATH` + `CERTCTL_SCEP_RA_KEY_PATH`, mode 0600) — clients encrypt their CSR to the RA cert's public key per RFC 8894 §3.2.2. Multi-profile deployments configure per-profile pairs via `CERTCTL_SCEP_PROFILES=corp,iot` + `CERTCTL_SCEP_PROFILE_<NAME>_RA_*_PATH`. See [`legacy-est-scep.md`](legacy-est-scep.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the openssl recipe + ChromeOS Admin Console pointer + must-staple per-profile policy.
 
+#### Multi-profile SCEP dispatch
+
+A single certctl deploy can publish multiple SCEP endpoints — one per fleet, one per device class, or one per Connector — by setting `CERTCTL_SCEP_PROFILES=<comma-separated>` and a matching set of `CERTCTL_SCEP_PROFILE_<NAME>_*` environment variables. The router publishes `/scep/<pathID>?operation=...` for every profile whose `<NAME>` appears in the list (or `/scep` for the legacy single-profile shape when `CERTCTL_SCEP_PROFILES` is unset). Each profile carries its OWN issuer binding, RA cert/key pair, challenge password, must-staple policy, optional mTLS sibling route, and optional Microsoft Intune Connector trust anchor — heterogeneous fleets share one server, distinct credentials.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CERTCTL_SCEP_PROFILES` | No | — | Comma-separated profile names (e.g. `corp,iot`). When unset, the legacy single-profile config (`CERTCTL_SCEP_*` without the `_PROFILE_<NAME>_` infix) is used. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_ISSUER_ID` | Yes | — | Issuer connector ID this profile dispatches to (e.g. `iss-local`, `iss-ejbca-corp`). |
+| `CERTCTL_SCEP_PROFILE_<NAME>_PROFILE_ID` | No | — | Optional certificate profile ID for fine-grained issuance policy. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_CHALLENGE_PASSWORD` | No | — | Static challenge password for the legacy SCEP auth path. Set to "" when only Intune dynamic challenges are expected. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_RA_CERT_PATH` | Yes | — | RA cert PEM path (mode 0600 enforced). |
+| `CERTCTL_SCEP_PROFILE_<NAME>_RA_KEY_PATH` | Yes | — | RA private key PEM path (mode 0600 enforced). |
+
+See [`legacy-est-scep.md`](legacy-est-scep.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the full per-profile env-var list and the mTLS / Intune extensions.
+
+#### SCEP mTLS sibling route (opt-in)
+
+For deploys that already have a previously-issued certctl client cert and want a stronger renewal binding than the static challenge password, certctl exposes an opt-in mTLS sibling route at `/scep-mtls/<pathID>`. The TLS handshake is configured with `tls.VerifyClientCertIfGiven` against an operator-supplied trust bundle; presented client certs are validated against the bundle before the SCEP handler runs. The standard `/scep/<pathID>` route stays open for new-enrollment devices that don't yet have a client cert.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CERTCTL_SCEP_PROFILE_<NAME>_MTLS_ENABLED` | No | `false` | Set `true` to publish `/scep-mtls/<pathID>` alongside `/scep/<pathID>`. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH` | When MTLS enabled | — | PEM bundle of CAs that may sign client certs. Preflight refuses a missing/empty bundle. |
+
+See [`legacy-est-scep.md`](legacy-est-scep.md#scep-mtls-sibling-route-phase-65) for the operator recipe + threat-model rationale.
+
+#### Microsoft Intune Certificate Connector dispatcher
+
+When a profile has `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true`, certctl validates the Microsoft Intune Certificate Connector's signed-challenge JWS natively as a drop-in NDES replacement (the Intune Connector documents itself as RFC 8894-compliant and works against any RFC 8894 SCEP server). The dispatcher walks parse → JWS signature verify (RS256 + ES256, alg=none rejected) → version dispatch → time bounds with ±tolerance → audience pin → CSR ↔ claim binding → replay cache → per-device rate limit → optional V3-Pro compliance hook. The trust anchor file is reloaded on `SIGHUP` (operator rotates the on-disk PEM, then `kill -HUP <certctl-pid>`); a parse failure during reload keeps the OLD pool so a half-rotation doesn't take Intune down.
+
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED` | No | `false` | Gate the dispatcher. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH` | When enabled | — | PEM bundle of the Connector's signing certs. Preflight refuses a missing/expired bundle. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_AUDIENCE` | No | — | Expected `aud` claim (typically the public SCEP URL the Connector calls). Empty disables the audience check. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CHALLENGE_VALIDITY` | No | `60m` | Defense-in-depth cap on top of the challenge's own `exp`. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE` | No | `60s` | ±tolerance on iat/exp checks. Raise on poorly-NTP-synced fleets, lower to enforce strict time. Refused at boot when ≥ `INTUNE_CHALLENGE_VALIDITY`. |
+| `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_PER_DEVICE_RATE_LIMIT_24H` | No | `3` | Max enrollments per `(claim.Subject, claim.Issuer)` in any rolling 24h window. Zero disables. |
+
+See [`scep-intune.md`](scep-intune.md) for the full deployment guide — NDES + EJBCA migration playbook, Intune SCEP profile field mapping, trust-anchor extraction recipe, monitoring + Prometheus alert thresholds, and the Microsoft Learn citations operators paste into procurement-team requests.
+
+#### SCEP probe in network scanner
+
+The Network Scans GUI surface includes a one-click "Probe SCEP" form that runs a capability + posture check against any reachable SCEP server URL — `GetCACaps` + `GetCACert` (NEVER `PKCSReq`) so the probe is read-only and safe to run against production endpoints. Result fields surface advertised caps (POSTPKIOperation, SHA-256, SHA-512, AES, SCEPStandard, Renewal), CA cert subject + issuer + algorithm + days-to-expiry + chain length, and a probe duration. Results persist to `scep_probe_results` (migration `000021`) and the probe history is paginated under `GET /api/v1/network-scan/scep-probes`. Useful for pre-migration assessment ("what does the existing NDES advertise?") and compliance-posture audits.
+
+| Endpoint | Auth | Description |
+|----------|------|-------------|
+| `POST /api/v1/network-scan/scep-probe` | Bearer | Body `{"url":"https://..."}`. Synchronous probe; returns `SCEPProbeResult`. |
+| `GET /api/v1/network-scan/scep-probes` | Bearer | Recent probe history, paginated `[1, 200]`. |
+
+The probe goes through the same dual-layer SSRF defense (`validation.ValidateSafeURL` up-front + `SafeHTTPDialContext` at dial time) as the rest of the network scanner. Standalone CLI binary is explicitly deferred — the in-tree network scanner is the only entrypoint today.
+
 ### Built-in: Vault PKI
 
 The Vault PKI connector integrates with HashiCorp Vault's PKI secrets engine using its native `/sign` API with token-based authentication. This is ideal for organizations using Vault as their internal certificate authority — synchronous issuance without the complexity of ACME or challenge solving.

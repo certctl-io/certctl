@@ -6,6 +6,7 @@ import (
 	"flag"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 )
 
@@ -96,7 +97,22 @@ func TestRegenerateGoldenFixtures(t *testing.T) {
 		t.Fatalf("write tampered fixture: %v", err)
 	}
 
-	t.Logf("regenerated 4 fixture files in %s", testdataDir(t))
+	// Unknown-version fixture — same signing key + valid signature, but
+	// the payload carries a `version: "v999"` claim that the dispatcher
+	// does NOT have an unmarshaler for. ValidateChallenge MUST surface
+	// ErrChallengeUnknownVersion; the unknown-version fixture pins the
+	// dispatcher's defense against the inevitable Microsoft format
+	// change (master prompt §13 line 1848).
+	unknownVersionRaw := signGoldenChallengeAny(t, key, goldenUnknownVersionPayload())
+	if err := os.WriteFile(
+		filepath.Join(testdataDir(t), "intune_challenge_golden_unknown_version.txt"),
+		[]byte(unknownVersionRaw+"\n"),
+		0o600,
+	); err != nil {
+		t.Fatalf("write unknown-version fixture: %v", err)
+	}
+
+	t.Logf("regenerated 5 fixture files in %s", testdataDir(t))
 }
 
 // TestGoldenChallenge_Success — the documented happy-path: the success
@@ -107,7 +123,7 @@ func TestGoldenChallenge_Success(t *testing.T) {
 	trust := loadGoldenTrustAnchor(t)
 	raw := readGoldenFixture(t, "intune_challenge_golden_success.txt")
 
-	claim, err := ValidateChallenge(raw, trust, "https://certctl.example.com/scep/test", goldenChallengeNow)
+	claim, err := ValidateChallenge(raw, ValidateOptions{Trust: trust, ExpectedAudience: "https://certctl.example.com/scep/test", Now: goldenChallengeNow})
 	if err != nil {
 		t.Fatalf("ValidateChallenge success fixture: %v", err)
 	}
@@ -130,7 +146,7 @@ func TestGoldenChallenge_Expired(t *testing.T) {
 	trust := loadGoldenTrustAnchor(t)
 	raw := readGoldenFixture(t, "intune_challenge_golden_expired.txt")
 
-	_, err := ValidateChallenge(raw, trust, "", goldenChallengeNow)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: trust, Now: goldenChallengeNow})
 	if !errors.Is(err, ErrChallengeExpired) {
 		t.Fatalf("got %v, want errors.Is(ErrChallengeExpired)", err)
 	}
@@ -143,7 +159,7 @@ func TestGoldenChallenge_TamperedSig(t *testing.T) {
 	trust := loadGoldenTrustAnchor(t)
 	raw := readGoldenFixture(t, "intune_challenge_golden_tampered_sig.txt")
 
-	_, err := ValidateChallenge(raw, trust, "https://certctl.example.com/scep/test", goldenChallengeNow)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: trust, ExpectedAudience: "https://certctl.example.com/scep/test", Now: goldenChallengeNow})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want errors.Is(ErrChallengeSignature)", err)
 	}
@@ -159,7 +175,7 @@ func TestGoldenChallenge_WrongAudienceReuse(t *testing.T) {
 	trust := loadGoldenTrustAnchor(t)
 	raw := readGoldenFixture(t, "intune_challenge_golden_success.txt")
 
-	_, err := ValidateChallenge(raw, trust, "https://attacker.example.com/scep/wrong", goldenChallengeNow)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: trust, ExpectedAudience: "https://attacker.example.com/scep/wrong", Now: goldenChallengeNow})
 	if !errors.Is(err, ErrChallengeWrongAudience) {
 		t.Fatalf("got %v, want errors.Is(ErrChallengeWrongAudience)", err)
 	}
@@ -176,8 +192,56 @@ func TestGoldenChallenge_RotatedTrustAnchorRejects(t *testing.T) {
 	rotated := genTestECDSAConnector(t)
 	raw := readGoldenFixture(t, "intune_challenge_golden_success.txt")
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{rotated.cert}, "", goldenChallengeNow)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{rotated.cert}, Now: goldenChallengeNow})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want errors.Is(ErrChallengeSignature) when validated against a rotated trust anchor", err)
+	}
+}
+
+// TestGoldenChallenge_UnknownVersionRejected — master prompt §13 line
+// 1848 named acceptance criterion. A challenge whose payload carries a
+// `version: "v999"` claim (a value the dispatcher's
+// versionUnmarshalers map deliberately does NOT contain) MUST surface
+// ErrChallengeUnknownVersion regardless of whether the signature is
+// otherwise valid. This is the dispatcher's defense against the
+// inevitable Microsoft Connector format change — the day Microsoft
+// ships v2 and certctl's parser doesn't yet have a v2 unmarshaler, every
+// Intune enrollment lands here with a clear typed error rather than
+// crashing the SCEP handler with a confusing unmarshal panic.
+//
+// Why this test uses a fresh trust anchor instead of the on-disk
+// golden PEM: the on-disk PEM was generated with a Go-stdlib version
+// that produces different ECDSA key bytes from the current
+// generateGoldenTrustAnchor() call (the deterministic-PRNG +
+// ecdsa.GenerateKey pair has shifted across Go releases — the on-disk
+// public key bytes don't match what the current Go runtime regenerates
+// from the same seed). Rather than bake a stale trust anchor into the
+// regression, we generate a fresh ECDSA Connector keypair in-process
+// + use BOTH for signing AND for the validator's trust pool. The
+// regen target still emits a fixture file under testdata/ for the
+// operator-readable artifact; the test itself stays decoupled from
+// the on-disk PEM's drift.
+func TestGoldenChallenge_UnknownVersionRejected(t *testing.T) {
+	conn := genTestECDSAConnector(t)
+	raw := signTestChallengeES256_FixedWidth(t, conn, struct {
+		Version string `json:"version"`
+		challengePayloadV1
+	}{
+		Version:            "v999",
+		challengePayloadV1: goldenChallengePayload(),
+	})
+
+	_, err := ValidateChallenge(raw, ValidateOptions{
+		Trust: []*x509.Certificate{conn.cert},
+		Now:   goldenChallengeNow,
+	})
+	if !errors.Is(err, ErrChallengeUnknownVersion) {
+		t.Fatalf("got %v, want errors.Is(ErrChallengeUnknownVersion) for version=v999 claim", err)
+	}
+	// The error message MUST surface the specific version string so the
+	// operator's audit log narrows the diagnosis to "Microsoft shipped
+	// vN" rather than "something is wrong with the challenge."
+	if !strings.Contains(err.Error(), "v999") {
+		t.Errorf("error should contain the unknown version literal for operator audit log: %v", err)
 	}
 }

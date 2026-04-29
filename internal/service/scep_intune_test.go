@@ -171,6 +171,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_Success(t *testing.T) {
 		holder,
 		"https://certctl.example.com/scep/corp",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -207,6 +208,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_StaticChallengeStillWorks(t *testi
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"https://certctl.example.com/scep/corp",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -224,6 +226,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_TamperedChallengeRejected(t *testi
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -252,6 +255,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_ClaimMismatchRejected(t *testing.T
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -277,6 +281,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_ReplayDetected(t *testing.T) {
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(0, 24*time.Hour, 100), // disable rate limit so we don't trip THAT first
 	)
@@ -300,6 +305,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_RateLimited(t *testing.T) {
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		// Replay cache must not block us — use disjoint nonces per call.
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(2, 24*time.Hour, 100), // limit = 2
@@ -337,6 +343,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_ComplianceHookNilDefault(t *testin
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -354,6 +361,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_ComplianceHookDeniesNonCompliant(t
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -382,6 +390,7 @@ func TestSCEPService_PKCSReq_IntuneDispatcher_ComplianceHookErrorFailsClosed(t *
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (no grace) keeps these tests deterministic
 		intune.NewReplayCache(60*time.Minute, 100),
 		intune.NewPerDeviceRateLimiter(3, 24*time.Hour, 100),
 	)
@@ -411,6 +420,7 @@ func TestSCEPService_IntuneEnabled_AccessorReflectsState(t *testing.T) {
 		holderFromCerts(t, []*x509.Certificate{conn.cert}),
 		"",
 		0,
+		0, // ClockSkewTolerance — strict (no grace)
 		nil,
 		nil,
 	)

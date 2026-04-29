@@ -285,6 +285,183 @@ func TestSCEPHandler_ChromeOSPKIMessage_AESVariants(t *testing.T) {
 	}
 }
 
+// TestSCEPHandler_ChromeOSPKIMessage_RAKeyMismatch — closure-bundle
+// gap M-1 / acceptance D.1 (cowork/scep-bundle-gap-closure-prompt.md).
+// Build a PKIMessage encrypted to a freshly-generated RA cert whose
+// matching private key the server does NOT have. The handler MUST
+// reject (RFC 8894 path can't decrypt → falls through; MVP path can't
+// either because the EnvelopedData isn't a raw CSR). Assert no
+// PKCSReqWithEnvelope was reached. Closes the documented threat that
+// an attacker who swaps the RA cert in transit gets a polite error
+// rather than information leak about the underlying issuer.
+func TestSCEPHandler_ChromeOSPKIMessage_RAKeyMismatch(t *testing.T) {
+	fix := newChromeOSStackFixture(t)
+
+	// Build a PKIMessage targeting an UNRELATED RA cert (different key).
+	// The server's handler still has fix.raKey, so decryption MUST fail.
+	bogusRAKey, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey bogus RA: %v", err)
+	}
+	bogusRACert := selfSignedRSACert(t, bogusRAKey, "ra-bogus-not-on-server")
+	bogusFix := &chromeOSStackFixture{
+		raKey:      bogusRAKey,
+		raCert:     bogusRACert,
+		deviceKey:  fix.deviceKey,
+		deviceCert: fix.deviceCert,
+	}
+	pkiMessage := buildChromeOSStylePKIMessage(t, bogusFix, domain.SCEPMessageTypePKCSReq, "txn-ra-mismatch", "shared-secret-123", "ra-mismatch.example.com", aesKeyForOID(pkcs7.OIDAES256CBC))
+
+	w, _ := postPKIOperation(t, fix.handler, pkiMessage)
+	// RFC 8894 path returns FAILURE+badMessageCheck CertRep (200), MVP
+	// fall-through returns 400. Either is acceptable — what we MUST
+	// see is "the issuer never received the CSR."
+	if w.Code != http.StatusBadRequest && w.Code != http.StatusOK {
+		t.Errorf("POST PKIOperation (RA-key mismatch): got %d, want 400 (MVP fall-through) or 200 (CertRep+failInfo)", w.Code)
+	}
+	if fix.svc.pkcsReqEnvelope != nil {
+		t.Error("PKCSReqWithEnvelope was reached despite the RA-cert/key mismatch — decrypt-failure leaked through to the service")
+	}
+}
+
+// TestSCEPHandler_ChromeOSPKIMessage_3DESBackwardCompat — closure-bundle
+// gap M-1 / acceptance D.2. RFC 8894 §3.5.2 names DES-EDE3-CBC
+// (1.2.840.113549.3.7) as a "supported but discouraged" content-encryption
+// algorithm for backward compat with older Cisco IOS / Apple legacy
+// clients. Verify the parser accepts this OID + the handler reaches
+// the service with a decoded CSR.
+func TestSCEPHandler_ChromeOSPKIMessage_3DESBackwardCompat(t *testing.T) {
+	fix := newChromeOSStackFixture(t)
+	tdesKey := aesKeyForOID(pkcs7.OIDDESEDE3CBC) // 24 bytes (3DES K1||K2||K3)
+
+	csrDER := buildTestCSR(t, fix.deviceKey, "tdes.example.com", "shared-secret-123")
+
+	iv := make([]byte, des.BlockSize) // 8 bytes for 3DES
+	if _, err := rand.Read(iv); err != nil {
+		t.Fatalf("rand iv: %v", err)
+	}
+	ciphertext := tripleDESCBCEncrypt(t, tdesKey, iv, csrDER)
+	encryptedKey, err := rsa.EncryptPKCS1v15(rand.Reader, fix.raCert.PublicKey.(*rsa.PublicKey), tdesKey)
+	if err != nil {
+		t.Fatalf("rsa encrypt 3des key: %v", err)
+	}
+	envelopedData := buildEnvelopedDataForTest(t, fix.raCert, encryptedKey, iv, ciphertext, pkcs7.OIDDESEDE3CBC)
+	pkiMessage := buildSignedDataForTest(t, fix.deviceKey, fix.deviceCert, domain.SCEPMessageTypePKCSReq, "txn-3des", []byte("0123456789abcdef"), envelopedData)
+
+	w, body := postPKIOperation(t, fix.handler, pkiMessage)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST PKIOperation (3DES legacy): got %d, want 200 (RFC 8894 §3.5.2 backward-compat) — body=%q", w.Code, body)
+	}
+	if fix.svc.pkcsReqEnvelope == nil {
+		t.Fatal("PKCSReqWithEnvelope was NOT reached — 3DES decrypt path didn't make it to the service")
+	}
+}
+
+// TestSCEPHandler_ChromeOSPKIMessage_RSACSR — closure-bundle gap M-1 /
+// acceptance D.4. Pins the "RSA CSR" matrix corner explicitly so a
+// future helper refactor that quietly drops the RSA path doesn't
+// disappear from the test count without a counter dropping. The
+// shared positive-flow assertions live in
+// assertChromeOSPositiveCertRep so the matrix-pair {RSA, ECDSA} stays
+// readable.
+func TestSCEPHandler_ChromeOSPKIMessage_RSACSR(t *testing.T) {
+	fix := newChromeOSStackFixture(t)
+	pkiMessage := buildChromeOSStylePKIMessage(t, fix, domain.SCEPMessageTypePKCSReq, "txn-rsa-csr", "shared-secret-123", "rsa-csr.example.com", aesKeyForOID(pkcs7.OIDAES256CBC))
+	assertChromeOSPositiveCertRep(t, fix, pkiMessage)
+}
+
+// TestSCEPHandler_ChromeOSPKIMessage_ECDSACSR — closure-bundle gap M-1
+// / acceptance D.3. The CSR's keypair is ECDSA P-256; the device's
+// transient signerInfo identity stays RSA (matches what real ChromeOS
+// + Intune-managed devices commonly emit — device identity is a
+// long-lived RSA key, the new cert can be ECDSA). Verifies the
+// handler doesn't choke on the inner CSR's algorithm even when the
+// outer SignerInfo is RSA-SHA256.
+func TestSCEPHandler_ChromeOSPKIMessage_ECDSACSR(t *testing.T) {
+	fix := newChromeOSStackFixture(t)
+
+	csrKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("ecdsa.GenerateKey: %v", err)
+	}
+	csrDER := buildTestECDSACSR(t, csrKey, "ecdsa-csr.example.com", "shared-secret-123")
+
+	symKey := aesKeyForOID(pkcs7.OIDAES256CBC)
+	iv := make([]byte, aes.BlockSize)
+	if _, err := rand.Read(iv); err != nil {
+		t.Fatalf("rand iv: %v", err)
+	}
+	ciphertext := aesCBCEncrypt(t, symKey, iv, csrDER)
+	encryptedKey, err := rsa.EncryptPKCS1v15(rand.Reader, fix.raCert.PublicKey.(*rsa.PublicKey), symKey)
+	if err != nil {
+		t.Fatalf("rsa encrypt symKey: %v", err)
+	}
+	envelopedData := buildEnvelopedDataForTest(t, fix.raCert, encryptedKey, iv, ciphertext, pkcs7.OIDAES256CBC)
+	pkiMessage := buildSignedDataForTest(t, fix.deviceKey, fix.deviceCert, domain.SCEPMessageTypePKCSReq, "txn-ecdsa-csr", []byte("0123456789abcdef"), envelopedData)
+	assertChromeOSPositiveCertRep(t, fix, pkiMessage)
+}
+
+// assertChromeOSPositiveCertRep is the shared positive-flow assertion
+// helper for the {RSA, ECDSA} CSR matrix tests. Asserts HTTP 200 +
+// content-type + the service-level mock saw the envelope.
+func assertChromeOSPositiveCertRep(t *testing.T, fix *chromeOSStackFixture, pkiMessage []byte) {
+	t.Helper()
+	w, body := postPKIOperation(t, fix.handler, pkiMessage)
+	if w.Code != http.StatusOK {
+		t.Fatalf("POST PKIOperation: got %d, want 200 (body=%q)", w.Code, body)
+	}
+	if got := w.Header().Get("Content-Type"); got != "application/x-pki-message" {
+		t.Errorf("Content-Type = %q, want application/x-pki-message", got)
+	}
+	if fix.svc.pkcsReqEnvelope == nil {
+		t.Fatal("PKCSReqWithEnvelope was NOT reached — handler dispatched to MVP path or rejected the message")
+	}
+}
+
+// buildTestECDSACSR mirrors buildTestCSR but for an ECDSA P-256
+// signing key. Closure-bundle Phase D helper. The CSR carries the
+// challengePassword attribute the same way the RSA helper does.
+func buildTestECDSACSR(t *testing.T, key *ecdsa.PrivateKey, commonName, challengePassword string) []byte {
+	t.Helper()
+	tmpl := &x509.CertificateRequest{
+		Subject:         pkix.Name{CommonName: commonName},
+		ExtraExtensions: []pkix.Extension{},
+		Attributes: []pkix.AttributeTypeAndValueSET{
+			{
+				Type: asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 7},
+				Value: [][]pkix.AttributeTypeAndValue{
+					{{Type: asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 7}, Value: challengePassword}},
+				},
+			},
+		},
+	}
+	der, err := x509.CreateCertificateRequest(rand.Reader, tmpl, key)
+	if err != nil {
+		t.Fatalf("CreateCertificateRequest (ECDSA): %v", err)
+	}
+	return der
+}
+
+// tripleDESCBCEncrypt mirrors aesCBCEncrypt for 3DES — used by the
+// 3DES backward-compat test. PKCS#7 padding to 8-byte blocks.
+func tripleDESCBCEncrypt(t *testing.T, key, iv, plaintext []byte) []byte {
+	t.Helper()
+	block, err := des.NewTripleDESCipher(key) //nolint:gosec // RFC 8894 §3.5.2 legacy backward-compat test fixture
+	if err != nil {
+		t.Fatalf("des.NewTripleDESCipher: %v", err)
+	}
+	bs := block.BlockSize()
+	padLen := bs - len(plaintext)%bs
+	padded := append([]byte{}, plaintext...)
+	for i := 0; i < padLen; i++ {
+		padded = append(padded, byte(padLen))
+	}
+	enc := cipher.NewCBCEncrypter(block, iv)
+	out := make([]byte, len(padded))
+	enc.CryptBlocks(out, padded)
+	return out
+}
+
 // TestSCEPHandler_MVPCompat_StillWorks asserts the existing MVP path (raw
 // CSR inside a stripped SignedData, no EnvelopedData) STILL works for
 // backward compat with lightweight clients.

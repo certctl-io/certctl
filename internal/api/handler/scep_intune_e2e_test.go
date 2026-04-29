@@ -66,6 +66,9 @@ import (
 // keypair the test uses to mint valid challenges.
 type intuneE2EFixture struct {
 	connectorKey *ecdsa.PrivateKey
+	connectorDir string // dir holding the trust-anchor PEM (for SIGHUP-reload tests)
+	trustPath    string // PEM file the holder watches; rewriting + Reload simulates SIGHUP
+	trustHolder  *intune.TrustAnchorHolder
 	raKey        *rsa.PrivateKey
 	raCert       *x509.Certificate
 	deviceKey    *rsa.PrivateKey
@@ -232,6 +235,7 @@ func newIntuneE2EFixture(t *testing.T) *intuneE2EFixture {
 		trustHolder,
 		"https://certctl.example.com/scep/test",
 		60*time.Minute,
+		0, // ClockSkewTolerance — strict (the e2e fixture uses time.Now() consistently so no drift to absorb)
 		replayCache,
 		rateLimiter,
 	)
@@ -251,6 +255,9 @@ func newIntuneE2EFixture(t *testing.T) *intuneE2EFixture {
 
 	return &intuneE2EFixture{
 		connectorKey: connectorKey,
+		connectorDir: dir,
+		trustPath:    trustPath,
+		trustHolder:  trustHolder,
 		raKey:        raKey,
 		raCert:       raCert,
 		deviceKey:    deviceKey,
@@ -491,4 +498,179 @@ func buildIntuneE2EPKIMessage(t *testing.T, fix *intuneE2EFixture, transactionID
 	envelopedData := buildEnvelopedDataForTest(t, fix.raCert, encryptedKey, iv, ciphertext, oidForAESKeyLen(t, len(symKey)))
 	signedData := buildSignedDataForTest(t, fix.deviceKey, fix.deviceCert, domain.SCEPMessageTypePKCSReq, transactionID, []byte("0123456789abcdef"), envelopedData)
 	return signedData
+}
+
+// =============================================================================
+// SCEP RFC 8894 + Intune master-prompt §13 line 1849 acceptance — the two
+// remaining e2e named tests: _RateLimited_E2E + _TrustAnchorSIGHUPReload_E2E.
+// Closed in the 2026-04-29 audit-closure bundle.
+// =============================================================================
+
+// TestSCEPIntuneEnrollment_RateLimited_E2E exercises the full
+// handler→service→dispatcher chain past the per-device rate-limit cap.
+// The fixture's default cap (3) is too high for a quick test; we
+// re-inject a fresh limiter with cap=2 so the 3rd attempt for the same
+// (Subject, Issuer) returns FAILURE+BadRequest with rate_limited
+// counter ticked. Each PKIMessage carries a distinct nonce (replay
+// cache otherwise rejects on duplicate-nonce well before the limiter
+// fires), and a distinct transactionID so the audit-log shape is
+// inspectable per attempt.
+func TestSCEPIntuneEnrollment_RateLimited_E2E(t *testing.T) {
+	fix := newIntuneE2EFixture(t)
+
+	// Re-wire SetIntuneIntegration with a stricter cap so the test
+	// stays fast. Also a fresh replay cache so a previous attempt's
+	// state doesn't leak into this test if Go ever reorders test
+	// execution within the package.
+	tightLimiter := intune.NewPerDeviceRateLimiter(2, 24*time.Hour, 100)
+	freshReplay := intune.NewReplayCache(60*time.Minute, 100)
+	fix.scepService.SetIntuneIntegration(
+		fix.trustHolder,
+		"https://certctl.example.com/scep/test",
+		60*time.Minute,
+		0, // ClockSkewTolerance — strict (we mint claims at time.Now())
+		freshReplay,
+		tightLimiter,
+	)
+
+	now := time.Now()
+
+	// First two attempts succeed (cap=2 means ≤2 issuances per 24h).
+	for i := 0; i < 2; i++ {
+		nonce := "e2e-rate-allow-" + string(rune('a'+i))
+		ch := signIntuneChallengeES256(t, fix.connectorKey, validIntuneE2EClaim(now, nonce))
+		txn := "txn-rate-allow-" + string(rune('a'+i))
+		pkiMessage := buildIntuneE2EPKIMessage(t, fix, txn, ch, "device-corp-001.example.com")
+		w, body := postPKIOperation(t, fix.handler, pkiMessage)
+		if w.Code != http.StatusOK {
+			t.Fatalf("attempt %d: HTTP %d (body=%q)", i+1, w.Code, body)
+		}
+		certRep, err := pkcs7.ParseSignedData(body)
+		if err != nil {
+			t.Fatalf("attempt %d: ParseSignedData: %v", i+1, err)
+		}
+		statusStr := decodeFirstSetMember(t, certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPPKIStatus.String()])
+		if statusStr != string(domain.SCEPStatusSuccess) {
+			t.Fatalf("attempt %d: pkiStatus = %q, want SUCCESS (the allowed first %d/%d)", i+1, statusStr, i+1, 2)
+		}
+	}
+
+	// 3rd attempt for the SAME (Subject, Issuer) MUST be rate-limited.
+	tripCh := signIntuneChallengeES256(t, fix.connectorKey, validIntuneE2EClaim(now, "e2e-rate-deny-c"))
+	tripMsg := buildIntuneE2EPKIMessage(t, fix, "txn-rate-deny-c", tripCh, "device-corp-001.example.com")
+	w, body := postPKIOperation(t, fix.handler, tripMsg)
+	if w.Code != http.StatusOK {
+		t.Fatalf("rate-limited attempt: HTTP %d (body=%q) — RFC 8894 §3.3 mandates a CertRep on every PKIOperation, including failures", w.Code, body)
+	}
+	certRep, err := pkcs7.ParseSignedData(body)
+	if err != nil {
+		t.Fatalf("rate-limited attempt: ParseSignedData: %v", err)
+	}
+	statusStr := decodeFirstSetMember(t, certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPPKIStatus.String()])
+	if statusStr != string(domain.SCEPStatusFailure) {
+		t.Fatalf("rate-limited pkiStatus = %q, want FAILURE", statusStr)
+	}
+	failRV, ok := certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPFailInfo.String()]
+	if !ok {
+		t.Fatal("rate-limited CertRep missing failInfo auth-attr")
+	}
+	failStr := decodeFirstSetMember(t, failRV)
+	if failStr != string(domain.SCEPFailBadRequest) {
+		t.Errorf("rate-limited failInfo = %q, want BadRequest (mapIntuneErrorToFailInfo: rate_limit → BadRequest)", failStr)
+	}
+
+	// The fixture's issuer should have seen exactly 2 issuances (the
+	// allowed pair) — the 3rd was blocked at the dispatcher gate.
+	if got, want := len(fix.issuer.issued), 2; got != want {
+		t.Errorf("issuer issuances = %d, want %d (rate-limited 3rd should not reach the issuer)", got, want)
+	}
+
+	// Audit log — at least one rate-limited entry. The dispatcher's
+	// audit action is "scep_pkcsreq_intune" for both successes and
+	// failures; we inspect the counter table for the rate_limited tick.
+	stats := fix.scepService.IntuneStats(time.Now())
+	if got := stats.Counters["rate_limited"]; got != 1 {
+		t.Errorf("IntuneStats.counters[rate_limited] = %d, want 1", got)
+	}
+	if got := stats.Counters["success"]; got != 2 {
+		t.Errorf("IntuneStats.counters[success] = %d, want 2 (cap=2 allowed pair)", got)
+	}
+}
+
+// TestSCEPIntuneEnrollment_TrustAnchorSIGHUPReload_E2E proves the full
+// SIGHUP-reload contract end-to-end: an enrollment that succeeds against
+// the original trust anchor MUST fail after the operator rotates the
+// on-disk file + reloads, when the device tries to enroll with the OLD
+// connector key.
+//
+// Why we call holder.Reload() directly instead of os.Process.Signal(SIGHUP):
+// signal delivery in tests is flaky (signals to the test process can
+// race with t.Parallel(), and signal.Notify is global). The SIGHUP
+// goroutine's only job is to call Reload, so calling Reload directly is
+// the equivalent contract — and stable in tests. Phase B frozen
+// decision #3 in cowork/scep-bundle-gap-closure-prompt.md.
+func TestSCEPIntuneEnrollment_TrustAnchorSIGHUPReload_E2E(t *testing.T) {
+	fix := newIntuneE2EFixture(t)
+	now := time.Now()
+
+	// Step 1: a valid enrollment against the original trust anchor.
+	originalCh := signIntuneChallengeES256(t, fix.connectorKey, validIntuneE2EClaim(now, "e2e-sighup-pre"))
+	originalMsg := buildIntuneE2EPKIMessage(t, fix, "txn-sighup-pre", originalCh, "device-corp-001.example.com")
+	w, body := postPKIOperation(t, fix.handler, originalMsg)
+	if w.Code != http.StatusOK {
+		t.Fatalf("pre-rotation enrollment: HTTP %d (body=%q)", w.Code, body)
+	}
+	certRep, err := pkcs7.ParseSignedData(body)
+	if err != nil {
+		t.Fatalf("pre-rotation ParseSignedData: %v", err)
+	}
+	statusStr := decodeFirstSetMember(t, certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPPKIStatus.String()])
+	if statusStr != string(domain.SCEPStatusSuccess) {
+		t.Fatalf("pre-rotation pkiStatus = %q, want SUCCESS", statusStr)
+	}
+
+	// Step 2: operator rotates the trust anchor — write a fresh signing
+	// cert from a NEW key into the same path. Holder.Reload() then
+	// swaps the in-memory pool to the new bundle. The OLD key
+	// (fix.connectorKey) is now disowned.
+	rotatedKey, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
+	if err != nil {
+		t.Fatalf("rotated key: %v", err)
+	}
+	rotatedCert := selfSignedECCertForIntuneE2E(t, rotatedKey, "intune-connector-rotated")
+	if err := os.WriteFile(fix.trustPath, pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: rotatedCert.Raw}), 0o600); err != nil {
+		t.Fatalf("rewrite trust anchor file: %v", err)
+	}
+	if err := fix.trustHolder.Reload(); err != nil {
+		t.Fatalf("trustHolder.Reload (post-rotation): %v", err)
+	}
+
+	// Step 3: a device that signs with the OLD connector key MUST be
+	// rejected — the holder no longer recognizes the signature.
+	staleCh := signIntuneChallengeES256(t, fix.connectorKey, validIntuneE2EClaim(now, "e2e-sighup-stale"))
+	staleMsg := buildIntuneE2EPKIMessage(t, fix, "txn-sighup-stale", staleCh, "device-corp-001.example.com")
+	w, body = postPKIOperation(t, fix.handler, staleMsg)
+	if w.Code != http.StatusOK {
+		t.Fatalf("stale-key enrollment: HTTP %d (body=%q) — RFC 8894 §3.3 mandates a CertRep+failInfo wire shape", w.Code, body)
+	}
+	certRep, err = pkcs7.ParseSignedData(body)
+	if err != nil {
+		t.Fatalf("stale-key ParseSignedData: %v", err)
+	}
+	statusStr = decodeFirstSetMember(t, certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPPKIStatus.String()])
+	if statusStr != string(domain.SCEPStatusFailure) {
+		t.Fatalf("stale-key pkiStatus = %q, want FAILURE after trust-anchor rotation", statusStr)
+	}
+	failStr := decodeFirstSetMember(t, certRep.SignerInfos[0].AuthAttributes[pkcs7.OIDSCEPFailInfo.String()])
+	if failStr != string(domain.SCEPFailBadMessageCheck) {
+		t.Errorf("stale-key failInfo = %q, want BadMessageCheck (mapIntuneErrorToFailInfo: sig errors → BadMessageCheck)", failStr)
+	}
+
+	stats := fix.scepService.IntuneStats(time.Now())
+	if got := stats.Counters["signature_invalid"]; got != 1 {
+		t.Errorf("IntuneStats.counters[signature_invalid] = %d, want 1 (post-rotation stale-key attempt)", got)
+	}
+	if got := stats.Counters["success"]; got != 1 {
+		t.Errorf("IntuneStats.counters[success] = %d, want 1 (only the pre-rotation attempt)", got)
+	}
 }

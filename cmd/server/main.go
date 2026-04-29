@@ -885,7 +885,7 @@ func main() {
 			// with INTUNE_ENABLED=false skip the entire block, so the cost on
 			// non-Intune deploys is exactly one bool check per profile.
 			if profile.Intune.Enabled {
-				intuneHolder, err := preflightSCEPIntuneTrustAnchor(true, profile.Intune.ConnectorCertPath, profileLog)
+				intuneHolder, err := preflightSCEPIntuneTrustAnchor(true, profile.PathID, profile.Intune.ConnectorCertPath, profileLog)
 				if err != nil {
 					profileLog.Error(
 						"startup refused: SCEP profile INTUNE trust anchor preflight failed "+
@@ -920,6 +920,7 @@ func main() {
 					intuneHolder,
 					profile.Intune.Audience,
 					profile.Intune.ChallengeValidity,
+					profile.Intune.ClockSkewTolerance,
 					replayCache,
 					rateLimiter,
 				)
@@ -927,6 +928,7 @@ func main() {
 					"trust_anchor_path", profile.Intune.ConnectorCertPath,
 					"audience", profile.Intune.Audience,
 					"challenge_validity", profile.Intune.ChallengeValidity,
+					"clock_skew_tolerance", profile.Intune.ClockSkewTolerance,
 					"per_device_rate_limit_24h", profile.Intune.PerDeviceRateLimit24h,
 				)
 			}
@@ -1462,18 +1464,24 @@ func preflightSCEPMTLSTrustBundle(enabled bool, bundlePath string) (*x509.CertPo
 // On success returns the freshly-built *intune.TrustAnchorHolder ready to
 // inject into the per-profile SCEPService via SetIntuneIntegration. The
 // holder also installs the SIGHUP watcher (started by the caller).
-func preflightSCEPIntuneTrustAnchor(enabled bool, path string, logger *slog.Logger) (*intune.TrustAnchorHolder, error) {
+func preflightSCEPIntuneTrustAnchor(enabled bool, pathID, path string, logger *slog.Logger) (*intune.TrustAnchorHolder, error) {
 	if !enabled {
 		return nil, nil
 	}
+	// pathIDLabel renders the empty-string PathID as "<root>" so the
+	// operator's boot-log error doesn't read like a missing variable.
+	pathIDLabel := pathID
+	if pathIDLabel == "" {
+		pathIDLabel = "<root>"
+	}
 	if path == "" {
-		return nil, fmt.Errorf("INTUNE enabled but trust anchor path empty: " +
-			"set CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH to a PEM bundle " +
-			"of the Microsoft Intune Certificate Connector's signing certs")
+		return nil, fmt.Errorf("SCEP profile (PathID=%q) INTUNE enabled but trust anchor path empty: "+
+			"set CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH to a PEM bundle "+
+			"of the Microsoft Intune Certificate Connector's signing certs", pathIDLabel)
 	}
 	holder, err := intune.NewTrustAnchorHolder(path, logger)
 	if err != nil {
-		return nil, fmt.Errorf("INTUNE trust anchor load failed: %w (path=%s)", err, path)
+		return nil, fmt.Errorf("SCEP profile (PathID=%q) INTUNE trust anchor load failed: %w (path=%s)", pathIDLabel, err, path)
 	}
 	return holder, nil
 }

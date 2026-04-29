@@ -111,6 +111,28 @@ func goldenExpiredChallengePayload() challengePayloadV1 {
 	return p
 }
 
+// goldenUnknownVersionPayload wraps the success v1 payload in a
+// version-bearing prelude where Version="v999" — a value the
+// versionUnmarshalers map does NOT contain. ValidateChallenge MUST
+// surface ErrChallengeUnknownVersion when given this payload.
+//
+// Master prompt §13 line 1848 (golden test acceptance) specifically
+// names "unknown-version-rejected" alongside success / expired /
+// tampered_sig as a required golden case; this helper materializes the
+// fixture from the same deterministic seed as the others so the
+// regenerated fixture file diff stays clean.
+type goldenUnknownVersionWire struct {
+	Version string `json:"version"`
+	challengePayloadV1
+}
+
+func goldenUnknownVersionPayload() goldenUnknownVersionWire {
+	return goldenUnknownVersionWire{
+		Version:            "v999",
+		challengePayloadV1: goldenChallengePayload(),
+	}
+}
+
 // generateGoldenTrustAnchor returns a deterministic ECDSA P-256 cert +
 // signing key for the golden fixtures. The same goldenFixtureSeed always
 // produces the same key + cert bytes — important so the testdata files
@@ -155,6 +177,17 @@ func generateGoldenTrustAnchor(t *testing.T) (*ecdsa.PrivateKey, *x509.Certifica
 // signature suffix varies between regenerations. ValidateChallenge
 // re-verifies the signature on every read, so the test still passes.
 func signGoldenChallenge(t *testing.T, key *ecdsa.PrivateKey, payload challengePayloadV1) string {
+	t.Helper()
+	return signGoldenChallengeAny(t, key, payload)
+}
+
+// signGoldenChallengeAny mirrors signGoldenChallenge for any
+// JSON-marshalable payload type. The goldenUnknownVersionWire fixture
+// embeds the v1 payload inside a version-bearing prelude, so the typed
+// helper above can't reach it without a cast — this any-typed sibling
+// keeps the typed entrypoint stable while letting the regen target +
+// the unknown-version-rejected golden test pass an embedded struct.
+func signGoldenChallengeAny(t *testing.T, key *ecdsa.PrivateKey, payload any) string {
 	t.Helper()
 	hdr, _ := json.Marshal(jwtHeader{Alg: "ES256", Typ: "JWT"})
 	pl, err := json.Marshal(payload)
@@ -256,6 +289,7 @@ func flipLastSignatureByte(t *testing.T, raw string) string {
 // minimal when an operator runs the regenerate flow).
 var _ = pemEncodeForFixture
 var _ = signGoldenChallenge
+var _ = signGoldenChallengeAny
 var _ = generateGoldenTrustAnchor
 
 // deterministicReader is a sha256-based PRNG seeded from a constant

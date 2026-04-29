@@ -879,6 +879,18 @@ type SCEPIntuneProfileConfig struct {
 	// signing key). Zero means "unlimited" (defense-in-depth disabled;
 	// not recommended for production).
 	PerDeviceRateLimit24h int
+
+	// ClockSkewTolerance widens the iat/exp validation window by
+	// ±|tolerance| to absorb modest clock drift between the Microsoft
+	// Intune Certificate Connector and the certctl host. Default 60s
+	// per master prompt §15 ("known hazards"). Operators on tightly
+	// time-synced fleets can set this to zero to enforce strict
+	// iat/exp checks; operators on loosely synced fleets (e.g. field
+	// devices with no NTP) may raise to 5m. Validate() refuses any
+	// tolerance ≥ ChallengeValidity (which would make the per-profile
+	// validity cap meaningless). Source env var:
+	// CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE.
+	ClockSkewTolerance time.Duration
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -1514,6 +1526,7 @@ func loadSCEPProfilesFromEnv() []SCEPProfileConfig {
 				Audience:              getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_AUDIENCE", ""),
 				ChallengeValidity:     getEnvDuration("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_CHALLENGE_VALIDITY", 60*time.Minute),
 				PerDeviceRateLimit24h: getEnvInt("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_PER_DEVICE_RATE_LIMIT_24H", 3),
+				ClockSkewTolerance:    getEnvDuration("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_CLOCK_SKEW_TOLERANCE", 60*time.Second),
 			},
 		})
 	}
@@ -1791,6 +1804,19 @@ func (c *Config) Validate() error {
 			// rare operator who wants no per-device cap).
 			if p.Intune.PerDeviceRateLimit24h < 0 {
 				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_PER_DEVICE_RATE_LIMIT_24H=%d — refuse to start: must be ≥0 (zero disables the per-device cap, positive values enforce it)", i, p.PathID, p.Intune.PerDeviceRateLimit24h)
+			}
+			// Master prompt §15 hazard closure: clock-skew tolerance must
+			// be ≥0 AND strictly less than ChallengeValidity. A negative
+			// value is operator typo; a value ≥ ChallengeValidity makes
+			// the iat/exp checks vacuously pass (a Connector challenge
+			// minted at NotBefore-tolerance still validates), defeating
+			// the per-profile validity cap. Reject at startup so the
+			// operator's first grep narrows it down fast.
+			if p.Intune.ClockSkewTolerance < 0 {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_CLOCK_SKEW_TOLERANCE=%s — refuse to start: must be ≥0 (zero disables the grace window, positive values widen it)", i, p.PathID, p.Intune.ClockSkewTolerance)
+			}
+			if p.Intune.ChallengeValidity > 0 && p.Intune.ClockSkewTolerance >= p.Intune.ChallengeValidity {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_CLOCK_SKEW_TOLERANCE=%s ≥ INTUNE_CHALLENGE_VALIDITY=%s — refuse to start: tolerance ≥ validity makes the per-profile validity cap vacuous", i, p.PathID, p.Intune.ClockSkewTolerance, p.Intune.ChallengeValidity)
 			}
 		}
 	}

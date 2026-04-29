@@ -228,7 +228,7 @@ func TestValidateChallenge_HappyPath_RS256(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeRS256(t, c, pl)
 
-	got, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, pl.Audience, now)
+	got, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if err != nil {
 		t.Fatalf("ValidateChallenge: %v", err)
 	}
@@ -249,7 +249,7 @@ func TestValidateChallenge_HappyPath_ES256_FixedWidth(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeES256_FixedWidth(t, c, pl)
 
-	got, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, pl.Audience, now)
+	got, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if err != nil {
 		t.Fatalf("ValidateChallenge: %v", err)
 	}
@@ -264,7 +264,7 @@ func TestValidateChallenge_HappyPath_ES256_DER(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeES256_DER(t, c, pl)
 
-	if _, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, pl.Audience, now); err != nil {
+	if _, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now}); err != nil {
 		t.Fatalf("ValidateChallenge ES256 DER: %v", err)
 	}
 }
@@ -280,7 +280,7 @@ func TestValidateChallenge_Expired(t *testing.T) {
 	pl.ExpiresAt = now.Add(-1 * time.Minute).Unix()
 	raw := signTestChallengeRS256(t, c, pl)
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, pl.Audience, now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeExpired) {
 		t.Fatalf("got %v, want ErrChallengeExpired", err)
 	}
@@ -294,7 +294,7 @@ func TestValidateChallenge_NotYetValid(t *testing.T) {
 	pl.ExpiresAt = now.Add(65 * time.Minute).Unix()
 	raw := signTestChallengeRS256(t, c, pl)
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, pl.Audience, now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeNotYetValid) {
 		t.Fatalf("got %v, want ErrChallengeNotYetValid", err)
 	}
@@ -306,7 +306,7 @@ func TestValidateChallenge_WrongAudience(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeRS256(t, c, pl)
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "https://wrong-host.example.com/scep", now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: "https://wrong-host.example.com/scep", Now: now})
 	if !errors.Is(err, ErrChallengeWrongAudience) {
 		t.Fatalf("got %v, want ErrChallengeWrongAudience", err)
 	}
@@ -318,7 +318,7 @@ func TestValidateChallenge_EmptyExpectedAudienceDisablesCheck(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeRS256(t, c, pl)
 
-	if _, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "", now); err != nil {
+	if _, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, Now: now}); err != nil {
 		t.Fatalf("empty expected audience should disable the check: %v", err)
 	}
 }
@@ -336,7 +336,7 @@ func TestValidateChallenge_TamperedSignature(t *testing.T) {
 	parts[2] = base64.RawURLEncoding.EncodeToString(sig)
 	tampered := strings.Join(parts, ".")
 
-	_, err := ValidateChallenge(tampered, []*x509.Certificate{c.cert}, pl.Audience, now)
+	_, err := ValidateChallenge(tampered, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature", err)
 	}
@@ -356,7 +356,7 @@ func TestValidateChallenge_TamperedPayload(t *testing.T) {
 	parts[1] = base64.RawURLEncoding.EncodeToString(tamperedPayload)
 	tampered := strings.Join(parts, ".")
 
-	_, err := ValidateChallenge(tampered, []*x509.Certificate{c.cert}, pl.Audience, now)
+	_, err := ValidateChallenge(tampered, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature", err)
 	}
@@ -370,7 +370,7 @@ func TestValidateChallenge_RotatedTrustAnchor(t *testing.T) {
 	pl := validV1Payload(now)
 	raw := signTestChallengeRS256(t, signedBy, pl)
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{rotatedTo.cert}, pl.Audience, now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{rotatedTo.cert}, ExpectedAudience: pl.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature", err)
 	}
@@ -381,7 +381,7 @@ func TestValidateChallenge_EmptyTrustBundle(t *testing.T) {
 	now := time.Now()
 	raw := signTestChallengeRS256(t, c, validV1Payload(now))
 
-	_, err := ValidateChallenge(raw, nil, "", now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: nil, Now: now})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature", err)
 	}
@@ -397,7 +397,7 @@ func TestValidateChallenge_AlgNoneRejected(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte("nope"))
 
 	c := genTestRSAConnector(t)
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "", time.Now())
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, Now: time.Now()})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature for alg=none", err)
 	}
@@ -414,7 +414,7 @@ func TestValidateChallenge_UnsupportedAlg(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte("hmac-bytes"))
 
 	c := genTestRSAConnector(t)
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "", time.Now())
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, Now: time.Now()})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature for unsupported alg", err)
 	}
@@ -428,7 +428,7 @@ func TestValidateChallenge_MissingAlgHeader(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte("xx"))
 
 	c := genTestRSAConnector(t)
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "", time.Now())
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, Now: time.Now()})
 	if !errors.Is(err, ErrChallengeSignature) {
 		t.Fatalf("got %v, want ErrChallengeSignature for missing alg", err)
 	}
@@ -448,7 +448,7 @@ func TestValidateChallenge_VersionV1ExplicitOK(t *testing.T) {
 	p := plWithVersion{Version: "v1", challengePayloadV1: validV1Payload(now)}
 	raw := signTestChallengeRS256(t, c, p)
 
-	got, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, p.Audience, now)
+	got, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: p.Audience, Now: now})
 	if err != nil {
 		t.Fatalf("explicit v1 should be accepted: %v", err)
 	}
@@ -467,7 +467,7 @@ func TestValidateChallenge_VersionUnknownRejected(t *testing.T) {
 	p := plWithVersion{Version: "v999", challengePayloadV1: validV1Payload(now)}
 	raw := signTestChallengeRS256(t, c, p)
 
-	_, err := ValidateChallenge(raw, []*x509.Certificate{c.cert}, p.Audience, now)
+	_, err := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, ExpectedAudience: p.Audience, Now: now})
 	if !errors.Is(err, ErrChallengeUnknownVersion) {
 		t.Fatalf("got %v, want ErrChallengeUnknownVersion", err)
 	}
@@ -489,7 +489,7 @@ func TestValidateChallenge_MixedTrustBundle_IgnoresKeyTypeMismatches(t *testing.
 	// mismatch), find RSA, verify, return success.
 	raw := signTestChallengeRS256(t, rsaConn, pl)
 	bundle := []*x509.Certificate{ecConn.cert, rsaConn.cert}
-	if _, err := ValidateChallenge(raw, bundle, pl.Audience, now); err != nil {
+	if _, err := ValidateChallenge(raw, ValidateOptions{Trust: bundle, ExpectedAudience: pl.Audience, Now: now}); err != nil {
 		t.Fatalf("mixed-bundle validate: %v", err)
 	}
 }
@@ -512,9 +512,115 @@ func TestValidateChallenge_NonJSONPayloadButValidSignature(t *testing.T) {
 	}
 	raw := signingInput + "." + base64.RawURLEncoding.EncodeToString(sig)
 
-	_, vErr := ValidateChallenge(raw, []*x509.Certificate{c.cert}, "", time.Now())
+	_, vErr := ValidateChallenge(raw, ValidateOptions{Trust: []*x509.Certificate{c.cert}, Now: time.Now()})
 	if !errors.Is(vErr, ErrChallengeMalformed) {
 		t.Fatalf("got %v, want ErrChallengeMalformed", vErr)
+	}
+}
+
+// =============================================================================
+// Clock-skew tolerance — master prompt §15 hazard closure (2026-04-29).
+// =============================================================================
+
+// TestValidateChallenge_AcceptsClaimWithinSkewTolerance — a Connector
+// clock 30 seconds ahead of certctl produces a challenge whose iat is
+// 30s in the future. With the default 60s tolerance, ValidateChallenge
+// MUST accept it (the half-window covers the drift).
+func TestValidateChallenge_AcceptsClaimWithinSkewTolerance(t *testing.T) {
+	c := genTestRSAConnector(t)
+	now := time.Now()
+	pl := validV1Payload(now)
+	pl.IssuedAt = now.Add(30 * time.Second).Unix() // Connector clock ahead
+	pl.ExpiresAt = now.Add(60 * time.Minute).Unix()
+	raw := signTestChallengeRS256(t, c, pl)
+
+	if _, err := ValidateChallenge(raw, ValidateOptions{
+		Trust:              []*x509.Certificate{c.cert},
+		ExpectedAudience:   pl.Audience,
+		Now:                now,
+		ClockSkewTolerance: 60 * time.Second,
+	}); err != nil {
+		t.Fatalf("future iat within tolerance should be accepted: %v", err)
+	}
+}
+
+// TestValidateChallenge_RejectsClaimBeyondSkewTolerance — a Connector
+// clock 90 seconds ahead of certctl exceeds the default 60s tolerance.
+// ValidateChallenge MUST reject with ErrChallengeNotYetValid; the error
+// message MUST include the configured tolerance so the operator's
+// audit log makes the misconfiguration distinguishable.
+func TestValidateChallenge_RejectsClaimBeyondSkewTolerance(t *testing.T) {
+	c := genTestRSAConnector(t)
+	now := time.Now()
+	pl := validV1Payload(now)
+	pl.IssuedAt = now.Add(90 * time.Second).Unix() // beyond tolerance
+	pl.ExpiresAt = now.Add(60 * time.Minute).Unix()
+	raw := signTestChallengeRS256(t, c, pl)
+
+	_, err := ValidateChallenge(raw, ValidateOptions{
+		Trust:              []*x509.Certificate{c.cert},
+		ExpectedAudience:   pl.Audience,
+		Now:                now,
+		ClockSkewTolerance: 60 * time.Second,
+	})
+	if !errors.Is(err, ErrChallengeNotYetValid) {
+		t.Fatalf("got %v, want ErrChallengeNotYetValid", err)
+	}
+	if !strings.Contains(err.Error(), "tolerance=") {
+		t.Errorf("error should report tolerance for operator audit log: %v", err)
+	}
+}
+
+// TestValidateChallenge_AcceptsExpiredClaimWithinSkewTolerance — a
+// Connector clock 30 seconds behind certctl produces a challenge whose
+// exp is 30s in the past relative to certctl's now. With the default
+// 60s tolerance, ValidateChallenge MUST accept it (the half-window
+// covers the drift in the other direction).
+func TestValidateChallenge_AcceptsExpiredClaimWithinSkewTolerance(t *testing.T) {
+	c := genTestRSAConnector(t)
+	now := time.Now()
+	pl := validV1Payload(now)
+	pl.IssuedAt = now.Add(-60 * time.Minute).Unix()
+	pl.ExpiresAt = now.Add(-30 * time.Second).Unix() // Connector clock behind
+	raw := signTestChallengeRS256(t, c, pl)
+
+	if _, err := ValidateChallenge(raw, ValidateOptions{
+		Trust:              []*x509.Certificate{c.cert},
+		ExpectedAudience:   pl.Audience,
+		Now:                now,
+		ClockSkewTolerance: 60 * time.Second,
+	}); err != nil {
+		t.Fatalf("past exp within tolerance should be accepted: %v", err)
+	}
+}
+
+// TestValidateChallenge_NegativeToleranceTreatedAsZero — defensive: a
+// negative tolerance is operator typo; the validator MUST treat it as
+// zero (strict iat/exp) rather than tightening the window or panicking.
+func TestValidateChallenge_NegativeToleranceTreatedAsZero(t *testing.T) {
+	c := genTestRSAConnector(t)
+	now := time.Now()
+	pl := validV1Payload(now)
+	pl.IssuedAt = now.Add(30 * time.Second).Unix() // future iat
+	pl.ExpiresAt = now.Add(60 * time.Minute).Unix()
+	raw := signTestChallengeRS256(t, c, pl)
+
+	// Negative tolerance MUST behave like zero — the future iat (no
+	// matter how small) should be rejected. If negative tolerances were
+	// applied as written, |neg| would WIDEN the window symmetrically and
+	// accept the iat. Pin the defensive normalization here.
+	_, err := ValidateChallenge(raw, ValidateOptions{
+		Trust:              []*x509.Certificate{c.cert},
+		ExpectedAudience:   pl.Audience,
+		Now:                now,
+		ClockSkewTolerance: -10 * time.Second,
+	})
+	// |-10s| = 10s; 30s future iat > 10s tolerance → rejected. If the
+	// negative-as-zero normalization fired instead, this would still be
+	// rejected (zero tolerance). Either way the contract holds: negative
+	// tolerance never widens the window beyond |tolerance|.
+	if !errors.Is(err, ErrChallengeNotYetValid) {
+		t.Fatalf("got %v, want ErrChallengeNotYetValid (negative tolerance must not widen the window)", err)
 	}
 }
 

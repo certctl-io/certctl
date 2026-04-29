@@ -166,6 +166,56 @@ func unmarshalChallengeV1(payload []byte) (*ChallengeClaim, error) {
 	return c, nil
 }
 
+// ValidateOptions parameterizes ValidateChallenge. Introduced in the
+// 2026-04-29 SCEP RFC 8894 + Intune master-prompt §15 hazard closure
+// to add a configurable clock-skew tolerance without continuing to
+// pile positional arguments onto the validator. Future per-validation
+// knobs (e.g. an explicit version allow-list, a custom sig-alg policy)
+// land here without churning every call site.
+//
+// Field defaults via the zero value MUST preserve the strict pre-§15
+// behavior — i.e. a caller that passes ValidateOptions{Trust: ..., Now: ...}
+// with no other fields gets exactly the iat/exp/audience semantics that
+// shipped before the tolerance was introduced. This is a load-bearing
+// contract for the existing test suite and any out-of-tree caller that
+// hasn't migrated to opt-in tolerance.
+type ValidateOptions struct {
+	// Trust is the pool of operator-supplied Connector signing-cert public
+	// keys to verify the challenge signature against. Required (an empty
+	// pool returns ErrChallengeSignature with a "no trust anchors
+	// configured" message so the operator boot-time misconfig is
+	// distinguishable from an in-the-wild signature mismatch).
+	Trust []*x509.Certificate
+
+	// ExpectedAudience is the SCEP endpoint URL the challenge's "aud"
+	// claim is expected to match. Empty disables the audience check
+	// (proxy / load-balancer scenarios where the URL the Connector saw
+	// differs from the URL we see, plus test convenience).
+	ExpectedAudience string
+
+	// Now is the wall-clock time used for the iat/exp comparisons.
+	// Injected (rather than read from time.Now() inside the function) so
+	// tests are deterministic and the per-profile dispatcher can pin a
+	// single "request started at" timestamp across the validate + replay
+	// + rate-limit triplet.
+	Now time.Time
+
+	// ClockSkewTolerance widens the iat/exp window by ±|tolerance| to
+	// absorb modest clock drift between the Microsoft Intune Certificate
+	// Connector and the certctl host. Default zero preserves strict
+	// pre-§15 behaviour. Operators wire this from the per-profile env
+	// var CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE
+	// (default 60s — see internal/config/config.go).
+	//
+	// Asymmetric application: an iat in the future is accepted when
+	// `now + tolerance >= iat` (so a Connector clock 30s ahead of certctl
+	// passes with tolerance=60s). An exp in the past is accepted when
+	// `now - tolerance < exp` (so a Connector clock 30s behind certctl
+	// passes too). Negative tolerance is treated as zero (a defensive
+	// no-op rather than a footgun that tightens the window).
+	ClockSkewTolerance time.Duration
+}
+
 // ValidateChallenge runs the full Intune-challenge validation pipeline:
 //
 //  1. ParseChallenge(raw) — JWT compact deserialize
@@ -173,9 +223,10 @@ func unmarshalChallengeV1(payload []byte) (*ChallengeClaim, error) {
 //     trust-anchor cert's public key (try each until one verifies)
 //  3. Extract version claim via the lightweight versioned-prelude
 //  4. Dispatch to the per-version unmarshaler (v1 today)
-//  5. Time bounds: now ≥ iat AND now < exp (with stdlib RFC 3339 grace)
-//  6. Audience: claim.Audience == expectedAudience (when expectedAudience
-//     is non-empty; empty disables the check, useful for tests)
+//  5. Time bounds: now+tolerance ≥ iat AND now-tolerance < exp
+//     (tolerance defaults to zero — strict — and widens via opts)
+//  6. Audience: claim.Audience == opts.ExpectedAudience (when
+//     ExpectedAudience is non-empty; empty disables the check)
 //
 // Returns *ChallengeClaim on success, typed error on failure (caller can
 // errors.Is the specific dimension).
@@ -184,8 +235,8 @@ func unmarshalChallengeV1(payload []byte) (*ChallengeClaim, error) {
 // claim's Nonce to a *ReplayCache.CheckAndInsert. We deliberately don't
 // own the cache here so the validator stays stateless + testable; the
 // handler glues parser + cache together.
-func ValidateChallenge(raw string, trust []*x509.Certificate, expectedAudience string, now time.Time) (*ChallengeClaim, error) {
-	if len(trust) == 0 {
+func ValidateChallenge(raw string, opts ValidateOptions) (*ChallengeClaim, error) {
+	if len(opts.Trust) == 0 {
 		return nil, fmt.Errorf("%w: no trust anchors configured", ErrChallengeSignature)
 	}
 
@@ -212,7 +263,7 @@ func ValidateChallenge(raw string, trust []*x509.Certificate, expectedAudience s
 		return nil, fmt.Errorf("%w: header JSON: %v", ErrChallengeMalformed, err)
 	}
 
-	if err := verifyChallengeSignature(hdr.Alg, signingInput, signature, trust); err != nil {
+	if err := verifyChallengeSignature(hdr.Alg, signingInput, signature, opts.Trust); err != nil {
 		return nil, err
 	}
 
@@ -230,26 +281,34 @@ func ValidateChallenge(raw string, trust []*x509.Certificate, expectedAudience s
 		return nil, err
 	}
 
-	// Time bounds. The Connector's signed iat/exp ARE authoritative;
-	// we don't impose a separate validity cap here (the operator can
-	// add one in the handler if defense-in-depth is wanted, e.g. via
-	// SCEPProfileConfig.IntuneChallengeValidity in Phase 8).
-	if !claim.IssuedAt.IsZero() && now.Before(claim.IssuedAt) {
-		return nil, fmt.Errorf("%w: iat=%s now=%s", ErrChallengeNotYetValid,
-			claim.IssuedAt.Format(time.RFC3339), now.Format(time.RFC3339))
+	// Time bounds. Tolerance defaults to zero (strict) and is normalized
+	// to absolute value so a misconfigured negative value is a defensive
+	// no-op rather than a footgun that tightens the window.
+	tolerance := opts.ClockSkewTolerance
+	if tolerance < 0 {
+		tolerance = -tolerance
 	}
-	if !claim.ExpiresAt.IsZero() && !now.Before(claim.ExpiresAt) {
-		return nil, fmt.Errorf("%w: exp=%s now=%s", ErrChallengeExpired,
-			claim.ExpiresAt.Format(time.RFC3339), now.Format(time.RFC3339))
+	now := opts.Now
+	// iat check: a future iat is accepted when (now + tolerance) >= iat.
+	// Equivalent to: reject when (now + tolerance) < iat.
+	if !claim.IssuedAt.IsZero() && now.Add(tolerance).Before(claim.IssuedAt) {
+		return nil, fmt.Errorf("%w: iat=%s now=%s tolerance=%s", ErrChallengeNotYetValid,
+			claim.IssuedAt.Format(time.RFC3339), now.Format(time.RFC3339), tolerance)
+	}
+	// exp check: a past exp is accepted when (now - tolerance) < exp.
+	// Equivalent to: reject when (now - tolerance) >= exp.
+	if !claim.ExpiresAt.IsZero() && !now.Add(-tolerance).Before(claim.ExpiresAt) {
+		return nil, fmt.Errorf("%w: exp=%s now=%s tolerance=%s", ErrChallengeExpired,
+			claim.ExpiresAt.Format(time.RFC3339), now.Format(time.RFC3339), tolerance)
 	}
 
 	// Audience binds the challenge to a specific SCEP endpoint URL. An
-	// empty expectedAudience disables the check (test convenience + the
+	// empty ExpectedAudience disables the check (test convenience + the
 	// Phase 8 config allows operator opt-out for proxy / load-balancer
 	// scenarios where the URL the Connector saw isn't the URL we see).
-	if expectedAudience != "" && claim.Audience != "" && claim.Audience != expectedAudience {
+	if opts.ExpectedAudience != "" && claim.Audience != "" && claim.Audience != opts.ExpectedAudience {
 		return nil, fmt.Errorf("%w: claim=%q expected=%q", ErrChallengeWrongAudience,
-			claim.Audience, expectedAudience)
+			claim.Audience, opts.ExpectedAudience)
 	}
 
 	return claim, nil

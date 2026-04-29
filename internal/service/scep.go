@@ -48,6 +48,7 @@ type SCEPService struct {
 	intuneTrust       *intune.TrustAnchorHolder // SIGHUP-reloadable trust pool
 	intuneAudience    string                    // expected "aud" claim; empty disables the check
 	intuneValidity    time.Duration             // optional override on top of the challenge's exp
+	intuneClockSkew   time.Duration             // ±tolerance applied to iat/exp; default 60s wired from config
 	intuneReplayCache *intune.ReplayCache       // nonce-keyed; catches duplicate submission
 	intuneRateLimiter *intune.PerDeviceRateLimiter
 	complianceCheck   ComplianceCheck   // V3-Pro plug-in seam; nil-default no-op
@@ -161,17 +162,18 @@ type IntuneTrustAnchorInfo struct {
 // GET endpoint hands back. SCEPService.IntuneStats() builds one of
 // these on demand under no contention with the dispatcher hot path.
 type IntuneStatsSnapshot struct {
-	PathID            string                  `json:"path_id"`
-	IssuerID          string                  `json:"issuer_id"`
-	Enabled           bool                    `json:"enabled"`
-	TrustAnchorPath   string                  `json:"trust_anchor_path,omitempty"`
-	TrustAnchors      []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
-	Audience          string                  `json:"audience,omitempty"`
-	ChallengeValidity time.Duration           `json:"challenge_validity_ns,omitempty"`
-	RateLimitDisabled bool                    `json:"rate_limit_disabled"`
-	ReplayCacheSize   int                     `json:"replay_cache_size"`
-	Counters          map[string]uint64       `json:"counters"`
-	GeneratedAt       time.Time               `json:"generated_at"`
+	PathID             string                  `json:"path_id"`
+	IssuerID           string                  `json:"issuer_id"`
+	Enabled            bool                    `json:"enabled"`
+	TrustAnchorPath    string                  `json:"trust_anchor_path,omitempty"`
+	TrustAnchors       []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
+	Audience           string                  `json:"audience,omitempty"`
+	ChallengeValidity  time.Duration           `json:"challenge_validity_ns,omitempty"`
+	ClockSkewTolerance time.Duration           `json:"clock_skew_tolerance_ns,omitempty"`
+	RateLimitDisabled  bool                    `json:"rate_limit_disabled"`
+	ReplayCacheSize    int                     `json:"replay_cache_size"`
+	Counters           map[string]uint64       `json:"counters"`
+	GeneratedAt        time.Time               `json:"generated_at"`
 }
 
 // SetPathID records the SCEP profile path ID this service instance
@@ -207,6 +209,7 @@ func (s *SCEPService) IntuneStats(now time.Time) IntuneStatsSnapshot {
 	}
 	out.Audience = s.intuneAudience
 	out.ChallengeValidity = s.intuneValidity
+	out.ClockSkewTolerance = s.intuneClockSkew
 	if s.intuneRateLimiter != nil {
 		out.RateLimitDisabled = s.intuneRateLimiter.Disabled()
 	}
@@ -315,13 +318,14 @@ type SCEPProfileStatsSnapshot struct {
 // minus the always-present per-profile ones (PathID, IssuerID,
 // GeneratedAt) which live on SCEPProfileStatsSnapshot.
 type IntuneSection struct {
-	TrustAnchorPath   string                  `json:"trust_anchor_path,omitempty"`
-	TrustAnchors      []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
-	Audience          string                  `json:"audience,omitempty"`
-	ChallengeValidity time.Duration           `json:"challenge_validity_ns,omitempty"`
-	RateLimitDisabled bool                    `json:"rate_limit_disabled"`
-	ReplayCacheSize   int                     `json:"replay_cache_size"`
-	Counters          map[string]uint64       `json:"counters"`
+	TrustAnchorPath    string                  `json:"trust_anchor_path,omitempty"`
+	TrustAnchors       []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
+	Audience           string                  `json:"audience,omitempty"`
+	ChallengeValidity  time.Duration           `json:"challenge_validity_ns,omitempty"`
+	ClockSkewTolerance time.Duration           `json:"clock_skew_tolerance_ns,omitempty"`
+	RateLimitDisabled  bool                    `json:"rate_limit_disabled"`
+	ReplayCacheSize    int                     `json:"replay_cache_size"`
+	Counters           map[string]uint64       `json:"counters"`
 }
 
 // ProfileStats returns the per-profile observability snapshot in the
@@ -352,9 +356,10 @@ func (s *SCEPService) ProfileStats(now time.Time) SCEPProfileStatsSnapshot {
 		return out
 	}
 	intuneSection := IntuneSection{
-		Audience:          s.intuneAudience,
-		ChallengeValidity: s.intuneValidity,
-		Counters:          s.intuneCounters.snapshot(),
+		Audience:           s.intuneAudience,
+		ChallengeValidity:  s.intuneValidity,
+		ClockSkewTolerance: s.intuneClockSkew,
+		Counters:           s.intuneCounters.snapshot(),
 	}
 	if s.intuneRateLimiter != nil {
 		intuneSection.RateLimitDisabled = s.intuneRateLimiter.Disabled()
@@ -446,6 +451,7 @@ func (s *SCEPService) SetIntuneIntegration(
 	trust *intune.TrustAnchorHolder,
 	audience string,
 	validity time.Duration,
+	clockSkew time.Duration,
 	replayCache *intune.ReplayCache,
 	rateLimiter *intune.PerDeviceRateLimiter,
 ) {
@@ -453,6 +459,7 @@ func (s *SCEPService) SetIntuneIntegration(
 	s.intuneTrust = trust
 	s.intuneAudience = audience
 	s.intuneValidity = validity
+	s.intuneClockSkew = clockSkew
 	s.intuneReplayCache = replayCache
 	s.intuneRateLimiter = rateLimiter
 	if s.intuneCounters == nil {
@@ -573,7 +580,12 @@ func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string
 	now := time.Now()
 	trust := s.intuneTrust.Get()
 
-	claim, err := intune.ValidateChallenge(challengePassword, trust, s.intuneAudience, now)
+	claim, err := intune.ValidateChallenge(challengePassword, intune.ValidateOptions{
+		Trust:              trust,
+		ExpectedAudience:   s.intuneAudience,
+		Now:                now,
+		ClockSkewTolerance: s.intuneClockSkew,
+	})
 	if err != nil {
 		s.logger.Warn("SCEP enrollment rejected: Intune challenge validation failed",
 			"transaction_id", transactionID, "reason", intuneFailReason(err), "error", err)

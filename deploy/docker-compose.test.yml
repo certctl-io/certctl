@@ -284,6 +284,27 @@ services:
       CERTCTL_EST_ENABLED: "true"
       CERTCTL_EST_ISSUER_ID: iss-local
 
+      # SCEP RFC 8894 + Intune master prompt §10.2 + §13 acceptance
+      # (deploy/test/scep_intune_e2e_test.go integration variant).
+      # Closed in the 2026-04-29 audit-closure bundle (Phase I).
+      #
+      # Publishes /scep/e2eintune?operation=... with the Intune
+      # dispatcher enabled. The deterministic Connector signing cert
+      # is bind-mounted at the path below; the matching private key
+      # lives ONLY on the test side (see
+      # deploy/test/scep_intune_e2e_test.go::generateE2EIntuneTrustAnchor).
+      CERTCTL_SCEP_ENABLED: "true"
+      CERTCTL_SCEP_PROFILES: "e2eintune"
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_ISSUER_ID: iss-local
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_RA_CERT_PATH: /etc/certctl/scep/ra.crt
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_RA_KEY_PATH: /etc/certctl/scep/ra.key
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_ENABLED: "true"
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CONNECTOR_CERT_PATH: /etc/certctl/scep/intune_trust_anchor.pem
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_AUDIENCE: https://localhost:8443/scep/e2eintune
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CHALLENGE_VALIDITY: 60m
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CLOCK_SKEW_TOLERANCE: 60s
+      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_PER_DEVICE_RATE_LIMIT_24H: 3
+
       # Dynamic issuer/target config encryption (M34/M35)
       CERTCTL_CONFIG_ENCRYPTION_KEY: test-encryption-key-32chars!!
 
@@ -305,6 +326,15 @@ services:
       # agent mounts the same host path at the same container path (see below)
       # so /etc/certctl/tls/ca.crt resolves to the *same* bytes on both sides.
       - ./test/certs:/etc/certctl/tls:ro
+      # SCEP RFC 8894 + Intune master prompt §10.2 + §13 acceptance: the
+      # e2eintune profile's RA cert/key + Intune Connector trust anchor
+      # PEM. The PEM is the deterministic public cert matching the test-
+      # side private key in deploy/test/scep_intune_e2e_test.go (re-run
+      # `go test -tags integration -run='^TestRegenerateE2EIntuneFixture$'
+      # -update-fixture ./deploy/test/...` to regenerate after a seed
+      # change). RA cert/key live alongside; tls-init container generates
+      # them at boot.
+      - ./test/fixtures:/etc/certctl/scep:ro
     networks:
       certctl-test:
         ipv4_address: 10.30.50.6

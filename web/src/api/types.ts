@@ -655,6 +655,10 @@ export interface IntuneStatsSnapshot {
   trust_anchors?: IntuneTrustAnchorInfo[];
   audience?: string;
   challenge_validity_ns?: number;
+  // Master prompt §15 hazard closure (2026-04-29): per-profile
+  // ±tolerance on iat/exp checks. Default 60s wired from
+  // CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE.
+  clock_skew_tolerance_ns?: number;
   rate_limit_disabled: boolean;
   replay_cache_size: number;
   // Counter labels match intuneFailReason() in the backend dispatcher:
@@ -693,6 +697,9 @@ export interface IntuneSection {
   trust_anchors?: IntuneTrustAnchorInfo[];
   audience?: string;
   challenge_validity_ns?: number;
+  // Master prompt §15 hazard closure (2026-04-29): per-profile
+  // ±tolerance on iat/exp checks. Default 60s.
+  clock_skew_tolerance_ns?: number;
   rate_limit_disabled: boolean;
   replay_cache_size: number;
   counters: Record<string, number>;
