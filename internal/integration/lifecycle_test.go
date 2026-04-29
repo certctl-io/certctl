@@ -1516,6 +1516,18 @@ func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID strin
 	return nil, nil
 }
 
+// SCEP RFC 8894 + Intune master bundle Phase 11.5 — interface
+// satisfaction stubs. The lifecycle integration tests don't exercise
+// the SCEP probe path; targeted coverage lives in
+// internal/service/scep_probe_test.go.
+func (m *mockNetworkScanService) ProbeSCEP(ctx context.Context, url string) (*domain.SCEPProbeResult, error) {
+	return nil, nil
+}
+
+func (m *mockNetworkScanService) ListRecentSCEPProbes(ctx context.Context, limit int) ([]*domain.SCEPProbeResult, error) {
+	return nil, nil
+}
+
 // mockVerificationService implements handler.VerificationService for integration tests.
 type mockVerificationService struct{}
 

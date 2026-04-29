@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"log/slog"
 	"net"
+	"net/http"
 	"sync"
 	"time"
 
@@ -29,6 +30,15 @@ type NetworkScanService struct {
 	auditService     *AuditService
 	logger           *slog.Logger
 	concurrency      int
+
+	// SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe
+	// state. Optional: nil-safe so deploys that don't enable the probe
+	// surface (no scep_probe_results table populated) still work.
+	scepProbeRepo   repository.SCEPProbeResultRepository
+	scepHTTPClient  *http.Client       // built from SafeHTTPDialContext for SSRF defense
+	scepValidateURL func(string) error // defaults to validation.ValidateSafeURL; tests inject permissive
+	scepIDFn        func() string
+	nowFn           func() time.Time
 }
 
 // NewNetworkScanService creates a new network scan service.
@@ -44,7 +54,18 @@ func NewNetworkScanService(
 		auditService:     auditService,
 		logger:           logger,
 		concurrency:      50,
+		nowFn:            time.Now,
 	}
+}
+
+// SetSCEPProbeRepo wires the SCEP probe persistence repository onto the
+// service. Called from cmd/server/main.go at startup. Nil-safe — calling
+// ProbeSCEP without a repo just skips the persist step (the probe still
+// runs and returns its result synchronously).
+//
+// SCEP RFC 8894 + Intune master bundle Phase 11.5.
+func (s *NetworkScanService) SetSCEPProbeRepo(repo repository.SCEPProbeResultRepository) {
+	s.scepProbeRepo = repo
 }
 
 // ListTargets returns all network scan targets.

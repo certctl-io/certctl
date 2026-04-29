@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse, SCEPProfilesResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse, SCEPProfilesResponse, SCEPProbeResult, SCEPProbesResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -319,6 +319,19 @@ export const reloadAdminSCEPIntuneTrust = (pathID: string) =>
 // getAdminSCEPIntuneStats helper.
 export const getAdminSCEPProfiles = () =>
   fetchJSON<SCEPProfilesResponse>(`${BASE}/admin/scep/profiles`);
+
+// SCEP RFC 8894 + Intune master bundle Phase 11.5: SCEP probe
+// (capability + posture). Synchronous — the caller blocks until the
+// probe completes (cap: 30s server-side). Persists to the history
+// table that listSCEPProbes reads from.
+export const probeSCEPServer = (url: string) =>
+  fetchJSON<SCEPProbeResult>(`${BASE}/network-scan/scep-probe`, {
+    method: 'POST',
+    body: JSON.stringify({ url }),
+  });
+
+export const listSCEPProbes = () =>
+  fetchJSON<SCEPProbesResponse>(`${BASE}/network-scan/scep-probes`);
 
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {

@@ -554,6 +554,22 @@ type NetworkScanRepository interface {
 	UpdateScanResults(ctx context.Context, id string, scanAt time.Time, durationMs int, certsFound int) error
 }
 
+// SCEPProbeResultRepository persists per-run SCEP probe snapshots.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 11.5. The probe is a
+// pre-migration / compliance-posture tool — operators run it ad-hoc
+// against arbitrary SCEP server URLs and the GUI shows recent history.
+// No FK to network_scan_targets — probe targets are URLs, not necessarily
+// network-scan-target rows.
+type SCEPProbeResultRepository interface {
+	// Insert persists a single probe outcome.
+	Insert(ctx context.Context, result *domain.SCEPProbeResult) error
+	// ListRecent returns the most recent N probe results across any URL,
+	// ordered by probed_at descending. Used by the GUI's "recent probes"
+	// table on the Network Scan page.
+	ListRecent(ctx context.Context, limit int) ([]*domain.SCEPProbeResult, error)
+}
+
 // OwnerRepository defines operations for managing certificate owners.
 type OwnerRepository interface {
 	// List returns all owners.

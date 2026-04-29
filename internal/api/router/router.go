@@ -349,6 +349,12 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("PUT /api/v1/network-scan-targets/{id}", http.HandlerFunc(reg.NetworkScan.UpdateNetworkScanTarget))
 	r.Register("DELETE /api/v1/network-scan-targets/{id}", http.HandlerFunc(reg.NetworkScan.DeleteNetworkScanTarget))
 	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(reg.NetworkScan.TriggerNetworkScan))
+	// SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe.
+	// Bearer-auth gated by the standard middleware chain; not admin-
+	// only because the probe is read-only against operator-supplied
+	// URLs and reuses the existing SafeHTTPDialContext SSRF defense.
+	r.Register("POST /api/v1/network-scan/scep-probe", http.HandlerFunc(reg.NetworkScan.ProbeSCEP))
+	r.Register("GET /api/v1/network-scan/scep-probes", http.HandlerFunc(reg.NetworkScan.ListSCEPProbes))
 
 	// Verification routes: /api/v1/jobs/{id}/verify and /api/v1/jobs/{id}/verification
 	r.Register("POST /api/v1/jobs/{id}/verify", http.HandlerFunc(reg.Verification.VerifyDeployment))

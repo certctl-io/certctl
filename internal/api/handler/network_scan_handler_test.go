@@ -74,6 +74,19 @@ func (m *mockNetworkScanService) TriggerScan(ctx context.Context, targetID strin
 	return nil, fmt.Errorf("not found: %w", ErrMockNotFound)
 }
 
+// SCEP RFC 8894 + Intune master bundle Phase 11.5 — interface
+// satisfaction stubs for the SCEP probe methods. The existing mock
+// doesn't exercise the probe path; dedicated tests in
+// scep_probe_handler_test.go (Phase 11.5.F) cover that surface with
+// their own targeted mock.
+func (m *mockNetworkScanService) ProbeSCEP(ctx context.Context, url string) (*domain.SCEPProbeResult, error) {
+	return nil, fmt.Errorf("ProbeSCEP not implemented in mockNetworkScanService — use scepProbeMockService")
+}
+
+func (m *mockNetworkScanService) ListRecentSCEPProbes(ctx context.Context, limit int) ([]*domain.SCEPProbeResult, error) {
+	return []*domain.SCEPProbeResult{}, nil
+}
+
 func TestListNetworkScanTargets(t *testing.T) {
 	svc := &mockNetworkScanService{
 		targets: []*domain.NetworkScanTarget{

@@ -732,6 +732,109 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/network-scan/scep-probe:
+    post:
+      tags: [SCEP]
+      summary: Probe an SCEP server for capability + posture
+      description: |
+        Synchronous probe against an SCEP server URL. Issues
+        `GET ?operation=GetCACaps` and `GET ?operation=GetCACert`
+        and returns the structured `SCEPProbeResult` (reachable,
+        advertised caps, RFC 8894 / AES / POST / Renewal / SHA-256 /
+        SHA-512 support flags, CA cert subject + issuer + NotBefore +
+        NotAfter + days-to-expiry + algorithm + chain length).
+
+        Capability-only — does NOT POST a CSR (would consume slot
+        allocations on the target server + create audit noise). Used
+        for pre-migration assessment + compliance posture audits.
+
+        SSRF-defended: the URL is validated up-front (reserved IPs
+        rejected) AND the underlying HTTP client uses the
+        SafeHTTPDialContext that re-resolves the host at dial time
+        (defends against DNS rebinding).
+
+        Result is persisted to the `scep_probe_results` table via
+        migration 000021 so the GUI can show recent probe history.
+        SCEP RFC 8894 + Intune master bundle Phase 11.5.
+      operationId: probeSCEP
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [url]
+              properties:
+                url:
+                  type: string
+                  format: uri
+                  description: Base SCEP server URL (no `?operation=...` suffix needed; the probe appends its own operations).
+      responses:
+        "200":
+          description: Probe completed (the result body's `error` field carries any sub-step failure)
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id:
+                    type: string
+                  target_url:
+                    type: string
+                  reachable:
+                    type: boolean
+                  advertised_caps:
+                    type: array
+                    items: { type: string }
+                  supports_rfc8894: { type: boolean }
+                  supports_aes: { type: boolean }
+                  supports_post_operation: { type: boolean }
+                  supports_renewal: { type: boolean }
+                  supports_sha256: { type: boolean }
+                  supports_sha512: { type: boolean }
+                  ca_cert_subject: { type: string }
+                  ca_cert_issuer: { type: string }
+                  ca_cert_not_before: { type: string, format: date-time }
+                  ca_cert_not_after: { type: string, format: date-time }
+                  ca_cert_expired: { type: boolean }
+                  ca_cert_days_to_expiry: { type: integer }
+                  ca_cert_algorithm: { type: string }
+                  ca_cert_chain_length: { type: integer }
+                  probed_at: { type: string, format: date-time }
+                  probe_duration_ms: { type: integer }
+                  error: { type: string }
+        "400":
+          description: Missing or malformed `url` field
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/network-scan/scep-probes:
+    get:
+      tags: [SCEP]
+      summary: List recent SCEP probe results
+      description: |
+        Returns the most recent 50 SCEP probe results across any
+        target URL, ordered by `probed_at` descending. Backs the
+        GUI's "Recent SCEP probes" history table on the Network
+        Scan page. SCEP RFC 8894 + Intune master bundle Phase 11.5.
+      operationId: listSCEPProbes
+      responses:
+        "200":
+          description: Recent probe results
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  probes:
+                    type: array
+                    items:
+                      type: object
+                  probe_count:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/admin/scep/profiles:
     get:
       tags: [SCEP]

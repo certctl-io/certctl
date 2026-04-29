@@ -719,3 +719,41 @@ export interface SCEPProfilesResponse {
   profile_count: number;
   generated_at: string;
 }
+
+// SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe.
+//
+// Backs the SCEP Probe section on the Network Scan page. The probe
+// issues GetCACaps + GetCACert against an operator-supplied SCEP
+// server URL and returns capability + posture metadata. Used for
+// pre-migration assessment + compliance posture audits. Persisted
+// to scep_probe_results (migration 000021) so the GUI can render
+// recent probe history.
+export interface SCEPProbeResult {
+  id: string;
+  target_url: string;
+  reachable: boolean;
+  advertised_caps: string[];
+  supports_rfc8894: boolean;
+  supports_aes: boolean;
+  supports_post_operation: boolean;
+  supports_renewal: boolean;
+  supports_sha256: boolean;
+  supports_sha512: boolean;
+  ca_cert_subject?: string;
+  ca_cert_issuer?: string;
+  ca_cert_not_before?: string;
+  ca_cert_not_after?: string;
+  ca_cert_expired: boolean;
+  ca_cert_days_to_expiry: number;
+  ca_cert_algorithm?: string;
+  ca_cert_chain_length: number;
+  probed_at: string;
+  probe_duration_ms: number;
+  error?: string;
+  created_at?: string;
+}
+
+export interface SCEPProbesResponse {
+  probes: SCEPProbeResult[];
+  probe_count: number;
+}

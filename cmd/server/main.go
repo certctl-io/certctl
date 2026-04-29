@@ -356,6 +356,12 @@ func main() {
 	discoveryService := service.NewDiscoveryService(discoveryRepo, certificateRepo, auditService)
 	networkScanRepo := postgres.NewNetworkScanRepository(db)
 	networkScanService := service.NewNetworkScanService(networkScanRepo, discoveryService, auditService, logger)
+	// SCEP RFC 8894 + Intune master bundle Phase 11.5 — wire the SCEP
+	// probe persistence repo onto the network scan service so the new
+	// /api/v1/network-scan/scep-probe endpoint can persist results to
+	// scep_probe_results (migration 000021).
+	scepProbeRepo := postgres.NewSCEPProbeResultRepository(db)
+	networkScanService.SetSCEPProbeRepo(scepProbeRepo)
 	logger.Info("initialized network scan service")
 
 	// Ensure the sentinel "server-scanner" agent exists for network discovery dedup.

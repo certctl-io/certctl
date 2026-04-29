@@ -7,13 +7,15 @@ import {
   updateNetworkScanTarget,
   deleteNetworkScanTarget,
   triggerNetworkScan,
+  probeSCEPServer,
+  listSCEPProbes,
 } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
-import type { NetworkScanTarget } from '../api/types';
+import type { NetworkScanTarget, SCEPProbeResult } from '../api/types';
 
 function CreateScanTargetModal({ onClose, onCreate }: {
   onClose: () => void;
@@ -258,6 +260,7 @@ export default function NetworkScanPage() {
             emptyMessage="No scan targets configured. Create one to start discovering certificates on your network."
           />
         )}
+        <SCEPProbeSection />
       </div>
 
       {showCreate && (
@@ -267,5 +270,222 @@ export default function NetworkScanPage() {
         />
       )}
     </>
+  );
+}
+
+// =============================================================================
+// SCEP Probe section — Phase 11.5 of the master bundle.
+// =============================================================================
+//
+// Operator-facing panel that runs an ad-hoc SCEP probe against a single
+// URL. Used for pre-migration assessment (probe an existing EJBCA / NDES
+// SCEP server before switching to certctl) and compliance posture audits
+// (probe your own SCEP server periodically). Capability-only — does NOT
+// POST a CSR. SSRF-defended at the backend via SafeHTTPDialContext.
+//
+// History table polls every 60s via TanStack Query.
+
+function SCEPProbeSection() {
+  const [url, setUrl] = useState('');
+  const [latestResult, setLatestResult] = useState<SCEPProbeResult | null>(null);
+  const [probeError, setProbeError] = useState<string | undefined>(undefined);
+
+  const historyQuery = useQuery({
+    queryKey: ['scep-probes'],
+    queryFn: listSCEPProbes,
+    refetchInterval: 60_000,
+  });
+
+  const probeMutation = useTrackedMutation<SCEPProbeResult, Error, string>({
+    mutationFn: (target: string) => probeSCEPServer(target),
+    invalidates: [['scep-probes']],
+    onSuccess: (result) => {
+      setLatestResult(result);
+      setProbeError(undefined);
+    },
+    onError: (err: Error) => {
+      setLatestResult(null);
+      setProbeError(err.message);
+    },
+  });
+
+  const handleProbe = () => {
+    if (!url.trim()) {
+      setProbeError('Enter a SCEP server URL');
+      return;
+    }
+    setProbeError(undefined);
+    probeMutation.mutate(url.trim());
+  };
+
+  return (
+    <section className="px-6 py-4 mt-2 border-t border-surface-border" data-testid="scep-probe-section">
+      <header className="mb-3">
+        <h2 className="text-base font-semibold text-ink">SCEP server probe</h2>
+        <p className="text-xs text-ink-muted">
+          Probe a SCEP server URL for capability + posture (RFC 8894 GetCACaps + GetCACert).
+          Use before migrating from EJBCA / NDES to verify what the existing server advertises.
+          Capability-only: does NOT POST a CSR. Reserved IP ranges are rejected.
+        </p>
+      </header>
+
+      <div className="bg-surface border border-surface-border rounded-lg p-4 mb-4">
+        <div className="flex gap-2">
+          <input
+            type="url"
+            value={url}
+            onChange={(e) => setUrl(e.target.value)}
+            placeholder="https://scep.example.com/scep"
+            className="flex-1 border border-surface-border rounded px-3 py-2 text-sm font-mono"
+            data-testid="scep-probe-url-input"
+            disabled={probeMutation.isPending}
+            onKeyDown={(e) => {
+              if (e.key === 'Enter') handleProbe();
+            }}
+          />
+          <button
+            type="button"
+            onClick={handleProbe}
+            disabled={probeMutation.isPending}
+            className="px-4 py-2 text-sm text-white bg-brand-600 hover:bg-brand-700 rounded disabled:opacity-50"
+            data-testid="scep-probe-submit"
+          >
+            {probeMutation.isPending ? 'Probing…' : 'Probe'}
+          </button>
+        </div>
+        {probeError && (
+          <div className="mt-3 rounded border border-red-300 bg-red-50 p-3 text-xs text-red-800" data-testid="scep-probe-error">
+            {probeError}
+          </div>
+        )}
+        {latestResult && <SCEPProbeResultPanel result={latestResult} />}
+      </div>
+
+      <SCEPProbeHistoryTable
+        probes={historyQuery.data?.probes ?? []}
+        isLoading={historyQuery.isLoading}
+      />
+    </section>
+  );
+}
+
+function SCEPProbeResultPanel({ result }: { result: SCEPProbeResult }) {
+  const tone = result.error
+    ? 'bg-red-50 border-red-300 text-red-800'
+    : result.reachable
+      ? 'bg-emerald-50 border-emerald-300 text-emerald-900'
+      : 'bg-amber-50 border-amber-300 text-amber-900';
+  return (
+    <div className={`mt-3 rounded border p-3 text-xs ${tone}`} data-testid="scep-probe-result-panel">
+      <div className="flex items-center justify-between mb-2">
+        <strong className="text-sm">{result.target_url}</strong>
+        <span>{formatDateTime(result.probed_at)} · {result.probe_duration_ms}ms</span>
+      </div>
+      {result.error && (
+        <p className="font-mono text-[11px] mb-2">Error: {result.error}</p>
+      )}
+      {result.reachable && (
+        <>
+          <div className="flex flex-wrap gap-1 mb-2" data-testid="scep-probe-cap-badges">
+            <CapBadge label="RFC 8894" supported={result.supports_rfc8894} />
+            <CapBadge label="AES" supported={result.supports_aes} />
+            <CapBadge label="POST" supported={result.supports_post_operation} />
+            <CapBadge label="Renewal" supported={result.supports_renewal} />
+            <CapBadge label="SHA-256" supported={result.supports_sha256} />
+            <CapBadge label="SHA-512" supported={result.supports_sha512} />
+          </div>
+          {result.ca_cert_subject && (
+            <dl className="grid grid-cols-2 gap-x-3 gap-y-1 mt-2">
+              <dt className="font-semibold">CA cert subject:</dt>
+              <dd className="font-mono text-[11px]">{result.ca_cert_subject}</dd>
+              <dt className="font-semibold">Issuer:</dt>
+              <dd className="font-mono text-[11px]">{result.ca_cert_issuer}</dd>
+              <dt className="font-semibold">Algorithm:</dt>
+              <dd>{result.ca_cert_algorithm || '(unknown)'}</dd>
+              <dt className="font-semibold">Chain length:</dt>
+              <dd>{result.ca_cert_chain_length}</dd>
+              <dt className="font-semibold">Expires:</dt>
+              <dd>
+                {result.ca_cert_not_after ? formatDateTime(result.ca_cert_not_after) : '(unknown)'}
+                {' '}
+                {result.ca_cert_expired ? (
+                  <span className="text-red-600 font-semibold">(EXPIRED)</span>
+                ) : (
+                  <span>({result.ca_cert_days_to_expiry}d remaining)</span>
+                )}
+              </dd>
+            </dl>
+          )}
+          {result.advertised_caps && result.advertised_caps.length > 0 && (
+            <p className="mt-2 text-[11px]">
+              Raw caps: <code>{result.advertised_caps.join(', ')}</code>
+            </p>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
+function CapBadge({ label, supported }: { label: string; supported: boolean }) {
+  return (
+    <span
+      className={`text-[11px] uppercase px-2 py-0.5 rounded border ${
+        supported ? 'bg-emerald-100 text-emerald-800 border-emerald-300' : 'bg-gray-100 text-gray-600 border-gray-300'
+      }`}
+      data-testid={`scep-probe-cap-${label.toLowerCase().replace(/\W/g, '-')}`}
+    >
+      {label} {supported ? '✓' : '✗'}
+    </span>
+  );
+}
+
+function SCEPProbeHistoryTable({ probes, isLoading }: { probes: SCEPProbeResult[]; isLoading: boolean }) {
+  if (isLoading) {
+    return <p className="text-xs text-ink-muted">Loading probe history…</p>;
+  }
+  if (probes.length === 0) {
+    return <p className="text-xs text-ink-muted">No SCEP probes yet — probe a URL above to start.</p>;
+  }
+  return (
+    <div className="mt-3" data-testid="scep-probe-history-table">
+      <h3 className="text-xs font-semibold text-ink uppercase tracking-wide mb-2">Recent SCEP probes</h3>
+      <table className="w-full text-xs">
+        <thead className="text-ink-muted uppercase">
+          <tr>
+            <th className="text-left py-1 pr-2">When</th>
+            <th className="text-left py-1 pr-2">Target</th>
+            <th className="text-left py-1 pr-2">Reachable</th>
+            <th className="text-left py-1 pr-2">RFC 8894</th>
+            <th className="text-left py-1 pr-2">CA expiry</th>
+          </tr>
+        </thead>
+        <tbody>
+          {probes.map((p) => (
+            <tr key={p.id} className="border-t border-surface-border">
+              <td className="py-1 pr-2 font-mono">{formatDateTime(p.probed_at)}</td>
+              <td className="py-1 pr-2 font-mono break-all">{p.target_url}</td>
+              <td className="py-1 pr-2">
+                {p.reachable ? (
+                  <span className="text-emerald-700">Yes</span>
+                ) : (
+                  <span className="text-red-700">No</span>
+                )}
+              </td>
+              <td className="py-1 pr-2">{p.supports_rfc8894 ? '✓' : '✗'}</td>
+              <td className="py-1 pr-2">
+                {p.ca_cert_expired ? (
+                  <span className="text-red-700 font-semibold">EXPIRED</span>
+                ) : p.ca_cert_subject ? (
+                  `${p.ca_cert_days_to_expiry}d`
+                ) : (
+                  '-'
+                )}
+              </td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
