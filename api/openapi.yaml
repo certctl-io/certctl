@@ -696,6 +696,61 @@ paths:
         "501":
           description: Issuer does not support OCSP
 
+  /.well-known/pki/ocsp/{issuer_id}:
+    post:
+      tags: [CRL & OCSP]
+      summary: OCSP responder (RFC 6960 §A.1.1, POST form)
+      description: |
+        Standard RFC 6960 §A.1.1 POST form of the OCSP responder. The
+        request body is the binary DER-encoded OCSPRequest with
+        Content-Type `application/ocsp-request`; the serial number is
+        carried inside that body, not in the URL path. Most production
+        OCSP clients (Firefox, OpenSSL `s_client -status`, cert-manager,
+        Microsoft Intune device validators) use POST exclusively.
+
+        The pre-existing GET form
+        (`/.well-known/pki/ocsp/{issuer_id}/{serial}`) is preserved for
+        ad-hoc curl inspection and human-readable URL paths; behaviour
+        and response are otherwise identical.
+
+        Auth-exempt under `/.well-known/pki/*` per RFC 8615 so relying
+        parties can poll without a certctl API key. CRL/OCSP-Responder
+        bundle Phase 4.
+      operationId: handleOCSPPost
+      security: []
+      parameters:
+        - name: issuer_id
+          in: path
+          required: true
+          schema:
+            type: string
+      requestBody:
+        required: true
+        content:
+          application/ocsp-request:
+            schema:
+              type: string
+              format: binary
+              description: DER-encoded OCSPRequest per RFC 6960 §4.1
+      responses:
+        "200":
+          description: OCSP response
+          content:
+            application/ocsp-response:
+              schema:
+                type: string
+                format: binary
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "415":
+          description: Content-Type is not application/ocsp-request
+        "500":
+          $ref: "#/components/responses/InternalError"
+        "501":
+          description: Issuer does not support OCSP
+
   # ─── Issuers ─────────────────────────────────────────────────────────
   /api/v1/issuers:
     get:

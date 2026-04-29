@@ -69,6 +69,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/crypto/signer"
+	"github.com/shankar0123/certctl/internal/repository"
 	"github.com/shankar0123/certctl/internal/validation"
 )
 
@@ -126,6 +127,27 @@ type Connector struct {
 	caCertPEM  string
 	subCA      bool            // true when loaded from disk (sub-CA mode)
 	revokedMap map[string]bool // serial -> revoked status
+
+	// Optional dependencies — set after construction via the
+	// Set*-style helpers below. The Connector functions correctly with
+	// any subset of these unset (the Phase-2 responder-cert path falls
+	// back to direct CA-key signing for OCSP when not configured, and
+	// the issuer ID falls back to the empty string for the
+	// responder-row key).
+	issuerID          string
+	ocspResponderRepo repository.OCSPResponderRepository
+	signerDriver      signer.Driver
+	// ocspResponderRotationGrace is the window before NotAfter at
+	// which the responder cert is rotated. Default 7 days; tunable
+	// for tests + special operator deploys.
+	ocspResponderRotationGrace time.Duration
+	// ocspResponderValidity is how long a freshly-generated responder
+	// cert is valid for. Default 30 days; tunable.
+	ocspResponderValidity time.Duration
+	// ocspResponderKeyDir is where FileDriver-backed responder keys
+	// land. Empty = use the OS temp dir (fine for tests; production
+	// callers should set this to a hardened path via the setter).
+	ocspResponderKeyDir string
 }
 
 // New creates a new local CA connector with the given configuration and logger.
@@ -143,10 +165,79 @@ func New(config *Config, logger *slog.Logger) *Connector {
 	}
 
 	return &Connector{
-		config:     config,
-		logger:     logger,
-		revokedMap: make(map[string]bool),
+		config:                     config,
+		logger:                     logger,
+		revokedMap:                 make(map[string]bool),
+		ocspResponderRotationGrace: 7 * 24 * time.Hour,  // 7 days
+		ocspResponderValidity:      30 * 24 * time.Hour, // 30 days
 	}
+}
+
+// SetOCSPResponderRepo wires the persistent store for the dedicated
+// OCSP-responder cert per RFC 6960 §2.6. When unset, SignOCSPResponse
+// falls back to signing with the CA key directly (the historical
+// behaviour, preserved for callers that don't supply this dep).
+//
+// Production wiring lives in cmd/server/main.go alongside the issuer
+// registry; tests inject a memory-backed repo via the same setter.
+func (c *Connector) SetOCSPResponderRepo(repo repository.OCSPResponderRepository) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ocspResponderRepo = repo
+}
+
+// SetSignerDriver wires the driver used to generate + load the OCSP
+// responder cert's private key. Required alongside SetOCSPResponderRepo
+// for the dedicated-responder path; without it the SignOCSPResponse
+// fallback (CA-key direct) takes over.
+func (c *Connector) SetSignerDriver(d signer.Driver) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.signerDriver = d
+}
+
+// SetIssuerID records the issuer ID so the responder row can be keyed
+// off it. Without this the responder repo can't be consulted (an empty
+// issuer ID would collide across local-issuer instances). Falls through
+// to the fallback path when unset.
+func (c *Connector) SetIssuerID(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.issuerID = id
+}
+
+// SetOCSPResponderRotationGrace overrides the default 7-day-before-expiry
+// rotation window for the dedicated responder cert. Tests use a small
+// value; operators with strict policies may set 14d or 30d.
+func (c *Connector) SetOCSPResponderRotationGrace(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d > 0 {
+		c.ocspResponderRotationGrace = d
+	}
+}
+
+// SetOCSPResponderValidity overrides the default 30-day validity for
+// freshly-generated responder certs. Operators preferring shorter
+// validity (with more frequent rotation) tune via this setter.
+func (c *Connector) SetOCSPResponderValidity(d time.Duration) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if d > 0 {
+		c.ocspResponderValidity = d
+	}
+}
+
+// SetOCSPResponderKeyDir sets the directory where FileDriver-backed
+// responder keys are written. Empty means "let the driver choose"
+// (typically the OS temp dir, fine for tests). Production callers MUST
+// set this to a hardened path; the FileDriver-installed
+// keystore.ensureKeyDirSecure equivalent applies the same 0700 +
+// permission gates as the CA key directory.
+func (c *Connector) SetOCSPResponderKeyDir(dir string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.ocspResponderKeyDir = dir
 }
 
 // ValidateConfig validates the local CA configuration.
@@ -878,18 +969,38 @@ func (c *Connector) GenerateCRL(ctx context.Context, revokedCerts []issuer.Revok
 }
 
 // SignOCSPResponse signs an OCSP response for the given certificate.
+//
+// As of Phase 2 of the CRL/OCSP responder bundle, the signing path is
+// no longer hardwired to the CA private key. ensureOCSPResponder
+// returns the appropriate cert + signer based on whether the operator
+// has wired the dedicated-responder dependencies (SetOCSPResponderRepo
+// + SetSignerDriver + SetIssuerID):
+//
+//   - Configured: the response is signed by a dedicated responder cert
+//     (signed by the CA, has id-pkix-ocsp-nocheck per RFC 6960
+//     §4.2.2.2.1). Relying parties see the responder cert in the
+//     response's certificates field; CA-key signing operations stay
+//     rare (only at responder bootstrap / rotation).
+//
+//   - Unconfigured: falls back to signing with the CA key directly
+//     (the historical pre-Phase-2 behaviour). Backward-compatible for
+//     callers that don't wire the responder deps.
+//
+// The OCSP response template fields (status, serial, thisUpdate,
+// nextUpdate, revocation reason) are unchanged across both paths;
+// only the signing key + the cert in the response's certificates
+// field differ.
 func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignRequest) ([]byte, error) {
-	if err := c.ensureCA(ctx); err != nil {
-		return nil, fmt.Errorf("CA initialization failed: %w", err)
+	responderCert, responderSigner, err := c.ensureOCSPResponder(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("ensure OCSP responder: %w", err)
 	}
 
-	// Import OCSP after we confirm golang.org/x/crypto is available
-	// This will be added to imports below
 	template := ocsp.Response{
 		SerialNumber: req.CertSerial,
 		ThisUpdate:   req.ThisUpdate,
 		NextUpdate:   req.NextUpdate,
-		Certificate:  c.caCert,
+		Certificate:  responderCert,
 	}
 
 	switch req.CertStatus {
@@ -903,14 +1014,22 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 		template.Status = ocsp.Unknown
 	}
 
-	respBytes, err := ocsp.CreateResponse(c.caCert, c.caCert, template, c.caSigner)
+	// ocsp.CreateResponse(issuer, responder, template, signer):
+	//   - issuer:    always c.caCert (the CA that issued the cert
+	//                being checked, NOT the responder cert)
+	//   - responder: the responder cert (== c.caCert in the fallback
+	//                path; a dedicated responder cert otherwise)
+	//   - signer:    the responder's signing key
+	respBytes, err := ocsp.CreateResponse(c.caCert, responderCert, template, responderSigner)
 	if err != nil {
 		return nil, fmt.Errorf("failed to create OCSP response: %w", err)
 	}
 
 	c.logger.Info("OCSP response signed",
 		"serial", req.CertSerial,
-		"status", req.CertStatus)
+		"status", req.CertStatus,
+		"responder_cn", responderCert.Subject.CommonName,
+		"dedicated_responder", responderCert != c.caCert)
 
 	return respBytes, nil
 }
