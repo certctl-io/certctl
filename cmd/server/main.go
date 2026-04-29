@@ -837,6 +837,12 @@ func main() {
 			scepService := service.NewSCEPService(profile.IssuerID, issuerConn, auditService, profileLog, profile.ChallengePassword)
 			scepService.SetProfileRepo(profileRepo)
 			scepService.SetPathID(profile.PathID)
+			// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up:
+			// surface mTLS sibling-route status in the per-profile snapshot
+			// the new /admin/scep/profiles endpoint emits. The actual mTLS
+			// trust pool wiring lives further down in the if profile.MTLSEnabled
+			// block; this just records the flag + bundle path for observability.
+			scepService.SetMTLSConfig(profile.MTLSEnabled, profile.MTLSClientCATrustBundlePath)
 			if profile.ProfileID != "" {
 				scepService.SetProfileID(profile.ProfileID)
 			}
@@ -859,6 +865,11 @@ func main() {
 				os.Exit(1)
 			}
 			scepHandler.SetRAPair(raCert, raKey)
+			// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up:
+			// surface RA cert metadata (subject + NotBefore + NotAfter) in
+			// the per-profile snapshot so the new /admin/scep/profiles
+			// endpoint can drive the GUI's RA expiry countdown badge.
+			scepService.SetRACert(raCert)
 
 			// SCEP RFC 8894 + Intune master bundle Phase 8: per-profile Intune
 			// dispatcher wire-in. Builds the trust-anchor holder, replay cache,

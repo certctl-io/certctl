@@ -245,9 +245,21 @@ common root cause and the operator action.
 | `malformed`          | Sporadic, low-volume                                              | Malformed challenge bytes — almost always a network proxy mangling the request body, or the Connector logging itself out mid-handshake. Capture a packet trace; the Connector should re-emit on the next device retry. |
 | `compliance_failed`  | V3-Pro only                                                       | The pluggable compliance check returned non-compliant. The audit-log details carries the reason string from Microsoft Graph. V2 deployments never see this counter tick.                                          |
 
-## Operational monitoring
+## Operational monitoring (SCEP Administration → Intune Monitoring tab)
 
-The Phase 9 admin GUI surface (`/scep/intune`) shows:
+The admin GUI surface for SCEP lives at `/scep` and is structured as
+three tabs: **Profiles** (default landing — every configured SCEP
+profile, lean cards with always-present fields), **Intune Monitoring**
+(the Intune-specific deep-dive described below), and **Recent Activity**
+(full SCEP audit log filter). Operators monitoring an Intune deployment
+spend most of their time on the Intune Monitoring tab, deep-linkable via
+`/scep?tab=intune` or the legacy alias `/scep/intune`. The Profiles tab
+gives the at-a-glance per-profile health (RA cert expiry, mTLS status,
+Intune enabled/disabled badge, challenge-password-set indicator) and a
+"View Intune details →" link from each Intune-enabled card that switches
+into this tab filtered to that profile.
+
+The Intune Monitoring tab shows:
 
 - **Per-profile cards** — one card per SCEP profile, with the trust
   anchor expiry countdown badge:
@@ -266,11 +278,21 @@ The Phase 9 admin GUI surface (`/scep/intune`) shows:
   Bad reloads keep the OLD pool in place; the modal stays open with
   the underlying error so the operator can correct the file and retry.
 
-Both admin endpoints (`GET /api/v1/admin/scep/intune/stats` and
-`POST /api/v1/admin/scep/intune/reload-trust`) are M-008 admin-gated.
-Non-admin Bearer callers get HTTP 403 + a clear message; the GUI
-hides the page entirely for non-admin users (UX hint; server-side
-enforcement is independent).
+Three admin endpoints back the page:
+
+- `GET /api/v1/admin/scep/profiles` — per-profile snapshot for the
+  Profiles tab; surfaces RA cert subject + NotAfter + days-to-expiry,
+  mTLS sibling-route status + bundle path, challenge-password-set flag,
+  and an optional `intune` sub-block for Intune-enabled profiles.
+- `GET /api/v1/admin/scep/intune/stats` — Intune-specific deep-dive
+  for the Intune Monitoring tab; per-status counters + trust anchor
+  pool details. Backward-compat shape preserved from Phase 9.
+- `POST /api/v1/admin/scep/intune/reload-trust` — SIGHUP-equivalent
+  trust anchor reload, body `{"path_id": "<pathID>"}`.
+
+All three are M-008 admin-gated. Non-admin Bearer callers get HTTP 403
++ a clear message; the GUI hides the page entirely for non-admin users
+(UX hint; server-side enforcement is independent).
 
 ### Recommended alert thresholds
 

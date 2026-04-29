@@ -863,12 +863,16 @@ startup via `intune.LoadTrustAnchor` (refuses to boot on empty
 bundle / parse error / past-`NotAfter` cert) and reloads atomically
 on `SIGHUP` (mirrors the server TLS-cert hot-reload pattern). A bad
 reload keeps the OLD pool in place — operators get a recoverable
-failure window rather than a service-down. The admin GUI's SCEP
-Intune Monitoring tab + admin endpoints
-(`GET /api/v1/admin/scep/intune/stats`,
-`POST /api/v1/admin/scep/intune/reload-trust`) are M-008 admin-gated;
-non-admin Bearer callers get HTTP 403 because the trust-anchor
-expiries are sensitive operational metadata.
+failure window rather than a service-down. The admin GUI's
+**Intune Monitoring** tab inside the SCEP Administration page (`/scep`)
+and the parallel admin endpoints
+(`GET /api/v1/admin/scep/profiles` for the always-present per-profile
+overview that drives the Profiles tab,
+`GET /api/v1/admin/scep/intune/stats` for the Intune deep dive,
+`POST /api/v1/admin/scep/intune/reload-trust` for the SIGHUP-equivalent)
+are all M-008 admin-gated; non-admin Bearer callers get HTTP 403
+because the trust-anchor expiries + RA cert expiries + mTLS bundle
+paths are sensitive operational metadata.
 
 See [`scep-intune.md`](scep-intune.md) for the full migration playbook
 + Microsoft support statement.

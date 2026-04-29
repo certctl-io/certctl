@@ -16,13 +16,19 @@ import (
 // rather than the concrete *service.SCEPService set so wiring stays
 // service-side and the handler stays test-friendly.
 //
-// SCEP RFC 8894 + Intune master bundle Phase 9.1.
+// SCEP RFC 8894 + Intune master bundle Phase 9.1, extended in the
+// Phase 9 follow-up (cowork/scep-gui-restructure-prompt.md) with
+// Profiles for the per-profile SCEP Administration tab.
 type AdminSCEPIntuneService interface {
 	// Stats returns one snapshot per configured SCEP profile (Intune-
-	// enabled or not). Profiles where Intune is disabled appear with
-	// Enabled=false so the GUI can show "off — opt in via env vars"
-	// rather than 404ing per-profile.
+	// enabled or not) in the Phase 9.1 flat shape. Backward-compat for
+	// the existing /admin/scep/intune/stats endpoint.
 	Stats(ctx context.Context, now time.Time) ([]service.IntuneStatsSnapshot, error)
+
+	// Profiles returns one snapshot per configured SCEP profile in the
+	// new shape (always-present per-profile fields + optional Intune
+	// sub-block). Backs the new /admin/scep/profiles endpoint.
+	Profiles(ctx context.Context, now time.Time) ([]service.SCEPProfileStatsSnapshot, error)
 
 	// ReloadTrust triggers the SIGHUP-equivalent Reload on the named
 	// profile's trust holder. Returns ErrAdminSCEPProfileNotFound if
@@ -39,18 +45,20 @@ type AdminSCEPIntuneService interface {
 // to any configured profile. The handler maps this to HTTP 404.
 var ErrAdminSCEPProfileNotFound = errors.New("admin scep intune: profile not found for the given path_id")
 
-// AdminSCEPIntuneHandler serves the per-profile Intune observability
-// endpoints for the GUI Intune Monitoring tab.
+// AdminSCEPIntuneHandler serves the per-profile SCEP observability
+// endpoints for the GUI SCEP Administration page.
 //
 // Endpoints:
 //
-//	GET  /api/v1/admin/scep/intune/stats
-//	POST /api/v1/admin/scep/intune/reload-trust   (JSON body: {"path_id": "corp"})
+//	GET  /api/v1/admin/scep/profiles                — Phase 9 follow-up
+//	GET  /api/v1/admin/scep/intune/stats            — Phase 9.2
+//	POST /api/v1/admin/scep/intune/reload-trust     — Phase 9.2 (JSON body: {"path_id": "corp"})
 //
-// Both endpoints are admin-gated (M-008 pattern). Non-admin Bearer
+// All three endpoints are admin-gated (M-008 pattern). Non-admin Bearer
 // callers get 403 — the stats endpoint reveals the operator's profile
-// set + trust anchor expiries (sensitive operational metadata) and the
-// reload endpoint is a privileged action.
+// set + trust anchor expiries (sensitive operational metadata), the
+// profiles endpoint additionally reveals RA cert expiries + mTLS bundle
+// paths, and the reload endpoint is a privileged action.
 type AdminSCEPIntuneHandler struct {
 	svc AdminSCEPIntuneService
 }
@@ -66,6 +74,42 @@ func NewAdminSCEPIntuneHandler(svc AdminSCEPIntuneService) AdminSCEPIntuneHandle
 // per-profile dispatch.
 type adminScepIntuneReloadRequest struct {
 	PathID string `json:"path_id"`
+}
+
+// Profiles handles GET /api/v1/admin/scep/profiles.
+//
+// Phase 9 follow-up endpoint backing the SCEP Administration page's
+// Profiles tab. Returns one snapshot per configured SCEP profile in
+// the SCEPProfileStatsSnapshot shape (always-present per-profile
+// fields + optional Intune sub-block).
+//
+// Same M-008 admin gate as Stats. Profiles where Intune is disabled
+// appear with Intune=null in the response.
+func (h AdminSCEPIntuneHandler) Profiles(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	if !middleware.IsAdmin(r.Context()) {
+		Error(w, http.StatusForbidden, "Admin access required")
+		return
+	}
+
+	now := time.Now()
+	rows, err := h.svc.Profiles(r.Context(), now)
+	if err != nil {
+		Error(w, http.StatusInternalServerError, "Failed to read SCEP profiles")
+		return
+	}
+	if rows == nil {
+		// Avoid serialising as `null` — the GUI expects an array.
+		rows = []service.SCEPProfileStatsSnapshot{}
+	}
+	_ = JSON(w, http.StatusOK, map[string]any{
+		"profiles":      rows,
+		"profile_count": len(rows),
+		"generated_at":  now.UTC(),
+	})
 }
 
 // Stats handles GET /api/v1/admin/scep/intune/stats.
@@ -173,6 +217,18 @@ func (s *AdminSCEPIntuneServiceImpl) Stats(_ context.Context, now time.Time) ([]
 	out := make([]service.IntuneStatsSnapshot, 0, len(s.services))
 	for _, svc := range s.services {
 		out = append(out, svc.IntuneStats(now))
+	}
+	return out, nil
+}
+
+// Profiles implements AdminSCEPIntuneService for the new
+// /admin/scep/profiles endpoint. Walks the same per-profile SCEPService
+// map but emits the SCEPProfileStatsSnapshot shape (always-present
+// fields + optional Intune sub-block).
+func (s *AdminSCEPIntuneServiceImpl) Profiles(_ context.Context, now time.Time) ([]service.SCEPProfileStatsSnapshot, error) {
+	out := make([]service.SCEPProfileStatsSnapshot, 0, len(s.services))
+	for _, svc := range s.services {
+		out = append(out, svc.ProfileStats(now))
 	}
 	return out, nil
 }

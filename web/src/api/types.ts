@@ -676,3 +676,46 @@ export interface IntuneReloadTrustResponse {
   path_id: string;
   reloaded_at: string;
 }
+
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
+// (cowork/scep-gui-restructure-prompt.md): per-profile SCEP admin
+// snapshot. Backs the new /api/v1/admin/scep/profiles endpoint and
+// the Profiles tab on the SCEP Administration page.
+//
+// Distinct from IntuneStatsSnapshot (which mirrors the existing
+// /admin/scep/intune/stats endpoint) so the existing endpoint's JSON
+// shape stays byte-stable for external consumers — backward-compat
+// for the Phase 9 admin contract. The Profiles endpoint nests Intune
+// data under a single optional `intune` field; the legacy Intune
+// endpoint keeps the flat shape.
+export interface IntuneSection {
+  trust_anchor_path?: string;
+  trust_anchors?: IntuneTrustAnchorInfo[];
+  audience?: string;
+  challenge_validity_ns?: number;
+  rate_limit_disabled: boolean;
+  replay_cache_size: number;
+  counters: Record<string, number>;
+}
+
+export interface SCEPProfileStatsSnapshot {
+  path_id: string;
+  issuer_id: string;
+  challenge_password_set: boolean;
+  ra_cert_subject?: string;
+  ra_cert_not_before?: string;
+  ra_cert_not_after?: string;
+  ra_cert_days_to_expiry: number;
+  ra_cert_expired: boolean;
+  mtls_enabled: boolean;
+  mtls_trust_bundle_path?: string;
+  generated_at: string;
+  // nil/undefined when Intune is disabled on this profile.
+  intune?: IntuneSection;
+}
+
+export interface SCEPProfilesResponse {
+  profiles: SCEPProfileStatsSnapshot[];
+  profile_count: number;
+  generated_at: string;
+}

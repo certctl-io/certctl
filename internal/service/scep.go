@@ -53,6 +53,18 @@ type SCEPService struct {
 	complianceCheck   ComplianceCheck   // V3-Pro plug-in seam; nil-default no-op
 	intuneCounters    *intuneCounterTab // per-status atomic counters for the admin endpoint
 	pathID            string            // SCEP profile path ID; surfaced by admin endpoints
+
+	// Per-profile metadata surfaced by the new /admin/scep/profiles
+	// endpoint. SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
+	// (cowork/scep-gui-restructure-prompt.md). All fields are nil/zero
+	// when the operator runs without Intune AND without mTLS — we still
+	// surface the always-present challenge-password-set + RA cert
+	// expiry on the Profiles tab for those.
+	raCertSubject       string
+	raCertNotBefore     time.Time
+	raCertNotAfter      time.Time
+	mtlsEnabled         bool
+	mtlsTrustBundlePath string
 }
 
 // intuneCounterTab is the in-memory equivalent of the
@@ -233,6 +245,142 @@ func (s *SCEPService) ReloadIntuneTrust() error {
 		return ErrSCEPProfileIntuneDisabled
 	}
 	return s.intuneTrust.Reload()
+}
+
+// SetRACert records the RA cert metadata the admin Profiles endpoint
+// surfaces (subject + NotBefore + NotAfter for the expiry countdown).
+// Called from cmd/server/main.go right after loadSCEPRAPair returns the
+// leaf cert. Nil-safe — passing nil leaves the fields zero-valued so
+// the snapshot's RACertSubject is empty (the GUI then renders
+// "RA cert not loaded").
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up.
+func (s *SCEPService) SetRACert(cert *x509.Certificate) {
+	if cert == nil {
+		return
+	}
+	s.raCertSubject = cert.Subject.CommonName
+	s.raCertNotBefore = cert.NotBefore
+	s.raCertNotAfter = cert.NotAfter
+}
+
+// SetMTLSConfig records this profile's mTLS sibling-route status for
+// the admin Profiles endpoint. The trust bundle PATH is surfaced (not
+// the bundle contents) so operators can correlate against their own
+// secret manager / file system audit. Called from cmd/server/main.go
+// in the per-profile loop, parallel to SetIntuneIntegration.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up.
+func (s *SCEPService) SetMTLSConfig(enabled bool, bundlePath string) {
+	s.mtlsEnabled = enabled
+	s.mtlsTrustBundlePath = bundlePath
+}
+
+// SCEPProfileStatsSnapshot is the per-profile observability shape the
+// new /admin/scep/profiles endpoint emits. Surfaces every always-
+// present per-profile field PLUS an optional Intune sub-block.
+// Profiles that don't have Intune enabled get Intune=nil (the GUI
+// renders the lean per-profile card without the Intune deep-dive
+// button).
+//
+// Distinct from IntuneStatsSnapshot (which the existing
+// /admin/scep/intune/stats endpoint emits) so the existing endpoint's
+// JSON shape stays byte-stable for external consumers — backward
+// compatibility for the Phase 9 admin contract.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
+// (cowork/scep-gui-restructure-prompt.md).
+type SCEPProfileStatsSnapshot struct {
+	// Always-present per-profile fields.
+	PathID               string    `json:"path_id"`
+	IssuerID             string    `json:"issuer_id"`
+	ChallengePasswordSet bool      `json:"challenge_password_set"`
+	RACertSubject        string    `json:"ra_cert_subject,omitempty"`
+	RACertNotBefore      time.Time `json:"ra_cert_not_before,omitempty"`
+	RACertNotAfter       time.Time `json:"ra_cert_not_after,omitempty"`
+	RACertDaysToExpiry   int       `json:"ra_cert_days_to_expiry"`
+	RACertExpired        bool      `json:"ra_cert_expired"`
+	MTLSEnabled          bool      `json:"mtls_enabled"`
+	MTLSTrustBundlePath  string    `json:"mtls_trust_bundle_path,omitempty"`
+	GeneratedAt          time.Time `json:"generated_at"`
+
+	// Optional Intune sub-block; nil when this profile has Intune
+	// disabled. Mirrors the IntuneStatsSnapshot fields minus the
+	// always-present per-profile ones (which now live on the parent).
+	Intune *IntuneSection `json:"intune,omitempty"`
+}
+
+// IntuneSection is the Intune-specific data a per-profile snapshot
+// carries when INTUNE_ENABLED=true. Same fields as IntuneStatsSnapshot
+// minus the always-present per-profile ones (PathID, IssuerID,
+// GeneratedAt) which live on SCEPProfileStatsSnapshot.
+type IntuneSection struct {
+	TrustAnchorPath   string                  `json:"trust_anchor_path,omitempty"`
+	TrustAnchors      []IntuneTrustAnchorInfo `json:"trust_anchors,omitempty"`
+	Audience          string                  `json:"audience,omitempty"`
+	ChallengeValidity time.Duration           `json:"challenge_validity_ns,omitempty"`
+	RateLimitDisabled bool                    `json:"rate_limit_disabled"`
+	ReplayCacheSize   int                     `json:"replay_cache_size"`
+	Counters          map[string]uint64       `json:"counters"`
+}
+
+// ProfileStats returns the per-profile observability snapshot in the
+// new shape (always-present fields + optional Intune sub-block).
+// Safe for concurrent callers; reads only; uses the same atomic
+// counter snapshots as IntuneStats.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up.
+func (s *SCEPService) ProfileStats(now time.Time) SCEPProfileStatsSnapshot {
+	out := SCEPProfileStatsSnapshot{
+		PathID:               s.pathID,
+		IssuerID:             s.issuerID,
+		ChallengePasswordSet: s.challengePassword != "",
+		RACertSubject:        s.raCertSubject,
+		RACertNotBefore:      s.raCertNotBefore,
+		RACertNotAfter:       s.raCertNotAfter,
+		MTLSEnabled:          s.mtlsEnabled,
+		MTLSTrustBundlePath:  s.mtlsTrustBundlePath,
+		GeneratedAt:          now.UTC(),
+	}
+	if !s.raCertNotAfter.IsZero() {
+		out.RACertExpired = now.After(s.raCertNotAfter)
+		if !out.RACertExpired {
+			out.RACertDaysToExpiry = int(s.raCertNotAfter.Sub(now).Hours() / 24)
+		}
+	}
+	if !s.intuneEnabled {
+		return out
+	}
+	intuneSection := IntuneSection{
+		Audience:          s.intuneAudience,
+		ChallengeValidity: s.intuneValidity,
+		Counters:          s.intuneCounters.snapshot(),
+	}
+	if s.intuneRateLimiter != nil {
+		intuneSection.RateLimitDisabled = s.intuneRateLimiter.Disabled()
+	}
+	if s.intuneReplayCache != nil {
+		intuneSection.ReplayCacheSize = s.intuneReplayCache.Len()
+	}
+	if s.intuneTrust != nil {
+		intuneSection.TrustAnchorPath = s.intuneTrust.Path()
+		certs := s.intuneTrust.Get()
+		intuneSection.TrustAnchors = make([]IntuneTrustAnchorInfo, 0, len(certs))
+		for _, c := range certs {
+			info := IntuneTrustAnchorInfo{
+				Subject:   c.Subject.CommonName,
+				NotBefore: c.NotBefore,
+				NotAfter:  c.NotAfter,
+				Expired:   now.After(c.NotAfter),
+			}
+			if !info.Expired {
+				info.DaysToExpiry = int(c.NotAfter.Sub(now).Hours() / 24)
+			}
+			intuneSection.TrustAnchors = append(intuneSection.TrustAnchors, info)
+		}
+	}
+	out.Intune = &intuneSection
+	return out
 }
 
 // ErrSCEPProfileIntuneDisabled is returned by ReloadIntuneTrust when

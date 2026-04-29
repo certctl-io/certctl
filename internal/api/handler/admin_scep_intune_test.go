@@ -18,17 +18,25 @@ import (
 // Records call observations so the M-008 admin-gate triplet can pin
 // "service was never invoked" when the gate rejects the caller.
 type fakeAdminSCEPIntuneService struct {
-	statsCalled  bool
-	reloadCalled bool
-	rows         []service.IntuneStatsSnapshot
-	statsErr     error
-	reloadPathID string
-	reloadErr    error
+	statsCalled    bool
+	profilesCalled bool
+	reloadCalled   bool
+	rows           []service.IntuneStatsSnapshot
+	profileRows    []service.SCEPProfileStatsSnapshot
+	statsErr       error
+	profilesErr    error
+	reloadPathID   string
+	reloadErr      error
 }
 
 func (f *fakeAdminSCEPIntuneService) Stats(_ context.Context, _ time.Time) ([]service.IntuneStatsSnapshot, error) {
 	f.statsCalled = true
 	return f.rows, f.statsErr
+}
+
+func (f *fakeAdminSCEPIntuneService) Profiles(_ context.Context, _ time.Time) ([]service.SCEPProfileStatsSnapshot, error) {
+	f.profilesCalled = true
+	return f.profileRows, f.profilesErr
 }
 
 func (f *fakeAdminSCEPIntuneService) ReloadTrust(_ context.Context, pathID string) error {
@@ -332,5 +340,156 @@ func TestAdminSCEPIntuneServiceImpl_ReloadUnknownPathReturnsNotFound(t *testing.
 	impl := NewAdminSCEPIntuneServiceImpl(map[string]*service.SCEPService{})
 	if err := impl.ReloadTrust(context.Background(), "nope"); !errors.Is(err, ErrAdminSCEPProfileNotFound) {
 		t.Errorf("ReloadTrust unknown = %v, want ErrAdminSCEPProfileNotFound", err)
+	}
+}
+
+// =============================================================================
+// M-008 admin-gate triplet for Profiles (GET) — Phase 9 follow-up endpoint.
+// =============================================================================
+
+func TestAdminSCEPProfiles_NonAdmin_Returns403(t *testing.T) {
+	svc := &fakeAdminSCEPIntuneService{}
+	h := NewAdminSCEPIntuneHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
+	req = req.WithContext(contextWithRequestID()) // request id only, no admin flag
+	w := httptest.NewRecorder()
+
+	h.Profiles(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for non-admin, got %d (body=%q)", w.Code, w.Body.String())
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	msg, _ := resp["message"].(string)
+	if !strings.Contains(strings.ToLower(msg), "admin") {
+		t.Errorf("expected message to mention admin requirement, got %q", msg)
+	}
+	if svc.profilesCalled {
+		t.Errorf("service was invoked despite non-admin caller — gate failed open")
+	}
+}
+
+func TestAdminSCEPProfiles_AdminExplicitFalse_Returns403(t *testing.T) {
+	svc := &fakeAdminSCEPIntuneService{}
+	h := NewAdminSCEPIntuneHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
+	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
+	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.Profiles(w, req)
+
+	if w.Code != http.StatusForbidden {
+		t.Fatalf("expected 403 for admin=false, got %d", w.Code)
+	}
+	if svc.profilesCalled {
+		t.Error("service called despite admin=false gate")
+	}
+}
+
+func TestAdminSCEPProfiles_AdminPermitted_ForwardsActor(t *testing.T) {
+	svc := &fakeAdminSCEPIntuneService{
+		profileRows: []service.SCEPProfileStatsSnapshot{
+			{
+				PathID:               "corp",
+				IssuerID:             "iss-corp",
+				ChallengePasswordSet: true,
+				MTLSEnabled:          true,
+				Intune: &service.IntuneSection{
+					Audience: "https://certctl.example.com/scep/corp",
+				},
+			},
+			{
+				PathID:               "iot",
+				IssuerID:             "iss-iot",
+				ChallengePasswordSet: true,
+				// Intune nil — disabled
+			},
+		},
+	}
+	h := NewAdminSCEPIntuneHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
+	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
+	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
+	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+
+	h.Profiles(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200 for admin caller, got %d (body=%q)", w.Code, w.Body.String())
+	}
+	if !svc.profilesCalled {
+		t.Fatal("service was not invoked for admin caller")
+	}
+	var resp map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if pc, ok := resp["profile_count"].(float64); !ok || pc != 2 {
+		t.Errorf("profile_count = %v, want 2", resp["profile_count"])
+	}
+	rows, ok := resp["profiles"].([]any)
+	if !ok || len(rows) != 2 {
+		t.Fatalf("profiles missing or wrong shape: %v", resp["profiles"])
+	}
+	// Find the Intune-enabled vs Intune-disabled row by path_id and
+	// assert the Intune sub-block is present/absent accordingly.
+	for _, raw := range rows {
+		row := raw.(map[string]any)
+		switch row["path_id"] {
+		case "corp":
+			if _, has := row["intune"]; !has {
+				t.Errorf("expected corp profile to carry an intune sub-block")
+			}
+		case "iot":
+			if _, has := row["intune"]; has {
+				t.Errorf("expected iot profile to OMIT the intune sub-block (Intune disabled)")
+			}
+		}
+	}
+}
+
+func TestAdminSCEPProfiles_RejectsNonGetMethod(t *testing.T) {
+	h := NewAdminSCEPIntuneHandler(&fakeAdminSCEPIntuneService{})
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/profiles", nil)
+	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.Profiles(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("expected 405 for POST, got %d", w.Code)
+	}
+}
+
+func TestAdminSCEPProfiles_PropagatesServiceError(t *testing.T) {
+	svc := &fakeAdminSCEPIntuneService{profilesErr: errors.New("registry walk failed")}
+	h := NewAdminSCEPIntuneHandler(svc)
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
+	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	req = req.WithContext(ctx)
+	w := httptest.NewRecorder()
+	h.Profiles(w, req)
+	if w.Code != http.StatusInternalServerError {
+		t.Errorf("expected 500 on service error, got %d", w.Code)
+	}
+}
+
+func TestAdminSCEPProfilesServiceImpl_NilMapReturnsEmpty(t *testing.T) {
+	impl := NewAdminSCEPIntuneServiceImpl(nil)
+	rows, err := impl.Profiles(context.Background(), time.Now())
+	if err != nil {
+		t.Fatalf("nil-map Profiles: %v", err)
+	}
+	if len(rows) != 0 {
+		t.Errorf("nil-map Profiles len=%d, want 0", len(rows))
 	}
 }

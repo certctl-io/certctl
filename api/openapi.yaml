@@ -732,6 +732,54 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/admin/scep/profiles:
+    get:
+      tags: [SCEP]
+      summary: Per-profile SCEP administration overview (admin)
+      description: |
+        Returns one snapshot per configured SCEP profile in the
+        SCEPProfileStatsSnapshot shape: always-present per-profile
+        fields (path_id, issuer_id, challenge_password_set, RA cert
+        subject + NotBefore/NotAfter + days-to-expiry, mTLS
+        sibling-route status, mTLS trust bundle path) plus an
+        optional `intune` sub-block when the profile has
+        INTUNE_ENABLED=true.
+
+        Profiles where Intune is disabled appear with the `intune`
+        field omitted (rather than null) so the GUI's per-profile
+        card can render the lean shape without an Intune deep-dive
+        button. Profiles where Intune is enabled also appear in the
+        sibling /api/v1/admin/scep/intune/stats endpoint with the
+        flat Phase 9.2 shape preserved for backward compat.
+
+        Admin-gated (M-008 pattern). Non-admin Bearer callers get
+        HTTP 403 — the snapshot reveals the operator's profile set,
+        RA cert expiries, and mTLS bundle paths (sensitive
+        operational metadata). SCEP RFC 8894 + Intune master bundle
+        Phase 9 follow-up.
+      operationId: listSCEPProfiles
+      responses:
+        "200":
+          description: Per-profile SCEP administration snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      type: object
+                  profile_count:
+                    type: integer
+                  generated_at:
+                    type: string
+                    format: date-time
+        "403":
+          description: Admin access required
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/admin/scep/intune/stats:
     get:
       tags: [SCEP]

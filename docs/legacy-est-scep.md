@@ -503,6 +503,12 @@ otherwise.
   field mapping, trust-anchor extraction recipe, troubleshooting matrix,
   operational monitoring, V3-Pro deferrals, and the Microsoft support
   statement (with Microsoft Learn URLs procurement teams ask for).
+- **For per-profile SCEP observability** (RA cert expiry countdown,
+  mTLS sibling-route status, challenge-password-set indicator, and
+  the full SCEP audit log filter), the admin GUI page lives at `/scep`
+  with three tabs: **Profiles** (default), **Intune Monitoring**,
+  **Recent Activity**. See `scep-intune.md::Operational monitoring`
+  for the Intune-specific tab inside it.
 
 ## Related docs
 

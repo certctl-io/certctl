@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse, SCEPProfilesResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -311,6 +311,14 @@ export const reloadAdminSCEPIntuneTrust = (pathID: string) =>
     method: 'POST',
     body: JSON.stringify({ path_id: pathID }),
   });
+
+// SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
+// (cowork/scep-gui-restructure-prompt.md): per-profile SCEP admin
+// surface backing the Profiles tab on the SCEP Administration page.
+// M-008 admin-gated; same gating semantics as the existing
+// getAdminSCEPIntuneStats helper.
+export const getAdminSCEPProfiles = () =>
+  fetchJSON<SCEPProfilesResponse>(`${BASE}/admin/scep/profiles`);
 
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {
