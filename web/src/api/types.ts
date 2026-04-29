@@ -586,3 +586,43 @@ export interface HealthCheckSummary {
   unknown: number;
   total: number;
 }
+
+// CRL/OCSP-Responder Phase 5: admin observability endpoint payload mirror.
+//
+// Backend type lives at internal/api/handler/admin_crl_cache.go::CRLCacheRow /
+// CRLCacheEvt and is gated behind middleware.IsAdmin (M-008 admin-gated handler
+// allowlist). The GUI surfaces a per-issuer cache-age badge on the
+// CertificateDetailPage Revocation Endpoints panel — only visible to admin
+// callers. Non-admin callers get HTTP 403 from the server; the GUI suppresses
+// the fetch entirely (and the badge) when useAuth().admin is false.
+//
+// Optional fields stay optional here because the server omits them when the
+// cache row is absent (issuer never had a CRL generated yet) — the panel
+// renders a "Not yet generated" pill in that case.
+export interface CRLCacheEvent {
+  started_at: string;
+  duration_ms: number;
+  succeeded: boolean;
+  crl_number: number;
+  revoked_count: number;
+  error?: string;
+}
+
+export interface CRLCacheRow {
+  issuer_id: string;
+  cache_present: boolean;
+  crl_number?: number;
+  this_update?: string;
+  next_update?: string;
+  generated_at?: string;
+  generation_duration_ms?: number;
+  revoked_count?: number;
+  is_stale?: boolean;
+  recent_events?: CRLCacheEvent[];
+}
+
+export interface CRLCacheResponse {
+  cache_rows: CRLCacheRow[];
+  row_count: number;
+  generated_at: string;
+}

@@ -2,13 +2,14 @@ import { useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useQuery } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
-import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12 } from '../api/client';
+import { getCertificate, getCertificateVersions, triggerRenewal, triggerDeployment, archiveCertificate, revokeCertificate, updateCertificate, getTargets, getJobs, getRenewalPolicies, getProfiles, getProfile, downloadCertificatePEM, exportCertificatePKCS12, getOCSPStatus, fetchCRL, getAdminCRLCache } from '../api/client';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
+import { useAuth } from '../components/AuthProvider';
 import { formatDate, formatDateTime, daysUntil, expiryColor, timeAgo } from '../api/utils';
-import type { Job } from '../api/types';
+import type { Job, CRLCacheRow } from '../api/types';
 
 function InfoRow({ label, value, editable, onEdit }: { label: string; value: React.ReactNode; editable?: boolean; onEdit?: () => void }) {
   return (
@@ -155,6 +156,163 @@ function DeploymentTimeline({ certId, certStatus, createdAt, issuedAt }: { certI
         <TimelineStep label={certStatus === 'Revoked' ? 'Revoked' : certStatus === 'Expired' ? 'Expired' : 'Active'}
           status={getActiveStatus()} time={getActiveTime()} isLast />
       </div>
+    </div>
+  );
+}
+
+// CRL/OCSP-Responder Phase 5: Revocation Endpoints panel.
+//
+// Surfaces the standards-compliant revocation URLs (CRL distribution point
+// per RFC 5280 §4.2.1.13, OCSP responder per RFC 6960 §A.1) for relying
+// parties that don't already know certctl's well-known scheme. Both endpoints
+// live under /.well-known/pki/ and run unauthenticated — relying-party clients
+// should never need a Bearer key to check revocation status.
+//
+// The "Test CRL fetch" / "Check OCSP status" buttons exercise the same
+// network path the CRL/OCSP responders advertise via the AIA + CDP
+// extensions on issued leaves, so an operator confirming "did Phase 4
+// actually wire end-to-end?" can do it without curl. Failures bubble up
+// as inline error text rather than throwing a global error boundary.
+//
+// The cache-age badge is admin-only (gated client-side AND server-side; the
+// server returns 403 for non-admin even if the GUI bug-clicks the fetch).
+// Stale rows render in amber per the IsStale flag (next_update < now). Rows
+// missing entirely (issuer never had a CRL pre-generated) render the neutral
+// "Not yet generated" pill.
+function RevocationEndpointsCard({ issuerId, serialNumber }: { issuerId: string; serialNumber?: string }) {
+  const { admin } = useAuth();
+  const [crlState, setCrlState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'err'; msg?: string }>({ status: 'idle' });
+  const [ocspState, setOcspState] = useState<{ status: 'idle' | 'loading' | 'ok' | 'err'; msg?: string }>({ status: 'idle' });
+
+  // Build the absolute URLs from window.location so operators can copy-paste
+  // them straight into curl / openssl. Using window.location keeps the URLs
+  // honest under reverse-proxy deployments where the perceived host differs
+  // from what the dev sees in their browser bar — the location object is the
+  // ground truth for "what URL does the relying party hit?".
+  const origin = typeof window !== 'undefined' ? window.location.origin : '';
+  const crlURL = `${origin}/.well-known/pki/crl/${issuerId}`;
+  // OCSP per RFC 6960 §A.1.1 supports both POST (preferred for CSR-style
+  // requests) and the GET form with base64-url(DER) in the path. The GUI's
+  // "Check OCSP status" button uses the simpler /{issuer}/{serial_hex}
+  // helper certctl exposes alongside the standards endpoint — that's what
+  // getOCSPStatus() in client.ts hits.
+  const ocspURL = `${origin}/.well-known/pki/ocsp/${issuerId}`;
+
+  // Admin-only: pull the cache row for this issuer so we can show
+  // "generated 2m ago / next update 58m" with a stale-warning chip.
+  const { data: cacheData } = useQuery({
+    queryKey: ['admin-crl-cache'],
+    queryFn: () => getAdminCRLCache(),
+    enabled: admin,
+    // Refresh a touch faster than the default scheduler interval (1h) so
+    // the badge feels live during ops investigation. Falls back gracefully
+    // if the user navigates away before the next tick.
+    refetchInterval: 60_000,
+    retry: false,
+  });
+
+  const issuerRow: CRLCacheRow | undefined = cacheData?.cache_rows?.find(r => r.issuer_id === issuerId);
+
+  const handleTestCRL = async () => {
+    setCrlState({ status: 'loading' });
+    try {
+      const r = await fetchCRL(issuerId);
+      setCrlState({ status: 'ok', msg: `OK — ${r.byteLength.toLocaleString()} bytes (${r.contentType || 'no content-type'})` });
+    } catch (e) {
+      setCrlState({ status: 'err', msg: e instanceof Error ? e.message : 'Fetch failed' });
+    }
+  };
+
+  const handleCheckOCSP = async () => {
+    if (!serialNumber) {
+      setOcspState({ status: 'err', msg: 'Serial number unavailable — cert has not been issued yet.' });
+      return;
+    }
+    setOcspState({ status: 'loading' });
+    try {
+      const buf = await getOCSPStatus(issuerId, serialNumber);
+      setOcspState({ status: 'ok', msg: `OCSP response received — ${buf.byteLength.toLocaleString()} bytes (DER)` });
+    } catch (e) {
+      setOcspState({ status: 'err', msg: e instanceof Error ? e.message : 'OCSP request failed' });
+    }
+  };
+
+  return (
+    <div className="bg-surface border border-surface-border rounded p-5 shadow-sm">
+      <div className="flex items-center justify-between mb-4">
+        <h3 className="text-sm font-semibold text-ink-muted">Revocation Endpoints</h3>
+        {admin && (
+          issuerRow ? (
+            issuerRow.cache_present ? (
+              <span
+                className={`text-xs px-2 py-0.5 rounded font-medium ${
+                  issuerRow.is_stale ? 'bg-amber-50 text-amber-700' : 'bg-emerald-50 text-emerald-700'
+                }`}
+                title={`CRL #${issuerRow.crl_number ?? '—'} — generated ${
+                  issuerRow.generated_at ? formatDateTime(issuerRow.generated_at) : '—'
+                }, next update ${issuerRow.next_update ? formatDateTime(issuerRow.next_update) : '—'}`}
+              >
+                {issuerRow.is_stale ? 'Cache stale' : 'Cache fresh'}
+                {issuerRow.generated_at ? ` · ${timeAgo(issuerRow.generated_at)}` : ''}
+              </span>
+            ) : (
+              <span className="text-xs px-2 py-0.5 rounded font-medium bg-surface-muted text-ink-faint">
+                Not yet generated
+              </span>
+            )
+          ) : null
+        )}
+      </div>
+
+      <div className="space-y-3">
+        <div>
+          <div className="text-xs text-ink-muted mb-1">CRL Distribution Point (RFC 5280 §4.2.1.13)</div>
+          <div className="flex items-center gap-2">
+            <code className="font-mono text-xs bg-surface-muted px-2 py-1 rounded text-ink flex-1 break-all">{crlURL}</code>
+            <button
+              onClick={handleTestCRL}
+              disabled={crlState.status === 'loading'}
+              className="text-xs px-3 py-1 rounded border border-surface-border text-brand-400 hover:text-brand-500 hover:border-brand-300 disabled:opacity-50 transition-colors"
+            >
+              {crlState.status === 'loading' ? 'Fetching…' : 'Test CRL fetch'}
+            </button>
+          </div>
+          {crlState.status === 'ok' && (
+            <div className="text-xs text-emerald-600 mt-1">{crlState.msg}</div>
+          )}
+          {crlState.status === 'err' && (
+            <div className="text-xs text-red-600 mt-1">{crlState.msg}</div>
+          )}
+        </div>
+
+        <div>
+          <div className="text-xs text-ink-muted mb-1">OCSP Responder (RFC 6960 §A.1)</div>
+          <div className="flex items-center gap-2">
+            <code className="font-mono text-xs bg-surface-muted px-2 py-1 rounded text-ink flex-1 break-all">{ocspURL}</code>
+            <button
+              onClick={handleCheckOCSP}
+              disabled={ocspState.status === 'loading' || !serialNumber}
+              title={!serialNumber ? 'Serial number unavailable — cert not yet issued' : ''}
+              className="text-xs px-3 py-1 rounded border border-surface-border text-brand-400 hover:text-brand-500 hover:border-brand-300 disabled:opacity-50 transition-colors"
+            >
+              {ocspState.status === 'loading' ? 'Checking…' : 'Check OCSP status'}
+            </button>
+          </div>
+          {ocspState.status === 'ok' && (
+            <div className="text-xs text-emerald-600 mt-1">{ocspState.msg}</div>
+          )}
+          {ocspState.status === 'err' && (
+            <div className="text-xs text-red-600 mt-1">{ocspState.msg}</div>
+          )}
+          {!serialNumber && ocspState.status === 'idle' && (
+            <div className="text-xs text-ink-faint mt-1">Serial number unavailable — issue the cert first.</div>
+          )}
+        </div>
+      </div>
+
+      <p className="text-xs text-ink-faint mt-4">
+        Both endpoints run unauthenticated under <code className="font-mono">/.well-known/pki/</code> per RFC 8615 so relying parties can validate revocation without API keys. The CRL is pre-generated by the scheduler (configurable via <code className="font-mono">CERTCTL_CRL_GENERATION_INTERVAL</code>); OCSP is signed by the per-issuer responder cert (RFC 6960 §2.6).
+      </p>
     </div>
   );
 }
@@ -612,6 +770,9 @@ export default function CertificateDetailPage() {
           currentPolicyId={cert.renewal_policy_id || ''}
           currentProfileId={cert.certificate_profile_id || ''}
         />
+
+        {/* Revocation Endpoints (CRL + OCSP) — Phase 5 */}
+        <RevocationEndpointsCard issuerId={cert.issuer_id} serialNumber={serialNumber} />
 
         {/* Tags */}
         {cert.tags && Object.keys(cert.tags).length > 0 && (

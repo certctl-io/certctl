@@ -1037,7 +1037,11 @@ jobs:
         # diff-04x03-d24864996ad4 + cat-b-dc46aadab98e for closure rationale.
         run: |
           set -e
-          DOCUMENTED='getAgentGroup getAgentGroupMembers getAuditEvent getCertificateDeployments getDiscoveredCertificate getHealthCheck getHealthCheckHistory getNetworkScanTarget getNotification getOCSPStatus getOwner getPolicy getPolicyViolations getRenewalPolicy getTeam registerAgent updateHealthCheck'
+          # CRL/OCSP-Responder Phase 5 closed the getOCSPStatus orphan: the
+          # CertificateDetailPage Revocation Endpoints panel now consumes it
+          # ("Check OCSP status" button). Removed from the list to keep the
+          # docblock + guardrail honest.
+          DOCUMENTED='getAgentGroup getAgentGroupMembers getAuditEvent getCertificateDeployments getDiscoveredCertificate getHealthCheck getHealthCheckHistory getNetworkScanTarget getNotification getOwner getPolicy getPolicyViolations getRenewalPolicy getTeam registerAgent updateHealthCheck'
           MISSING=""
           for fn in $DOCUMENTED; do
             if ! grep -qE "^export const ${fn}\b" web/src/api/client.ts; then

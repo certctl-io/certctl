@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -16,10 +16,15 @@ const BASE = '/api/v1';
 //   getAgentGroup, getAgentGroupMembers, getAuditEvent,
 //   getCertificateDeployments, getDiscoveredCertificate,
 //   getHealthCheck, getHealthCheckHistory, getNetworkScanTarget,
-//   getNotification, getOCSPStatus, getOwner, getPolicy,
+//   getNotification, getOwner, getPolicy,
 //   getPolicyViolations, getRenewalPolicy, getTeam, registerAgent
 //   (by-design pull-only; see C-1 closure docblock above its export),
 //   updateHealthCheck.
+//
+// CRL/OCSP-Responder Phase 5 closed the getOCSPStatus orphan: the
+// CertificateDetailPage Revocation Endpoints panel now exercises it
+// via the "Check OCSP status" button, so it's removed from the list
+// above (and from the CI guardrail's DOCUMENTED list).
 //
 // CI guardrail at .github/workflows/ci.yml::"Documented orphan
 // client fns sync guard (P-1)" enforces the docblock list ↔
@@ -267,6 +272,29 @@ export const getOCSPStatus = (issuerId: string, serial: string) => {
       return r.arrayBuffer();
     });
 };
+
+// CRL/OCSP-Responder Phase 5: GUI-side helper for the "Test CRL fetch" button
+// on CertificateDetailPage. Fetches the DER-encoded CRL from the well-known
+// endpoint and returns the byte length so the panel can show "OK — N bytes".
+// The Authorization header is intentionally omitted: /.well-known/pki/crl/ is
+// the standards-compliant relying-party surface and runs unauthenticated.
+export const fetchCRL = (issuerId: string) => {
+  return fetch(`/.well-known/pki/crl/${issuerId}`)
+    .then(async r => {
+      if (!r.ok) throw new Error(`CRL fetch failed: ${r.status}`);
+      const buf = await r.arrayBuffer();
+      return { byteLength: buf.byteLength, contentType: r.headers.get('content-type') ?? '' };
+    });
+};
+
+// CRL/OCSP-Responder Phase 5 admin endpoint mirror.
+//
+// Backend handler: internal/api/handler/admin_crl_cache.go::ListCache.
+// M-008 admin-gated; non-admin Bearer callers get HTTP 403 — the GUI hides
+// the badge entirely (rather than letting it 403 noisily) by gating the
+// React-Query enabled flag on useAuth().admin at the call site.
+export const getAdminCRLCache = () =>
+  fetchJSON<CRLCacheResponse>(`${BASE}/admin/crl/cache`);
 
 // Agents
 export const getAgents = (params: Record<string, string> = {}) => {
