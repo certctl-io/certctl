@@ -75,12 +75,13 @@ var (
 	OIDDESEDE3CBC = asn1.ObjectIdentifier{1, 2, 840, 113549, 3, 7}
 )
 
-// Sentinel decryption error. The caller (handler / service) maps this to
-// SCEPFailBadMessageCheck per RFC 8894 §3.3.2.2 + §3.2.2 (integrity-check
-// failure semantics). The error text is intentionally generic so the
-// padding-oracle / Bleichenbacher leak surfaces are closed: every failure
-// mode (RSA decrypt failure, content decrypt failure, padding malformed,
-// unknown algorithm) returns the SAME error message text.
+// ErrEnvelopedDataDecrypt is the sentinel decryption error. The caller
+// (handler / service) maps this to SCEPFailBadMessageCheck per RFC 8894
+// §3.3.2.2 + §3.2.2 (integrity-check failure semantics). The error text
+// is intentionally generic so the padding-oracle / Bleichenbacher leak
+// surfaces are closed: every failure mode (RSA decrypt failure, content
+// decrypt failure, padding malformed, unknown algorithm) returns the SAME
+// error message text.
 var ErrEnvelopedDataDecrypt = errors.New("envelopedData: decrypt failed")
 
 // EnvelopedData is the parsed RFC 5652 EnvelopedData structure ready for

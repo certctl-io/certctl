@@ -242,6 +242,3 @@ func selfSignedCertPEM(t *testing.T, cn string) string {
 // testRand returns the system random source. Wrapped here so tests can be
 // adapted to a deterministic source if golden-file tests need it later.
 func testRand() io.Reader { return rand.Reader }
-
-func nowMinus1Hour() time.Time { return time.Now().Add(-time.Hour) }
-func nowPlus30Days() time.Time { return time.Now().Add(30 * 24 * time.Hour) }
