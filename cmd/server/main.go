@@ -680,6 +680,17 @@ func main() {
 		BulkRenewal:      bulkRenewalHandler,
 		BulkReassignment: bulkReassignmentHandler,
 		Version:          versionHandler,
+		// CRL/OCSP-Responder Phase 5: admin observability endpoint
+		// for the scheduler-driven CRL pre-generation cache.
+		AdminCRLCache: handler.NewAdminCRLCacheHandler(
+			handler.NewAdminCRLCacheServiceImpl(crlCacheRepo, func() []string {
+				ids := make([]string, 0, issuerRegistry.Len())
+				for id := range issuerRegistry.List() {
+					ids = append(ids, id)
+				}
+				return ids
+			}),
+		),
 	})
 	// Register EST (RFC 7030) handlers if enabled
 	if cfg.EST.Enabled {

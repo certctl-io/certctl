@@ -36,6 +36,7 @@ import (
 // surfaces the flag to the GUI but does not gate) — explicitly excluded.
 var AdminGatedHandlers = map[string]string{
 	"bulk_revocation.go": "M-003: bulk revocation is fleet-scale destructive — admin-only",
+	"admin_crl_cache.go": "CRL/OCSP-Responder Phase 5: cache state reveals issuer set + CRL cadence — admin-only",
 }
 
 // InformationalIsAdminCallers is the documented allowlist of files that

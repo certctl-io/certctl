@@ -122,6 +122,10 @@ type HandlerRegistry struct {
 	// cmd/server/main.go so probes and rollout systems can read build
 	// identity without Bearer credentials. See handler/version.go.
 	Version handler.VersionHandler
+	// AdminCRLCache handles GET /api/v1/admin/crl/cache. Bundle CRL/OCSP-
+	// Responder Phase 5 — admin-gated ops surface for the
+	// scheduler-driven CRL pre-generation pipeline.
+	AdminCRLCache handler.AdminCRLCacheHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -286,6 +290,11 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Audit routes: /api/v1/audit
 	r.Register("GET /api/v1/audit", http.HandlerFunc(reg.Audit.ListAuditEvents))
 	r.Register("GET /api/v1/audit/{id}", http.HandlerFunc(reg.Audit.GetAuditEvent))
+
+	// Bundle CRL/OCSP-Responder Phase 5: admin observability for the
+	// scheduler-driven CRL pre-generation cache. Admin-gated inside
+	// the handler (M-003 pattern); non-admin callers get 403.
+	r.Register("GET /api/v1/admin/crl/cache", http.HandlerFunc(reg.AdminCRLCache.ListCache))
 
 	// Notifications routes: /api/v1/notifications
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))

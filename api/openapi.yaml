@@ -696,6 +696,42 @@ paths:
         "501":
           description: Issuer does not support OCSP
 
+  /api/v1/admin/crl/cache:
+    get:
+      tags: [CRL & OCSP]
+      summary: Inspect CRL pre-generation cache (admin)
+      description: |
+        Returns the per-issuer CRL cache state populated by the
+        scheduler's crlGenerationLoop. One row per registered issuer
+        with `cache_present` indicating whether a CRL has ever been
+        generated, plus `is_stale` derived from `next_update` vs.
+        wall clock, plus the most recent generation events for
+        ops grep.
+
+        Admin-gated (M-003 pattern). Bundle CRL/OCSP-Responder Phase 5.
+      operationId: listCRLCache
+      responses:
+        "200":
+          description: Cache state per issuer
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  cache_rows:
+                    type: array
+                    items:
+                      type: object
+                  row_count:
+                    type: integer
+                  generated_at:
+                    type: string
+                    format: date-time
+        "403":
+          description: Admin access required
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /.well-known/pki/ocsp/{issuer_id}:
     post:
       tags: [CRL & OCSP]
