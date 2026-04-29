@@ -283,15 +283,34 @@ Revocation is a 7-step process: validate eligibility → get serial → update s
 
 - `GET /.well-known/pki/crl/{issuer_id}` — DER-encoded X.509 CRL signed by the issuing CA, 24-hour validity (RFC 5280 §5 + RFC 8615). Served unauthenticated with `Content-Type: application/pkix-crl` so relying parties without certctl API credentials can fetch it.
 
+The CRL is **pre-generated** by the scheduler's `crlGenerationLoop` (`internal/scheduler/scheduler.go`) on a configurable interval (`CERTCTL_CRL_GENERATION_INTERVAL`, default 1h) and persisted in the `crl_cache` table (migration 000019). HTTP fetches read from the cache rather than rebuilding per request — a busy CA does not DOS itself at scale. Concurrent regeneration requests for the same issuer are coalesced via an in-tree singleflight gate (`internal/service/crl_cache.go`, ~30 LoC; no `golang.org/x/sync` dependency). Per-issuer generation events are recorded in `crl_generation_events` for ops visibility.
+
 Prior non-standard JSON CRL and authenticated `/api/v1/crl*` paths were removed in M-006 — RFC 5280 defines only the DER wire format and relying parties do not have API keys.
 
 ### OCSP Responder
 
-`GET /.well-known/pki/ocsp/{issuer_id}/{serial}` — signed OCSP responses (good/revoked/unknown) per RFC 6960. Served unauthenticated with `Content-Type: application/ocsp-response`. Signs with the issuing CA key; requires CA key access (Local CA, step-CA connectors).
+certctl serves both forms RFC 6960 §A.1.1 defines:
+
+- `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` — URL-path lookup (useful for ops curl-debugging).
+- `POST /.well-known/pki/ocsp/{issuer_id}` — binary `application/ocsp-request` body (the form most production clients use: Firefox, OpenSSL `s_client -status`, cert-manager, Intune).
+
+Both forms are unauthenticated and return signed OCSP responses (good/revoked/unknown) with `Content-Type: application/ocsp-response`.
+
+OCSP responses are signed by a **dedicated per-issuer OCSP responder cert** (RFC 6960 §2.6 / §4.2.2.2, migration 000020) — NOT by the CA private key directly. The responder cert is generated on first OCSP request via `OCSPResponderService.EnsureResponder` (`internal/connector/issuer/local/ocsp_responder.go`), persisted in the `ocsp_responders` table, and carries the `id-pkix-ocsp-nocheck` extension (OID `1.3.6.1.5.5.7.48.1.5`, RFC 6960 §4.2.2.2.1) so OCSP clients do not recursively check the responder's own revocation status. The responder cert auto-rotates within `CERTCTL_OCSP_RESPONDER_ROTATION_GRACE` (default 7d) of expiry; new certs default to `CERTCTL_OCSP_RESPONDER_VALIDITY` (30d). Self-healing: if the persisted responder key file is missing (operator pruned the keydir), the service treats this as "rotate now" rather than crashing. Local CA + step-CA connectors expose CRL+OCSP; upstream issuers (Vault, EJBCA, DigiCert) serve their own infrastructure.
+
+### Admin Cache Observability
+
+`GET /api/v1/admin/crl/cache` — admin-gated (Bearer required, admin flag enforced server-side via `middleware.IsAdmin`; returns HTTP 403 for non-admin callers). Returns the per-issuer cache state: `crl_number`, `this_update`, `next_update`, `generated_at`, `generation_duration_ms`, `revoked_count`, `is_stale`, plus the most-recent N generation events. Used by ops dashboards and the GUI cert-detail page's cache-age badge. The handler is pinned to the M-008 admin-gated handler allowlist (`internal/api/handler/m008_admin_gate_test.go`) — adding a new admin endpoint without the regression triplet (`_NonAdmin_Returns403` / `_AdminExplicitFalse_Returns403` / `_AdminPermitted_ForwardsActor`) fails CI.
+
+### GUI Revocation Endpoints Panel
+
+The certificate-detail page (`web/src/pages/CertificateDetailPage.tsx`) renders a Revocation Endpoints card that shows the CRL Distribution Point URL (`https://<host>/.well-known/pki/crl/<issuer_id>`) and OCSP Responder URL (`https://<host>/.well-known/pki/ocsp/<issuer_id>`), plus two action buttons: "Test CRL fetch" (calls `fetchCRL(issuer_id)`, shows byte count + content-type) and "Check OCSP status" (calls `getOCSPStatus(issuer_id, serial_hex)`, shows DER response size). For admin callers, a cache-age badge ("Cache fresh · 2m ago" / "Cache stale" / "Not yet generated") consumes the admin observability endpoint above; non-admin callers don't trigger the fetch (gated client-side on `useAuth().admin`) so the badge cannot leak generation cadence.
 
 ### Short-Lived Certificate Exemption
 
 Certificates with profile TTL < 1 hour skip CRL/OCSP. Expiry is sufficient revocation for short-lived credentials.
+
+For the full operator + relying-party guide (curl/OpenSSL/Firefox/cert-manager/Intune integration recipes, troubleshooting), see [`crl-ocsp.md`](crl-ocsp.md).
 
 ---
 
@@ -390,8 +409,12 @@ Self-signed or sub-CA mode using `crypto/x509`.
 |---|---|---|
 | `CERTCTL_CA_CERT_PATH` | (none) | Path to CA certificate PEM. When set, enables sub-CA mode. |
 | `CERTCTL_CA_KEY_PATH` | (none) | Path to CA private key PEM (RSA, ECDSA, PKCS#8). |
+| `CERTCTL_CRL_GENERATION_INTERVAL` | `1h` | How often the scheduler walks every CRL-supporting issuer and rebuilds the cached CRL. HTTP fetches read from the cache, not from a per-request rebuild. |
+| `CERTCTL_OCSP_RESPONDER_KEY_DIR` | (none) | **Operator MUST set in production.** Directory where the FileDriver persists each issuer's OCSP responder key (`ocsp-responder-<issuer_id>.key`). When unset, the responder service uses a temporary directory that does NOT survive restarts — fine for dev, NEVER for prod. |
+| `CERTCTL_OCSP_RESPONDER_ROTATION_GRACE` | `7d` | When the responder cert's `NotAfter` falls within this window, `EnsureResponder` rotates to a fresh cert+key on the next OCSP request or scheduler tick. |
+| `CERTCTL_OCSP_RESPONDER_VALIDITY` | `30d` | How long each newly-issued responder cert is valid for. Short by design: relying parties cache OCSP responses, not the responder cert chain, and `id-pkix-ocsp-nocheck` blocks recursive revocation checking on the responder itself. |
 
-Sub-CA mode validates `IsCA=true` and `KeyUsageCertSign` on the loaded certificate. Falls back to self-signed when paths are not set. Supports CRL generation (`GenerateCRL`) and OCSP response signing (`SignOCSPResponse`).
+Sub-CA mode validates `IsCA=true` and `KeyUsageCertSign` on the loaded certificate. Falls back to self-signed when paths are not set. Supports CRL generation (`GenerateCRL`) and OCSP response signing (`SignOCSPResponse`). All CA-key signing flows through the `signer.Signer` interface (`internal/crypto/signer/`); the OCSP responder cert is signed by the CA via the existing issuance pipeline and OCSP responses are signed by the responder key (NOT the CA key directly) per RFC 6960 §2.6.
 
 ### ACME
 
@@ -1429,8 +1452,10 @@ The migration runner reads SQL files from `./migrations/` by default; the path i
 | `000008_verification` | Columns on `jobs` (verification fields) |
 | `000009_issuer_config` | Columns on `issuers` (encrypted_config, source, test_status) |
 | `000010_target_config` | Columns on `targets` (encrypted_config, source, test_status) |
+| `000019_crl_cache` | `crl_cache` (per-issuer pre-generated DER CRL with monotonic `crl_number` per RFC 5280 §5.2.3, `this_update` / `next_update` timestamps, `revoked_count`, generation duration metric) + `crl_generation_events` (per-tick ops audit row with `succeeded` flag and error text) |
+| `000020_ocsp_responder` | `ocsp_responders` (per-issuer dedicated OCSP responder cert PEM + on-disk key path + `not_before` / `not_after` for auto-rotation) |
 
-All migrations are idempotent (`IF NOT EXISTS`, `ON CONFLICT`).
+The migration list above is illustrative; for the full sequence run `ls migrations/*.up.sql`. All migrations are idempotent (`IF NOT EXISTS`, `ON CONFLICT`).
 
 ---
 
