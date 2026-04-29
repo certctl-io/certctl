@@ -40,6 +40,34 @@ type Config struct {
 	HealthCheck    HealthCheckConfig
 	Encryption     EncryptionConfig
 	CloudDiscovery CloudDiscoveryConfig
+	OCSPResponder  OCSPResponderConfig
+}
+
+// OCSPResponderConfig configures the dedicated OCSP-responder cert
+// per issuer (RFC 6960 §2.6 + §4.2.2.2). When unset, the local issuer
+// falls back to signing OCSP responses with the CA key directly.
+//
+// Bundle CRL/OCSP-Responder Phase 2.
+type OCSPResponderConfig struct {
+	// KeyDir is the filesystem directory where FileDriver-backed
+	// responder keys are written. Operators MUST set this in
+	// production (the default of "" maps to cwd, which is fine for
+	// tests but not for serious deployments).
+	// Setting: CERTCTL_OCSP_RESPONDER_KEY_DIR.
+	KeyDir string
+
+	// RotationGrace is the window before NotAfter at which the
+	// responder cert is rotated. Default: 7 days. Operators with
+	// stricter relying-party caching expectations may shorten;
+	// operators with looser ones may lengthen.
+	// Setting: CERTCTL_OCSP_RESPONDER_ROTATION_GRACE.
+	RotationGrace time.Duration
+
+	// Validity is how long a freshly-bootstrapped responder cert is
+	// valid for. Default: 30 days. Shorter validity means more
+	// frequent rotations + smaller revocation-list windows.
+	// Setting: CERTCTL_OCSP_RESPONDER_VALIDITY.
+	Validity time.Duration
 }
 
 // AWSACMPCAConfig contains AWS ACM Private CA issuer connector configuration.
@@ -806,6 +834,14 @@ type SchedulerConfig struct {
 	// had no path. Post-C-1 main.go wires this knob.
 	// Setting: CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL environment variable.
 	ShortLivedExpiryCheckInterval time.Duration
+
+	// CRLGenerationInterval is how often the scheduler pre-generates
+	// CRLs into the crl_cache table. The /.well-known/pki/crl/{issuer_id}
+	// HTTP endpoint reads from this cache instead of regenerating per
+	// request. Default: 1 hour.
+	// Setting: CERTCTL_CRL_GENERATION_INTERVAL environment variable.
+	// Bundle CRL/OCSP-Responder Phase 3.
+	CRLGenerationInterval time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -1015,6 +1051,11 @@ func Load() (*Config, error) {
 			// C-1 closure: matches the in-memory default at
 			// internal/scheduler/scheduler.go:145 (30 * time.Second).
 			ShortLivedExpiryCheckInterval: getEnvDuration("CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL", 30*time.Second),
+			// CRL/OCSP-Responder Phase 3: pre-generation cadence.
+			// Default 1h matches the in-scheduler default; relying-party
+			// CRL refresh expectations under RFC 5280 are typically
+			// hourly to daily, so 1h gives operators plenty of margin.
+			CRLGenerationInterval: getEnvDuration("CERTCTL_CRL_GENERATION_INTERVAL", 1*time.Hour),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
@@ -1193,6 +1234,11 @@ func Load() (*Config, error) {
 				Project:     getEnv("CERTCTL_GCP_SM_PROJECT", ""),
 				Credentials: getEnv("CERTCTL_GCP_SM_CREDENTIALS", ""),
 			},
+		},
+		OCSPResponder: OCSPResponderConfig{
+			KeyDir:        getEnv("CERTCTL_OCSP_RESPONDER_KEY_DIR", ""),
+			RotationGrace: getEnvDuration("CERTCTL_OCSP_RESPONDER_ROTATION_GRACE", 7*24*time.Hour),
+			Validity:      getEnvDuration("CERTCTL_OCSP_RESPONDER_VALIDITY", 30*24*time.Hour),
 		},
 	}
 

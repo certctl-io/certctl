@@ -5,10 +5,14 @@ import (
 	"fmt"
 	"log/slog"
 	"sync"
+	"time"
 
+	"github.com/shankar0123/certctl/internal/connector/issuer/local"
 	"github.com/shankar0123/certctl/internal/connector/issuerfactory"
 	"github.com/shankar0123/certctl/internal/crypto"
+	"github.com/shankar0123/certctl/internal/crypto/signer"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // IssuerRegistry is a thread-safe registry of issuer connectors.
@@ -18,6 +22,29 @@ type IssuerRegistry struct {
 	mu      sync.RWMutex
 	issuers map[string]IssuerConnector
 	logger  *slog.Logger
+
+	// localDeps, when set, is injected into every *local.Connector
+	// constructed by Rebuild via SetOCSPResponderRepo + SetSignerDriver
+	// + SetIssuerID + SetOCSPResponderKeyDir. Wires the dedicated OCSP
+	// responder cert flow (RFC 6960 §2.6); see Bundle CRL/OCSP-Responder
+	// Phase 2. When unset, local connectors fall back to signing OCSP
+	// with the CA key directly (the historical behaviour, preserved for
+	// callers that don't supply these deps).
+	localDeps *LocalIssuerDeps
+}
+
+// LocalIssuerDeps groups the optional dependencies that the local
+// issuer needs for the dedicated OCSP responder cert flow. All fields
+// are required when localDeps is set on the registry; nil-checking
+// individual fields would partially-initialize the responder path
+// which is worse than the all-or-nothing fallback to direct CA-key
+// signing.
+type LocalIssuerDeps struct {
+	OCSPResponderRepo repository.OCSPResponderRepository
+	SignerDriver      signer.Driver
+	KeyDir            string        // where FileDriver-backed responder keys land
+	RotationGrace     time.Duration // optional override; default 7d if zero
+	Validity          time.Duration // optional override; default 30d if zero
 }
 
 // NewIssuerRegistry creates a new empty issuer registry.
@@ -26,6 +53,17 @@ func NewIssuerRegistry(logger *slog.Logger) *IssuerRegistry {
 		issuers: make(map[string]IssuerConnector),
 		logger:  logger,
 	}
+}
+
+// SetLocalIssuerDeps configures the per-local-connector dependencies
+// applied by Rebuild. Must be called before BuildRegistry / Rebuild
+// so the deps are in place when local connectors are constructed.
+//
+// Bundle CRL/OCSP-Responder Phase 2.
+func (r *IssuerRegistry) SetLocalIssuerDeps(deps *LocalIssuerDeps) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.localDeps = deps
 }
 
 // Get returns the issuer connector for the given ID and whether it exists.
@@ -107,6 +145,31 @@ func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey string)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("issuer %s: factory error: %v", cfg.ID, err))
 			continue
+		}
+
+		// Bundle CRL/OCSP-Responder Phase 2: when local deps are
+		// configured on the registry, inject them into every freshly-
+		// constructed *local.Connector so its SignOCSPResponse takes
+		// the dedicated responder cert path. Type-assert is the
+		// pragmatic seam — the factory returns issuer.Connector so
+		// this is the only place that knows what concrete type was
+		// just built.
+		if localConn, ok := connector.(*local.Connector); ok && r.localDeps != nil {
+			localConn.SetIssuerID(cfg.ID)
+			localConn.SetOCSPResponderRepo(r.localDeps.OCSPResponderRepo)
+			localConn.SetSignerDriver(r.localDeps.SignerDriver)
+			if r.localDeps.KeyDir != "" {
+				localConn.SetOCSPResponderKeyDir(r.localDeps.KeyDir)
+			}
+			if r.localDeps.RotationGrace > 0 {
+				localConn.SetOCSPResponderRotationGrace(r.localDeps.RotationGrace)
+			}
+			if r.localDeps.Validity > 0 {
+				localConn.SetOCSPResponderValidity(r.localDeps.Validity)
+			}
+			r.logger.Info("local issuer wired with dedicated OCSP responder deps",
+				"id", cfg.ID,
+				"key_dir", r.localDeps.KeyDir)
 		}
 
 		newIssuers[cfg.ID] = NewIssuerConnectorAdapter(connector)
