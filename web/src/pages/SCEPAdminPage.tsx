@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
 import { getAdminSCEPIntuneStats, reloadAdminSCEPIntuneTrust, getAuditEvents } from '../api/client';
 import PageHeader from '../components/PageHeader';
 import ErrorState from '../components/ErrorState';
 import { useAuth } from '../components/AuthProvider';
+import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { formatDateTime } from '../api/utils';
 import type { IntuneStatsSnapshot, IntuneTrustAnchorInfo, AuditEvent } from '../api/types';
 
@@ -299,7 +300,6 @@ function RecentFailuresTable({ events }: { events: AuditEvent[] }) {
 
 export default function SCEPAdminPage() {
   const auth = useAuth();
-  const queryClient = useQueryClient();
   const [reloadTarget, setReloadTarget] = useState<IntuneStatsSnapshot | null>(null);
   const [reloadError, setReloadError] = useState<string | undefined>(undefined);
 
@@ -328,12 +328,23 @@ export default function SCEPAdminPage() {
     refetchInterval: 60_000,
   });
 
-  const reloadMutation = useMutation({
+  // Bundle-8 / M-009 invalidation contract: trust-anchor reload changes
+  // both the per-profile trust pool (reflected in IntuneStats) AND every
+  // recently-failed Intune enrollment counter that might now succeed on
+  // retry. We invalidate the stats key so the per-profile trust-anchor
+  // panel reflects the new pool immediately; the audit log queries
+  // remain on their 60s timer (a SIGHUP-equivalent reload doesn't
+  // backfill new audit rows).
+  const reloadMutation = useTrackedMutation<
+    Awaited<ReturnType<typeof reloadAdminSCEPIntuneTrust>>,
+    Error,
+    string
+  >({
     mutationFn: (pathID: string) => reloadAdminSCEPIntuneTrust(pathID),
+    invalidates: [['admin', 'scep', 'intune', 'stats']],
     onSuccess: () => {
       setReloadTarget(null);
       setReloadError(undefined);
-      void queryClient.invalidateQueries({ queryKey: ['admin', 'scep', 'intune', 'stats'] });
     },
     onError: (err: Error) => {
       setReloadError(err.message);
