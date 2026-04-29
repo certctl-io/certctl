@@ -322,8 +322,15 @@ func describeCertAlgorithm(c *x509.Certificate) string {
 	case *rsa.PublicKey:
 		return fmt.Sprintf("RSA-%d", pub.N.BitLen())
 	case *ecdsa.PublicKey:
-		if pub.Curve != nil && pub.Curve.Params() != nil {
-			return "ECDSA-" + pub.Curve.Params().Name
+		// Curve is embedded in ecdsa.PublicKey; check the interface
+		// itself for nil before calling Params() via promotion (QF1008
+		// — staticcheck wants the promoted-method form, not the
+		// chained selector). Still need the nil check because
+		// calling Params() on a nil embedded interface would panic.
+		if pub.Curve != nil {
+			if params := pub.Params(); params != nil {
+				return "ECDSA-" + params.Name
+			}
 		}
 		return "ECDSA"
 	}
