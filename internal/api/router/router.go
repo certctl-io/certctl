@@ -66,10 +66,10 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 // The TestRouter_AuthExemptAllowlist regression test below pins the slice
 // to the actual mux.Handle calls — adding an undocumented bypass fails CI.
 var AuthExemptRouterRoutes = []string{
-	"GET /health",            // K8s/Docker liveness probe; cannot carry Bearer
-	"GET /ready",             // K8s/Docker readiness probe; cannot carry Bearer
-	"GET /api/v1/auth/info",  // GUI calls before login to detect auth mode
-	"GET /api/v1/version",    // Rollout probes need build identity without key
+	"GET /health",           // K8s/Docker liveness probe; cannot carry Bearer
+	"GET /ready",            // K8s/Docker readiness probe; cannot carry Bearer
+	"GET /api/v1/auth/info", // GUI calls before login to detect auth mode
+	"GET /api/v1/version",   // Rollout probes need build identity without key
 }
 
 // AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
@@ -81,9 +81,9 @@ var AuthExemptRouterRoutes = []string{
 // TestDispatch_AuthExemptPrefixes regression test in cmd/server/main_test.go
 // pins this slice to buildFinalHandler's actual dispatch logic.
 var AuthExemptDispatchPrefixes = []string{
-	"/.well-known/pki",  // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
-	"/.well-known/est",  // RFC 7030 EST — auth via mTLS or CSR-embedded creds
-	"/scep",             // RFC 8894 SCEP — auth via challengePassword in CSR
+	"/.well-known/pki", // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
+	"/.well-known/est", // RFC 7030 EST — auth via mTLS or CSR-embedded creds
+	"/scep",            // RFC 8894 SCEP — auth via challengePassword in CSR
 }
 
 // HandlerRegistry groups all API handler dependencies for router registration.
@@ -108,8 +108,8 @@ type HandlerRegistry struct {
 	Verification   handler.VerificationHandler
 	Export         handler.ExportHandler
 	Digest         handler.DigestHandler
-	HealthChecks    *handler.HealthCheckHandler
-	BulkRevocation  handler.BulkRevocationHandler
+	HealthChecks   *handler.HealthCheckHandler
+	BulkRevocation handler.BulkRevocationHandler
 	// L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
 	// server-side bulk endpoints replace pre-L-1 client-side N×HTTP
 	// loops in CertificatesPage.tsx. See handler/bulk_renewal.go and
@@ -392,6 +392,11 @@ func (r *Router) RegisterSCEPHandlers(scep handler.SCEPHandler) {
 func (r *Router) RegisterPKIHandlers(pki handler.CertificateHandler) {
 	r.Register("GET /.well-known/pki/crl/{issuer_id}", http.HandlerFunc(pki.GetDERCRL))
 	r.Register("GET /.well-known/pki/ocsp/{issuer_id}/{serial}", http.HandlerFunc(pki.HandleOCSP))
+	// RFC 6960 §A.1.1 standard POST form. The binary OCSPRequest body
+	// carries the serial; the URL only needs the issuer ID. Most
+	// production OCSP clients use POST exclusively (see CRL/OCSP-Responder
+	// Phase 4 prompt for the full client compatibility matrix).
+	r.Register("POST /.well-known/pki/ocsp/{issuer_id}", http.HandlerFunc(pki.HandleOCSPPost))
 }
 
 // GetMux returns the underlying http.ServeMux for direct access if needed.

@@ -1,14 +1,18 @@
 package handler
 
 import (
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
 	"log/slog"
 	"net/http"
 	"strconv"
 	"strings"
 	"time"
+
+	"golang.org/x/crypto/ocsp"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
@@ -601,6 +605,92 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 	issuerID := parts[0]
 	serialHex := parts[1]
 
+	derBytes, err := h.svc.GetOCSPResponse(r.Context(), issuerID, serialHex)
+	if err != nil {
+		errMsg := err.Error()
+		if strings.Contains(errMsg, "not found") {
+			ErrorWithRequestID(w, http.StatusNotFound, errMsg, requestID)
+			return
+		}
+		if strings.Contains(errMsg, "do not support") || strings.Contains(errMsg, "does not support") {
+			ErrorWithRequestID(w, http.StatusNotImplemented, errMsg, requestID)
+			return
+		}
+		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to generate OCSP response", requestID)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/ocsp-response")
+	w.Header().Set("Cache-Control", "max-age=3600")
+	w.WriteHeader(http.StatusOK)
+	w.Write(derBytes)
+}
+
+// HandleOCSPPost processes RFC 6960 §A.1.1 POST OCSP requests.
+// POST /.well-known/pki/ocsp/{issuer_id}
+//
+// The body MUST be the binary DER-encoded OCSPRequest with content-type
+// "application/ocsp-request". The response is the same DER-encoded
+// OCSPResponse with content-type "application/ocsp-response" returned
+// by the existing GET handler — only the input shape differs.
+//
+// POST is the standard transport for production OCSP clients (Firefox,
+// OpenSSL `s_client -status`, cert-manager, Microsoft Intune device
+// validators). The pre-existing GET form is kept for ad-hoc curl
+// inspection + human-readable URL paths.
+//
+// Bundle CRL/OCSP-Responder Phase 4.
+func (h CertificateHandler) HandleOCSPPost(w http.ResponseWriter, r *http.Request) {
+	requestID, _ := r.Context().Value("request_id").(string)
+
+	if r.Method != http.MethodPost {
+		ErrorWithRequestID(w, http.StatusMethodNotAllowed, "Method not allowed", requestID)
+		return
+	}
+
+	// Be tolerant about Content-Type: RFC 6960 §A.1.1 says it MUST be
+	// "application/ocsp-request" but real-world clients sometimes omit
+	// the header or send it with a charset suffix. We require the
+	// substring "ocsp-request" rather than exact match — the actual
+	// validation happens in ocsp.ParseRequest below; a malformed body
+	// fails there with a 400.
+	ct := r.Header.Get("Content-Type")
+	if ct != "" && !strings.Contains(strings.ToLower(ct), "ocsp-request") {
+		ErrorWithRequestID(w, http.StatusUnsupportedMediaType,
+			fmt.Sprintf("Content-Type must be application/ocsp-request, got %q", ct), requestID)
+		return
+	}
+
+	// Issuer ID from the path. The router pattern strips the leading
+	// /.well-known/pki/ocsp/ prefix; what remains is the bare issuer ID.
+	issuerID := strings.TrimPrefix(r.URL.Path, "/.well-known/pki/ocsp/")
+	issuerID = strings.TrimSuffix(issuerID, "/")
+	if issuerID == "" || strings.Contains(issuerID, "/") {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Issuer ID is required", requestID)
+		return
+	}
+
+	// Body is already MaxBytesReader-capped by the body-size middleware.
+	// OCSPRequest bodies are tiny (~200 bytes for a single-cert query),
+	// so the default cap is comfortably above what any legitimate client
+	// will send.
+	body, err := io.ReadAll(r.Body)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Failed to read request body", requestID)
+		return
+	}
+
+	ocspReq, err := ocsp.ParseRequest(body)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest,
+			fmt.Sprintf("Invalid OCSPRequest: %v", err), requestID)
+		return
+	}
+
+	// Reuse the existing service path. The serial extracted from the
+	// parsed OCSPRequest is converted to hex (the on-disk format for
+	// certctl serials matches certificate.SerialNumber.Text(16)).
+	serialHex := fmt.Sprintf("%x", ocspReq.SerialNumber)
 	derBytes, err := h.svc.GetOCSPResponse(r.Context(), issuerID, serialHex)
 	if err != nil {
 		errMsg := err.Error()

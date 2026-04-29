@@ -12,14 +12,19 @@ import (
 
 // CertificateService provides business logic for certificate management.
 type CertificateService struct {
-	certRepo       repository.CertificateRepository
-	targetRepo     repository.TargetRepository
-	jobRepo        repository.JobRepository
-	policyService  *PolicyService
-	auditService   *AuditService
-	revSvc         *RevocationSvc
-	caSvc          *CAOperationsSvc
-	keygenMode     string
+	certRepo      repository.CertificateRepository
+	targetRepo    repository.TargetRepository
+	jobRepo       repository.JobRepository
+	policyService *PolicyService
+	auditService  *AuditService
+	revSvc        *RevocationSvc
+	caSvc         *CAOperationsSvc
+	// crlCacheSvc, when set, makes GenerateDERCRL serve from the
+	// pre-generated cache instead of regenerating per request. Bundle
+	// CRL/OCSP-Responder Phase 4. Optional; when nil GenerateDERCRL
+	// falls back to the historical on-demand path via caSvc.
+	crlCacheSvc *CRLCacheService
+	keygenMode  string
 }
 
 // NewCertificateService creates a new certificate service.
@@ -43,6 +48,17 @@ func (s *CertificateService) SetRevocationSvc(svc *RevocationSvc) {
 // SetCAOperationsSvc sets the CA operations service.
 func (s *CertificateService) SetCAOperationsSvc(svc *CAOperationsSvc) {
 	s.caSvc = svc
+}
+
+// SetCRLCacheSvc wires the CRL cache service. When set, GenerateDERCRL
+// reads from the scheduler-pre-generated cache (cheap DB lookup) and
+// only triggers an on-demand regeneration on cache miss / staleness.
+// When unset, GenerateDERCRL falls back to the historical per-request
+// regeneration via caSvc.
+//
+// Bundle CRL/OCSP-Responder Phase 4.
+func (s *CertificateService) SetCRLCacheSvc(svc *CRLCacheService) {
+	s.crlCacheSvc = svc
 }
 
 // SetTargetRepo sets the target repository for deployment queries.
@@ -481,9 +497,23 @@ func (s *CertificateService) GetRevokedCertificates(ctx context.Context) ([]*dom
 	return s.revSvc.GetRevokedCertificates(ctx)
 }
 
-// GenerateDERCRL generates a DER-encoded X.509 CRL for the given issuer.
-// Delegates to CAOperationsSvc.
+// GenerateDERCRL returns the DER-encoded X.509 CRL for the given
+// issuer. When the CRL cache service is wired (SetCRLCacheSvc), reads
+// from the scheduler-pre-generated cache and only regenerates on miss
+// / staleness — the cache layer's singleflight gate collapses
+// concurrent miss requests to a single underlying generation.
+//
+// When the cache service is not wired, falls back to the historical
+// on-demand path via CAOperationsSvc.GenerateDERCRL — every HTTP fetch
+// triggers a fresh generation.
+//
+// Backward-compatible: existing callers that don't wire the cache see
+// no behavioural change.
 func (s *CertificateService) GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error) {
+	if s.crlCacheSvc != nil {
+		der, _, err := s.crlCacheSvc.Get(ctx, issuerID)
+		return der, err
+	}
 	if s.caSvc == nil {
 		return nil, fmt.Errorf("CA operations service not configured")
 	}

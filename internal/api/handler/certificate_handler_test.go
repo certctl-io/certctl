@@ -3,12 +3,20 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto"
+	"crypto/rand"
+	"crypto/rsa"
+	"crypto/x509"
+	"crypto/x509/pkix"
 	"encoding/json"
 	"fmt"
+	"math/big"
 	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
+
+	"golang.org/x/crypto/ocsp"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
@@ -1208,6 +1216,174 @@ func TestHandleOCSP_MethodNotAllowed(t *testing.T) {
 	}
 }
 
+// === Phase-4 POST OCSP (RFC 6960 §A.1.1) Tests ===
+
+// buildOCSPRequest constructs a binary DER-encoded OCSPRequest body
+// for testing the POST handler. The same shape is what production
+// clients (Firefox, OpenSSL, cert-manager) send.
+func buildOCSPRequest(t *testing.T, serial *big.Int) []byte {
+	t.Helper()
+	// Build a minimal issuer cert + leaf cert pair so ocsp.CreateRequest
+	// has the SubjectPublicKeyInfo + serial it needs.
+	caKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	caTpl := &x509.Certificate{
+		SerialNumber:          big.NewInt(0xCA),
+		Subject:               pkix.Name{CommonName: "Test Issuer"},
+		NotBefore:             time.Now().Add(-time.Hour),
+		NotAfter:              time.Now().Add(24 * time.Hour),
+		IsCA:                  true,
+		BasicConstraintsValid: true,
+	}
+	caDER, err := x509.CreateCertificate(rand.Reader, caTpl, caTpl, &caKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create CA: %v", err)
+	}
+	caCert, _ := x509.ParseCertificate(caDER)
+
+	leafTpl := &x509.Certificate{
+		SerialNumber: serial,
+		Subject:      pkix.Name{CommonName: "leaf.example.com"},
+		NotBefore:    time.Now().Add(-time.Hour),
+		NotAfter:     time.Now().Add(24 * time.Hour),
+	}
+	leafKey, _ := rsa.GenerateKey(rand.Reader, 2048)
+	leafDER, err := x509.CreateCertificate(rand.Reader, leafTpl, caCert, &leafKey.PublicKey, caKey)
+	if err != nil {
+		t.Fatalf("create leaf: %v", err)
+	}
+	leafCert, _ := x509.ParseCertificate(leafDER)
+
+	body, err := ocsp.CreateRequest(leafCert, caCert, &ocsp.RequestOptions{Hash: crypto.SHA256})
+	if err != nil {
+		t.Fatalf("create OCSP request: %v", err)
+	}
+	return body
+}
+
+func TestHandleOCSPPost_Success(t *testing.T) {
+	wantSerial := big.NewInt(0xDEADBEEF)
+	expectedHex := fmt.Sprintf("%x", wantSerial)
+
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(_ context.Context, issuerID string, serialHex string) ([]byte, error) {
+			if issuerID != "iss-local" {
+				return nil, fmt.Errorf("unexpected issuer %q", issuerID)
+			}
+			if serialHex != expectedHex {
+				return nil, fmt.Errorf("unexpected serial %q (want %q)", serialHex, expectedHex)
+			}
+			return []byte{0x30, 0x82, 0x02, 0x00}, nil
+		},
+	}
+	handler := NewCertificateHandler(mock)
+
+	body := buildOCSPRequest(t, wantSerial)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/ocsp-request")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+
+	handler.HandleOCSPPost(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d (body=%s)", w.Code, w.Body.String())
+	}
+	if ct := w.Header().Get("Content-Type"); ct != "application/ocsp-response" {
+		t.Errorf("Content-Type = %q, want application/ocsp-response", ct)
+	}
+}
+
+func TestHandleOCSPPost_RejectsNonPostMethod(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodGet, "/.well-known/pki/ocsp/iss-local", nil)
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusMethodNotAllowed {
+		t.Errorf("got %d, want 405", w.Code)
+	}
+}
+
+func TestHandleOCSPPost_RejectsWrongContentType(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local", bytes.NewReader([]byte("garbage")))
+	req.Header.Set("Content-Type", "text/plain")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusUnsupportedMediaType {
+		t.Errorf("got %d, want 415", w.Code)
+	}
+}
+
+func TestHandleOCSPPost_AcceptsMissingContentType(t *testing.T) {
+	// Real-world tolerance: some clients omit the header entirely.
+	// Validation falls through to ocsp.ParseRequest which will reject
+	// a non-OCSP body with a 400.
+	body := buildOCSPRequest(t, big.NewInt(1))
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(_ context.Context, _, _ string) ([]byte, error) {
+			return []byte{0x30, 0x82}, nil
+		},
+	}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local", bytes.NewReader(body))
+	// Intentionally NOT setting Content-Type.
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("got %d, want 200 with missing Content-Type (body=%s)", w.Code, w.Body.String())
+	}
+}
+
+func TestHandleOCSPPost_RejectsMalformedBody(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local", bytes.NewReader([]byte("not-an-ocsp-request")))
+	req.Header.Set("Content-Type", "application/ocsp-request")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("got %d, want 400", w.Code)
+	}
+}
+
+func TestHandleOCSPPost_RejectsMissingIssuer(t *testing.T) {
+	mock := &MockCertificateService{}
+	handler := NewCertificateHandler(mock)
+	body := buildOCSPRequest(t, big.NewInt(1))
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/ocsp-request")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("got %d, want 400", w.Code)
+	}
+}
+
+func TestHandleOCSPPost_PropagatesNotFound(t *testing.T) {
+	mock := &MockCertificateService{
+		GetOCSPResponseFn: func(_ context.Context, _, _ string) ([]byte, error) {
+			return nil, fmt.Errorf("certificate not found")
+		},
+	}
+	handler := NewCertificateHandler(mock)
+	body := buildOCSPRequest(t, big.NewInt(1))
+	req := httptest.NewRequest(http.MethodPost, "/.well-known/pki/ocsp/iss-local", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/ocsp-request")
+	req = req.WithContext(contextWithRequestID())
+	w := httptest.NewRecorder()
+	handler.HandleOCSPPost(w, req)
+	if w.Code != http.StatusNotFound {
+		t.Errorf("got %d, want 404", w.Code)
+	}
+}
+
 // === M20 Enhanced Query API Tests ===
 
 // TestListCertificates_SortParam tests sort parameter parsing and passing to service.
@@ -1315,9 +1491,9 @@ func TestListCertificates_CreatedAfterFilter(t *testing.T) {
 // TestListCertificates_CursorPagination tests cursor-based pagination response.
 func TestListCertificates_CursorPagination(t *testing.T) {
 	cert := domain.ManagedCertificate{
-		ID:        "mc-cursor-test-1",
+		ID:         "mc-cursor-test-1",
 		CommonName: "cursor.example.com",
-		CreatedAt: time.Now(),
+		CreatedAt:  time.Now(),
 	}
 
 	mock := &MockCertificateService{
