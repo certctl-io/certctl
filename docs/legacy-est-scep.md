@@ -294,17 +294,15 @@ behavior change.
 
 Real enterprise deploys run multiple SCEP endpoints from one certctl
 instance — corp-laptop CA, IoT CA, server CA — each with its own
-issuer + RA pair + challenge password. Configure via:
-
-```
-CERTCTL_SCEP_PROFILES=corp,iot,server
-CERTCTL_SCEP_PROFILE_CORP_ISSUER_ID=iss-corp-laptop
-CERTCTL_SCEP_PROFILE_CORP_PROFILE_ID=prof-corp-tls
-CERTCTL_SCEP_PROFILE_CORP_CHALLENGE_PASSWORD=...
-CERTCTL_SCEP_PROFILE_CORP_RA_CERT_PATH=/etc/certctl/scep/corp-ra.crt
-CERTCTL_SCEP_PROFILE_CORP_RA_KEY_PATH=/etc/certctl/scep/corp-ra.key
-# ... per profile name in CERTCTL_SCEP_PROFILES
-```
+issuer + RA pair + challenge password. Configure via the indexed env-var
+form documented in [`features.md`](features.md): set
+`CERTCTL_SCEP_PROFILES=corp,iot,server` (a comma-separated list of
+profile names), then for each name supply the per-profile env-vars
+prefixed with `CERTCTL_SCEP_PROFILE_<NAME>_` followed by the suffix
+keys `_ISSUER_ID`, `_PROFILE_ID`, `_CHALLENGE_PASSWORD`, `_RA_CERT_PATH`,
+`_RA_KEY_PATH`. The `<NAME>` token resolves to the upper-cased profile
+name from the list. Each profile is independently validated at startup;
+per-profile failures log the offending PathID.
 
 The router exposes `/scep/corp`, `/scep/iot`, `/scep/server`. The legacy
 `/scep` root remains for the single-profile flat-env-var case (when
@@ -324,7 +322,7 @@ PKIOperation.
 
 The RA cert is loaded once at startup and persisted in the handler's
 struct field; rotation requires a server restart (mirrors the
-`CERTCTL_TLS_CERT_PATH` precedent in `cmd/server/tls.go`). The
+`CERTCTL_SERVER_TLS_CERT_PATH` precedent in `cmd/server/tls.go`). The
 recommended cadence is annual rotation with a 30-day overlap during
 which both old + new RA certs are listed in `GetCACert`'s response (set
 the cert chain accordingly in your sub-CA hierarchy).
