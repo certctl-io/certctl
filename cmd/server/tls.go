@@ -136,21 +136,27 @@ func buildServerTLSConfig(holder *certHolder) *tls.Config {
 }
 
 // buildServerTLSConfigWithMTLS extends buildServerTLSConfig with a client-cert
-// trust pool for the SCEP RFC 8894 + Intune master bundle Phase 6.5 mTLS
-// sibling route. SCEP profiles that opt into mTLS each contribute their
-// trust bundle to the union pool here; the same TLS listener serves both
-// /scep[/<pathID>] (no client cert) and /scep-mtls/<pathID> (cert required
-// at the handler layer).
+// trust pool for the SCEP/EST mTLS sibling routes.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 6.5 introduced this for the
+// /scep-mtls/<pathID> route; EST RFC 7030 hardening master bundle Phase 2
+// extended it so the same TLS listener also serves /.well-known/est-mtls/
+// <pathID>. Both protocols' mTLS profiles contribute their trust bundles
+// to a UNION pool that the caller (cmd/server/main.go) builds by walking
+// every enabled mTLS profile's bundle bytes once. The per-protocol
+// handlers re-verify against just THIS profile's bundle (so an EST-mTLS
+// bootstrap cert can't enroll against a SCEP-mTLS profile and vice versa).
 //
 // ClientAuth: VerifyClientCertIfGiven — request a cert during handshake; if
 // the client presents one, verify it against the union pool; if absent, the
 // request still reaches the handler and the per-route handler decides
 // whether to accept. Critical that we do NOT use RequireAndVerifyClientCert
-// here — that would break the standard /scep route (which is challenge-
-// password-only, no client cert expected).
+// here — that would break the standard /scep + /.well-known/est routes
+// (challenge-password-only / unauth-or-Basic, no client cert expected).
 //
-// Pass clientCAs == nil to disable mTLS (no profile opted in). The function
-// then returns the same shape as buildServerTLSConfig.
+// Pass clientCAs == nil to disable mTLS (no profile opted in across either
+// protocol). The function then returns the same shape as
+// buildServerTLSConfig.
 func buildServerTLSConfigWithMTLS(holder *certHolder, clientCAs *x509.CertPool) *tls.Config {
 	cfg := buildServerTLSConfig(holder)
 	if clientCAs != nil {

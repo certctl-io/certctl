@@ -31,10 +31,12 @@ import (
 	notifyteams "github.com/shankar0123/certctl/internal/connector/notifier/teams"
 	"github.com/shankar0123/certctl/internal/crypto/signer"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/ratelimit"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
 	"github.com/shankar0123/certctl/internal/scep/intune"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
+	"github.com/shankar0123/certctl/internal/trustanchor"
 )
 
 func main() {
@@ -736,8 +738,24 @@ func main() {
 	// mirrors the SCEP audit-closure pattern (cmd/server/main.go::
 	// preflightSCEPIntuneTrustAnchor signature took pathID for exactly
 	// this reason).
+	// EST RFC 7030 hardening master bundle Phase 2 + SCEP RFC 8894 +
+	// Intune master bundle Phase 6.5 SHARED union pool: every protocol's
+	// mTLS profiles contribute their trust certs here so a single TLS
+	// listener accepts client certs from EITHER protocol's profiles, and
+	// the per-handler gate re-verifies that the cert chains to THIS
+	// profile's bundle. Allocated lazily by whichever protocol first
+	// opts in (left nil when no profile opted in across both protocols
+	// — buildServerTLSConfigWithMTLS treats nil as 'no mTLS').
+	var mtlsUnionPoolForTLS *x509.CertPool
+	// estMTLSStopWatchers collects every per-profile trust-anchor
+	// SIGHUP-watcher stop func so we can shut them down on server exit
+	// (mirrors intuneStopWatchers below).
+	var estMTLSStopWatchers []func()
+
 	if cfg.EST.Enabled {
 		estHandlers := make(map[string]handler.ESTHandler, len(cfg.EST.Profiles))
+		estMTLSHandlers := make(map[string]handler.ESTHandler)
+		estMTLSAnyEnabled := false
 		for i, profile := range cfg.EST.Profiles {
 			profile := profile // shadow for closure-safety
 			profileLog := logger.With(
@@ -769,7 +787,102 @@ func main() {
 			if profile.ProfileID != "" {
 				estService.SetProfileID(profile.ProfileID)
 			}
-			estHandlers[profile.PathID] = handler.NewESTHandler(estService)
+			estHandler := handler.NewESTHandler(estService)
+			estHandler.SetLabelForLog(fmt.Sprintf("est (PathID=%q)", profile.PathID))
+
+			// Phase 3.1: HTTP Basic enrollment password. Only takes effect
+			// on the standard /.well-known/est/<PathID>/ route — the mTLS
+			// sibling skips it because the client cert IS the auth signal.
+			if profile.EnrollmentPassword != "" {
+				estHandler.SetEnrollmentPassword(profile.EnrollmentPassword)
+				// Phase 3.3: per-source-IP failed-auth rate limit.
+				// Defaults: 10 failed attempts / 1 hour / 50k tracked IPs.
+				// Hard-coded for now (no env var); a tuning bundle can lift
+				// these once we've watched real production deploys for a
+				// release. The shared SlidingWindowLimiter applies the same
+				// math the SCEP/Intune limiter uses — extracted in Phase 4.1
+				// of this bundle so both call sites share the implementation.
+				failed := ratelimit.NewSlidingWindowLimiter(10, time.Hour, 50_000)
+				estHandler.SetSourceIPRateLimiter(failed)
+			}
+			// Phase 2.1: mTLS sibling route. When MTLSEnabled=true, build a
+			// per-profile SIGHUP-reloadable trust-anchor holder, splice the
+			// bundle's certs into the EST mTLS union pool, and clone the
+			// handler with the per-profile trust + channel-binding policy
+			// so SimpleEnrollMTLS / SimpleReEnrollMTLS verify against just
+			// THIS profile's bundle.
+			if profile.MTLSEnabled {
+				holder, err := preflightESTMTLSClientCATrustBundle(true, profile.PathID, profile.MTLSClientCATrustBundlePath, profileLog)
+				if err != nil {
+					profileLog.Error(
+						"startup refused: EST profile MTLS trust bundle preflight failed "+
+							"(EST hardening Phase 2: required when MTLS_ENABLED=true). "+
+							"Verify the bundle file exists at MTLS_CLIENT_CA_TRUST_BUNDLE_PATH, "+
+							"is readable, parses as PEM, contains ≥1 CERTIFICATE block, "+
+							"and none of the bundled certs are past NotAfter.",
+						"error", err,
+					)
+					os.Exit(1)
+				}
+				// Merge this profile's certs into the union pool the TLS
+				// layer uses for VerifyClientCertIfGiven. Walk the bundle
+				// directly so the union pool gets exactly the same certs
+				// as the per-profile pool (mirrors SCEP's pattern at the
+				// equivalent loop iteration).
+				if mtlsUnionPoolForTLS == nil {
+					mtlsUnionPoolForTLS = x509.NewCertPool()
+				}
+				bundleBytes, _ := os.ReadFile(profile.MTLSClientCATrustBundlePath)
+				rest := bundleBytes
+				for {
+					var block *pem.Block
+					block, rest = pem.Decode(rest)
+					if block == nil {
+						break
+					}
+					if block.Type != "CERTIFICATE" {
+						continue
+					}
+					if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+						mtlsUnionPoolForTLS.AddCert(cert)
+					}
+				}
+				estMTLSAnyEnabled = true
+
+				// Build the mTLS sibling-route handler with the per-profile
+				// trust pool, channel-binding policy, and (if configured)
+				// per-principal rate limiter.
+				mtlsHandler := handler.NewESTHandler(estService)
+				mtlsHandler.SetLabelForLog(fmt.Sprintf("est-mtls (PathID=%q)", profile.PathID))
+				mtlsHandler.SetMTLSTrust(holder)
+				mtlsHandler.SetChannelBindingRequired(profile.ChannelBindingRequired)
+				if profile.RateLimitPerPrincipal24h > 0 {
+					perPrincipal := ratelimit.NewSlidingWindowLimiter(profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
+					mtlsHandler.SetPerPrincipalRateLimiter(perPrincipal)
+				}
+				estMTLSHandlers[profile.PathID] = mtlsHandler
+
+				// Install the SIGHUP watcher so an operator that rotates
+				// the mTLS trust bundle file gets the new pool live without
+				// a server restart. Watcher stop func is collected for
+				// orderly shutdown via the defer below.
+				estMTLSStopWatchers = append(estMTLSStopWatchers, holder.WatchSIGHUP())
+
+				profileLog.Info("EST mTLS sibling route enabled",
+					"endpoint", "/.well-known/est-mtls/"+profile.PathID,
+					"client_ca_trust_bundle", profile.MTLSClientCATrustBundlePath,
+					"channel_binding_required", profile.ChannelBindingRequired,
+				)
+			}
+			// Phase 4.2: per-principal rate limiter on the standard route
+			// too (additive — both routes share the same per-(CN, IP) cap
+			// when configured). The mTLS handler above gets its own
+			// limiter instance so the two routes don't share a bucket.
+			if profile.RateLimitPerPrincipal24h > 0 {
+				perPrincipal := ratelimit.NewSlidingWindowLimiter(profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
+				estHandler.SetPerPrincipalRateLimiter(perPrincipal)
+			}
+			estHandlers[profile.PathID] = estHandler
 
 			endpoint := "/.well-known/est"
 			if profile.PathID != "" {
@@ -785,18 +898,30 @@ func main() {
 			)
 		}
 		apiRouter.RegisterESTHandlers(estHandlers)
-		logger.Info("EST server enabled", "profile_count", len(cfg.EST.Profiles))
+		if estMTLSAnyEnabled {
+			apiRouter.RegisterESTMTLSHandlers(estMTLSHandlers)
+			logger.Info("EST mTLS sibling route enabled (Phase 2)",
+				"mtls_profile_count", len(estMTLSHandlers),
+			)
+		}
+		logger.Info("EST server enabled",
+			"profile_count", len(cfg.EST.Profiles),
+			"mtls_profile_count", len(estMTLSHandlers),
+		)
+		// Stop SIGHUP watchers in LIFO on server shutdown.
+		if len(estMTLSStopWatchers) > 0 {
+			defer func() {
+				for _, stop := range estMTLSStopWatchers {
+					stop()
+				}
+			}()
+		}
 	}
 
 	// SCEP RFC 8894 Phase 6.5: union pool of every enabled mTLS profile's
-	// trust bundle. Populated inside the SCEP startup block below; passed
-	// to the TLS-config builder later so the listener accepts client certs
-	// signed by ANY mTLS profile's CA. The handler-layer gate
-	// (HandleSCEPMTLS) re-verifies per-profile, so a cert that chains to
-	// profile A's bundle cannot enroll against profile B even though it
-	// passes the TLS-layer union check. Stays nil when no profile opted in
-	// (the TLS config builder treats nil as 'no mTLS').
-	var scepMTLSUnionPoolForTLS *x509.CertPool
+	// EST RFC 7030 hardening master bundle Phase 2: SCEP's mTLS union pool
+	// merged into the SHARED mtlsUnionPoolForTLS variable declared above.
+	// Variables here intentionally renamed to make the merge explicit.
 
 	// Register SCEP (RFC 8894) handlers if enabled.
 	//
@@ -821,7 +946,6 @@ func main() {
 		// bundle to prevent cross-profile bleed-through).
 		scepHandlers := make(map[string]handler.SCEPHandler, len(cfg.SCEP.Profiles))
 		scepMTLSHandlers := make(map[string]handler.SCEPHandler)
-		scepMTLSUnionPool := x509.NewCertPool()
 		scepMTLSAnyEnabled := false
 		// SCEP RFC 8894 + Intune master bundle Phase 8: per-profile Intune
 		// trust anchor holders. We track them here so a single SIGHUP
@@ -1017,7 +1141,10 @@ func main() {
 						continue
 					}
 					if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
-						scepMTLSUnionPool.AddCert(cert)
+						if mtlsUnionPoolForTLS == nil {
+							mtlsUnionPoolForTLS = x509.NewCertPool()
+						}
+						mtlsUnionPoolForTLS.AddCert(cert)
 					}
 				}
 				scepMTLSAnyEnabled = true
@@ -1049,7 +1176,6 @@ func main() {
 		// no-op-when-disabled case obvious in logs.
 		if scepMTLSAnyEnabled {
 			apiRouter.RegisterSCEPMTLSHandlers(scepMTLSHandlers)
-			scepMTLSUnionPoolForTLS = scepMTLSUnionPool
 			logger.Info("SCEP mTLS sibling route enabled (Phase 6.5)",
 				"mtls_profile_count", len(scepMTLSHandlers),
 			)
@@ -1317,7 +1443,7 @@ func main() {
 		// sibling route gates additionally on the verified client cert.
 		// nil pool = no profile opted in = identical TLS shape to the
 		// pre-Phase-6.5 buildServerTLSConfig path.
-		TLSConfig:         buildServerTLSConfigWithMTLS(tlsCertHolder, scepMTLSUnionPoolForTLS),
+		TLSConfig:         buildServerTLSConfigWithMTLS(tlsCertHolder, mtlsUnionPoolForTLS),
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      120 * time.Second, // Must accommodate ACME issuance (order + challenge + finalize)
@@ -1474,6 +1600,41 @@ func preflightSCEPMTLSTrustBundle(enabled bool, bundlePath string) (*x509.CertPo
 		return nil, fmt.Errorf("MTLS trust bundle contained no CERTIFICATE PEM blocks (path=%s)", bundlePath)
 	}
 	return pool, nil
+}
+
+// preflightESTMTLSClientCATrustBundle validates a per-profile EST mTLS
+// client-CA trust bundle and returns a SIGHUP-reloadable holder.
+//
+// EST RFC 7030 hardening master bundle Phase 2.5.
+//
+// Mirrors preflightSCEPMTLSTrustBundle's checks (file exists, parses as
+// PEM, ≥1 cert, none expired) but returns a *trustanchor.Holder rather
+// than a raw *x509.CertPool — the EST handler stores the holder so a
+// SIGHUP rotates the trust bundle live without a server restart, exactly
+// the way the Intune trust anchor rotation works (Phase 8.5 of the SCEP
+// bundle). The handler-side .Pool() accessor on the holder rebuilds an
+// x509.CertPool from the current snapshot for each Verify call.
+//
+// Uses the shared internal/trustanchor.LoadBundle (extracted in EST
+// hardening Phase 2.1 from the original Intune-only path) so the EST
+// + Intune callers exercise the same loader semantics — empty bundle
+// rejected, expired cert rejected with subject in error message,
+// non-CERTIFICATE PEM blocks tolerated.
+func preflightESTMTLSClientCATrustBundle(enabled bool, pathID, bundlePath string, logger *slog.Logger) (*trustanchor.Holder, error) {
+	if !enabled {
+		return nil, nil
+	}
+	if bundlePath == "" {
+		return nil, fmt.Errorf("EST profile (PathID=%q) MTLS enabled but trust bundle path empty: "+
+			"set CERTCTL_EST_PROFILE_<NAME>_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH to a PEM file "+
+			"containing the bootstrap-CA certs the operator allows to enroll", pathID)
+	}
+	holder, err := trustanchor.New(bundlePath, logger)
+	if err != nil {
+		return nil, fmt.Errorf("EST profile (PathID=%q) MTLS trust bundle preflight: %w", pathID, err)
+	}
+	holder.SetLabelForLog(fmt.Sprintf("EST mTLS client CA bundle (PathID=%q)", pathID))
+	return holder, nil
 }
 
 // preflightSCEPIntuneTrustAnchor validates a per-profile Microsoft Intune
@@ -1745,9 +1906,17 @@ func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, da
 		}
 
 		// RFC 7030 EST endpoints ride the no-auth middleware chain (M-001,
-		// option D, audit 2026-04-19). Trust boundary is CSR signature + profile
-		// policy, not HTTP Bearer. /.well-known/est/cacerts is explicitly
-		// anonymous per RFC 7030 §4.1.1.
+		// option D, audit 2026-04-19). Trust boundary is CSR signature +
+		// (per EST hardening Phase 2) optional client cert at the handler
+		// layer, not HTTP Bearer. /.well-known/est/cacerts is explicitly
+		// anonymous per RFC 7030 §4.1.1; /.well-known/est-mtls/<PathID>/
+		// (EST hardening Phase 2 sibling route) requires a client cert
+		// gate at the handler layer — both share this prefix gate because
+		// "/.well-known/est-mtls" is itself prefixed by "/.well-known/est".
+		// EST hardening Phase 3's HTTP Basic enrollment-password is a
+		// per-profile handler-layer auth that runs INSIDE the no-auth
+		// middleware chain (since the chain skips the Bearer middleware,
+		// the handler gets to define its own auth contract).
 		if strings.HasPrefix(path, "/.well-known/est") {
 			noAuthHandler.ServeHTTP(w, r)
 			return

@@ -16,6 +16,13 @@ import (
 	"time"
 )
 
+// EST RFC 7030 hardening master bundle Phase 2.1: the white-box parser
+// tests (TestParseTrustAnchorPEM_*) moved to internal/trustanchor/holder_test.go
+// where parseBundlePEM now lives. The intune package retains a thin
+// public-surface test of LoadTrustAnchor — the back-compat shim that
+// existing intune callers use — so a future refactor that breaks the
+// shim's wire-up to trustanchor.LoadBundle is caught here.
+
 // pemEncodeCert is a small DRY helper for the PEM bundle fixtures.
 func pemEncodeCert(t *testing.T, der []byte) []byte {
 	t.Helper()
@@ -24,7 +31,9 @@ func pemEncodeCert(t *testing.T, der []byte) []byte {
 
 // freshConnectorCertDER returns a freshly-minted EC P-256 cert as raw DER
 // + the matching key. Lifetime is parameterised so the same factory drives
-// both the happy-path and expired-cert cases.
+// both happy-path and expired-cert cases. Kept in this file (not deleted with
+// the white-box tests) because trust_anchor_holder_test.go's freshHolderCert
+// returns *x509.Certificate while LoadTrustAnchor tests need raw DER + key.
 func freshConnectorCertDER(t *testing.T, notAfter time.Time) ([]byte, *ecdsa.PrivateKey) {
 	t.Helper()
 	key, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
@@ -44,96 +53,6 @@ func freshConnectorCertDER(t *testing.T, notAfter time.Time) ([]byte, *ecdsa.Pri
 	return der, key
 }
 
-func TestParseTrustAnchorPEM_HappyPath_SingleCert(t *testing.T) {
-	der, _ := freshConnectorCertDER(t, time.Now().Add(365*24*time.Hour))
-	body := pemEncodeCert(t, der)
-
-	certs, err := parseTrustAnchorPEM(body, "test", time.Now())
-	if err != nil {
-		t.Fatalf("parseTrustAnchorPEM: %v", err)
-	}
-	if len(certs) != 1 {
-		t.Fatalf("len(certs) = %d, want 1", len(certs))
-	}
-	if certs[0].Subject.CommonName != "intune-connector-test" {
-		t.Errorf("Subject.CommonName = %q", certs[0].Subject.CommonName)
-	}
-}
-
-func TestParseTrustAnchorPEM_HappyPath_MultiCert(t *testing.T) {
-	d1, _ := freshConnectorCertDER(t, time.Now().Add(30*24*time.Hour))
-	d2, _ := freshConnectorCertDER(t, time.Now().Add(60*24*time.Hour))
-	body := append(pemEncodeCert(t, d1), pemEncodeCert(t, d2)...)
-
-	certs, err := parseTrustAnchorPEM(body, "test", time.Now())
-	if err != nil {
-		t.Fatalf("parseTrustAnchorPEM: %v", err)
-	}
-	if len(certs) != 2 {
-		t.Fatalf("len(certs) = %d, want 2", len(certs))
-	}
-}
-
-func TestParseTrustAnchorPEM_SkipsNonCertBlocks(t *testing.T) {
-	der, key := freshConnectorCertDER(t, time.Now().Add(30*24*time.Hour))
-	keyDER, err := x509.MarshalECPrivateKey(key)
-	if err != nil {
-		t.Fatalf("MarshalECPrivateKey: %v", err)
-	}
-	keyPEM := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-	body := append(keyPEM, pemEncodeCert(t, der)...) // priv key first, cert second
-
-	certs, err := parseTrustAnchorPEM(body, "test", time.Now())
-	if err != nil {
-		t.Fatalf("parseTrustAnchorPEM should ignore non-CERTIFICATE blocks: %v", err)
-	}
-	if len(certs) != 1 {
-		t.Fatalf("len(certs) = %d, want 1 (priv key block must be skipped)", len(certs))
-	}
-}
-
-func TestParseTrustAnchorPEM_EmptyBundleRejected(t *testing.T) {
-	_, err := parseTrustAnchorPEM([]byte("nothing here"), "test", time.Now())
-	if err == nil || !strings.Contains(err.Error(), "no CERTIFICATE PEM blocks") {
-		t.Fatalf("expected 'no CERTIFICATE PEM blocks' error, got %v", err)
-	}
-}
-
-func TestParseTrustAnchorPEM_OnlyKeyBlocksRejected(t *testing.T) {
-	key, _ := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
-	keyDER, _ := x509.MarshalECPrivateKey(key)
-	body := pem.EncodeToMemory(&pem.Block{Type: "EC PRIVATE KEY", Bytes: keyDER})
-
-	_, err := parseTrustAnchorPEM(body, "test", time.Now())
-	if err == nil {
-		t.Fatalf("expected error for bundle with no certs, got nil")
-	}
-}
-
-func TestParseTrustAnchorPEM_ExpiredCertRejected(t *testing.T) {
-	der, _ := freshConnectorCertDER(t, time.Now().Add(-1*time.Hour)) // already expired
-	body := pemEncodeCert(t, der)
-
-	_, err := parseTrustAnchorPEM(body, "expired-bundle", time.Now())
-	if err == nil || !strings.Contains(err.Error(), "expired") {
-		t.Fatalf("expected expiry error, got %v", err)
-	}
-	// Operator-actionable message must include the subject so the audit
-	// log says exactly which cert to rotate.
-	if !strings.Contains(err.Error(), "intune-connector-test") {
-		t.Errorf("error must include subject CN for operator action: %v", err)
-	}
-}
-
-func TestParseTrustAnchorPEM_MalformedCertRejected(t *testing.T) {
-	bad := pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE", Bytes: []byte("not-a-real-asn1-cert")})
-
-	_, err := parseTrustAnchorPEM(bad, "test", time.Now())
-	if err == nil {
-		t.Fatalf("expected x509 parse error, got nil")
-	}
-}
-
 func TestLoadTrustAnchor_FromDisk(t *testing.T) {
 	der, _ := freshConnectorCertDER(t, time.Now().Add(30*24*time.Hour))
 	body := pemEncodeCert(t, der)
@@ -150,6 +69,9 @@ func TestLoadTrustAnchor_FromDisk(t *testing.T) {
 	if len(certs) != 1 {
 		t.Fatalf("len(certs) = %d, want 1", len(certs))
 	}
+	if certs[0].Subject.CommonName != "intune-connector-test" {
+		t.Errorf("Subject.CommonName = %q", certs[0].Subject.CommonName)
+	}
 }
 
 func TestLoadTrustAnchor_EmptyPath(t *testing.T) {
@@ -164,7 +86,6 @@ func TestLoadTrustAnchor_MissingFile(t *testing.T) {
 	if err == nil {
 		t.Fatalf("expected file-not-found error, got nil")
 	}
-	// Don't string-assert on the OS error — just make sure it's surfaced.
 	if errors.Is(err, nil) {
 		t.Fatalf("error must be non-nil")
 	}

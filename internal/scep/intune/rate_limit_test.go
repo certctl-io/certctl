@@ -103,15 +103,11 @@ func TestPerDeviceRateLimiter_EmptySubjectShortCircuits(t *testing.T) {
 	}
 }
 
-func TestPerDeviceRateLimiter_DefaultCapsHonored(t *testing.T) {
-	l := NewPerDeviceRateLimiter(5, 0, 0) // window=0 → 24h default; cap=0 → 100k default
-	if l.window != 24*time.Hour {
-		t.Errorf("default window = %v, want 24h", l.window)
-	}
-	if l.cap != 100_000 {
-		t.Errorf("default cap = %d, want 100000", l.cap)
-	}
-}
+// TestPerDeviceRateLimiter_DefaultCapsHonored — moved to
+// internal/ratelimit/sliding_window_test.go::TestSlidingWindowLimiter_DefaultCapsHonored
+// in EST RFC 7030 hardening Phase 4.1 (the white-box test reads private
+// fields that no longer exist on the wrapper). The shared package owns
+// the field-default contract.
 
 func TestPerDeviceRateLimiter_MapCapEvictsOldest(t *testing.T) {
 	// Cap of 3 keys to exercise the eviction branch deterministically.
@@ -161,30 +157,8 @@ func TestPerDeviceRateLimiter_ConcurrentRaceFree(t *testing.T) {
 	}
 }
 
-func TestPruneOlderThan(t *testing.T) {
-	t0 := time.Now()
-	in := []time.Time{
-		t0.Add(-3 * time.Hour),    // pruned (older than cutoff)
-		t0.Add(-2 * time.Hour),    // pruned (older than cutoff)
-		t0.Add(-1 * time.Hour),    // survives (-60m is NEWER than the -90m cutoff)
-		t0.Add(-30 * time.Minute), // survives
-		t0,                        // survives
-	}
-	out := pruneOlderThan(in, t0.Add(-90*time.Minute))
-	if len(out) != 3 {
-		t.Fatalf("len(out) = %d, want 3 (-1h, -30m, t0 all newer than -90m cutoff)", len(out))
-	}
-	if !out[0].Equal(t0.Add(-1 * time.Hour)) {
-		t.Errorf("out[0] = %v, want -1h (oldest surviving entry)", out[0])
-	}
-}
-
-func TestPruneOlderThan_NoOpWhenNothingToPrune(t *testing.T) {
-	t0 := time.Now()
-	in := []time.Time{t0.Add(-1 * time.Minute), t0}
-	out := pruneOlderThan(in, t0.Add(-1*time.Hour))
-	// Same slice header (no copy needed).
-	if len(out) != len(in) {
-		t.Fatalf("len(out) = %d, want %d", len(out), len(in))
-	}
-}
+// TestPruneOlderThan + TestPruneOlderThan_NoOpWhenNothingToPrune — moved
+// to internal/ratelimit/sliding_window_test.go in EST RFC 7030 hardening
+// Phase 4.1. pruneOlderThan is now an unexported helper of the shared
+// ratelimit package (the implementation moved there); the white-box
+// tests follow.

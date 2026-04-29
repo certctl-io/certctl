@@ -81,10 +81,11 @@ var AuthExemptRouterRoutes = []string{
 // TestDispatch_AuthExemptPrefixes regression test in cmd/server/main_test.go
 // pins this slice to buildFinalHandler's actual dispatch logic.
 var AuthExemptDispatchPrefixes = []string{
-	"/.well-known/pki", // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
-	"/.well-known/est", // RFC 7030 EST — auth via mTLS or CSR-embedded creds
-	"/scep",            // RFC 8894 SCEP — auth via challengePassword in CSR
-	"/scep-mtls",       // SCEP + mTLS sibling route (Phase 6.5) — auth is client cert + challengePassword
+	"/.well-known/pki",      // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
+	"/.well-known/est",      // RFC 7030 EST — auth via mTLS or CSR-embedded creds
+	"/.well-known/est-mtls", // EST + mTLS sibling route (EST hardening Phase 2) — auth is client cert
+	"/scep",                 // RFC 8894 SCEP — auth via challengePassword in CSR
+	"/scep-mtls",            // SCEP + mTLS sibling route (Phase 6.5) — auth is client cert + challengePassword
 }
 
 // HandlerRegistry groups all API handler dependencies for router registration.
@@ -442,6 +443,44 @@ func (r *Router) RegisterESTHandlers(handlers map[string]handler.ESTHandler) {
 		r.Register("POST "+prefix+"/simpleenroll", http.HandlerFunc(hCopy.SimpleEnroll))
 		r.Register("POST "+prefix+"/simplereenroll", http.HandlerFunc(hCopy.SimpleReEnroll))
 		r.Register("GET "+prefix+"/csrattrs", http.HandlerFunc(hCopy.CSRAttrs))
+	}
+}
+
+// RegisterESTMTLSHandlers sets up the sibling `/.well-known/est-mtls/<PathID>/`
+// routes for EST profiles that opted into mTLS via
+// `CERTCTL_EST_PROFILE_<NAME>_MTLS_ENABLED=true`.
+//
+// EST RFC 7030 hardening master bundle Phase 2.2 + 2.3: enterprise
+// procurement teams routinely reject 'shared password authentication' as
+// a checkbox-fail regardless of how strong the password is. This sibling
+// route adds client-cert auth at the handler layer AND keeps the (Phase 3)
+// HTTP Basic enrollment-password as a defense-in-depth fallback for the
+// non-mTLS profile. Devices present a bootstrap cert from a trusted CA,
+// then EST-enroll for their long-lived cert. Mirrors the SCEP mTLS
+// sibling pattern at RegisterSCEPMTLSHandlers below (commit 6b0d9e from
+// the SCEP Phase 6.5 work).
+//
+// Path conventions: every mTLS profile gets a non-empty PathID, so the
+// sibling routes are always /.well-known/est-mtls/<pathID>/. There is no
+// "empty PathID = legacy /.well-known/est-mtls" case — mTLS is opt-in
+// per profile, the legacy /.well-known/est root is always non-mTLS to
+// preserve backward compat with existing deploys.
+//
+// Each handler in the map MUST have had SetMTLSTrust called so the
+// per-profile cert verification has a trust anchor. cmd/server/main.go's
+// per-profile EST loop wires this in the same loop iteration that
+// registers the handler.
+func (r *Router) RegisterESTMTLSHandlers(handlers map[string]handler.ESTHandler) {
+	for pathID, h := range handlers {
+		if pathID == "" {
+			continue // mTLS sibling route requires per-profile PathID
+		}
+		hCopy := h // h is captured by value — see RegisterESTHandlers above
+		prefix := "/.well-known/est-mtls/" + pathID
+		r.Register("GET "+prefix+"/cacerts", http.HandlerFunc(hCopy.CACertsMTLS))
+		r.Register("POST "+prefix+"/simpleenroll", http.HandlerFunc(hCopy.SimpleEnrollMTLS))
+		r.Register("POST "+prefix+"/simplereenroll", http.HandlerFunc(hCopy.SimpleReEnrollMTLS))
+		r.Register("GET "+prefix+"/csrattrs", http.HandlerFunc(hCopy.CSRAttrsMTLS))
 	}
 }
 
