@@ -212,9 +212,13 @@ func ParseSignedData(der []byte) (*SignedData, error) {
 		}
 		out.SignerInfos = append(out.SignerInfos, si)
 	}
-	if len(out.SignerInfos) == 0 {
-		return nil, fmt.Errorf("signedData: no parseable signerInfos")
-	}
+	// Empty signerInfos is valid for the degenerate certs-only PKCS#7
+	// form (RFC 8894 §3.5.1 GetCACert response, RFC 7030 EST cacerts) —
+	// a SignedData with only the certificates field populated and no
+	// signers. The caller of ParseSignedData decides whether the lack
+	// of signers is an error in their context (the SCEP RFC 8894
+	// PKIMessage handler treats it as a fall-through to the MVP path;
+	// the CertRep certs-only inner content treats it as expected).
 	return out, nil
 }
 
