@@ -32,6 +32,7 @@ import (
 	"github.com/shankar0123/certctl/internal/crypto/signer"
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository/postgres"
+	"github.com/shankar0123/certctl/internal/scep/intune"
 	"github.com/shankar0123/certctl/internal/scheduler"
 	"github.com/shankar0123/certctl/internal/service"
 )
@@ -762,6 +763,12 @@ func main() {
 		scepMTLSHandlers := make(map[string]handler.SCEPHandler)
 		scepMTLSUnionPool := x509.NewCertPool()
 		scepMTLSAnyEnabled := false
+		// SCEP RFC 8894 + Intune master bundle Phase 8: per-profile Intune
+		// trust anchor holders. We track them here so a single SIGHUP
+		// reload-watcher set spans every profile, AND so the deferred
+		// stop-watcher cleanup runs once at server shutdown.
+		intuneTrustHolders := []*intune.TrustAnchorHolder{}
+		intuneStopWatchers := []func(){}
 		for i, profile := range cfg.SCEP.Profiles {
 			profile := profile // shadow for closure-safety even though no closures escape
 			profileLog := logger.With(
@@ -826,6 +833,61 @@ func main() {
 				os.Exit(1)
 			}
 			scepHandler.SetRAPair(raCert, raKey)
+
+			// SCEP RFC 8894 + Intune master bundle Phase 8: per-profile Intune
+			// dispatcher wire-in. Builds the trust-anchor holder, replay cache,
+			// and per-device rate limiter; injects them into the SCEPService;
+			// starts the SIGHUP reload watcher (one per holder, all responding
+			// to the same signal as the existing TLS-cert watcher). Profiles
+			// with INTUNE_ENABLED=false skip the entire block, so the cost on
+			// non-Intune deploys is exactly one bool check per profile.
+			if profile.Intune.Enabled {
+				intuneHolder, err := preflightSCEPIntuneTrustAnchor(true, profile.Intune.ConnectorCertPath, profileLog)
+				if err != nil {
+					profileLog.Error(
+						"startup refused: SCEP profile INTUNE trust anchor preflight failed "+
+							"(Phase 8.2: required when INTUNE_ENABLED=true). "+
+							"Verify the bundle file exists at INTUNE_CONNECTOR_CERT_PATH, "+
+							"is readable, parses as PEM, contains ≥1 CERTIFICATE block, "+
+							"and none of the bundled certs are past NotAfter (operator-rotated).",
+						"error", err,
+					)
+					os.Exit(1)
+				}
+				intuneTrustHolders = append(intuneTrustHolders, intuneHolder)
+				intuneStopWatchers = append(intuneStopWatchers, intuneHolder.WatchSIGHUP())
+
+				// Replay cache TTL = ChallengeValidity (defaults to 60m via
+				// config.go's getEnvDuration default). The cache is sized
+				// for the documented 100k-entry production default; smaller
+				// is fine, larger tightens the operator's escape hatch.
+				replayCache := intune.NewReplayCache(profile.Intune.ChallengeValidity, 0)
+
+				// Per-device rate limiter: honor the per-profile cap
+				// (INTUNE_PER_DEVICE_RATE_LIMIT_24H, default 3). The cap can
+				// be 0 to disable (limiter then short-circuits all Allow calls
+				// to nil). Map cap stays at the 100k default.
+				rateLimiter := intune.NewPerDeviceRateLimiter(
+					profile.Intune.PerDeviceRateLimit24h,
+					24*time.Hour,
+					0,
+				)
+
+				scepService.SetIntuneIntegration(
+					intuneHolder,
+					profile.Intune.Audience,
+					profile.Intune.ChallengeValidity,
+					replayCache,
+					rateLimiter,
+				)
+				profileLog.Info("SCEP profile Intune dispatcher enabled",
+					"trust_anchor_path", profile.Intune.ConnectorCertPath,
+					"audience", profile.Intune.Audience,
+					"challenge_validity", profile.Intune.ChallengeValidity,
+					"per_device_rate_limit_24h", profile.Intune.PerDeviceRateLimit24h,
+				)
+			}
+
 			scepHandlers[profile.PathID] = scepHandler
 			endpoint := "/scep"
 			if profile.PathID != "" {
@@ -835,6 +897,7 @@ func main() {
 				"endpoint", endpoint+"?operation={GetCACaps,GetCACert,PKIOperation}",
 				"challenge_password_set", profile.ChallengePassword != "",
 				"ra_cert_path", profile.RACertPath,
+				"intune_enabled", profile.Intune.Enabled,
 			)
 
 			// SCEP RFC 8894 Phase 6.5: register the mTLS sibling route
@@ -913,7 +976,20 @@ func main() {
 		logger.Info("SCEP server enabled",
 			"profile_count", len(scepHandlers),
 			"mtls_profile_count", len(scepMTLSHandlers),
+			"intune_profile_count", len(intuneTrustHolders),
 		)
+
+		// SCEP RFC 8894 + Intune master bundle Phase 8.5: clean up the
+		// SIGHUP watcher goroutines when the server shuts down. We register
+		// the stop functions on a deferred sweep so the cleanup runs in
+		// LIFO order even if a downstream init step os.Exit(1)s.
+		if len(intuneStopWatchers) > 0 {
+			defer func() {
+				for _, stop := range intuneStopWatchers {
+					stop()
+				}
+			}()
+		}
 	}
 
 	// Register RFC 5280 CRL and RFC 6960 OCSP handlers under /.well-known/pki/.
@@ -1317,6 +1393,46 @@ func preflightSCEPMTLSTrustBundle(enabled bool, bundlePath string) (*x509.CertPo
 		return nil, fmt.Errorf("MTLS trust bundle contained no CERTIFICATE PEM blocks (path=%s)", bundlePath)
 	}
 	return pool, nil
+}
+
+// preflightSCEPIntuneTrustAnchor validates a per-profile Microsoft Intune
+// Certificate Connector signing-cert trust bundle.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 8.2.
+//
+// No-op when this profile has Intune disabled (the common case for
+// non-Intune SCEP deploys). When enabled:
+//
+//  1. Path is non-empty (Validate() refuse covers this too; we re-check
+//     here so the caller can os.Exit(1) with the specific PathID in the
+//     log line).
+//  2. File exists + readable.
+//  3. PEM-decodes to ≥1 CERTIFICATE block (intune.LoadTrustAnchor enforces
+//     this and skips non-CERTIFICATE blocks like accidentally-pasted
+//     priv-key blocks).
+//  4. None of the bundled certs is past NotAfter — an expired Intune
+//     trust anchor would silently reject every Connector challenge at
+//     runtime, which is a much worse failure mode than failing fast at
+//     boot. intune.LoadTrustAnchor enforces this and surfaces the subject
+//     CN in the error message so the operator knows which cert to rotate.
+//
+// On success returns the freshly-built *intune.TrustAnchorHolder ready to
+// inject into the per-profile SCEPService via SetIntuneIntegration. The
+// holder also installs the SIGHUP watcher (started by the caller).
+func preflightSCEPIntuneTrustAnchor(enabled bool, path string, logger *slog.Logger) (*intune.TrustAnchorHolder, error) {
+	if !enabled {
+		return nil, nil
+	}
+	if path == "" {
+		return nil, fmt.Errorf("INTUNE enabled but trust anchor path empty: " +
+			"set CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH to a PEM bundle " +
+			"of the Microsoft Intune Certificate Connector's signing certs")
+	}
+	holder, err := intune.NewTrustAnchorHolder(path, logger)
+	if err != nil {
+		return nil, fmt.Errorf("INTUNE trust anchor load failed: %w (path=%s)", err, path)
+	}
+	return holder, nil
 }
 
 // loadSCEPRAPair reads the RA cert PEM + key PEM and returns the parsed

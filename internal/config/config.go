@@ -820,6 +820,65 @@ type SCEPProfileConfig struct {
 	// `cmd/server/main.go::preflightSCEPMTLSTrustBundle` — file exists,
 	// parses as PEM, contains ≥1 cert, none expired.
 	MTLSClientCATrustBundlePath string
+
+	// Intune is the per-profile Microsoft Intune Certificate Connector
+	// integration block. When Enabled is false (default), this profile only
+	// honors the static ChallengePassword; when true, requests with an
+	// Intune-shaped challenge password (length + dot-count heuristic) are
+	// routed to the Intune dynamic-challenge validator.
+	//
+	// SCEP RFC 8894 + Intune master bundle Phase 8.8: per-profile dispatch
+	// is what makes the heterogeneous-fleet story work — an operator
+	// running corp-laptops via Intune AND IoT devices via static challenge
+	// configures Intune-mode on the corp profile only; the IoT profile's
+	// PKCSReq path skips the Intune dispatcher entirely.
+	Intune SCEPIntuneProfileConfig
+}
+
+// SCEPIntuneProfileConfig is the per-profile Microsoft Intune Certificate
+// Connector integration sub-block on SCEPProfileConfig.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 8.1.
+//
+// All fields here are populated from CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_*
+// env vars (e.g. CERTCTL_SCEP_PROFILE_CORP_INTUNE_ENABLED=true). Per-profile
+// overrides means an operator with two Intune-backed profiles (corp + iot,
+// say) can pin distinct Connectors + audiences + rate limits per fleet.
+type SCEPIntuneProfileConfig struct {
+	// Enabled gates the Intune dynamic-challenge validation path. When
+	// false (default), this profile honors only the static ChallengePassword.
+	// When true, ConnectorCertPath becomes a required boot gate.
+	Enabled bool
+
+	// ConnectorCertPath is the filesystem path to a PEM bundle of one or
+	// more Microsoft Intune Certificate Connector signing certs. Required
+	// when Enabled=true. Reloaded on SIGHUP via the per-profile
+	// TrustAnchorHolder wired in cmd/server/main.go.
+	ConnectorCertPath string
+
+	// Audience is the expected "aud" claim value in the Intune challenge —
+	// typically the public SCEP endpoint URL the Connector is configured to
+	// call (e.g. "https://certctl.example.com/scep/corp"). Defaults to
+	// empty (audience check disabled) for proxy / load-balancer scenarios
+	// where the URL the Connector saw isn't the URL we see; operators
+	// who pin a public URL here gain defense-in-depth against challenge
+	// re-use across endpoints.
+	Audience string
+
+	// ChallengeValidity caps the maximum age of an Intune challenge, on
+	// top of the challenge's own iat/exp claims. Default 60 minutes per
+	// Microsoft's published Connector defaults — operators may want a
+	// stricter cap to reduce the replay-window exposure on a stolen
+	// challenge. Zero means "use Connector's exp claim only" (no extra cap).
+	ChallengeValidity time.Duration
+
+	// PerDeviceRateLimit24h caps the number of enrollments per
+	// (claim.Subject, claim.Issuer) pair in any rolling 24-hour window.
+	// Default 3 (covers legitimate first-cert + recovery + post-wipe
+	// re-enrollment, blocks bulk-enumeration from a compromised Connector
+	// signing key). Zero means "unlimited" (defense-in-depth disabled;
+	// not recommended for production).
+	PerDeviceRateLimit24h int
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -1448,6 +1507,14 @@ func loadSCEPProfilesFromEnv() []SCEPProfileConfig {
 			// SCEP RFC 8894 Phase 6.5: opt-in mTLS sibling route.
 			MTLSEnabled:                 getEnvBool("CERTCTL_SCEP_PROFILE_"+envName+"_MTLS_ENABLED", false),
 			MTLSClientCATrustBundlePath: getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH", ""),
+			// SCEP RFC 8894 Phase 8.1: per-profile Intune Connector dispatch.
+			Intune: SCEPIntuneProfileConfig{
+				Enabled:               getEnvBool("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_ENABLED", false),
+				ConnectorCertPath:     getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_CONNECTOR_CERT_PATH", ""),
+				Audience:              getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_AUDIENCE", ""),
+				ChallengeValidity:     getEnvDuration("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_CHALLENGE_VALIDITY", 60*time.Minute),
+				PerDeviceRateLimit24h: getEnvInt("CERTCTL_SCEP_PROFILE_"+envName+"_INTUNE_PER_DEVICE_RATE_LIMIT_24H", 3),
+			},
 		})
 	}
 	return out
@@ -1705,6 +1772,25 @@ func (c *Config) Validate() error {
 			// gate is the structural-config refuse, defense in depth.
 			if p.MTLSEnabled && p.MTLSClientCATrustBundlePath == "" {
 				return fmt.Errorf("SCEP profile %d (PathID=%q) has MTLSEnabled=true but MTLS_CLIENT_CA_TRUST_BUNDLE_PATH is empty — refuse to start: the mTLS sibling route /scep-mtls/%s would have no client-cert trust anchor", i, p.PathID, p.PathID)
+			}
+			// Phase 8.1: when Intune is enabled, the Connector trust anchor
+			// path must be set. Preflight in cmd/server/main.go validates the
+			// file itself (intune.LoadTrustAnchor: exists, parseable PEM,
+			// ≥1 CERTIFICATE block, none expired); this gate is the
+			// structural-config refuse, defense in depth — without it an
+			// operator who flips INTUNE_ENABLED=true but forgets to set
+			// CONNECTOR_CERT_PATH would get every Intune enrollment
+			// rejected at runtime with no trust anchor configured (much
+			// worse failure mode than failing fast at boot).
+			if p.Intune.Enabled && p.Intune.ConnectorCertPath == "" {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_ENABLED=true but INTUNE_CONNECTOR_CERT_PATH is empty — refuse to start: the Intune dynamic-challenge validator would have no trust anchor and reject every Microsoft Intune enrollment", i, p.PathID)
+			}
+			// Phase 8.6: a non-zero rate limit must be sane. Negative is a
+			// config typo; positive values are the per-(Subject,Issuer)
+			// 24-hour cap; zero means 'disabled' (allowed for tests + the
+			// rare operator who wants no per-device cap).
+			if p.Intune.PerDeviceRateLimit24h < 0 {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_PER_DEVICE_RATE_LIMIT_24H=%d — refuse to start: must be ≥0 (zero disables the per-device cap, positive values enforce it)", i, p.PathID, p.Intune.PerDeviceRateLimit24h)
 			}
 		}
 	}

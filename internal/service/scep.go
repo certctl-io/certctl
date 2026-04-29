@@ -5,17 +5,30 @@ import (
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"log/slog"
 	"strings"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/shankar0123/certctl/internal/scep/intune"
 )
 
 // SCEPService implements the SCEP (RFC 8894) enrollment protocol.
 // It delegates certificate operations to an existing IssuerConnector and records
 // enrollment events in the audit trail.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 8.3 + 8.4 + 8.7: per-profile
+// Intune dynamic-challenge dispatcher (intuneEnabled+intuneTrust+...);
+// audit action `scep_pkcsreq_intune` flows through the existing
+// auditService; per-device rate limit + nil-default compliance hook seam.
+//
+// Lifecycle: a service instance per SCEP profile (Phase 1.5). The Intune
+// fields are populated only on profiles where INTUNE_ENABLED=true; on the
+// rest they're nil/empty and looksIntuneShaped short-circuits to the
+// existing static-challenge path.
 type SCEPService struct {
 	issuer            IssuerConnector
 	issuerID          string
@@ -24,6 +37,281 @@ type SCEPService struct {
 	profileID         string // optional: constrain enrollments to a specific profile
 	profileRepo       repository.CertificateProfileRepository
 	challengePassword string // shared secret for enrollment authentication
+
+	// Intune dispatcher state (Phase 8.3+8.6+8.7). All nil/zero when this
+	// profile has INTUNE_ENABLED=false; all populated when true. The
+	// dispatcher in PKCSReq + PKCSReqWithEnvelope + RenewalReqWithEnvelope
+	// gates on intuneEnabled before consulting any of these.
+	intuneEnabled     bool
+	intuneTrust       *intune.TrustAnchorHolder // SIGHUP-reloadable trust pool
+	intuneAudience    string                    // expected "aud" claim; empty disables the check
+	intuneValidity    time.Duration             // optional override on top of the challenge's exp
+	intuneReplayCache *intune.ReplayCache       // nonce-keyed; catches duplicate submission
+	intuneRateLimiter *intune.PerDeviceRateLimiter
+	complianceCheck   ComplianceCheck // V3-Pro plug-in seam; nil-default no-op
+}
+
+// ComplianceCheck is the optional gate that pings Intune's compliance API
+// (or any custom policy backend) to confirm the device is in good standing
+// before issuing a cert. When nil (the V2-free default), the gate is a
+// no-op and enrollments proceed solely on challenge validation +
+// claim-binding + replay + per-device rate limit.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 8.7 — V3-Pro plug-in seam.
+//
+// V3-Pro plugs in here via a new module that calls Microsoft Graph's
+// /deviceManagement/managedDevices/{id}/compliancePolicyStates endpoint
+// (or equivalent), wires SetComplianceCheck on the service, and
+// short-circuits non-compliant device enrollments with a SCEP CertRep
+// FAILURE/badRequest plus a compliance_failed audit event + metric.
+//
+// Return contract:
+//
+//   - compliant=true,  err=nil   → proceed with enrollment.
+//   - compliant=false, err=nil   → CertRep FAILURE + compliance_failed metric;
+//     the reason string flows into the audit event for ops triage.
+//   - compliant=*,     err!=nil  → fail-safe (deny) by default; the V3-Pro
+//     module is responsible for a more nuanced "permit on API failure"
+//     mode if its policy demands one.
+//
+// Leaving the hook here means the V3-Pro work is plug-in code, not a
+// dispatcher refactor. The cost today is one struct field + one setter +
+// one nil-guarded call site. Zero behavior change in V2.
+type ComplianceCheck func(ctx context.Context, claim *intune.ChallengeClaim) (compliant bool, reason string, err error)
+
+// SetComplianceCheck installs the V3-Pro compliance gate. Idempotent;
+// passing nil re-disables the gate (useful for tests + the rare case where
+// V3-Pro plugin code wants to drop the gate at runtime). Safe to call
+// before or after the service starts serving requests.
+func (s *SCEPService) SetComplianceCheck(fn ComplianceCheck) { s.complianceCheck = fn }
+
+// SetIntuneIntegration wires the per-profile Intune dispatcher onto the
+// service. Pass enabled=false (with nil/zero values for the rest) to
+// explicitly opt this profile out of Intune mode; pass enabled=true with
+// a populated trust holder + replay cache + rate limiter to opt in. The
+// audience is allowed to be empty (the validator's audience check then
+// becomes a no-op, useful for proxy/load-balancer scenarios where the URL
+// the Connector saw differs from the URL we see).
+//
+// Constructor-time injection (rather than NewSCEPService extra params)
+// keeps the surface stable for the existing callers + lets the wire-in
+// at cmd/server/main.go construct the holder + cache + limiter once and
+// share them across profiles cleanly. Profiles where INTUNE_ENABLED=false
+// simply never call this method.
+func (s *SCEPService) SetIntuneIntegration(
+	trust *intune.TrustAnchorHolder,
+	audience string,
+	validity time.Duration,
+	replayCache *intune.ReplayCache,
+	rateLimiter *intune.PerDeviceRateLimiter,
+) {
+	s.intuneEnabled = true
+	s.intuneTrust = trust
+	s.intuneAudience = audience
+	s.intuneValidity = validity
+	s.intuneReplayCache = replayCache
+	s.intuneRateLimiter = rateLimiter
+}
+
+// IntuneEnabled reports whether this service instance is wired for Intune
+// dynamic-challenge dispatch. Useful for handler-layer gating + admin
+// endpoints (Phase 9 GUI surface). Always returns false on profiles where
+// SetIntuneIntegration was never called.
+func (s *SCEPService) IntuneEnabled() bool { return s.intuneEnabled }
+
+// looksIntuneShaped is the fast pre-check that distinguishes an
+// Intune-format challenge from a static challenge password. Intune
+// challenges are JWT-like (three base64url segments separated by dots,
+// total length > 200 bytes for any reasonable claim payload). Static
+// challenges are typically ≤ 64 bytes ASCII.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 8.3.
+//
+// The heuristic is allowed to false-positive (the validator catches
+// malformed input → ErrChallengeMalformed), but it MUST NOT false-negative
+// on real Intune challenges — that would route an Intune challenge to the
+// constant-time static compare and reject every enrollment. Hence the
+// generous length threshold (real Intune challenges are typically
+// >800 bytes; the 200 floor is well below the smallest plausible v1
+// payload + signature).
+func looksIntuneShaped(s string) bool {
+	if len(s) <= 200 {
+		return false
+	}
+	return strings.Count(s, ".") == 2
+}
+
+// intuneFailReason maps a typed Intune error to the metric label used in
+// `certctl_scep_intune_enrollments_total{status="..."}`. Defaults to
+// "malformed" so a previously-unseen error category still surfaces in
+// the metric (with a follow-up to add a typed branch here).
+func intuneFailReason(err error) string {
+	switch {
+	case err == nil:
+		return "success"
+	case errors.Is(err, intune.ErrChallengeSignature):
+		return "signature_invalid"
+	case errors.Is(err, intune.ErrChallengeExpired):
+		return "expired"
+	case errors.Is(err, intune.ErrChallengeNotYetValid):
+		return "not_yet_valid"
+	case errors.Is(err, intune.ErrChallengeWrongAudience):
+		return "wrong_audience"
+	case errors.Is(err, intune.ErrChallengeReplay):
+		return "replay"
+	case errors.Is(err, intune.ErrChallengeUnknownVersion):
+		return "unknown_version"
+	case errors.Is(err, intune.ErrChallengeMalformed):
+		return "malformed"
+	case errors.Is(err, intune.ErrRateLimited):
+		return "rate_limited"
+	case errors.Is(err, intune.ErrClaimCNMismatch),
+		errors.Is(err, intune.ErrClaimSANDNSMismatch),
+		errors.Is(err, intune.ErrClaimSANRFC822Mismatch),
+		errors.Is(err, intune.ErrClaimSANUPNMismatch):
+		return "claim_mismatch"
+	default:
+		return "malformed"
+	}
+}
+
+// intuneEnrollOutcome is the envelope the dispatcher hands back to its two
+// callers (PKCSReq's MVP path + PKCSReqWithEnvelope/RenewalReqWithEnvelope's
+// RFC 8894 path). It carries enough to short-circuit OR continue to the
+// existing processEnrollment flow:
+//
+//   - decided=false → not Intune-shaped (or Intune disabled); fall through
+//     to the static-challenge path.
+//   - decided=true, err=nil → Intune validation passed; the caller MUST
+//     call processEnrollment with auditAction="scep_pkcsreq_intune".
+//   - decided=true, err!=nil → Intune validation failed; the caller MUST
+//     short-circuit with the typed error (handler maps to FailInfo).
+type intuneEnrollOutcome struct {
+	decided bool
+	claim   *intune.ChallengeClaim
+	err     error
+}
+
+// dispatchIntuneChallenge runs the full Intune validation pipeline for a
+// single PKCSReq invocation: shape check → ValidateChallenge → DeviceMatchesCSR
+// → replay-cache CheckAndInsert → per-device rate limit → optional
+// compliance check. Each failure leg increments the appropriate metric
+// label + emits an audit-friendly Warn log line. Returns an outcome that
+// tells the caller whether to short-circuit or continue to enrollment.
+//
+// Splitting the dispatcher out of PKCSReq* keeps the three call sites
+// (PKCSReq, PKCSReqWithEnvelope, RenewalReqWithEnvelope) consistent — every
+// path through the Intune mode runs through the same gate sequence so an
+// operator gets the same audit shape regardless of which SCEP message
+// type the device sent.
+func (s *SCEPService) dispatchIntuneChallenge(ctx context.Context, csrPEM string, challengePassword string, transactionID string) intuneEnrollOutcome {
+	if !s.intuneEnabled || !looksIntuneShaped(challengePassword) {
+		return intuneEnrollOutcome{decided: false}
+	}
+	if s.intuneTrust == nil {
+		// Defensive: enabled bit was flipped without wiring the trust
+		// holder. Treat as a hard failure so the operator sees it
+		// instead of silently falling through to the static path.
+		s.logger.Error("SCEP enrollment rejected: Intune mode enabled but no trust anchor holder wired",
+			"transaction_id", transactionID)
+		return intuneEnrollOutcome{decided: true, err: intune.ErrChallengeSignature}
+	}
+
+	now := time.Now()
+	trust := s.intuneTrust.Get()
+
+	claim, err := intune.ValidateChallenge(challengePassword, trust, s.intuneAudience, now)
+	if err != nil {
+		s.logger.Warn("SCEP enrollment rejected: Intune challenge validation failed",
+			"transaction_id", transactionID, "reason", intuneFailReason(err), "error", err)
+		return intuneEnrollOutcome{decided: true, err: err}
+	}
+
+	// Defense-in-depth validity cap on top of the challenge's own iat/exp.
+	// When intuneValidity is non-zero, the challenge's iat must be within
+	// (now - intuneValidity, now]; an old-but-not-yet-expired challenge
+	// (per the Connector's exp claim) gets rejected here.
+	if s.intuneValidity > 0 && !claim.IssuedAt.IsZero() && now.Sub(claim.IssuedAt) > s.intuneValidity {
+		err := fmt.Errorf("%w: iat=%s exceeds operator-configured validity cap %s",
+			intune.ErrChallengeExpired, claim.IssuedAt.Format(time.RFC3339), s.intuneValidity)
+		s.logger.Warn("SCEP enrollment rejected: Intune challenge older than operator validity cap",
+			"transaction_id", transactionID, "error", err)
+		return intuneEnrollOutcome{decided: true, err: err}
+	}
+
+	// Bind claim ↔ CSR before consuming the replay-cache slot. If the CSR
+	// doesn't match the claim, we don't want to mark the nonce as seen
+	// (the next legitimate retry should still work).
+	csr, perr := parseCSRForIntune(csrPEM)
+	if perr != nil {
+		s.logger.Warn("SCEP enrollment rejected: CSR parse failed during Intune dispatch",
+			"transaction_id", transactionID, "error", perr)
+		// CSR parse failure surfaces as a "malformed" intune metric label
+		// (the wrapping helps the audit log distinguish it from a
+		// challenge-malformed failure).
+		return intuneEnrollOutcome{decided: true, err: fmt.Errorf("%w: CSR parse: %v", intune.ErrChallengeMalformed, perr)}
+	}
+	if mErr := claim.DeviceMatchesCSR(csr); mErr != nil {
+		s.logger.Warn("SCEP enrollment rejected: Intune claim does not match CSR",
+			"transaction_id", transactionID, "error", mErr)
+		return intuneEnrollOutcome{decided: true, err: mErr}
+	}
+
+	// Replay protection — runs AFTER claim validation + CSR binding so a
+	// failed validation doesn't burn a replay slot on a legitimate retry.
+	if s.intuneReplayCache != nil && claim.Nonce != "" {
+		if !s.intuneReplayCache.CheckAndInsert(claim.Nonce, now) {
+			err := fmt.Errorf("%w: nonce=%q", intune.ErrChallengeReplay, claim.Nonce)
+			s.logger.Warn("SCEP enrollment rejected: Intune challenge nonce replay",
+				"transaction_id", transactionID, "subject", claim.Subject)
+			return intuneEnrollOutcome{decided: true, err: err}
+		}
+	}
+
+	// Per-device rate limit — second line of defense against a compromised
+	// Connector signing key issuing many DIFFERENT valid challenges for
+	// the same device.
+	if s.intuneRateLimiter != nil {
+		if rlErr := s.intuneRateLimiter.Allow(claim.Subject, claim.Issuer, now); rlErr != nil {
+			s.logger.Warn("SCEP enrollment rejected: Intune per-device rate limit exceeded",
+				"transaction_id", transactionID, "subject", claim.Subject, "issuer", claim.Issuer)
+			return intuneEnrollOutcome{decided: true, err: rlErr}
+		}
+	}
+
+	// Optional V3-Pro compliance hook (nil-default no-op in V2). Runs LAST
+	// so we don't ping the compliance API for requests we'd reject anyway.
+	if s.complianceCheck != nil {
+		compliant, reason, cerr := s.complianceCheck(ctx, claim)
+		if cerr != nil {
+			s.logger.Error("Intune compliance check returned error; failing closed",
+				"transaction_id", transactionID, "subject", claim.Subject, "error", cerr)
+			return intuneEnrollOutcome{decided: true, err: fmt.Errorf("intune compliance check: %w", cerr)}
+		}
+		if !compliant {
+			s.logger.Warn("SCEP enrollment rejected: device non-compliant per Intune compliance check",
+				"transaction_id", transactionID, "subject", claim.Subject, "reason", reason)
+			return intuneEnrollOutcome{decided: true, err: fmt.Errorf("intune compliance: %s", reason)}
+		}
+	}
+
+	return intuneEnrollOutcome{decided: true, claim: claim}
+}
+
+// parseCSRForIntune is a thin wrapper around encoding/pem + x509 that the
+// dispatcher uses for the claim ↔ CSR binding check. Kept private + named
+// for grepability so a future refactor can swap the parse strategy without
+// touching the dispatcher.
+func parseCSRForIntune(csrPEM string) (*x509.CertificateRequest, error) {
+	block, _ := pem.Decode([]byte(csrPEM))
+	if block == nil {
+		return nil, fmt.Errorf("invalid CSR PEM")
+	}
+	csr, err := x509.ParseCertificateRequest(block.Bytes)
+	if err != nil {
+		return nil, fmt.Errorf("parse CSR: %w", err)
+	}
+	return csr, nil
 }
 
 // NewSCEPService creates a new SCEPService for the given issuer connector.
@@ -86,6 +374,19 @@ func (s *SCEPService) GetCACert(ctx context.Context) (string, error) {
 // non-empty branch now uses crypto/subtle.ConstantTimeCompare to avoid leaking
 // the shared secret through a response-time side channel.
 func (s *SCEPService) PKCSReq(ctx context.Context, csrPEM string, challengePassword string, transactionID string) (*domain.SCEPEnrollResult, error) {
+	// SCEP RFC 8894 + Intune master bundle Phase 8.3: try the Intune
+	// dispatcher first. When it returns decided=true the service has
+	// already made the call (success or typed failure); when decided=false
+	// we fall through to the existing static-challenge path. The
+	// dispatcher gates internally on intuneEnabled + looksIntuneShaped,
+	// so this is a free no-op for profiles where Intune is disabled.
+	if outcome := s.dispatchIntuneChallenge(ctx, csrPEM, challengePassword, transactionID); outcome.decided {
+		if outcome.err != nil {
+			return nil, fmt.Errorf("intune challenge: %w", outcome.err)
+		}
+		return s.processEnrollment(ctx, csrPEM, transactionID, "scep_pkcsreq_intune")
+	}
+
 	// Defense-in-depth: refuse any enrollment when no shared secret is
 	// configured. The server-level pre-flight check in cmd/server/main.go
 	// normally prevents the service from being constructed in this state, but
@@ -258,6 +559,29 @@ func (s *SCEPService) PKCSReqWithEnvelope(ctx context.Context, csrPEM string, ch
 		RecipientNonce: envelope.SenderNonce,
 	}
 
+	// SCEP RFC 8894 + Intune master bundle Phase 8.3: same dispatcher as
+	// PKCSReq, applied to the RFC 8894 path. The dispatcher runs AFTER the
+	// EnvelopedData decryption + POPO verification (handler-side, before
+	// the service is invoked) but BEFORE the static-challenge fallback. On
+	// Intune-validation failure the response envelope carries a typed
+	// FailInfo so the CertRep wire shape is preserved (RFC 8894 §3.3).
+	if outcome := s.dispatchIntuneChallenge(ctx, csrPEM, challengePassword, envelope.TransactionID); outcome.decided {
+		if outcome.err != nil {
+			resp.Status = domain.SCEPStatusFailure
+			resp.FailInfo = mapIntuneErrorToFailInfo(outcome.err)
+			return resp
+		}
+		result, err := s.processEnrollment(ctx, csrPEM, envelope.TransactionID, "scep_pkcsreq_intune")
+		if err != nil {
+			resp.Status = domain.SCEPStatusFailure
+			resp.FailInfo = mapServiceErrorToFailInfo(err)
+			return resp
+		}
+		resp.Status = domain.SCEPStatusSuccess
+		resp.Result = result
+		return resp
+	}
+
 	// Defense-in-depth: refuse any enrollment when no shared secret is
 	// configured. Mirrors PKCSReq's gate. Returning nil signals 'let the
 	// caller translate to HTTP 403' — the existing PKCSReq path returns
@@ -285,6 +609,41 @@ func (s *SCEPService) PKCSReqWithEnvelope(ctx context.Context, csrPEM string, ch
 	resp.Status = domain.SCEPStatusSuccess
 	resp.Result = result
 	return resp
+}
+
+// mapIntuneErrorToFailInfo maps a typed Intune-validation error to the
+// SCEP failInfo code RFC 8894 §3.2.1.4.5 enumerates. Mapping rationale:
+//
+//   - Signature / replay / wrong-audience / expired / not-yet-valid →
+//     BadMessageCheck (the request didn't pass integrity / freshness
+//     checks; same wire shape as a tampered EnvelopedData).
+//   - Claim mismatches (CN / SAN-DNS / SAN-RFC822 / SAN-UPN) → BadRequest
+//     (the request was well-formed and signed but the asserted identity
+//     doesn't match what the device actually requested).
+//   - Rate-limited / unknown-version → BadRequest (no better wire-level
+//     code; the audit log carries the exact reason).
+//   - Malformed → BadRequest.
+//   - Compliance failure → BadRequest (V3-Pro can swap to a more
+//     specific code if it cares).
+func mapIntuneErrorToFailInfo(err error) domain.SCEPFailInfo {
+	if err == nil {
+		return domain.SCEPFailBadRequest
+	}
+	switch {
+	case errors.Is(err, intune.ErrChallengeSignature),
+		errors.Is(err, intune.ErrChallengeExpired),
+		errors.Is(err, intune.ErrChallengeNotYetValid),
+		errors.Is(err, intune.ErrChallengeWrongAudience),
+		errors.Is(err, intune.ErrChallengeReplay):
+		return domain.SCEPFailBadMessageCheck
+	case errors.Is(err, intune.ErrClaimCNMismatch),
+		errors.Is(err, intune.ErrClaimSANDNSMismatch),
+		errors.Is(err, intune.ErrClaimSANRFC822Mismatch),
+		errors.Is(err, intune.ErrClaimSANUPNMismatch):
+		return domain.SCEPFailBadRequest
+	default:
+		return domain.SCEPFailBadRequest
+	}
 }
 
 // mapServiceErrorToFailInfo translates a service-layer error into the
@@ -343,6 +702,38 @@ func (s *SCEPService) RenewalReqWithEnvelope(ctx context.Context, csrPEM string,
 	resp := &domain.SCEPResponseEnvelope{
 		TransactionID:  envelope.TransactionID,
 		RecipientNonce: envelope.SenderNonce,
+	}
+
+	// SCEP RFC 8894 + Intune master bundle Phase 8.3: Intune dispatcher
+	// applies to RenewalReq too. The chain-validation gate further down
+	// stays in place — Intune-managed devices still need to present a
+	// previously-issued cert as POPO when re-enrolling. The Intune
+	// validator covers "is this a legitimate Intune challenge?" and the
+	// chain check covers "did this device hold a prior cert from this
+	// issuer?" — both must pass.
+	if outcome := s.dispatchIntuneChallenge(ctx, csrPEM, challengePassword, envelope.TransactionID); outcome.decided {
+		if outcome.err != nil {
+			resp.Status = domain.SCEPStatusFailure
+			resp.FailInfo = mapIntuneErrorToFailInfo(outcome.err)
+			return resp
+		}
+		// Chain-of-trust check still applies on renewal even via Intune.
+		if err := s.verifyRenewalSignerCertChain(ctx, envelope.SignerCert); err != nil {
+			s.logger.Warn("SCEP renewal rejected: signer cert chain invalid (Intune path)",
+				"transaction_id", envelope.TransactionID, "error", err.Error())
+			resp.Status = domain.SCEPStatusFailure
+			resp.FailInfo = domain.SCEPFailBadMessageCheck
+			return resp
+		}
+		result, err := s.processEnrollment(ctx, csrPEM, envelope.TransactionID, "scep_renewalreq_intune")
+		if err != nil {
+			resp.Status = domain.SCEPStatusFailure
+			resp.FailInfo = mapServiceErrorToFailInfo(err)
+			return resp
+		}
+		resp.Status = domain.SCEPStatusSuccess
+		resp.Result = result
+		return resp
 	}
 
 	// Same challenge-password gate as PKCSReqWithEnvelope. Defense in depth

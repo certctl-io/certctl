@@ -420,19 +420,88 @@ challenge+mTLS:
    the password requirement doesn't go away — the password is still
    the application-layer auth boundary).
 
+### Microsoft Intune dynamic-challenge dispatcher (Phase 8, opt-in)
+
+When SCEP sits behind the Microsoft Intune Certificate Connector, devices
+present an Intune-issued signed challenge (a JWT-like blob over a JSON
+claim payload) instead of the static `_CHALLENGE_PASSWORD`. Phase 8 wires
+a per-profile dispatcher that validates these signed challenges against
+the Connector's signing-cert trust anchor and binds the asserted device
+identity to the inbound CSR. Static challenge passwords still work as a
+fallback so heterogeneous fleets (some Intune-enrolled, some not) keep
+working.
+
+**Per-profile env vars** (all default to off; legacy/static-only profiles
+need no changes):
+
+```
+CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true
+CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CONNECTOR_CERT_PATH=/etc/certctl/intune-corp.pem
+CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_AUDIENCE=https://certctl.example.com/scep/corp
+CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CHALLENGE_VALIDITY=60m
+CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_PER_DEVICE_RATE_LIMIT_24H=3
+```
+
+**Trust-anchor extraction:** the operator extracts the Connector
+installation's signing cert (from the Connector's certificate store on
+the Windows host running the Connector — Microsoft does not publish a
+direct download) and writes a PEM bundle to the configured path.
+Multiple Connectors in HA = concatenate their certs.
+
+**Trust-anchor reload:** the holder re-reads the bundle on `SIGHUP` (the
+same signal that rotates the server's TLS cert). A bad reload (parse
+error, expired cert) keeps the OLD pool in place — operators get a
+recoverable failure window rather than a service-down. Rotate the file
+on disk, then `kill -HUP <certctl-pid>` to apply with no restart.
+
+**Replay protection:** in-memory cache of seen challenge nonces with TTL
+= `_CHALLENGE_VALIDITY` (default 60m). Sized for 100k entries, which
+covers a ~25 RPS Intune fleet's steady-state. The same challenge
+submitted twice within the TTL is rejected with `ErrChallengeReplay`.
+
+**Per-device rate limit:** sliding-window-log limiter keyed by
+`(claim.Subject, claim.Issuer)`. Default 3 enrollments per 24h covers
+legitimate first-cert + recovery + post-wipe re-enrollment but blocks a
+compromised Connector signing key from issuing many DIFFERENT valid
+challenges for the same device. Set the var to `0` to disable.
+
+**Audit + observability:** Intune enrollments emit
+`audit_event.action="scep_pkcsreq_intune"` (or
+`"scep_renewalreq_intune"`) so operators can grep the audit log to count
+Intune-vs-static enrollments. Per-failure-mode reason flows into the log
+line; the metric label set is `success / signature_invalid / expired /
+not_yet_valid / wrong_audience / replay / rate_limited / claim_mismatch
+/ unknown_version / malformed`.
+
+**Compliance-state hook (V3-Pro plug-in seam):** a nil-default
+`ComplianceCheck` field on `SCEPService` lets a future Pro module plug
+in a Microsoft Graph compliance API call between challenge validation
+and certificate issuance. V2 ships the seam (one struct field + one
+setter + one nil-guarded call site) so Pro is plug-in code, not a
+dispatcher refactor.
+
+**Mixed-mode (recommended):** keep `_CHALLENGE_PASSWORD` set even when
+Intune is enabled. Devices that don't go through Intune (manual
+enrollment, on-prem MDM bridges) continue to enroll via the static path;
+the dispatcher routes Intune-shaped challenges (length > 200 + exactly
+two dots) to the validator and falls through to the static compare
+otherwise.
+
 ### Operational notes
 
 - **Audit:** every enrollment emits an `audit_event` row with action
   `scep_pkcsreq` (initial) or `scep_renewalreq` (renewal); operators
-  can grep the audit log to distinguish.
+  can grep the audit log to distinguish. Intune-dispatched enrollments
+  use `scep_pkcsreq_intune` and `scep_renewalreq_intune` respectively.
 - **Body-size cap:** `http.MaxBytesReader` middleware caps request
   bodies at `CERTCTL_MAX_BODY_SIZE` (default 1MB); SCEP PKIMessages are
   typically <50KB so the default cap is generous.
 - **HTTPS-only:** the SCEP endpoint inherits the TLS-1.3-pinned control
   plane; there is no plaintext fallback.
-- **Forward reference:** for Microsoft Intune deployments specifically,
-  see [`scep-intune.md`](scep-intune.md) (the doc Phase 11 of the
-  master bundle ships).
+- **Forward reference:** for the deeper Intune integration writeup
+  (architecture, migration playbook, troubleshooting,
+  Microsoft-support-statement), see [`scep-intune.md`](scep-intune.md)
+  (Phase 11 of the master bundle).
 
 ## Related docs
 
