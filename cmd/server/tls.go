@@ -2,6 +2,7 @@ package main
 
 import (
 	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"os"
@@ -132,6 +133,31 @@ func buildServerTLSConfig(holder *certHolder) *tls.Config {
 		CurvePreferences: []tls.CurveID{tls.X25519, tls.CurveP256},
 		GetCertificate:   holder.GetCertificate,
 	}
+}
+
+// buildServerTLSConfigWithMTLS extends buildServerTLSConfig with a client-cert
+// trust pool for the SCEP RFC 8894 + Intune master bundle Phase 6.5 mTLS
+// sibling route. SCEP profiles that opt into mTLS each contribute their
+// trust bundle to the union pool here; the same TLS listener serves both
+// /scep[/<pathID>] (no client cert) and /scep-mtls/<pathID> (cert required
+// at the handler layer).
+//
+// ClientAuth: VerifyClientCertIfGiven — request a cert during handshake; if
+// the client presents one, verify it against the union pool; if absent, the
+// request still reaches the handler and the per-route handler decides
+// whether to accept. Critical that we do NOT use RequireAndVerifyClientCert
+// here — that would break the standard /scep route (which is challenge-
+// password-only, no client cert expected).
+//
+// Pass clientCAs == nil to disable mTLS (no profile opted in). The function
+// then returns the same shape as buildServerTLSConfig.
+func buildServerTLSConfigWithMTLS(holder *certHolder, clientCAs *x509.CertPool) *tls.Config {
+	cfg := buildServerTLSConfig(holder)
+	if clientCAs != nil {
+		cfg.ClientCAs = clientCAs
+		cfg.ClientAuth = tls.VerifyClientCertIfGiven
+	}
+	return cfg
 }
 
 // preflightServerTLS is the fail-loud startup gate for HTTPS. Returns a

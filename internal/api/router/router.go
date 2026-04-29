@@ -84,6 +84,7 @@ var AuthExemptDispatchPrefixes = []string{
 	"/.well-known/pki", // RFC 5280 CRL + RFC 6960 OCSP — relying-party-unauth
 	"/.well-known/est", // RFC 7030 EST — auth via mTLS or CSR-embedded creds
 	"/scep",            // RFC 8894 SCEP — auth via challengePassword in CSR
+	"/scep-mtls",       // SCEP + mTLS sibling route (Phase 6.5) — auth is client cert + challengePassword
 }
 
 // HandlerRegistry groups all API handler dependencies for router registration.
@@ -422,6 +423,42 @@ func (r *Router) RegisterSCEPHandlers(handlers map[string]handler.SCEPHandler) {
 		// pointer receivers in the future.
 		r.Register("GET /scep/"+pathID, http.HandlerFunc(hCopy.HandleSCEP))
 		r.Register("POST /scep/"+pathID, http.HandlerFunc(hCopy.HandleSCEP))
+	}
+}
+
+// RegisterSCEPMTLSHandlers sets up the sibling `/scep-mtls/<PathID>` routes
+// for SCEP profiles that opted into mTLS via
+// `CERTCTL_SCEP_PROFILE_<NAME>_MTLS_ENABLED=true`.
+//
+// SCEP RFC 8894 + Intune master bundle Phase 6.5: enterprise procurement
+// teams routinely reject 'shared password authentication' as a checkbox-
+// fail regardless of how strong the password is. This sibling route adds
+// client-cert auth at the handler layer AND keeps the challenge password
+// (defense in depth, not replacement). Devices present a bootstrap cert
+// from a trusted CA, then SCEP-enroll for their long-lived cert. Same
+// model Apple's MDM and Cisco's BRSKI use.
+//
+// Path conventions mirror the standard SCEP route: empty PathID maps to
+// `/scep-mtls` root (single-profile mTLS deploy); non-empty PathIDs map
+// to `/scep-mtls/<pathID>`. The /scep-mtls prefix is in
+// AuthExemptDispatchPrefixes — the auth boundary is the client cert
+// (verified at the TLS layer + per-profile re-verified at the handler
+// layer) plus the challenge password, NOT a Bearer token.
+//
+// Each handler in the map MUST have had SetMTLSTrustPool called so the
+// per-profile cert verification has a trust anchor.
+func (r *Router) RegisterSCEPMTLSHandlers(handlers map[string]handler.SCEPHandler) {
+	if h, ok := handlers[""]; ok {
+		r.Register("GET /scep-mtls", http.HandlerFunc(h.HandleSCEPMTLS))
+		r.Register("POST /scep-mtls", http.HandlerFunc(h.HandleSCEPMTLS))
+	}
+	for pathID, h := range handlers {
+		if pathID == "" {
+			continue
+		}
+		hCopy := h
+		r.Register("GET /scep-mtls/"+pathID, http.HandlerFunc(hCopy.HandleSCEPMTLS))
+		r.Register("POST /scep-mtls/"+pathID, http.HandlerFunc(hCopy.HandleSCEPMTLS))
 	}
 }
 

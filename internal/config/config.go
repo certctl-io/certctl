@@ -796,6 +796,30 @@ type SCEPProfileConfig struct {
 	// match, expiry, RSA-or-ECDSA alg).
 	RACertPath string
 	RAKeyPath  string
+
+	// MTLSEnabled gates the sibling `/scep-mtls/<PathID>` route. When true,
+	// the route requires a client cert that chains to one of the certs in
+	// MTLSClientCATrustBundlePath. The standard `/scep[/<PathID>]` route
+	// remains application-layer-auth (challenge password) so existing
+	// clients keep working — mTLS is additive, not replacement.
+	//
+	// SCEP RFC 8894 + Intune master bundle Phase 6.5: enterprise procurement
+	// teams routinely reject 'shared password authentication' as a checkbox-
+	// fail regardless of how strong the password is. This flag wires up a
+	// sibling route that adds client-cert auth at the handler layer AND keeps
+	// the challenge password (defense in depth, not replacement). Devices
+	// present a bootstrap cert from a trusted CA (e.g. a manufacturing-time
+	// cert), then SCEP-enroll for their long-lived cert. Same model Apple's
+	// MDM and Cisco's BRSKI use.
+	MTLSEnabled bool
+
+	// MTLSClientCATrustBundlePath is the PEM bundle of CA certs that sign
+	// the client (device-bootstrap) certs the operator allows to enroll.
+	// Required when MTLSEnabled is true. Operators with multiple bootstrap
+	// CAs concatenate them. Validated at startup by
+	// `cmd/server/main.go::preflightSCEPMTLSTrustBundle` — file exists,
+	// parses as PEM, contains ≥1 cert, none expired.
+	MTLSClientCATrustBundlePath string
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -1421,6 +1445,9 @@ func loadSCEPProfilesFromEnv() []SCEPProfileConfig {
 			ChallengePassword: getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_CHALLENGE_PASSWORD", ""),
 			RACertPath:        getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_RA_CERT_PATH", ""),
 			RAKeyPath:         getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_RA_KEY_PATH", ""),
+			// SCEP RFC 8894 Phase 6.5: opt-in mTLS sibling route.
+			MTLSEnabled:                 getEnvBool("CERTCTL_SCEP_PROFILE_"+envName+"_MTLS_ENABLED", false),
+			MTLSClientCATrustBundlePath: getEnv("CERTCTL_SCEP_PROFILE_"+envName+"_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH", ""),
 		})
 	}
 	return out
@@ -1671,6 +1698,13 @@ func (c *Config) Validate() error {
 			}
 			if p.IssuerID == "" {
 				return fmt.Errorf("SCEP profile %d (PathID=%q) has empty IssuerID — refuse to start: each SCEP profile must bind to a configured issuer", i, p.PathID)
+			}
+			// Phase 6.5: when mTLS is enabled, the trust bundle path must
+			// be set. Preflight in cmd/server/main.go validates the file
+			// itself (exists, parseable PEM, ≥1 cert, none expired); this
+			// gate is the structural-config refuse, defense in depth.
+			if p.MTLSEnabled && p.MTLSClientCATrustBundlePath == "" {
+				return fmt.Errorf("SCEP profile %d (PathID=%q) has MTLSEnabled=true but MTLS_CLIENT_CA_TRUST_BUNDLE_PATH is empty — refuse to start: the mTLS sibling route /scep-mtls/%s would have no client-cert trust anchor", i, p.PathID, p.PathID)
 			}
 		}
 	}

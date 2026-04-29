@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"net"
@@ -726,6 +727,16 @@ func main() {
 			"endpoints", "/.well-known/est/{cacerts,simpleenroll,simplereenroll,csrattrs}")
 	}
 
+	// SCEP RFC 8894 Phase 6.5: union pool of every enabled mTLS profile's
+	// trust bundle. Populated inside the SCEP startup block below; passed
+	// to the TLS-config builder later so the listener accepts client certs
+	// signed by ANY mTLS profile's CA. The handler-layer gate
+	// (HandleSCEPMTLS) re-verifies per-profile, so a cert that chains to
+	// profile A's bundle cannot enroll against profile B even though it
+	// passes the TLS-layer union check. Stays nil when no profile opted in
+	// (the TLS config builder treats nil as 'no mTLS').
+	var scepMTLSUnionPoolForTLS *x509.CertPool
+
 	// Register SCEP (RFC 8894) handlers if enabled.
 	//
 	// SCEP RFC 8894 Phase 1.5: multi-profile dispatch. Config.Validate()
@@ -739,7 +750,18 @@ func main() {
 		// (challenge password presence, RA pair validity, issuer reachability).
 		// Failures log the offending PathID so a multi-profile deploy can
 		// pinpoint which profile broke startup.
+		//
+		// SCEP RFC 8894 + Intune master bundle Phase 6.5: profiles that
+		// opt into mTLS via CERTCTL_SCEP_PROFILE_<NAME>_MTLS_ENABLED=true
+		// get a parallel sibling-route handler registered at /scep-mtls/
+		// <pathID>. The per-profile trust pool gates the inbound client
+		// cert chain (verified at the TLS layer against the union pool +
+		// re-verified at the handler layer against just THIS profile's
+		// bundle to prevent cross-profile bleed-through).
 		scepHandlers := make(map[string]handler.SCEPHandler, len(cfg.SCEP.Profiles))
+		scepMTLSHandlers := make(map[string]handler.SCEPHandler)
+		scepMTLSUnionPool := x509.NewCertPool()
+		scepMTLSAnyEnabled := false
 		for i, profile := range cfg.SCEP.Profiles {
 			profile := profile // shadow for closure-safety even though no closures escape
 			profileLog := logger.With(
@@ -814,10 +836,83 @@ func main() {
 				"challenge_password_set", profile.ChallengePassword != "",
 				"ra_cert_path", profile.RACertPath,
 			)
+
+			// SCEP RFC 8894 Phase 6.5: register the mTLS sibling route
+			// when this profile opted in. Build a per-profile trust pool
+			// from the bundle, share its certs into the union pool the
+			// TLS layer uses, and clone the handler with the per-profile
+			// pool injected so HandleSCEPMTLS can re-verify the inbound
+			// client cert against just THIS profile's bundle.
+			if profile.MTLSEnabled {
+				perProfilePool, err := preflightSCEPMTLSTrustBundle(true, profile.MTLSClientCATrustBundlePath)
+				if err != nil {
+					profileLog.Error(
+						"startup refused: SCEP profile MTLS trust bundle preflight failed "+
+							"(Phase 6.5: required when MTLS_ENABLED=true). "+
+							"Verify the bundle file exists at MTLS_CLIENT_CA_TRUST_BUNDLE_PATH, "+
+							"is readable, parses as PEM, contains ≥1 CERTIFICATE block, "+
+							"and none of the bundled certs are past NotAfter.",
+						"error", err,
+					)
+					os.Exit(1)
+				}
+				// Add this profile's certs to the union pool the TLS
+				// layer uses for VerifyClientCertIfGiven. We re-walk the
+				// bundle so the union pool gets exactly the same certs
+				// as the per-profile pool (defensive against future
+				// pool-mutation refactors).
+				bundleBytes, _ := os.ReadFile(profile.MTLSClientCATrustBundlePath)
+				rest := bundleBytes
+				for {
+					var block *pem.Block
+					block, rest = pem.Decode(rest)
+					if block == nil {
+						break
+					}
+					if block.Type != "CERTIFICATE" {
+						continue
+					}
+					if cert, err := x509.ParseCertificate(block.Bytes); err == nil {
+						scepMTLSUnionPool.AddCert(cert)
+					}
+				}
+				scepMTLSAnyEnabled = true
+
+				// Build the parallel sibling-route handler. Same SCEP
+				// service + RA pair as the standard route — mTLS is
+				// additive, not a replacement.
+				mtlsHandler := handler.NewSCEPHandler(scepService)
+				mtlsHandler.SetRAPair(raCert, raKey)
+				mtlsHandler.SetMTLSTrustPool(perProfilePool)
+				scepMTLSHandlers[profile.PathID] = mtlsHandler
+
+				mtlsEndpoint := "/scep-mtls"
+				if profile.PathID != "" {
+					mtlsEndpoint = "/scep-mtls/" + profile.PathID
+				}
+				profileLog.Info("SCEP mTLS sibling route enabled",
+					"endpoint", mtlsEndpoint,
+					"client_ca_trust_bundle", profile.MTLSClientCATrustBundlePath,
+				)
+			}
 		}
 		apiRouter.RegisterSCEPHandlers(scepHandlers)
+		// SCEP RFC 8894 + Intune master bundle Phase 6.5: register the
+		// /scep-mtls sibling routes when at least one profile opted in.
+		// scepMTLSHandlers is non-empty only when scepMTLSAnyEnabled is
+		// true (the per-profile branch only adds to the map when the
+		// profile flag is set), but the explicit gate makes the
+		// no-op-when-disabled case obvious in logs.
+		if scepMTLSAnyEnabled {
+			apiRouter.RegisterSCEPMTLSHandlers(scepMTLSHandlers)
+			scepMTLSUnionPoolForTLS = scepMTLSUnionPool
+			logger.Info("SCEP mTLS sibling route enabled (Phase 6.5)",
+				"mtls_profile_count", len(scepMTLSHandlers),
+			)
+		}
 		logger.Info("SCEP server enabled",
 			"profile_count", len(scepHandlers),
+			"mtls_profile_count", len(scepMTLSHandlers),
 		)
 	}
 
@@ -1055,9 +1150,17 @@ func main() {
 	// Server configuration
 	addr := net.JoinHostPort(cfg.Server.Host, strconv.Itoa(cfg.Server.Port))
 	httpServer := &http.Server{
-		Addr:              addr,
-		Handler:           finalHandler,
-		TLSConfig:         buildServerTLSConfig(tlsCertHolder),
+		Addr:    addr,
+		Handler: finalHandler,
+		// SCEP RFC 8894 + Intune master bundle Phase 6.5: when at least
+		// one SCEP profile opted into mTLS, the listener carries the
+		// union of every enabled profile's client-CA trust bundle and
+		// negotiates VerifyClientCertIfGiven on the handshake. The
+		// /scep route stays challenge-password-only; the /scep-mtls
+		// sibling route gates additionally on the verified client cert.
+		// nil pool = no profile opted in = identical TLS shape to the
+		// pre-Phase-6.5 buildServerTLSConfig path.
+		TLSConfig:         buildServerTLSConfigWithMTLS(tlsCertHolder, scepMTLSUnionPoolForTLS),
 		ReadTimeout:       30 * time.Second,
 		ReadHeaderTimeout: 5 * time.Second,
 		WriteTimeout:      120 * time.Second, // Must accommodate ACME issuance (order + challenge + finalize)
@@ -1153,6 +1256,67 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
 	}
 	return nil
+}
+
+// preflightSCEPMTLSTrustBundle validates a per-profile mTLS client-CA
+// trust bundle. SCEP RFC 8894 + Intune master bundle Phase 6.5.
+//
+// Mirrors preflightSCEPRACertKey's no-op-when-disabled pattern; otherwise
+// the checks are:
+//
+//  1. Path is non-empty (the Validate() refuse covers this too, but
+//     preflight reports the specific failure with an actionable error
+//     string + os.Exit(1) at the call site).
+//  2. File exists + readable.
+//  3. PEM-decodes to ≥1 CERTIFICATE block.
+//  4. None of the bundled certs is past NotAfter — an expired trust
+//     anchor would silently reject every client cert at runtime.
+//
+// On success, returns the parsed *x509.CertPool ready to inject into the
+// per-profile SCEPHandler via SetMTLSTrustPool. Each bundled cert also
+// contributes to the union pool that backs the TLS-layer
+// VerifyClientCertIfGiven.
+func preflightSCEPMTLSTrustBundle(enabled bool, bundlePath string) (*x509.CertPool, error) {
+	if !enabled {
+		return nil, nil
+	}
+	if bundlePath == "" {
+		return nil, fmt.Errorf("MTLS enabled but trust bundle path empty: " +
+			"set CERTCTL_SCEP_PROFILE_<NAME>_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH to a PEM file " +
+			"containing the bootstrap-CA certs the operator allows to enroll")
+	}
+	body, err := os.ReadFile(bundlePath)
+	if err != nil {
+		return nil, fmt.Errorf("read MTLS trust bundle: %w (path=%s)", err, bundlePath)
+	}
+	pool := x509.NewCertPool()
+	rest := body
+	count := 0
+	now := time.Now()
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		cert, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			return nil, fmt.Errorf("parse MTLS trust bundle cert: %w (path=%s)", err, bundlePath)
+		}
+		if now.After(cert.NotAfter) {
+			return nil, fmt.Errorf("MTLS trust bundle cert expired at %s (subject=%q, path=%s) — replace before restart",
+				cert.NotAfter.Format(time.RFC3339), cert.Subject.CommonName, bundlePath)
+		}
+		pool.AddCert(cert)
+		count++
+	}
+	if count == 0 {
+		return nil, fmt.Errorf("MTLS trust bundle contained no CERTIFICATE PEM blocks (path=%s)", bundlePath)
+	}
+	return pool, nil
 }
 
 // loadSCEPRAPair reads the RA cert PEM + key PEM and returns the parsed
@@ -1390,7 +1554,20 @@ func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, da
 		// authenticate via the challengePassword attribute in the PKCS#10 CSR,
 		// not via HTTP Bearer tokens. preflightSCEPChallengePassword refuses to
 		// start the server if SCEP is enabled without a non-empty shared secret.
+		//
+		// SCEP RFC 8894 + Intune master bundle Phase 6.5: the sibling
+		// /scep-mtls[/<pathID>] route also rides the no-auth chain. Its
+		// auth boundary is (a) client cert verified at the TLS layer +
+		// re-verified per-profile at the handler layer, plus (b) the
+		// challenge password — neither is a Bearer token. The /scepxyz
+		// vs /scep-mtls disambiguation: 'xyz' starts with a letter so the
+		// HasPrefix(path, "/scep/") gate doesn't match it; 'mtls' is its
+		// own dedicated prefix gated below to avoid the same overlap.
 		if path == "/scep" || strings.HasPrefix(path, "/scep/") {
+			noAuthHandler.ServeHTTP(w, r)
+			return
+		}
+		if path == "/scep-mtls" || strings.HasPrefix(path, "/scep-mtls/") {
 			noAuthHandler.ServeHTTP(w, r)
 			return
 		}

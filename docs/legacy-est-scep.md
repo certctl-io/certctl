@@ -346,6 +346,80 @@ Recommended for: Intune-deployed device certs (modern TLS clients);
 SCEP profiles serving general / legacy clients (ChromeOS, IoT) should
 stay `false` until the TLS path is verified.
 
+### mTLS sibling route (Phase 6.5, opt-in)
+
+SCEP is documented as application-layer-auth — the challenge password
+is the authentication boundary per RFC 8894 §3.2. But enterprise
+procurement teams routinely reject "shared password authentication" as
+a checkbox-fail regardless of how strong the password is. The clean
+answer: a **sibling** route at `/scep-mtls/<pathID>` that requires
+client-cert auth at the handler layer AND ALSO accepts the challenge
+password (defense in depth, not replacement). Devices present a
+bootstrap cert from a trusted CA (e.g. a manufacturing-time cert),
+then SCEP-enroll for their long-lived cert. Same model Apple's MDM and
+Cisco's BRSKI use.
+
+**Opt in per profile** by setting two env vars:
+
+```
+CERTCTL_SCEP_PROFILE_<NAME>_MTLS_ENABLED=true
+CERTCTL_SCEP_PROFILE_<NAME>_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH=/etc/certctl/scep/<name>-bootstrap-cas.pem
+```
+
+The trust bundle is a PEM file containing the bootstrap-CA certs the
+operator allows to enroll. Operators with multiple bootstrap CAs
+concatenate them. The startup preflight
+(`cmd/server/main.go::preflightSCEPMTLSTrustBundle`) validates: file
+exists, parses as PEM, contains ≥1 cert, none expired. Failures
+`os.Exit(1)` with a structured log identifying the offending PathID.
+
+**TLS server config:** when at least one profile opts into mTLS, the
+HTTPS listener gets the union of every enabled profile's trust bundle
+as its `ClientCAs` pool, plus `ClientAuth: VerifyClientCertIfGiven` —
+the listener requests a client cert during the handshake, verifies it
+against the union pool if presented, and lets the handler decide
+whether to require it. This means the SAME listener serves both
+`/scep[/<pathID>]` (no client cert required) and `/scep-mtls/<pathID>`
+(cert required). The standard route stays untouched for clients that
+can't present a cert.
+
+**Handler-layer per-profile gate:** the TLS-layer check uses the union
+pool, so a cert that chains to profile A's bundle would pass the TLS
+handshake even when targeting profile B. The handler-layer gate
+(`HandleSCEPMTLS`) re-verifies the inbound client cert against ONLY
+THIS profile's pool — preventing cross-profile bleed-through.
+
+**Auth chain on the mTLS sibling route:**
+
+1. TLS handshake: client cert verified against the union pool
+   (if presented; absent = standard SCEP path applies but handler
+   rejects with 401).
+2. Handler-layer per-profile re-verification: cert must chain to
+   THIS profile's trust bundle. Mismatch = 401.
+3. Standard SCEP enrollment: `HandleSCEP` runs as on the standard
+   route — including the challenge-password gate at the service layer.
+
+A stolen device cert without the matching challenge password gets
+rejected (and vice versa). Both layers are independently required.
+
+**Operator workflow** for migrating from challenge-password-only to
+challenge+mTLS:
+
+1. Generate a bootstrap CA + issue a bootstrap cert per device (out
+   of band — typically manufacturing-time, MDM-pushed, or a separate
+   PKI flow). 
+2. Distribute the trust bundle to certctl as the
+   `_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH`.
+3. Set `_MTLS_ENABLED=true` for the profile, restart certctl.
+4. Devices now have TWO valid enrollment URLs:
+   `/scep/<pathID>` (challenge-password-only, legacy) and
+   `/scep-mtls/<pathID>` (cert + challenge, new).
+5. Roll out config to fleet that switches devices to the new URL.
+6. Once the fleet has migrated, remove `_CHALLENGE_PASSWORD` from the
+   profile (Validate() will keep the gate when MTLSEnabled=true so
+   the password requirement doesn't go away — the password is still
+   the application-layer auth boundary).
+
 ### Operational notes
 
 - **Audit:** every enrollment emits an `audit_event` row with action

@@ -74,6 +74,13 @@ type SCEPHandler struct {
 	svc    SCEPService
 	raCert *x509.Certificate // RFC 8894 path: RA cert clients encrypt CSR to
 	raKey  crypto.PrivateKey // RFC 8894 path: RA key for EnvelopedData decrypt + CertRep signing
+
+	// SCEP RFC 8894 + Intune master bundle Phase 6.5: per-profile mTLS
+	// trust bundle. When set, HandleSCEPMTLS verifies the inbound client
+	// cert chain against this pool. Nil when the profile has MTLSEnabled=false
+	// — HandleSCEPMTLS rejects unconditionally in that case (the route
+	// shouldn't even be registered, but defense in depth).
+	mtlsTrustPool *x509.CertPool
 }
 
 // NewSCEPHandler creates a new SCEPHandler with the legacy MVP-only behavior.
@@ -89,6 +96,75 @@ func NewSCEPHandler(svc SCEPService) SCEPHandler {
 func (h *SCEPHandler) SetRAPair(raCert *x509.Certificate, raKey crypto.PrivateKey) {
 	h.raCert = raCert
 	h.raKey = raKey
+}
+
+// SetMTLSTrustPool injects the per-profile client-cert trust pool the
+// `/scep-mtls/<PathID>` sibling route uses to verify inbound device
+// bootstrap certs. SCEP RFC 8894 + Intune master bundle Phase 6.5.
+//
+// The TLS layer (cmd/server/main.go::buildServerTLSConfig) uses
+// VerifyClientCertIfGiven against the UNION of every enabled mTLS
+// profile's bundle, so the same TLS listener serves both /scep
+// (challenge-password-only) and /scep-mtls/<PathID> (cert + challenge).
+// The per-profile gate at the handler layer enforces 'cert must chain to
+// THIS profile's bundle' so a cert that chains to profile A's bundle
+// cannot enroll against profile B even though it passed the TLS layer.
+func (h *SCEPHandler) SetMTLSTrustPool(pool *x509.CertPool) {
+	h.mtlsTrustPool = pool
+}
+
+// HandleSCEPMTLS is the entry point for the `/scep-mtls/<PathID>` sibling
+// route. SCEP RFC 8894 + Intune master bundle Phase 6.5.
+//
+// Gates on the inbound client cert chain — the request must:
+//
+//  1. Carry a TLS connection (r.TLS != nil) — defense in depth even
+//     though the HTTPS-only listener guarantees this.
+//  2. Have presented a peer cert (len(r.TLS.PeerCertificates) > 0) — the
+//     listener uses VerifyClientCertIfGiven, so a missing cert is a
+//     legitimate failure here, not a TLS error.
+//  3. The peer cert chain must verify against THIS profile's trust pool
+//     (h.mtlsTrustPool). The TLS layer verified against the union pool
+//     of all mTLS profiles, but a cert that chains to profile A cannot
+//     enroll against profile B — verify per-profile here.
+//
+// Failures return HTTP 401 (Unauthorized — mTLS failure is authentication,
+// not authorization). On success the call delegates to HandleSCEP — the
+// challenge-password gate still fires (defense in depth: mTLS is additive,
+// not replacement).
+func (h SCEPHandler) HandleSCEPMTLS(w http.ResponseWriter, r *http.Request) {
+	if h.mtlsTrustPool == nil {
+		// Profile is misconfigured — handler registered for /scep-mtls but
+		// SetMTLSTrustPool was never called. The startup preflight should
+		// have caught this; surfacing as 500 makes the deploy bug loud.
+		ErrorWithRequestID(w, http.StatusInternalServerError, "mTLS handler missing trust pool", middleware.GetRequestID(r.Context()))
+		return
+	}
+	if r.TLS == nil || len(r.TLS.PeerCertificates) == 0 {
+		// Client didn't present a cert. With VerifyClientCertIfGiven the
+		// TLS handshake completes anyway — the per-profile gate enforces
+		// 'cert required' at the application layer.
+		ErrorWithRequestID(w, http.StatusUnauthorized, "Client certificate required for /scep-mtls", middleware.GetRequestID(r.Context()))
+		return
+	}
+	leaf := r.TLS.PeerCertificates[0]
+	intermediates := x509.NewCertPool()
+	for _, c := range r.TLS.PeerCertificates[1:] {
+		intermediates.AddCert(c)
+	}
+	if _, err := leaf.Verify(x509.VerifyOptions{
+		Roots:         h.mtlsTrustPool,
+		Intermediates: intermediates,
+		KeyUsages:     []x509.ExtKeyUsage{x509.ExtKeyUsageClientAuth, x509.ExtKeyUsageAny},
+	}); err != nil {
+		ErrorWithRequestID(w, http.StatusUnauthorized, "Client certificate not trusted by this profile", middleware.GetRequestID(r.Context()))
+		return
+	}
+	// Defense in depth — mTLS is ADDITIVE. The request still flows through
+	// HandleSCEP which enforces the challenge-password gate at the service
+	// layer. A stolen device cert without the matching challenge password
+	// still gets rejected (and vice versa).
+	h.HandleSCEP(w, r)
 }
 
 // HandleSCEP is the single entry point for all SCEP operations.

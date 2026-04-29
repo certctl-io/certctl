@@ -36,7 +36,21 @@ import (
 // At Bundle D close time, this list is empty. Future entries should be
 // rare — the OpenAPI spec is the source of truth for the public API
 // surface.
-var SpecParityExceptions = map[string]string{}
+var SpecParityExceptions = map[string]string{
+	// SCEP RFC 8894 + Intune master bundle Phase 6.5: the /scep-mtls
+	// sibling route is opt-in (gated on per-profile MTLSEnabled). It rides
+	// the same SCEP-PKIOperation contract as /scep but with an additional
+	// client-cert auth layer at the handler. The OpenAPI spec covers the
+	// canonical /scep endpoint; documenting /scep-mtls separately would
+	// duplicate every operation row with no information gain — the
+	// PKIMessage wire format, query params, and response shapes are
+	// identical. The route lives in router.go as literal r.Register calls
+	// for the openapi-parity scanner's benefit; it stays out of openapi.yaml
+	// by exception. See docs/legacy-est-scep.md::mTLS-sibling-route for the
+	// operator-facing description.
+	"GET /scep-mtls":  "Phase 6.5 mTLS sibling route — same wire format as /scep with cert-required gate; documented in docs/legacy-est-scep.md",
+	"POST /scep-mtls": "Phase 6.5 mTLS sibling route — same wire format as /scep with cert-required gate; documented in docs/legacy-est-scep.md",
+}
 
 func TestRouter_OpenAPIParity(t *testing.T) {
 	routes, err := scanRouterRoutes("router.go")
