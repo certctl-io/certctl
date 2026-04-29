@@ -123,7 +123,9 @@ func TestCertificateLifecycle(t *testing.T) {
 		Verification:   verificationHandler,
 		BulkRevocation: handler.BulkRevocationHandler{},
 	})
-	r.RegisterESTHandlers(estHandler)
+	// EST RFC 7030 hardening Phase 1: RegisterESTHandlers takes a map
+	// keyed by PathID. Empty PathID = legacy /.well-known/est/ root.
+	r.RegisterESTHandlers(map[string]handler.ESTHandler{"": estHandler})
 
 	// Create test server
 	server := httptest.NewServer(r)

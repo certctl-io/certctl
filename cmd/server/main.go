@@ -721,35 +721,71 @@ func main() {
 			handler.NewAdminSCEPIntuneServiceImpl(scepServices),
 		),
 	})
-	// Register EST (RFC 7030) handlers if enabled
+	// Register EST (RFC 7030) handlers if enabled.
+	//
+	// EST RFC 7030 hardening master bundle Phase 1: multi-profile dispatch.
+	// Config.Validate() guarantees cfg.EST.Profiles is non-empty when
+	// cfg.EST.Enabled is true (the legacy single-issuer flat fields are
+	// merged into Profiles[0] by mergeESTLegacyIntoProfiles in Load()).
+	// Each profile gets its own service + handler instance, registered at
+	// /.well-known/est/ (PathID="") or /.well-known/est/<PathID>/.
+	//
+	// Per-profile preflight gates (issuer reachable, CA serves cacerts)
+	// run inside the loop. Failures log the offending PathID so a
+	// multi-profile deploy can pinpoint which profile broke startup —
+	// mirrors the SCEP audit-closure pattern (cmd/server/main.go::
+	// preflightSCEPIntuneTrustAnchor signature took pathID for exactly
+	// this reason).
 	if cfg.EST.Enabled {
-		issuerConn, ok := issuerRegistry.Get(cfg.EST.IssuerID)
-		if !ok {
-			logger.Error("EST issuer not found in registry", "issuer_id", cfg.EST.IssuerID)
-			os.Exit(1)
-		}
-		// Bundle-4 / L-005: validate the issuer can actually serve a CA certificate
-		// at startup, not at first request time. ACME / DigiCert / Sectigo etc.
-		// return an error from GetCACertPEM because they don't expose a static
-		// CA chain; binding EST to one of those would silently degrade enrollment.
-		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
-		if err := preflightEnrollmentIssuer(preflightCtx, "EST", cfg.EST.IssuerID, issuerConn); err != nil {
+		estHandlers := make(map[string]handler.ESTHandler, len(cfg.EST.Profiles))
+		for i, profile := range cfg.EST.Profiles {
+			profile := profile // shadow for closure-safety
+			profileLog := logger.With(
+				"est_profile_index", i,
+				"est_profile_pathid", profile.PathID,
+				"est_profile_issuer", profile.IssuerID,
+			)
+
+			issuerConn, ok := issuerRegistry.Get(profile.IssuerID)
+			if !ok {
+				profileLog.Error("startup refused: EST profile issuer not found in registry",
+					"hint", "EST profile must reference a configured issuer ID; check CERTCTL_ISSUERS_ENABLED + the issuer factory")
+				os.Exit(1)
+			}
+			// Bundle-4 / L-005: validate the issuer can actually serve a CA certificate
+			// at startup, not at first request time. ACME / DigiCert / Sectigo etc.
+			// return an error from GetCACertPEM because they don't expose a static
+			// CA chain; binding EST to one of those would silently degrade enrollment.
+			preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 10*time.Second)
+			if err := preflightEnrollmentIssuer(preflightCtx, "EST", profile.IssuerID, issuerConn); err != nil {
+				preflightCancel()
+				profileLog.Error("startup refused: EST profile issuer cannot serve CA certificate", "error", err)
+				os.Exit(1)
+			}
 			preflightCancel()
-			logger.Error("startup refused: EST issuer cannot serve CA certificate", "error", err)
-			os.Exit(1)
+
+			estService := service.NewESTService(profile.IssuerID, issuerConn, auditService, profileLog)
+			estService.SetProfileRepo(profileRepo)
+			if profile.ProfileID != "" {
+				estService.SetProfileID(profile.ProfileID)
+			}
+			estHandlers[profile.PathID] = handler.NewESTHandler(estService)
+
+			endpoint := "/.well-known/est"
+			if profile.PathID != "" {
+				endpoint = "/.well-known/est/" + profile.PathID
+			}
+			profileLog.Info("EST profile enabled",
+				"endpoints", endpoint+"/{cacerts,simpleenroll,simplereenroll,csrattrs}",
+				"server_keygen_enabled", profile.ServerKeygenEnabled,
+				"mtls_enabled", profile.MTLSEnabled,
+				"basic_auth_configured", profile.EnrollmentPassword != "",
+				"allowed_auth_modes", profile.AllowedAuthModes,
+				"rate_limit_per_principal_24h", profile.RateLimitPerPrincipal24h,
+			)
 		}
-		preflightCancel()
-		estService := service.NewESTService(cfg.EST.IssuerID, issuerConn, auditService, logger)
-		estService.SetProfileRepo(profileRepo)
-		if cfg.EST.ProfileID != "" {
-			estService.SetProfileID(cfg.EST.ProfileID)
-		}
-		estHandler := handler.NewESTHandler(estService)
-		apiRouter.RegisterESTHandlers(estHandler)
-		logger.Info("EST server enabled",
-			"issuer_id", cfg.EST.IssuerID,
-			"profile_id", cfg.EST.ProfileID,
-			"endpoints", "/.well-known/est/{cacerts,simpleenroll,simplereenroll,csrattrs}")
+		apiRouter.RegisterESTHandlers(estHandlers)
+		logger.Info("EST server enabled", "profile_count", len(cfg.EST.Profiles))
 	}
 
 	// SCEP RFC 8894 Phase 6.5: union pool of every enabled mTLS profile's

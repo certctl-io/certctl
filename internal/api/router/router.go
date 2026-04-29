@@ -376,26 +376,73 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/health-checks/{id}/acknowledge", http.HandlerFunc(reg.HealthChecks.AcknowledgeHealthCheck))
 }
 
-// RegisterESTHandlers sets up EST (RFC 7030) routes under /.well-known/est/.
+// RegisterESTHandlers sets up EST (RFC 7030) routes under
+// /.well-known/est/[<pathID>/].
 //
-// EST endpoints are intentionally unauthenticated at the HTTP layer. Per RFC 7030
-// §3.2.3, authentication and authorization for enrollment are deployment-specific;
-// certctl relies on CSR signature verification, profile policy enforcement (allowed
-// key types, max TTL, permitted EKUs), and the underlying issuer connector's own
-// policy. Per RFC 7030 §4.1.1, /.well-known/est/cacerts is explicitly anonymous.
+// EST RFC 7030 hardening master bundle Phase 1: this signature was originally
+// `RegisterESTHandlers(est handler.ESTHandler)` — a single handler installed
+// at the legacy /.well-known/est/ root. The per-profile dispatch refactor
+// takes a map keyed by ESTProfileConfig.PathID. Empty PathID maps to the
+// legacy /.well-known/est/ root for backward compatibility (existing
+// operators with the flat single-issuer config see no URL change);
+// non-empty PathID values map to /.well-known/est/<pathID>/. Validate()
+// guards PathID uniqueness + slug-shape so this loop never gets a
+// collision or an invalid path segment.
 //
-// cmd/server/main.go's finalHandler dispatches /.well-known/est/* to a dedicated
-// no-auth middleware chain (RequestID, structuredLogger, Recovery only) so EST
-// clients — IoT devices, 802.1X supplicants, MDM-enrolled laptops — never hit the
-// Bearer-token auth middleware they cannot satisfy. See M-001 audit 2026-04-19
-// (option D): prior builds routed EST through the authenticated apiHandler chain,
-// which reduced every enrollment to a 401 before the handler was reached.
-func (r *Router) RegisterESTHandlers(est handler.ESTHandler) {
-	// EST endpoints per RFC 7030 Section 3.2.2
-	r.Register("GET /.well-known/est/cacerts", http.HandlerFunc(est.CACerts))
-	r.Register("POST /.well-known/est/simpleenroll", http.HandlerFunc(est.SimpleEnroll))
-	r.Register("POST /.well-known/est/simplereenroll", http.HandlerFunc(est.SimpleReEnroll))
-	r.Register("GET /.well-known/est/csrattrs", http.HandlerFunc(est.CSRAttrs))
+// EST endpoints are intentionally unauthenticated at the HTTP middleware
+// layer. Per RFC 7030 §3.2.3, authentication and authorization for
+// enrollment are deployment-specific; pre-Phase-2 certctl relies on CSR
+// signature verification, profile policy enforcement (allowed key types,
+// max TTL, permitted EKUs), and the underlying issuer connector's own
+// policy. Per RFC 7030 §4.1.1, /.well-known/est/<pathID>/cacerts is
+// explicitly anonymous. Phase 2 + 3 of the EST hardening bundle add
+// per-profile mTLS + HTTP Basic auth at the HANDLER layer (not the
+// middleware layer) so the existing no-auth dispatch in
+// cmd/server/main.go's finalHandler stays correct — auth is per-profile,
+// not per-prefix.
+//
+// cmd/server/main.go's finalHandler dispatches /.well-known/est/* to a
+// dedicated no-auth middleware chain (RequestID, structuredLogger,
+// Recovery only) so EST clients — IoT devices, 802.1X supplicants,
+// MDM-enrolled laptops — never hit the Bearer-token auth middleware they
+// cannot satisfy. See M-001 audit 2026-04-19 (option D): prior builds
+// routed EST through the authenticated apiHandler chain, which reduced
+// every enrollment to a 401 before the handler was reached.
+func (r *Router) RegisterESTHandlers(handlers map[string]handler.ESTHandler) {
+	// Legacy /.well-known/est/ route for the empty-PathID profile is
+	// registered with literal strings so the openapi-parity scanner
+	// (Bundle D / Audit M-027, see openapi_parity_test.go) sees the four
+	// EST operations as AST literals exactly the way it did pre-Phase-1.
+	// The scanner walks for *ast.BasicLit string args to r.Register, so
+	// dynamically-built paths would not appear in its index. Keeping the
+	// empty-PathID case static preserves the spec parity contract for the
+	// documented /.well-known/est/ endpoints that openapi.yaml describes.
+	if h, ok := handlers[""]; ok {
+		r.Register("GET /.well-known/est/cacerts", http.HandlerFunc(h.CACerts))
+		r.Register("POST /.well-known/est/simpleenroll", http.HandlerFunc(h.SimpleEnroll))
+		r.Register("POST /.well-known/est/simplereenroll", http.HandlerFunc(h.SimpleReEnroll))
+		r.Register("GET /.well-known/est/csrattrs", http.HandlerFunc(h.CSRAttrs))
+	}
+	// Multi-profile routes register dynamically. These per-deployment
+	// paths (/.well-known/est/<pathID>/) aren't in openapi.yaml because
+	// the path segment is operator-defined; the spec covers the canonical
+	// /.well-known/est/ root only. The parity scanner correctly skips
+	// dynamic routes (it only checks literals). Mirrors the SCEP dispatch
+	// pattern at RegisterSCEPHandlers above (commit 6d30493).
+	for pathID, h := range handlers {
+		if pathID == "" {
+			continue // already handled by the static block above
+		}
+		hCopy := h // h is captured by value — ESTHandler is a small
+		// struct (one interface field) so the per-iteration copy is
+		// cheap and avoids any loop-variable-capture surprise if
+		// ESTHandler ever grows pointer receivers in the future.
+		prefix := "/.well-known/est/" + pathID
+		r.Register("GET "+prefix+"/cacerts", http.HandlerFunc(hCopy.CACerts))
+		r.Register("POST "+prefix+"/simpleenroll", http.HandlerFunc(hCopy.SimpleEnroll))
+		r.Register("POST "+prefix+"/simplereenroll", http.HandlerFunc(hCopy.SimpleReEnroll))
+		r.Register("GET "+prefix+"/csrattrs", http.HandlerFunc(hCopy.CSRAttrs))
+	}
 }
 
 // RegisterSCEPHandlers sets up SCEP (RFC 8894) routes.

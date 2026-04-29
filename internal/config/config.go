@@ -646,6 +646,15 @@ type OpenSSLConfig struct {
 }
 
 // ESTConfig controls the RFC 7030 Enrollment over Secure Transport server.
+// EST RFC 7030 hardening master bundle Phase 1: this type was originally a
+// flat single-issuer struct. Real enterprise deployments need to expose
+// multiple EST endpoints from one certctl instance — corp-laptop CA, IoT
+// CA, WiFi/802.1X CA — each with its own issuer + auth modes + URL path
+// (/.well-known/est/<pathID>/). The Profiles slice carries that. Existing
+// operators see no behavior change: when Profiles is empty AND the legacy
+// single-issuer flat fields below are set, ConfigLoad synthesizes a
+// single-element Profiles[0] with PathID="" (which maps to the legacy
+// /.well-known/est/ root path).
 type ESTConfig struct {
 	// Enabled controls whether EST endpoints are available for device enrollment.
 	// Default: false (EST disabled). Set to true to enable RFC 7030 endpoints
@@ -653,14 +662,151 @@ type ESTConfig struct {
 	Enabled bool
 
 	// IssuerID selects which issuer connector processes EST certificate requests.
-	// Valid values: "iss-local" (default), "iss-acme", "iss-stepca", "iss-openssl".
-	// Default: "iss-local". Must reference a configured issuer.
+	// Default: "iss-local". Legacy single-issuer field; merged into Profiles[0]
+	// by mergeESTLegacyIntoProfiles when Profiles is empty.
 	IssuerID string
 
 	// ProfileID optionally constrains EST enrollments to a specific certificate profile.
-	// When set, all EST enrollments must match the profile's crypto constraints.
-	// Leave empty to allow EST to use any configured issuer's defaults.
+	// Legacy single-issuer field; merged into Profiles[0] when applicable.
 	ProfileID string
+
+	// Profiles is the multi-endpoint configuration. Each profile gets its own
+	// URL path (/.well-known/est/<PathID>/), its own bound issuer, its own auth
+	// modes, and its own per-profile policy knobs (rate limit, server-keygen
+	// gate, mTLS bundle, RFC 9266 channel-binding requirement). Population
+	// sources, in priority order:
+	//
+	//   1. Explicit list via CERTCTL_EST_PROFILES (e.g. "corp,iot,wifi").
+	//   2. Backward-compat shim: when CERTCTL_EST_PROFILES is unset AND the
+	//      legacy flat fields above are populated AND Enabled=true, ConfigLoad
+	//      synthesizes a single-element Profiles[0] with PathID="" so
+	//      /.well-known/est/ continues to route the same way it did
+	//      pre-Phase-1.
+	//
+	// EST RFC 7030 hardening master bundle Phase 1.
+	Profiles []ESTProfileConfig
+}
+
+// ESTProfileConfig is one EST endpoint's configuration. Each profile is
+// bound to one issuer + one optional certctl CertificateProfile + one set
+// of per-profile auth modes (mTLS / HTTP Basic / both). Future phases of
+// the hardening bundle wire the additional per-profile fields:
+//
+//   - Phase 2 reads MTLSEnabled + MTLSClientCATrustBundlePath +
+//     ChannelBindingRequired to enable the /.well-known/est-mtls/<PathID>
+//     sibling route (mirrors SCEP's /scep-mtls/<PathID> from commit e7a3075).
+//   - Phase 3 reads EnrollmentPassword + AllowedAuthModes to enforce HTTP
+//     Basic auth on the standard /.well-known/est/<PathID>/ route.
+//   - Phase 4 reads RateLimitPerPrincipal24h to apply per-CN+source-IP
+//     sliding-window rate limiting (mirrors SCEP/Intune's
+//     PerDeviceRateLimiter from internal/scep/intune/rate_limit.go).
+//   - Phase 5 reads ServerKeygenEnabled to gate the new /serverkeygen
+//     endpoint per RFC 7030 §4.4.
+//
+// Phase 1 (this commit) lays the FIELD CONTRACTS + per-profile Validate()
+// gates so an operator who flips MTLSEnabled=true without supplying the
+// bundle path gets a loud refuse-to-start error rather than a silent
+// no-op. The actual auth/limit/keygen handlers ship in Phases 2-5.
+//
+// EST RFC 7030 hardening master bundle Phase 1.
+type ESTProfileConfig struct {
+	// PathID is the URL segment after /.well-known/est/. Empty string maps
+	// to the legacy /.well-known/est/ root for backward compatibility (so
+	// existing operators with the flat single-issuer config see no URL
+	// change). Non-empty values MUST be a single path-safe slug
+	// ([a-z0-9-], no slashes); validated at startup by Config.Validate().
+	// Multi-profile deployments typically use short tokens like "corp",
+	// "iot", "wifi" — the URL becomes /.well-known/est/corp/cacerts,
+	// /.well-known/est/iot/simpleenroll, etc.
+	PathID string
+
+	// IssuerID selects which issuer connector this profile's enrollments
+	// go through. Must reference a configured issuer. Required (Validate
+	// refuses empty IssuerID).
+	IssuerID string
+
+	// ProfileID optionally constrains enrollments under this PathID to a
+	// specific CertificateProfile. Leave empty to allow the issuer's
+	// defaults. When non-empty, profile crypto policy (allowed key
+	// algorithms, required EKUs, max TTL) is enforced at enrollment time
+	// via service.ValidateCSRAgainstProfile.
+	ProfileID string
+
+	// EnrollmentPassword is the per-profile shared secret for HTTP Basic
+	// auth on the standard /.well-known/est/<PathID>/ route (Phase 3).
+	// Empty value means HTTP Basic auth is NOT required for this profile
+	// (mTLS-only or anonymous, depending on AllowedAuthModes). Stored only
+	// in process memory; never logged. Constant-time comparison via
+	// crypto/subtle.ConstantTimeCompare in the handler.
+	EnrollmentPassword string
+
+	// MTLSEnabled gates the sibling /.well-known/est-mtls/<PathID>/ route
+	// (Phase 2). When true, the route requires a client cert that chains
+	// to one of the certs in MTLSClientCATrustBundlePath. The standard
+	// /.well-known/est/<PathID>/ route remains application-layer-auth
+	// (HTTP Basic password) so existing clients keep working — mTLS is
+	// additive, not replacement.
+	//
+	// Mirrors SCEP's MTLSEnabled (commit e7a3075). Same defense-in-depth
+	// rationale: enterprise procurement teams routinely reject 'shared
+	// password authentication' as a checkbox-fail regardless of how
+	// strong the password is. This flag wires up a sibling route that
+	// adds client-cert auth at the handler layer.
+	MTLSEnabled bool
+
+	// MTLSClientCATrustBundlePath is the PEM bundle of CA certs that sign
+	// the client (device-bootstrap) certs the operator allows to enroll
+	// via the mTLS sibling route. Required when MTLSEnabled is true.
+	// Validated at startup by cmd/server/main.go's
+	// preflightESTMTLSClientCATrustBundle (Phase 2): file exists, parses
+	// as PEM, contains ≥1 cert, none expired.
+	MTLSClientCATrustBundlePath string
+
+	// ChannelBindingRequired forces the EST mTLS handler (Phase 2) to
+	// require RFC 9266 tls-exporter channel binding in the CSR's CMC
+	// id-aa-channelBindings attribute. When true, CSRs without the
+	// binding are refused with ErrChannelBindingMissing; mismatched
+	// bindings refused with ErrChannelBindingMismatch. Defaults true for
+	// new-cert-issuance flows (Phase 2 default), false for re-enrollment
+	// where the previous-cert presentation is the trust signal. Operators
+	// running clients that don't support RFC 9266 (older libest, etc.)
+	// can opt out per-profile.
+	//
+	// EST RFC 7030 hardening master bundle Phase 0 frozen decision 0.2.
+	ChannelBindingRequired bool
+
+	// AllowedAuthModes enumerates which application-layer auth modes
+	// this profile accepts. Valid entries: "mtls", "basic". Empty slice
+	// means no auth required (the unauthenticated default that EST
+	// shipped with at v2.0.66; preserved for backward compat — Validate
+	// emits a warning log for empty slices to nudge operators toward
+	// explicit opt-in). Phase 2 + 3 read this to enforce per-mode
+	// requirements; Phase 1 just validates shape.
+	//
+	// EST RFC 7030 hardening master bundle Phase 0 frozen decision 0.1.
+	AllowedAuthModes []string
+
+	// RateLimitPerPrincipal24h caps enrollments per (CSR.Subject.CN,
+	// sourceIP) pair in any rolling 24-hour window. Default 0 (Phase 1
+	// preserves the unauthenticated/unlimited default to avoid changing
+	// production behavior); Phase 4 will wire this against the extracted
+	// internal/ratelimit/SlidingWindowLimiter. Negative values are
+	// rejected at Validate time as a config typo.
+	//
+	// EST RFC 7030 hardening master bundle Phase 1 + Phase 4.
+	RateLimitPerPrincipal24h int
+
+	// ServerKeygenEnabled gates the /.well-known/est/<PathID>/serverkeygen
+	// endpoint (RFC 7030 §4.4) for this profile. When true, the server
+	// generates the keypair on behalf of the client and returns both
+	// cert + private key (the latter wrapped in CMS EnvelopedData).
+	// Default false. Phase 5 wires the handler; Phase 1 lays the gate
+	// + the Validate refusal for ServerKeygenEnabled=true without a
+	// CertificateProfile that pins AllowedKeyAlgorithms (the server
+	// must know what algorithm to generate).
+	//
+	// EST RFC 7030 hardening master bundle Phase 5.
+	ServerKeygenEnabled bool
 }
 
 // SCEPConfig controls the RFC 8894 Simple Certificate Enrollment Protocol server.
@@ -1314,6 +1460,12 @@ func Load() (*Config, error) {
 			Enabled:   getEnvBool("CERTCTL_EST_ENABLED", false),
 			IssuerID:  getEnv("CERTCTL_EST_ISSUER_ID", "iss-local"),
 			ProfileID: getEnv("CERTCTL_EST_PROFILE_ID", ""),
+			// EST RFC 7030 hardening Phase 1: multi-profile dispatch. When
+			// CERTCTL_EST_PROFILES is set (e.g. "corp,iot,wifi"), each name
+			// expands to per-profile env vars CERTCTL_EST_PROFILE_<NAME>_*.
+			// When unset, the legacy single-issuer flat fields above are
+			// merged into Profiles[0] by mergeESTLegacyIntoProfiles below.
+			Profiles: loadESTProfilesFromEnv(),
 		},
 		SCEP: SCEPConfig{
 			Enabled:           getEnvBool("CERTCTL_SCEP_ENABLED", false),
@@ -1474,6 +1626,14 @@ func Load() (*Config, error) {
 	// struct.
 	mergeSCEPLegacyIntoProfiles(&cfg.SCEP)
 
+	// EST RFC 7030 hardening Phase 1: same back-compat shim, EST flavor.
+	// When CERTCTL_EST_PROFILES is unset AND the legacy flat single-issuer
+	// fields are populated AND Enabled=true, synthesise a single-element
+	// Profiles[0] with PathID="" so /.well-known/est/ continues to dispatch
+	// the same way it did pre-Phase-1. Done AFTER the field-by-field load
+	// so it can read from the populated cfg.EST struct.
+	mergeESTLegacyIntoProfiles(&cfg.EST)
+
 	if err := cfg.Validate(); err != nil {
 		return nil, err
 	}
@@ -1583,6 +1743,149 @@ func validSCEPPathID(s string) bool {
 		return false
 	}
 	return true
+}
+
+// loadESTProfilesFromEnv reads the indexed CERTCTL_EST_PROFILES env var
+// (e.g. "corp,iot,wifi") and expands each name into an ESTProfileConfig
+// populated from CERTCTL_EST_PROFILE_<NAME>_*. Returns nil when the
+// CERTCTL_EST_PROFILES env var is unset or empty — in that case the
+// legacy-shim path (mergeESTLegacyIntoProfiles, called from Load after
+// the initial config build) populates Profiles[0] from the flat fields
+// if needed.
+//
+// PathID for each profile is the lowercased trimmed name from the
+// CERTCTL_EST_PROFILES list (e.g. "Corp" -> "corp"). Validation that
+// the PathID is path-safe ([a-z0-9-]+) lives in Config.Validate() so
+// the loader can stay free of error returns.
+//
+// Mirrors loadSCEPProfilesFromEnv exactly. EST RFC 7030 hardening Phase 1.
+func loadESTProfilesFromEnv() []ESTProfileConfig {
+	raw := strings.TrimSpace(os.Getenv("CERTCTL_EST_PROFILES"))
+	if raw == "" {
+		return nil
+	}
+	names := strings.Split(raw, ",")
+	out := make([]ESTProfileConfig, 0, len(names))
+	for _, n := range names {
+		n = strings.TrimSpace(n)
+		if n == "" {
+			continue
+		}
+		// The env-var key is the upper-cased name (CERTCTL_EST_PROFILE_CORP_*),
+		// but the URL path segment is the lower-cased name to match the
+		// path-safe slug constraint enforced in Validate.
+		envName := strings.ToUpper(n)
+		pathID := strings.ToLower(n)
+		out = append(out, ESTProfileConfig{
+			PathID:                      pathID,
+			IssuerID:                    getEnv("CERTCTL_EST_PROFILE_"+envName+"_ISSUER_ID", ""),
+			ProfileID:                   getEnv("CERTCTL_EST_PROFILE_"+envName+"_PROFILE_ID", ""),
+			EnrollmentPassword:          getEnv("CERTCTL_EST_PROFILE_"+envName+"_ENROLLMENT_PASSWORD", ""),
+			MTLSEnabled:                 getEnvBool("CERTCTL_EST_PROFILE_"+envName+"_MTLS_ENABLED", false),
+			MTLSClientCATrustBundlePath: getEnv("CERTCTL_EST_PROFILE_"+envName+"_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH", ""),
+			ChannelBindingRequired:      getEnvBool("CERTCTL_EST_PROFILE_"+envName+"_CHANNEL_BINDING_REQUIRED", false),
+			AllowedAuthModes:            parseAuthModes(getEnv("CERTCTL_EST_PROFILE_"+envName+"_ALLOWED_AUTH_MODES", "")),
+			RateLimitPerPrincipal24h:    getEnvInt("CERTCTL_EST_PROFILE_"+envName+"_RATE_LIMIT_PER_PRINCIPAL_24H", 0),
+			ServerKeygenEnabled:         getEnvBool("CERTCTL_EST_PROFILE_"+envName+"_SERVERKEYGEN_ENABLED", false),
+		})
+	}
+	return out
+}
+
+// parseAuthModes splits a comma-separated env value into a normalized
+// []string of auth-mode tokens. Empty input returns nil (the
+// "unauthenticated default" Phase 1 preserves for back-compat). Tokens
+// are lowercased + trimmed; unknown tokens are kept as-is so Validate
+// can refuse them with a typed error message naming the offending token.
+func parseAuthModes(s string) []string {
+	s = strings.TrimSpace(s)
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p == "" {
+			continue
+		}
+		out = append(out, p)
+	}
+	return out
+}
+
+// mergeESTLegacyIntoProfiles is the EST backward-compat shim. When
+// Profiles is empty AND the legacy single-issuer fields are populated
+// (Enabled=true is the trigger; IssuerID has a non-empty default so it
+// can't be the trigger by itself), synthesise a single-element
+// Profiles[0] with PathID="" so /.well-known/est/ dispatches identically
+// to the pre-Phase-1 deploy. No-op when Profiles is non-empty (the
+// operator explicitly opted into the structured form via
+// CERTCTL_EST_PROFILES) or when EST is disabled.
+//
+// EST's legacy single-issuer config has fewer "trigger" fields than
+// SCEP's (no per-profile RA pair, no per-profile challenge password —
+// both of those land in Phases 2/3 of the hardening bundle). The shim
+// triggers whenever EST is enabled, since the operator clearly intends
+// to serve EST. This makes the back-compat behavior identical to v2.0.66
+// (single /.well-known/est/ root with the operator's chosen issuer).
+//
+// EST RFC 7030 hardening Phase 1.
+func mergeESTLegacyIntoProfiles(c *ESTConfig) {
+	if c == nil || !c.Enabled || len(c.Profiles) > 0 {
+		return
+	}
+	c.Profiles = []ESTProfileConfig{{
+		PathID:    "", // empty pathID maps to the legacy /.well-known/est/ root
+		IssuerID:  c.IssuerID,
+		ProfileID: c.ProfileID,
+		// No legacy fields exist for EnrollmentPassword, MTLS*, etc. —
+		// those land in Phases 2/3. Operators upgrading from v2.0.66 get
+		// the same unauthenticated behavior they had before; opting into
+		// auth requires moving to the structured CERTCTL_EST_PROFILES
+		// form (which Phase 12 docs as the recommended migration path).
+	}}
+}
+
+// validESTPathID reports whether s is a valid EST profile path segment.
+// Same shape as validSCEPPathID — empty string allowed (legacy root),
+// otherwise ASCII lowercase letters / digits / hyphens with no
+// leading/trailing hyphen. Kept as a separate function (rather than
+// generalizing) so that future EST-specific path constraints (e.g. RFC
+// 7030 §3.2.2 reserved path segments) can land here without affecting
+// SCEP's validator.
+//
+// EST RFC 7030 hardening Phase 1.
+func validESTPathID(s string) bool {
+	if s == "" {
+		return true // empty maps to legacy /.well-known/est/ root
+	}
+	if s[0] == '-' || s[len(s)-1] == '-' {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		c := s[i]
+		if (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '-' {
+			continue
+		}
+		return false
+	}
+	return true
+}
+
+// validESTAuthMode reports whether mode is one of the documented EST
+// auth modes Phase 2 + Phase 3 will dispatch on. Kept here so Validate
+// can refuse unknown modes (typos, future modes the binary doesn't yet
+// implement) at startup with a clear error rather than at first-request
+// with a confusing 401/403.
+//
+// EST RFC 7030 hardening Phase 1.
+func validESTAuthMode(mode string) bool {
+	switch mode {
+	case "mtls", "basic":
+		return true
+	}
+	return false
 }
 
 // Validate checks that the configuration is valid.
@@ -1817,6 +2120,92 @@ func (c *Config) Validate() error {
 			}
 			if p.Intune.ChallengeValidity > 0 && p.Intune.ClockSkewTolerance >= p.Intune.ChallengeValidity {
 				return fmt.Errorf("SCEP profile %d (PathID=%q) has INTUNE_CLOCK_SKEW_TOLERANCE=%s ≥ INTUNE_CHALLENGE_VALIDITY=%s — refuse to start: tolerance ≥ validity makes the per-profile validity cap vacuous", i, p.PathID, p.Intune.ClockSkewTolerance, p.Intune.ChallengeValidity)
+			}
+		}
+	}
+
+	// EST RFC 7030 hardening Phase 1: per-profile validation. When the
+	// structured Profiles slice is populated (either via CERTCTL_EST_PROFILES
+	// or via the legacy-shim merge in Load), iterate each profile and refuse
+	// boot if any is malformed. PathID format + uniqueness, IssuerID
+	// presence, MTLS-bundle-required-when-enabled, AllowedAuthModes shape,
+	// RateLimit ≥0 are all gated here. Phase 2/3 preflights validate the
+	// MTLS trust bundle file itself (mode, parse, expiry); Phase 1 is
+	// the structural-config refuse, defense in depth.
+	if c.EST.Enabled {
+		seenESTPath := map[string]bool{}
+		for i, p := range c.EST.Profiles {
+			if !validESTPathID(p.PathID) {
+				return fmt.Errorf("EST profile %d (%q) has invalid PathID — refuse to start: must be empty (legacy /.well-known/est/ root) or a path-safe slug matching [a-z0-9-]+ with no leading/trailing hyphen (got %q)", i, p.PathID, p.PathID)
+			}
+			if seenESTPath[p.PathID] {
+				return fmt.Errorf("EST profile %d duplicates PathID %q — refuse to start: each profile must have a unique URL segment so the router can dispatch unambiguously", i, p.PathID)
+			}
+			seenESTPath[p.PathID] = true
+			if p.IssuerID == "" {
+				return fmt.Errorf("EST profile %d (PathID=%q) has empty IssuerID — refuse to start: each EST profile must bind to a configured issuer", i, p.PathID)
+			}
+			// Phase 2: when mTLS is enabled, the trust bundle path must be
+			// set. The Phase 2 preflight in cmd/server/main.go validates
+			// the file itself (exists, parseable PEM, ≥1 cert, none
+			// expired); this gate is the structural-config refuse,
+			// defense in depth — without it an operator who flips
+			// MTLS_ENABLED=true but forgets to set
+			// MTLS_CLIENT_CA_TRUST_BUNDLE_PATH would get every mTLS
+			// enrollment rejected at runtime with no trust anchor
+			// configured.
+			if p.MTLSEnabled && p.MTLSClientCATrustBundlePath == "" {
+				return fmt.Errorf("EST profile %d (PathID=%q) has MTLSEnabled=true but MTLS_CLIENT_CA_TRUST_BUNDLE_PATH is empty — refuse to start: the mTLS sibling route /.well-known/est-mtls/%s/ would have no client-cert trust anchor", i, p.PathID, p.PathID)
+			}
+			// Channel-binding is meaningful only when mTLS is in use (RFC
+			// 9266 binds the TLS-presented client cert to the CSR's CMC
+			// id-aa-channelBindings attribute). Channel-binding-required-
+			// without-mTLS is operator confusion; refuse at boot so the
+			// intent is unambiguous.
+			if p.ChannelBindingRequired && !p.MTLSEnabled {
+				return fmt.Errorf("EST profile %d (PathID=%q) has ChannelBindingRequired=true but MTLSEnabled=false — refuse to start: RFC 9266 channel binding is meaningful only when mTLS is in use; either enable mTLS (set MTLS_ENABLED=true + MTLS_CLIENT_CA_TRUST_BUNDLE_PATH) or disable the channel-binding requirement", i, p.PathID)
+			}
+			// AllowedAuthModes shape: every entry must be a known mode.
+			// Empty slice is allowed (Phase 1 preserves the unauthenticated
+			// default for back-compat); Phase 3 docs nudge operators to set
+			// this explicitly, and a future bundle may flip the default to
+			// require explicit opt-in.
+			for _, mode := range p.AllowedAuthModes {
+				if !validESTAuthMode(mode) {
+					return fmt.Errorf("EST profile %d (PathID=%q) has unknown AllowedAuthModes entry %q — refuse to start: valid modes are \"mtls\" + \"basic\" (Phase 2/3 of the EST hardening bundle wire each)", i, p.PathID, mode)
+				}
+			}
+			// Cross-check: when AllowedAuthModes mentions "mtls", the
+			// profile's MTLSEnabled MUST be true (otherwise the auth mode
+			// references infrastructure the operator hasn't configured).
+			// Conversely, "basic" in AllowedAuthModes requires a non-empty
+			// EnrollmentPassword (Phase 3 will ALSO refuse a configured
+			// "basic" mode without a password; we duplicate the gate here
+			// for defense in depth).
+			authModeIndex := map[string]bool{}
+			for _, mode := range p.AllowedAuthModes {
+				authModeIndex[mode] = true
+			}
+			if authModeIndex["mtls"] && !p.MTLSEnabled {
+				return fmt.Errorf("EST profile %d (PathID=%q) lists \"mtls\" in AllowedAuthModes but MTLSEnabled=false — refuse to start: enable mTLS or remove \"mtls\" from the auth-mode list", i, p.PathID)
+			}
+			if authModeIndex["basic"] && p.EnrollmentPassword == "" {
+				return fmt.Errorf("EST profile %d (PathID=%q) lists \"basic\" in AllowedAuthModes but ENROLLMENT_PASSWORD is empty — refuse to start: HTTP Basic auth needs a per-profile shared secret (set CERTCTL_EST_PROFILE_<NAME>_ENROLLMENT_PASSWORD)", i, p.PathID)
+			}
+			// RateLimitPerPrincipal24h ≥ 0. Negative is a config typo;
+			// zero means 'disabled' (allowed for tests + the rare operator
+			// who wants no per-device cap, mirrors SCEP's same default).
+			if p.RateLimitPerPrincipal24h < 0 {
+				return fmt.Errorf("EST profile %d (PathID=%q) has RATE_LIMIT_PER_PRINCIPAL_24H=%d — refuse to start: must be ≥0 (zero disables the per-principal cap, positive values enforce it)", i, p.PathID, p.RateLimitPerPrincipal24h)
+			}
+			// ServerKeygenEnabled requires an explicit ProfileID + the
+			// referenced CertificateProfile to pin AllowedKeyAlgorithms
+			// (the server has to decide what algorithm to generate). The
+			// presence of the CertificateProfile in the registry is checked
+			// at boot by the Phase 5 preflight; here we just gate the
+			// presence of ProfileID.
+			if p.ServerKeygenEnabled && p.ProfileID == "" {
+				return fmt.Errorf("EST profile %d (PathID=%q) has SERVERKEYGEN_ENABLED=true but PROFILE_ID is empty — refuse to start: server-side keygen needs a CertificateProfile to pin AllowedKeyAlgorithms (the server must know what key to generate)", i, p.PathID)
 			}
 		}
 	}

@@ -93,27 +93,29 @@ func setupTestServer(t *testing.T) (*httptest.Server, *mockCertificateRepository
 
 	r := router.New()
 	r.RegisterHandlers(router.HandlerRegistry{
-		Certificates:  certificateHandler,
-		Issuers:       issuerHandler,
-		Targets:       targetHandler,
-		Agents:        agentHandler,
-		Jobs:          jobHandler,
-		Policies:      policyHandler,
-		Profiles:      profileHandler,
-		Teams:         teamHandler,
-		Owners:        ownerHandler,
-		AgentGroups:   agentGroupHandler,
-		Audit:         auditHandler,
-		Notifications: notificationHandler,
-		Stats:         statsHandler,
-		Metrics:       metricsHandler,
-		Health:        healthHandler,
-		Discovery:     discoveryHandler,
-		NetworkScan:   networkScanHandler,
-		Verification:    verificationHandler,
-		BulkRevocation:  handler.BulkRevocationHandler{},
+		Certificates:   certificateHandler,
+		Issuers:        issuerHandler,
+		Targets:        targetHandler,
+		Agents:         agentHandler,
+		Jobs:           jobHandler,
+		Policies:       policyHandler,
+		Profiles:       profileHandler,
+		Teams:          teamHandler,
+		Owners:         ownerHandler,
+		AgentGroups:    agentGroupHandler,
+		Audit:          auditHandler,
+		Notifications:  notificationHandler,
+		Stats:          statsHandler,
+		Metrics:        metricsHandler,
+		Health:         healthHandler,
+		Discovery:      discoveryHandler,
+		NetworkScan:    networkScanHandler,
+		Verification:   verificationHandler,
+		BulkRevocation: handler.BulkRevocationHandler{},
 	})
-	r.RegisterESTHandlers(estHandler)
+	// EST RFC 7030 hardening Phase 1: RegisterESTHandlers takes a map
+	// keyed by PathID. Empty PathID = legacy /.well-known/est/ root.
+	r.RegisterESTHandlers(map[string]handler.ESTHandler{"": estHandler})
 	// M-006: CRL + OCSP live under /.well-known/pki/ (RFC 5280 + RFC 6960 + RFC 8615).
 	// The negative_test integration suite exercises the DER CRL at this path with
 	// no Authorization header to verify the relying-party contract.
@@ -643,11 +645,11 @@ func TestM11bEndpoints(t *testing.T) {
 	t.Run("AgentGroups", func(t *testing.T) {
 		t.Run("CreateAgentGroup_Success", func(t *testing.T) {
 			payload := map[string]interface{}{
-				"name":        "Linux Servers",
-				"description": "All linux-based agents",
-				"match_os":    "linux",
+				"name":               "Linux Servers",
+				"description":        "All linux-based agents",
+				"match_os":           "linux",
 				"match_architecture": "amd64",
-				"enabled":     true,
+				"enabled":            true,
 			}
 			body, _ := json.Marshal(payload)
 			resp, err := http.Post(server.URL+"/api/v1/agent-groups", "application/json", bytes.NewReader(body))
@@ -842,4 +844,3 @@ func TestRevocationEndpoints(t *testing.T) {
 		}
 	})
 }
-

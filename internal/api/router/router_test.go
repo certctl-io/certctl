@@ -304,8 +304,12 @@ func TestRegisterESTHandlers_AllPaths(t *testing.T) {
 		})
 	}
 
+	// EST RFC 7030 hardening Phase 1: RegisterESTHandlers signature
+	// changed from `(handler.ESTHandler)` to `(map[string]handler.ESTHandler)`.
+	// The empty-PathID key preserves the legacy /.well-known/est/ root
+	// routes this test asserts.
 	est := handler.ESTHandler{}
-	r.RegisterESTHandlers(est)
+	r.RegisterESTHandlers(map[string]handler.ESTHandler{"": est})
 
 	testHandler := recoverMW(r)
 
