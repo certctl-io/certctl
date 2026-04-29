@@ -760,19 +760,33 @@ IssuerConnector (connector layer via IssuerConnectorAdapter)
 Signed certificate returned as PKCS#7 certs-only
 ```
 
-**Wire format:** SCEP clients wrap CSRs in PKCS#7 SignedData envelopes. The handler parses the outer ASN.1 ContentInfo → SignedData → EncapsulatedContentInfo to extract the CSR bytes. Fallback paths handle base64-encoded PKCS#7 and raw CSR submissions (for simpler clients). Responses use PKCS#7 certs-only via the shared `internal/pkcs7` package (same as EST). Single certs are returned as raw DER for `GetCACert`, chains as PKCS#7.
+**Wire format:** Two paths, tried in order. The new RFC 8894 path (post-2026-04-29) parses the full PKIMessage shape: ContentInfo → SignedData → SignerInfo (POPO over auth-attrs verified via `internal/pkcs7/signedinfo.go::SignerInfo.VerifySignature` with the canonical SET-OF Attribute re-serialisation per RFC 5652 §5.4) → EnvelopedData (decrypted via `internal/pkcs7/envelopeddata.go::EnvelopedData.Decrypt` with RSA PKCS#1v1.5 keyTrans + AES-CBC content + constant-time PKCS#7 unpad to close the padding-oracle leak) → inner PKCS#10 CSR. Auth-attrs (messageType, transactionID, senderNonce) flow through to the service layer via `domain.SCEPRequestEnvelope`. The handler dispatches on messageType: PKCSReq (19) → initial enrollment; RenewalReq (17) → re-enrollment with chain validation; GetCertInitial (20) → polling stub returns FAILURE+badCertID. Responses are full CertRep PKIMessages (`internal/pkcs7/certrep.go::BuildCertRepPKIMessage`) signed by the per-profile RA cert/key with the issued cert chain encrypted to the device's transient signing cert (RFC 8894 §3.3.2). On parse failure the handler falls through to the legacy MVP path: base64-encoded PKCS#7 and raw CSR submissions are still accepted; responses use the legacy PKCS#7 certs-only shape via the shared `internal/pkcs7` package. The MVP fall-through is non-negotiable — backward compat with lightweight SCEP clients that don't speak full RFC 8894. Single certs are returned as raw DER for `GetCACert`, chains as PKCS#7.
 
 **Authentication:** SCEP endpoints at `/scep` and `/scep/*` are served unauthenticated at the HTTP layer — no Bearer token required — per RFC 8894 §3.2, which defines authentication via the `challengePassword` attribute (OID 1.2.840.113549.1.9.7) embedded in the PKCS#10 CSR rather than an HTTP credential. The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes `/scep` and `/scep/*` through `noAuthHandler` (RequestID + structuredLogger + Recovery only). The `challengePassword` is mandatory: `preflightSCEPChallengePassword` at startup refuses to boot the control plane when `CERTCTL_SCEP_ENABLED=true` is set without `CERTCTL_SCEP_CHALLENGE_PASSWORD`, closing CWE-306 (missing authentication for a critical function). `SCEPService.PKCSReq` enforces the same invariant defense-in-depth — an empty `s.challengePassword` rejects every enrollment — and the password comparison uses `crypto/subtle.ConstantTimeCompare` to prevent response-time side-channel leakage. The startup log line `SCEP server enabled` emits a `challenge_password_set` boolean for operator visibility.
 
-**Interface:** The `SCEPHandler` defines an `SCEPService` interface (dependency inversion):
+**Interface:** The `SCEPHandler` defines an `SCEPService` interface (dependency inversion). The legacy `PKCSReq` method backs the MVP fall-through path; the three `*WithEnvelope` variants back the RFC 8894 PKIMessage path:
 
 ```go
 type SCEPService interface {
     GetCACaps(ctx context.Context) string
     GetCACert(ctx context.Context) (string, error)
-    PKCSReq(ctx context.Context, csrPEM string, challengePassword string, transactionID string) (*domain.SCEPEnrollResult, error)
+    // MVP path — raw CSR + transactionID synthesised from CSR's CN.
+    PKCSReq(ctx context.Context, csrPEM, challengePassword, transactionID string) (*domain.SCEPEnrollResult, error)
+    // RFC 8894 path — envelope carries the parsed authenticated attributes
+    // (messageType, transactionID, senderNonce, signerCert). Returns
+    // *SCEPResponseEnvelope (not error + result) because RFC 8894 §3.3
+    // mandates a CertRep PKIMessage on every response, even failures.
+    PKCSReqWithEnvelope(ctx context.Context, csrPEM, challengePassword string, env *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
+    RenewalReqWithEnvelope(ctx context.Context, csrPEM, challengePassword string, env *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
+    GetCertInitialWithEnvelope(ctx context.Context, env *domain.SCEPRequestEnvelope) *domain.SCEPResponseEnvelope
 }
 ```
+
+**Capabilities advertised:** `POSTPKIOperation` + `SHA-256` + `SHA-512` + `AES` + `SCEPStandard` + `Renewal`. ChromeOS specifically looks for `POSTPKIOperation` (non-base64 POST), `AES` (the now-implemented CBC content encryption), `SCEPStandard` (RFC 8894 conformance), and `Renewal` (RenewalReq messageType-17 dispatch).
+
+**Multi-profile dispatch:** A single certctl instance can expose multiple SCEP endpoints from `CERTCTL_SCEP_PROFILES=corp,iot,server` + per-profile `CERTCTL_SCEP_PROFILE_<NAME>_*` env vars, each with its own issuer + RA pair + challenge password. The router exposes `/scep` (legacy, single-profile flat-env case) + `/scep/<pathID>` per non-empty profile. Per-profile preflight validates each RA pair independently; failures log the offending PathID. See [`legacy-est-scep.md`](legacy-est-scep.md#multi-profile-dispatch-scep-path-id) for the operator config recipe.
+
+**Must-staple per profile:** When `CertificateProfile.MustStaple = true`, the local issuer adds the RFC 7633 `id-pe-tlsfeature` extension (OID `1.3.6.1.5.5.7.1.24`, non-critical, value `SEQUENCE OF INTEGER {5}`) to issued certs so browsers + modern TLS libraries fail-closed on missing OCSP stapling responses.
 
 **Shared PKCS#7 package:** Both EST and SCEP handlers share a common `internal/pkcs7` package for building PKCS#7 certs-only responses and PEM-to-DER chain conversion, eliminating code duplication between the two enrollment protocols.
 

@@ -107,7 +107,7 @@ gantt
 | Protocol | Standard | Use Case |
 |----------|----------|----------|
 | EST (Enrollment over Secure Transport) | RFC 7030 | Device enrollment, WiFi/802.1X, IoT |
-| SCEP (Simple Certificate Enrollment Protocol) | RFC 8894 | MDM platforms (Jamf, Intune), network devices |
+| SCEP (Simple Certificate Enrollment Protocol) | RFC 8894 | MDM platforms (Jamf, Intune), network devices, ChromeOS. Full RFC 8894 wire format: EnvelopedData decryption, signerInfo POPO verification, CertRep PKIMessage builder; PKCSReq + RenewalReq + GetCertInitial messageType dispatch; multi-profile dispatch (`/scep/<pathID>`); per-profile RA cert + key. Lightweight raw-CSR clients keep working via the legacy MVP fall-through path. |
 | ACME v2 | RFC 8555 | Public CA automated issuance (Let's Encrypt, ZeroSSL) |
 | ACME ARI (Renewal Information) | RFC 9773 | CA-directed renewal timing — the CA tells you when to renew |
 
@@ -173,7 +173,7 @@ Built for **platform engineering and DevOps teams** managing 10–500+ certifica
 
 **Policy engine.** Certificate profiles constrain key types, max TTL, and EKUs — with crypto policy enforcement that validates every CSR against profile rules before it reaches the issuer. MaxTTL caps are enforced per issuer connector. Approval workflows pause jobs for human review. Ownership tracking routes notifications to the right team. Agent groups match devices by OS, architecture, IP CIDR, and version.
 
-**Enrollment protocols.** EST server (RFC 7030) for device and WiFi enrollment. SCEP server (RFC 8894) for MDM platforms and network devices. S/MIME issuance with email protection EKU.
+**Enrollment protocols.** EST server (RFC 7030) for device and WiFi enrollment. SCEP server (RFC 8894) for MDM platforms and network devices — full wire format (EnvelopedData decrypt + signerInfo POPO verify + CertRep PKIMessage builder), tested against ChromeOS-shape requests; multi-profile dispatch (`/scep/<pathID>`); RenewalReq + GetCertInitial messageType support; lightweight raw-CSR fallback for legacy clients. See [docs/legacy-est-scep.md](docs/legacy-est-scep.md) for the operator + device-integration guide. S/MIME issuance with email protection EKU.
 
 **Revocation.** Single and bulk revocation (by profile, owner, agent, or issuer). RFC 5280 reason codes. Production-grade revocation status surface for relying parties: DER-encoded X.509 CRL per issuer, scheduler-pre-generated and cached so HTTP fetches do not rebuild per request; embedded OCSP responder serving both GET and POST forms (RFC 6960 §A.1.1) with responses signed by a per-issuer dedicated OCSP responder cert (RFC 6960 §2.6, `id-pkix-ocsp-nocheck` per §4.2.2.2.1) — the CA private key is never used directly for OCSP signing. Both endpoints live unauthenticated under `/.well-known/pki/` per RFC 8615. Short-lived certs (TTL < 1 hour) are exempt — expiry is sufficient revocation. See [docs/crl-ocsp.md](docs/crl-ocsp.md) for the relying-party integration guide.
 

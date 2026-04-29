@@ -327,7 +327,9 @@ The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used b
 - **step-ca**: Returns error — step-ca serves its own `/root` endpoint for CA distribution.
 - **OpenSSL/Custom CA**: Returns error — custom script-based CAs have no CA cert access through certctl.
 
-Note: EST and SCEP are not connectors — they are protocol handlers (`internal/api/handler/est.go` and `internal/api/handler/scep.go`) that delegate certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID` or `CERTCTL_SCEP_ISSUER_ID`. Both share a common `internal/pkcs7` package for PKCS#7 response encoding. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
+Note: EST and SCEP are not connectors — they are protocol handlers (`internal/api/handler/est.go` and `internal/api/handler/scep.go`) that delegate certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID` or `CERTCTL_SCEP_ISSUER_ID` (or the per-profile `CERTCTL_SCEP_PROFILE_<NAME>_ISSUER_ID` form for multi-endpoint SCEP). Both share a common `internal/pkcs7` package for PKCS#7 response encoding. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for details.
+
+**SCEP RA cert + key (post-2026-04-29):** the SCEP server's RFC 8894 path requires an RA cert/key pair (`CERTCTL_SCEP_RA_CERT_PATH` + `CERTCTL_SCEP_RA_KEY_PATH`, mode 0600) — clients encrypt their CSR to the RA cert's public key per RFC 8894 §3.2.2. Multi-profile deployments configure per-profile pairs via `CERTCTL_SCEP_PROFILES=corp,iot` + `CERTCTL_SCEP_PROFILE_<NAME>_RA_*_PATH`. See [`legacy-est-scep.md`](legacy-est-scep.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the openssl recipe + ChromeOS Admin Console pointer + must-staple per-profile policy.
 
 ### Built-in: Vault PKI
 
