@@ -29,6 +29,7 @@ package integration_test
 import (
 	"crypto/x509"
 	"encoding/asn1"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"io"
@@ -39,6 +40,22 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ocsp"
+)
+
+// ---------------------------------------------------------------------------
+// Test-stack-specific identifiers — match deploy/docker-compose.test.yml's
+// seed data + migrations/seed.sql. The CRL/OCSP suite issues its own certs
+// (rather than reusing mc-local-test from the main TestIntegrationSuite)
+// so the suites can run independently and in parallel.
+// ---------------------------------------------------------------------------
+
+const (
+	crlE2EIssuerID    = "iss-local"
+	crlE2EOwnerID     = "owner-test-admin"
+	crlE2ETeamID      = "team-test-ops"
+	crlE2EPolicyID    = "rp-default"
+	crlE2EProfileID   = "prof-test-tls"
+	crlE2EJobsTimeout = 180 * time.Second
 )
 
 // TestCRLOCSPLifecycle exercises the CRL/OCSP-Responder backend
@@ -162,25 +179,162 @@ func TestCRLOCSPPostEndpoint(t *testing.T) {
 // existing convention.
 // ---------------------------------------------------------------------------
 
-// issueLocalCert issues a cert against the test-stack's local issuer
-// and returns the parsed cert + PEM + hex serial. Implementation
-// reuses the existing integration_test.go::createCertificate path —
-// adapt the body to whatever helper is in scope by the time CI runs
-// this. For brevity, the stub here documents the contract; the
-// implementer can replace the body with the actual API calls once
-// the integration_test.go primitives are read in full.
-func issueLocalCert(t *testing.T, commonName string) (cert *x509.Certificate, certPEM string, hexSerial string) {
-	t.Helper()
-	t.Skip("TODO: wire to integration_test.go::createCertificate or equivalent helper. " +
-		"Stub emits skip rather than panic so the file compiles + lists in `go test -list`.")
-	return nil, "", ""
+// crlE2ECert tracks the certctl-side ID + the parsed leaf together. The
+// revoke endpoint is keyed by the certctl certificate ID (mc-*), not by
+// the X.509 serial — so the test threads both through the helpers.
+type crlE2ECert struct {
+	CertctlID string            // e.g. "mc-crl-e2e-<n>"
+	Leaf      *x509.Certificate // parsed leaf
+	HexSerial string            // lowercase hex of Leaf.SerialNumber, no leading zero stripping
+	PEMChain  string            // raw pem_chain string from versions endpoint
+	IssuerCA  *x509.Certificate // parsed issuer CA (chain[1] when present, else chain[0])
 }
 
-// revokeCertViaAPI calls POST /api/v1/certificates/{id}/revoke (or the
-// equivalent path in the existing integration suite). Stub for now.
+// crlE2ECerts holds the in-flight cert-ID → cert mapping so revokeCertViaAPI
+// can resolve the hex serial back to the certctl cert ID. Populated by
+// issueLocalCert. Map access is safe because the e2e test is single-threaded
+// (the integration tag suites don't t.Parallel()).
+var crlE2ECerts = map[string]*crlE2ECert{}
+
+// issueLocalCert issues a cert against the test-stack's local issuer and
+// returns the parsed leaf + raw PEM chain + hex serial. Wires through the
+// existing integration_test.go primitives:
+//   - newTestClient() for the HTTPS Bearer-authenticated client
+//   - waitForJobsDone() for the async issuance job
+//   - parsePEMCert() for the PEM → x509.Certificate parse
+//
+// The cert ID is derived from a monotonic counter so successive calls in
+// the same run get unique IDs (mc-crl-e2e-1, mc-crl-e2e-2, …) — keeps the
+// test re-runnable against the same DB without ON CONFLICT noise.
+func issueLocalCert(t *testing.T, commonName string) (cert *x509.Certificate, certPEM string, hexSerial string) {
+	t.Helper()
+
+	c := newTestClient()
+
+	certID := fmt.Sprintf("mc-crl-e2e-%d", len(crlE2ECerts)+1)
+	body := fmt.Sprintf(`{
+		"id": %q,
+		"name": %q,
+		"common_name": %q,
+		"sans": [%q],
+		"issuer_id": %q,
+		"owner_id": %q,
+		"team_id": %q,
+		"renewal_policy_id": %q,
+		"certificate_profile_id": %q,
+		"environment": "test"
+	}`, certID, certID, commonName, commonName,
+		crlE2EIssuerID, crlE2EOwnerID, crlE2ETeamID, crlE2EPolicyID, crlE2EProfileID)
+
+	resp, err := c.Post("/api/v1/certificates", body)
+	if err != nil {
+		t.Fatalf("issueLocalCert: POST /certificates: %v", err)
+	}
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("issueLocalCert: POST status %d, body=%s", resp.StatusCode, readBody(resp))
+	}
+	resp.Body.Close()
+
+	// Trigger issuance + wait for the job to finish.
+	resp, err = c.Post("/api/v1/certificates/"+certID+"/renew", "")
+	if err != nil {
+		t.Fatalf("issueLocalCert: POST renew: %v", err)
+	}
+	resp.Body.Close()
+	waitForJobsDone(t, c, certID, crlE2EJobsTimeout)
+
+	// Pull the freshly-issued version.
+	resp, err = c.Get("/api/v1/certificates/" + certID + "/versions")
+	if err != nil {
+		t.Fatalf("issueLocalCert: GET versions: %v", err)
+	}
+	rawBody := readBody(resp)
+	var versions []certVersion
+	if err := json.Unmarshal([]byte(rawBody), &versions); err != nil {
+		// Versions endpoint may use the paged envelope.
+		var pr pagedResponse
+		if err := json.Unmarshal([]byte(rawBody), &pr); err != nil {
+			t.Fatalf("issueLocalCert: decode versions: %v (body: %s)", err, rawBody)
+		}
+		if err := json.Unmarshal(pr.Data, &versions); err != nil {
+			t.Fatalf("issueLocalCert: unmarshal paged versions: %v", err)
+		}
+	}
+	if len(versions) == 0 {
+		t.Fatalf("issueLocalCert: no versions returned for %s", certID)
+	}
+	v := versions[0]
+	if v.PEMChain == "" {
+		t.Fatalf("issueLocalCert: empty pem_chain on version %s", v.ID)
+	}
+
+	leaf, issuerCA := parsePEMChain(t, v.PEMChain)
+	hex := strings.ToLower(leaf.SerialNumber.Text(16))
+
+	crlE2ECerts[hex] = &crlE2ECert{
+		CertctlID: certID,
+		Leaf:      leaf,
+		HexSerial: hex,
+		PEMChain:  v.PEMChain,
+		IssuerCA:  issuerCA,
+	}
+	return leaf, v.PEMChain, hex
+}
+
+// parsePEMChain decodes a leaf || issuer || ... PEM bundle. Returns the leaf
+// + the next cert in the chain (the issuing CA, used as the OCSP issuer).
+// If the chain has only one cert (self-signed test root), returns it twice.
+func parsePEMChain(t *testing.T, chainPEM string) (leaf, issuer *x509.Certificate) {
+	t.Helper()
+	rest := []byte(chainPEM)
+	var certs []*x509.Certificate
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type != "CERTIFICATE" {
+			continue
+		}
+		c, err := x509.ParseCertificate(block.Bytes)
+		if err != nil {
+			t.Fatalf("parsePEMChain: %v", err)
+		}
+		certs = append(certs, c)
+	}
+	if len(certs) == 0 {
+		t.Fatalf("parsePEMChain: no certificates decoded from chain")
+	}
+	leaf = certs[0]
+	if len(certs) >= 2 {
+		issuer = certs[1]
+	} else {
+		issuer = certs[0] // self-signed test root
+	}
+	return leaf, issuer
+}
+
+// revokeCertViaAPI calls POST /api/v1/certificates/{id}/revoke. The certctl
+// API keys revocation by certctl cert ID (mc-*), not by X.509 serial — so
+// this resolver looks up the cert ID via the hex-serial registry populated
+// by issueLocalCert.
 func revokeCertViaAPI(t *testing.T, hexSerial string, reason string) {
 	t.Helper()
-	t.Skip("TODO: wire to existing API revoke helper")
+	entry, ok := crlE2ECerts[strings.ToLower(hexSerial)]
+	if !ok {
+		t.Fatalf("revokeCertViaAPI: no certctl ID registered for serial %s — call issueLocalCert first", hexSerial)
+	}
+	c := newTestClient()
+	body := fmt.Sprintf(`{"reason": %q}`, reason)
+	resp, err := c.Post("/api/v1/certificates/"+entry.CertctlID+"/revoke", body)
+	if err != nil {
+		t.Fatalf("revokeCertViaAPI: %v", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode/100 != 2 {
+		t.Fatalf("revokeCertViaAPI: POST status %d, body=%s", resp.StatusCode, readBody(resp))
+	}
 }
 
 // fetchCRL hits GET /.well-known/pki/crl/{issuer_id} and returns the
@@ -230,12 +384,37 @@ func fetchOCSP(t *testing.T, issuerID, hexSerial string) (*ocsp.Response, *x509.
 	return parsed, parsed.Certificate
 }
 
-// fetchCACert fetches the CA cert PEM via the existing
-// /.well-known/pki/cacert/ or equivalent endpoint. Stub for now;
-// implementer wires to the real path when fleshing out.
+// fetchCACert returns the issuing CA certificate for the given issuer.
+//
+// Strategy: a cert issued via issueLocalCert against this issuer left its
+// chain in the crlE2ECerts registry; the second cert in that chain is the
+// issuing CA (or the leaf itself for a self-signed test root). This
+// avoids a dependency on a /.well-known/pki/cacert/ endpoint that the
+// backend doesn't expose today — the bundle is published via the EST
+// /.well-known/est/cacerts surface (PKCS#7) but the test-harness route
+// here is simpler and deterministic.
+//
+// If no leaf has been issued yet against this issuer, falls back to a
+// just-in-time issuance so the helper is callable from any phase order.
 func fetchCACert(t *testing.T, issuerID string) *x509.Certificate {
 	t.Helper()
-	t.Skip("TODO: wire to CA cert fetch endpoint")
+	for _, entry := range crlE2ECerts {
+		if entry.IssuerCA != nil && entry.Leaf.Issuer.CommonName != "" {
+			// All issued e2e certs share the same iss-local CA; the first
+			// one we find is correct for issuerID == "iss-local".
+			if issuerID == crlE2EIssuerID || strings.HasPrefix(issuerID, "iss-local") {
+				return entry.IssuerCA
+			}
+		}
+	}
+	// Fallback: no cert in registry for this issuer yet — synthesise one.
+	_, _, _ = issueLocalCert(t, fmt.Sprintf("cacert-bootstrap-%d.example.com", time.Now().UnixNano()))
+	for _, entry := range crlE2ECerts {
+		if entry.IssuerCA != nil {
+			return entry.IssuerCA
+		}
+	}
+	t.Fatalf("fetchCACert: no CA cert resolvable for issuer %s after bootstrap", issuerID)
 	return nil
 }
 
@@ -268,28 +447,43 @@ func certHasOCSPNoCheck(cert *x509.Certificate) bool {
 	return false
 }
 
-// requireServerReady, serverBaseURL, httpClient — these helpers exist
-// in integration_test.go's harness. Local stubs here simply skip
-// when called outside a configured stack, so this file compiles
-// standalone in the sandbox where `go vet ./deploy/test/...` runs
-// without the full integration env.
+// requireServerReady polls /health until it returns 200, or t.Fatals after
+// 30s. The endpoint is unauthenticated (router.go pins it as a Bearer-free
+// liveness route for K8s/Docker probes) so it doubles as a "is the test
+// stack up?" probe before the suite makes its first authenticated call.
 func requireServerReady(t *testing.T) {
 	t.Helper()
-	if _, err := pem.Decode(nil); err != nil {
-		// no-op reference to keep imports tidy
+	client := newUnauthHTTPClient()
+	deadline := time.Now().Add(30 * time.Second)
+	url := serverURL + "/health"
+	for time.Now().Before(deadline) {
+		resp, err := client.Get(url)
+		if err == nil {
+			resp.Body.Close()
+			if resp.StatusCode == http.StatusOK {
+				return
+			}
+		}
+		time.Sleep(500 * time.Millisecond)
 	}
-	t.Skip("TODO: wire to integration_test.go::requireServerReady (or replace with the existing helper)")
+	t.Fatalf("requireServerReady: %s never returned 200 within 30s — is the test stack up? (run `docker compose -f deploy/docker-compose.test.yml up -d` first)", url)
 }
 
+// serverBaseURL returns the server URL configured by the integration
+// harness (CERTCTL_TEST_SERVER_URL, defaulting to https://localhost:8443
+// per deploy/docker-compose.test.yml).
 func serverBaseURL(t *testing.T) string {
 	t.Helper()
-	return "https://localhost:8443" // matches deploy/docker-compose.test.yml
+	return serverURL
 }
 
+// httpClient returns the unauthenticated TLS-trust-aware client from the
+// integration harness. The /.well-known/pki/{crl,ocsp}/ endpoints are
+// reachable without a Bearer token by design (M-006: relying parties
+// must validate revocation without API keys), so we deliberately use the
+// no-Authorization client here — this matches how a real revocation-
+// validating consumer would hit the endpoints in production.
 func httpClient(t *testing.T) *http.Client {
 	t.Helper()
-	// The existing integration suite has a TLS-trust-aware client; reuse
-	// it when integrating fully. The stub here returns a plain client
-	// so the test compiles standalone.
-	return &http.Client{Timeout: 30 * time.Second}
+	return newUnauthHTTPClient()
 }
