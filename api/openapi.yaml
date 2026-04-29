@@ -981,6 +981,104 @@ paths:
         "500":
           description: Trust anchor reload failed (the OLD pool is retained)
 
+  /api/v1/admin/est/profiles:
+    get:
+      tags: [EST]
+      summary: Per-profile EST administration overview (admin)
+      description: |
+        Returns one snapshot per configured EST profile with always-present
+        per-profile fields (path_id, issuer_id, profile_id, mtls_enabled,
+        basic_auth_configured, server_keygen_enabled, counters) plus an
+        optional trust-anchor sub-block when the profile has MTLS_ENABLED=true.
+
+        Counter labels: success_simpleenroll, success_simplereenroll,
+        success_serverkeygen, auth_failed_basic, auth_failed_mtls,
+        auth_failed_channel_binding, csr_invalid, csr_policy_violation,
+        csr_signature_mismatch, rate_limited, issuer_error, internal_error.
+
+        Admin-gated (M-008 pattern). Non-admin Bearer callers get HTTP 403 —
+        the snapshot reveals operator profile set, mTLS trust-anchor expiries,
+        and auth-mode posture (sensitive operational metadata). EST RFC 7030
+        hardening master bundle Phase 7.2.
+      operationId: listESTProfiles
+      responses:
+        "200":
+          description: Per-profile EST administration snapshot
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  profiles:
+                    type: array
+                    items:
+                      type: object
+                  profile_count:
+                    type: integer
+                  generated_at:
+                    type: string
+                    format: date-time
+        "403":
+          description: Admin access required
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/admin/est/reload-trust:
+    post:
+      tags: [EST]
+      summary: Reload an EST profile's mTLS trust anchor (admin)
+      description: |
+        Triggers the same Reload that the SIGHUP watcher would run for
+        the named EST profile. The body MUST be `{"path_id": "<pathID>"}`;
+        an empty body targets the legacy `/.well-known/est` root profile
+        (PathID="").
+
+        Returns 200 + `{"reloaded": true, ...}` on success; 404 when the
+        path_id doesn't match any configured EST profile; 409 when the
+        profile exists but mTLS is disabled on it (no trust anchor to
+        reload); 500 when the underlying file fails to parse — in which
+        case the holder retains the OLD pool so enrollment keeps working
+        off the previous trust anchor while the operator fixes the file.
+
+        Admin-gated (M-008 pattern). EST RFC 7030 hardening master
+        bundle Phase 7.2.
+      operationId: reloadESTTrust
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                path_id:
+                  type: string
+                  description: EST profile PathID (empty string = legacy /.well-known/est root)
+      responses:
+        "200":
+          description: Trust anchor reloaded
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  reloaded:
+                    type: boolean
+                  path_id:
+                    type: string
+                  reloaded_at:
+                    type: string
+                    format: date-time
+        "400":
+          description: Invalid JSON body
+        "403":
+          description: Admin access required
+        "404":
+          description: EST profile not found for the given path_id
+        "409":
+          description: EST profile exists but mTLS is disabled
+        "500":
+          description: Trust anchor reload failed (the OLD pool is retained)
+
   /.well-known/pki/ocsp/{issuer_id}:
     post:
       tags: [CRL & OCSP]
@@ -3697,6 +3795,71 @@ paths:
                 format: byte
         "204":
           description: No CSR attributes defined (empty response)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /.well-known/est/serverkeygen:
+    post:
+      tags: [EST]
+      summary: EST server-driven key generation (RFC 7030 §4.4)
+      description: |
+        EST RFC 7030 §4.4 server-keygen endpoint. Server generates the
+        keypair, issues the certificate with the new pubkey, and returns
+        BOTH the cert (as `application/pkcs7-mime; smime-type=certs-only`)
+        AND the corresponding private key (as `application/pkcs7-mime;
+        smime-type=enveloped-data` — the private key is wrapped in CMS
+        EnvelopedData encrypted to the client's CSR-supplied
+        key-encipherment public key per RFC 7030 §4.4.2).
+
+        The two parts are returned as a `multipart/mixed` response body
+        with a per-response random boundary. Standard EST clients
+        (libest, openssl + smime) parse this multipart body natively.
+
+        Per-profile gate: this endpoint is registered for every EST
+        profile but returns 404 unless the operator opted in via
+        `CERTCTL_EST_PROFILE_<NAME>_SERVER_KEYGEN_ENABLED=true`. The
+        per-profile gate constrains the attack surface — server-driven
+        keygen requires the server to hold plaintext private keys
+        briefly, a meaningful trust delta from device-driven keygen.
+
+        Auth modes match the simpleenroll endpoint: HTTP Basic when the
+        per-profile enrollment-password is set, anonymous otherwise.
+        The mTLS sibling route at /.well-known/est-mtls/<PathID>/serverkeygen
+        is registered when the profile has MTLS_ENABLED=true.
+
+        EST RFC 7030 hardening master bundle Phase 5.
+      operationId: estServerKeygen
+      security: []
+      requestBody:
+        required: true
+        description: Base64-encoded PKCS#10 CSR. The CSR's Subject + SANs
+          drive the issued cert's identity. The CSR's pubkey MUST be RSA
+          — that pubkey is the encryption target for the returned
+          private key (CMS EnvelopedData uses RSA PKCS#1 v1.5 keyTrans).
+        content:
+          application/pkcs10:
+            schema:
+              type: string
+              format: byte
+      responses:
+        "200":
+          description: Multipart body with cert + EnvelopedData-wrapped key
+          content:
+            multipart/mixed:
+              schema:
+                type: string
+                format: byte
+        "400":
+          description: |
+            CSR malformed, CSR pubkey not RSA (RFC 7030 §4.4.2 requires
+            an encryption mechanism), or unsupported keygen algorithm
+            requested by the profile.
+        "401":
+          description: HTTP Basic auth failed (when enrollment-password is set)
+        "404":
+          description: Server-keygen not enabled for this profile
+        "429":
+          description: Per-(CN, source-IP) rate limit exceeded
         "500":
           $ref: "#/components/responses/InternalError"
 

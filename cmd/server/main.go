@@ -672,6 +672,11 @@ func main() {
 	// admin endpoint observes the populated state at request time.
 	scepServices := map[string]*service.SCEPService{}
 
+	// EST RFC 7030 hardening master bundle Phase 7.2: same shape for
+	// the EST admin endpoint. The EST startup loop populates this map
+	// by PathID; the AdminEST handler reads it at request time.
+	estServices := map[string]*service.ESTService{}
+
 	// Build the API router with all handlers
 	apiRouter := router.New()
 	apiRouter.RegisterHandlers(router.HandlerRegistry{
@@ -721,6 +726,11 @@ func main() {
 		// stats endpoint returns an empty profiles array.
 		AdminSCEPIntune: handler.NewAdminSCEPIntuneHandler(
 			handler.NewAdminSCEPIntuneServiceImpl(scepServices),
+		),
+		// EST RFC 7030 hardening Phase 7.2: admin endpoint backing the
+		// EST Administration GUI. Same shape as AdminSCEPIntune.
+		AdminEST: handler.NewAdminESTHandler(
+			handler.NewAdminESTServiceImpl(estServices),
 		),
 	})
 	// Register EST (RFC 7030) handlers if enabled.
@@ -789,6 +799,11 @@ func main() {
 			}
 			estHandler := handler.NewESTHandler(estService)
 			estHandler.SetLabelForLog(fmt.Sprintf("est (PathID=%q)", profile.PathID))
+			// Phase 5: server-keygen endpoint per profile. The per-profile gate
+			// stays off by default so existing v2.X.0 deploys see no behavior
+			// change unless the operator explicitly opts in via
+			// CERTCTL_EST_PROFILE_<NAME>_SERVER_KEYGEN_ENABLED=true.
+			estHandler.SetServerKeygenEnabled(profile.ServerKeygenEnabled)
 
 			// Phase 3.1: HTTP Basic enrollment password. Only takes effect
 			// on the standard /.well-known/est/<PathID>/ route — the mTLS
@@ -856,6 +871,7 @@ func main() {
 				mtlsHandler.SetLabelForLog(fmt.Sprintf("est-mtls (PathID=%q)", profile.PathID))
 				mtlsHandler.SetMTLSTrust(holder)
 				mtlsHandler.SetChannelBindingRequired(profile.ChannelBindingRequired)
+				mtlsHandler.SetServerKeygenEnabled(profile.ServerKeygenEnabled)
 				if profile.RateLimitPerPrincipal24h > 0 {
 					perPrincipal := ratelimit.NewSlidingWindowLimiter(profile.RateLimitPerPrincipal24h, 24*time.Hour, 100_000)
 					mtlsHandler.SetPerPrincipalRateLimiter(perPrincipal)
@@ -883,6 +899,25 @@ func main() {
 				estHandler.SetPerPrincipalRateLimiter(perPrincipal)
 			}
 			estHandlers[profile.PathID] = estHandler
+
+			// Phase 7.2: publish service into the shared estServices map +
+			// wire the per-profile observability metadata so the AdminEST
+			// handler can render the Profiles tab. This MUST happen after
+			// every per-profile setter so Stats() snapshot reads stable
+			// state.
+			//
+			// trustHolderForAdmin: the EST mTLS branch above declares a
+			// local `holder` variable when MTLSEnabled=true. We rebuild
+			// the lookup here so the metadata setter sees the same
+			// holder. Non-mTLS profiles see nil — Stats() handles that.
+			var trustHolderForAdmin *trustanchor.Holder
+			if profile.MTLSEnabled && estMTLSHandlers[profile.PathID].HasMTLSTrust() {
+				trustHolderForAdmin = estMTLSHandlers[profile.PathID].MTLSTrust()
+			}
+			estService.SetESTAdminMetadata(profile.PathID, profile.MTLSEnabled,
+				profile.EnrollmentPassword != "", profile.ServerKeygenEnabled,
+				trustHolderForAdmin)
+			estServices[profile.PathID] = estService
 
 			endpoint := "/.well-known/est"
 			if profile.PathID != "" {

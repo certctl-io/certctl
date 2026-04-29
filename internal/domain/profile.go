@@ -1,6 +1,7 @@
 package domain
 
 import (
+	"encoding/asn1"
 	"time"
 )
 
@@ -33,10 +34,33 @@ type CertificateProfile struct {
 	// Recommended for: Intune-deployed device certs (modern TLS clients);
 	// SCEP profiles serving general/legacy clients (ChromeOS, IoT) should
 	// stay false until the TLS path is verified.
-	MustStaple bool      `json:"must_staple"`
-	Enabled    bool      `json:"enabled"`
-	CreatedAt  time.Time `json:"created_at"`
-	UpdatedAt  time.Time `json:"updated_at"`
+	MustStaple bool `json:"must_staple"`
+
+	// RequiredCSRAttributes is the per-profile hint list the EST `csrattrs`
+	// endpoint (RFC 7030 §4.5) returns to enrolling clients. Values are
+	// short string keys that map to ASN.1 ObjectIdentifiers via
+	// AttributeStringToOID — example: ["serialNumber", "deviceSerialNumber"]
+	// to push the device serial into the issued cert's Subject DN for
+	// IoT bootstrapping. Defaults empty (the EST handler then returns
+	// 204-No-Content per RFC 7030 §4.5.2 — the legacy stub behavior).
+	//
+	// EKU strings already live in AllowedEKUs above and are added to the
+	// csrattrs response automatically — RequiredCSRAttributes covers the
+	// non-EKU attribute hints (RFC 5280 distinguished-name attributes,
+	// RFC 5912 CMC attributes, etc.). Keeping the two concept slices
+	// separate matches how operators think: "what EKUs do I need" vs
+	// "what extra subject attributes do I need".
+	//
+	// Unknown keys are tolerated at marshal time (logged + dropped) so a
+	// new key on a forward-version certctl doesn't force every profile
+	// edit to round-trip through the validator.
+	//
+	// EST RFC 7030 hardening master bundle Phase 6.
+	RequiredCSRAttributes []string `json:"required_csr_attributes,omitempty"`
+
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // KeyAlgorithmRule defines an allowed key algorithm and its minimum key size.
@@ -85,4 +109,82 @@ var ValidEKUs = map[string]bool{
 	"codeSigning":     true,
 	"emailProtection": true,
 	"timeStamping":    true,
+}
+
+// EKUStringToOID maps an EKU short-name (as used in
+// CertificateProfile.AllowedEKUs) to the corresponding RFC 5280 §4.2.1.12
+// id-kp-* OID. Returns ok=false for unknown names so the EST csrattrs
+// path can drop unrecognized hints rather than emit garbage OIDs.
+//
+// EST RFC 7030 hardening master bundle Phase 6.2.
+func EKUStringToOID(name string) (asn1.ObjectIdentifier, bool) {
+	oid, ok := ekuOIDByName[name]
+	return oid, ok
+}
+
+// AttributeStringToOID maps a Subject DN / CMC attribute short-name
+// (as used in CertificateProfile.RequiredCSRAttributes) to the
+// corresponding ASN.1 OID. Returns ok=false for unknown names. The
+// known set is intentionally small at GA — operators add new keys via
+// PR review rather than free-form strings, so a typo trips a validator
+// + the EST csrattrs response stays self-describing.
+//
+// EST RFC 7030 hardening master bundle Phase 6.2.
+func AttributeStringToOID(name string) (asn1.ObjectIdentifier, bool) {
+	oid, ok := attributeOIDByName[name]
+	return oid, ok
+}
+
+// ekuOIDByName is the lookup table EKUStringToOID consults. OIDs
+// registered in RFC 5280 §4.2.1.12 + RFC 3280 + Microsoft.
+var ekuOIDByName = map[string]asn1.ObjectIdentifier{
+	"serverAuth":      {1, 3, 6, 1, 5, 5, 7, 3, 1},
+	"clientAuth":      {1, 3, 6, 1, 5, 5, 7, 3, 2},
+	"codeSigning":     {1, 3, 6, 1, 5, 5, 7, 3, 3},
+	"emailProtection": {1, 3, 6, 1, 5, 5, 7, 3, 4},
+	"timeStamping":    {1, 3, 6, 1, 5, 5, 7, 3, 8},
+	"ocspSigning":     {1, 3, 6, 1, 5, 5, 7, 3, 9},
+	// Microsoft EKUs commonly required for AD smartcard / Intune device
+	// auth. Not in ValidEKUs above (which only enumerates the broadly
+	// portable names), but devices enrolling for these targets need
+	// csrattrs to advertise them.
+	"smartCardLogon":          {1, 3, 6, 1, 4, 1, 311, 20, 2, 2},
+	"documentSigning":         {1, 3, 6, 1, 4, 1, 311, 10, 3, 12},
+	"encryptingFileSystem":    {1, 3, 6, 1, 4, 1, 311, 10, 3, 4},
+	"keyRecoveryAgent":        {1, 3, 6, 1, 4, 1, 311, 21, 6},
+	"ocspNoCheck":             {1, 3, 6, 1, 5, 5, 7, 48, 1, 5},
+	"anyExtendedKeyUsage":     {2, 5, 29, 37, 0},
+	"ipsecIKE":                {1, 3, 6, 1, 5, 5, 7, 3, 17},
+	"machineEAP":              {1, 3, 6, 1, 5, 5, 7, 3, 13},
+	"kerberosClientAuth":      {1, 3, 6, 1, 5, 2, 3, 4},
+	"kerberosKeyDistribution": {1, 3, 6, 1, 5, 2, 3, 5},
+}
+
+// attributeOIDByName covers the Subject DN / CMC attribute hints the
+// EST csrattrs endpoint can advertise. Sourced from RFC 5280
+// §4.1.2.6 + RFC 5912 (CMC) + RFC 5280 §4.1.2.4. Limited surface on
+// purpose; PRs can extend.
+var attributeOIDByName = map[string]asn1.ObjectIdentifier{
+	// RFC 5280 §4.1.2.6 — distinguished-name attributes commonly
+	// requested for IoT bootstrap.
+	"commonName":             {2, 5, 4, 3},
+	"surname":                {2, 5, 4, 4},
+	"serialNumber":           {2, 5, 4, 5},
+	"countryName":            {2, 5, 4, 6},
+	"localityName":           {2, 5, 4, 7},
+	"stateOrProvinceName":    {2, 5, 4, 8},
+	"organizationName":       {2, 5, 4, 10},
+	"organizationalUnitName": {2, 5, 4, 11},
+	"title":                  {2, 5, 4, 12},
+	// CSR attributes from RFC 2985 §5.4 — challengePassword is
+	// already used by SCEP profiles; emailAddress + extensionRequest
+	// are the standard PKCS#10 carriers.
+	"challengePassword": {1, 2, 840, 113549, 1, 9, 7},
+	"emailAddress":      {1, 2, 840, 113549, 1, 9, 1},
+	"extensionRequest":  {1, 2, 840, 113549, 1, 9, 14},
+	// Device-identity attributes that show up in IoT / MDM
+	// enrollment flows.
+	"deviceSerialNumber":  {1, 3, 6, 1, 4, 1, 311, 21, 14}, // Microsoft Intune device serial
+	"unstructuredName":    {1, 2, 840, 113549, 1, 9, 2},
+	"unstructuredAddress": {1, 2, 840, 113549, 1, 9, 8},
 }

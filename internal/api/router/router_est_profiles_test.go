@@ -51,6 +51,10 @@ func (s *estProfileMockService) SimpleReEnroll(_ context.Context, _ string) (*do
 	return &domain.ESTEnrollResult{CertPEM: "-----BEGIN CERTIFICATE-----\nPROFILE=" + s.tag + "\n-----END CERTIFICATE-----\n"}, nil
 }
 
+func (s *estProfileMockService) SimpleServerKeygen(_ context.Context, _ string) (*domain.ESTServerKeygenResult, error) {
+	return nil, nil
+}
+
 func (s *estProfileMockService) GetCSRAttrs(_ context.Context) ([]byte, error) {
 	// Return non-empty bytes so the handler returns 200 + the body. The body
 	// won't carry a profile tag (csrattrs is base64-encoded ASN.1; sticking

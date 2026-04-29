@@ -24,12 +24,14 @@ import (
 
 // mockESTService implements ESTService for testing.
 type mockESTService struct {
-	CACertPEM    string
-	CACertErr    error
-	EnrollResult *domain.ESTEnrollResult
-	EnrollErr    error
-	CSRAttrs     []byte
-	CSRAttrsErr  error
+	CACertPEM          string
+	CACertErr          error
+	EnrollResult       *domain.ESTEnrollResult
+	EnrollErr          error
+	CSRAttrs           []byte
+	CSRAttrsErr        error
+	ServerKeygenResult *domain.ESTServerKeygenResult
+	ServerKeygenErr    error
 }
 
 func (m *mockESTService) GetCACerts(ctx context.Context) (string, error) {
@@ -46,6 +48,10 @@ func (m *mockESTService) SimpleReEnroll(ctx context.Context, csrPEM string) (*do
 
 func (m *mockESTService) GetCSRAttrs(ctx context.Context) ([]byte, error) {
 	return m.CSRAttrs, m.CSRAttrsErr
+}
+
+func (m *mockESTService) SimpleServerKeygen(ctx context.Context, csrPEM string) (*domain.ESTServerKeygenResult, error) {
+	return m.ServerKeygenResult, m.ServerKeygenErr
 }
 
 // generateTestCSRPEM creates a valid ECDSA P-256 CSR for testing.

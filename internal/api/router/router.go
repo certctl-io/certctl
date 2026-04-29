@@ -136,6 +136,13 @@ type HandlerRegistry struct {
 	// Both endpoints are admin-gated (M-008 pin updated to include
 	// admin_scep_intune.go).
 	AdminSCEPIntune handler.AdminSCEPIntuneHandler
+	// AdminEST handles the per-profile EST observability + trust-anchor
+	// reload endpoints. EST RFC 7030 hardening master bundle Phase 7.2.
+	//   GET  /api/v1/admin/est/profiles      → per-profile snapshot
+	//   POST /api/v1/admin/est/reload-trust  → SIGHUP-equivalent
+	// Both endpoints are admin-gated (M-008 pin updated to include
+	// admin_est.go).
+	AdminEST handler.AdminESTHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -313,6 +320,9 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/admin/scep/profiles", http.HandlerFunc(reg.AdminSCEPIntune.Profiles))
 	r.Register("GET /api/v1/admin/scep/intune/stats", http.HandlerFunc(reg.AdminSCEPIntune.Stats))
 	r.Register("POST /api/v1/admin/scep/intune/reload-trust", http.HandlerFunc(reg.AdminSCEPIntune.ReloadTrust))
+	// EST RFC 7030 hardening Phase 7.2 — admin-gated EST observability.
+	r.Register("GET /api/v1/admin/est/profiles", http.HandlerFunc(reg.AdminEST.Profiles))
+	r.Register("POST /api/v1/admin/est/reload-trust", http.HandlerFunc(reg.AdminEST.ReloadTrust))
 
 	// Notifications routes: /api/v1/notifications
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))
@@ -423,6 +433,11 @@ func (r *Router) RegisterESTHandlers(handlers map[string]handler.ESTHandler) {
 		r.Register("POST /.well-known/est/simpleenroll", http.HandlerFunc(h.SimpleEnroll))
 		r.Register("POST /.well-known/est/simplereenroll", http.HandlerFunc(h.SimpleReEnroll))
 		r.Register("GET /.well-known/est/csrattrs", http.HandlerFunc(h.CSRAttrs))
+		// EST RFC 7030 hardening master bundle Phase 5: serverkeygen route
+		// is always registered; the handler returns 404 unless the per-profile
+		// SetServerKeygenEnabled(true) was called. Same registration shape as
+		// the other endpoints so the openapi-parity guard sees the literal.
+		r.Register("POST /.well-known/est/serverkeygen", http.HandlerFunc(h.ServerKeygen))
 	}
 	// Multi-profile routes register dynamically. These per-deployment
 	// paths (/.well-known/est/<pathID>/) aren't in openapi.yaml because
@@ -443,6 +458,7 @@ func (r *Router) RegisterESTHandlers(handlers map[string]handler.ESTHandler) {
 		r.Register("POST "+prefix+"/simpleenroll", http.HandlerFunc(hCopy.SimpleEnroll))
 		r.Register("POST "+prefix+"/simplereenroll", http.HandlerFunc(hCopy.SimpleReEnroll))
 		r.Register("GET "+prefix+"/csrattrs", http.HandlerFunc(hCopy.CSRAttrs))
+		r.Register("POST "+prefix+"/serverkeygen", http.HandlerFunc(hCopy.ServerKeygen))
 	}
 }
 
@@ -481,6 +497,7 @@ func (r *Router) RegisterESTMTLSHandlers(handlers map[string]handler.ESTHandler)
 		r.Register("POST "+prefix+"/simpleenroll", http.HandlerFunc(hCopy.SimpleEnrollMTLS))
 		r.Register("POST "+prefix+"/simplereenroll", http.HandlerFunc(hCopy.SimpleReEnrollMTLS))
 		r.Register("GET "+prefix+"/csrattrs", http.HandlerFunc(hCopy.CSRAttrsMTLS))
+		r.Register("POST "+prefix+"/serverkeygen", http.HandlerFunc(hCopy.ServerKeygenMTLS))
 	}
 }
 

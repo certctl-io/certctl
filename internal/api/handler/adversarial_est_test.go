@@ -130,6 +130,11 @@ func (t *trappedESTService) GetCSRAttrs(ctx context.Context) ([]byte, error) {
 	return nil, errors.New("trap: GetCSRAttrs should not be called from adversarial CSR tests")
 }
 
+func (t *trappedESTService) SimpleServerKeygen(ctx context.Context, csrPEM string) (*domain.ESTServerKeygenResult, error) {
+	t.serviceCalled = true
+	return nil, errors.New("trap: SimpleServerKeygen should not be called from adversarial CSR tests")
+}
+
 // TestESTSimpleEnroll_AdversarialCSRs runs each adversarial CSR through the
 // enrollment endpoint.
 func TestESTSimpleEnroll_AdversarialCSRs(t *testing.T) {

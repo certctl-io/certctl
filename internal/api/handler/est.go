@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"crypto/rand"
 	"crypto/subtle"
 	"crypto/x509"
 	"encoding/base64"
@@ -35,6 +36,13 @@ type ESTService interface {
 
 	// GetCSRAttrs returns the CSR attributes the server wants clients to include.
 	GetCSRAttrs(ctx context.Context) ([]byte, error)
+
+	// SimpleServerKeygen runs the RFC 7030 §4.4 server-driven key generation
+	// flow: server generates the keypair, issues a cert with the new pubkey,
+	// returns both cert + private key (the latter wrapped in CMS
+	// EnvelopedData to the client's CSR-supplied key-encipherment pubkey).
+	// EST RFC 7030 hardening master bundle Phase 5.
+	SimpleServerKeygen(ctx context.Context, csrPEM string) (*domain.ESTServerKeygenResult, error)
 }
 
 // ESTHandler handles HTTP requests for the EST protocol (RFC 7030).
@@ -101,6 +109,15 @@ type ESTHandler struct {
 	// include in audit log lines / Prometheus labels. Defaults to
 	// "est" when unset.
 	labelForLog string
+
+	// EST RFC 7030 hardening Phase 5: per-profile gate for the
+	// /serverkeygen endpoint (RFC 7030 §4.4). The endpoint is only
+	// routable when this flag is set; the standard /simpleenroll +
+	// /simplereenroll path is unaffected. Operators opt-in per
+	// profile to constrain the attack surface — server-driven keygen
+	// requires the server to hold plaintext private keys briefly,
+	// which is a meaningful trust delta from device-driven keygen.
+	serverKeygenEnabled bool
 }
 
 // NewESTHandler creates a new ESTHandler with no per-profile auth
@@ -123,6 +140,16 @@ func NewESTHandler(svc ESTService) ESTHandler {
 // 'cert must chain to THIS profile's bundle' so a cert that chains to
 // profile A's bundle cannot enroll against profile B.
 func (h *ESTHandler) SetMTLSTrust(t *trustanchor.Holder) { h.mtlsTrust = t }
+
+// MTLSTrust returns the per-profile mTLS trust holder (Phase 7.2 wire-up
+// helper for cmd/server/main.go's admin-metadata setter). Nil when
+// SetMTLSTrust was never called. Callers MUST treat the holder as
+// read-only; the SIGHUP watcher inside the holder owns mutation.
+func (h ESTHandler) MTLSTrust() *trustanchor.Holder { return h.mtlsTrust }
+
+// HasMTLSTrust reports whether this handler instance has an mTLS trust
+// pool wired up. Convenience wrapper around `h.MTLSTrust() != nil`.
+func (h ESTHandler) HasMTLSTrust() bool { return h.mtlsTrust != nil }
 
 // SetChannelBindingRequired toggles RFC 9266 tls-exporter channel binding
 // on the simplereenroll mTLS path. EST RFC 7030 hardening Phase 2.4.
@@ -161,6 +188,15 @@ func (h *ESTHandler) SetLabelForLog(label string) {
 		return
 	}
 	h.labelForLog = label
+}
+
+// SetServerKeygenEnabled toggles the RFC 7030 §4.4 server-keygen endpoint
+// for this handler instance. EST RFC 7030 hardening Phase 5. When false
+// (default), ServerKeygen + ServerKeygenMTLS return 404 even if the
+// route was registered — defense-in-depth against a router-level
+// regression that exposes the endpoint without the per-profile gate.
+func (h *ESTHandler) SetServerKeygenEnabled(enabled bool) {
+	h.serverKeygenEnabled = enabled
 }
 
 // label returns h.labelForLog with the "est" fallback applied. Tiny
@@ -284,6 +320,147 @@ func (h ESTHandler) CSRAttrsMTLS(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	h.writeCSRAttrsResponse(w, r)
+}
+
+// ----- /serverkeygen — RFC 7030 §4.4 (Phase 5) -----
+
+// ServerKeygen handles POST /.well-known/est/[<PathID>/]serverkeygen.
+// EST RFC 7030 hardening Phase 5. Identical auth + rate-limit pipeline
+// as SimpleEnroll (HTTP Basic optional + per-principal limit optional);
+// gated additionally by SetServerKeygenEnabled.
+func (h ESTHandler) ServerKeygen(w http.ResponseWriter, r *http.Request) {
+	h.handleServerKeygen(w, r, false /*viaMTLS*/)
+}
+
+// ServerKeygenMTLS handles POST /.well-known/est-mtls/<PathID>/serverkeygen.
+// Cert auth + serverkeygen pipeline.
+func (h ESTHandler) ServerKeygenMTLS(w http.ResponseWriter, r *http.Request) {
+	if _, ok := h.requireClientCertChain(w, r); !ok {
+		return
+	}
+	h.handleServerKeygen(w, r, true /*viaMTLS*/)
+}
+
+// handleServerKeygen runs the shared pipeline for both /serverkeygen
+// route variants. Mirrors handleEnrollOrReEnroll but emits the multipart
+// response shape RFC 7030 §4.4.2 mandates.
+func (h ESTHandler) handleServerKeygen(w http.ResponseWriter, r *http.Request, viaMTLS bool) {
+	if r.Method != http.MethodPost {
+		http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		return
+	}
+	requestID := middleware.GetRequestID(r.Context())
+	if !h.serverKeygenEnabled {
+		// Per-profile gate disabled — serve 404 even when the route is
+		// registered. Operator opted out at the profile level; the
+		// endpoint should appear non-existent to clients.
+		http.NotFound(w, r)
+		return
+	}
+	if err := verifyESTTransport(r); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest,
+			fmt.Sprintf("EST transport precondition failed: %v", err), requestID)
+		return
+	}
+	// HTTP Basic gate — non-mTLS path only (same logic as enroll).
+	if !viaMTLS && h.basicPassword != "" {
+		if !h.requireBasicAuth(w, r) {
+			return
+		}
+	}
+	csrPEM, err := h.readCSRFromRequest(r)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, fmt.Sprintf("Invalid CSR: %v", err), requestID)
+		return
+	}
+	csr, _ := decodeCSRPEM(csrPEM)
+	// Per-principal limit applies to serverkeygen too — a compromised
+	// credential shouldn't be able to flood the server with key
+	// generation requests (each costs CPU + RNG entropy).
+	if h.perPrincipalLimiter != nil {
+		if err := h.applyPerPrincipalRateLimit(r, csr); err != nil {
+			ErrorWithRequestID(w, http.StatusTooManyRequests,
+				fmt.Sprintf("EST serverkeygen rate-limited: %v", err), requestID)
+			return
+		}
+	}
+	result, err := h.svc.SimpleServerKeygen(r.Context(), csrPEM)
+	if err != nil {
+		// Map known typed errors to actionable HTTP statuses; everything
+		// else falls back to 500 with an audit-log breadcrumb.
+		switch {
+		case strings.Contains(err.Error(), "missing RSA key-encipherment"):
+			ErrorWithRequestID(w, http.StatusBadRequest,
+				"EST serverkeygen requires an RSA key-encipherment public key in the CSR (RFC 7030 §4.4.2)",
+				requestID)
+		case strings.Contains(err.Error(), "unsupported keygen algorithm"):
+			ErrorWithRequestID(w, http.StatusBadRequest,
+				fmt.Sprintf("EST serverkeygen unsupported algorithm: %v", err), requestID)
+		case strings.Contains(err.Error(), "disabled for this profile"):
+			http.NotFound(w, r)
+		default:
+			ErrorWithRequestID(w, http.StatusInternalServerError,
+				fmt.Sprintf("EST serverkeygen failed: %v", err), requestID)
+		}
+		return
+	}
+	h.writeServerKeygenMultipart(w, result)
+}
+
+// writeServerKeygenMultipart emits the RFC 7030 §4.4.2 multipart body
+// containing the cert (certs-only PKCS#7) + the EnvelopedData private
+// key. Boundary is fixed-pattern + a per-response random suffix to
+// satisfy MIME's "boundary must not appear in body" requirement
+// (16 bytes of randomness gives a vanishingly small collision chance).
+//
+// Content-Type: multipart/mixed; boundary="..."
+// First part: application/pkcs7-mime; smime-type=certs-only (base64-wrapped)
+// Second part: application/pkcs7-mime; smime-type=enveloped-data (base64-wrapped)
+func (h ESTHandler) writeServerKeygenMultipart(w http.ResponseWriter, result *domain.ESTServerKeygenResult) {
+	// Build cert part (certs-only PKCS#7 + base64-wrap).
+	certDERs, err := pkcs7.PEMToDERChain(result.CertPEM)
+	if err != nil || len(certDERs) == 0 {
+		http.Error(w, "Failed to encode certificate", http.StatusInternalServerError)
+		return
+	}
+	if result.ChainPEM != "" {
+		if chainDERs, err := pkcs7.PEMToDERChain(result.ChainPEM); err == nil {
+			certDERs = append(certDERs, chainDERs...)
+		}
+	}
+	certPart, err := pkcs7.BuildCertsOnlyPKCS7(certDERs)
+	if err != nil {
+		http.Error(w, "Failed to build PKCS#7 cert part", http.StatusInternalServerError)
+		return
+	}
+
+	boundary := newMultipartBoundary()
+	w.Header().Set("Content-Type", "multipart/mixed; boundary="+boundary)
+	w.WriteHeader(http.StatusOK)
+
+	bw := w
+	// First part: cert.
+	fmt.Fprintf(bw, "--%s\r\n", boundary)
+	bw.Write([]byte("Content-Type: application/pkcs7-mime; smime-type=certs-only\r\n"))
+	bw.Write([]byte("Content-Transfer-Encoding: base64\r\n\r\n"))
+	writeBase64Wrapped(bw, certPart)
+	// Second part: encrypted key (EnvelopedData).
+	fmt.Fprintf(bw, "--%s\r\n", boundary)
+	bw.Write([]byte("Content-Type: application/pkcs7-mime; smime-type=enveloped-data\r\n"))
+	bw.Write([]byte("Content-Transfer-Encoding: base64\r\n\r\n"))
+	writeBase64Wrapped(bw, result.EncryptedKey)
+	// Closing boundary.
+	fmt.Fprintf(bw, "--%s--\r\n", boundary)
+}
+
+// newMultipartBoundary returns a deterministic-prefix + random-suffix
+// boundary string. The fixed prefix lets log filters spot serverkeygen
+// responses; the random suffix prevents MIME-injection via a CSR whose
+// signature happens to contain the boundary bytes.
+func newMultipartBoundary() string {
+	var rnd [16]byte
+	_, _ = rand.Read(rnd[:])
+	return fmt.Sprintf("certctl-est-serverkeygen-%x", rnd[:])
 }
 
 // ----- shared internal pipeline -----
