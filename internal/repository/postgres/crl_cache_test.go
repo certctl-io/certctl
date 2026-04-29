@@ -13,12 +13,19 @@ import (
 // Postgres started by repo_test.go::getTestDB. The cache table only
 // has a FK to issuers(id), so the prereq insert is just an issuer row.
 
-func insertIssuerForCRL(t *testing.T, ctx context.Context, suffix string) (issuerID string) {
+// insertIssuerForCRL deliberately does NOT take a ctx parameter — the
+// inner getTestDB(t) helper has no ctx-aware variant in this package,
+// so accepting one here would trip the contextcheck linter (the ctx
+// would be "lost" at the getTestDB call boundary). The helper uses a
+// fresh context.Background() for the single ExecContext call; that's
+// fine because tests are short-lived and the per-test isolation comes
+// from the schema-per-test pattern, not from ctx cancellation.
+func insertIssuerForCRL(t *testing.T, suffix string) (issuerID string) {
 	t.Helper()
 	tdb := getTestDB(t)
 	issuerID = "iss-crlcache-" + suffix
 	now := time.Now().Truncate(time.Microsecond)
-	_, err := tdb.db.ExecContext(ctx,
+	_, err := tdb.db.ExecContext(context.Background(),
 		`INSERT INTO issuers (id, name, type, enabled, created_at, updated_at) VALUES ($1, $2, $3, $4, $5, $6)`,
 		issuerID, "Issuer "+suffix, "generic-ca", true, now, now)
 	if err != nil {
@@ -48,7 +55,7 @@ func TestCRLCacheRepository_PutGet_RoundTrip(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "roundtrip")
+	issuerID := insertIssuerForCRL(t, "roundtrip")
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	want := &domain.CRLCacheEntry{
@@ -98,7 +105,7 @@ func TestCRLCacheRepository_Put_Overwrites(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "overwrite")
+	issuerID := insertIssuerForCRL(t, "overwrite")
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	first := &domain.CRLCacheEntry{
@@ -158,7 +165,7 @@ func TestCRLCacheRepository_NextCRLNumber_FirstIsOne(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "first")
+	issuerID := insertIssuerForCRL(t, "first")
 	n, err := repo.NextCRLNumber(ctx, issuerID)
 	if err != nil {
 		t.Fatalf("NextCRLNumber: %v", err)
@@ -174,7 +181,7 @@ func TestCRLCacheRepository_NextCRLNumber_Monotonic(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "mono")
+	issuerID := insertIssuerForCRL(t, "mono")
 	now := time.Now().UTC().Truncate(time.Microsecond)
 
 	// Seed with a known crl_number.
@@ -205,7 +212,7 @@ func TestCRLCacheRepository_RecordAndListEvents(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "events")
+	issuerID := insertIssuerForCRL(t, "events")
 	base := time.Now().UTC().Truncate(time.Microsecond)
 
 	for i := 0; i < 3; i++ {
@@ -247,7 +254,7 @@ func TestCRLCacheRepository_RecordEvent_FailureWithError(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "failevent")
+	issuerID := insertIssuerForCRL(t, "failevent")
 	evt := &domain.CRLGenerationEvent{
 		IssuerID:  issuerID,
 		StartedAt: time.Now().UTC().Truncate(time.Microsecond),
@@ -275,7 +282,7 @@ func TestCRLCacheRepository_ListEvents_LimitDefaults(t *testing.T) {
 	repo := postgres.NewCRLCacheRepository(db)
 	ctx := context.Background()
 
-	issuerID := insertIssuerForCRL(t, ctx, "limit")
+	issuerID := insertIssuerForCRL(t, "limit")
 	for i := 0; i < 5; i++ {
 		_ = repo.RecordGenerationEvent(ctx, &domain.CRLGenerationEvent{
 			IssuerID:  issuerID,
