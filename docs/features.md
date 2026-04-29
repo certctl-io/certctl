@@ -646,6 +646,8 @@ SCEP uses a single URL (`/scep?operation=...`). The handler extracts PKCS#10 CSR
 | `CERTCTL_SCEP_ISSUER_ID` | `iss-local` | Issuer for SCEP enrollments |
 | `CERTCTL_SCEP_PROFILE_ID` | (none) | Optional profile constraint |
 | `CERTCTL_SCEP_CHALLENGE_PASSWORD` | (none) | Shared secret for enrollment authentication |
+| `CERTCTL_SCEP_RA_CERT_PATH` | (none) | Path to PEM-encoded RA (Registration Authority) certificate. **Required when `CERTCTL_SCEP_ENABLED=true`** for the RFC 8894 PKIMessage path: SCEP clients encrypt their PKCS#10 CSR to this cert's public key (EnvelopedData wrapper, RFC 8894 §3.2.2) and the server signs the outbound CertRep PKIMessage signerInfo with the matching key (RFC 8894 §3.3.2). Generation: a self-signed cert with `CN=<your-ca-id>-RA` and the `id-kp-emailProtection` / `id-kp-cmcRA` EKU is sufficient — see [`legacy-est-scep.md`](legacy-est-scep.md) for the openssl recipe. The preflight gate at startup also enforces a cert/key match, non-expired NotAfter, and an RSA-or-ECDSA public-key algorithm. |
+| `CERTCTL_SCEP_RA_KEY_PATH` | (none) | Path to PEM-encoded private key matching `CERTCTL_SCEP_RA_CERT_PATH`. **Required when `CERTCTL_SCEP_ENABLED=true`.** File MUST be mode `0600` (owner read/write only); preflight refuses to load a world- or group-readable RA key as defense-in-depth against credential leak. The server reads this file once at startup; rotation requires a restart. |
 
 ---
 

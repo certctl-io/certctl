@@ -1290,3 +1290,116 @@ func TestValidate_EncryptionKey_LongAccepted(t *testing.T) {
 		t.Errorf("Validate() returned error for 44-byte key: %v", err)
 	}
 }
+
+// SCEP RFC 8894 Phase 1: Validate() must refuse to start when SCEP is enabled
+// without an RA cert + key pair, mirroring the existing CHALLENGE_PASSWORD
+// gate. Defense-in-depth with cmd/server/main.go::preflightSCEPRACertKey
+// which additionally validates file mode + cert/key match + expiry + alg.
+func TestValidate_SCEPEnabled_MissingRAPair_Refuses(t *testing.T) {
+	cases := []struct {
+		name       string
+		raCertPath string
+		raKeyPath  string
+	}{
+		{"both_empty", "", ""},
+		{"cert_only", "/etc/certctl/scep/ra.crt", ""},
+		{"key_only", "", "/etc/certctl/scep/ra.key"},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &Config{
+				Server:   validServerConfig(t),
+				Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+				Log:      LogConfig{Level: "info", Format: "json"},
+				Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
+				Keygen:   KeygenConfig{Mode: "agent"},
+				Scheduler: SchedulerConfig{
+					RenewalCheckInterval:        1 * time.Hour,
+					JobProcessorInterval:        30 * time.Second,
+					AgentHealthCheckInterval:    2 * time.Minute,
+					NotificationProcessInterval: 1 * time.Minute,
+					NotificationRetryInterval:   2 * time.Minute,
+					RetryInterval:               5 * time.Minute,
+					JobTimeoutInterval:          10 * time.Minute,
+					AwaitingCSRTimeout:          24 * time.Hour,
+					AwaitingApprovalTimeout:     168 * time.Hour,
+				},
+				SCEP: SCEPConfig{
+					Enabled:           true,
+					ChallengePassword: "shared-secret-not-empty",
+					RACertPath:        tc.raCertPath,
+					RAKeyPath:         tc.raKeyPath,
+				},
+			}
+			err := cfg.Validate()
+			if err == nil {
+				t.Fatalf("Validate() = nil, want error for SCEP enabled with missing RA pair")
+			}
+			if !strings.Contains(err.Error(), "RA cert/key path missing") {
+				t.Errorf("Validate() error = %q, want 'RA cert/key path missing'", err.Error())
+			}
+		})
+	}
+}
+
+// SCEP enabled with a complete RA pair (and a non-empty challenge password)
+// should pass Validate — the file-existence + mode + match checks live in
+// preflightSCEPRACertKey, not in Validate. This pins the boundary so a
+// future "validate the file too" refactor doesn't accidentally double up.
+func TestValidate_SCEPEnabled_CompleteRAPair_Accepts(t *testing.T) {
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
+		},
+		SCEP: SCEPConfig{
+			Enabled:           true,
+			ChallengePassword: "shared-secret-not-empty",
+			RACertPath:        "/etc/certctl/scep/ra.crt",
+			RAKeyPath:         "/etc/certctl/scep/ra.key",
+		},
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil for complete RA pair (file-existence checked in preflightSCEPRACertKey)", err)
+	}
+}
+
+// SCEP disabled with empty RA pair fields must NOT trip the gate — the
+// fields only matter when SCEP is enabled. Mirrors the CHALLENGE_PASSWORD
+// disabled-passes precedent in TestValidate_ValidConfig.
+func TestValidate_SCEPDisabled_EmptyRAPair_Accepts(t *testing.T) {
+	cfg := &Config{
+		Server:   validServerConfig(t),
+		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:      LogConfig{Level: "info", Format: "json"},
+		Auth:     AuthConfig{Type: "api-key", Secret: "test-secret"},
+		Keygen:   KeygenConfig{Mode: "agent"},
+		Scheduler: SchedulerConfig{
+			RenewalCheckInterval:        1 * time.Hour,
+			JobProcessorInterval:        30 * time.Second,
+			AgentHealthCheckInterval:    2 * time.Minute,
+			NotificationProcessInterval: 1 * time.Minute,
+			NotificationRetryInterval:   2 * time.Minute,
+			RetryInterval:               5 * time.Minute,
+			JobTimeoutInterval:          10 * time.Minute,
+			AwaitingCSRTimeout:          24 * time.Hour,
+			AwaitingApprovalTimeout:     168 * time.Hour,
+		},
+		SCEP: SCEPConfig{Enabled: false}, // RACertPath / RAKeyPath stay empty
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() = %v, want nil for SCEP disabled with empty RA pair", err)
+	}
+}

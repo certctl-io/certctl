@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"fmt"
 	"log/slog"
 	"net"
@@ -743,6 +745,25 @@ func main() {
 			)
 			os.Exit(1)
 		}
+		// SCEP RFC 8894 Phase 1: validate the RA cert/key pair before booting.
+		// Without a valid pair the new RFC 8894 PKIMessage path (EnvelopedData
+		// decryption + CertRep signing) cannot run; fail loud at startup rather
+		// than silently falling through to the MVP raw-CSR path on every
+		// request. preflightSCEPRACertKey checks: file existence, key file mode
+		// 0600 (defense-in-depth against world-readable RA key), cert/key
+		// algorithm match, RA cert not expired, RA cert public-key algorithm is
+		// CMS-compatible (RSA or ECDSA per RFC 8894 §3.5.2). Mirrors
+		// preflightSCEPChallengePassword's fail-loud-then-os.Exit(1) pattern.
+		if err := preflightSCEPRACertKey(cfg.SCEP.Enabled, cfg.SCEP.RACertPath, cfg.SCEP.RAKeyPath); err != nil {
+			logger.Error(
+				"startup refused: SCEP RA cert/key preflight failed "+
+					"(RFC 8894 §3.2.2 EnvelopedData + §3.3.2 CertRep require an RA pair). "+
+					"Generate the RA pair per docs/legacy-est-scep.md, set "+
+					"CERTCTL_SCEP_RA_CERT_PATH + CERTCTL_SCEP_RA_KEY_PATH, then restart.",
+				"error", err,
+			)
+			os.Exit(1)
+		}
 		issuerConn, ok := issuerRegistry.Get(cfg.SCEP.IssuerID)
 		if !ok {
 			logger.Error("SCEP issuer not found in registry", "issuer_id", cfg.SCEP.IssuerID)
@@ -1102,6 +1123,106 @@ func preflightSCEPChallengePassword(enabled bool, challengePassword string) erro
 			"SCEP enrollment would accept any client (CWE-306); " +
 			"configure a non-empty shared secret or set CERTCTL_SCEP_ENABLED=false")
 	}
+	return nil
+}
+
+// preflightSCEPRACertKey validates the RA cert/key pair the RFC 8894 SCEP
+// path requires. Mirrors preflightSCEPChallengePassword's no-op-when-disabled
+// pattern; otherwise the checks are:
+//
+//  1. Both paths are non-empty (the Validate() refuse covers this too,
+//     but preflight reports the specific failure mode + os.Exit(1) so the
+//     operator sees a clear log line in addition to the config error).
+//  2. The key file mode is 0600 (refuse world-/group-readable RA key —
+//     defense-in-depth against credential leak via a misconfigured
+//     deploy that leaves /etc/certctl/scep/*.key as 0644).
+//  3. Cert PEM parses to exactly one x509.Certificate.
+//  4. Key PEM parses to a Go crypto.Signer (RSA or ECDSA — RFC 8894
+//     §3.5.2 advertises those as the CMS-compatible algorithms).
+//  5. The cert's PublicKey matches the key's Public() — refuses pairs
+//     accidentally swapped between profiles in a multi-profile config.
+//  6. The cert's NotAfter is in the future — an expired RA cert would
+//     fail TLS handshake on EnvelopedData decryption per RFC 5652.
+//
+// Each check returns a wrapped error; the caller (main) is responsible for
+// translating to a structured slog.Error + os.Exit(1) so the helper stays
+// unit-testable without booting the full server.
+func preflightSCEPRACertKey(enabled bool, raCertPath, raKeyPath string) error {
+	if !enabled {
+		return nil
+	}
+	if raCertPath == "" || raKeyPath == "" {
+		return fmt.Errorf("SCEP enabled but RA pair missing: " +
+			"set CERTCTL_SCEP_RA_CERT_PATH + CERTCTL_SCEP_RA_KEY_PATH " +
+			"(RFC 8894 §3.2.2 requires an RA pair so clients can encrypt the " +
+			"CSR to the RA cert and the server can sign the CertRep response)")
+	}
+
+	// File mode check FIRST so a world-readable key never gets read into the
+	// process address space. Ignored on Windows (Stat().Mode() doesn't carry
+	// POSIX bits there); the production deploy is Linux per the Dockerfile.
+	keyInfo, err := os.Stat(raKeyPath)
+	if err != nil {
+		return fmt.Errorf("CERTCTL_SCEP_RA_KEY_PATH stat failed: %w (path=%s)", err, raKeyPath)
+	}
+	mode := keyInfo.Mode().Perm()
+	if mode&0o077 != 0 {
+		return fmt.Errorf("CERTCTL_SCEP_RA_KEY_PATH has insecure permissions %#o; "+
+			"RA private key must be mode 0600 (owner read/write only) — "+
+			"chmod 0600 %s and restart", mode, raKeyPath)
+	}
+
+	certPEM, err := os.ReadFile(raCertPath)
+	if err != nil {
+		return fmt.Errorf("CERTCTL_SCEP_RA_CERT_PATH read failed: %w (path=%s)", err, raCertPath)
+	}
+	keyPEM, err := os.ReadFile(raKeyPath)
+	if err != nil {
+		return fmt.Errorf("CERTCTL_SCEP_RA_KEY_PATH read failed: %w (path=%s)", err, raKeyPath)
+	}
+
+	// tls.X509KeyPair validates that the cert + key parse, share an algorithm,
+	// and the cert's PublicKey matches the key's Public() — three of our six
+	// checks in a single stdlib call, so we use it rather than re-implementing.
+	pair, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		return fmt.Errorf("RA cert/key pair invalid: %w "+
+			"(cert=%s key=%s) — verify the cert and key are matching halves of "+
+			"the same RA pair, both PEM-encoded, with the cert containing exactly "+
+			"one CERTIFICATE block and the key containing one PRIVATE KEY block",
+			err, raCertPath, raKeyPath)
+	}
+	if len(pair.Certificate) == 0 {
+		// Defensive — tls.X509KeyPair already errors on this, but the contract
+		// for the next x509.ParseCertificate call needs the slice non-empty.
+		return fmt.Errorf("RA cert PEM at %s contains no certificate blocks", raCertPath)
+	}
+
+	// Re-parse the leaf so we can read NotAfter + the public-key alg.
+	leaf, err := x509.ParseCertificate(pair.Certificate[0])
+	if err != nil {
+		return fmt.Errorf("RA cert at %s does not parse as x509: %w", raCertPath, err)
+	}
+	if time.Now().After(leaf.NotAfter) {
+		return fmt.Errorf("RA cert at %s expired at %s — "+
+			"generate a fresh RA pair (the SCEP CertRep signature would be "+
+			"rejected by every conformant client)", raCertPath, leaf.NotAfter.Format(time.RFC3339))
+	}
+
+	// CMS-compatible public-key algorithm gate. RFC 8894 §3.5.2 advertises RSA
+	// and AES; the responder cert algorithm pertains to the signature scheme
+	// used on the CertRep, which means the cert's PublicKey must be RSA or
+	// ECDSA. Catches pre-shared Ed25519 dev keys that micromdm/scep clients
+	// reject.
+	switch leaf.PublicKeyAlgorithm {
+	case x509.RSA, x509.ECDSA:
+		// ok — supported by golang.org/x/crypto/ocsp + every SCEP client
+	default:
+		return fmt.Errorf("RA cert at %s uses unsupported public-key algorithm %s — "+
+			"RFC 8894 §3.5.2 CMS signing requires RSA or ECDSA",
+			raCertPath, leaf.PublicKeyAlgorithm)
+	}
+
 	return nil
 }
 

@@ -689,6 +689,32 @@ type SCEPConfig struct {
 	// issuer. The service-layer PKCSReq path also rejects this configuration
 	// defense-in-depth.
 	ChallengePassword string
+
+	// RACertPath is the path to a PEM-encoded RA (Registration Authority)
+	// certificate used by the RFC 8894 SCEP path. SCEP clients encrypt their
+	// PKCS#10 CSR to this cert's public key (via the EnvelopedData wrapper, RFC
+	// 8894 §3.2.2). The certctl server uses RAKeyPath to decrypt inbound
+	// EnvelopedData and to sign outbound CertRep PKIMessage signerInfo (RFC
+	// 8894 §3.3.2).
+	//
+	// Required when Enabled is true; Config.Validate() refuses to start without
+	// it. Without an RA pair the new RFC 8894 path silently falls through to
+	// the MVP raw-CSR path on every request and the operator's intent is
+	// unclear — fail loud at startup instead.
+	//
+	// Generation: a self-signed RA cert with subject "CN=<your-ca-id>-RA" and
+	// the id-kp-emailProtection / id-kp-cmcRA EKU is sufficient. The RA cert
+	// SHOULD be the same cert returned by GetCACert (RFC 8894 §3.5.1) so
+	// clients encrypt to a key the server can decrypt with. See
+	// docs/legacy-est-scep.md for the openssl recipe.
+	RACertPath string
+
+	// RAKeyPath is the path to the PEM-encoded private key matching RACertPath.
+	// File MUST be mode 0600 (owner read/write only); preflight refuses to load
+	// a world-readable RA key as defense-in-depth against credential leak. The
+	// server only ever reads this file at startup; rotation requires a restart
+	// (per the existing CERTCTL_TLS_CERT_PATH precedent in cmd/server/tls.go).
+	RAKeyPath string
 }
 
 // NetworkScanConfig controls the server-side active TLS scanner.
@@ -1118,6 +1144,13 @@ func Load() (*Config, error) {
 			IssuerID:          getEnv("CERTCTL_SCEP_ISSUER_ID", "iss-local"),
 			ProfileID:         getEnv("CERTCTL_SCEP_PROFILE_ID", ""),
 			ChallengePassword: getEnv("CERTCTL_SCEP_CHALLENGE_PASSWORD", ""),
+			// SCEP RFC 8894 Phase 1: RA cert + key for the EnvelopedData /
+			// signerInfo path. Required when Enabled is true (Validate() refuse
+			// + cmd/server/main.go::preflightSCEPRACertKey). Loaded from
+			// CERTCTL_SCEP_RA_CERT_PATH / CERTCTL_SCEP_RA_KEY_PATH per the
+			// existing CERTCTL_SCEP_* prefix convention.
+			RACertPath: getEnv("CERTCTL_SCEP_RA_CERT_PATH", ""),
+			RAKeyPath:  getEnv("CERTCTL_SCEP_RA_KEY_PATH", ""),
 		},
 		Verification: VerificationConfig{
 			Enabled: getEnvBool("CERTCTL_VERIFY_DEPLOYMENT", true),
@@ -1401,6 +1434,17 @@ func (c *Config) Validate() error {
 	// enroll a CSR against the configured issuer (anonymous issuance).
 	if c.SCEP.Enabled && c.SCEP.ChallengePassword == "" {
 		return fmt.Errorf("SCEP is enabled but CERTCTL_SCEP_CHALLENGE_PASSWORD is empty — refuse to start (CWE-306: anonymous SCEP issuance is insecure; set a non-empty shared secret or disable SCEP with CERTCTL_SCEP_ENABLED=false). This gate duplicates cmd/server/main.go:preflightSCEPChallengePassword for defense in depth")
+	}
+
+	// SCEP RFC 8894 Phase 1: RA cert + key are mandatory when SCEP is enabled.
+	// Without them the new RFC 8894 PKIMessage path (EnvelopedData decryption,
+	// CertRep signing) cannot run and every SCEP request silently falls through
+	// to the MVP raw-CSR path — fail loud at startup so the operator's intent
+	// is unambiguous. Mirrors the ChallengePassword gate above; defense in
+	// depth with cmd/server/main.go::preflightSCEPRACertKey which additionally
+	// validates file mode + cert/key match + expiry + algorithm.
+	if c.SCEP.Enabled && (c.SCEP.RACertPath == "" || c.SCEP.RAKeyPath == "") {
+		return fmt.Errorf("SCEP is enabled but RA cert/key path missing — refuse to start (RFC 8894 §3.2.2 requires an RA cert clients can encrypt their CSR to and an RA key the server uses to decrypt + sign CertRep): set both CERTCTL_SCEP_RA_CERT_PATH and CERTCTL_SCEP_RA_KEY_PATH or disable SCEP with CERTCTL_SCEP_ENABLED=false. See docs/legacy-est-scep.md for the openssl recipe to generate the RA pair. This gate duplicates cmd/server/main.go:preflightSCEPRACertKey for defense in depth")
 	}
 
 	// Validate scheduler intervals
