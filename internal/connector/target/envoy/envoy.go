@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/deploy"
 )
 
 // Config represents the Envoy deployment target configuration.
@@ -147,8 +148,11 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		certData += request.ChainPEM + "\n"
 	}
 
-	// Write certificate with mode 0644 (readable by Envoy process)
-	if err := os.WriteFile(certPath, []byte(certData), 0644); err != nil {
+	// Phase 7 (deploy-hardening I): atomic-write via
+	// deploy.AtomicWriteFile so cert/key/chain swap atomically and
+	// have backup files for rollback. Envoy's SDS file watcher
+	// picks up the rename atomically — no torn config.
+	if _, err := deploy.AtomicWriteFile(ctx, certPath, []byte(certData), deploy.WriteOptions{Mode: 0644}); err != nil {
 		errMsg := fmt.Sprintf("failed to write certificate: %v", err)
 		c.logger.Error("certificate deployment failed", "error", err)
 		return &target.DeploymentResult{
@@ -161,7 +165,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Write private key with secure permissions (0600: rw-------)
 	if request.KeyPEM != "" {
-		if err := os.WriteFile(keyPath, []byte(request.KeyPEM), 0600); err != nil {
+		if _, err := deploy.AtomicWriteFile(ctx, keyPath, []byte(request.KeyPEM), deploy.WriteOptions{Mode: 0600}); err != nil {
 			errMsg := fmt.Sprintf("failed to write private key: %v", err)
 			c.logger.Error("key deployment failed", "error", err)
 			return &target.DeploymentResult{
@@ -176,7 +180,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	// Write chain separately if chain_filename is configured
 	if c.config.ChainFilename != "" && request.ChainPEM != "" {
 		chainPath := filepath.Join(c.config.CertDir, c.config.ChainFilename)
-		if err := os.WriteFile(chainPath, []byte(request.ChainPEM+"\n"), 0644); err != nil {
+		if _, err := deploy.AtomicWriteFile(ctx, chainPath, []byte(request.ChainPEM+"\n"), deploy.WriteOptions{Mode: 0644}); err != nil {
 			errMsg := fmt.Sprintf("failed to write chain: %v", err)
 			c.logger.Error("chain deployment failed", "error", err)
 			return &target.DeploymentResult{

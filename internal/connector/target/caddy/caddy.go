@@ -13,6 +13,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/deploy"
 )
 
 // Config represents the Caddy deployment target configuration.
@@ -192,12 +193,17 @@ func (c *Connector) deployViaFile(ctx context.Context, request target.Deployment
 	certPath := filepath.Join(c.config.CertDir, c.config.CertFile)
 	keyPath := filepath.Join(c.config.CertDir, c.config.KeyFile)
 
-	// Write certificate with chain
+	// Write certificate with chain — Phase 7 (deploy-hardening I):
+	// atomic-write via deploy.AtomicWriteFile so cert/key swap
+	// atomically and have backup files for rollback (Caddy's file
+	// watcher picks up the rename atomically, no torn config).
 	certData := request.CertPEM + "\n"
 	if request.ChainPEM != "" {
 		certData += request.ChainPEM + "\n"
 	}
-	if err := os.WriteFile(certPath, []byte(certData), 0644); err != nil {
+	if _, err := deploy.AtomicWriteFile(ctx, certPath, []byte(certData), deploy.WriteOptions{
+		Mode: 0644,
+	}); err != nil {
 		errMsg := fmt.Sprintf("failed to write certificate: %v", err)
 		c.logger.Error("certificate deployment failed", "error", err)
 		return &target.DeploymentResult{
@@ -208,9 +214,11 @@ func (c *Connector) deployViaFile(ctx context.Context, request target.Deployment
 		}, fmt.Errorf("%s", errMsg)
 	}
 
-	// Write private key
+	// Write private key — atomic + 0600 default.
 	if request.KeyPEM != "" {
-		if err := os.WriteFile(keyPath, []byte(request.KeyPEM), 0600); err != nil {
+		if _, err := deploy.AtomicWriteFile(ctx, keyPath, []byte(request.KeyPEM), deploy.WriteOptions{
+			Mode: 0600,
+		}); err != nil {
 			errMsg := fmt.Sprintf("failed to write private key: %v", err)
 			c.logger.Error("key deployment failed", "error", err)
 			return &target.DeploymentResult{

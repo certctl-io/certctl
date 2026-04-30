@@ -1,55 +1,96 @@
+// Package postfix implements the Postfix + Dovecot mail-server
+// target connector. As of the deploy-hardening I master bundle
+// Phase 7, both modes follow the canonical NGINX template:
+// atomic-write via internal/deploy.Apply, validate-with-the-target
+// PreCommit, reload PostCommit, post-deploy TLS verify, rollback
+// on failure.
 package postfix
 
 import (
 	"context"
+	"crypto/sha256"
+	"encoding/base64"
+	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"os"
 	"os/exec"
+	"os/user"
 	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/deploy"
+	"github.com/shankar0123/certctl/internal/tlsprobe"
 	"github.com/shankar0123/certctl/internal/validation"
 )
 
-// Config represents the Postfix/Dovecot deployment target configuration.
-// This connector supports dual-mode operation: "postfix" for Postfix MTA
-// and "dovecot" for Dovecot IMAP/POP3. The mode determines default file
-// paths and reload commands. Both modes write cert/key/chain files and
-// reload the mail service.
 type Config struct {
-	Mode            string `json:"mode"`              // "postfix" (default) or "dovecot"
-	CertPath        string `json:"cert_path"`         // Path where cert will be written
-	KeyPath         string `json:"key_path"`           // Path where private key will be written
-	ChainPath       string `json:"chain_path"`         // Path where CA chain will be written (optional — if empty, chain appended to cert)
-	ReloadCommand   string `json:"reload_command"`     // Command to reload service
-	ValidateCommand string `json:"validate_command"`   // Optional command to validate config before reload
+	Mode            string `json:"mode"`
+	CertPath        string `json:"cert_path"`
+	KeyPath         string `json:"key_path"`
+	ChainPath       string `json:"chain_path"`
+	ReloadCommand   string `json:"reload_command"`
+	ValidateCommand string `json:"validate_command"`
+
+	// Phase 7: file ownership + mode + verify + retention.
+	CertFileMode  os.FileMode             `json:"cert_file_mode,omitempty"`
+	KeyFileMode   os.FileMode             `json:"key_file_mode,omitempty"`
+	ChainFileMode os.FileMode             `json:"chain_file_mode,omitempty"`
+	CertFileOwner string                  `json:"cert_file_owner,omitempty"`
+	CertFileGroup string                  `json:"cert_file_group,omitempty"`
+	KeyFileOwner  string                  `json:"key_file_owner,omitempty"`
+	KeyFileGroup  string                  `json:"key_file_group,omitempty"`
+	PostDeployVerify         *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
+	PostDeployVerifyAttempts int                     `json:"post_deploy_verify_attempts,omitempty"`
+	PostDeployVerifyBackoff  time.Duration           `json:"post_deploy_verify_backoff,omitempty"`
+	BackupRetention          int                     `json:"backup_retention,omitempty"`
 }
 
-// Connector implements the target.Connector interface for Postfix and Dovecot
-// mail servers. This connector runs on the AGENT side and handles local
-// certificate deployment for mail server TLS (STARTTLS, SMTPS, IMAPS, POP3S).
+type PostDeployVerifyConfig struct {
+	Enabled  bool          `json:"enabled"`
+	Endpoint string        `json:"endpoint,omitempty"`
+	Timeout  time.Duration `json:"timeout,omitempty"`
+}
+
 type Connector struct {
 	config *Config
 	logger *slog.Logger
+
+	runValidate func(ctx context.Context, command string) ([]byte, error)
+	runReload   func(ctx context.Context, command string) ([]byte, error)
+	probe       func(ctx context.Context, address string, timeout time.Duration) tlsprobe.ProbeResult
 }
 
-// New creates a new Postfix/Dovecot target connector with the given configuration and logger.
 func New(config *Config, logger *slog.Logger) *Connector {
-	return &Connector{
-		config: config,
-		logger: logger,
-	}
+	c := &Connector{config: config, logger: logger}
+	c.runValidate = defaultRunCommand
+	c.runReload = defaultRunCommand
+	c.probe = tlsprobe.ProbeTLS
+	return c
 }
 
-// applyDefaults sets mode-specific default values for any unconfigured fields.
+func defaultRunCommand(ctx context.Context, command string) ([]byte, error) {
+	return exec.CommandContext(ctx, "sh", "-c", command).CombinedOutput()
+}
+
+func (c *Connector) SetTestRunValidate(fn func(ctx context.Context, command string) ([]byte, error)) {
+	c.runValidate = fn
+}
+func (c *Connector) SetTestRunReload(fn func(ctx context.Context, command string) ([]byte, error)) {
+	c.runReload = fn
+}
+func (c *Connector) SetTestProbe(fn func(ctx context.Context, address string, timeout time.Duration) tlsprobe.ProbeResult) {
+	c.probe = fn
+}
+
 func applyDefaults(cfg *Config) {
 	if cfg.Mode == "" {
 		cfg.Mode = "postfix"
 	}
-
 	switch cfg.Mode {
 	case "dovecot":
 		if cfg.CertPath == "" {
@@ -64,7 +105,7 @@ func applyDefaults(cfg *Config) {
 		if cfg.ValidateCommand == "" {
 			cfg.ValidateCommand = "doveconf -n"
 		}
-	default: // "postfix"
+	default:
 		if cfg.CertPath == "" {
 			cfg.CertPath = "/etc/postfix/certs/cert.pem"
 		}
@@ -80,24 +121,15 @@ func applyDefaults(cfg *Config) {
 	}
 }
 
-// ValidateConfig checks that the configuration is valid for the selected mode.
-// It applies mode-specific defaults, validates shell commands against injection,
-// and verifies the certificate directory exists.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
 		return fmt.Errorf("invalid mail server config: %w", err)
 	}
-
-	// Validate mode
 	if cfg.Mode != "" && cfg.Mode != "postfix" && cfg.Mode != "dovecot" {
 		return fmt.Errorf("invalid mode %q: must be \"postfix\" or \"dovecot\"", cfg.Mode)
 	}
-
-	// Apply mode-specific defaults
 	applyDefaults(&cfg)
-
-	// Validate commands to prevent injection attacks
 	if err := validation.ValidateShellCommand(cfg.ReloadCommand); err != nil {
 		return fmt.Errorf("invalid reload_command: %w", err)
 	}
@@ -106,205 +138,296 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 			return fmt.Errorf("invalid validate_command: %w", err)
 		}
 	}
-
 	c.logger.Info("validating mail server configuration",
-		"mode", cfg.Mode,
-		"cert_path", cfg.CertPath,
-		"key_path", cfg.KeyPath,
-		"chain_path", cfg.ChainPath)
-
-	// Verify certificate directory exists
+		"mode", cfg.Mode, "cert_path", cfg.CertPath, "key_path", cfg.KeyPath, "chain_path", cfg.ChainPath)
 	certDir := filepath.Dir(cfg.CertPath)
 	if _, err := os.Stat(certDir); os.IsNotExist(err) {
 		return fmt.Errorf("%s cert directory does not exist: %s", cfg.Mode, certDir)
 	}
-
-	// Verify validate command works (best-effort — service might not be installed yet)
-	if cfg.ValidateCommand != "" {
-		cmd := exec.CommandContext(ctx, "sh", "-c", cfg.ValidateCommand)
-		if err := cmd.Run(); err != nil {
-			c.logger.Warn("config validation command failed during config check",
-				"error", err,
-				"mode", cfg.Mode,
-				"validate_command", cfg.ValidateCommand)
-		}
-	}
-
 	c.config = &cfg
 	c.logger.Info("mail server configuration validated", "mode", cfg.Mode)
 	return nil
 }
 
-// DeployCertificate writes the certificate, key, and chain to the configured paths
-// and reloads the mail service to pick up the new certificates.
-//
-// Steps:
-// 1. Write certificate to cert_path with mode 0644 (if chain_path empty, append chain)
-// 2. Write private key to key_path with mode 0600
-// 3. If chain_path is set, write chain separately with mode 0644
-// 4. Validate configuration (if validate_command is set)
-// 5. Reload service
+// DeployCertificate atomic + verify + rollback. Mail-specific
+// quirk preserved: if ChainPath is empty, the chain is appended to
+// the cert (Postfix/Dovecot's "no separate chain" mode).
 func (c *Connector) DeployCertificate(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
 	c.logger.Info("deploying certificate to mail server",
-		"mode", c.config.Mode,
-		"cert_path", c.config.CertPath,
-		"key_path", c.config.KeyPath)
-
+		"mode", c.config.Mode, "cert_path", c.config.CertPath)
 	startTime := time.Now()
 
-	// Build certificate data: if chain_path is set, write chain separately;
-	// otherwise append chain to cert file (fullchain behavior)
-	certData := request.CertPEM
-	if request.ChainPEM != "" && c.config.ChainPath == "" {
-		certData += "\n" + request.ChainPEM
-	}
-
-	// Write certificate with mode 0644 (rw-r--r--)
-	if err := os.WriteFile(c.config.CertPath, []byte(certData), 0644); err != nil {
-		errMsg := fmt.Sprintf("failed to write certificate: %v", err)
-		c.logger.Error("certificate deployment failed", "error", err)
-		return &target.DeploymentResult{
-			Success:       false,
-			TargetAddress: c.config.CertPath,
-			Message:       errMsg,
-			DeployedAt:    time.Now(),
-		}, fmt.Errorf("%s", errMsg)
-	}
-
-	// Write private key with secure permissions (0600: rw-------)
-	if c.config.KeyPath != "" && request.KeyPEM != "" {
-		if err := os.WriteFile(c.config.KeyPath, []byte(request.KeyPEM), 0600); err != nil {
-			errMsg := fmt.Sprintf("failed to write private key: %v", err)
-			c.logger.Error("key deployment failed", "error", err)
-			return &target.DeploymentResult{
-				Success:       false,
-				TargetAddress: c.config.KeyPath,
-				Message:       errMsg,
-				DeployedAt:    time.Now(),
-			}, fmt.Errorf("%s", errMsg)
-		}
-		c.logger.Info("private key written", "key_path", c.config.KeyPath)
-	}
-
-	// Write chain separately if chain_path is configured
-	if c.config.ChainPath != "" && request.ChainPEM != "" {
-		if err := os.WriteFile(c.config.ChainPath, []byte(request.ChainPEM), 0644); err != nil {
-			errMsg := fmt.Sprintf("failed to write chain: %v", err)
-			c.logger.Error("chain deployment failed", "error", err)
-			return &target.DeploymentResult{
-				Success:       false,
-				TargetAddress: c.config.ChainPath,
-				Message:       errMsg,
-				DeployedAt:    time.Now(),
-			}, fmt.Errorf("%s", errMsg)
-		}
-	}
-
-	// Validate configuration before reload
+	plan := c.buildPlan(request)
 	if c.config.ValidateCommand != "" {
-		c.logger.Debug("validating configuration", "validate_command", c.config.ValidateCommand)
-		validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
-		if output, err := validateCmd.CombinedOutput(); err != nil {
-			errMsg := fmt.Sprintf("%s config validation failed: %v (output: %s)", c.config.Mode, err, string(output))
-			c.logger.Error("config validation failed", "error", err, "output", string(output))
-			return &target.DeploymentResult{
-				Success:       false,
-				TargetAddress: c.config.CertPath,
-				Message:       errMsg,
-				DeployedAt:    time.Now(),
-			}, fmt.Errorf("%s", errMsg)
+		plan.PreCommit = func(pcCtx context.Context, _ map[string]string) error {
+			out, err := c.runValidate(pcCtx, c.config.ValidateCommand)
+			if err != nil {
+				return fmt.Errorf("%s validate failed: %w (output: %s)", c.config.Mode, err, string(out))
+			}
+			return nil
+		}
+	}
+	plan.PostCommit = func(pcCtx context.Context) error {
+		out, err := c.runReload(pcCtx, c.config.ReloadCommand)
+		if err != nil {
+			return fmt.Errorf("%s reload failed: %w (output: %s)", c.config.Mode, err, string(out))
+		}
+		return nil
+	}
+
+	res, err := deploy.Apply(ctx, plan)
+	if err != nil {
+		return c.failureResult(c.config.CertPath, "deploy.Apply", err, startTime), err
+	}
+
+	if !res.SkippedAsIdempotent {
+		if vErr := c.runPostDeployVerify(ctx, request.CertPEM); vErr != nil {
+			c.logger.Error("post-deploy TLS verify failed; rolling back", "error", vErr)
+			rbErr := c.rollbackToBackups(ctx, res.BackupPaths)
+			if rbErr != nil {
+				return c.failureResult(c.config.CertPath, "verify+rollback both failed",
+					fmt.Errorf("verify: %w; rollback: %v", vErr, rbErr), startTime), rbErr
+			}
+			return c.failureResult(c.config.CertPath, "post-deploy verify failed; rolled back", vErr, startTime), vErr
 		}
 	}
 
-	// Reload service
-	c.logger.Debug("reloading service", "reload_command", c.config.ReloadCommand)
-	reloadCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ReloadCommand)
-	if output, err := reloadCmd.CombinedOutput(); err != nil {
-		errMsg := fmt.Sprintf("%s reload failed: %v (output: %s)", c.config.Mode, err, string(output))
-		c.logger.Error("service reload failed", "error", err, "output", string(output))
-		return &target.DeploymentResult{
-			Success:       false,
-			TargetAddress: c.config.CertPath,
-			Message:       errMsg,
-			DeployedAt:    time.Now(),
-		}, fmt.Errorf("%s", errMsg)
+	dur := time.Since(startTime)
+	idemNote := ""
+	if res.SkippedAsIdempotent {
+		idemNote = " (idempotent skip — bytes unchanged)"
 	}
-
-	deploymentDuration := time.Since(startTime)
 	c.logger.Info("certificate deployed to mail server successfully",
-		"mode", c.config.Mode,
-		"duration", deploymentDuration.String(),
-		"cert_path", c.config.CertPath)
-
+		"duration", dur.String(), "mode", c.config.Mode, "idempotent", res.SkippedAsIdempotent)
 	return &target.DeploymentResult{
 		Success:       true,
 		TargetAddress: c.config.CertPath,
 		DeploymentID:  fmt.Sprintf("%s-%d", c.config.Mode, time.Now().Unix()),
-		Message:       fmt.Sprintf("Certificate deployed and %s reloaded successfully", c.config.Mode),
+		Message:       fmt.Sprintf("Certificate deployed and %s reloaded successfully%s", c.config.Mode, idemNote),
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"cert_path":   c.config.CertPath,
-			"key_path":    c.config.KeyPath,
 			"mode":        c.config.Mode,
-			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
+			"cert_path":   c.config.CertPath,
+			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
+			"idempotent":  fmt.Sprintf("%t", res.SkippedAsIdempotent),
 		},
 	}, nil
 }
 
-// ValidateDeployment verifies that the deployed certificate is valid and accessible.
-// It runs the validate command (if configured) and checks that the cert file exists.
+func (c *Connector) ValidateOnly(ctx context.Context, request target.DeploymentRequest) error {
+	if c.config == nil || c.config.ValidateCommand == "" {
+		return target.ErrValidateOnlyNotSupported
+	}
+	out, err := c.runValidate(ctx, c.config.ValidateCommand)
+	if err != nil {
+		return fmt.Errorf("%s validate (ValidateOnly): %w (output: %s)", c.config.Mode, err, string(out))
+	}
+	return nil
+}
+
+func (c *Connector) buildPlan(request target.DeploymentRequest) deploy.Plan {
+	// Postfix/Dovecot quirk: if ChainPath is empty, append chain
+	// to cert for serving as a single-file bundle.
+	certBytes := []byte(request.CertPEM)
+	if c.config.ChainPath == "" && request.ChainPEM != "" {
+		certBytes = append(certBytes, []byte("\n"+request.ChainPEM)...)
+	}
+	files := []deploy.File{{
+		Path:  c.config.CertPath,
+		Bytes: certBytes,
+		Mode:  c.config.CertFileMode,
+		Owner: c.config.CertFileOwner,
+		Group: c.config.CertFileGroup,
+	}}
+	if c.config.ChainPath != "" && request.ChainPEM != "" {
+		files = append(files, deploy.File{
+			Path:  c.config.ChainPath,
+			Bytes: []byte(request.ChainPEM),
+			Mode:  c.config.ChainFileMode,
+		})
+	}
+	if c.config.KeyPath != "" && request.KeyPEM != "" {
+		mode := c.config.KeyFileMode
+		if mode == 0 {
+			mode = 0600 // back-compat: Postfix keys 0600
+		}
+		files = append(files, deploy.File{
+			Path:  c.config.KeyPath,
+			Bytes: []byte(request.KeyPEM),
+			Mode:  mode,
+			Owner: c.config.KeyFileOwner,
+			Group: c.config.KeyFileGroup,
+		})
+	}
+	defaultUser := pickFirstExistingUser("postfix", "dovecot", "_postfix")
+	defaultGroup := pickFirstExistingGroup("postfix", "dovecot", "_postfix")
+	return deploy.Plan{
+		Files:           files,
+		Defaults:        deploy.FileDefaults{Mode: 0644, Owner: defaultUser, Group: defaultGroup},
+		BackupRetention: c.config.BackupRetention,
+	}
+}
+
+func (c *Connector) runPostDeployVerify(ctx context.Context, deployedCertPEM string) error {
+	verify := c.config.PostDeployVerify
+	if verify != nil && !verify.Enabled {
+		return nil
+	}
+	endpoint := ""
+	timeout := 10 * time.Second
+	if verify != nil {
+		endpoint = verify.Endpoint
+		if verify.Timeout > 0 {
+			timeout = verify.Timeout
+		}
+	}
+	if endpoint == "" {
+		c.logger.Warn("post-deploy verify enabled but no endpoint configured; skipping")
+		return nil
+	}
+	want, err := certPEMToFingerprint(deployedCertPEM)
+	if err != nil {
+		return fmt.Errorf("compute deployed cert fingerprint: %w", err)
+	}
+	attempts := c.config.PostDeployVerifyAttempts
+	if attempts <= 0 {
+		attempts = 3
+	}
+	backoff := c.config.PostDeployVerifyBackoff
+	if backoff <= 0 {
+		backoff = 2 * time.Second
+	}
+	var lastErr error
+	for i := 0; i < attempts; i++ {
+		if i > 0 {
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(backoff):
+			}
+		}
+		res := c.probe(ctx, endpoint, timeout)
+		if !res.Success {
+			lastErr = fmt.Errorf("TLS probe failed: %s", res.Error)
+			continue
+		}
+		got := strings.ToLower(res.Fingerprint)
+		want = strings.ToLower(want)
+		if got == want {
+			return nil
+		}
+		lastErr = fmt.Errorf("post-deploy TLS verify SHA-256 mismatch: got %s, want %s", got, want)
+	}
+	return lastErr
+}
+
+func (c *Connector) rollbackToBackups(ctx context.Context, backupPaths map[string]string) error {
+	for finalPath, backupPath := range backupPaths {
+		if backupPath == "" {
+			if err := os.Remove(finalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("rollback remove %s: %w", finalPath, err)
+			}
+			continue
+		}
+		bytes, err := os.ReadFile(backupPath)
+		if err != nil {
+			return fmt.Errorf("rollback read backup %s: %w", backupPath, err)
+		}
+		if _, err := deploy.AtomicWriteFile(ctx, finalPath, bytes, deploy.WriteOptions{
+			SkipIdempotent:  true,
+			BackupRetention: -1,
+		}); err != nil {
+			return fmt.Errorf("rollback write %s: %w", finalPath, err)
+		}
+	}
+	out, err := c.runReload(ctx, c.config.ReloadCommand)
+	if err != nil {
+		return fmt.Errorf("rollback reload failed: %w (output: %s)", err, string(out))
+	}
+	return nil
+}
+
+func (c *Connector) failureResult(addr, stage string, err error, startTime time.Time) *target.DeploymentResult {
+	return &target.DeploymentResult{
+		Success:       false,
+		TargetAddress: addr,
+		Message:       fmt.Sprintf("%s: %v", stage, err),
+		DeployedAt:    time.Now(),
+		Metadata: map[string]string{
+			"stage":       stage,
+			"duration_ms": fmt.Sprintf("%d", time.Since(startTime).Milliseconds()),
+		},
+	}
+}
+
+func certPEMToFingerprint(pemBytes string) (string, error) {
+	begin := "-----BEGIN CERTIFICATE-----"
+	end := "-----END CERTIFICATE-----"
+	beginIdx := strings.Index(pemBytes, begin)
+	if beginIdx < 0 {
+		return "", fmt.Errorf("no CERTIFICATE PEM block")
+	}
+	rest := pemBytes[beginIdx+len(begin):]
+	endIdx := strings.Index(rest, end)
+	if endIdx < 0 {
+		return "", fmt.Errorf("PEM block not terminated")
+	}
+	body := strings.TrimSpace(rest[:endIdx])
+	body = strings.ReplaceAll(body, "\n", "")
+	body = strings.ReplaceAll(body, "\r", "")
+	body = strings.ReplaceAll(body, " ", "")
+	der, err := base64.StdEncoding.DecodeString(body)
+	if err != nil {
+		return "", fmt.Errorf("base64 decode: %w", err)
+	}
+	h := sha256.Sum256(der)
+	return hex.EncodeToString(h[:]), nil
+}
+
+func pickFirstExistingUser(candidates ...string) string {
+	for _, name := range candidates {
+		if _, err := user.Lookup(name); err == nil {
+			return name
+		}
+	}
+	return ""
+}
+func pickFirstExistingGroup(candidates ...string) string {
+	for _, name := range candidates {
+		if _, err := user.LookupGroup(name); err == nil {
+			return name
+		}
+	}
+	return ""
+}
+
 func (c *Connector) ValidateDeployment(ctx context.Context, request target.ValidationRequest) (*target.ValidationResult, error) {
 	c.logger.Info("validating mail server deployment",
-		"mode", c.config.Mode,
-		"certificate_id", request.CertificateID,
-		"serial", request.Serial)
-
+		"mode", c.config.Mode, "certificate_id", request.CertificateID, "serial", request.Serial)
 	startTime := time.Now()
-
-	// Validate configuration if validate command is set
 	if c.config.ValidateCommand != "" {
-		validateCmd := exec.CommandContext(ctx, "sh", "-c", c.config.ValidateCommand)
-		if output, err := validateCmd.CombinedOutput(); err != nil {
-			errMsg := fmt.Sprintf("%s config validation failed: %v (output: %s)", c.config.Mode, err, string(output))
-			c.logger.Error("validation failed", "error", err)
+		if _, err := c.runValidate(ctx, c.config.ValidateCommand); err != nil {
+			errMsg := fmt.Sprintf("%s config validation failed: %v", c.config.Mode, err)
 			return &target.ValidationResult{
-				Valid:         false,
-				Serial:        request.Serial,
-				TargetAddress: c.config.CertPath,
-				Message:       errMsg,
-				ValidatedAt:   time.Now(),
+				Valid: false, Serial: request.Serial, TargetAddress: c.config.CertPath,
+				Message: errMsg, ValidatedAt: time.Now(),
 			}, fmt.Errorf("%s", errMsg)
 		}
 	}
-
-	// Verify certificate file exists and is readable
 	if _, err := os.Stat(c.config.CertPath); os.IsNotExist(err) {
 		errMsg := fmt.Sprintf("certificate file not found: %s", c.config.CertPath)
-		c.logger.Error("validation failed", "error", err)
 		return &target.ValidationResult{
-			Valid:         false,
-			Serial:        request.Serial,
-			TargetAddress: c.config.CertPath,
-			Message:       errMsg,
-			ValidatedAt:   time.Now(),
+			Valid: false, Serial: request.Serial, TargetAddress: c.config.CertPath,
+			Message: errMsg, ValidatedAt: time.Now(),
 		}, fmt.Errorf("%s", errMsg)
 	}
-
-	validationDuration := time.Since(startTime)
-	c.logger.Info("mail server deployment validated successfully",
-		"mode", c.config.Mode,
-		"duration", validationDuration.String())
-
+	dur := time.Since(startTime)
 	return &target.ValidationResult{
-		Valid:         true,
-		Serial:        request.Serial,
-		TargetAddress: c.config.CertPath,
-		Message:       fmt.Sprintf("%s configuration valid and certificate accessible", c.config.Mode),
-		ValidatedAt:   time.Now(),
+		Valid: true, Serial: request.Serial, TargetAddress: c.config.CertPath,
+		Message: fmt.Sprintf("%s configuration valid", c.config.Mode), ValidatedAt: time.Now(),
 		Metadata: map[string]string{
-			"mode":             c.config.Mode,
-			"validate_command": c.config.ValidateCommand,
-			"duration_ms":      fmt.Sprintf("%d", validationDuration.Milliseconds()),
+			"mode": c.config.Mode, "validate_command": c.config.ValidateCommand,
+			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
 		},
 	}, nil
 }

@@ -336,12 +336,20 @@ func (c *Connector) buildPlan(request target.DeploymentRequest) deploy.Plan {
 		})
 	}
 	if c.config.KeyPath != "" && request.KeyPEM != "" {
+		// Key file default mode is 0640 (NGINX worker reads via
+		// group); 0600 would lock the worker out unless the
+		// agent runs as the nginx user. Per-File explicit mode
+		// wins over Defaults; we set the default explicitly here
+		// so the deploy package's FileDefaults.Mode (0644 — for
+		// cert/chain) doesn't bleed onto the key.
+		keyMode := c.config.KeyFileMode
+		if keyMode == 0 {
+			keyMode = 0640
+		}
 		files = append(files, deploy.File{
 			Path:  c.config.KeyPath,
 			Bytes: []byte(request.KeyPEM),
-			// 0640 default for keys (NGINX worker reads via group);
-			// 0600 would lock the worker out.
-			Mode:  c.config.KeyFileMode,
+			Mode:  keyMode,
 			Owner: c.config.KeyFileOwner,
 			Group: c.config.KeyFileGroup,
 		})
