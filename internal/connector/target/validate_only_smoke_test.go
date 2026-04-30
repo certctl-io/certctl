@@ -27,13 +27,13 @@ import (
 	// f5 removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
 	// haproxy removed Phase 6 — real ValidateOnly implementation now in haproxy.go.
 	// iis removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
-	"github.com/shankar0123/certctl/internal/connector/target/javakeystore"
-	"github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
+	// javakeystore removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
+	// k8ssecret removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
 	// nginx removed Phase 4 — real ValidateOnly implementation now in nginx.go.
 	// postfix removed Phase 7 — real ValidateOnly implementation now in postfix.go.
-	"github.com/shankar0123/certctl/internal/connector/target/ssh"
+	// ssh removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
 	"github.com/shankar0123/certctl/internal/connector/target/traefik"
-	"github.com/shankar0123/certctl/internal/connector/target/wincertstore"
+	// wincertstore removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
 )
 
 // connectorsAtPhase3 is the canonical list of connectors that, as
@@ -74,20 +74,20 @@ var connectorsAtPhase3 = []struct {
 	// f5 removed Phase 8 — Authenticate-probe real impl.
 	// haproxy removed Phase 6 — `haproxy -c -f` real impl.
 	// iis removed Phase 8 — Get-WebSite probe real impl.
-	{"javakeystore", func() target.Connector { return &javakeystore.Connector{} }},
-	{"k8ssecret", func() target.Connector { return &k8ssecret.Connector{} }},
+	// javakeystore removed Phase 9 — `keytool -list` real impl.
+	// k8ssecret removed Phase 9 — GetSecret RBAC probe real impl.
 	// nginx removed Phase 4 — `nginx -t` real impl.
 	// postfix removed Phase 7 — `postfix check` / `doveconf -n` real impl.
-	{"ssh", func() target.Connector { return &ssh.Connector{} }},
+	// ssh removed Phase 9 — Connect probe real impl.
 	// traefik: no validate-with-target command exists; always sentinel.
 	{"traefik", func() target.Connector { return &traefik.Connector{} }},
-	{"wincertstore", func() target.Connector { return &wincertstore.Connector{} }},
+	// wincertstore removed Phase 9 — `Get-ChildItem Cert:\` probe.
 }
 
 func TestEveryConnectorDefaultsToSentinel(t *testing.T) {
 	// Expected list size shrinks as Phases 4-9 land their real
 	// ValidateOnly implementations. Phase 4 removed nginx.
-	const expectedAtCurrentPhase = 7
+	const expectedAtCurrentPhase = 3
 	if len(connectorsAtPhase3) != expectedAtCurrentPhase {
 		t.Fatalf("connectors-at-phase list = %d entries, want %d (drift in the 13-connector inventory)", len(connectorsAtPhase3), expectedAtCurrentPhase)
 	}

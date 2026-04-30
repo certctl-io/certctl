@@ -2,17 +2,35 @@ package javakeystore
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
 )
 
-// ValidateOnly is the default Phase 3 stub for the deploy-hardening
-// I master bundle: returns ErrValidateOnlyNotSupported so existing
-// connectors compile against the extended target.Connector interface
-// without changing behavior. Phase javakeystore dry-run support arrives when
-// the connector's atomic-deploy implementation lands (NGINX in
-// Phase 4, Apache in Phase 5, etc.); each phase replaces this stub
-// with a real validate-with-the-target implementation.
+// ValidateOnly — Phase 9. Probes via `keytool -list -keystore
+// <path> -storepass <pass>`. Confirms the keystore exists, the
+// password is correct, and `keytool` is on PATH. Failure mode
+// surfaces the actual keytool stderr (wrong password, missing
+// JRE, file not found, etc.).
 func (c *Connector) ValidateOnly(ctx context.Context, request target.DeploymentRequest) error {
-	return target.ErrValidateOnlyNotSupported
+	if c.executor == nil || c.config == nil {
+		return target.ErrValidateOnlyNotSupported
+	}
+	if c.config.KeystorePath == "" {
+		return target.ErrValidateOnlyNotSupported
+	}
+	args := []string{"-list", "-keystore", c.config.KeystorePath}
+	if c.config.KeystorePassword != "" {
+		args = append(args, "-storepass", c.config.KeystorePassword)
+	}
+	keytool := c.config.KeytoolPath
+	if keytool == "" {
+		keytool = "keytool"
+	}
+	out, err := c.executor.Execute(ctx, keytool, args...)
+	if err != nil {
+		return fmt.Errorf("JavaKeystore ValidateOnly: keytool -list failed: %w (output: %s)", err, out)
+	}
+	_ = out
+	return nil
 }

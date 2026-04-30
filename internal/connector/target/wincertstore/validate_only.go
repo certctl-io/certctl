@@ -2,17 +2,33 @@ package wincertstore
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
 )
 
-// ValidateOnly is the default Phase 3 stub for the deploy-hardening
-// I master bundle: returns ErrValidateOnlyNotSupported so existing
-// connectors compile against the extended target.Connector interface
-// without changing behavior. Phase wincertstore dry-run support arrives when
-// the connector's atomic-deploy implementation lands (NGINX in
-// Phase 4, Apache in Phase 5, etc.); each phase replaces this stub
-// with a real validate-with-the-target implementation.
+// ValidateOnly — Phase 9. Probes the Windows certificate store
+// via Get-ChildItem against the configured store path. Confirms
+// the agent has the right permissions + the store path is valid.
+// V3-Pro can extend with temp-import + immediate-remove; V2 ships
+// the permission probe.
 func (c *Connector) ValidateOnly(ctx context.Context, request target.DeploymentRequest) error {
-	return target.ErrValidateOnlyNotSupported
+	if c.executor == nil {
+		return target.ErrValidateOnlyNotSupported
+	}
+	store := c.config.StoreName
+	if store == "" {
+		store = "My"
+	}
+	loc := c.config.StoreLocation
+	if loc == "" {
+		loc = "LocalMachine"
+	}
+	storePath := fmt.Sprintf(`Cert:\%s\%s`, loc, store)
+	script := fmt.Sprintf(`Get-ChildItem -Path %q | Select-Object -First 1 | Format-Table -HideTableHeaders -Property Thumbprint`, storePath)
+	out, err := c.executor.Execute(ctx, script)
+	if err != nil {
+		return fmt.Errorf("WinCertStore ValidateOnly: %w (output: %s)", err, out)
+	}
+	return nil
 }
