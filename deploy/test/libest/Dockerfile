@@ -22,7 +22,13 @@
 
 ARG LIBEST_REF=v3.2.0-2
 
-FROM debian:bookworm-slim AS builder
+# Bundle A / Audit H-001 (CWE-829): both FROM lines below pin
+# debian:bookworm-slim to the immutable OCI image-index digest pulled
+# 2026-04-29 (last_pushed 2026-04-22). To bump:
+#   curl -sSL https://hub.docker.com/v2/repositories/library/debian/tags/bookworm-slim \
+#     | jq -r .digest
+# Replace the @sha256:... portion on BOTH FROM lines.
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252 AS builder
 
 ARG LIBEST_REF
 
@@ -52,7 +58,8 @@ RUN git clone --depth 1 --branch ${LIBEST_REF} https://github.com/cisco/libest.g
 # Runtime stage. Carries only what we need to docker-exec estclient
 # from the integration test: the compiled binary, the openssl CLI for
 # CSR generation + cert parsing, and bash for the test's exec scripts.
-FROM debian:bookworm-slim
+# Pinned to the same digest as the builder above (Bundle A / H-001).
+FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
 
 RUN apt-get update && apt-get install --no-install-recommends -y \
         bash \
