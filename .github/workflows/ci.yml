@@ -389,6 +389,40 @@ jobs:
         # on Linux per Phase 6 / frozen decision 0.5).
         run: bash scripts/vendor-e2e-skip-check.sh test-output.log
 
+      - name: Diagnostic dump on failure
+        # Prints container status + last 200 log lines from the certctl-server
+        # and base-stack containers when ANY previous step in this job fails.
+        # The matrix-collapse (Phase 5) brings up ~18 containers concurrently
+        # (vs 1 vendor sidecar at a time pre-collapse); transient failures
+        # surface most often as "container certctl-test-server is unhealthy"
+        # without any visible reason because compose only reports the
+        # dependency-chain symptom, not the root cause. Dumping logs here
+        # makes the underlying error (DB migration crash, port bind failure,
+        # entrypoint stall, OOM kill) visible in the GitHub Actions log
+        # without requiring a workstation reproduction.
+        if: failure()
+        run: |
+          echo "=== docker compose ps -a ==="
+          docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml ps -a || true
+          echo ""
+          echo "=== certctl-test-server logs (last 200 lines) ==="
+          docker logs --tail 200 certctl-test-server 2>&1 || true
+          echo ""
+          echo "=== certctl-test-tls-init logs ==="
+          docker logs certctl-test-tls-init 2>&1 || true
+          echo ""
+          echo "=== certctl-test-postgres logs (last 100 lines) ==="
+          docker logs --tail 100 certctl-test-postgres 2>&1 || true
+          echo ""
+          echo "=== certctl-test-stepca logs (last 100 lines) ==="
+          docker logs --tail 100 certctl-test-stepca 2>&1 || true
+          echo ""
+          echo "=== certctl-test-pebble logs (last 50 lines) ==="
+          docker logs --tail 50 certctl-test-pebble 2>&1 || true
+          echo ""
+          echo "=== certctl-test-agent logs (last 100 lines) ==="
+          docker logs --tail 100 certctl-test-agent 2>&1 || true
+
       - name: Tear down sidecars
         if: always()
         run: docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml down -v
