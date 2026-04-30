@@ -44,17 +44,17 @@ type vendorSidecar struct {
 }
 
 var sidecarMap = map[string]vendorSidecar{
-	"apache":          {name: "apache-test", hostPort: "127.0.0.1:20443"},
-	"haproxy":         {name: "haproxy-test", hostPort: "127.0.0.1:20444"},
-	"traefik":         {name: "traefik-test", hostPort: "127.0.0.1:20445"},
-	"caddy":           {name: "caddy-test", hostPort: "127.0.0.1:20446", healthPath: "http://127.0.0.1:22019/config/"},
-	"envoy":           {name: "envoy-test", hostPort: "127.0.0.1:20447"},
-	"postfix":         {name: "postfix-test", hostPort: "127.0.0.1:20465"},
-	"dovecot":         {name: "dovecot-test", hostPort: "127.0.0.1:20993"},
-	"openssh":         {name: "openssh-test", hostPort: "127.0.0.1:20022"},
-	"f5-mock":         {name: "f5-mock-icontrol", hostPort: "127.0.0.1:20443"},
-	"k8s-kind":        {name: "k8s-kind-test", hostPort: ""},
-	"windows-iis":     {name: "windows-iis-test", hostPort: "127.0.0.1:20448"},
+	"apache":      {name: "apache-test", hostPort: "127.0.0.1:20443"},
+	"haproxy":     {name: "haproxy-test", hostPort: "127.0.0.1:20444"},
+	"traefik":     {name: "traefik-test", hostPort: "127.0.0.1:20445"},
+	"caddy":       {name: "caddy-test", hostPort: "127.0.0.1:20446", healthPath: "http://127.0.0.1:22019/config/"},
+	"envoy":       {name: "envoy-test", hostPort: "127.0.0.1:20447"},
+	"postfix":     {name: "postfix-test", hostPort: "127.0.0.1:20465"},
+	"dovecot":     {name: "dovecot-test", hostPort: "127.0.0.1:20993"},
+	"openssh":     {name: "openssh-test", hostPort: "127.0.0.1:20022"},
+	"f5-mock":     {name: "f5-mock-icontrol", hostPort: "127.0.0.1:20443"},
+	"k8s-kind":    {name: "k8s-kind-test", hostPort: ""},
+	"windows-iis": {name: "windows-iis-test", hostPort: "127.0.0.1:20448"},
 }
 
 // requireSidecar skips the test cleanly when the sidecar isn't

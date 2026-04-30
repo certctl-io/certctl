@@ -15,7 +15,8 @@
 // environments without `docker compose --profile deploy-e2e up -d`).
 //
 // Per frozen decision 0.6: discoverable via
-//   go test -tags integration -run 'VendorEdge_<vendor>'
+//
+//	go test -tags integration -run 'VendorEdge_<vendor>'
 package integration
 
 import (
