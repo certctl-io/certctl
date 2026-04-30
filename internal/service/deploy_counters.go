@@ -42,14 +42,14 @@ type DeployCounters struct {
 }
 
 type deployBucket struct {
-	attemptsSuccess   atomic.Uint64
-	attemptsFailure   atomic.Uint64
-	validateFailures  atomic.Uint64
-	reloadFailures    atomic.Uint64
-	postVerifyFails   atomic.Uint64
-	rollbackRestored  atomic.Uint64
-	rollbackAlsoFail  atomic.Uint64
-	idempotentSkips   atomic.Uint64
+	attemptsSuccess  atomic.Uint64
+	attemptsFailure  atomic.Uint64
+	validateFailures atomic.Uint64
+	reloadFailures   atomic.Uint64
+	postVerifyFails  atomic.Uint64
+	rollbackRestored atomic.Uint64
+	rollbackAlsoFail atomic.Uint64
+	idempotentSkips  atomic.Uint64
 }
 
 // NewDeployCounters constructs a zero-value counter table. The
@@ -123,15 +123,15 @@ func (c *DeployCounters) IncIdempotentSkip(targetType string) {
 // DeploySnapshot is the per-(target_type, label) snapshot returned
 // to the Prometheus exposer.
 type DeploySnapshot struct {
-	TargetType        string
-	AttemptsSuccess   uint64
-	AttemptsFailure   uint64
-	ValidateFailures  uint64
-	ReloadFailures    uint64
-	PostVerifyFails   uint64
-	RollbackRestored  uint64
-	RollbackAlsoFail  uint64
-	IdempotentSkips   uint64
+	TargetType       string
+	AttemptsSuccess  uint64
+	AttemptsFailure  uint64
+	ValidateFailures uint64
+	ReloadFailures   uint64
+	PostVerifyFails  uint64
+	RollbackRestored uint64
+	RollbackAlsoFail uint64
+	IdempotentSkips  uint64
 }
 
 // Snapshot returns one DeploySnapshot per known target type.

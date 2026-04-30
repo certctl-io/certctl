@@ -33,15 +33,15 @@ type CounterSnapshotter interface {
 //
 // Phase 10 of the deploy-hardening I master bundle.
 type DeploySnapshotEntry struct {
-	TargetType        string
-	AttemptsSuccess   uint64
-	AttemptsFailure   uint64
-	ValidateFailures  uint64
-	ReloadFailures    uint64
-	PostVerifyFails   uint64
-	RollbackRestored  uint64
-	RollbackAlsoFail  uint64
-	IdempotentSkips   uint64
+	TargetType       string
+	AttemptsSuccess  uint64
+	AttemptsFailure  uint64
+	ValidateFailures uint64
+	ReloadFailures   uint64
+	PostVerifyFails  uint64
+	RollbackRestored uint64
+	RollbackAlsoFail uint64
+	IdempotentSkips  uint64
 }
 
 // DeployCounterSnapshotter is the surface MetricsHandler consumes

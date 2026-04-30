@@ -71,15 +71,15 @@ type Config struct {
 	ValidateCommand string `json:"validate_command"`
 
 	// Phase 4 (deploy-hardening I): file ownership + mode overrides.
-	CertFileMode    os.FileMode `json:"cert_file_mode,omitempty"`
-	ChainFileMode   os.FileMode `json:"chain_file_mode,omitempty"`
-	KeyFileMode     os.FileMode `json:"key_file_mode,omitempty"`
-	CertFileOwner   string      `json:"cert_file_owner,omitempty"`
-	CertFileGroup   string      `json:"cert_file_group,omitempty"`
-	ChainFileOwner  string      `json:"chain_file_owner,omitempty"`
-	ChainFileGroup  string      `json:"chain_file_group,omitempty"`
-	KeyFileOwner    string      `json:"key_file_owner,omitempty"`
-	KeyFileGroup    string      `json:"key_file_group,omitempty"`
+	CertFileMode   os.FileMode `json:"cert_file_mode,omitempty"`
+	ChainFileMode  os.FileMode `json:"chain_file_mode,omitempty"`
+	KeyFileMode    os.FileMode `json:"key_file_mode,omitempty"`
+	CertFileOwner  string      `json:"cert_file_owner,omitempty"`
+	CertFileGroup  string      `json:"cert_file_group,omitempty"`
+	ChainFileOwner string      `json:"chain_file_owner,omitempty"`
+	ChainFileGroup string      `json:"chain_file_group,omitempty"`
+	KeyFileOwner   string      `json:"key_file_owner,omitempty"`
+	KeyFileGroup   string      `json:"key_file_group,omitempty"`
 
 	// Phase 4 (deploy-hardening I): post-deploy TLS verification.
 	PostDeployVerify         *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`

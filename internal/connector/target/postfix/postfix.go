@@ -37,13 +37,13 @@ type Config struct {
 	ValidateCommand string `json:"validate_command"`
 
 	// Phase 7: file ownership + mode + verify + retention.
-	CertFileMode  os.FileMode             `json:"cert_file_mode,omitempty"`
-	KeyFileMode   os.FileMode             `json:"key_file_mode,omitempty"`
-	ChainFileMode os.FileMode             `json:"chain_file_mode,omitempty"`
-	CertFileOwner string                  `json:"cert_file_owner,omitempty"`
-	CertFileGroup string                  `json:"cert_file_group,omitempty"`
-	KeyFileOwner  string                  `json:"key_file_owner,omitempty"`
-	KeyFileGroup  string                  `json:"key_file_group,omitempty"`
+	CertFileMode             os.FileMode             `json:"cert_file_mode,omitempty"`
+	KeyFileMode              os.FileMode             `json:"key_file_mode,omitempty"`
+	ChainFileMode            os.FileMode             `json:"chain_file_mode,omitempty"`
+	CertFileOwner            string                  `json:"cert_file_owner,omitempty"`
+	CertFileGroup            string                  `json:"cert_file_group,omitempty"`
+	KeyFileOwner             string                  `json:"key_file_owner,omitempty"`
+	KeyFileGroup             string                  `json:"key_file_group,omitempty"`
 	PostDeployVerify         *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
 	PostDeployVerifyAttempts int                     `json:"post_deploy_verify_attempts,omitempty"`
 	PostDeployVerifyBackoff  time.Duration           `json:"post_deploy_verify_backoff,omitempty"`

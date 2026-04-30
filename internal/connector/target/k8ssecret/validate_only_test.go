@@ -18,7 +18,7 @@ func (s *stubK8s) GetSecret(_ context.Context, _, _ string) (*SecretData, error)
 
 func (s *stubK8s) CreateSecret(_ context.Context, _ string, _ *SecretData) error { return nil }
 func (s *stubK8s) UpdateSecret(_ context.Context, _ string, _ *SecretData) error { return nil }
-func (s *stubK8s) DeleteSecret(_ context.Context, _, _ string) error              { return nil }
+func (s *stubK8s) DeleteSecret(_ context.Context, _, _ string) error             { return nil }
 
 func TestK8s_ValidateOnly_Succeeds(t *testing.T) {
 	c := NewWithClient(&Config{Namespace: "ns", SecretName: "tls"}, &stubK8s{}, nil)
