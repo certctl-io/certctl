@@ -502,6 +502,11 @@ func main() {
 
 	// Initialize API handlers
 	certificateHandler := handler.NewCertificateHandler(certificateService)
+	// Production hardening II Phase 3: per-source-IP OCSP rate limit.
+	// Window 1m so the cap counts requests per minute. Map cap 50k
+	// matches the SCEP/Intune replay cache cap. Zero disables.
+	ocspLimiter := ratelimit.NewSlidingWindowLimiter(cfg.Scheduler.OCSPRateLimitPerIPMin, time.Minute, 50_000)
+	certificateHandler.SetOCSPRateLimiter(ocspLimiter)
 	issuerHandler := handler.NewIssuerHandler(issuerService)
 	targetHandler := handler.NewTargetHandler(targetService)
 	agentHandler := handler.NewAgentHandler(agentService, cfg.Auth.AgentBootstrapToken)
@@ -535,6 +540,10 @@ func main() {
 	verificationHandler := handler.NewVerificationHandler(verificationService)
 	exportService := service.NewExportService(certificateRepo, auditService)
 	exportHandler := handler.NewExportHandler(exportService)
+	// Production hardening II Phase 3: per-actor cert-export rate limit.
+	// Window 1h so the cap counts exports per hour. Zero disables.
+	exportLimiter := ratelimit.NewSlidingWindowLimiter(cfg.Scheduler.CertExportRateLimitPerActorHr, time.Hour, 50_000)
+	exportHandler.SetExportRateLimiter(exportLimiter)
 
 	bulkRevocationHandler := handler.NewBulkRevocationHandler(bulkRevocationService)
 	// L-1 master closure: handlers for the new bulk-renew + bulk-reassign

@@ -1190,6 +1190,18 @@ type SchedulerConfig struct {
 	// Setting: CERTCTL_CRL_GENERATION_INTERVAL environment variable.
 	// Bundle CRL/OCSP-Responder Phase 3.
 	CRLGenerationInterval time.Duration
+
+	// OCSPRateLimitPerIPMin is the per-source-IP cap on OCSP requests
+	// per minute. Defaults to 1000 (production hardening II Phase 3
+	// frozen decision 0.5). Zero disables the limit.
+	// Setting: CERTCTL_OCSP_RATE_LIMIT_PER_IP_MIN environment variable.
+	OCSPRateLimitPerIPMin int
+
+	// CertExportRateLimitPerActorHr is the per-actor cap on cert-export
+	// requests per hour. Defaults to 50 (production hardening II Phase
+	// 3 frozen decision 0.6). Zero disables the limit.
+	// Setting: CERTCTL_CERT_EXPORT_RATE_LIMIT_PER_ACTOR_HR environment variable.
+	CertExportRateLimitPerActorHr int
 }
 
 // LogConfig contains logging configuration.
@@ -1403,7 +1415,9 @@ func Load() (*Config, error) {
 			// Default 1h matches the in-scheduler default; relying-party
 			// CRL refresh expectations under RFC 5280 are typically
 			// hourly to daily, so 1h gives operators plenty of margin.
-			CRLGenerationInterval: getEnvDuration("CERTCTL_CRL_GENERATION_INTERVAL", 1*time.Hour),
+			CRLGenerationInterval:         getEnvDuration("CERTCTL_CRL_GENERATION_INTERVAL", 1*time.Hour),
+			OCSPRateLimitPerIPMin:         getEnvInt("CERTCTL_OCSP_RATE_LIMIT_PER_IP_MIN", 1000),
+			CertExportRateLimitPerActorHr: getEnvInt("CERTCTL_CERT_EXPORT_RATE_LIMIT_PER_ACTOR_HR", 50),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),

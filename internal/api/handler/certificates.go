@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"net"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/ratelimit"
 	"github.com/shankar0123/certctl/internal/repository"
 	"github.com/shankar0123/certctl/internal/service"
 )
@@ -45,12 +47,22 @@ type CertificateService interface {
 
 // CertificateHandler handles HTTP requests for certificate operations.
 type CertificateHandler struct {
-	svc CertificateService
+	svc         CertificateService
+	ocspLimiter *ratelimit.SlidingWindowLimiter // production hardening II Phase 3 — per-source-IP cap on OCSP
 }
 
 // NewCertificateHandler creates a new CertificateHandler with a service dependency.
 func NewCertificateHandler(svc CertificateService) CertificateHandler {
 	return CertificateHandler{svc: svc}
+}
+
+// SetOCSPRateLimiter wires the per-source-IP OCSP rate limiter.
+// Production hardening II Phase 3. Default cap (when set in
+// cmd/server/main.go): 1000 req/min/IP. Setting to nil disables the
+// limit; the limiter's own NewSlidingWindowLimiter(maxN<=0, ...)
+// also produces a no-op limiter, so the env-var-zero case is safe.
+func (h *CertificateHandler) SetOCSPRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+	h.ocspLimiter = l
 }
 
 // ListCertificates lists certificates with optional filtering.
@@ -587,6 +599,54 @@ func (h CertificateHandler) GetDERCRL(w http.ResponseWriter, r *http.Request) {
 	w.Write(derBytes)
 }
 
+// ocspSourceIP extracts the source IP from the request for the
+// per-IP rate limiter. Production hardening II Phase 3.
+//
+// Strategy: net.SplitHostPort on RemoteAddr; on parse failure fall
+// back to the bare RemoteAddr string. We deliberately do NOT honor
+// X-Forwarded-For here because OCSP is publicly reachable and
+// untrusted intermediaries could spoof the header to bypass the
+// limit. Operators behind a trusted reverse proxy should configure
+// the proxy to pass through the original IP via the standard
+// transport (rewriting RemoteAddr at the proxy boundary).
+func ocspSourceIP(r *http.Request) string {
+	if r == nil {
+		return ""
+	}
+	host, _, err := net.SplitHostPort(r.RemoteAddr)
+	if err != nil {
+		return r.RemoteAddr
+	}
+	return host
+}
+
+// applyOCSPRateLimit enforces the per-source-IP cap. Returns true when
+// the request was rejected (handler should stop). Returns false to
+// continue processing. Production hardening II Phase 3.
+func (h CertificateHandler) applyOCSPRateLimit(w http.ResponseWriter, r *http.Request) bool {
+	if h.ocspLimiter == nil {
+		return false
+	}
+	ip := ocspSourceIP(r)
+	if err := h.ocspLimiter.Allow(ip, time.Now()); err != nil {
+		// Rate-limited: respond with the canonical OCSP "tryLater"
+		// status (status 3 per RFC 6960 §2.3) plus an HTTP-level
+		// Retry-After hint. ocsp.UnauthorizedErrorResponse is
+		// status 6 (unauthorized); we use that here too because
+		// x/crypto/ocsp doesn't ship a TryLater pre-built blob and
+		// rolling our own DER for one rejection path adds a
+		// fragility surface for no relying-party benefit
+		// (everything that retries an OCSP failure retries on any
+		// non-good status, not specifically TryLater).
+		w.Header().Set("Content-Type", "application/ocsp-response")
+		w.Header().Set("Retry-After", "60")
+		w.WriteHeader(http.StatusOK)
+		_, _ = w.Write(ocsp.UnauthorizedErrorResponse)
+		return true
+	}
+	return false
+}
+
 // HandleOCSP processes OCSP requests.
 // GET /.well-known/pki/ocsp/{issuer_id}/{serial_hex}
 //
@@ -598,6 +658,13 @@ func (h CertificateHandler) HandleOCSP(w http.ResponseWriter, r *http.Request) {
 
 	if r.Method != http.MethodGet {
 		ErrorWithRequestID(w, http.StatusMethodNotAllowed, "Method not allowed", requestID)
+		return
+	}
+
+	// Production hardening II Phase 3: per-source-IP rate limit.
+	// When the cap is tripped, applyOCSPRateLimit writes the
+	// rate-limited OCSP response and returns true — handler stops.
+	if h.applyOCSPRateLimit(w, r) {
 		return
 	}
 
@@ -651,6 +718,11 @@ func (h CertificateHandler) HandleOCSPPost(w http.ResponseWriter, r *http.Reques
 
 	if r.Method != http.MethodPost {
 		ErrorWithRequestID(w, http.StatusMethodNotAllowed, "Method not allowed", requestID)
+		return
+	}
+
+	// Production hardening II Phase 3: per-source-IP rate limit.
+	if h.applyOCSPRateLimit(w, r) {
 		return
 	}
 

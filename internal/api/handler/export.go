@@ -5,11 +5,14 @@ import (
 	"errors"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/shankar0123/certctl/internal/ratelimit"
 	"github.com/shankar0123/certctl/internal/service"
 )
 
@@ -21,7 +24,8 @@ type ExportService interface {
 
 // ExportHandler handles HTTP requests for certificate export operations.
 type ExportHandler struct {
-	svc ExportService
+	svc           ExportService
+	exportLimiter *ratelimit.SlidingWindowLimiter // production hardening II Phase 3
 }
 
 // NewExportHandler creates a new ExportHandler with a service dependency.
@@ -29,11 +33,51 @@ func NewExportHandler(svc ExportService) ExportHandler {
 	return ExportHandler{svc: svc}
 }
 
+// SetExportRateLimiter wires the per-actor cert-export rate limiter.
+// Production hardening II Phase 3. Default cap (when set in
+// cmd/server/main.go): 50 exports/hr/operator. Setting to nil
+// disables the limit.
+func (h *ExportHandler) SetExportRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+	h.exportLimiter = l
+}
+
+// applyExportRateLimit enforces the per-actor cap. Returns true when
+// the request was rejected (handler should stop).
+//
+// On rejection: HTTP 429 + JSON body {"error":"rate_limit_exceeded",
+// "retry_after_seconds":3600}. Production hardening II Phase 3.
+func (h ExportHandler) applyExportRateLimit(w http.ResponseWriter, r *http.Request) bool {
+	if h.exportLimiter == nil {
+		return false
+	}
+	// Auth context populates an actor on the request; cert-export is
+	// always behind the API-key middleware so this is non-empty in
+	// production. Fall-back to RemoteAddr only if the auth pipeline
+	// somehow allowed an empty actor (defensive; shouldn't fire).
+	actor := r.Header.Get("X-Actor")
+	if actor == "" {
+		actor = r.RemoteAddr
+	}
+	if err := h.exportLimiter.Allow(actor, time.Now()); err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.Header().Set("Retry-After", "3600")
+		w.WriteHeader(http.StatusTooManyRequests)
+		_, _ = fmt.Fprint(w, `{"error":"rate_limit_exceeded","retry_after_seconds":3600}`)
+		return true
+	}
+	return false
+}
+
 // ExportPEM exports a certificate and its chain in PEM format.
 // GET /api/v1/certificates/{id}/export/pem
 func (h ExportHandler) ExportPEM(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Production hardening II Phase 3: per-actor cert-export rate limit.
+	if h.applyExportRateLimit(w, r) {
 		return
 	}
 
@@ -75,6 +119,11 @@ func (h ExportHandler) ExportPEM(w http.ResponseWriter, r *http.Request) {
 func (h ExportHandler) ExportPKCS12(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodPost {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+
+	// Production hardening II Phase 3: per-actor cert-export rate limit.
+	if h.applyExportRateLimit(w, r) {
 		return
 	}
 
