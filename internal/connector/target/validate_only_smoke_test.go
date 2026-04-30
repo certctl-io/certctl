@@ -21,7 +21,7 @@ import (
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/apache"
+	// apache removed Phase 5 — real ValidateOnly implementation now in apache.go.
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
@@ -64,7 +64,8 @@ var connectorsAtPhase3 = []struct {
 	// suite.
 	new func() target.Connector
 }{
-	{"apache", func() target.Connector { return &apache.Connector{} }},
+	// apache removed Phase 5 — its ValidateOnly is now the real
+	// implementation; tested directly in apache/apache_atomic_test.go.
 	{"caddy", func() target.Connector { return &caddy.Connector{} }},
 	{"envoy", func() target.Connector { return &envoy.Connector{} }},
 	{"f5", func() target.Connector { return &f5.Connector{} }},
@@ -84,7 +85,7 @@ var connectorsAtPhase3 = []struct {
 func TestEveryConnectorDefaultsToSentinel(t *testing.T) {
 	// Expected list size shrinks as Phases 4-9 land their real
 	// ValidateOnly implementations. Phase 4 removed nginx.
-	const expectedAtCurrentPhase = 12
+	const expectedAtCurrentPhase = 11
 	if len(connectorsAtPhase3) != expectedAtCurrentPhase {
 		t.Fatalf("connectors-at-phase list = %d entries, want %d (drift in the 13-connector inventory)", len(connectorsAtPhase3), expectedAtCurrentPhase)
 	}
