@@ -3,8 +3,19 @@ package target
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"time"
 )
+
+// ErrValidateOnlyNotSupported is returned by ValidateOnly when the
+// connector cannot dry-run a deploy (e.g., K8s — there is no API
+// for "would this Secret update succeed without modifying state?").
+//
+// Frozen decision 0.6 of the deploy-hardening I master bundle:
+// ValidateOnly returns this sentinel rather than nil so operators
+// can errors.Is to distinguish "validated successfully" from
+// "validation not supported on this connector type."
+var ErrValidateOnlyNotSupported = errors.New("target connector does not support ValidateOnly dry-run")
 
 // Connector defines the interface for certificate deployment operations.
 type Connector interface {
@@ -14,6 +25,20 @@ type Connector interface {
 	// DeployCertificate deploys a certificate to the target.
 	// The request contains the certificate and chain in PEM format, but never a private key.
 	DeployCertificate(ctx context.Context, request DeploymentRequest) (*DeploymentResult, error)
+
+	// ValidateOnly runs the validate step (PreCommit) of a deploy
+	// WITHOUT touching the live cert. Returns nil when the deploy
+	// would succeed at the validate stage; returns
+	// ErrValidateOnlyNotSupported when the connector cannot dry-run
+	// (e.g., K8s — there's no API for "would this Secret update
+	// succeed without modifying state?"); returns any other error
+	// from the connector's validate step.
+	//
+	// Operators preview a deploy via this method before committing.
+	// Phase 3 of the deploy-hardening I master bundle adds the
+	// interface method; Phases 4-9 implement the meaningful path
+	// per connector.
+	ValidateOnly(ctx context.Context, request DeploymentRequest) error
 
 	// ValidateDeployment verifies that a deployed certificate is valid and accessible.
 	ValidateDeployment(ctx context.Context, request ValidationRequest) (*ValidationResult, error)
