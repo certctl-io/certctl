@@ -26,7 +26,40 @@ type ManagedCertificate struct {
 	RevocationReason     string            `json:"revocation_reason,omitempty"`
 	CreatedAt            time.Time         `json:"created_at"`
 	UpdatedAt            time.Time         `json:"updated_at"`
+
+	// Source tags how this managed certificate was created. EST RFC 7030
+	// hardening master bundle Phase 11.1 — operators bulk-revoke
+	// EST-issued certs by filtering on Source=EST. Empty value preserves
+	// the v2.X.0 behavior (the bulk-revoke handler treats empty as
+	// equivalent to legacy/manual; new EST issuances stamp Source=EST,
+	// new SCEP issuances will eventually stamp Source=SCEP under a
+	// future bundle).
+	Source CertificateSource `json:"source,omitempty"`
 }
+
+// CertificateSource is the enum of provenance values stamped on each
+// managed-certificate row when it's created. The empty string is the
+// back-compat default — pre-Phase-11 rows have it set to "" by the
+// migration's DEFAULT clause; the bulk-revoke filter treats empty as
+// "any source" so existing call paths see no behavior change.
+//
+// EST RFC 7030 hardening master bundle Phase 11.1.
+type CertificateSource string
+
+const (
+	// CertificateSourceUnspecified preserves the v2.X.0 default ("").
+	CertificateSourceUnspecified CertificateSource = ""
+	// CertificateSourceEST stamps every cert issued through one of the
+	// EST endpoints (simpleenroll / simplereenroll / serverkeygen).
+	CertificateSourceEST CertificateSource = "EST"
+	// CertificateSourceSCEP / API / Agent reserve future provenance
+	// values — not stamped today; SCEP-issued certs continue to land
+	// with Source="" until a follow-up bundle wires the stamp at the
+	// SCEP service layer.
+	CertificateSourceSCEP  CertificateSource = "SCEP"
+	CertificateSourceAPI   CertificateSource = "API"
+	CertificateSourceAgent CertificateSource = "Agent"
+)
 
 // CertificateVersion represents a specific version of a certificate.
 type CertificateVersion struct {

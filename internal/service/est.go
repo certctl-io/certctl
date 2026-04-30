@@ -88,15 +88,23 @@ func (s *ESTService) GetCACerts(ctx context.Context) (string, error) {
 
 // SimpleEnroll processes an initial enrollment request.
 // RFC 7030 Section 4.2: /simpleenroll accepts a PKCS#10 CSR and returns a signed cert.
+//
+// Phase 11.3: typed audit codes — the inner processEnrollment emits
+// `est_simple_enroll_success` on success + `est_simple_enroll_failed`
+// on any rejection. The legacy bare `est_simple_enroll` is retained
+// for back-compat (the GUI's activity-tab chip-filter matches by
+// prefix so both shapes render under the same chip).
 func (s *ESTService) SimpleEnroll(ctx context.Context, csrPEM string) (*domain.ESTEnrollResult, error) {
-	return s.processEnrollment(ctx, csrPEM, "est_simple_enroll")
+	return s.processEnrollment(ctx, csrPEM, "est_simple_enroll",
+		AuditActionESTSimpleEnrollSuccess, AuditActionESTSimpleEnrollFailed)
 }
 
 // SimpleReEnroll processes a re-enrollment request.
 // RFC 7030 Section 4.2.2: /simplereenroll is functionally identical to /simpleenroll
 // but is used when renewing an existing certificate.
 func (s *ESTService) SimpleReEnroll(ctx context.Context, csrPEM string) (*domain.ESTEnrollResult, error) {
-	return s.processEnrollment(ctx, csrPEM, "est_simple_reenroll")
+	return s.processEnrollment(ctx, csrPEM, "est_simple_reenroll",
+		AuditActionESTSimpleReEnrollSuccess, AuditActionESTSimpleReEnrollFailed)
 }
 
 // GetCSRAttrs returns the CSR attributes the server wants clients to include.
@@ -180,28 +188,58 @@ func (s *ESTService) GetCSRAttrs(ctx context.Context) ([]byte, error) {
 }
 
 // processEnrollment handles the common enrollment logic for both simpleenroll and simplereenroll.
-func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, auditAction string) (*domain.ESTEnrollResult, error) {
+//
+// Phase 11.3 split-emit: every audit RecordEvent call goes to BOTH the
+// legacy bare action code (auditAction param, e.g. "est_simple_enroll")
+// AND the typed success/failed code (typedSuccess / typedFailed params)
+// so existing GUI activity-tab chip filters stay green while operators
+// gain the typed grep surface.
+func (s *ESTService) processEnrollment(ctx context.Context, csrPEM, auditAction, typedSuccess, typedFailed string) (*domain.ESTEnrollResult, error) {
+	// emitFailed is the in-line helper that records BOTH the bare +
+	// typed failed-event so every error path stays one-liner. Returns
+	// the input err verbatim so call sites stay one-shot.
+	emitFailed := func(reason string, err error) {
+		if s.auditService == nil {
+			return
+		}
+		details := map[string]interface{}{
+			"reason":    reason,
+			"error":     err.Error(),
+			"protocol":  "EST",
+			"issuer_id": s.issuerID,
+		}
+		if s.profileID != "" {
+			details["profile_id"] = s.profileID
+		}
+		_ = s.auditService.RecordEvent(ctx, "est-client", "system", auditAction+"_failed", "certificate", "", details)
+		_ = s.auditService.RecordEvent(ctx, "est-client", "system", typedFailed, "certificate", "", details)
+	}
+	_ = emitFailed // referenced inside the body below
 	// Parse the CSR to extract CN and SANs
 	block, _ := pem.Decode([]byte(csrPEM))
 	if block == nil {
 		s.counters.inc(estCounterCSRInvalid)
+		emitFailed("csr_pem_decode", fmt.Errorf("invalid CSR PEM"))
 		return nil, fmt.Errorf("invalid CSR PEM")
 	}
 
 	csr, err := x509.ParseCertificateRequest(block.Bytes)
 	if err != nil {
 		s.counters.inc(estCounterCSRInvalid)
+		emitFailed("csr_parse", err)
 		return nil, fmt.Errorf("failed to parse CSR: %w", err)
 	}
 
 	if err := csr.CheckSignature(); err != nil {
 		s.counters.inc(estCounterCSRSignatureMismatch)
+		emitFailed("csr_signature", err)
 		return nil, fmt.Errorf("CSR signature verification failed: %w", err)
 	}
 
 	commonName := csr.Subject.CommonName
 	if commonName == "" {
 		s.counters.inc(estCounterCSRInvalid)
+		emitFailed("csr_missing_cn", fmt.Errorf("missing CN"))
 		return nil, fmt.Errorf("CSR must include a Common Name")
 	}
 
@@ -231,6 +269,15 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 	}
 	if _, csrErr := ValidateCSRAgainstProfile(csrPEM, profile); csrErr != nil {
 		s.counters.inc(estCounterCSRPolicyViolation)
+		// Emit BOTH the typed-failed code (for the Activity tab) AND
+		// the standalone est_csr_policy_violation code (for the
+		// per-failure-mode counter that ops greppers prefer).
+		emitFailed("csr_policy_violation", csrErr)
+		if s.auditService != nil {
+			_ = s.auditService.RecordEvent(ctx, "est-client", "system",
+				AuditActionESTCSRPolicyViolation, "certificate", "",
+				map[string]interface{}{"error": csrErr.Error(), "issuer_id": s.issuerID, "profile_id": s.profileID})
+		}
 		s.logger.Error("EST enrollment rejected: crypto policy violation",
 			"action", auditAction,
 			"common_name", commonName,
@@ -262,6 +309,7 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 	result, err := s.issuer.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTLSeconds, mustStaple)
 	if err != nil {
 		s.counters.inc(estCounterIssuerError)
+		emitFailed("issuer_error", err)
 		s.logger.Error("EST enrollment failed",
 			"action", auditAction,
 			"common_name", commonName,
@@ -276,7 +324,10 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 		s.counters.inc(estCounterSuccessSimpleEnroll)
 	}
 
-	// Audit the enrollment
+	// Audit the enrollment — split-emit per Phase 11.3: legacy bare
+	// action code (back-compat for the GUI activity tab + existing
+	// audit-log analysers) + typed _success suffix variant + the
+	// canonical typed code from the AuditAction* constants.
 	if s.auditService != nil {
 		details := map[string]interface{}{
 			"common_name": commonName,
@@ -289,6 +340,7 @@ func (s *ESTService) processEnrollment(ctx context.Context, csrPEM string, audit
 			details["profile_id"] = s.profileID
 		}
 		_ = s.auditService.RecordEvent(ctx, "est-client", "system", auditAction, "certificate", result.Serial, details)
+		_ = s.auditService.RecordEvent(ctx, "est-client", "system", typedSuccess, "certificate", result.Serial, details)
 	}
 
 	s.logger.Info("EST enrollment successful",
@@ -524,6 +576,8 @@ func (s *ESTService) SimpleServerKeygen(ctx context.Context, csrPEM string) (*ES
 			details["profile_id"] = s.profileID
 		}
 		_ = s.auditService.RecordEvent(ctx, "est-client", "system", "est_server_keygen", "certificate", issued.Serial, details)
+		// Phase 11.3: typed _success suffix for the operator grep surface.
+		_ = s.auditService.RecordEvent(ctx, "est-client", "system", AuditActionESTServerKeygenSuccess, "certificate", issued.Serial, details)
 	}
 	s.logger.Info("EST serverkeygen successful",
 		"common_name", commonName, "serial", issued.Serial,

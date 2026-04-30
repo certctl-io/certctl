@@ -151,7 +151,24 @@ func (s *BulkRevocationService) resolveCertificates(ctx context.Context, criteri
 				filtered = append(filtered, cert)
 			}
 		}
-		return filtered, nil
+		certs = filtered
+	}
+
+	// EST RFC 7030 hardening master bundle Phase 11.2: per-source
+	// post-filter. Empty Source matches anything (back-compat); a
+	// non-empty Source narrows the result set to only certs stamped
+	// with that provenance value. Filter is applied here rather than
+	// in the SQL query so existing CertificateFilter callers are
+	// unaffected; the small per-cert pass is fine because bulk-revoke
+	// is already a low-frequency operation.
+	if criteria.Source != "" {
+		var bySource []*domain.ManagedCertificate
+		for _, cert := range certs {
+			if cert.Source == criteria.Source {
+				bySource = append(bySource, cert)
+			}
+		}
+		certs = bySource
 	}
 
 	return certs, nil

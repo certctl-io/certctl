@@ -470,6 +470,45 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/est/certificates/bulk-revoke:
+    post:
+      tags: [EST, Certificates]
+      summary: Bulk revoke EST-issued certificates (admin)
+      description: |
+        EST-source-scoped bulk revocation. Identical wire shape to
+        /api/v1/certificates/bulk-revoke; the handler pins
+        `Source=EST` so the operation only affects certs the EST
+        service stamped at issuance time. SCEP-issued / API-issued /
+        Agent-provisioned certs are never touched by this endpoint.
+
+        At least one narrower criterion (profile_id, owner_id,
+        agent_id, issuer_id, team_id, or certificate_ids) is
+        required — Source-only requests are rejected as too broad
+        to prevent accidental fleet-wide revocation. Admin-gated
+        (M-008 / M-003 pattern). Audit action emitted: `est_bulk_revoke`.
+
+        EST RFC 7030 hardening master bundle Phase 11.2.
+      operationId: bulkRevokeESTCertificates
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/BulkRevokeRequest"
+      responses:
+        "200":
+          description: Bulk revocation result (same shape as the generic endpoint)
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/BulkRevokeResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Admin access required
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/certificates/bulk-renew:
     post:
       tags: [Certificates]

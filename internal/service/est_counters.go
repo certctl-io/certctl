@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"sync/atomic"
 	"time"
 
@@ -174,11 +175,27 @@ func (s *ESTService) Stats(now time.Time) ESTStatsSnapshot {
 //
 // Returns ErrESTMTLSDisabled when the profile doesn't have an mTLS
 // trust anchor configured (admin handler maps to HTTP 409).
+//
+// Phase 11.3: emits AuditActionESTTrustAnchorReloaded on successful
+// reload so operators have a typed grep target for "who rotated the
+// trust bundle for which profile + when".
 func (s *ESTService) ReloadTrust() error {
 	if s.estTrustAnchor == nil {
 		return ErrESTMTLSDisabled
 	}
-	return s.estTrustAnchor.Reload()
+	if err := s.estTrustAnchor.Reload(); err != nil {
+		return err
+	}
+	if s.auditService != nil {
+		details := map[string]interface{}{
+			"path_id":           s.estPathIDForLog,
+			"trust_anchor_path": s.estTrustAnchor.Path(),
+			"protocol":          "EST",
+		}
+		_ = s.auditService.RecordEvent(context.Background(), "est-admin", "system",
+			AuditActionESTTrustAnchorReloaded, "trust_anchor", s.estPathIDForLog, details)
+	}
+	return nil
 }
 
 // ErrESTMTLSDisabled signals the admin handler that an EST profile

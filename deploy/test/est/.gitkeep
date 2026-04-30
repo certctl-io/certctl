@@ -1,0 +1,6 @@
+# EST RFC 7030 hardening master bundle Phase 10.1.
+# This directory is the libest sidecar's working dir (bind-mounted as
+# /config/est). The integration test writes CSRs here + reads issued
+# certs back; this .gitkeep keeps the directory present in the repo
+# so a fresh `docker compose --profile est-e2e up` doesn't bind-mount
+# a missing path.

@@ -52,9 +52,20 @@ type BulkRevocationCriteria struct {
 	IssuerID       string   `json:"issuer_id,omitempty"`
 	TeamID         string   `json:"team_id,omitempty"`
 	CertificateIDs []string `json:"certificate_ids,omitempty"`
+	// Source filters by ManagedCertificate.Source provenance value.
+	// Empty matches any source (back-compat with v2.X.0 callers); the
+	// EST bulk-revoke endpoint pins this to CertificateSourceEST so an
+	// operator hitting POST /api/v1/est/certificates/bulk-revoke only
+	// affects EST-issued certs, never SCEP/API/Agent-provisioned ones.
+	//
+	// EST RFC 7030 hardening master bundle Phase 11.2.
+	Source CertificateSource `json:"source,omitempty"`
 }
 
-// IsEmpty returns true if no filter criteria are set.
+// IsEmpty returns true if no filter criteria are set. Source alone does
+// NOT count as a criterion — a Source=EST request without any narrower
+// criterion (profile_id, owner_id, etc.) is rejected as too broad,
+// because it would revoke EVERY EST-issued cert in the deployment.
 func (c BulkRevocationCriteria) IsEmpty() bool {
 	return c.ProfileID == "" && c.OwnerID == "" && c.AgentID == "" &&
 		c.IssuerID == "" && c.TeamID == "" && len(c.CertificateIDs) == 0
@@ -62,11 +73,11 @@ func (c BulkRevocationCriteria) IsEmpty() bool {
 
 // BulkRevocationResult contains the outcome of a bulk revocation operation.
 type BulkRevocationResult struct {
-	TotalMatched int                    `json:"total_matched"`
-	TotalRevoked int                    `json:"total_revoked"`
-	TotalSkipped int                    `json:"total_skipped"`
-	TotalFailed  int                    `json:"total_failed"`
-	Errors       []BulkRevocationError  `json:"errors,omitempty"`
+	TotalMatched int                   `json:"total_matched"`
+	TotalRevoked int                   `json:"total_revoked"`
+	TotalSkipped int                   `json:"total_skipped"`
+	TotalFailed  int                   `json:"total_failed"`
+	Errors       []BulkRevocationError `json:"errors,omitempty"`
 }
 
 // BulkRevocationError records a per-certificate revocation failure.

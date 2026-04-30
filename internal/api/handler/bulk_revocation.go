@@ -104,3 +104,72 @@ func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request
 
 	JSON(w, http.StatusOK, result)
 }
+
+// BulkRevokeEST handles EST-source-scoped bulk certificate revocation.
+// POST /api/v1/est/certificates/bulk-revoke
+//
+// EST RFC 7030 hardening master bundle Phase 11.2.
+//
+// Identical to BulkRevoke above but the Source criterion is pinned to
+// CertificateSourceEST so the operation only affects certs the EST
+// service stamped at issuance time. Operators who want to revoke
+// "every cert this device family ever issued through EST" hit this
+// endpoint with a profile_id / owner_id / etc. criterion + the
+// handler narrows the result set to EST-only.
+//
+// Same M-008 admin-gate as the generic BulkRevoke. Audit action
+// emitted by the service is `est_bulk_revoke` (typed code from Phase
+// 11.3) so operators grep on the action string distinguishes
+// EST-bulk-revoke from the generic bulk-revoke.
+func (h BulkRevocationHandler) BulkRevokeEST(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodPost {
+		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
+		return
+	}
+	requestID := middleware.GetRequestID(r.Context())
+	if !middleware.IsAdmin(r.Context()) {
+		ErrorWithRequestID(w, http.StatusForbidden,
+			"EST bulk revocation requires admin privileges", requestID)
+		return
+	}
+	var req bulkRevokeRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)
+		return
+	}
+	if req.Reason == "" {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Revocation reason is required", requestID)
+		return
+	}
+	if !domain.IsValidRevocationReason(req.Reason) {
+		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid revocation reason: "+req.Reason, requestID)
+		return
+	}
+	criteria := domain.BulkRevocationCriteria{
+		ProfileID:      req.ProfileID,
+		OwnerID:        req.OwnerID,
+		AgentID:        req.AgentID,
+		IssuerID:       req.IssuerID,
+		TeamID:         req.TeamID,
+		CertificateIDs: req.CertificateIDs,
+		// Pin Source to EST — operators MUST also supply at least one
+		// narrower criterion (criteria.IsEmpty intentionally excludes
+		// Source so a Source-only request is still rejected as too
+		// broad). This protects against "revoke every EST cert in the
+		// fleet" via a malformed body.
+		Source: domain.CertificateSourceEST,
+	}
+	if criteria.IsEmpty() {
+		ErrorWithRequestID(w, http.StatusBadRequest,
+			"At least one narrower criterion is required (profile_id, owner_id, agent_id, issuer_id, team_id, or certificate_ids); EST bulk-revoke is implicitly Source-scoped to EST",
+			requestID)
+		return
+	}
+	actor := resolveActor(r.Context())
+	result, err := h.svc.BulkRevoke(r.Context(), criteria, req.Reason, actor)
+	if err != nil {
+		ErrorWithRequestID(w, http.StatusInternalServerError, "EST bulk revocation failed: "+err.Error(), requestID)
+		return
+	}
+	JSON(w, http.StatusOK, result)
+}

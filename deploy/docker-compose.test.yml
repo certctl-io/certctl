@@ -431,6 +431,48 @@ services:
         ipv4_address: 10.30.50.8
     restart: unless-stopped
 
+  # EST RFC 7030 hardening master bundle Phase 10.1 — libest sidecar.
+  #
+  # Cisco's libest reference RFC 7030 client. The integration test
+  # (deploy/test/est_e2e_test.go, build tag `integration`) docker-exec's
+  # into this container to drive estclient against the live certctl
+  # server. The container stays alive via `sleep infinity` so the test
+  # can do many serial exec calls without paying container-startup cost.
+  #
+  # Profile-gated (`profiles: [est-e2e]`) so the routine `docker compose
+  # up` for non-EST integration runs doesn't pay the libest build cost.
+  # Operator opts in via `docker compose --profile est-e2e up`. CI's
+  # est-e2e job runs:
+  #     docker compose --profile est-e2e build libest-client
+  #     docker compose --profile est-e2e up -d
+  #     INTEGRATION=1 go test -tags integration -run 'TestEST_LibESTClient' ./deploy/test/...
+  libest-client:
+    build:
+      context: ..
+      dockerfile: deploy/test/libest/Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    container_name: certctl-test-libest
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    volumes:
+      # /config/est is the libest working directory — the integration
+      # test writes CSRs / reads issued certs through this mount so the
+      # test-side Go code can inspect estclient's outputs.
+      - ./test/est:/config/est:rw
+      # certctl's CA bundle for TLS pinning. estclient uses this to
+      # verify the certctl-server cert (the same self-signed bundle
+      # the certctl-agent verifies against).
+      - ./test/certs:/config/certs:ro
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.9
+    restart: unless-stopped
+    profiles: [est-e2e]
+
 # =============================================================================
 # Network
 # =============================================================================

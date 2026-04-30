@@ -179,7 +179,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 
 	query := fmt.Sprintf(`
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, source, created_at, updated_at
 		FROM managed_certificates
 		%s
 		ORDER BY %s %s
@@ -200,13 +200,14 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 		var sans pq.StringArray
 		var profileID sql.NullString
 		var revocationReason sql.NullString
+		var source sql.NullString
 
 		err := rows.Scan(
 			&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
 			&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &profileID,
 			&cert.Status, &cert.ExpiresAt, &tagsJSON,
 			&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.RevokedAt, &revocationReason,
-			&cert.CreatedAt, &cert.UpdatedAt)
+			&source, &cert.CreatedAt, &cert.UpdatedAt)
 
 		if err != nil {
 			return nil, 0, fmt.Errorf("failed to scan certificate: %w", err)
@@ -218,6 +219,10 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 		}
 		if revocationReason.Valid {
 			cert.RevocationReason = revocationReason.String
+		}
+		// Phase 11.1: source column.
+		if source.Valid {
+			cert.Source = domain.CertificateSource(source.String)
 		}
 
 		// Unmarshal tags
@@ -259,7 +264,7 @@ func (r *CertificateRepository) List(ctx context.Context, filter *repository.Cer
 func (r *CertificateRepository) Get(ctx context.Context, id string) (*domain.ManagedCertificate, error) {
 	row := r.db.QueryRowContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, source, created_at, updated_at
 		FROM managed_certificates
 		WHERE id = $1
 	`, id)
@@ -286,7 +291,7 @@ func (r *CertificateRepository) GetByIssuerAndSerial(ctx context.Context, issuer
 	row := r.db.QueryRowContext(ctx, `
 		SELECT mc.id, mc.name, mc.common_name, mc.sans, mc.environment, mc.owner_id, mc.team_id,
 		       mc.issuer_id, mc.renewal_policy_id, mc.certificate_profile_id, mc.status, mc.expires_at,
-		       mc.tags, mc.last_renewal_at, mc.last_deployment_at, mc.revoked_at, mc.revocation_reason,
+		       mc.tags, mc.last_renewal_at, mc.last_deployment_at, mc.revoked_at, mc.revocation_reason, mc.source,
 		       mc.created_at, mc.updated_at
 		FROM managed_certificates mc
 		JOIN certificate_versions cv ON cv.certificate_id = mc.id
@@ -331,14 +336,14 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 	err = r.db.QueryRowContext(ctx, `
 		INSERT INTO managed_certificates (
 			id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19)
+			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, source, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16, $17, $18, $19, $20)
 		RETURNING id
 	`, cert.ID, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
 		cert.OwnerID, cert.TeamID, cert.IssuerID, cert.RenewalPolicyID, profileID,
 		cert.Status, cert.ExpiresAt,
 		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt,
-		cert.RevokedAt, revocationReason,
+		cert.RevokedAt, revocationReason, string(cert.Source),
 		cert.CreatedAt, cert.UpdatedAt).Scan(&cert.ID)
 
 	if err != nil {
@@ -382,12 +387,13 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 			last_deployment_at = $13,
 			revoked_at = $14,
 			revocation_reason = $15,
-			updated_at = $16
-		WHERE id = $17
+			source = $16,
+			updated_at = $17
+		WHERE id = $18
 	`, cert.Name, cert.CommonName, pq.Array(cert.SANs), cert.Environment,
 		cert.OwnerID, cert.TeamID, cert.IssuerID, profileID, cert.Status, cert.ExpiresAt,
 		tagsJSON, cert.LastRenewalAt, cert.LastDeploymentAt,
-		cert.RevokedAt, revocationReason, cert.UpdatedAt, cert.ID)
+		cert.RevokedAt, revocationReason, string(cert.Source), cert.UpdatedAt, cert.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to update certificate: %w", err)
@@ -491,7 +497,7 @@ func (r *CertificateRepository) CreateVersion(ctx context.Context, version *doma
 func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
-		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, created_at, updated_at
+		       certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, source, created_at, updated_at
 		FROM managed_certificates
 		WHERE expires_at < $1 AND status != $2
 		ORDER BY expires_at ASC
@@ -510,13 +516,14 @@ func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, bef
 		var sans pq.StringArray
 		var profileID sql.NullString
 		var revocationReason sql.NullString
+		var source sql.NullString
 
 		err := rows.Scan(
 			&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
 			&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &profileID,
 			&cert.Status, &cert.ExpiresAt, &tagsJSON,
 			&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.RevokedAt, &revocationReason,
-			&cert.CreatedAt, &cert.UpdatedAt)
+			&source, &cert.CreatedAt, &cert.UpdatedAt)
 
 		if err != nil {
 			return nil, fmt.Errorf("failed to scan certificate: %w", err)
@@ -528,6 +535,9 @@ func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, bef
 		}
 		if revocationReason.Valid {
 			cert.RevocationReason = revocationReason.String
+		}
+		if source.Valid {
+			cert.Source = domain.CertificateSource(source.String)
 		}
 
 		// Unmarshal tags
@@ -668,13 +678,14 @@ func (r *CertificateRepository) scanCertificate(ctx context.Context, scanner int
 	var sans pq.StringArray
 	var profileID sql.NullString
 	var revocationReason sql.NullString
+	var source sql.NullString
 
 	err := scanner.Scan(
 		&cert.ID, &cert.Name, &cert.CommonName, &sans, &cert.Environment, &cert.OwnerID,
 		&cert.TeamID, &cert.IssuerID, &cert.RenewalPolicyID, &profileID,
 		&cert.Status, &cert.ExpiresAt, &tagsJSON,
 		&cert.LastRenewalAt, &cert.LastDeploymentAt, &cert.RevokedAt, &revocationReason,
-		&cert.CreatedAt, &cert.UpdatedAt)
+		&source, &cert.CreatedAt, &cert.UpdatedAt)
 
 	if err != nil {
 		return nil, fmt.Errorf("failed to scan certificate: %w", err)
@@ -686,6 +697,12 @@ func (r *CertificateRepository) scanCertificate(ctx context.Context, scanner int
 	}
 	if revocationReason.Valid {
 		cert.RevocationReason = revocationReason.String
+	}
+	// Phase 11.1: source column ships with default '' so every existing
+	// row scans into CertificateSourceUnspecified ("") — back-compat for
+	// the bulk-revoke filter, which treats empty as "any source".
+	if source.Valid {
+		cert.Source = domain.CertificateSource(source.String)
 	}
 
 	// Unmarshal tags

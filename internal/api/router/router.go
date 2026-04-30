@@ -188,6 +188,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// errors[]} out). L-1 master added bulk-renew + bulk-reassign
 	// alongside the pre-existing bulk-revoke.
 	r.Register("POST /api/v1/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevoke))
+	// EST RFC 7030 hardening Phase 11.2 — Source-scoped EST bulk-revoke.
+	// Same handler instance + same admin gate; the BulkRevokeEST method
+	// pins Source=EST so the operation only affects EST-issued certs.
+	r.Register("POST /api/v1/est/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevokeEST))
 	r.Register("POST /api/v1/certificates/bulk-renew", http.HandlerFunc(reg.BulkRenewal.BulkRenew))
 	r.Register("POST /api/v1/certificates/bulk-reassign", http.HandlerFunc(reg.BulkReassignment.BulkReassign))
 	r.Register("GET /api/v1/certificates", http.HandlerFunc(reg.Certificates.ListCertificates))
