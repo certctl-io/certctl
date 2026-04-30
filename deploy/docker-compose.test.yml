@@ -469,7 +469,13 @@ services:
       - ./test/certs:/config/certs:ro
     networks:
       certctl-test:
-        ipv4_address: 10.30.50.9
+        # Was 10.30.50.9 — collided with certctl-tls-init (line 91). Pre-Phase-5
+        # per-vendor matrix structurally hid this: tls-init is profile-less so
+        # it always ran, but libest is profiles=[est-e2e] so it only ran when
+        # the (separate) est-e2e job brought it up. Different jobs ⇒ different
+        # docker networks ⇒ no collision. Surfaced when a future job runs both
+        # profiles together; pre-emptive fix here.
+        ipv4_address: 10.30.50.10
     restart: unless-stopped
     profiles: [est-e2e]
 
