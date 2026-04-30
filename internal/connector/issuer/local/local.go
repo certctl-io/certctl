@@ -94,6 +94,20 @@ type Config struct {
 	// CAKeyPath is the path to a PEM-encoded CA private key file (RSA or ECDSA).
 	// Required when CACertPath is set.
 	CAKeyPath string `json:"ca_key_path,omitempty"`
+
+	// CRLDistributionPointURLs — production hardening II Phase 6. When
+	// non-empty, the local issuer auto-injects the RFC 5280 §4.2.1.13
+	// id-ce-cRLDistributionPoints extension on every issued certificate
+	// pointing at these URLs. Operators set this to certctl's own
+	// public CRL endpoint (e.g.
+	// https://certctl.example.com:8443/.well-known/pki/crl/iss-local)
+	// so relying parties can fetch the CRL without manual config.
+	//
+	// Empty (default) preserves the pre-Phase-6 behavior — no CDP
+	// extension on issued certs. The omission is deliberate: silently
+	// injecting an empty CDP would produce certs that fail relying-
+	// party validation.
+	CRLDistributionPointURLs []string `json:"crl_distribution_point_urls,omitempty"`
 }
 
 // Connector implements the issuer.Connector interface for local certificate generation.
@@ -709,6 +723,15 @@ func (c *Connector) generateCertificate(csr *x509.CertificateRequest, additional
 		EmailAddresses: emails,
 		SubjectKeyId:   hashPublicKey(csr.PublicKey),
 		AuthorityKeyId: c.caCert.SubjectKeyId,
+	}
+
+	// Production hardening II Phase 6: auto-inject the
+	// id-ce-cRLDistributionPoints extension when configured. crypto/x509
+	// handles the ASN.1 encoding from the URL slice. Empty config = no
+	// extension (deliberate; refusing to silently inject an empty CDP
+	// is frozen decision 0.9).
+	if len(c.config.CRLDistributionPointURLs) > 0 {
+		template.CRLDistributionPoints = append(template.CRLDistributionPoints, c.config.CRLDistributionPointURLs...)
 	}
 
 	// Add IP addresses if present
