@@ -734,9 +734,60 @@ type ESTService interface {
 
 **Issuer connector extension:** EST required adding `GetCACertPEM(ctx) (string, error)` to the issuer connector interface so the `/cacerts` endpoint can serve the CA chain. The Local CA returns its CA certificate PEM; Vault PKI fetches via `GET /v1/{mount}/ca/pem`; Google CAS fetches via API; AWS ACM PCA retrieves via `GetCertificateAuthorityCertificate`. ACME, step-ca, OpenSSL, DigiCert, and Sectigo connectors return errors (they don't expose a static CA chain — their chains are per-issuance).
 
-**Authentication:** EST endpoints are served unauthenticated at the HTTP layer under `/.well-known/est/*` — no Bearer token required. Per RFC 7030 §3.2.3 EST authentication is deployment-specific, and per §4.1.1 `/cacerts` is explicitly anonymous. certctl enforces authentication via CSR signature verification inside `ESTService.SimpleEnroll`/`SimpleReEnroll` plus profile policy gates (allowed key algorithms, minimum key size, permitted SANs, permitted EKUs, MaxTTL). The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes `/.well-known/est/*` through `noAuthHandler` (RequestID + structuredLogger + Recovery only). Operators who need stronger client identification should terminate mTLS at an upstream reverse proxy and pin the CSR's SAN to the client cert subject at the profile level.
+**Authentication:** EST endpoints are served unauthenticated at the HTTP layer under `/.well-known/est/*` — no Bearer token required. Per RFC 7030 §3.2.3 EST authentication is deployment-specific, and per §4.1.1 `/cacerts` is explicitly anonymous. certctl enforces authentication via CSR signature verification inside `ESTService.SimpleEnroll`/`SimpleReEnroll` plus profile policy gates (allowed key algorithms, minimum key size, permitted SANs, permitted EKUs, MaxTTL). The HTTP dispatch is implemented in `cmd/server/main.go:buildFinalHandler`, which routes `/.well-known/est/*` through `noAuthHandler` (RequestID + structuredLogger + Recovery only). The EST RFC 7030 hardening master bundle (Phases 1–11, post-2026-04-29) layers per-profile mTLS sibling routes, HTTP Basic enrollment-password auth, RFC 9266 channel binding, and per-(CN, sourceIP) sliding-window rate limits on top of this baseline — see [`EST Server (RFC 7030) — Production Deployment`](#est-server-rfc-7030--production-deployment) below for the production topology.
 
-**Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID.
+**Audit:** Every EST enrollment is recorded in the audit trail with `protocol: "EST"`, the CN, SANs, issuer ID, serial number, and optional profile ID. The hardening bundle adds typed audit-action codes per failure dimension (`est_simple_enroll_success` / `_failed`, `est_auth_failed_basic` / `_mtls` / `_channel_binding`, `est_rate_limited`, `est_csr_policy_violation`, `est_bulk_revoke`, `est_trust_anchor_reloaded`, etc.) so operators can filter the GUI Recent Activity tab on the exact reason — see `internal/service/est_audit_actions.go` for the constants.
+
+### EST Server (RFC 7030) — Production Deployment
+
+The EST hardening master bundle (Phases 1–11, post-2026-04-29) makes the EST server production-grade for enterprise WiFi/802.1X, IoT bootstrap, and Microsoft-fleet enrollment without a behind-the-proxy auth layer. The `EST Server (RFC 7030)` section above describes the V2-baseline single-profile server; the production topology layers in:
+
+- **Multi-profile dispatch** via `CERTCTL_EST_PROFILES=corp,iot,wifi`. Each profile gets its own `/.well-known/est/<pathID>/` endpoint group, isolated issuer binding, optional `CertificateProfile`, and independent auth + trust anchor.
+- **mTLS sibling route** at `/.well-known/est-mtls/<pathID>/` (opt-in via `_MTLS_ENABLED=true`). Required for the standard route's HTTP Basic to coexist with the renewal-on-existing-cert flow. Per-handler re-verify enforces "cert chains to THIS profile's bundle" so cross-profile bleed is blocked even when both profiles share a TLS listener union pool (`cmd/server/tls.go::buildServerTLSConfigWithMTLS`).
+- **HTTP Basic enrollment-password** on the standard route (opt-in via `_ALLOWED_AUTH_MODES=basic` + `_ENROLLMENT_PASSWORD`). Constant-time comparison; per-source-IP failed-auth limiter (10 attempts / 1h / 50k tracked IPs) caps brute-force from a single source.
+- **RFC 9266 `tls-exporter` channel binding** (opt-in via `_CHANNEL_BINDING_REQUIRED=true`, gated on `_MTLS_ENABLED=true`). Defends against TLS-bridging MITM where an attacker funnels the device's CSR through their own TLS session.
+- **Per-(CN, sourceIP) sliding-window rate limit** via `_RATE_LIMIT_PER_PRINCIPAL_24H` (default 0 = disabled; production = 3). Mirrors the SCEP/Intune per-device limit pattern.
+- **Server-side keygen** per RFC 7030 §4.4 (opt-in via `_SERVERKEYGEN_ENABLED=true`). CMS EnvelopedData wraps the server-generated private key encrypted to the device's CSR pubkey via AES-256-CBC; plaintext key zeroized after marshal (mirrors the SCEP/Intune `keymem.marshalPrivateKeyAndZeroize` discipline).
+- **Per-profile observability** via the `/api/v1/admin/est/profiles` and `POST /api/v1/admin/est/reload-trust` endpoints (M-008 admin-gated). The GUI surface lives at `/est` with three tabs (Profiles / Recent Activity / Trust Bundle) — counter cells per failure dimension, trust-anchor expiry countdowns, SIGHUP-equivalent reload modal.
+- **EST-source-scoped bulk revoke** at `POST /api/v1/est/certificates/bulk-revoke` (M-008 admin-gated). The handler pins `Source=EST` so the operator's bulk-revoke only affects EST-issued certs even if the criteria match SCEP/API/Agent-issued certs too. Provenance is tracked via `ManagedCertificate.Source` (migration `000023_managed_certificates_source.up.sql`).
+
+```mermaid
+flowchart LR
+    subgraph "EST clients"
+        Laptop["Laptop / supplicant\n(host enrollment)"]
+        IoT["IoT device\n(bootstrap)"]
+        Sup["WiFi supplicant\n(user enrollment)"]
+    end
+    subgraph "EST endpoints (per profile)"
+        Std["/.well-known/est/&lt;pathID&gt;/\n(HTTP Basic OR anonymous)"]
+        MTLS["/.well-known/est-mtls/&lt;pathID&gt;/\n(client cert required;\ntrust → _MTLS_CLIENT_CA_TRUST_BUNDLE_PATH)"]
+    end
+    subgraph "Per-profile gates (in order)"
+        Auth["Auth\n(_ALLOWED_AUTH_MODES)"]
+        CB["RFC 9266 channel binding\n(_CHANNEL_BINDING_REQUIRED)"]
+        RL["Sliding-window rate limit\n(_RATE_LIMIT_PER_PRINCIPAL_24H)"]
+        Pol["CSR policy gate\n(profile.AllowedKeyAlgorithms / EKUs / SANs / MaxTTL / MustStaple)"]
+    end
+    subgraph "Issuance"
+        Iss["IssuerConnector\n(per profile _ISSUER_ID)"]
+    end
+    Laptop --> MTLS
+    IoT --> Std
+    Sup --> MTLS
+    Std --> Auth --> RL --> Pol --> Iss
+    MTLS --> Auth --> CB --> RL --> Pol --> Iss
+    Iss --> Audit["audit log\n(typed est_* action codes)"]
+    Iss --> Counter["estCounterTab\n(per-profile sync/atomic)"]
+    Audit --> GUI["/est admin tabs\n(Profiles / Recent Activity / Trust Bundle)"]
+    Counter --> GUI
+    GUI -. "SIGHUP-equivalent" .-> Reload["/api/v1/admin/est/reload-trust\n(M-008 admin-gated)"]
+```
+
+Trust-anchor reload semantics: a bad SIGHUP (parse error, expired cert) keeps the OLD pool in place. The operator hits the GUI Reload modal, sees the typed error, corrects the file, retries — the EST endpoint never goes down during a half-rotation. Implemented via the shared `internal/trustanchor.Holder` primitive that the SCEP/Intune dispatcher also uses; per-handler `Get()` returns a snapshot at request-start so an in-flight request that crosses a SIGHUP uses the OLD pool.
+
+**libest interop tested in CI.** The libest sidecar at `deploy/test/libest/Dockerfile` builds Cisco's reference RFC 7030 client (v3.2.0-2) and the integration suite at `deploy/test/est_e2e_test.go` exercises every documented flow end-to-end via `docker exec` against the live certctl server. See [`docs/est.md::Appendix A`](est.md#appendix-a-libest-reference-client) for the operator-side reproducer.
+
+The full operator guide (multi-profile config, WiFi/802.1X + FreeRADIUS recipe, IoT bootstrap recipe, troubleshooting matrix per typed audit-action) is at [`docs/est.md`](est.md).
 
 ### SCEP Server (RFC 8894)
 
