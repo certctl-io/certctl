@@ -131,13 +131,33 @@ WORKDIR /src
 # next-older default-fcommon GCC is 9.x in debian:buster, which is
 # LTS-EOL since June 2024. Restoring the flag explicitly is cleaner
 # than downgrading the base again.
+#
+# CRITICAL: pass CFLAGS + LDFLAGS at configure-time ONLY. Do NOT also
+# pass them on the `make` command line.
+#
+# Why: libest's configure.ac (lines 193-195) unconditionally appends
+# the bundled safec stub paths to the user's CFLAGS/LDFLAGS/LIBS:
+#
+#   CFLAGS="$CFLAGS -Wall -I$safecdir/include"
+#   LDFLAGS="$LDFLAGS -L$safecdir/lib"
+#   LIBS="$LIBS -lsafe_lib"
+#
+# The merged values get baked into the generated Makefile as
+# @CFLAGS@/@LDFLAGS@/@LIBS@ substitutions, so every link command —
+# notably estclient's — gets `-L/src/safe_c_stub/lib -lsafe_lib`.
+#
+# Per automake's variable-precedence rules, a command-line
+# `make LDFLAGS=...` OVERRIDES the `LDFLAGS = @LDFLAGS@` line in
+# the Makefile. Pass-through at make-time wipes the safec stub's
+# `-L` path; estclient then fails to link with
+# `cannot find -lsafe_lib` even though `safe_c_stub/lib/libsafe_lib.a`
+# built fine. Configure-time alone is sufficient — configure writes
+# the merged value into the Makefile exactly once.
 RUN git clone --depth 1 --branch ${LIBEST_REF} https://github.com/cisco/libest.git . \
     && CFLAGS="-fcommon" \
        LDFLAGS="-Wl,--allow-multiple-definition" \
        ./configure --prefix=/opt/libest --disable-shared --enable-static \
-    && make CFLAGS="-fcommon" \
-            LDFLAGS="-Wl,--allow-multiple-definition" \
-            -j"$(nproc)" \
+    && make -j"$(nproc)" \
     && make install
 
 # Runtime stage. Carries only what we need to docker-exec estclient
