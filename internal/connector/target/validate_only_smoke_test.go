@@ -25,7 +25,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
-	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
+	// haproxy removed Phase 6 — real ValidateOnly implementation now in haproxy.go.
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/javakeystore"
 	"github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
@@ -69,7 +69,8 @@ var connectorsAtPhase3 = []struct {
 	{"caddy", func() target.Connector { return &caddy.Connector{} }},
 	{"envoy", func() target.Connector { return &envoy.Connector{} }},
 	{"f5", func() target.Connector { return &f5.Connector{} }},
-	{"haproxy", func() target.Connector { return &haproxy.Connector{} }},
+	// haproxy removed Phase 6 — its ValidateOnly is now real;
+	// tested in haproxy/haproxy_atomic_test.go.
 	{"iis", func() target.Connector { return &iis.Connector{} }},
 	{"javakeystore", func() target.Connector { return &javakeystore.Connector{} }},
 	{"k8ssecret", func() target.Connector { return &k8ssecret.Connector{} }},
@@ -85,7 +86,7 @@ var connectorsAtPhase3 = []struct {
 func TestEveryConnectorDefaultsToSentinel(t *testing.T) {
 	// Expected list size shrinks as Phases 4-9 land their real
 	// ValidateOnly implementations. Phase 4 removed nginx.
-	const expectedAtCurrentPhase = 11
+	const expectedAtCurrentPhase = 10
 	if len(connectorsAtPhase3) != expectedAtCurrentPhase {
 		t.Fatalf("connectors-at-phase list = %d entries, want %d (drift in the 13-connector inventory)", len(connectorsAtPhase3), expectedAtCurrentPhase)
 	}
