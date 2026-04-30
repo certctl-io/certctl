@@ -1380,13 +1380,40 @@ jobs:
           cache: true
 
       - name: Bring up vendor sidecar
+        # Map matrix.vendor → docker-compose service name. The naming is
+        # NOT 1:1 because (a) the legacy NGINX vendor-edge tests reuse the
+        # apache-test sidecar via requireSidecar(t,"apache") — see the
+        # comment in deploy/test/nginx_vendor_e2e_test.go; (b) the openssh
+        # service is named openssh-test (not ssh-test); (c) the kind
+        # cluster service is named k8s-kind-test; (d) the F5 mock service
+        # is named f5-mock-icontrol and must be built first because it
+        # has no published image; (e) the JavaKeystore tests are pure-Go
+        # placeholder stubs that exercise no sidecar.
         run: |
-          if [ "${{ matrix.vendor }}" = "f5-mock" ]; then
-            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml build f5-mock-icontrol
-            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d f5-mock-icontrol
-          else
-            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d ${{ matrix.vendor }}-test
+          set -e
+          case "${{ matrix.vendor }}" in
+            nginx)        SVC=apache-test ;;       # nginx tests reuse apache sidecar
+            apache)       SVC=apache-test ;;
+            haproxy)      SVC=haproxy-test ;;
+            traefik)      SVC=traefik-test ;;
+            caddy)        SVC=caddy-test ;;
+            envoy)        SVC=envoy-test ;;
+            postfix)      SVC=postfix-test ;;
+            dovecot)      SVC=dovecot-test ;;
+            ssh)          SVC=openssh-test ;;
+            k8s)          SVC=k8s-kind-test ;;
+            f5-mock)      SVC=f5-mock-icontrol ;;
+            javakeystore) SVC="" ;;                # pure-Go placeholder stubs; no sidecar needed
+            *)            echo "::error::unknown matrix vendor '${{ matrix.vendor }}'"; exit 1 ;;
+          esac
+          if [ -z "$SVC" ]; then
+            echo "vendor=${{ matrix.vendor }} runs without a sidecar (pure-Go placeholder tests)"
+            exit 0
           fi
+          if [ "${{ matrix.vendor }}" = "f5-mock" ]; then
+            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml build "$SVC"
+          fi
+          docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d "$SVC"
           sleep 5
 
       - name: Run vendor-edge e2e

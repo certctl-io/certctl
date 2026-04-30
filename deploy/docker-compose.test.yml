@@ -486,7 +486,7 @@ services:
   # docs/deployment-vendor-matrix.md.
 
   apache-test:
-    image: httpd:2.4-alpine@sha256:8e8ee9929d4d8ddbed9ff3e5aaad26cdb46c40a4e51d8fdd02c41bff37d1d65a
+    image: httpd:2.4-alpine@sha256:f9061a65c6e8f50d5636e10806da3d5a238877c11d6bc0149dc5131be0a1a19f
     container_name: certctl-test-apache
     ports:
       - "20443:443"
@@ -500,7 +500,7 @@ services:
     profiles: [deploy-e2e]
 
   haproxy-test:
-    image: haproxy:3.0-alpine@sha256:2e8a7b9f3c91c2c46a90e3a98a7e44e0f7c89def96b3f2bd2a7d0a48a9f4d36a
+    image: haproxy:3.0-alpine@sha256:5b645ad4f3294cf5bc50ab8b201fdeb73732eca2928185df335735c698e8c3e2
     container_name: certctl-test-haproxy
     ports:
       - "20444:443"
@@ -513,7 +513,7 @@ services:
     profiles: [deploy-e2e]
 
   traefik-test:
-    image: traefik:v3.1@sha256:c5a92b19a3a77a3a60b9d9cdf3f60d7f08e7e9a2e4cdbcfb4a08b2e8a9e86e7c
+    image: traefik:v3.1@sha256:8516638b18e67e999d293e4ff0e5baf7807674cd4bdd3d36d448497bcbf0a174
     container_name: certctl-test-traefik
     command:
       - --providers.file.directory=/etc/traefik/dynamic
@@ -531,7 +531,7 @@ services:
     profiles: [deploy-e2e]
 
   caddy-test:
-    image: caddy:2.8-alpine@sha256:0afbb4bbcdaf0b3036020168f2796e6c80ddf95a7f5de2d3a5d8d7d80796a3df
+    image: caddy:2.8-alpine@sha256:b95ed06fbc6d74d24a40902090c8cc6086ce7d08ba60a3a7e8e62bf164a9d7bb
     container_name: certctl-test-caddy
     command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
     ports:
@@ -546,7 +546,7 @@ services:
     profiles: [deploy-e2e]
 
   envoy-test:
-    image: envoyproxy/envoy:v1.32-latest@sha256:b87f1a50f78ce96a5bca7eaa6c8d5e0e6d4edd6c8e9c2b9d7d2c39b5f6a2e3a4
+    image: envoyproxy/envoy:v1.32-latest@sha256:6ed0d4f28b8122df896062c425b34f18b8287e8c71c6badb3b84ca2e2f47c519
     container_name: certctl-test-envoy
     command: envoy -c /etc/envoy/envoy.yaml --log-level error
     ports:
@@ -560,7 +560,7 @@ services:
     profiles: [deploy-e2e]
 
   postfix-test:
-    image: boky/postfix:latest@sha256:8d4f1ad9d2e1c4f9e3d4f9c1d7e6c0e9e8c5f5b3d1a4f7c4e1f2d6c5b3e9c8a7
+    image: boky/postfix:latest@sha256:cd7e192900bfc49a67291a572b5f645f9e7d1b8d7f2b79b0364b4b4176964e21
     container_name: certctl-test-postfix
     environment:
       ALLOWED_SENDER_DOMAINS: "test.local"
@@ -575,7 +575,7 @@ services:
     profiles: [deploy-e2e]
 
   dovecot-test:
-    image: dovecot/dovecot:latest@sha256:7f4e2c1b6d4a5f7c8e6d9b3f4e7c2a8d6e3f1c4b9a8e7d6c5b4a3f2e1d0c9b8a
+    image: dovecot/dovecot:latest@sha256:4046993478e8c8bcb841fdbff2d8de1b233484cc0196b3723f6c588e7eaf7301
     container_name: certctl-test-dovecot
     ports:
       - "20993:993"
@@ -589,7 +589,7 @@ services:
     profiles: [deploy-e2e]
 
   openssh-test:
-    image: lscr.io/linuxserver/openssh-server:latest@sha256:d6a7e4c3b2f1a0d9c8b7e6f5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5
+    image: lscr.io/linuxserver/openssh-server:latest@sha256:742f577d4100f5ad3b38f270d722931bbe98b997444c13b1a2a838df12a9971e
     container_name: certctl-test-openssh
     environment:
       USER_NAME: "certctl"
@@ -629,7 +629,7 @@ services:
   # The kind binary lives in the test image; the Docker socket is mounted
   # so kind can manage child containers.
   k8s-kind-test:
-    image: kindest/node:v1.31.0@sha256:53df588e04085fd41ae12de0c3fe4c72f7013bba32a20e7325357a1ac94ba865
+    image: kindest/node:v1.31.0@sha256:7fbc5644a803286a69ff9c5695f03bb01b512896835e15df7df17f756f7245ac
     container_name: certctl-test-kind
     privileged: true
     networks:
@@ -646,7 +646,7 @@ services:
   # Image not pulled by default (no profile match on Linux); included
   # here so Windows operators get the same compose surface.
   windows-iis-test:
-    image: mcr.microsoft.com/windows/servercore/iis:windowsservercore-ltsc2022@sha256:placeholder-operator-pins-on-windows
+    image: mcr.microsoft.com/windows/servercore/iis:windowsservercore-ltsc2022@sha256:8d0b0e651ad514e3fb05978db66f38036118812e1b9314a48f10419cad8a3462
     container_name: certctl-test-iis
     ports:
       - "20448:443"
