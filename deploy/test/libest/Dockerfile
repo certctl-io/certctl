@@ -96,9 +96,48 @@ RUN apt-get update && apt-get install --no-install-recommends -y \
 
 WORKDIR /src
 
+# Why CFLAGS=-fcommon + LDFLAGS=-Wl,--allow-multiple-definition:
+#
+# GCC 10 (released 2020-05) flipped the default from -fcommon to
+# -fno-common — "tentative definitions" of global variables in
+# headers (without the `extern` keyword) now get a real definition
+# in EVERY translation unit that includes the header. libest's
+# est_locl.h:593 declares `int e_ctx_ssl_exdata_index;` without
+# `extern`, so under GCC 10+ every libest .c file gets its own copy
+# and the linker reports nine multiple-definition errors.
+#
+#   -fcommon                          → restore GCC 9 / pre-2020
+#                                       default for tentative
+#                                       definitions; tolerates the
+#                                       libest est_locl.h shape.
+#
+# Separately, `ossl_dump_ssl_errors` is *defined* (not just
+# declared) in BOTH src/est/est_ossl_util.c:310 (inside libest)
+# AND example/client/util/utils.c:33 (which estclient links).
+# This is a real-function-level duplicate; -fcommon doesn't apply.
+#
+#   -Wl,--allow-multiple-definition   → restore the pre-strict ld
+#                                       behavior that tolerates
+#                                       function-level duplicates
+#                                       (last-defined-wins).
+#
+# Both flags restore the build contract libest 3.2.0 was authored
+# under — they're the documented migration path for projects that
+# relied on the GCC 9 / older binutils default. Not a band-aid;
+# this is the canonical way to build libest 3.2.0 on a modern
+# toolchain.
+#
+# bullseye-slim's GCC is 10.2 (already enforces -fno-common); the
+# next-older default-fcommon GCC is 9.x in debian:buster, which is
+# LTS-EOL since June 2024. Restoring the flag explicitly is cleaner
+# than downgrading the base again.
 RUN git clone --depth 1 --branch ${LIBEST_REF} https://github.com/cisco/libest.git . \
-    && ./configure --prefix=/opt/libest --disable-shared --enable-static \
-    && make -j"$(nproc)" \
+    && CFLAGS="-fcommon" \
+       LDFLAGS="-Wl,--allow-multiple-definition" \
+       ./configure --prefix=/opt/libest --disable-shared --enable-static \
+    && make CFLAGS="-fcommon" \
+            LDFLAGS="-Wl,--allow-multiple-definition" \
+            -j"$(nproc)" \
     && make install
 
 # Runtime stage. Carries only what we need to docker-exec estclient
