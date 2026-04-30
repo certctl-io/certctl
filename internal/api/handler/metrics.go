@@ -15,12 +15,27 @@ type MetricsService interface {
 	GetDashboardSummary(ctx context.Context) (interface{}, error)
 }
 
+// CounterSnapshotter is the minimum surface MetricsHandler consumes
+// from a counter table for the Prometheus exposer. The OCSPCounters
+// type in internal/service satisfies this; future per-area counter
+// tabs (CRL, cert-export, EST, SCEP, Intune) plug in the same way.
+//
+// Production hardening II Phase 8.
+type CounterSnapshotter interface {
+	Snapshot() map[string]uint64
+}
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
 type MetricsHandler struct {
 	svc           MetricsService
 	serverStarted time.Time
+	// Production hardening II Phase 8 — per-area counter snapshotters.
+	// nil values omit the corresponding metric block; cmd/server/main.go
+	// wires the instances at startup. The naming convention is
+	// certctl_<area>_<label>_total per frozen decision 0.10.
+	ocspCounters CounterSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -30,6 +45,13 @@ func NewMetricsHandler(svc MetricsService, serverStarted time.Time) MetricsHandl
 		svc:           svc,
 		serverStarted: serverStarted,
 	}
+}
+
+// SetOCSPCounters wires the OCSP counter table for the per-area
+// metric block in the Prometheus exposition. nil disables the block.
+// Production hardening II Phase 8.
+func (h *MetricsHandler) SetOCSPCounters(c CounterSnapshotter) {
+	h.ocspCounters = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -222,6 +244,28 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 	fmt.Fprintf(w, "# HELP certctl_uptime_seconds Server uptime in seconds.\n")
 	fmt.Fprintf(w, "# TYPE certctl_uptime_seconds gauge\n")
 	fmt.Fprintf(w, "certctl_uptime_seconds %d\n", uptimeSeconds)
+
+	// Production hardening II Phase 8 — per-area counters. Each block
+	// is nil-guarded so a deploy without the wire still produces clean
+	// output (just the legacy dashboard metrics above). Naming
+	// convention: certctl_<area>_<label>_total per frozen decision
+	// 0.10.
+	if h.ocspCounters != nil {
+		fmt.Fprintf(w, "\n# HELP certctl_ocsp_counter_total OCSP responder per-event counters (production hardening II Phase 8).\n")
+		fmt.Fprintf(w, "# TYPE certctl_ocsp_counter_total counter\n")
+		snap := h.ocspCounters.Snapshot()
+		// Emit in a deterministic order so the output diff is stable
+		// across requests (helps operators spot drift in dashboard
+		// snapshots).
+		labels := []string{
+			"request_get", "request_post", "request_success", "request_invalid",
+			"issuer_not_found", "cert_not_found", "signing_failed",
+			"nonce_echoed", "nonce_malformed", "rate_limited",
+		}
+		for _, lbl := range labels {
+			fmt.Fprintf(w, "certctl_ocsp_counter_total{label=%q} %d\n", lbl, snap[lbl])
+		}
+	}
 }
 
 // DashboardSummary mirrors the service.DashboardSummary for JSON unmarshaling.

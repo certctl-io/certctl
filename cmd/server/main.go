@@ -329,7 +329,12 @@ func main() {
 	// counters get wired in Phase 8 when the Prometheus exposer reads
 	// them.
 	ocspResponseCacheRepo := postgres.NewOCSPResponseCacheRepository(db)
-	ocspResponseCacheService := service.NewOCSPResponseCacheService(ocspResponseCacheRepo, caOperationsSvc, nil, logger)
+	// Production hardening II Phase 8: share a single OCSPCounters
+	// instance between the cache service (Phase 2) and the Prometheus
+	// exposer (Phase 8) so the metrics endpoint reflects every counter
+	// tick that happens inside the cache service's hot path.
+	ocspCounters := service.NewOCSPCounters()
+	ocspResponseCacheService := service.NewOCSPResponseCacheService(ocspResponseCacheRepo, caOperationsSvc, ocspCounters, logger)
 	caOperationsSvc.SetOCSPCacheSvc(ocspResponseCacheService)
 	// Load-bearing security wire: invalidate the cache after a successful
 	// revocation so the next OCSP fetch returns "revoked" (not the stale
@@ -524,6 +529,11 @@ func main() {
 	notificationHandler := handler.NewNotificationHandler(notificationService)
 	statsHandler := handler.NewStatsHandler(statsService)
 	metricsHandler := handler.NewMetricsHandler(statsService, time.Now())
+	// Production hardening II Phase 8: wire the per-area counter
+	// snapshotters so the Prometheus exposer surfaces them. Operators
+	// alert on certctl_ocsp_counter_total{label="rate_limited"},
+	// {label="nonce_malformed"}, etc.
+	metricsHandler.SetOCSPCounters(ocspCounters)
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
