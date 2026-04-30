@@ -133,7 +133,7 @@ jobs:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
           PR_NUMBER: ${{ github.event.number }}
           GITHUB_REPOSITORY: ${{ github.repository }}
-        run: bash scripts/ci-guards/coverage-pr-comment.sh
+        run: bash scripts/coverage-pr-comment.sh
 
       # Bundle P / Strengthening #6 — QA-doc drift guards. Forces every PR
       # that adds a Part to docs/testing-guide.md OR a seed row to
@@ -327,7 +327,7 @@ jobs:
   # placeholders). Collapsed to one job that brings up all 11 sidecars
   # at once and runs the full VendorEdge_ test set.
   #
-  # Skip-detection guard (scripts/ci-guards/vendor-e2e-skip-check.sh)
+  # Skip-detection guard (scripts/vendor-e2e-skip-check.sh)
   # enforces that no test SKIPs except the documented allowlist
   # (windows-iis-requiring tests on Linux). If a sidecar fails to come
   # up, requireSidecar() in deploy/test/vendor_e2e_helpers.go calls
@@ -387,7 +387,7 @@ jobs:
         # lines in the test output and fails the build if it exceeds the
         # allowlist (windows-iis-requiring tests; legitimately skipped
         # on Linux per Phase 6 / frozen decision 0.5).
-        run: bash scripts/ci-guards/vendor-e2e-skip-check.sh test-output.log
+        run: bash scripts/vendor-e2e-skip-check.sh test-output.log
 
       - name: Tear down sidecars
         if: always()

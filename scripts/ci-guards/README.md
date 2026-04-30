@@ -16,14 +16,33 @@ Every script in this directory MUST:
 1. Be exit-code 0 on a clean repo (no regression present).
 2. Be exit-code non-zero on regression, with a `::error::` annotation
    prefix so PR reviewers see the failing line in the GitHub Actions UI.
-3. Be runnable from repo root via `bash scripts/ci-guards/<id>.sh` —
-   no implicit `cd` requirement, no env-var requirement.
+3. **Be runnable from repo root via `bash scripts/ci-guards/<id>.sh`
+   with NO arguments and NO env-var requirements.** The CI loop step
+   (`for g in scripts/ci-guards/*.sh; do bash "$g"; done`) iterates
+   every `.sh` here without args; any script that requires an arg or
+   env var WILL fail in that loop.
 4. Carry a head-comment block matching the in-source justification
    from the original ci.yml entry: the audit-finding reference, the
    closure rationale, the exempt-surface list (if any).
 5. Use `set -e` early to fail-fast on internal command errors.
 6. Produce no output on the happy path beyond a final
    `echo "<id>: clean."` confirmation line.
+
+### Helpers vs guards
+
+Scripts that consume input artifacts (a test-output log, a
+`coverage.out` file) or env vars (`PR_NUMBER`, `GH_TOKEN`) are
+HELPERS, not guards. They live in `scripts/`, NOT `scripts/ci-guards/`.
+
+Current helpers:
+- `scripts/vendor-e2e-skip-check.sh` — consumes `test-output.log`
+  arg from the deploy-vendor-e2e job
+- `scripts/coverage-pr-comment.sh` — consumes `coverage.out` +
+  `PR_NUMBER` + `GH_TOKEN` env from the go-build-and-test job
+- `scripts/check-coverage-thresholds.sh` — consumes `coverage.out`
+  + `.github/coverage-thresholds.yml`
+- `scripts/qa-doc-part-count.sh` + `scripts/qa-doc-seed-count.sh` —
+  invoked via `make verify-docs` pre-tag, not in CI
 
 ## Adding a new guard
 

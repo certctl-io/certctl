@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# scripts/ci-guards/vendor-e2e-skip-check.sh
+# scripts/vendor-e2e-skip-check.sh
 #
 # Counts `^--- SKIP:` lines in the vendor-e2e test output and fails
 # the build if any test skipped that's NOT in the allowlist at
-# scripts/ci-guards/vendor-e2e-skip-allowlist.txt.
+# scripts/vendor-e2e-skip-allowlist.txt.
 #
 # Per ci-pipeline-cleanup bundle Phase 5 / frozen decision 0.6.
 # requireSidecar() in deploy/test/vendor_e2e_helpers.go uses
@@ -12,12 +12,20 @@
 # one fails to start, the affected tests skip silently. This
 # guard catches that.
 #
-# Usage: bash scripts/ci-guards/vendor-e2e-skip-check.sh <test-output.log>
+# Lives in scripts/ (not scripts/ci-guards/) because it's a
+# helper that consumes a test-output log produced by a specific
+# CI step — not a regression guard runnable bare. The
+# scripts/ci-guards/ contract requires bare-callable, no-arg
+# scripts. See scripts/ci-guards/README.md.
+#
+# Usage: bash scripts/vendor-e2e-skip-check.sh <test-output.log>
 
 set -e
 
-LOG="${1:-test-output.log}"
-ALLOWLIST="scripts/ci-guards/vendor-e2e-skip-allowlist.txt"
+# Mandatory arg — fail loud at parse time rather than when the file
+# is missing (avoids the silent-default footgun).
+LOG="${1:?usage: $0 <test-output.log>}"
+ALLOWLIST="scripts/vendor-e2e-skip-allowlist.txt"
 
 if [ ! -f "$LOG" ]; then
   echo "::error::test output log not found: $LOG"

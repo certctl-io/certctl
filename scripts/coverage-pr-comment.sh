@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/ci-guards/coverage-pr-comment.sh
+# scripts/coverage-pr-comment.sh
 #
 # Post a per-package coverage table as a PR comment on every PR.
 # Self-hosted alternative to Codecov / Coveralls (per ci-pipeline-cleanup
@@ -8,6 +8,11 @@
 # Reads coverage.out from the Go Test step. Updates an existing comment
 # in place if one already exists (avoids duplicate noise on subsequent
 # pushes to the same PR).
+#
+# Lives in scripts/ (not scripts/ci-guards/) because it's a helper that
+# consumes coverage.out + GH env vars — not a regression guard runnable
+# bare. The scripts/ci-guards/ contract requires bare-callable, no-arg,
+# no-env scripts. See scripts/ci-guards/README.md.
 #
 # Required env:
 #   GH_TOKEN          — secrets.GITHUB_TOKEN

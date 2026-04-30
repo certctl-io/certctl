@@ -1,4 +1,4 @@
-# scripts/ci-guards/vendor-e2e-skip-allowlist.txt
+# scripts/vendor-e2e-skip-allowlist.txt
 #
 # Test names that are EXPECTED to skip on Linux ubuntu-latest CI runners.
 # Each entry: one Go test function name per line. Lines starting with `#`
