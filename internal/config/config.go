@@ -1202,6 +1202,22 @@ type SchedulerConfig struct {
 	// 3 frozen decision 0.6). Zero disables the limit.
 	// Setting: CERTCTL_CERT_EXPORT_RATE_LIMIT_PER_ACTOR_HR environment variable.
 	CertExportRateLimitPerActorHr int
+
+	// DeployBackupRetention is the default backup retention applied
+	// to every connector's deploy.Plan when the per-target config
+	// doesn't override. Defaults to 3 (deploy-hardening I frozen
+	// decision 0.2). Set to -1 to disable backups entirely (rollback
+	// becomes impossible — documented foot-gun).
+	// Setting: CERTCTL_DEPLOY_BACKUP_RETENTION environment variable.
+	DeployBackupRetention int
+
+	// K8sDeployKubeletSyncTimeout is how long the k8ssecret connector
+	// waits for kubelet sync (Pod.Status.ContainerStatuses indicating
+	// the new Secret has been mounted) after a Secret update before
+	// timing out the post-deploy verify. Defaults to 60s.
+	// Setting: CERTCTL_K8S_DEPLOY_KUBELET_SYNC_TIMEOUT environment variable.
+	// Deploy-hardening I Phase 9.
+	K8sDeployKubeletSyncTimeout time.Duration
 }
 
 // LogConfig contains logging configuration.
@@ -1418,6 +1434,9 @@ func Load() (*Config, error) {
 			CRLGenerationInterval:         getEnvDuration("CERTCTL_CRL_GENERATION_INTERVAL", 1*time.Hour),
 			OCSPRateLimitPerIPMin:         getEnvInt("CERTCTL_OCSP_RATE_LIMIT_PER_IP_MIN", 1000),
 			CertExportRateLimitPerActorHr: getEnvInt("CERTCTL_CERT_EXPORT_RATE_LIMIT_PER_ACTOR_HR", 50),
+			// Deploy-hardening I (frozen decisions 0.2 + Phase 9).
+			DeployBackupRetention:       getEnvInt("CERTCTL_DEPLOY_BACKUP_RETENTION", 3),
+			K8sDeployKubeletSyncTimeout: getEnvDuration("CERTCTL_K8S_DEPLOY_KUBELET_SYNC_TIMEOUT", 60*time.Second),
 		},
 		Log: LogConfig{
 			Level:  getEnv("CERTCTL_LOG_LEVEL", "info"),
