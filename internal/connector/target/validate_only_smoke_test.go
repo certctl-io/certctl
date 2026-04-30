@@ -24,13 +24,13 @@ import (
 	// apache removed Phase 5 — real ValidateOnly implementation now in apache.go.
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
-	"github.com/shankar0123/certctl/internal/connector/target/f5"
+	// f5 removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
 	// haproxy removed Phase 6 — real ValidateOnly implementation now in haproxy.go.
-	"github.com/shankar0123/certctl/internal/connector/target/iis"
+	// iis removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
 	"github.com/shankar0123/certctl/internal/connector/target/javakeystore"
 	"github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
 	// nginx removed Phase 4 — real ValidateOnly implementation now in nginx.go.
-	"github.com/shankar0123/certctl/internal/connector/target/postfix"
+	// postfix removed Phase 7 — real ValidateOnly implementation now in postfix.go.
 	"github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/traefik"
 	"github.com/shankar0123/certctl/internal/connector/target/wincertstore"
@@ -66,19 +66,20 @@ var connectorsAtPhase3 = []struct {
 }{
 	// apache removed Phase 5 — its ValidateOnly is now the real
 	// implementation; tested directly in apache/apache_atomic_test.go.
+	// caddy: file mode returns sentinel (no validate-with-target);
+	// api mode is real-impl. Empty Connector hits the file-mode path.
 	{"caddy", func() target.Connector { return &caddy.Connector{} }},
+	// envoy: no validate-with-target command exists; always sentinel.
 	{"envoy", func() target.Connector { return &envoy.Connector{} }},
-	{"f5", func() target.Connector { return &f5.Connector{} }},
-	// haproxy removed Phase 6 — its ValidateOnly is now real;
-	// tested in haproxy/haproxy_atomic_test.go.
-	{"iis", func() target.Connector { return &iis.Connector{} }},
+	// f5 removed Phase 8 — Authenticate-probe real impl.
+	// haproxy removed Phase 6 — `haproxy -c -f` real impl.
+	// iis removed Phase 8 — Get-WebSite probe real impl.
 	{"javakeystore", func() target.Connector { return &javakeystore.Connector{} }},
 	{"k8ssecret", func() target.Connector { return &k8ssecret.Connector{} }},
-	// nginx removed Phase 4 — its ValidateOnly is now the real
-	// implementation; tested directly in
-	// internal/connector/target/nginx/nginx_test.go.
-	{"postfix", func() target.Connector { return &postfix.Connector{} }},
+	// nginx removed Phase 4 — `nginx -t` real impl.
+	// postfix removed Phase 7 — `postfix check` / `doveconf -n` real impl.
 	{"ssh", func() target.Connector { return &ssh.Connector{} }},
+	// traefik: no validate-with-target command exists; always sentinel.
 	{"traefik", func() target.Connector { return &traefik.Connector{} }},
 	{"wincertstore", func() target.Connector { return &wincertstore.Connector{} }},
 }
@@ -86,7 +87,7 @@ var connectorsAtPhase3 = []struct {
 func TestEveryConnectorDefaultsToSentinel(t *testing.T) {
 	// Expected list size shrinks as Phases 4-9 land their real
 	// ValidateOnly implementations. Phase 4 removed nginx.
-	const expectedAtCurrentPhase = 10
+	const expectedAtCurrentPhase = 7
 	if len(connectorsAtPhase3) != expectedAtCurrentPhase {
 		t.Fatalf("connectors-at-phase list = %d entries, want %d (drift in the 13-connector inventory)", len(connectorsAtPhase3), expectedAtCurrentPhase)
 	}
