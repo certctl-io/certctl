@@ -68,14 +68,16 @@ jobs:
         # rules live in staticcheck.conf with documented justifications;
         # adding a new entry requires an explicit security review.
         #
-        # SOFT gate (continue-on-error: true) until M-028 closes the 6
-        # remaining SA1019 deprecated-API sites:
-        #   - cmd/server/main_test.go × 3: middleware.NewAuth → NewAuthWithNamedKeys
-        #   - internal/api/handler/scep.go: csr.Attributes → Extensions
-        #   - internal/connector/issuer/local/local.go: elliptic.Marshal → crypto/ecdh
-        # When M-028 ships, flip continue-on-error to false to make this
-        # a hard gate. Until then, the step still annotates findings on PRs.
-        continue-on-error: true
+        # ci-pipeline-cleanup Phase 3 / frozen decision 0.7: HARD gate.
+        # M-028 SA1019 sites verified closed at HEAD 1de61e91:
+        #   - middleware.NewAuth: zero callers (all migrated to
+        #     NewAuthWithNamedKeys in cmd/server/{main,main_test}.go)
+        #   - csr.Attributes (internal/api/handler/scep.go × 2): inline
+        #     //lint:ignore SA1019 with load-bearing rationale (RFC 2985
+        #     challengePassword has no non-deprecated stdlib API)
+        #   - elliptic.Marshal: only in bundle9_coverage_test.go × 1 as
+        #     deliberate byte-equivalence regression oracle, suppressed
+        #     with //lint:ignore SA1019
         run: staticcheck ./...
 
       - name: Race Detection
