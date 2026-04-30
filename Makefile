@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-docs verify-deploy clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -16,6 +16,8 @@ help:
 	@echo "  make lint           Run linter (golangci-lint)"
 	@echo "  make fmt            Format code with gofmt"
 	@echo "  make verify         Pre-commit gate: fmt + vet + lint + test (CI-parity)"
+	@echo "  make verify-docs    Pre-tag gate:    QA-doc drift checks (operator-facing docs)"
+	@echo "  make verify-deploy  Pre-push gate:   digest validity + OpenAPI parity + docker build smoke"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate-up     Run migrations (requires DB_URL)"
@@ -115,6 +117,38 @@ verify:
 	@go test -short -count=1 ./...
 	@echo ""
 	@echo "verify: PASS — safe to commit"
+
+# verify-docs: pre-tag gate. Runs the QA-doc Part-count + seed-count
+# drift guards that ci-pipeline-cleanup Phase 11 / frozen decision 0.13
+# moved out of CI (was per-push blocking; now operator-runs pre-tag).
+# These guards protect docs/qa-test-guide.md headlines from drifting
+# vs the underlying source-of-truth (testing-guide Part count, seed
+# row count). Operator-facing docs only — not product-affecting.
+verify-docs:
+	@echo "==> QA-doc Part-count drift"
+	@bash scripts/qa-doc-part-count.sh
+	@echo "==> QA-doc seed-count drift"
+	@bash scripts/qa-doc-seed-count.sh
+	@echo ""
+	@echo "verify-docs: PASS — safe to tag"
+
+# verify-deploy: optional pre-push gate. Runs the digest-validity check,
+# the OpenAPI ↔ handler parity check, and a Docker build smoke for the
+# production images (server + agent only — fast subset for local; CI
+# builds all 4 Dockerfiles per ci-pipeline-cleanup Phase 8 / frozen
+# decision 0.10).
+#
+# Per ci-pipeline-cleanup bundle Phase 11 / frozen decision 0.13.
+verify-deploy:
+	@echo "==> Digest validity"
+	@bash scripts/ci-guards/digest-validity.sh
+	@echo "==> OpenAPI ↔ handler parity"
+	@bash scripts/ci-guards/openapi-handler-parity.sh
+	@echo "==> Docker build smoke (server + agent — fast subset)"
+	@docker build -f Dockerfile        -t certctl:verify           .
+	@docker build -f Dockerfile.agent  -t certctl-agent:verify     .
+	@echo ""
+	@echo "verify-deploy: PASS — safe to push"
 
 # Database targets (requires migrate tool)
 migrate-up:
