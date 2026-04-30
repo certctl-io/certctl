@@ -53,12 +53,24 @@ func (s *ExportService) ExportPEM(ctx context.Context, certID string) (*ExportPE
 	// Split PEM chain into leaf cert + chain
 	certPEM, chainPEM := splitPEMChain(version.PEMChain)
 
-	// Audit the export
+	// Audit the export — split-emit per Phase 7 split-emit pattern.
+	// Legacy bare code "export_pem" preserved for back-compat with
+	// existing audit-log analysers; typed AuditActionCertExportPEM
+	// emitted alongside as the new operator grep target. Mirrors
+	// est.go::processEnrollment's split-emit pattern.
 	if s.auditService != nil {
+		details := map[string]interface{}{
+			"serial":          version.SerialNumber,
+			"has_private_key": false, // V2: cert-only path
+			"actor_kind":      "user",
+		}
 		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
-			"export_pem", "certificate", cert.ID,
-			map[string]interface{}{"serial": version.SerialNumber}); auditErr != nil {
-			slog.Error("failed to record audit event", "error", auditErr)
+			"export_pem", "certificate", cert.ID, details); auditErr != nil {
+			slog.Error("failed to record audit event (legacy)", "error", auditErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
+			AuditActionCertExportPEM, "certificate", cert.ID, details); auditErr != nil {
+			slog.Error("failed to record audit event (typed)", "error", auditErr)
 		}
 	}
 
@@ -108,12 +120,25 @@ func (s *ExportService) ExportPKCS12(ctx context.Context, certID string, passwor
 		return nil, fmt.Errorf("failed to encode PKCS#12: %w", err)
 	}
 
-	// Audit the export
+	// Audit the export — split-emit per Phase 7. Typed code
+	// AuditActionCertExportPKCS12 + cipher detail. The cipher value
+	// is pinned to PKCS12CipherModernAES256 so a future dependency
+	// upgrade that changes the encoder default surfaces in audit
+	// drift review.
 	if s.auditService != nil {
+		details := map[string]interface{}{
+			"serial":          version.SerialNumber,
+			"has_private_key": false, // V2: trust-store mode only
+			"cipher":          PKCS12CipherModernAES256,
+			"actor_kind":      "user",
+		}
 		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
-			"export_pkcs12", "certificate", cert.ID,
-			map[string]interface{}{"serial": version.SerialNumber, "has_private_key": false}); auditErr != nil {
-			slog.Error("failed to record audit event", "error", auditErr)
+			"export_pkcs12", "certificate", cert.ID, details); auditErr != nil {
+			slog.Error("failed to record audit event (legacy)", "error", auditErr)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "api", domain.ActorTypeUser,
+			AuditActionCertExportPKCS12, "certificate", cert.ID, details); auditErr != nil {
+			slog.Error("failed to record audit event (typed)", "error", auditErr)
 		}
 	}
 
