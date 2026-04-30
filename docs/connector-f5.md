@@ -1,0 +1,166 @@
+# F5 BIG-IP Connector — Operator Deep-Dive
+
+> Per Phase 14 of the deploy-hardening II master bundle.
+
+## Overview
+
+The F5 connector (`internal/connector/target/f5/`) deploys TLS
+certs to F5 BIG-IP load balancers via the iControl REST API.
+F5's transactional API gives certctl atomic-update semantics for
+free at the API level — the Bundle I rollback wire layers
+on-failure cleanup of orphaned crypto objects.
+
+## Vendor versions tested
+
+- **F5 v15.1 LTS**
+- **F5 v17.0 LTS**
+- **F5 v17.5**
+
+## Two-tier validation strategy (frozen decision 0.3)
+
+1. **CI tier**: `f5-mock-icontrol` sidecar — in-tree Go server at
+   `deploy/test/f5-mock-icontrol/` implementing the iControl REST
+   surface this bundle exercises (auth, file upload, transactions,
+   SSL profile CRUD). All `TestVendorEdge_F5_*_E2E` tests run
+   against this in CI.
+2. **Customer-grade tier**: operator-supplied real F5 vagrant box.
+   Documented setup recipe below. Manual smoke required for
+   "verified" status in `docs/deployment-vendor-matrix.md`.
+
+The mock implements a SUBSET of iControl REST. A real F5 may
+diverge on quirks the mock doesn't model. Customer-grade
+validation against the vagrant box is the validation tier above
+the mock.
+
+## Setting up the operator-supplied real F5
+
+```bash
+# F5 Networks publishes BIG-IP VE (Virtual Edition) on:
+#   https://downloads.f5.com → BIG-IP VE → 17.5.0 → Vagrant
+# Download the .box file (requires F5 account; free tier ok).
+vagrant box add f5/big-ip-17.5.0 ~/Downloads/BIGIP-17.5.0.0.0.box
+vagrant init f5/big-ip-17.5.0
+vagrant up
+
+# Then point certctl at vagrant's mapped management interface:
+#   https://localhost:8443 with admin/<vagrant-default-password>
+# Per-target Config:
+#   Host: "localhost"
+#   Port: 8443
+#   Username: "admin"
+#   Password: "<from vagrant>"
+```
+
+Run the F5 vendor-edge tests against the real F5 by setting:
+
+```
+F5_REAL_HOST=localhost:8443 \
+F5_REAL_USER=admin \
+F5_REAL_PASS=<vagrant-pass> \
+INTEGRATION=1 go test -tags integration \
+  -run 'TestVendorEdge_F5' ./deploy/test/...
+```
+
+(Test bodies opt into the real-F5 path when these env vars are
+set; otherwise default to the mock sidecar.)
+
+## Per-quirk operator guidance
+
+### SSL profile reference counting
+
+`TestVendorEdge_F5_SSLProfileReferenceCounting_TransactionWithNVS_AtomicCommit_E2E`
+
+When a transaction binds the new SSL profile to N virtual
+servers, F5 commits all N atomically. Failure aborts all N.
+
+### Client SSL vs server SSL profile
+
+`TestVendorEdge_F5_ClientSSLProfileVsServerSSLProfile_DeployUpdatesCorrect_E2E`
+
+F5 has separate `client-ssl` profiles (terminating TLS from clients)
+and `server-ssl` profiles (originating TLS to backends). Connector
+targets the operator-named profile only.
+
+### Partition handling
+
+`TestVendorEdge_F5_PartitionCommonVsCustom_DeployRespectsPartition_E2E`
+
+F5 partitions namespace objects (Common, custom-tenant). Connector
+respects the operator-supplied `Partition`.
+
+### v15 vs v17 API stability
+
+`TestVendorEdge_F5_F5v15_vs_v17_TransactionAPIShapeStable_E2E`
+
+`mgmt/tm/transaction` API shape stable across v15.1 LTS and v17.x.
+No per-version branch needed.
+
+### Large cert chain (>4 links)
+
+`TestVendorEdge_F5_LargeCertChainHandling_E2E`
+
+v15.x had a known issue with cert chains >4 links (silent
+truncation of the deep links). v17.x lifted this limit.
+
+**Operator action:** if on v15.x, keep chains ≤4 links OR upgrade
+to v17.x. Documented loud in this doc.
+
+### Auth token expiry
+
+`TestVendorEdge_F5_AuthTokenExpiryRefresh_E2E`
+
+F5 auth tokens expire (default 1200s). Connector re-authenticates
+on 401 transparently.
+
+### Transaction timeout cleanup
+
+`TestVendorEdge_F5_TransactionTimeoutCleanup_E2E`
+
+Open transactions timeout after 120s. Bundle I rollback wire
+catches orphaned crypto objects (uploaded files not committed via
+transaction).
+
+### Same-VS update
+
+`TestVendorEdge_F5_VirtualServerBindingOnSameVS_E2E`
+
+Re-binding an SSL profile on the same Virtual Server is atomic
+at the F5 API level. No listener disruption.
+
+### SSL options preservation
+
+`TestVendorEdge_F5_SSLOptionsPreservedAcrossRotation_E2E`
+
+Operator-supplied `cipher-list`, `no-tls-v1`, `secure-renegotiate`
+options on the SSL profile preserved across cert rotation.
+
+### iControl REST rate limit
+
+`TestVendorEdge_F5_iControlRESTRateLimit_E2E`
+
+F5 iControl REST defaults to 100 req/s. Connector backs off on
+429 with exponential retry.
+
+## Troubleshooting matrix
+
+| Symptom | Test name | Operator action |
+|---|---|---|
+| Cert deploys but only 4 chain links served | `LargeCertChainHandling_E2E` | upgrade to v17.x or shorten chain |
+| Frequent 401 retries | `AuthTokenExpiryRefresh_E2E` | benign; tune token lifetime if needed |
+| Orphaned `/Common/cert-<timestamp>` objects | `TransactionTimeoutCleanup_E2E` | run cleanup script; check for hung deploys |
+| Wrong partition deployed to | `PartitionCommonVsCustom_E2E` | verify `Partition` in connector config |
+| Cipher list reset post-rotate | `SSLOptionsPreservedAcrossRotation_E2E` | bug — file an issue |
+
+## V3-Pro deferrals
+
+- F5 GTM (DNS-load-balancer cert deploys).
+- F5 NGINX Plus cert deploy via the F5 API (when F5 ships the
+  unified API).
+- AS3 declarative deploy (operator-friendly JSON declaration vs
+  the imperative iControl REST flow).
+
+## Related docs
+
+- [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
+- [Vendor compatibility matrix](deployment-vendor-matrix.md)
+- F5 official iControl REST docs: <https://clouddocs.f5.com/api/icontrol-rest/>
