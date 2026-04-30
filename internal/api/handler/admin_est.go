@@ -170,12 +170,12 @@ func (s *AdminESTServiceImpl) Profiles(_ context.Context, now time.Time) ([]serv
 }
 
 // ReloadTrust implements AdminESTService.
-func (s *AdminESTServiceImpl) ReloadTrust(_ context.Context, pathID string) error {
+func (s *AdminESTServiceImpl) ReloadTrust(ctx context.Context, pathID string) error {
 	svc, ok := s.services[pathID]
 	if !ok {
 		return ErrAdminESTProfileNotFound
 	}
-	return svc.ReloadTrust()
+	return svc.ReloadTrust(ctx)
 }
 
 // Compile-time interface check.

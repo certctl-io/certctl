@@ -178,8 +178,12 @@ func (s *ESTService) Stats(now time.Time) ESTStatsSnapshot {
 //
 // Phase 11.3: emits AuditActionESTTrustAnchorReloaded on successful
 // reload so operators have a typed grep target for "who rotated the
-// trust bundle for which profile + when".
-func (s *ESTService) ReloadTrust() error {
+// trust bundle for which profile + when". The caller-supplied ctx is
+// forwarded into RecordEvent so the audit row carries the same
+// request-scoped trace identifiers as the rest of the admin pipeline,
+// and so the contextcheck linter doesn't flag the admin handler for
+// silently dropping its r.Context() at the service boundary.
+func (s *ESTService) ReloadTrust(ctx context.Context) error {
 	if s.estTrustAnchor == nil {
 		return ErrESTMTLSDisabled
 	}
@@ -192,7 +196,7 @@ func (s *ESTService) ReloadTrust() error {
 			"trust_anchor_path": s.estTrustAnchor.Path(),
 			"protocol":          "EST",
 		}
-		_ = s.auditService.RecordEvent(context.Background(), "est-admin", "system",
+		_ = s.auditService.RecordEvent(ctx, "est-admin", "system",
 			AuditActionESTTrustAnchorReloaded, "trust_anchor", s.estPathIDForLog, details)
 	}
 	return nil
