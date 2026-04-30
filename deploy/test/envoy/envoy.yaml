@@ -1,0 +1,35 @@
+admin:
+  address:
+    socket_address:
+      address: 0.0.0.0
+      port_value: 9901
+static_resources:
+  listeners:
+    - name: https
+      address:
+        socket_address: { address: 0.0.0.0, port_value: 443 }
+      filter_chains:
+        - transport_socket:
+            name: envoy.transport_sockets.tls
+            typed_config:
+              "@type": type.googleapis.com/envoy.extensions.transport_sockets.tls.v3.DownstreamTlsContext
+              common_tls_context:
+                tls_certificates:
+                  - certificate_chain: { filename: /etc/envoy/certs/cert.pem }
+                    private_key:       { filename: /etc/envoy/certs/key.pem }
+          filters:
+            - name: envoy.filters.network.http_connection_manager
+              typed_config:
+                "@type": type.googleapis.com/envoy.extensions.filters.network.http_connection_manager.v3.HttpConnectionManager
+                stat_prefix: ingress_http
+                http_filters:
+                  - name: envoy.filters.http.router
+                    typed_config:
+                      "@type": type.googleapis.com/envoy.extensions.filters.http.router.v3.Router
+                route_config:
+                  virtual_hosts:
+                    - name: backend
+                      domains: ["*"]
+                      routes:
+                        - match: { prefix: "/" }
+                          direct_response: { status: 200 }

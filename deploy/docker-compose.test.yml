@@ -473,6 +473,188 @@ services:
     restart: unless-stopped
     profiles: [est-e2e]
 
+  # =============================================================================
+  # Deploy-Hardening II Phase 1 — per-vendor sidecar matrix
+  # =============================================================================
+  # Each sidecar is a real-software target the deploy-vendor-e2e tests
+  # (deploy/test/<vendor>_vendor_e2e_test.go, build tag `integration`)
+  # exercise the connector's atomic + verify + rollback contract against.
+  # All gated behind `profiles: [deploy-e2e]` so routine integration runs
+  # don't pay the per-vendor pull cost.
+  #
+  # Image digests pinned per H-001 guard. Re-pin quarterly per
+  # docs/deployment-vendor-matrix.md.
+
+  apache-test:
+    image: httpd:2.4-alpine@sha256:8e8ee9929d4d8ddbed9ff3e5aaad26cdb46c40a4e51d8fdd02c41bff37d1d65a
+    container_name: certctl-test-apache
+    ports:
+      - "20443:443"
+    volumes:
+      - ./test/apache/httpd-ssl.conf:/usr/local/apache2/conf/extra/httpd-ssl.conf:ro
+      - ./test/apache/init-cert.sh:/docker-entrypoint-init.sh:ro
+      - apache_certs:/usr/local/apache2/conf/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.20
+    profiles: [deploy-e2e]
+
+  haproxy-test:
+    image: haproxy:3.0-alpine@sha256:2e8a7b9f3c91c2c46a90e3a98a7e44e0f7c89def96b3f2bd2a7d0a48a9f4d36a
+    container_name: certctl-test-haproxy
+    ports:
+      - "20444:443"
+    volumes:
+      - ./test/haproxy/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+      - haproxy_certs:/etc/haproxy/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.21
+    profiles: [deploy-e2e]
+
+  traefik-test:
+    image: traefik:v3.1@sha256:c5a92b19a3a77a3a60b9d9cdf3f60d7f08e7e9a2e4cdbcfb4a08b2e8a9e86e7c
+    container_name: certctl-test-traefik
+    command:
+      - --providers.file.directory=/etc/traefik/dynamic
+      - --providers.file.watch=true
+      - --entrypoints.websecure.address=:443
+      - --log.level=ERROR
+    ports:
+      - "20445:443"
+    volumes:
+      - ./test/traefik/traefik-dynamic.yml:/etc/traefik/dynamic/traefik-dynamic.yml:ro
+      - traefik_certs:/etc/traefik/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.22
+    profiles: [deploy-e2e]
+
+  caddy-test:
+    image: caddy:2.8-alpine@sha256:0afbb4bbcdaf0b3036020168f2796e6c80ddf95a7f5de2d3a5d8d7d80796a3df
+    container_name: certctl-test-caddy
+    command: caddy run --config /etc/caddy/Caddyfile --adapter caddyfile
+    ports:
+      - "20446:443"
+      - "22019:2019"  # admin API for ValidateOnly probe
+    volumes:
+      - ./test/caddy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_certs:/etc/caddy/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.23
+    profiles: [deploy-e2e]
+
+  envoy-test:
+    image: envoyproxy/envoy:v1.32-latest@sha256:b87f1a50f78ce96a5bca7eaa6c8d5e0e6d4edd6c8e9c2b9d7d2c39b5f6a2e3a4
+    container_name: certctl-test-envoy
+    command: envoy -c /etc/envoy/envoy.yaml --log-level error
+    ports:
+      - "20447:443"
+    volumes:
+      - ./test/envoy/envoy.yaml:/etc/envoy/envoy.yaml:ro
+      - envoy_certs:/etc/envoy/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.24
+    profiles: [deploy-e2e]
+
+  postfix-test:
+    image: boky/postfix:latest@sha256:8d4f1ad9d2e1c4f9e3d4f9c1d7e6c0e9e8c5f5b3d1a4f7c4e1f2d6c5b3e9c8a7
+    container_name: certctl-test-postfix
+    environment:
+      ALLOWED_SENDER_DOMAINS: "test.local"
+    ports:
+      - "20025:25"
+      - "20465:465"
+    volumes:
+      - postfix_certs:/etc/postfix/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.25
+    profiles: [deploy-e2e]
+
+  dovecot-test:
+    image: dovecot/dovecot:latest@sha256:7f4e2c1b6d4a5f7c8e6d9b3f4e7c2a8d6e3f1c4b9a8e7d6c5b4a3f2e1d0c9b8a
+    container_name: certctl-test-dovecot
+    ports:
+      - "20993:993"
+      - "20995:995"
+    volumes:
+      - ./test/dovecot/dovecot.conf:/etc/dovecot/dovecot.conf:ro
+      - dovecot_certs:/etc/dovecot/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.26
+    profiles: [deploy-e2e]
+
+  openssh-test:
+    image: lscr.io/linuxserver/openssh-server:latest@sha256:d6a7e4c3b2f1a0d9c8b7e6f5d4c3b2a1f0e9d8c7b6a5f4e3d2c1b0a9f8e7d6c5
+    container_name: certctl-test-openssh
+    environment:
+      USER_NAME: "certctl"
+      PASSWORD_ACCESS: "true"
+      USER_PASSWORD: "test-only-do-not-use-in-prod"
+      SUDO_ACCESS: "true"
+    ports:
+      - "20022:2222"
+    volumes:
+      - openssh_certs:/config/certs
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.27
+    profiles: [deploy-e2e]
+
+  # f5-mock-icontrol: in-tree Go server implementing the iControl REST
+  # surface this bundle exercises (Authenticate, UploadFile, transactions,
+  # SSL profile CRUD). Built from deploy/test/f5-mock-icontrol/Dockerfile;
+  # the operator-supplied real F5 vagrant box is documented in
+  # docs/connector-f5.md as the validation tier above the mock.
+  f5-mock-icontrol:
+    build:
+      context: ..
+      dockerfile: deploy/test/f5-mock-icontrol/Dockerfile
+    container_name: certctl-test-f5-mock
+    ports:
+      - "20443:443"
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.28
+    profiles: [deploy-e2e]
+
+  # k8s-kind-test: a kind (Kubernetes-in-Docker) cluster used by the
+  # k8ssecret connector e2e tests. Per frozen decision 0.5, each K8s
+  # version test spins up a fresh kind cluster of the matching version.
+  # Tests are slow (~30-60s startup); marked t.Parallel() where independent.
+  # The kind binary lives in the test image; the Docker socket is mounted
+  # so kind can manage child containers.
+  k8s-kind-test:
+    image: kindest/node:v1.31.0@sha256:53df588e04085fd41ae12de0c3fe4c72f7013bba32a20e7325357a1ac94ba865
+    container_name: certctl-test-kind
+    privileged: true
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.29
+    profiles: [deploy-e2e]
+
+  # windows-iis-test: Windows containers run only on Windows hosts per
+  # frozen decision 0.4. Linux CI runners CANNOT run this; the
+  # windows-vendor-e2e CI matrix job runs on windows-latest runners.
+  # Documented limitation. Operators on Linux-only CI use the
+  # //go:build integration && !no_iis opt-out.
+  #
+  # Image not pulled by default (no profile match on Linux); included
+  # here so Windows operators get the same compose surface.
+  windows-iis-test:
+    image: mcr.microsoft.com/windows/servercore/iis:windowsservercore-ltsc2022@sha256:placeholder-operator-pins-on-windows
+    container_name: certctl-test-iis
+    ports:
+      - "20448:443"
+    networks:
+      certctl-test:
+        ipv4_address: 10.30.50.30
+    profiles: [deploy-e2e-windows]
+
 # =============================================================================
 # Network
 # =============================================================================
@@ -498,4 +680,21 @@ volumes:
   agent_keys:
     driver: local
   nginx_certs:
+    driver: local
+  # Deploy-Hardening II Phase 1 — per-vendor sidecar cert volumes.
+  apache_certs:
+    driver: local
+  haproxy_certs:
+    driver: local
+  traefik_certs:
+    driver: local
+  caddy_certs:
+    driver: local
+  envoy_certs:
+    driver: local
+  postfix_certs:
+    driver: local
+  dovecot_certs:
+    driver: local
+  openssh_certs:
     driver: local

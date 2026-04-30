@@ -1,0 +1,9 @@
+{
+    admin 0.0.0.0:2019
+    auto_https off
+}
+
+:443 {
+    tls /etc/caddy/certs/cert.pem /etc/caddy/certs/key.pem
+    respond "OK"
+}
