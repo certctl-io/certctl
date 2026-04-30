@@ -95,6 +95,47 @@ type Agent struct {
 	// race with ctx.Done() and other cases.
 	retiredOnce   sync.Once
 	retiredSignal chan struct{}
+
+	// Deploy-hardening I Phase 2: per-target deploy mutex.
+	// Two cert renewals against the same target ID (e.g., two SAN
+	// entries renewing in the same window, or a fast-cycling
+	// renewal-then-test workflow) MUST serialize at the agent
+	// dispatch site. Without this lock, the underlying connector's
+	// temp-file path could collide and the reload command would
+	// race against itself.
+	//
+	// Granularity is one mutex per target ID, NOT per (target, cert)
+	// pair — frozen decision 0.5. Cert deploy throughput is
+	// operator-grade tens-per-minute; coarse serialization is fine
+	// and simplifies reasoning about reload-side race windows.
+	//
+	// sync.Map is sized for thousands of unique target IDs without
+	// rehash thrash; LoadOrStore is atomic + lock-free on the
+	// hot path. Mutexes live for the agent's lifetime — no janitor
+	// because target IDs are bounded and the per-target memory
+	// (~16 bytes per entry) is negligible vs. typical agent heap.
+	//
+	// Job items without a TargetID (e.g., agent-managed cert + no
+	// connector dispatch — should never happen for deploy jobs but
+	// defended anyway) bypass the lock to avoid a singleton
+	// serialization point.
+	deployMutexes sync.Map // map[string]*sync.Mutex, keyed on JobItem.TargetID
+}
+
+// targetDeployMutex returns the per-target-ID *sync.Mutex,
+// lazy-initialising one on first acquisition. Returns nil when
+// targetID is empty (caller should skip the lock entirely).
+//
+// Phase 2 of the deploy-hardening I master bundle: the load-bearing
+// serialization point that defends against concurrent deploys to the
+// same target stomping each other's temp-file paths or reload
+// commands.
+func (a *Agent) targetDeployMutex(targetID string) *sync.Mutex {
+	if targetID == "" {
+		return nil
+	}
+	v, _ := a.deployMutexes.LoadOrStore(targetID, &sync.Mutex{})
+	return v.(*sync.Mutex)
 }
 
 // WorkResponse represents the response from the work polling endpoint.
@@ -665,6 +706,22 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 				"certificate_id": job.CertificateID,
 				"job_id":         job.ID,
 			},
+		}
+
+		// Phase 2 of the deploy-hardening I master bundle:
+		// per-target deploy mutex. Acquire BEFORE
+		// DeployCertificate so two concurrent renewals against
+		// the same target ID serialize. The lock is held for the
+		// full Deploy duration including PreCommit (validate),
+		// PostCommit (reload), and post-deploy verify (Phases
+		// 4-9). Released on every return path via defer.
+		var targetID string
+		if job.TargetID != nil {
+			targetID = *job.TargetID
+		}
+		if mu := a.targetDeployMutex(targetID); mu != nil {
+			mu.Lock()
+			defer mu.Unlock()
 		}
 
 		result, err := connector.DeployCertificate(ctx, deployReq)
