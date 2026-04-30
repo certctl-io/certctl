@@ -308,20 +308,33 @@ jobs:
           fi
 
   # =============================================================================
-  # Deploy-Hardening II Phase 15 — per-vendor e2e matrix
+  # deploy-vendor-e2e — single-job (collapsed from 12-job matrix)
   # =============================================================================
-  # Per frozen decision 0.9: each vendor's e2e tests run in their own
-  # matrix job so vendor failures surface independently in the CI status
-  # check (operator sees "K8s 1.31 vendor-edge fail" as a discrete check,
-  # not a generic "integration tests failed").
+  # Per ci-pipeline-cleanup bundle Phase 5 / frozen decision 0.4 (revises
+  # Bundle II decision 0.9): the per-vendor matrix produced 12 status-check
+  # rows for ~1 real assertion (115/116 vendor-edge tests are t.Log
+  # placeholders). Collapsed to one job that brings up all 11 sidecars
+  # at once and runs the full VendorEdge_ test set.
+  #
+  # Skip-detection guard (scripts/ci-guards/vendor-e2e-skip-check.sh)
+  # enforces that no test SKIPs except the documented allowlist
+  # (windows-iis-requiring tests on Linux). If a sidecar fails to come
+  # up, requireSidecar() in deploy/test/vendor_e2e_helpers.go calls
+  # t.Skipf() — the guard catches that.
+  #
+  # RAM headroom on ubuntu-latest (16 GB ceiling) — operator-confirmed
+  # in Phase 0 / frozen decision 0.14 prototype-branch run. If RAM
+  # regresses, fall back to bucketed matrix per
+  # cowork/ci-pipeline-cleanup/decisions-revised.md.
+  #
+  # The Windows matrix (deploy-vendor-e2e-windows) was deleted entirely
+  # per Phase 6 / frozen decision 0.5 (revises Bundle II decision 0.4).
+  # IIS + WinCertStore validation moved to the operator playbook at
+  # docs/connector-iis.md::Operator validation playbook.
   deploy-vendor-e2e:
-    name: deploy-vendor-e2e (${{ matrix.vendor }})
+    name: deploy-vendor-e2e
     runs-on: ubuntu-latest
     needs: [go-build-and-test]
-    strategy:
-      fail-fast: false
-      matrix:
-        vendor: [nginx, apache, haproxy, traefik, caddy, envoy, postfix, dovecot, ssh, javakeystore, k8s, f5-mock]
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@v5
@@ -332,110 +345,39 @@ jobs:
           go-version: '1.25.9'
           cache: true
 
-      - name: Bring up vendor sidecar
-        # Map matrix.vendor → docker-compose service name. The naming is
-        # NOT 1:1 because (a) the legacy NGINX vendor-edge tests reuse the
-        # apache-test sidecar via requireSidecar(t,"apache") — see the
-        # comment in deploy/test/nginx_vendor_e2e_test.go; (b) the openssh
-        # service is named openssh-test (not ssh-test); (c) the kind
-        # cluster service is named k8s-kind-test; (d) the F5 mock service
-        # is named f5-mock-icontrol and must be built first because it
-        # has no published image; (e) the JavaKeystore tests are pure-Go
-        # placeholder stubs that exercise no sidecar.
-        run: |
-          set -e
-          case "${{ matrix.vendor }}" in
-            nginx)        SVC=apache-test ;;       # nginx tests reuse apache sidecar
-            apache)       SVC=apache-test ;;
-            haproxy)      SVC=haproxy-test ;;
-            traefik)      SVC=traefik-test ;;
-            caddy)        SVC=caddy-test ;;
-            envoy)        SVC=envoy-test ;;
-            postfix)      SVC=postfix-test ;;
-            dovecot)      SVC=dovecot-test ;;
-            ssh)          SVC=openssh-test ;;
-            k8s)          SVC=k8s-kind-test ;;
-            f5-mock)      SVC=f5-mock-icontrol ;;
-            javakeystore) SVC="" ;;                # pure-Go placeholder stubs; no sidecar needed
-            *)            echo "::error::unknown matrix vendor '${{ matrix.vendor }}'"; exit 1 ;;
-          esac
-          if [ -z "$SVC" ]; then
-            echo "vendor=${{ matrix.vendor }} runs without a sidecar (pure-Go placeholder tests)"
-            exit 0
-          fi
-          if [ "${{ matrix.vendor }}" = "f5-mock" ]; then
-            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml build "$SVC"
-          fi
-          docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d "$SVC"
-          sleep 5
+      - name: Build f5-mock-icontrol sidecar
+        # The only sidecar without a published image; built from the in-tree
+        # Go server at deploy/test/f5-mock-icontrol/.
+        run: docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml build f5-mock-icontrol
 
-      - name: Run vendor-edge e2e
+      - name: Bring up all vendor sidecars
+        # Brings up the 11 deploy-e2e sidecars (apache-test, haproxy-test,
+        # traefik-test, caddy-test, envoy-test, postfix-test, dovecot-test,
+        # openssh-test, f5-mock-icontrol, k8s-kind-test, windows-iis-test
+        # which is gated by a separate windows-only profile and won't
+        # actually start) plus the always-on legacy nginx.
+        run: |
+          docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d
+          sleep 15
+
+      - name: Run all vendor-edge e2e
+        # Captures test output for skip-count enforcement (next step).
         env:
           INTEGRATION: "1"
         run: |
-          # Per frozen decision 0.6: discoverable via
-          # `go test -run 'VendorEdge_<vendor>'`. Match the matrix
-          # vendor (test names are CamelCase: TestVendorEdge_NGINX_*,
-          # TestVendorEdge_HAProxy_*, etc.).
-          case "${{ matrix.vendor }}" in
-            nginx)        PATTERN='VendorEdge_NGINX' ;;
-            apache)       PATTERN='VendorEdge_Apache' ;;
-            haproxy)      PATTERN='VendorEdge_HAProxy' ;;
-            traefik)      PATTERN='VendorEdge_Traefik' ;;
-            caddy)        PATTERN='VendorEdge_Caddy' ;;
-            envoy)        PATTERN='VendorEdge_Envoy' ;;
-            postfix)      PATTERN='VendorEdge_Postfix' ;;
-            dovecot)      PATTERN='VendorEdge_Dovecot' ;;
-            ssh)          PATTERN='VendorEdge_SSH' ;;
-            javakeystore) PATTERN='VendorEdge_JavaKeystore' ;;
-            k8s)          PATTERN='VendorEdge_K8s' ;;
-            f5-mock)      PATTERN='VendorEdge_F5' ;;
-          esac
-          go test -tags integration -race -count=1 -run "$PATTERN" ./deploy/test/...
+          go test -tags integration -race -count=1 -run 'VendorEdge_' \
+            ./deploy/test/... 2>&1 | tee test-output.log
 
-      - name: Tear down sidecar
+      - name: Skip-count enforcement
+        # ci-pipeline-cleanup Phase 5 / frozen decision 0.6:
+        # requireSidecar uses t.Skipf (not t.Fatal) when a sidecar isn't
+        # reachable — collapsing the per-vendor matrix removes the implicit
+        # guard each per-job matrix entry provided. This step counts SKIP
+        # lines in the test output and fails the build if it exceeds the
+        # allowlist (windows-iis-requiring tests; legitimately skipped
+        # on Linux per Phase 6 / frozen decision 0.5).
+        run: bash scripts/ci-guards/vendor-e2e-skip-check.sh test-output.log
+
+      - name: Tear down sidecars
         if: always()
         run: docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml down -v
-
-  # =============================================================================
-  # Deploy-Hardening II Phase 15 — Windows-host vendor e2e matrix
-  # =============================================================================
-  # IIS + WinCertStore tests run on windows-latest runners per frozen
-  # decision 0.4 (Windows containers run only on Windows hosts).
-  # Linux-only operators skip via //go:build integration && !no_iis.
-  deploy-vendor-e2e-windows:
-    name: deploy-vendor-e2e-windows (${{ matrix.vendor }})
-    runs-on: windows-latest
-    needs: [go-build-and-test]
-    strategy:
-      fail-fast: false
-      matrix:
-        vendor: [iis, wincertstore]
-    timeout-minutes: 30
-    steps:
-      - uses: actions/checkout@v5
-
-      - name: Set up Go
-        uses: actions/setup-go@v5
-        with:
-          go-version: '1.25.9'
-          cache: true
-
-      - name: Bring up Windows IIS sidecar
-        shell: powershell
-        run: |
-          docker compose --profile deploy-e2e-windows -f deploy/docker-compose.test.yml up -d windows-iis-test
-          Start-Sleep -Seconds 10
-
-      - name: Run vendor-edge e2e (Windows)
-        env:
-          INTEGRATION: "1"
-        shell: powershell
-        run: |
-          $pattern = if ("${{ matrix.vendor }}" -eq "iis") { "VendorEdge_IIS" } else { "VendorEdge_WinCertStore" }
-          go test -tags integration -race -count=1 -run $pattern ./deploy/test/...
-
-      - name: Tear down sidecar
-        if: always()
-        shell: powershell
-        run: docker compose --profile deploy-e2e-windows -f deploy/docker-compose.test.yml down -v
