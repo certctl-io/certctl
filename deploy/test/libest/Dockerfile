@@ -30,17 +30,55 @@
 
 ARG LIBEST_REF=r3.2.0
 
+# Why bullseye-slim and NOT bookworm-slim:
+#
+# libest r3.2.0 (last upstream commit 2020-07-06) was authored
+# against OpenSSL 1.1.x and binutils ≤ 2.35. It does NOT build on
+# OpenSSL 3.0 / binutils 2.36+ for three independent reasons surfaced
+# by the ci-pipeline-cleanup Phase 8 Docker build smoke step:
+#
+#   1. `FIPS_mode` / `FIPS_mode_set` — removed in OpenSSL 3.0;
+#      libest calls them in 5 places (est_client.c lines 3179, 3590,
+#      3676; est_server.c line 3336; estclient.c line 1283).
+#      Even libest `main` branch (last update 2024-07-12) still uses
+#      these without OpenSSL-version guards.
+#   2. `e_ctx_ssl_exdata_index` declared without `extern` in
+#      est_locl.h:593 — multiple-definition error under the binutils
+#      2.36+ default `-fno-common`. Fixed on libest main but not
+#      backported to r3.2.0.
+#   3. `ossl_dump_ssl_errors` duplicate symbol between libest and
+#      example/client/utils.c — same `-fno-common` shape.
+#
+# debian:bullseye-slim ships:
+#   - OpenSSL 1.1.1n — FIPS_mode/FIPS_mode_set present as expected
+#   - binutils 2.35.2 — pre-`-fno-common` default; tolerates the
+#     multiple-def shape libest was written under
+#
+# All three build errors vanish simultaneously. The earlier draft of
+# this Dockerfile (commit 15da1f4 + 320ef73) used bookworm-slim and
+# silently broke the build; ci-pipeline-cleanup Phase 8's Docker
+# build smoke surfaced it.
+#
+# Bullseye support timeline: regular updates until 2026-08, LTS
+# until 2028-08. The libest sidecar is a hermetic test-only fixture
+# (not exposed to attackers, not shipped in production), so the
+# OpenSSL 1.1.1 EOL (2023-09) is acceptable here. Production
+# certctl images stay on bookworm-slim with OpenSSL 3.0.
+#
 # Bundle A / Audit H-001 (CWE-829): both FROM lines below pin
-# debian:bookworm-slim to the immutable OCI image-index digest pulled
-# 2026-04-29 (last_pushed 2026-04-22). To bump:
-#   curl -sSL https://hub.docker.com/v2/repositories/library/debian/tags/bookworm-slim \
-#     | jq -r .digest
+# debian:bullseye-slim to the immutable OCI image-index digest pulled
+# 2026-04-30. To bump:
+#   tok=$(curl -sS "https://auth.docker.io/token?service=registry.docker.io&scope=repository:library/debian:pull" | jq -r .token)
+#   curl -sSI -H "Authorization: Bearer $tok" \
+#     -H "Accept: application/vnd.docker.distribution.manifest.list.v2+json" \
+#     "https://registry-1.docker.io/v2/library/debian/manifests/bullseye-slim" \
+#     | grep -i 'docker-content-digest'
 # Replace the @sha256:... portion on BOTH FROM lines.
-FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252 AS builder
+FROM debian:bullseye-slim@sha256:1a4701c321b1d28b1ff5f0230e766791e4b79b1d4c6c7a70064f4b297b1a330f AS builder
 
 ARG LIBEST_REF
 
-# Build deps. We use the system openssl (1.1.1n in bookworm-slim) which
+# Build deps. We use the system openssl (1.1.1n in bullseye-slim) which
 # is the same major version libest r3.2.0 was tested against. libest
 # also wants libcurl + libsafec; we install both via apt rather than
 # building from source for reproducibility.
@@ -66,15 +104,21 @@ RUN git clone --depth 1 --branch ${LIBEST_REF} https://github.com/cisco/libest.g
 # Runtime stage. Carries only what we need to docker-exec estclient
 # from the integration test: the compiled binary, the openssl CLI for
 # CSR generation + cert parsing, and bash for the test's exec scripts.
+#
+# MUST be bullseye-slim — the estclient binary built in the builder
+# stage dynamically links against libssl1.1 + libcrypto1.1 (OpenSSL
+# 1.1.x ABI). bookworm-slim ships libssl3/libcrypto3 only — running
+# the bullseye-built binary on a bookworm runtime fails at startup
+# with "error while loading shared libraries: libssl.so.1.1".
 # Pinned to the same digest as the builder above (Bundle A / H-001).
-FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13a59fa0a1df2d5c252
+FROM debian:bullseye-slim@sha256:1a4701c321b1d28b1ff5f0230e766791e4b79b1d4c6c7a70064f4b297b1a330f
 
 RUN apt-get update && apt-get install --no-install-recommends -y \
         bash \
         ca-certificates \
         curl \
         libcurl4 \
-        libssl3 \
+        libssl1.1 \
         openssl \
     && rm -rf /var/lib/apt/lists/* \
     && useradd --create-home --uid 1000 estuser
