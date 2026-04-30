@@ -29,7 +29,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
 	"github.com/shankar0123/certctl/internal/connector/target/javakeystore"
 	"github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
-	"github.com/shankar0123/certctl/internal/connector/target/nginx"
+	// nginx removed Phase 4 — real ValidateOnly implementation now in nginx.go.
 	"github.com/shankar0123/certctl/internal/connector/target/postfix"
 	"github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/traefik"
@@ -72,7 +72,9 @@ var connectorsAtPhase3 = []struct {
 	{"iis", func() target.Connector { return &iis.Connector{} }},
 	{"javakeystore", func() target.Connector { return &javakeystore.Connector{} }},
 	{"k8ssecret", func() target.Connector { return &k8ssecret.Connector{} }},
-	{"nginx", func() target.Connector { return &nginx.Connector{} }},
+	// nginx removed Phase 4 — its ValidateOnly is now the real
+	// implementation; tested directly in
+	// internal/connector/target/nginx/nginx_test.go.
 	{"postfix", func() target.Connector { return &postfix.Connector{} }},
 	{"ssh", func() target.Connector { return &ssh.Connector{} }},
 	{"traefik", func() target.Connector { return &traefik.Connector{} }},
@@ -80,8 +82,11 @@ var connectorsAtPhase3 = []struct {
 }
 
 func TestEveryConnectorDefaultsToSentinel(t *testing.T) {
-	if len(connectorsAtPhase3) != 13 {
-		t.Fatalf("connectors-at-phase-3 list = %d entries, want 13 (drift in the 14-connector inventory)", len(connectorsAtPhase3))
+	// Expected list size shrinks as Phases 4-9 land their real
+	// ValidateOnly implementations. Phase 4 removed nginx.
+	const expectedAtCurrentPhase = 12
+	if len(connectorsAtPhase3) != expectedAtCurrentPhase {
+		t.Fatalf("connectors-at-phase list = %d entries, want %d (drift in the 13-connector inventory)", len(connectorsAtPhase3), expectedAtCurrentPhase)
 	}
 	for _, c := range connectorsAtPhase3 {
 		t.Run(c.name, func(t *testing.T) {
