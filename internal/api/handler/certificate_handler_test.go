@@ -38,6 +38,7 @@ type MockCertificateService struct {
 	GetRevokedCertificatesFn     func(ctx context.Context) ([]*domain.CertificateRevocation, error)
 	GenerateDERCRLFn             func(ctx context.Context, issuerID string) ([]byte, error)
 	GetOCSPResponseFn            func(ctx context.Context, issuerID string, serialHex string) ([]byte, error)
+	GetOCSPResponseWithNonceFn   func(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error)
 	GetCertificateDeploymentsFn  func(ctx context.Context, certID string) ([]domain.DeploymentTarget, error)
 }
 
@@ -119,6 +120,21 @@ func (m *MockCertificateService) GenerateDERCRL(ctx context.Context, issuerID st
 }
 
 func (m *MockCertificateService) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
+	if m.GetOCSPResponseFn != nil {
+		return m.GetOCSPResponseFn(ctx, issuerID, serialHex)
+	}
+	return nil, nil
+}
+
+// GetOCSPResponseWithNonce — production hardening II Phase 1.
+// Falls through to the legacy GetOCSPResponseFn when a per-test
+// nonce-aware override isn't set, mirroring the behavior of the
+// real CertificateService where the nonce-less variant is just a
+// nil-nonce wrapper around the nonce-aware path.
+func (m *MockCertificateService) GetOCSPResponseWithNonce(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error) {
+	if m.GetOCSPResponseWithNonceFn != nil {
+		return m.GetOCSPResponseWithNonceFn(ctx, issuerID, serialHex, nonce)
+	}
 	if m.GetOCSPResponseFn != nil {
 		return m.GetOCSPResponseFn(ctx, issuerID, serialHex)
 	}

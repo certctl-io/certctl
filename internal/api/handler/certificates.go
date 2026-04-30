@@ -17,6 +17,7 @@ import (
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // CertificateService defines the service interface for certificate operations.
@@ -34,6 +35,11 @@ type CertificateService interface {
 	GetRevokedCertificates(ctx context.Context) ([]*domain.CertificateRevocation, error)
 	GenerateDERCRL(ctx context.Context, issuerID string) ([]byte, error)
 	GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error)
+	// GetOCSPResponseWithNonce is the nonce-aware variant added in
+	// production hardening II Phase 1. When nonce is non-nil, the
+	// responder echoes it in the response per RFC 6960 §4.4.1. A nil
+	// nonce produces a response without the nonce extension.
+	GetOCSPResponseWithNonce(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error)
 	GetCertificateDeployments(ctx context.Context, certID string) ([]domain.DeploymentTarget, error)
 }
 
@@ -687,11 +693,34 @@ func (h CertificateHandler) HandleOCSPPost(w http.ResponseWriter, r *http.Reques
 		return
 	}
 
+	// Production hardening II Phase 1: extract the optional RFC 6960
+	// §4.4.1 nonce extension from the request. golang.org/x/crypto/ocsp
+	// doesn't expose the request's extensions, so we walk the raw DER
+	// ourselves via service.ParseOCSPRequestNonce.
+	//
+	// Failure modes:
+	//   - no nonce (most relying parties): nonce=nil, present=false,
+	//     err=nil -> proceed without echoing.
+	//   - well-formed nonce <= 32 bytes: nonce=bytes, present=true,
+	//     err=nil -> plumb through GetOCSPResponseWithNonce.
+	//   - malformed nonce (empty or > 32 bytes): err=ErrOCSPNonceMalformed
+	//     -> respond with the OCSP "unauthorized" status (RFC 6960 §2.3
+	//     status code 6) rather than echoing potentially-malicious bytes.
+	nonce, _, nonceErr := service.ParseOCSPRequestNonce(body)
+	if errors.Is(nonceErr, service.ErrOCSPNonceMalformed) {
+		w.Header().Set("Content-Type", "application/ocsp-response")
+		w.WriteHeader(http.StatusOK)
+		// ocsp.UnauthorizedErrorResponse is the canonical pre-built
+		// error response (status 6) per RFC 6960 §4.2.1.
+		w.Write(ocsp.UnauthorizedErrorResponse)
+		return
+	}
+
 	// Reuse the existing service path. The serial extracted from the
 	// parsed OCSPRequest is converted to hex (the on-disk format for
 	// certctl serials matches certificate.SerialNumber.Text(16)).
 	serialHex := fmt.Sprintf("%x", ocspReq.SerialNumber)
-	derBytes, err := h.svc.GetOCSPResponse(r.Context(), issuerID, serialHex)
+	derBytes, err := h.svc.GetOCSPResponseWithNonce(r.Context(), issuerID, serialHex, nonce)
 	if err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not found") {

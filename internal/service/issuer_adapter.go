@@ -104,6 +104,7 @@ func (a *IssuerConnectorAdapter) SignOCSPResponse(ctx context.Context, req OCSPS
 		RevocationReason: req.RevocationReason,
 		ThisUpdate:       req.ThisUpdate,
 		NextUpdate:       req.NextUpdate,
+		Nonce:            req.Nonce, // RFC 6960 §4.4.1 echo (production hardening II Phase 1)
 	})
 }
 

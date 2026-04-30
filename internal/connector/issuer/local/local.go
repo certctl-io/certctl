@@ -1050,6 +1050,23 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 		template.Status = ocsp.Unknown
 	}
 
+	// Production hardening II Phase 1.4: echo the request's nonce in
+	// the response's singleExtensions field per RFC 6960 §4.4.1.
+	// The handler walks the inbound request's extensions and populates
+	// req.Nonce when a well-formed nonce extension is present; we just
+	// re-marshal it here as the extnValue OCTET STRING.
+	if len(req.Nonce) > 0 {
+		nonceExtnValue, err := asn1.Marshal(req.Nonce)
+		if err != nil {
+			return nil, fmt.Errorf("marshal OCSP nonce extension: %w", err)
+		}
+		template.ExtraExtensions = append(template.ExtraExtensions, pkix.Extension{
+			Id:       asn1.ObjectIdentifier{1, 3, 6, 1, 5, 5, 7, 48, 1, 2}, // id-pkix-ocsp-nonce
+			Critical: false,                                                // RFC 6960 §4.4 — nonce is non-critical
+			Value:    nonceExtnValue,
+		})
+	}
+
 	// ocsp.CreateResponse(issuer, responder, template, signer):
 	//   - issuer:    always c.caCert (the CA that issued the cert
 	//                being checked, NOT the responder cert)

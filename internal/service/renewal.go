@@ -100,6 +100,11 @@ type OCSPSignRequest struct {
 	RevocationReason int
 	ThisUpdate       time.Time
 	NextUpdate       time.Time
+	// Nonce — RFC 6960 §4.4.1 nonce-extension echo. When non-nil, the
+	// responder includes this value in the response's singleExtensions
+	// field. Production hardening II Phase 1 — mirrors the same-named
+	// field on internal/connector/issuer/interface.go::OCSPSignRequest.
+	Nonce []byte
 }
 
 // NewRenewalService creates a new renewal service.

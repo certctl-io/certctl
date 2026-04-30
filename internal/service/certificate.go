@@ -521,12 +521,20 @@ func (s *CertificateService) GenerateDERCRL(ctx context.Context, issuerID string
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
-// Delegates to CAOperationsSvc.
+// Back-compat wrapper around GetOCSPResponseWithNonce; passes nil nonce so the
+// response omits the RFC 6960 §4.4.1 nonce extension.
 func (s *CertificateService) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
+	return s.GetOCSPResponseWithNonce(ctx, issuerID, serialHex, nil)
+}
+
+// GetOCSPResponseWithNonce generates a signed OCSP response and (when
+// nonce != nil) echoes the nonce in the response per RFC 6960 §4.4.1.
+// Production hardening II Phase 1.
+func (s *CertificateService) GetOCSPResponseWithNonce(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error) {
 	if s.caSvc == nil {
 		return nil, fmt.Errorf("CA operations service not configured")
 	}
-	return s.caSvc.GetOCSPResponse(ctx, issuerID, serialHex)
+	return s.caSvc.GetOCSPResponseWithNonce(ctx, issuerID, serialHex, nonce)
 }
 
 // GetCertificateDeployments returns all deployment targets for a certificate (M20).

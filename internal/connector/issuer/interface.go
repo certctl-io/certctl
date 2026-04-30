@@ -123,4 +123,10 @@ type OCSPSignRequest struct {
 	RevocationReason int
 	ThisUpdate       time.Time
 	NextUpdate       time.Time
+	// Nonce — RFC 6960 §4.4.1 OCSP-nonce extension echo. When non-nil,
+	// the responder MUST include this value in the response's
+	// singleExtensions field. When nil, the response MUST NOT carry
+	// a nonce extension (back-compat with relying parties that don't
+	// understand it). Production hardening II Phase 1.
+	Nonce []byte
 }

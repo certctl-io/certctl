@@ -98,7 +98,21 @@ func (s *CAOperationsSvc) GenerateDERCRL(ctx context.Context, issuerID string) (
 }
 
 // GetOCSPResponse generates a signed OCSP response for the given certificate serial.
+// Back-compat wrapper around GetOCSPResponseWithNonce: passes nil nonce,
+// which produces a response without the RFC 6960 §4.4.1 nonce extension.
+// Older callers that don't carry a nonce see no behavior change.
 func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, serialHex string) ([]byte, error) {
+	return s.GetOCSPResponseWithNonce(ctx, issuerID, serialHex, nil)
+}
+
+// GetOCSPResponseWithNonce generates a signed OCSP response for the
+// given certificate serial. When nonce is non-nil, the responder echoes
+// it in the response per RFC 6960 §4.4.1 (nonce extension). nil nonce
+// omits the extension entirely (back-compat with relying parties that
+// do not include one).
+//
+// Production hardening II Phase 1.
+func (s *CAOperationsSvc) GetOCSPResponseWithNonce(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
@@ -133,6 +147,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 						CertStatus: 0, // good — short-lived exemption
 						ThisUpdate: now,
 						NextUpdate: now.Add(1 * time.Hour),
+						Nonce:      nonce,
 					})
 				}
 			}
@@ -150,6 +165,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 			RevocationReason: domain.CRLReasonCode(domain.RevocationReason(rev.Reason)),
 			ThisUpdate:       now,
 			NextUpdate:       now.Add(1 * time.Hour),
+			Nonce:            nonce,
 		})
 	}
 
@@ -175,6 +191,7 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 				CertStatus: 2, // unknown
 				ThisUpdate: now,
 				NextUpdate: now.Add(1 * time.Hour),
+				Nonce:      nonce,
 			})
 		}
 	}
@@ -185,5 +202,6 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 		CertStatus: 0, // good
 		ThisUpdate: now,
 		NextUpdate: now.Add(1 * time.Hour),
+		Nonce:      nonce,
 	})
 }
