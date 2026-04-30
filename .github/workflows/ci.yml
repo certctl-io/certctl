@@ -1353,3 +1353,109 @@ jobs:
             echo "::error::Helm chart rendered without a TLS source — fail-loud guard regressed"
             exit 1
           fi
+
+  # =============================================================================
+  # Deploy-Hardening II Phase 15 — per-vendor e2e matrix
+  # =============================================================================
+  # Per frozen decision 0.9: each vendor's e2e tests run in their own
+  # matrix job so vendor failures surface independently in the CI status
+  # check (operator sees "K8s 1.31 vendor-edge fail" as a discrete check,
+  # not a generic "integration tests failed").
+  deploy-vendor-e2e:
+    name: deploy-vendor-e2e (${{ matrix.vendor }})
+    runs-on: ubuntu-latest
+    needs: [go-build-and-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        vendor: [nginx, apache, haproxy, traefik, caddy, envoy, postfix, dovecot, ssh, javakeystore, k8s, f5-mock]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.9'
+          cache: true
+
+      - name: Bring up vendor sidecar
+        run: |
+          if [ "${{ matrix.vendor }}" = "f5-mock" ]; then
+            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml build f5-mock-icontrol
+            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d f5-mock-icontrol
+          else
+            docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml up -d ${{ matrix.vendor }}-test
+          fi
+          sleep 5
+
+      - name: Run vendor-edge e2e
+        env:
+          INTEGRATION: "1"
+        run: |
+          # Per frozen decision 0.6: discoverable via
+          # `go test -run 'VendorEdge_<vendor>'`. Match the matrix
+          # vendor (test names are CamelCase: TestVendorEdge_NGINX_*,
+          # TestVendorEdge_HAProxy_*, etc.).
+          case "${{ matrix.vendor }}" in
+            nginx)        PATTERN='VendorEdge_NGINX' ;;
+            apache)       PATTERN='VendorEdge_Apache' ;;
+            haproxy)      PATTERN='VendorEdge_HAProxy' ;;
+            traefik)      PATTERN='VendorEdge_Traefik' ;;
+            caddy)        PATTERN='VendorEdge_Caddy' ;;
+            envoy)        PATTERN='VendorEdge_Envoy' ;;
+            postfix)      PATTERN='VendorEdge_Postfix' ;;
+            dovecot)      PATTERN='VendorEdge_Dovecot' ;;
+            ssh)          PATTERN='VendorEdge_SSH' ;;
+            javakeystore) PATTERN='VendorEdge_JavaKeystore' ;;
+            k8s)          PATTERN='VendorEdge_K8s' ;;
+            f5-mock)      PATTERN='VendorEdge_F5' ;;
+          esac
+          go test -tags integration -race -count=1 -run "$PATTERN" ./deploy/test/...
+
+      - name: Tear down sidecar
+        if: always()
+        run: docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml down -v
+
+  # =============================================================================
+  # Deploy-Hardening II Phase 15 — Windows-host vendor e2e matrix
+  # =============================================================================
+  # IIS + WinCertStore tests run on windows-latest runners per frozen
+  # decision 0.4 (Windows containers run only on Windows hosts).
+  # Linux-only operators skip via //go:build integration && !no_iis.
+  deploy-vendor-e2e-windows:
+    name: deploy-vendor-e2e-windows (${{ matrix.vendor }})
+    runs-on: windows-latest
+    needs: [go-build-and-test]
+    strategy:
+      fail-fast: false
+      matrix:
+        vendor: [iis, wincertstore]
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.9'
+          cache: true
+
+      - name: Bring up Windows IIS sidecar
+        shell: powershell
+        run: |
+          docker compose --profile deploy-e2e-windows -f deploy/docker-compose.test.yml up -d windows-iis-test
+          Start-Sleep -Seconds 10
+
+      - name: Run vendor-edge e2e (Windows)
+        env:
+          INTEGRATION: "1"
+        shell: powershell
+        run: |
+          $pattern = if ("${{ matrix.vendor }}" -eq "iis") { "VendorEdge_IIS" } else { "VendorEdge_WinCertStore" }
+          go test -tags integration -race -count=1 -run $pattern ./deploy/test/...
+
+      - name: Tear down sidecar
+        if: always()
+        shell: powershell
+        run: docker compose --profile deploy-e2e-windows -f deploy/docker-compose.test.yml down -v
