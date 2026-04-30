@@ -322,6 +322,21 @@ func main() {
 	})
 	crlCacheService := service.NewCRLCacheService(crlCacheRepo, caOperationsSvc, issuerRegistry, logger)
 
+	// Production hardening II Phase 2: OCSP response cache. Mirrors the
+	// CRL cache wire above. The cache service consults
+	// caOperationsSvc.LiveSignOCSPResponse on miss (via the bypass-
+	// cache entry point that breaks the recursion); the responder
+	// counters get wired in Phase 8 when the Prometheus exposer reads
+	// them.
+	ocspResponseCacheRepo := postgres.NewOCSPResponseCacheRepository(db)
+	ocspResponseCacheService := service.NewOCSPResponseCacheService(ocspResponseCacheRepo, caOperationsSvc, nil, logger)
+	caOperationsSvc.SetOCSPCacheSvc(ocspResponseCacheService)
+	// Load-bearing security wire: invalidate the cache after a successful
+	// revocation so the next OCSP fetch returns "revoked" (not the stale
+	// "good" cached blob). Without this the cache would serve stale-
+	// good for up to CERTCTL_OCSP_CACHE_REFRESH_INTERVAL after a revoke.
+	revocationSvc.SetOCSPCacheInvalidator(ocspResponseCacheService)
+
 	// Wire sub-services into CertificateService
 	certificateService.SetRevocationSvc(revocationSvc)
 	certificateService.SetCAOperationsSvc(caOperationsSvc)

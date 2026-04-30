@@ -18,6 +18,26 @@ type RevocationSvc struct {
 	auditService     *AuditService
 	notificationSvc  *NotificationService
 	issuerRegistry   *IssuerRegistry
+	// ocspCacheInvalidator — production hardening II Phase 2 load-
+	// bearing security wire. After a successful revocation, the
+	// service MUST invalidate the OCSP response cache for this
+	// (issuer, serial) so the next OCSP fetch returns the revoked
+	// status (not the stale "good" cached blob).
+	ocspCacheInvalidator OCSPCacheInvalidator
+}
+
+// OCSPCacheInvalidator is the minimum surface RevocationSvc needs
+// from the OCSP cache. The cache service implements this interface;
+// the indirection keeps RevocationSvc from depending on the cache
+// type and lets tests inject a fake invalidator.
+type OCSPCacheInvalidator interface {
+	InvalidateOnRevoke(ctx context.Context, issuerID, serialHex string) error
+}
+
+// SetOCSPCacheInvalidator wires the OCSP cache for invalidate-on-
+// revoke. Production hardening II Phase 2.
+func (s *RevocationSvc) SetOCSPCacheInvalidator(c OCSPCacheInvalidator) {
+	s.ocspCacheInvalidator = c
 }
 
 // NewRevocationSvc creates a new revocation service.
@@ -126,6 +146,28 @@ func (s *RevocationSvc) RevokeCertificateWithActor(ctx context.Context, certID s
 					}
 				}
 			}
+		}
+	}
+
+	// 5.5. Invalidate the OCSP response cache for this (issuer, serial)
+	// so the next OCSP fetch returns the revoked status (not the stale
+	// "good" cached blob). Production hardening II Phase 2 LOAD-BEARING
+	// security wire — without this, a revoked cert keeps returning
+	// "good" until the next ocspCacheRefreshLoop tick.
+	//
+	// Failure is logged and swallowed: the revocation row is committed,
+	// the CRL will reflect the revocation on the next regen, and the
+	// admin can manually nuke the cache row if necessary. Failing the
+	// caller's revoke on cache-failure would leave the operator's
+	// intent unachieved (cert appears not-revoked); failing-soft +
+	// logging is the right tradeoff.
+	if s.ocspCacheInvalidator != nil {
+		if err := s.ocspCacheInvalidator.InvalidateOnRevoke(ctx, cert.IssuerID, version.SerialNumber); err != nil {
+			slog.Warn("failed to invalidate OCSP response cache after revocation (revocation still committed)",
+				"error", err,
+				"issuer_id", cert.IssuerID,
+				"serial", version.SerialNumber,
+				"certificate_id", certID)
 		}
 	}
 

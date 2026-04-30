@@ -116,6 +116,38 @@ type CRLCacheRepository interface {
 	ListGenerationEvents(ctx context.Context, issuerID string, limit int) ([]*domain.CRLGenerationEvent, error)
 }
 
+// OCSPResponseCacheRepository persists pre-signed OCSP responses so the
+// /.well-known/pki/ocsp/{issuer_id}/{serial_hex} endpoint can serve
+// from cache rather than triggering a fresh signature per request.
+// Populated by the scheduler's ocspCacheRefreshLoop and read by the
+// OCSPResponseCacheService (internal/service/ocsp_response_cache.go) on
+// every OCSP fetch via a read-through facade.
+//
+// Schema lives in migrations/000024_ocsp_response_cache.up.sql.
+// Production hardening II Phase 2.
+type OCSPResponseCacheRepository interface {
+	// Get returns the cached response for (issuer, serial), or
+	// (nil, nil) on miss so the caller falls through to live signing.
+	Get(ctx context.Context, issuerID, serialHex string) (*domain.OCSPResponseCacheEntry, error)
+
+	// Put upserts the cache row. ON CONFLICT replaces every field so
+	// a re-sign atomically swaps without a window where the row is
+	// stale.
+	Put(ctx context.Context, entry *domain.OCSPResponseCacheEntry) error
+
+	// Delete removes a single cache row. Called by
+	// InvalidateOnRevoke after a successful revocation so the next
+	// fetch triggers a fresh signature with the updated status. The
+	// load-bearing security wire — without it, a revoked cert keeps
+	// returning the stale "good" cached response until the next
+	// scheduler tick.
+	Delete(ctx context.Context, issuerID, serialHex string) error
+
+	// CountByIssuer returns the per-issuer cached entry count for the
+	// admin observability endpoint.
+	CountByIssuer(ctx context.Context) (map[string]int, error)
+}
+
 // OCSPResponderRepository persists per-issuer OCSP-responder cert + key
 // pointers for the dedicated-responder-cert flow (RFC 6960 §2.6 +
 // §4.2.2.2). One row per issuer; rotation overwrites in place.

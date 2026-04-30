@@ -21,6 +21,29 @@ type CAOperationsSvc struct {
 	certRepo       repository.CertificateRepository
 	profileRepo    repository.CertificateProfileRepository
 	issuerRegistry *IssuerRegistry
+	// ocspCacheSvc — production hardening II Phase 2 read-through
+	// cache. When set, GetOCSPResponseWithNonce serves nil-nonce
+	// requests from the cache; nonce-bearing requests always go
+	// through the live signing path (the cached blob is signed with
+	// nil nonce, so a request that wants a nonce echo can't use it).
+	// Use SetOCSPCacheSvc to wire.
+	ocspCacheSvc OCSPResponseCacher
+}
+
+// OCSPResponseCacher is the minimum surface CAOperationsSvc consumes
+// from the OCSP response cache. The cache service implements this
+// interface; the indirection lets tests inject a fake cacher and
+// avoids a service→service hard dep on the cache type.
+type OCSPResponseCacher interface {
+	Get(ctx context.Context, issuerID, serialHex string) ([]byte, error)
+	InvalidateOnRevoke(ctx context.Context, issuerID, serialHex string) error
+}
+
+// SetOCSPCacheSvc wires the OCSP response cache. When set, nil-nonce
+// requests through GetOCSPResponseWithNonce serve from the cache;
+// nonce-bearing requests bypass.
+func (s *CAOperationsSvc) SetOCSPCacheSvc(c OCSPResponseCacher) {
+	s.ocspCacheSvc = c
 }
 
 // NewCAOperationsSvc creates a new CA operations service.
@@ -105,14 +128,42 @@ func (s *CAOperationsSvc) GetOCSPResponse(ctx context.Context, issuerID string, 
 	return s.GetOCSPResponseWithNonce(ctx, issuerID, serialHex, nil)
 }
 
-// GetOCSPResponseWithNonce generates a signed OCSP response for the
-// given certificate serial. When nonce is non-nil, the responder echoes
-// it in the response per RFC 6960 §4.4.1 (nonce extension). nil nonce
-// omits the extension entirely (back-compat with relying parties that
-// do not include one).
+// GetOCSPResponseWithNonce returns a signed OCSP response for the
+// given certificate serial. When nonce is non-nil, the responder
+// echoes it in the response per RFC 6960 §4.4.1; nil nonce omits the
+// extension (back-compat).
 //
-// Production hardening II Phase 1.
+// Dispatch: nil-nonce requests served from the OCSP response cache
+// when wired (production hardening II Phase 2); nonce-bearing
+// requests always live-sign because the cache stores nil-nonce blobs
+// and re-signing to add the nonce defeats the point of caching.
+//
+// Production hardening II Phase 1 (nonce) + Phase 2 (cache dispatch).
 func (s *CAOperationsSvc) GetOCSPResponseWithNonce(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error) {
+	if s.ocspCacheSvc != nil && len(nonce) == 0 {
+		// Cache wired and request has no nonce → read-through cache.
+		// On cache miss the cache service calls back into
+		// LiveSignOCSPResponse(nil) and writes the result back.
+		return s.ocspCacheSvc.Get(ctx, issuerID, serialHex)
+	}
+	return s.LiveSignOCSPResponse(ctx, issuerID, serialHex, nonce)
+}
+
+// LiveSignOCSPResponse is the unconditional signing path: it consults
+// the revocation repo, decides good/revoked/unknown, and signs via
+// the issuer connector. Bypasses the OCSP response cache.
+//
+// Used by:
+//   - GetOCSPResponseWithNonce when nonce != nil OR cache not wired.
+//   - OCSPResponseCacheService.Get on cache miss (the read-through
+//     fallback that produces the blob to write back to cache).
+//
+// Exported because the cache service needs to call it without
+// re-entering the cache; ordinary handler callers should still go
+// through GetOCSPResponseWithNonce.
+//
+// Production hardening II Phase 2.
+func (s *CAOperationsSvc) LiveSignOCSPResponse(ctx context.Context, issuerID string, serialHex string, nonce []byte) ([]byte, error) {
 	if s.revocationRepo == nil {
 		return nil, fmt.Errorf("revocation repository not configured")
 	}
