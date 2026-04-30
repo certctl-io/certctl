@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"sort"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
@@ -25,6 +26,31 @@ type CounterSnapshotter interface {
 	Snapshot() map[string]uint64
 }
 
+// DeploySnapshotEntry is the per-target-type tuple emitted by the
+// deploy package's counter table. Avoids importing the service
+// package's DeploySnapshot directly so the handler stays
+// dependency-light (the interface uses primitives only).
+//
+// Phase 10 of the deploy-hardening I master bundle.
+type DeploySnapshotEntry struct {
+	TargetType        string
+	AttemptsSuccess   uint64
+	AttemptsFailure   uint64
+	ValidateFailures  uint64
+	ReloadFailures    uint64
+	PostVerifyFails   uint64
+	RollbackRestored  uint64
+	RollbackAlsoFail  uint64
+	IdempotentSkips   uint64
+}
+
+// DeployCounterSnapshotter is the surface MetricsHandler consumes
+// for the per-target-type deploy counters. The DeployCounters type
+// in internal/service satisfies this via an adapter.
+type DeployCounterSnapshotter interface {
+	Snapshot() []DeploySnapshotEntry
+}
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
@@ -36,6 +62,8 @@ type MetricsHandler struct {
 	// wires the instances at startup. The naming convention is
 	// certctl_<area>_<label>_total per frozen decision 0.10.
 	ocspCounters CounterSnapshotter
+	// Phase 10 (deploy-hardening I) — per-target-type deploy counters.
+	deployCounters DeployCounterSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -52,6 +80,13 @@ func NewMetricsHandler(svc MetricsService, serverStarted time.Time) MetricsHandl
 // Production hardening II Phase 8.
 func (h *MetricsHandler) SetOCSPCounters(c CounterSnapshotter) {
 	h.ocspCounters = c
+}
+
+// SetDeployCounters wires the per-target-type deploy counter table
+// for the Prometheus exposition. nil disables the block. Phase 10
+// of the deploy-hardening I master bundle.
+func (h *MetricsHandler) SetDeployCounters(c DeployCounterSnapshotter) {
+	h.deployCounters = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -264,6 +299,49 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 		}
 		for _, lbl := range labels {
 			fmt.Fprintf(w, "certctl_ocsp_counter_total{label=%q} %d\n", lbl, snap[lbl])
+		}
+	}
+
+	// Phase 10 (deploy-hardening I) — per-target-type deploy
+	// counters. The exposer enumerates the (target_type, sub-label)
+	// tuples to defend against drift; adding a new sub-counter to
+	// DeployCounters without also adding it here would surface as
+	// silent missing-metric in operator dashboards.
+	if h.deployCounters != nil {
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_attempts_total Per-target-type deploy attempts (deploy-hardening I Phase 10).\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_attempts_total counter\n")
+		snap := h.deployCounters.Snapshot()
+		// Sort by target_type for stable output.
+		sort.Slice(snap, func(i, j int) bool { return snap[i].TargetType < snap[j].TargetType })
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_attempts_total{target_type=%q,result=%q} %d\n", s.TargetType, "success", s.AttemptsSuccess)
+			fmt.Fprintf(w, "certctl_deploy_attempts_total{target_type=%q,result=%q} %d\n", s.TargetType, "failure", s.AttemptsFailure)
+		}
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_validate_failures_total Per-target-type validate-step failures.\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_validate_failures_total counter\n")
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_validate_failures_total{target_type=%q} %d\n", s.TargetType, s.ValidateFailures)
+		}
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_reload_failures_total Per-target-type reload-step failures (rollback was attempted).\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_reload_failures_total counter\n")
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_reload_failures_total{target_type=%q} %d\n", s.TargetType, s.ReloadFailures)
+		}
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_post_verify_failures_total Per-target-type post-deploy TLS verify failures.\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_post_verify_failures_total counter\n")
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_post_verify_failures_total{target_type=%q} %d\n", s.TargetType, s.PostVerifyFails)
+		}
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_rollback_total Per-target-type rollbacks.\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_rollback_total counter\n")
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_rollback_total{target_type=%q,outcome=%q} %d\n", s.TargetType, "restored", s.RollbackRestored)
+			fmt.Fprintf(w, "certctl_deploy_rollback_total{target_type=%q,outcome=%q} %d\n", s.TargetType, "also_failed", s.RollbackAlsoFail)
+		}
+		fmt.Fprintf(w, "\n# HELP certctl_deploy_idempotent_skip_total Per-target-type SHA-256 idempotent skips (defends against retry storms).\n")
+		fmt.Fprintf(w, "# TYPE certctl_deploy_idempotent_skip_total counter\n")
+		for _, s := range snap {
+			fmt.Fprintf(w, "certctl_deploy_idempotent_skip_total{target_type=%q} %d\n", s.TargetType, s.IdempotentSkips)
 		}
 	}
 }
