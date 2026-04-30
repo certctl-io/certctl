@@ -39,15 +39,15 @@ vendor. EOL versions explicitly excluded.
 | **Postfix** | postfix.org | 3.6 | CI | per-listener cert binding | configure cert per-listener block | `TestVendorEdge_Postfix_MultiListenerCertBinding_DeployUpdatesCorrectListener_E2E` |
 | Postfix | postfix.org | 3.8 | CI | (same) | (same) | (same) |
 | **Dovecot** | dovecot.org | 2.3 | CI | submission/submissions port variants | configure both inet_listener blocks | `TestVendorEdge_Dovecot_SubmissionSubmissionsPortVariants_E2E` |
-| **IIS** | microsoft.com | IIS 10 (Server 2019) | pending | Windows-host-only CI; app-pool recycle opt-in | `AppPoolRecycle: true` per-target if needed | `TestVendorEdge_IIS_AppPoolRecycle_OptInForCertChange_E2E` |
-| IIS | microsoft.com | IIS 10 (Server 2022) | pending | (same) | (same) | (same) |
+| **IIS** | microsoft.com | IIS 10 (Server 2019) | operator-playbook | Windows-host-only validation per [operator playbook](connector-iis.md#operator-validation-playbook-windows-host); app-pool recycle opt-in | `AppPoolRecycle: true` per-target if needed | `TestVendorEdge_IIS_AppPoolRecycle_OptInForCertChange_E2E` |
+| IIS | microsoft.com | IIS 10 (Server 2022) | operator-playbook | (same) | (same) | (same) |
 | **F5 BIG-IP** | f5.com | v15.1 LTS | mock | larger cert chain (>4 links) historical issue | use cert chain ≤4 links OR upgrade to v17 | `TestVendorEdge_F5_LargeCertChainHandling_E2E` |
 | F5 BIG-IP | f5.com | v17.0 | mock | (chain limit lifted) | n/a | (same) |
 | F5 BIG-IP | f5.com | v17.5 | mock | (same) | n/a | (same) |
 | **SSH** | openssh.com | OpenSSH 8.x | CI | sftp subsystem may be disabled | connector falls back to scp | `TestVendorEdge_SSH_SFTPSubsystemAbsent_FallsBackToSCP_E2E` |
 | SSH | openssh.com | OpenSSH 9.x | CI | (same) | (same) | (same) |
-| **WinCertStore** | microsoft.com | Windows Server 2019 | pending | cert store ACL: NS vs IIS_IUSRS | configure store ACL per IIS app-pool identity | `TestVendorEdge_WinCertStore_CertStoreACL_NetworkServiceAccess_E2E` |
-| WinCertStore | microsoft.com | Windows Server 2022 | pending | (same) | (same) | (same) |
+| **WinCertStore** | microsoft.com | Windows Server 2019 | operator-playbook | Windows-host-only validation per [operator playbook](connector-iis.md#operator-validation-playbook-windows-host); cert store ACL: NS vs IIS_IUSRS | configure store ACL per IIS app-pool identity | `TestVendorEdge_WinCertStore_CertStoreACL_NetworkServiceAccess_E2E` |
+| WinCertStore | microsoft.com | Windows Server 2022 | operator-playbook | (same) | (same) | (same) |
 | **JavaKeystore** | adoptium.net | JDK 11 LTS | pending | keytool `-importkeystore` semantics | use `KeytoolPath` config to pin to JDK | `TestVendorEdge_JavaKeystore_JDK11_vs_17_vs_21_KeytoolBehavior_E2E` |
 | JavaKeystore | adoptium.net | JDK 17 LTS | pending | (same) | (same) | (same) |
 | JavaKeystore | adoptium.net | JDK 21 LTS | pending | (same) | (same) | (same) |

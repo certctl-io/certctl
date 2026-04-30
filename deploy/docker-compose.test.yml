@@ -637,14 +637,23 @@ services:
         ipv4_address: 10.30.50.29
     profiles: [deploy-e2e]
 
-  # windows-iis-test: Windows containers run only on Windows hosts per
-  # frozen decision 0.4. Linux CI runners CANNOT run this; the
-  # windows-vendor-e2e CI matrix job runs on windows-latest runners.
-  # Documented limitation. Operators on Linux-only CI use the
-  # //go:build integration && !no_iis opt-out.
+  # windows-iis-test: Windows containers run only on Windows hosts.
+  # CI no longer runs an IIS matrix (per ci-pipeline-cleanup bundle
+  # Phase 6 / frozen decision 0.5 — revises Bundle II decision 0.4).
+  # Two reasons the Windows matrix was deleted: (a) it couldn't
+  # physically work on `windows-latest` GitHub runners (Docker not
+  # started in Windows-containers mode by default; `bridge` network
+  # driver doesn't exist on Windows Docker); (b) all IIS + WinCertStore
+  # vendor-edge tests are t.Log placeholder stubs that exercise no
+  # IIS-specific behavior.
   #
-  # Image not pulled by default (no profile match on Linux); included
-  # here so Windows operators get the same compose surface.
+  # Operators validate IIS + WinCertStore manually on a Windows host
+  # per the playbook at docs/connector-iis.md::Operator validation playbook.
+  #
+  # The sidecar definition stays here under profiles: [deploy-e2e-windows]
+  # so a Windows operator can opt in via:
+  #   docker compose --profile deploy-e2e-windows up -d windows-iis-test
+  # Linux CI never activates this profile.
   windows-iis-test:
     image: mcr.microsoft.com/windows/servercore/iis:windowsservercore-ltsc2022@sha256:8d0b0e651ad514e3fb05978db66f38036118812e1b9314a48f10419cad8a3462
     container_name: certctl-test-iis

@@ -128,3 +128,68 @@ hostname.
 
 - [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
 - [Vendor compatibility matrix](deployment-vendor-matrix.md)
+
+## Operator validation playbook (Windows host)
+
+CI no longer runs the IIS + WinCertStore vendor-e2e tests on every
+push. Per ci-pipeline-cleanup bundle frozen decision 0.5 (which
+revises Bundle II decision 0.4), the Windows matrix was deleted
+because (a) it couldn't physically work on `windows-latest` GitHub
+runners (Docker not started in Windows-containers mode by default;
+`bridge` network driver doesn't exist on Windows Docker — uses
+`nat`), and (b) all IIS + WinCertStore vendor-edge tests are
+`t.Log` placeholder stubs that exercise no IIS-specific behavior.
+
+The real IIS connector validation lives in:
+
+1. `internal/connector/target/iis/` unit tests (run on Linux in the
+   regular Go Build & Test job — already green on every push).
+2. This playbook — operator manual smoke against a real Windows host
+   pre-release.
+
+### Prerequisites
+
+- Windows Server 2019 or 2022 host (or Windows 10/11 Pro with Hyper-V)
+- Docker Desktop in Windows containers mode
+  (Settings → "Switch to Windows containers")
+- Go 1.25.9 + git
+
+### Procedure
+
+```powershell
+# Clone + checkout
+git clone https://github.com/shankar0123/certctl.git
+cd certctl
+git fetch --tags
+git checkout v2.X.0  # whichever release is being validated
+
+# Bring up the Windows IIS sidecar
+docker compose --profile deploy-e2e-windows `
+  -f deploy/docker-compose.test.yml `
+  up -d windows-iis-test
+Start-Sleep -Seconds 30
+
+# Run IIS + WinCertStore vendor-edge tests
+$env:INTEGRATION = "1"
+go test -tags integration -race -count=1 `
+  -run 'VendorEdge_(IIS|WinCertStore)' `
+  ./deploy/test/... | Tee-Object -FilePath iis-validation.log
+
+# Tear down
+docker compose --profile deploy-e2e-windows `
+  -f deploy/docker-compose.test.yml `
+  down -v
+```
+
+### Acceptance
+
+Per Bundle II frozen decision 0.14, the IIS / WinCertStore cells in
+`docs/deployment-vendor-matrix.md` flip from "CI" / "pending" → "✓"
+only when ALL of the following are true:
+
+- ≥1 happy-path e2e passes against the real Windows IIS sidecar
+- ≥1 specific-quirk test for that Windows Server version passes
+- This playbook's full procedure ran clean once on a real Windows host
+
+Operator records the validation date + Windows Server version in
+`cowork/<bundle>/iis-validation-receipts.md` for audit trail.
