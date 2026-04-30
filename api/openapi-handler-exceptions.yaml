@@ -1,0 +1,27 @@
+# Routes registered in internal/api/router/router.go that are intentionally
+# NOT in api/openapi.yaml. Each entry needs a one-line `why:` justification.
+# Adding a new entry requires PR-time review.
+#
+# OpenAPI-shaped REST endpoints belong in api/openapi.yaml, NOT here.
+# This list is for protocol-shaped (SCEP wire endpoints) and operational
+# (health, metrics, pprof) routes only.
+#
+# Per ci-pipeline-cleanup bundle Phase 9 / frozen decision 0.11.
+
+documented_exceptions:
+  - route: "GET /scep"
+    why: "SCEP wire-protocol endpoint per RFC 8894 §3.1; serves CA certs via GetCACert/GetCACaps query params, NOT a REST resource."
+  - route: "POST /scep"
+    why: "SCEP wire-protocol endpoint per RFC 8894 §3.1; receives PKCSReq / RenewalReq PKIMessages, NOT a REST resource."
+  - route: "GET /scep/"
+    why: "SCEP wire-protocol endpoint with trailing-slash variant; ChromeOS clients send the trailing-slash form."
+  - route: "POST /scep/"
+    why: "SCEP wire-protocol endpoint with trailing-slash variant; ChromeOS clients send the trailing-slash form."
+  - route: "GET /scep-mtls"
+    why: "SCEP-mTLS sibling endpoint per ci-pipeline-cleanup-prerequisite EST RFC 7030 hardening Phase 6.5; same wire-protocol semantics, mutually-authenticated TLS variant."
+  - route: "POST /scep-mtls"
+    why: "SCEP-mTLS sibling endpoint, POST variant."
+  - route: "GET /scep-mtls/"
+    why: "SCEP-mTLS sibling endpoint, trailing-slash variant."
+  - route: "POST /scep-mtls/"
+    why: "SCEP-mTLS sibling endpoint, trailing-slash POST variant."

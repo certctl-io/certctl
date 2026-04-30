@@ -381,3 +381,48 @@ jobs:
       - name: Tear down sidecars
         if: always()
         run: docker compose --profile deploy-e2e -f deploy/docker-compose.test.yml down -v
+
+  # =============================================================================
+  # image-and-supply-chain — digest validity + Docker build smoke + OpenAPI parity
+  # =============================================================================
+  # Per ci-pipeline-cleanup bundle Phases 7-9 / frozen decision 0.8.
+  # Three checks bundled into one job (parallel to go-build-and-test):
+  #   1. Digest validity — every @sha256 ref in deploy/* + Dockerfiles must
+  #      resolve on its registry. Closes the H-001 lying-field gap (H-001
+  #      verifies digest *presence* but not *resolution* — Bundle II shipped
+  #      11 fabricated digests that passed H-001 and failed `docker pull`).
+  #   2. Docker build smoke — all 4 Dockerfiles in the repo must build.
+  #      Catches syntax errors / COPY path drift before tag-time release.yml.
+  #   3. OpenAPI ↔ handler parity — every router route has a matching
+  #      operationId or is documented in api/openapi-handler-exceptions.yaml.
+  image-and-supply-chain:
+    name: image-and-supply-chain
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Set up Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25.9'
+          cache: true
+
+      - name: Digest validity (every @sha256 ref must resolve)
+        run: bash scripts/ci-guards/digest-validity.sh
+
+      - name: Docker build smoke (all 4 Dockerfiles)
+        # Per frozen decision 0.10: build all 4 Dockerfiles in the repo,
+        # not just production server + agent. The test-sidecar Dockerfiles
+        # are load-bearing for vendor-e2e — a syntax error there silently
+        # breaks the e2e suite.
+        run: |
+          set -e
+          docker build -f Dockerfile        -t certctl:smoke           .
+          docker build -f Dockerfile.agent  -t certctl-agent:smoke     .
+          docker build -f deploy/test/f5-mock-icontrol/Dockerfile -t f5-mock:smoke .
+          docker build -f deploy/test/libest/Dockerfile           -t libest:smoke   .
+          echo "All 4 Dockerfiles build clean."
+
+      - name: OpenAPI ↔ handler operationId parity
+        run: bash scripts/ci-guards/openapi-handler-parity.sh
