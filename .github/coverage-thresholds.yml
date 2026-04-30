@@ -1,0 +1,78 @@
+# Coverage floors per gated package.
+#
+# Each entry: floor: <integer percentage>, why: <load-bearing context>.
+# Adding a new gated package: one entry here; CI's `Check Coverage Thresholds`
+# step auto-picks up. Lowering a floor REQUIRES corresponding code-side test
+# work — never lower the gate to make CI green.
+#
+# Per ci-pipeline-cleanup bundle Phase 2 / frozen decision 0.3.
+
+internal/service:
+  floor: 70
+  why: |
+    Bundle R-CI-extended raise (post-Bundle-N.C-extended): service
+    55 → 70. HEAD 73.4% (3pp margin). Prescribed Bundle R target
+    was 80; held lower to avoid false-positives on single low-
+    coverage files dragging the global per-file-average down.
+
+internal/api/handler:
+  floor: 75
+  why: |
+    Bundle R-CI-extended raise: handler 60 → 75. HEAD 79.8% (4pp
+    margin). Prescribed Bundle R target was 80; held lower for
+    same reason as service layer.
+
+internal/domain:
+  floor: 40
+  why: |
+    Domain layer is mostly type definitions + validators; 40% is
+    the load-bearing-paths floor.
+
+internal/api/middleware:
+  floor: 30
+  why: |
+    Middleware coverage is per-handler-test-driven. 30% is the
+    floor that catches the wired-up middleware paths; the
+    unwired paths (alternative auth providers not currently
+    enabled) sit below.
+
+internal/crypto:
+  floor: 88
+  why: |
+    Bundle R closure CI checkpoint #3: crypto floor lifted 85 → 88.
+    Post-Bundle-Q package-scoped coverage at HEAD: 88.2%. The
+    remaining ~12% gap is platform-failure branches (rand.Reader /
+    aes.NewCipher) that require interface seams the production
+    code doesn't use; closing them is tracked as R-CI-extended,
+    not Bundle R scope.
+
+internal/connector/issuer/local:
+  floor: 86
+  why: |
+    Bundle R closure CI checkpoint #3: local-issuer floor lifted
+    85 → 86. Post-Bundle-Q package-scoped coverage at HEAD: 86.7%.
+    The prescribed Bundle R target was 92, but reaching it
+    requires interface seams for crypto/x509 signing-error
+    branches — tracked as R-CI-extended.
+
+internal/connector/issuer/acme:
+  floor: 80
+  why: |
+    Bundle R-CI-extended threshold raise (post-Bundle-J-extended):
+    ACME 50 → 80. The Pebble-style mock + per-CA failure tests
+    lift package-scoped ACME to 85.4%; gate at 80 with 5pp margin
+    to absorb the global-run per-file-average dip.
+
+internal/connector/issuer/stepca:
+  floor: 80
+  why: |
+    Bundle L.B / Coverage-Audit C-005 — StepCA failure-mode + JWE
+    round-trip tests lift package from 52.1% to 90.4% (per-package
+    run). Floor at 80 with margin.
+
+internal/mcp:
+  floor: 85
+  why: |
+    Bundle K / Coverage-Audit C-002 — MCP per-tool dispatch via
+    in-memory transport lifts package from 28.0% to 93.1% (per-
+    package run). Floor at 85.
