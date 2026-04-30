@@ -87,20 +87,22 @@ gantt
 
 | Target | Type | Notes |
 |--------|------|-------|
-| NGINX | `NGINX` | File write, config validation, reload |
-| Apache httpd | `Apache` | Separate cert/chain/key files, configtest, graceful reload |
-| HAProxy | `HAProxy` | Combined PEM file, validate, reload |
-| Traefik | `Traefik` | File provider deployment, auto-reload via filesystem watch |
-| Caddy | `Caddy` | Dual-mode: admin API hot-reload or file-based |
-| Envoy | `Envoy` | File-based with optional SDS JSON config |
-| Postfix | `Postfix` | Mail server TLS, pairs with S/MIME support |
-| Dovecot | `Dovecot` | Mail server TLS, pairs with S/MIME support |
-| Microsoft IIS | `IIS` | Local PowerShell or remote WinRM, PEM→PFX, SNI support |
-| F5 BIG-IP | `F5` | iControl REST via proxy agent, transaction-based atomic updates |
-| SSH (Agentless) | `SSH` | SFTP cert/key deployment to any Linux/Unix server |
-| Windows Certificate Store | `WinCertStore` | PowerShell Import-PfxCertificate, configurable store/location |
-| Java Keystore | `JavaKeystore` | PEM→PKCS#12→keytool pipeline, JKS and PKCS12 formats |
-| Kubernetes Secrets | `KubernetesSecrets` | `kubernetes.io/tls` Secrets, in-cluster or kubeconfig auth |
+| NGINX | `NGINX` | Atomic write + `nginx -t` validate + `nginx -s reload` + post-deploy TLS verify + rollback (deploy-hardening I) |
+| Apache httpd | `Apache` | Atomic write + `apachectl configtest` + graceful reload + post-deploy TLS verify + rollback |
+| HAProxy | `HAProxy` | Combined PEM atomic write + `haproxy -c -f` validate + `systemctl reload` + post-deploy TLS verify + rollback |
+| Traefik | `Traefik` | Atomic write + post-deploy TLS verify + rollback (file watcher auto-reloads) |
+| Caddy | `Caddy` | Atomic write (file mode) or `POST /load` (api mode) + admin API ValidateOnly probe |
+| Envoy | `Envoy` | Atomic write + SDS file watcher auto-reload |
+| Postfix | `Postfix` | Atomic write + `postfix check` + `postfix reload` + post-deploy TLS verify + rollback |
+| Dovecot | `Dovecot` | Atomic write + `doveconf -n` + `doveadm reload` + post-deploy TLS verify + rollback |
+| Microsoft IIS | `IIS` | Local PowerShell or remote WinRM, PEM→PFX, SNI support, explicit pre-deploy backup + post-rollback re-import |
+| F5 BIG-IP | `F5` | iControl REST via proxy agent, transaction-based atomic updates + post-deploy TLS verify on Virtual Server |
+| SSH (Agentless) | `SSH` | SFTP cert/key deployment + pre-deploy SCP backup + tls.Dial post-verify |
+| Windows Certificate Store | `WinCertStore` | PowerShell Import-PfxCertificate + Get-ChildItem snapshot for rollback |
+| Java Keystore | `JavaKeystore` | PEM→PKCS#12→keytool pipeline + keytool snapshot for rollback |
+| Kubernetes Secrets | `KubernetesSecrets` | `kubernetes.io/tls` Secrets, atomic API + SHA-256 verify + kubelet sync poll |
+
+**Deploy-hardening I** (post-2026-04-30 master bundle): every connector now goes through `internal/deploy.Apply` for atomic-write + ownership-preservation + SHA-256 idempotency + per-target-type Prometheus counters (`certctl_deploy_*_total`). See [`docs/deployment-atomicity.md`](docs/deployment-atomicity.md) for the operator guide.
 
 ### Enrollment Protocols
 
