@@ -4,10 +4,18 @@
 # canonical RFC 7030 client for the certctl integration test suite.
 #
 # Source: https://github.com/cisco/libest (the upstream reference
-# implementation; last tag 3.2.0-2 from 2018, but the protocol surface
-# we exercise is stable RFC 7030). We build from source rather than
-# pulling a published image because no official Cisco image exists on
-# Docker Hub + reproducible offline-friendly builds need a pinned ref.
+# implementation; latest tag is r3.2.0 — verified via
+# https://api.github.com/repos/cisco/libest/tags 2026-04-30. The
+# protocol surface we exercise is stable RFC 7030). We build from
+# source rather than pulling a published image because no official
+# Cisco image exists on Docker Hub + reproducible offline-friendly
+# builds need a pinned ref.
+#
+# Note: an earlier draft of this Dockerfile (commit 15da1f4) pinned
+# LIBEST_REF=v3.2.0-2 — that ref does not exist upstream (cisco/libest
+# tags do NOT use the `v` prefix and there is no `-2` patch suffix).
+# The build silently broke until ci-pipeline-cleanup Phase 8's Docker
+# build smoke surfaced it.
 #
 # The builder stage compiles libest + its OpenSSL dependency; the
 # runtime stage carries only the compiled `estclient` binary +
@@ -20,7 +28,7 @@
 # CI uses `docker compose --profile est-e2e build libest-client` to
 # orchestrate the build alongside the rest of the test stack.
 
-ARG LIBEST_REF=v3.2.0-2
+ARG LIBEST_REF=r3.2.0
 
 # Bundle A / Audit H-001 (CWE-829): both FROM lines below pin
 # debian:bookworm-slim to the immutable OCI image-index digest pulled
@@ -33,7 +41,7 @@ FROM debian:bookworm-slim@sha256:f9c6a2fd2ddbc23e336b6257a5245e31f996953ef06cd13
 ARG LIBEST_REF
 
 # Build deps. We use the system openssl (1.1.1n in bookworm-slim) which
-# is the same major version libest 3.2.0-2 was tested against. libest
+# is the same major version libest r3.2.0 was tested against. libest
 # also wants libcurl + libsafec; we install both via apt rather than
 # building from source for reproducibility.
 RUN apt-get update && apt-get install --no-install-recommends -y \
