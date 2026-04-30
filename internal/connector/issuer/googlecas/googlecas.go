@@ -93,10 +93,10 @@ type Connector struct {
 	httpClient *http.Client
 
 	// OAuth2 token caching
-	mu          sync.Mutex
-	tokenCache  *cachedToken
-	saKey       *serviceAccountKey
-	rsaKey      *rsa.PrivateKey
+	mu         sync.Mutex
+	tokenCache *cachedToken
+	saKey      *serviceAccountKey
+	rsaKey     *rsa.PrivateKey
 }
 
 // New creates a new Google CAS connector with the given configuration and logger.

@@ -42,15 +42,15 @@ type fakeSSHServer struct {
 	user     string
 	password string
 
-	wg       sync.WaitGroup
-	mu       sync.Mutex
-	closed   bool
+	wg     sync.WaitGroup
+	mu     sync.Mutex
+	closed bool
 
 	// Optional behaviour toggles for failure-mode tests.
-	rejectAuth      bool   // reject all auth attempts (auth failure path)
-	dropOnHandshake bool   // close conn before SSH NewServerConn returns (handshake failure)
-	failExec        bool   // exec sessions return non-zero exit (Execute error path)
-	failSFTP        bool   // refuse sftp subsystem (SFTP failure path)
+	rejectAuth      bool // reject all auth attempts (auth failure path)
+	dropOnHandshake bool // close conn before SSH NewServerConn returns (handshake failure)
+	failExec        bool // exec sessions return non-zero exit (Execute error path)
+	failSFTP        bool // refuse sftp subsystem (SFTP failure path)
 }
 
 // startFakeSSHServer binds a fresh server on a random local port and returns

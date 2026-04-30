@@ -90,9 +90,9 @@ func New(config *Config, logger *slog.Logger) *Connector {
 
 // orderRequest is the JSON body for DigiCert certificate order submission.
 type orderRequest struct {
-	Certificate   orderCert   `json:"certificate"`
-	Organization  orderOrg    `json:"organization"`
-	ValidityYears int         `json:"validity_years"`
+	Certificate   orderCert `json:"certificate"`
+	Organization  orderOrg  `json:"organization"`
+	ValidityYears int       `json:"validity_years"`
 }
 
 type orderCert struct {

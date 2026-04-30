@@ -15,18 +15,18 @@ import (
 
 // ProbeResult contains the result of probing a TLS endpoint.
 type ProbeResult struct {
-	Address        string        `json:"address"`
-	Success        bool          `json:"success"`
-	Fingerprint    string        `json:"fingerprint"`     // SHA-256 hex fingerprint of leaf cert
-	TLSVersion     string        `json:"tls_version"`     // e.g. "TLS 1.3"
-	CipherSuite    string        `json:"cipher_suite"`    // e.g. "TLS_AES_128_GCM_SHA256"
-	Subject        string        `json:"subject"`         // cert subject CN
-	Issuer         string        `json:"issuer"`          // cert issuer CN
-	NotBefore      time.Time     `json:"not_before"`
-	NotAfter       time.Time     `json:"not_after"`
-	SerialNumber   string        `json:"serial_number"`
-	ResponseTimeMs int           `json:"response_time_ms"`
-	Error          string        `json:"error,omitempty"`
+	Address        string    `json:"address"`
+	Success        bool      `json:"success"`
+	Fingerprint    string    `json:"fingerprint"`  // SHA-256 hex fingerprint of leaf cert
+	TLSVersion     string    `json:"tls_version"`  // e.g. "TLS 1.3"
+	CipherSuite    string    `json:"cipher_suite"` // e.g. "TLS_AES_128_GCM_SHA256"
+	Subject        string    `json:"subject"`      // cert subject CN
+	Issuer         string    `json:"issuer"`       // cert issuer CN
+	NotBefore      time.Time `json:"not_before"`
+	NotAfter       time.Time `json:"not_after"`
+	SerialNumber   string    `json:"serial_number"`
+	ResponseTimeMs int       `json:"response_time_ms"`
+	Error          string    `json:"error,omitempty"`
 }
 
 // ProbeTLS connects to a TLS endpoint, performs a handshake, and extracts certificate metadata.

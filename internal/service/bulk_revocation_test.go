@@ -32,11 +32,11 @@ func newBulkRevocationTestService() (*BulkRevocationService, *mockCertRepo, *moc
 
 func addTestCert(repo *mockCertRepo, id, status, issuerID string) {
 	cert := &domain.ManagedCertificate{
-		ID:        id,
+		ID:         id,
 		CommonName: id + ".example.com",
-		Status:    domain.CertificateStatus(status),
-		IssuerID:  issuerID,
-		ExpiresAt: time.Now().AddDate(0, 6, 0),
+		Status:     domain.CertificateStatus(status),
+		IssuerID:   issuerID,
+		ExpiresAt:  time.Now().AddDate(0, 6, 0),
 	}
 	repo.AddCert(cert)
 	// Add a version with serial number (needed by RevokeCertificateWithActor)
@@ -54,13 +54,13 @@ func addTestCert(repo *mockCertRepo, id, status, issuerID string) {
 
 func addTestCertWithProfile(repo *mockCertRepo, id, status, issuerID, profileID, ownerID string) {
 	cert := &domain.ManagedCertificate{
-		ID:        id,
-		CommonName: id + ".example.com",
-		Status:    domain.CertificateStatus(status),
-		IssuerID:  issuerID,
+		ID:                   id,
+		CommonName:           id + ".example.com",
+		Status:               domain.CertificateStatus(status),
+		IssuerID:             issuerID,
 		CertificateProfileID: profileID,
-		OwnerID:   ownerID,
-		ExpiresAt: time.Now().AddDate(0, 6, 0),
+		OwnerID:              ownerID,
+		ExpiresAt:            time.Now().AddDate(0, 6, 0),
 	}
 	repo.AddCert(cert)
 	repo.Versions[id] = []*domain.CertificateVersion{
@@ -272,11 +272,11 @@ func TestBulkRevoke_PartialFailure(t *testing.T) {
 	addTestCert(certRepo, "mc-1", "Active", "iss-local")
 	// mc-2 is active but has NO version — RevokeCertificateWithActor will fail on GetLatestVersion
 	cert2 := &domain.ManagedCertificate{
-		ID:        "mc-2",
+		ID:         "mc-2",
 		CommonName: "mc-2.example.com",
-		Status:    domain.CertificateStatusActive,
-		IssuerID:  "iss-local",
-		ExpiresAt: time.Now().AddDate(0, 6, 0),
+		Status:     domain.CertificateStatusActive,
+		IssuerID:   "iss-local",
+		ExpiresAt:  time.Now().AddDate(0, 6, 0),
 	}
 	certRepo.AddCert(cert2)
 	// Don't add versions for mc-2 so GetLatestVersion returns errNotFound

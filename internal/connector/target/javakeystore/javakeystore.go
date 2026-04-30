@@ -263,10 +263,10 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		Message:       fmt.Sprintf("Certificate imported to %s (alias: %s, thumbprint: %s)", c.config.KeystorePath, c.config.Alias, thumbprint),
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"thumbprint":     thumbprint,
-			"alias":          c.config.Alias,
-			"keystore_type":  c.config.KeystoreType,
-			"keystore_path":  c.config.KeystorePath,
+			"thumbprint":    thumbprint,
+			"alias":         c.config.Alias,
+			"keystore_type": c.config.KeystoreType,
+			"keystore_path": c.config.KeystorePath,
 		},
 	}, nil
 }

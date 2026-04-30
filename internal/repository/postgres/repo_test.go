@@ -319,7 +319,7 @@ func TestCertificateRepository_GetExpiringCertificates(t *testing.T) {
 			ID: tc.id, Name: tc.id, CommonName: tc.id + ".example.com",
 			SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
 			IssuerID: issuerID, RenewalPolicyID: policyID,
-			Status: domain.CertificateStatusActive,
+			Status:    domain.CertificateStatusActive,
 			ExpiresAt: tc.expires, Tags: map[string]string{},
 			CreatedAt: now, UpdatedAt: now,
 		}
@@ -780,7 +780,7 @@ func TestJobRepository_CRUD(t *testing.T) {
 		ID: "mc-job-test", Name: "job-test", CommonName: "job.example.com",
 		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
 		IssuerID: issuerID, RenewalPolicyID: policyID,
-		Status: domain.CertificateStatusActive,
+		Status:    domain.CertificateStatusActive,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -871,7 +871,7 @@ func TestRevocationRepository_CRUD(t *testing.T) {
 		ID: "mc-rev-test", Name: "rev-test", CommonName: "rev.example.com",
 		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
 		IssuerID: issuerID, RenewalPolicyID: policyID,
-		Status: domain.CertificateStatusRevoked,
+		Status:    domain.CertificateStatusRevoked,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -1250,12 +1250,12 @@ func TestProfileRepository_CRUD(t *testing.T) {
 			{Algorithm: "RSA", MinSize: 2048},
 			{Algorithm: "ECDSA", MinSize: 256},
 		},
-		MaxTTLSeconds:     86400,
-		AllowedEKUs:       []string{"serverAuth"},
-		AllowShortLived:   false,
-		Enabled:           true,
-		CreatedAt:         now,
-		UpdatedAt:         now,
+		MaxTTLSeconds:   86400,
+		AllowedEKUs:     []string{"serverAuth"},
+		AllowShortLived: false,
+		Enabled:         true,
+		CreatedAt:       now,
+		UpdatedAt:       now,
 	}
 
 	if err := repo.Create(ctx, profile); err != nil {
@@ -1306,7 +1306,7 @@ func TestNotificationRepository_CRUD(t *testing.T) {
 		ID: "mc-notif-test", Name: "notif-test", CommonName: "notif.example.com",
 		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
 		IssuerID: issuerID, RenewalPolicyID: policyID,
-		Status: domain.CertificateStatusActive,
+		Status:    domain.CertificateStatusActive,
 		ExpiresAt: now.Add(30 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -1432,7 +1432,7 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 		ID: "mc-linked-cert", Name: "linked-cert", CommonName: "linked.example.com",
 		SANs: []string{}, OwnerID: ownerID, TeamID: teamID,
 		IssuerID: issuerID, RenewalPolicyID: policyID,
-		Status: domain.CertificateStatusActive,
+		Status:    domain.CertificateStatusActive,
 		ExpiresAt: now.Add(90 * 24 * time.Hour), Tags: map[string]string{},
 		CreatedAt: now, UpdatedAt: now,
 	}
@@ -1447,7 +1447,7 @@ func TestDiscoveryRepository_DiscoveredCertCRUD(t *testing.T) {
 		NotBefore: &notBefore, NotAfter: &notAfter, KeyAlgorithm: "RSA", KeySize: 2048,
 		IsCA: false, PEMData: "---PEM---", SourcePath: "/etc/ssl/certs/disc.pem",
 		SourceFormat: "PEM", AgentID: "agent-dcert-test",
-		Status: domain.DiscoveryStatusUnmanaged,
+		Status:      domain.DiscoveryStatusUnmanaged,
 		FirstSeenAt: now, LastSeenAt: now, CreatedAt: now, UpdatedAt: now,
 	}
 
@@ -1577,8 +1577,8 @@ func TestNetworkScanRepository_CRUD(t *testing.T) {
 
 	target := &domain.NetworkScanTarget{
 		ID: "ns-test-1", Name: "Internal Network",
-		CIDRs: []string{"10.0.0.0/24", "192.168.1.0/24"},
-		Ports: []int64{443, 8443},
+		CIDRs:   []string{"10.0.0.0/24", "192.168.1.0/24"},
+		Ports:   []int64{443, 8443},
 		Enabled: true, ScanIntervalHours: 6, TimeoutMs: 5000,
 		CreatedAt: now, UpdatedAt: now,
 	}

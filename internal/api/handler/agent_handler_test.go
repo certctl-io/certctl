@@ -28,8 +28,8 @@ type MockAgentService struct {
 	// I-004: soft-retirement hooks. Tests that don't set these receive nil
 	// results and nil errors, which mirrors the safest default (no-op) for
 	// unrelated suites that mock only the legacy surface.
-	RetireAgentFn        func(agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error)
-	ListRetiredAgentsFn  func(page, perPage int) ([]domain.Agent, int64, error)
+	RetireAgentFn       func(agentID, actor string, force bool, reason string) (*service.AgentRetirementResult, error)
+	ListRetiredAgentsFn func(page, perPage int) ([]domain.Agent, int64, error)
 }
 
 func (m *MockAgentService) ListAgents(_ context.Context, page, perPage int) ([]domain.Agent, int64, error) {

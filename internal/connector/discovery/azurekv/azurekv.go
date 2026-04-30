@@ -69,10 +69,10 @@ type certificateListResponse struct {
 	Value []struct {
 		ID         string `json:"id"`
 		Attributes struct {
-			Enabled int64  `json:"enabled"`
-			Created int64  `json:"created"`
-			Updated int64  `json:"updated"`
-			Exp     int64  `json:"exp"`
+			Enabled int64 `json:"enabled"`
+			Created int64 `json:"created"`
+			Updated int64 `json:"updated"`
+			Exp     int64 `json:"exp"`
 		} `json:"attributes,omitempty"`
 		Tags map[string]string `json:"tags,omitempty"`
 	} `json:"value"`
@@ -84,10 +84,10 @@ type certificateBundle struct {
 	ID         string `json:"id"`
 	CER        string `json:"cer"`
 	Attributes struct {
-		Enabled int64  `json:"enabled"`
-		Created int64  `json:"created"`
-		Updated int64  `json:"updated"`
-		Exp     int64  `json:"exp"`
+		Enabled int64 `json:"enabled"`
+		Created int64 `json:"created"`
+		Updated int64 `json:"updated"`
+		Exp     int64 `json:"exp"`
 	} `json:"attributes,omitempty"`
 }
 
@@ -170,10 +170,10 @@ func (s *Source) Discover(ctx context.Context) (*domain.DiscoveryReport, error) 
 	s.logger.Info("starting Azure Key Vault discovery", "vault_url", s.config.VaultURL)
 
 	report := &domain.DiscoveryReport{
-		AgentID:     "cloud-azure-kv",
-		Directories: []string{fmt.Sprintf("azure-kv://%s/", s.config.VaultURL)},
+		AgentID:      "cloud-azure-kv",
+		Directories:  []string{fmt.Sprintf("azure-kv://%s/", s.config.VaultURL)},
 		Certificates: []domain.DiscoveredCertEntry{},
-		Errors:      []string{},
+		Errors:       []string{},
 	}
 
 	startTime := time.Now()

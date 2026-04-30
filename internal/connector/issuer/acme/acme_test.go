@@ -798,9 +798,9 @@ func TestValidateConfig_DNSPersistIssuerDomainRequired(t *testing.T) {
 
 	c := New(nil, testLogger())
 	cfg, _ := json.Marshal(map[string]string{
-		"directory_url":     srv.URL,
-		"email":             "test@example.com",
-		"challenge_type":    "dns-persist-01",
+		"directory_url":      srv.URL,
+		"email":              "test@example.com",
+		"challenge_type":     "dns-persist-01",
 		"dns_present_script": "/tmp/script.sh",
 		// Missing dns_persist_issuer_domain
 	})
@@ -870,9 +870,9 @@ func TestValidateConfig_DNS01WithPresentScript(t *testing.T) {
 
 	c := New(nil, testLogger())
 	cfg, _ := json.Marshal(map[string]string{
-		"directory_url":     srv.URL,
-		"email":             "test@example.com",
-		"challenge_type":    "dns-01",
+		"directory_url":      srv.URL,
+		"email":              "test@example.com",
+		"challenge_type":     "dns-01",
 		"dns_present_script": "/bin/sh",
 		"dns_cleanup_script": "/bin/sh",
 	})
@@ -897,10 +897,10 @@ func TestValidateConfig_DNSPersist01WithAllFields(t *testing.T) {
 
 	c := New(nil, testLogger())
 	cfg, _ := json.Marshal(map[string]string{
-		"directory_url":           srv.URL,
-		"email":                   "test@example.com",
-		"challenge_type":          "dns-persist-01",
-		"dns_present_script":      "/bin/sh",
+		"directory_url":             srv.URL,
+		"email":                     "test@example.com",
+		"challenge_type":            "dns-persist-01",
+		"dns_present_script":        "/bin/sh",
 		"dns_persist_issuer_domain": "letsencrypt.org",
 	})
 

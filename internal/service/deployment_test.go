@@ -266,17 +266,17 @@ func TestDeploymentService_ProcessDeploymentJob_Success(t *testing.T) {
 	// Add agent with recent heartbeat
 	now := time.Now()
 	agent := &domain.Agent{
-		ID:               "agent-1",
-		Name:             "Test Agent",
-		Hostname:         "agent.example.com",
-		Status:           domain.AgentStatusOnline,
-		LastHeartbeatAt:  &now,
-		RegisteredAt:     time.Now(),
-		APIKeyHash:       "hash-1",
-		OS:               "linux",
-		Architecture:     "amd64",
-		IPAddress:        "192.168.1.1",
-		Version:          "1.0.0",
+		ID:              "agent-1",
+		Name:            "Test Agent",
+		Hostname:        "agent.example.com",
+		Status:          domain.AgentStatusOnline,
+		LastHeartbeatAt: &now,
+		RegisteredAt:    time.Now(),
+		APIKeyHash:      "hash-1",
+		OS:              "linux",
+		Architecture:    "amd64",
+		IPAddress:       "192.168.1.1",
+		Version:         "1.0.0",
 	}
 	agentRepo.AddAgent(agent)
 

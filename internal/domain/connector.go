@@ -11,7 +11,7 @@ type Issuer struct {
 	Name            string          `json:"name"`
 	Type            IssuerType      `json:"type"`
 	Config          json.RawMessage `json:"config"`
-	EncryptedConfig []byte          `json:"-"`                         // AES-GCM encrypted full config (never exposed via API)
+	EncryptedConfig []byte          `json:"-"` // AES-GCM encrypted full config (never exposed via API)
 	Enabled         bool            `json:"enabled"`
 	LastTestedAt    *time.Time      `json:"last_tested_at,omitempty"`
 	TestStatus      string          `json:"test_status,omitempty"`
@@ -27,13 +27,13 @@ type DeploymentTarget struct {
 	Type            TargetType      `json:"type"`
 	AgentID         string          `json:"agent_id"`
 	Config          json.RawMessage `json:"config"`
-	EncryptedConfig []byte          `json:"-"`                         // AES-GCM encrypted full config (never exposed via API)
+	EncryptedConfig []byte          `json:"-"` // AES-GCM encrypted full config (never exposed via API)
 	Enabled         bool            `json:"enabled"`
 	LastTestedAt    *time.Time      `json:"last_tested_at,omitempty"`
 	TestStatus      string          `json:"test_status,omitempty"`
 	Source          string          `json:"source,omitempty"`
-	RetiredAt       *time.Time      `json:"retired_at,omitempty"`      // I-004: soft-retirement timestamp (nil = active)
-	RetiredReason   *string         `json:"retired_reason,omitempty"`  // I-004: reason captured at cascade retirement
+	RetiredAt       *time.Time      `json:"retired_at,omitempty"`     // I-004: soft-retirement timestamp (nil = active)
+	RetiredReason   *string         `json:"retired_reason,omitempty"` // I-004: reason captured at cascade retirement
 	CreatedAt       time.Time       `json:"created_at"`
 	UpdatedAt       time.Time       `json:"updated_at"`
 }
@@ -65,11 +65,11 @@ type Agent struct {
 	// docs/architecture.md ER diagram (which documents DB shape, not API
 	// shape) and coverage-gap-audit-2026-04-24-v5/unified-audit.md
 	// cat-s5-apikey_leak for the full closure rationale.
-	APIKeyHash      string      `json:"-"`
-	OS              string      `json:"os"`
-	Architecture    string      `json:"architecture"`
-	IPAddress       string      `json:"ip_address"`
-	Version         string      `json:"version"`
+	APIKeyHash   string `json:"-"`
+	OS           string `json:"os"`
+	Architecture string `json:"architecture"`
+	IPAddress    string `json:"ip_address"`
+	Version      string `json:"version"`
 	// I-004: soft-retirement fields. An agent with RetiredAt != nil is the
 	// canonical "retired" state. The Status column remains as before (Online
 	// / Offline / Degraded) and is preserved at retirement time as the
@@ -115,9 +115,9 @@ func (a *Agent) IsRetired() bool { return a != nil && a.RetiredAt != nil }
 // any non-zero count blocks a default retire with HTTP 409 and requires an
 // explicit ?force=true&reason=... escape hatch from the operator.
 type AgentDependencyCounts struct {
-	ActiveTargets     int `json:"active_targets"`     // deployment_targets.agent_id=id AND retired_at IS NULL
+	ActiveTargets      int `json:"active_targets"`      // deployment_targets.agent_id=id AND retired_at IS NULL
 	ActiveCertificates int `json:"active_certificates"` // certificates currently deployed via one of this agent's active targets
-	PendingJobs       int `json:"pending_jobs"`       // jobs.agent_id=id AND status IN (Pending, AwaitingCSR, AwaitingApproval, Running)
+	PendingJobs        int `json:"pending_jobs"`        // jobs.agent_id=id AND status IN (Pending, AwaitingCSR, AwaitingApproval, Running)
 }
 
 // HasDependencies reports whether any preflight counter is non-zero.
@@ -180,14 +180,14 @@ const (
 type IssuerType string
 
 const (
-	IssuerTypeACME      IssuerType = "ACME"
-	IssuerTypeGenericCA IssuerType = "GenericCA"
-	IssuerTypeStepCA    IssuerType = "StepCA"
-	IssuerTypeOpenSSL   IssuerType = "OpenSSL"
-	IssuerTypeVault     IssuerType = "VaultPKI"
-	IssuerTypeDigiCert  IssuerType = "DigiCert"
-	IssuerTypeSectigo   IssuerType = "Sectigo"
-	IssuerTypeGoogleCAS IssuerType = "GoogleCAS"
+	IssuerTypeACME       IssuerType = "ACME"
+	IssuerTypeGenericCA  IssuerType = "GenericCA"
+	IssuerTypeStepCA     IssuerType = "StepCA"
+	IssuerTypeOpenSSL    IssuerType = "OpenSSL"
+	IssuerTypeVault      IssuerType = "VaultPKI"
+	IssuerTypeDigiCert   IssuerType = "DigiCert"
+	IssuerTypeSectigo    IssuerType = "Sectigo"
+	IssuerTypeGoogleCAS  IssuerType = "GoogleCAS"
 	IssuerTypeAWSACMPCA  IssuerType = "AWSACMPCA"
 	IssuerTypeEntrust    IssuerType = "Entrust"
 	IssuerTypeGlobalSign IssuerType = "GlobalSign"
@@ -198,16 +198,16 @@ const (
 type TargetType string
 
 const (
-	TargetTypeNGINX    TargetType = "NGINX"
-	TargetTypeApache   TargetType = "Apache"
-	TargetTypeHAProxy  TargetType = "HAProxy"
-	TargetTypeF5       TargetType = "F5"
-	TargetTypeIIS      TargetType = "IIS"
-	TargetTypeTraefik  TargetType = "Traefik"
-	TargetTypeCaddy    TargetType = "Caddy"
-	TargetTypeEnvoy    TargetType = "Envoy"
-	TargetTypePostfix  TargetType = "Postfix"
-	TargetTypeDovecot  TargetType = "Dovecot"
+	TargetTypeNGINX             TargetType = "NGINX"
+	TargetTypeApache            TargetType = "Apache"
+	TargetTypeHAProxy           TargetType = "HAProxy"
+	TargetTypeF5                TargetType = "F5"
+	TargetTypeIIS               TargetType = "IIS"
+	TargetTypeTraefik           TargetType = "Traefik"
+	TargetTypeCaddy             TargetType = "Caddy"
+	TargetTypeEnvoy             TargetType = "Envoy"
+	TargetTypePostfix           TargetType = "Postfix"
+	TargetTypeDovecot           TargetType = "Dovecot"
 	TargetTypeSSH               TargetType = "SSH"
 	TargetTypeWinCertStore      TargetType = "WinCertStore"
 	TargetTypeJavaKeystore      TargetType = "JavaKeystore"

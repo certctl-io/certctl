@@ -162,7 +162,7 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	csrBase64 := base64.StdEncoding.EncodeToString(csrBlock.Bytes)
 
 	enrollReq := map[string]interface{}{
-		"certificate_request":      csrBase64,
+		"certificate_request":        csrBase64,
 		"certificate_authority_name": c.config.CAName,
 	}
 

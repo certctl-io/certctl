@@ -175,7 +175,7 @@ func TestEJBCAConnector(t *testing.T) {
 				w.Header().Set("Content-Type", "application/json")
 
 				respData := map[string]interface{}{
-					"certificate":      base64.StdEncoding.EncodeToString(certBlock.Bytes),
+					"certificate":       base64.StdEncoding.EncodeToString(certBlock.Bytes),
 					"certificate_chain": []string{base64.StdEncoding.EncodeToString(chainBlock.Bytes)},
 					"serial_number":     "123456",
 				}
@@ -242,7 +242,7 @@ func TestEJBCAConnector(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				w.Header().Set("Content-Type", "application/json")
 				respData := map[string]interface{}{
-					"certificate":      base64.StdEncoding.EncodeToString(certBlock.Bytes),
+					"certificate":       base64.StdEncoding.EncodeToString(certBlock.Bytes),
 					"certificate_chain": []string{},
 					"serial_number":     "789012",
 				}
@@ -314,7 +314,7 @@ func TestEJBCAConnector(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				w.Header().Set("Content-Type", "application/json")
 				respData := map[string]interface{}{
-					"certificate":      base64.StdEncoding.EncodeToString(certBlock.Bytes),
+					"certificate":       base64.StdEncoding.EncodeToString(certBlock.Bytes),
 					"certificate_chain": []string{},
 					"serial_number":     "123456",
 				}
@@ -356,7 +356,7 @@ func TestEJBCAConnector(t *testing.T) {
 				w.WriteHeader(http.StatusOK)
 				w.Header().Set("Content-Type", "application/json")
 				respData := map[string]interface{}{
-					"certificate":      base64.StdEncoding.EncodeToString(certBlock.Bytes),
+					"certificate":       base64.StdEncoding.EncodeToString(certBlock.Bytes),
 					"certificate_chain": []string{},
 					"serial_number":     "654321",
 				}

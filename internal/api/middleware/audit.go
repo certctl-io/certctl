@@ -221,11 +221,11 @@ func NewAuditServiceAdapter(recordFn func(ctx context.Context, actor string, act
 // RecordAPICall implements AuditRecorder by translating API call data into an audit event.
 func (a *AuditServiceAdapter) RecordAPICall(ctx context.Context, method, path, actor string, bodyHash string, status int, latencyMs int64) error {
 	details := map[string]interface{}{
-		"method":      method,
-		"path":        path,
-		"body_hash":   bodyHash,
-		"status":      status,
-		"latency_ms":  latencyMs,
+		"method":     method,
+		"path":       path,
+		"body_hash":  bodyHash,
+		"status":     status,
+		"latency_ms": latencyMs,
 	}
 
 	action := fmt.Sprintf("api_%s", strings.ToLower(method))

@@ -15,10 +15,10 @@ import (
 
 // mockAuditRecorder captures RecordAPICall invocations for testing.
 type mockAuditRecorder struct {
-	mu      sync.Mutex
-	calls   []auditCall
-	err     error         // if non-nil, RecordAPICall returns this
-	block   chan struct{} // if non-nil, RecordAPICall blocks on receive before returning
+	mu    sync.Mutex
+	calls []auditCall
+	err   error         // if non-nil, RecordAPICall returns this
+	block chan struct{} // if non-nil, RecordAPICall blocks on receive before returning
 }
 
 type auditCall struct {

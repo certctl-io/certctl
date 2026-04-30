@@ -114,9 +114,9 @@ func TestExtractTargetHostAndPort_InvalidJSON(t *testing.T) {
 
 func TestExtractTargetHostAndPort_AlternativeFieldNames(t *testing.T) {
 	tests := []struct {
-		name      string
-		config    map[string]interface{}
-		expected  string
+		name     string
+		config   map[string]interface{}
+		expected string
 	}{
 		{"host", map[string]interface{}{"host": "host1.com"}, "host1.com"},
 		{"hostname", map[string]interface{}{"hostname": "host2.com"}, "host2.com"},

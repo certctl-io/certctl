@@ -107,9 +107,9 @@ func NewWithHTTPClient(config *Config, logger *slog.Logger, client *http.Client)
 
 // certificateRequest is the JSON body for GlobalSign certificate order submission.
 type certificateRequest struct {
-	CSR      string            `json:"csr"`
+	CSR       string           `json:"csr"`
 	SubjectDN subjectDNRequest `json:"subject_dn"`
-	SAN      sanRequest        `json:"san,omitempty"`
+	SAN       sanRequest       `json:"san,omitempty"`
 }
 
 type subjectDNRequest struct {

@@ -30,8 +30,8 @@ func TestRedactDetailsForAudit_CredentialKeys(t *testing.T) {
 	for _, key := range cases {
 		t.Run(key, func(t *testing.T) {
 			in := map[string]interface{}{
-				key:                 "sensitive-value-do-not-leak",
-				"non_sensitive_id":  "ok-public-id",
+				key:                "sensitive-value-do-not-leak",
+				"non_sensitive_id": "ok-public-id",
 			}
 			out := RedactDetailsForAudit(in)
 			if out[key] != "[REDACTED:CREDENTIAL]" {
@@ -70,7 +70,7 @@ func TestRedactDetailsForAudit_NestedMap(t *testing.T) {
 	in := map[string]interface{}{
 		"resource_id": "iss-prod",
 		"config": map[string]interface{}{
-			"endpoint": "https://acme.example.com",
+			"endpoint":   "https://acme.example.com",
 			"eab_secret": "do-not-leak-this-secret",
 			"contact": map[string]interface{}{
 				"email": "ops@example.com",
@@ -159,8 +159,8 @@ func TestRedactDetailsForAudit_NoRedactionPath(t *testing.T) {
 	// Maps with no sensitive keys should NOT have a redacted_keys array
 	// — clutter-free for the common case.
 	in := map[string]interface{}{
-		"action":   "create_certificate",
-		"cert_id":  "mc-prod-001",
+		"action":     "create_certificate",
+		"cert_id":    "mc-prod-001",
 		"latency_ms": float64(42),
 	}
 	out := RedactDetailsForAudit(in)
@@ -171,7 +171,7 @@ func TestRedactDetailsForAudit_NoRedactionPath(t *testing.T) {
 
 func TestRedactDetailsForAudit_DoesNotMutateInput(t *testing.T) {
 	in := map[string]interface{}{
-		"api_key": "secret-do-not-leak",
+		"api_key":  "secret-do-not-leak",
 		"resource": "iss-prod",
 	}
 	_ = RedactDetailsForAudit(in)
@@ -197,8 +197,8 @@ func TestRedactDetailsForAudit_JSONRoundTrip(t *testing.T) {
 	// The redacted map MUST round-trip through json.Marshal (the
 	// AuditService persistence path). Catches type-assertion regressions.
 	in := map[string]interface{}{
-		"reason":    "compromised-key",
-		"api_key":   "leak-me",
+		"reason":  "compromised-key",
+		"api_key": "leak-me",
 		"contacts": []interface{}{
 			map[string]interface{}{"email": "ops@example.com"},
 		},

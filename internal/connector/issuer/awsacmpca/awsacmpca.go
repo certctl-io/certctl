@@ -105,9 +105,9 @@ type GetCertificateOutput struct {
 
 // RevokeCertificateInput represents the request to revoke a certificate.
 type RevokeCertificateInput struct {
-	CAArn               string
-	CertificateSerial   string
-	RevocationReason    string
+	CAArn             string
+	CertificateSerial string
+	RevocationReason  string
 }
 
 // GetCACertificateInput represents the request to retrieve the CA certificate.
@@ -395,14 +395,14 @@ func mapRevocationReason(reason *string) string {
 	}
 
 	reasonMap := map[string]string{
-		"unspecified":           "UNSPECIFIED",
-		"keyCompromise":         "KEY_COMPROMISE",
-		"caCompromise":          "CERTIFICATE_AUTHORITY_COMPROMISE",
-		"affiliationChanged":    "AFFILIATION_CHANGED",
-		"superseded":            "SUPERSEDED",
-		"cessationOfOperation":  "CESSATION_OF_OPERATION",
-		"certificateHold":       "CERTIFICATE_HOLD",
-		"privilegeWithdrawn":    "PRIVILEGE_WITHDRAWN",
+		"unspecified":          "UNSPECIFIED",
+		"keyCompromise":        "KEY_COMPROMISE",
+		"caCompromise":         "CERTIFICATE_AUTHORITY_COMPROMISE",
+		"affiliationChanged":   "AFFILIATION_CHANGED",
+		"superseded":           "SUPERSEDED",
+		"cessationOfOperation": "CESSATION_OF_OPERATION",
+		"certificateHold":      "CERTIFICATE_HOLD",
+		"privilegeWithdrawn":   "PRIVILEGE_WITHDRAWN",
 	}
 
 	if mapped, ok := reasonMap[*reason]; ok {

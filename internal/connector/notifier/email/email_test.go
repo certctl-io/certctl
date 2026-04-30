@@ -88,11 +88,11 @@ func TestEmail_ValidateConfig_MissingPort(t *testing.T) {
 
 func TestEmail_ValidateConfig_MissingFromAddress(t *testing.T) {
 	cfg := &Config{
-		SMTPHost:   "smtp.example.com",
-		SMTPPort:   587,
-		Username:   "user",
-		Password:   "pass",
-		UseTLS:     true,
+		SMTPHost: "smtp.example.com",
+		SMTPPort: 587,
+		Username: "user",
+		Password: "pass",
+		UseTLS:   true,
 	}
 
 	rawConfig, _ := json.Marshal(cfg)

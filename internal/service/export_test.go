@@ -71,10 +71,10 @@ func TestExportPEM_Success(t *testing.T) {
 			Status:     domain.CertificateStatusActive,
 		},
 		&domain.CertificateVersion{
-			ID:           "cv-1",
+			ID:            "cv-1",
 			CertificateID: "mc-test-1",
-			SerialNumber: "abc123",
-			PEMChain:     fullPEM,
+			SerialNumber:  "abc123",
+			PEMChain:      fullPEM,
 		},
 	)
 	auditSvc := &AuditService{auditRepo: &mockAuditRepo{}}

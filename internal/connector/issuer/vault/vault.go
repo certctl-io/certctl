@@ -86,9 +86,9 @@ func New(config *Config, logger *slog.Logger) *Connector {
 
 // vaultResponse is the standard Vault API response wrapper.
 type vaultResponse struct {
-	Data    json.RawMessage `json:"data"`
-	Errors  []string        `json:"errors,omitempty"`
-	Warnings []string       `json:"warnings,omitempty"`
+	Data     json.RawMessage `json:"data"`
+	Errors   []string        `json:"errors,omitempty"`
+	Warnings []string        `json:"warnings,omitempty"`
 }
 
 // signData holds the data returned from the /sign endpoint.

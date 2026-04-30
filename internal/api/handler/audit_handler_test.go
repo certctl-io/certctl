@@ -9,14 +9,14 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/shankar0123/certctl/internal/domain"
 )
 
 // mockAuditService implements AuditService for testing.
 type mockAuditService struct {
-	listFunc  func(page, perPage int) ([]domain.AuditEvent, int64, error)
-	getFunc   func(id string) (*domain.AuditEvent, error)
+	listFunc func(page, perPage int) ([]domain.AuditEvent, int64, error)
+	getFunc  func(id string) (*domain.AuditEvent, error)
 }
 
 func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {

@@ -104,15 +104,15 @@ func TestNotificationEvent_RetryFields(t *testing.T) {
 	next := time.Now().Add(2 * time.Minute)
 	lastErr := "connection refused"
 	event := &NotificationEvent{
-		ID:           "notif-retry-001",
-		Type:         NotificationTypeExpirationWarning,
-		Channel:      NotificationChannelWebhook,
-		Recipient:    "https://hooks.example.com/certs",
-		Message:      "retry me",
-		Status:       string(NotificationStatusFailed),
-		RetryCount:   3,
-		NextRetryAt:  &next,
-		LastError:    &lastErr,
+		ID:          "notif-retry-001",
+		Type:        NotificationTypeExpirationWarning,
+		Channel:     NotificationChannelWebhook,
+		Recipient:   "https://hooks.example.com/certs",
+		Message:     "retry me",
+		Status:      string(NotificationStatusFailed),
+		RetryCount:  3,
+		NextRetryAt: &next,
+		LastError:   &lastErr,
 	}
 
 	if event.RetryCount != 3 {

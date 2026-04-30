@@ -12,10 +12,10 @@ import "time"
 type OCSPResponseCacheEntry struct {
 	IssuerID         string    `json:"issuer_id"`
 	SerialHex        string    `json:"serial_hex"`
-	ResponseDER      []byte    `json:"-"` // raw DER, omitted from admin JSON to keep responses lean
-	CertStatus       string    `json:"cert_status"`                  // "good" | "revoked" | "unknown"
-	RevocationReason int       `json:"revocation_reason,omitempty"`  // only set when CertStatus == "revoked"
-	RevokedAt        time.Time `json:"revoked_at,omitempty"`         // only set when CertStatus == "revoked"
+	ResponseDER      []byte    `json:"-"`                           // raw DER, omitted from admin JSON to keep responses lean
+	CertStatus       string    `json:"cert_status"`                 // "good" | "revoked" | "unknown"
+	RevocationReason int       `json:"revocation_reason,omitempty"` // only set when CertStatus == "revoked"
+	RevokedAt        time.Time `json:"revoked_at,omitempty"`        // only set when CertStatus == "revoked"
 	ThisUpdate       time.Time `json:"this_update"`
 	NextUpdate       time.Time `json:"next_update"`
 	GeneratedAt      time.Time `json:"generated_at"`

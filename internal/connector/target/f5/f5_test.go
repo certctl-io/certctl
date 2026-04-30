@@ -25,14 +25,14 @@ type mockF5Client struct {
 	calls []mockCall
 
 	// Configurable responses per method
-	authenticateErr     error
-	authenticateCount   int // tracks number of Authenticate calls
-	uploadFileErr       error
-	uploadFileErrOn     string // only error when filename contains this substring
-	installCertErr      error
-	installCertErrOn    string
-	installKeyErr       error
-	createTransactionID string
+	authenticateErr      error
+	authenticateCount    int // tracks number of Authenticate calls
+	uploadFileErr        error
+	uploadFileErrOn      string // only error when filename contains this substring
+	installCertErr       error
+	installCertErrOn     string
+	installKeyErr        error
+	createTransactionID  string
 	createTransactionErr error
 	commitTransactionErr error
 	updateSSLProfileErr  error

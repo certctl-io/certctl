@@ -1,10 +1,10 @@
 package postgres
 
 import (
-	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"database/sql"
 	"fmt"
+	"github.com/shankar0123/certctl/internal/repository"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/domain"

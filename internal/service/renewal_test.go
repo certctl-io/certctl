@@ -977,7 +977,7 @@ func TestCheckExpiringCertificates_ARI_ShouldRenewNow(t *testing.T) {
 		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
 		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
 		AlertThresholdsDays: []int{30, 14, 7, 0},
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		CreatedAt:           time.Now(), UpdatedAt: time.Now(),
 	}
 	policyRepo.AddPolicy(policy)
 
@@ -1050,7 +1050,7 @@ func TestCheckExpiringCertificates_ARI_NotYet(t *testing.T) {
 		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
 		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
 		AlertThresholdsDays: []int{30, 14, 7, 0},
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		CreatedAt:           time.Now(), UpdatedAt: time.Now(),
 	}
 	policyRepo.AddPolicy(policy)
 
@@ -1110,7 +1110,7 @@ func TestCheckExpiringCertificates_ARI_NilResult_FallsThrough(t *testing.T) {
 		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
 		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
 		AlertThresholdsDays: []int{30, 14, 7, 0},
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		CreatedAt:           time.Now(), UpdatedAt: time.Now(),
 	}
 	policyRepo.AddPolicy(policy)
 
@@ -1178,7 +1178,7 @@ func TestCheckExpiringCertificates_ARI_Error_FallsThrough(t *testing.T) {
 		ID: "rp-standard", Name: "Standard", RenewalWindowDays: 30,
 		AutoRenew: true, MaxRetries: 3, RetryInterval: 300,
 		AlertThresholdsDays: []int{30, 14, 7, 0},
-		CreatedAt: time.Now(), UpdatedAt: time.Now(),
+		CreatedAt:           time.Now(), UpdatedAt: time.Now(),
 	}
 	policyRepo.AddPolicy(policy)
 
@@ -1313,7 +1313,6 @@ func TestFailJob_SetsFailedStatus(t *testing.T) {
 	}
 }
 
-
 // --- CreateDeploymentJobs Tests ---
 
 func TestCreateDeploymentJobs_PartialFailure(t *testing.T) {
@@ -1331,10 +1330,10 @@ func TestCreateDeploymentJobs_PartialFailure(t *testing.T) {
 
 	// Create certificate
 	cert := &domain.ManagedCertificate{
-		ID:        "mc-partial",
+		ID:         "mc-partial",
 		CommonName: "test.example.com",
-		CreatedAt: time.Now(),
-		UpdatedAt: time.Now(),
+		CreatedAt:  time.Now(),
+		UpdatedAt:  time.Now(),
 	}
 	certRepo.AddCert(cert)
 
@@ -1382,6 +1381,5 @@ func TestCreateDeploymentJobs_PartialFailure(t *testing.T) {
 		t.Error("expected job to be routed to agent-1")
 	}
 }
-
 
 // stringPtr is defined in notification_test.go

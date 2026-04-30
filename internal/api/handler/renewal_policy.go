@@ -1,10 +1,10 @@
 package handler
 
 import (
-	"github.com/shankar0123/certctl/internal/repository"
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/shankar0123/certctl/internal/repository"
 	"net/http"
 	"strconv"
 	"strings"

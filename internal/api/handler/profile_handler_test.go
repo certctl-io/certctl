@@ -237,9 +237,9 @@ func TestCreateProfile_Success(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":          "New Profile",
+		"name":            "New Profile",
 		"max_ttl_seconds": 86400,
-		"allowed_ekus":  []string{"serverAuth"},
+		"allowed_ekus":    []string{"serverAuth"},
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -331,7 +331,7 @@ func TestUpdateProfile_Success(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":          "Updated Profile",
+		"name":            "Updated Profile",
 		"max_ttl_seconds": 172800,
 	}
 	bodyBytes, _ := json.Marshal(body)

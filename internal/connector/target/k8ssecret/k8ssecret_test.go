@@ -93,7 +93,7 @@ func (m *mockK8sClient) DeleteSecret(ctx context.Context, namespace, name string
 
 func TestValidateConfig_Success_MinimalConfig(t *testing.T) {
 	cfg := map[string]interface{}{
-		"namespace":  "default",
+		"namespace":   "default",
 		"secret_name": "my-cert",
 	}
 
@@ -644,4 +644,3 @@ func contains(s, substr string) bool {
 	}
 	return false
 }
-

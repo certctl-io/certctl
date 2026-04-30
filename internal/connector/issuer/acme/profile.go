@@ -249,4 +249,3 @@ func signJWS(key *ecdsa.PrivateKey, kid, nonce, targetURL string, payload []byte
 
 	return json.Marshal(jws)
 }
-

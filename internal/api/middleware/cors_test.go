@@ -40,9 +40,9 @@ func TestNewCORS_NilOriginsDeniesAll(t *testing.T) {
 // TestNewCORS_M013_ContractDocumentedInOrder pins the documented dispatch
 // order so a refactor cannot silently invert the cases:
 //
-//	1. len(AllowedOrigins) == 0  → deny (no CORS headers)
-//	2. AllowedOrigins == ["*"]   → allow all (Access-Control-Allow-Origin: *)
-//	3. else                      → exact-match allowlist with Vary: Origin
+//  1. len(AllowedOrigins) == 0  → deny (no CORS headers)
+//  2. AllowedOrigins == ["*"]   → allow all (Access-Control-Allow-Origin: *)
+//  3. else                      → exact-match allowlist with Vary: Origin
 //
 // If a refactor accidentally falls through to the allow-all branch when
 // AllowedOrigins is empty, this test fails on case 1.
@@ -293,9 +293,9 @@ func TestNewCORS_MultipleOrigins(t *testing.T) {
 	}))
 
 	tests := []struct {
-		origin       string
-		shouldAllow  bool
-		description  string
+		origin      string
+		shouldAllow bool
+		description string
 	}{
 		{"https://app.example.com", true, "first origin in list"},
 		{"https://admin.example.com", true, "second origin in list"},

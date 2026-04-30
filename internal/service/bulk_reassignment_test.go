@@ -67,8 +67,8 @@ func TestBulkReassign_HappyPath(t *testing.T) {
 func TestBulkReassign_SkipsAlreadyOwned(t *testing.T) {
 	svc, certRepo, ownerRepo, _ := newBulkReassignmentTestService()
 	addOwner(ownerRepo, "o-bob")
-	addOwnedCert(certRepo, "mc-1", "o-bob", "")    // already owned by target
-	addOwnedCert(certRepo, "mc-2", "o-alice", "")  // needs reassign
+	addOwnedCert(certRepo, "mc-1", "o-bob", "")   // already owned by target
+	addOwnedCert(certRepo, "mc-2", "o-alice", "") // needs reassign
 
 	res, err := svc.BulkReassign(context.Background(),
 		domain.BulkReassignmentRequest{

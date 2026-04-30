@@ -52,11 +52,11 @@ func TestWrapPingError_AuthFailureGuidance(t *testing.T) {
 
 	// Contract elements — the operator-facing string is what we ship.
 	wantSubstrings := []string{
-		"SQLSTATE 28P01",                       // operators grep on this
-		"POSTGRES_PASSWORD",                    // names the variable that traps
-		"first boot",                           // the mechanism in plain language
-		"down -v",                              // destructive remediation
-		"ALTER ROLE",                           // non-destructive remediation
+		"SQLSTATE 28P01",    // operators grep on this
+		"POSTGRES_PASSWORD", // names the variable that traps
+		"first boot",        // the mechanism in plain language
+		"down -v",           // destructive remediation
+		"ALTER ROLE",        // non-destructive remediation
 	}
 	for _, s := range wantSubstrings {
 		if !strings.Contains(got, s) {

@@ -59,9 +59,9 @@ func newWinRMExecutor(cfg *WinRMConfig) (*winrmExecutor, error) {
 		port,
 		cfg.UseHTTPS,
 		cfg.Insecure,
-		nil,  // CA cert
-		nil,  // Client cert
-		nil,  // Client key
+		nil, // CA cert
+		nil, // Client cert
+		nil, // Client key
 		timeout,
 	)
 

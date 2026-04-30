@@ -48,31 +48,31 @@ func TestExpireShortLivedCertificates_Success(t *testing.T) {
 
 	// Create a short-lived profile (TTL < 1 hour = 3600 seconds)
 	shortLivedProfile := &domain.CertificateProfile{
-		ID:                  "prof-short",
-		Name:                "Short-Lived",
-		MaxTTLSeconds:       300, // 5 minutes
-		AllowShortLived:     true,
-		Enabled:             true,
+		ID:                   "prof-short",
+		Name:                 "Short-Lived",
+		MaxTTLSeconds:        300, // 5 minutes
+		AllowShortLived:      true,
+		Enabled:              true,
 		AllowedKeyAlgorithms: domain.DefaultKeyAlgorithms(),
-		AllowedEKUs:         domain.DefaultEKUs(),
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		AllowedEKUs:          domain.DefaultEKUs(),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	profileRepo.AddProfile(shortLivedProfile)
 
 	// Create an active certificate that has already expired
 	expiredCert := &domain.ManagedCertificate{
-		ID:                    "mc-expired-short",
-		Name:                  "Expired Short-Lived Cert",
-		CommonName:            "short.example.com",
-		SANs:                  []string{},
-		IssuerID:              "iss-test",
-		CertificateProfileID:  "prof-short",
-		Status:                domain.CertificateStatusActive,
-		ExpiresAt:             now.Add(-5 * time.Minute), // Already expired
-		CreatedAt:             now.Add(-15 * time.Minute),
-		UpdatedAt:             now.Add(-5 * time.Minute),
-		Tags:                  make(map[string]string),
+		ID:                   "mc-expired-short",
+		Name:                 "Expired Short-Lived Cert",
+		CommonName:           "short.example.com",
+		SANs:                 []string{},
+		IssuerID:             "iss-test",
+		CertificateProfileID: "prof-short",
+		Status:               domain.CertificateStatusActive,
+		ExpiresAt:            now.Add(-5 * time.Minute), // Already expired
+		CreatedAt:            now.Add(-15 * time.Minute),
+		UpdatedAt:            now.Add(-5 * time.Minute),
+		Tags:                 make(map[string]string),
 	}
 	certRepo.AddCert(expiredCert)
 
@@ -218,31 +218,31 @@ func TestExpireShortLivedCertificates_PartialUpdateError(t *testing.T) {
 
 	// Create a short-lived profile
 	shortLivedProfile := &domain.CertificateProfile{
-		ID:                  "prof-short",
-		Name:                "Short-Lived",
-		MaxTTLSeconds:       300,
-		AllowShortLived:     true,
-		Enabled:             true,
+		ID:                   "prof-short",
+		Name:                 "Short-Lived",
+		MaxTTLSeconds:        300,
+		AllowShortLived:      true,
+		Enabled:              true,
 		AllowedKeyAlgorithms: domain.DefaultKeyAlgorithms(),
-		AllowedEKUs:         domain.DefaultEKUs(),
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		AllowedEKUs:          domain.DefaultEKUs(),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	profileRepo.AddProfile(shortLivedProfile)
 
 	// Create a certificate with a failing update
 	expiredCert := &domain.ManagedCertificate{
-		ID:                    "mc-expired-fail",
-		Name:                  "Expired Cert That Will Fail",
-		CommonName:            "fail.example.com",
-		SANs:                  []string{},
-		IssuerID:              "iss-test",
-		CertificateProfileID:  "prof-short",
-		Status:                domain.CertificateStatusActive,
-		ExpiresAt:             now.Add(-5 * time.Minute),
-		CreatedAt:             now.Add(-15 * time.Minute),
-		UpdatedAt:             now.Add(-5 * time.Minute),
-		Tags:                  make(map[string]string),
+		ID:                   "mc-expired-fail",
+		Name:                 "Expired Cert That Will Fail",
+		CommonName:           "fail.example.com",
+		SANs:                 []string{},
+		IssuerID:             "iss-test",
+		CertificateProfileID: "prof-short",
+		Status:               domain.CertificateStatusActive,
+		ExpiresAt:            now.Add(-5 * time.Minute),
+		CreatedAt:            now.Add(-15 * time.Minute),
+		UpdatedAt:            now.Add(-5 * time.Minute),
+		Tags:                 make(map[string]string),
 	}
 	certRepo.AddCert(expiredCert)
 
@@ -275,31 +275,31 @@ func TestExpireShortLivedCertificates_AlreadyExpired(t *testing.T) {
 
 	// Create a short-lived profile
 	shortLivedProfile := &domain.CertificateProfile{
-		ID:                  "prof-short",
-		Name:                "Short-Lived",
-		MaxTTLSeconds:       300,
-		AllowShortLived:     true,
-		Enabled:             true,
+		ID:                   "prof-short",
+		Name:                 "Short-Lived",
+		MaxTTLSeconds:        300,
+		AllowShortLived:      true,
+		Enabled:              true,
 		AllowedKeyAlgorithms: domain.DefaultKeyAlgorithms(),
-		AllowedEKUs:         domain.DefaultEKUs(),
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		AllowedEKUs:          domain.DefaultEKUs(),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	profileRepo.AddProfile(shortLivedProfile)
 
 	// Create a certificate that's already in Expired status
 	alreadyExpiredCert := &domain.ManagedCertificate{
-		ID:                    "mc-already-expired",
-		Name:                  "Already Expired Cert",
-		CommonName:            "already-expired.example.com",
-		SANs:                  []string{},
-		IssuerID:              "iss-test",
-		CertificateProfileID:  "prof-short",
-		Status:                domain.CertificateStatusExpired, // Already expired
-		ExpiresAt:             now.Add(-30 * time.Minute),
-		CreatedAt:             now.Add(-45 * time.Minute),
-		UpdatedAt:             now.Add(-10 * time.Minute),
-		Tags:                  make(map[string]string),
+		ID:                   "mc-already-expired",
+		Name:                 "Already Expired Cert",
+		CommonName:           "already-expired.example.com",
+		SANs:                 []string{},
+		IssuerID:             "iss-test",
+		CertificateProfileID: "prof-short",
+		Status:               domain.CertificateStatusExpired, // Already expired
+		ExpiresAt:            now.Add(-30 * time.Minute),
+		CreatedAt:            now.Add(-45 * time.Minute),
+		UpdatedAt:            now.Add(-10 * time.Minute),
+		Tags:                 make(map[string]string),
 	}
 	certRepo.AddCert(alreadyExpiredCert)
 
@@ -329,31 +329,31 @@ func TestExpireShortLivedCertificates_ProfileNotShortLived(t *testing.T) {
 
 	// Create a regular (not short-lived) profile with TTL > 1 hour
 	regularProfile := &domain.CertificateProfile{
-		ID:                  "prof-regular",
-		Name:                "Regular",
-		MaxTTLSeconds:       86400, // 24 hours
-		AllowShortLived:     false,
-		Enabled:             true,
+		ID:                   "prof-regular",
+		Name:                 "Regular",
+		MaxTTLSeconds:        86400, // 24 hours
+		AllowShortLived:      false,
+		Enabled:              true,
 		AllowedKeyAlgorithms: domain.DefaultKeyAlgorithms(),
-		AllowedEKUs:         domain.DefaultEKUs(),
-		CreatedAt:           now,
-		UpdatedAt:           now,
+		AllowedEKUs:          domain.DefaultEKUs(),
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	profileRepo.AddProfile(regularProfile)
 
 	// Create an expired certificate with the regular profile
 	expiredCert := &domain.ManagedCertificate{
-		ID:                    "mc-expired-regular",
-		Name:                  "Expired Regular Cert",
-		CommonName:            "regular.example.com",
-		SANs:                  []string{},
-		IssuerID:              "iss-test",
-		CertificateProfileID:  "prof-regular",
-		Status:                domain.CertificateStatusActive,
-		ExpiresAt:             now.Add(-1 * time.Hour),
-		CreatedAt:             now.Add(-25 * time.Hour),
-		UpdatedAt:             now.Add(-1 * time.Hour),
-		Tags:                  make(map[string]string),
+		ID:                   "mc-expired-regular",
+		Name:                 "Expired Regular Cert",
+		CommonName:           "regular.example.com",
+		SANs:                 []string{},
+		IssuerID:             "iss-test",
+		CertificateProfileID: "prof-regular",
+		Status:               domain.CertificateStatusActive,
+		ExpiresAt:            now.Add(-1 * time.Hour),
+		CreatedAt:            now.Add(-25 * time.Hour),
+		UpdatedAt:            now.Add(-1 * time.Hour),
+		Tags:                 make(map[string]string),
 	}
 	certRepo.AddCert(expiredCert)
 

@@ -26,10 +26,10 @@ func testLogger() *slog.Logger {
 
 // mockExecutor records PowerShell scripts and returns configurable responses.
 type mockExecutor struct {
-	scripts    []string
-	responses  []string
-	errors     []error
-	callIndex  int
+	scripts   []string
+	responses []string
+	errors    []error
+	callIndex int
 }
 
 func (m *mockExecutor) Execute(ctx context.Context, script string) (string, error) {

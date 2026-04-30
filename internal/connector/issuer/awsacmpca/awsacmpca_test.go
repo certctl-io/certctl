@@ -22,15 +22,15 @@ import (
 
 // mockACMPCAClient implements the ACMPCAClient interface for testing.
 type mockACMPCAClient struct {
-	issueCertificateErr    error
-	getCertificateErr      error
-	revokeCertificateErr   error
-	getCACertificateErr    error
-	issuedCertPEM          string
-	issuedChainPEM         string
-	caCertPEM              string
-	caCertChainPEM         string
-	lastIssueCertificateInput *awsacmpca.IssueCertificateInput
+	issueCertificateErr        error
+	getCertificateErr          error
+	revokeCertificateErr       error
+	getCACertificateErr        error
+	issuedCertPEM              string
+	issuedChainPEM             string
+	caCertPEM                  string
+	caCertChainPEM             string
+	lastIssueCertificateInput  *awsacmpca.IssueCertificateInput
 	lastRevokeCertificateInput *awsacmpca.RevokeCertificateInput
 }
 

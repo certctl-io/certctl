@@ -13,11 +13,11 @@ import (
 // RevocationSvc provides revocation-related business logic.
 // It handles certificate revocation, revocation notifications, and issuer coordination.
 type RevocationSvc struct {
-	certRepo         repository.CertificateRepository
-	revocationRepo   repository.RevocationRepository
-	auditService     *AuditService
-	notificationSvc  *NotificationService
-	issuerRegistry   *IssuerRegistry
+	certRepo        repository.CertificateRepository
+	revocationRepo  repository.RevocationRepository
+	auditService    *AuditService
+	notificationSvc *NotificationService
+	issuerRegistry  *IssuerRegistry
 	// ocspCacheInvalidator — production hardening II Phase 2 load-
 	// bearing security wire. After a successful revocation, the
 	// service MUST invalidate the OCSP response cache for this

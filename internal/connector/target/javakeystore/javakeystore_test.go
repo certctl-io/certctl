@@ -240,7 +240,7 @@ func TestDeployCertificate_Success(t *testing.T) {
 
 	mock := &mockExecutor{
 		responses: []mockResponse{
-			{Output: "", Err: nil},                    // keytool -delete (alias may not exist)
+			{Output: "", Err: nil},                         // keytool -delete (alias may not exist)
 			{Output: "Import command completed", Err: nil}, // keytool -importkeystore
 		},
 	}
@@ -355,8 +355,8 @@ func TestDeployCertificate_WithReload(t *testing.T) {
 	mock := &mockExecutor{
 		responses: []mockResponse{
 			// No existing keystore → delete skipped → import is call 0, reload is call 1
-			{Output: "Imported", Err: nil},   // import
-			{Output: "restarted", Err: nil},  // reload
+			{Output: "Imported", Err: nil},  // import
+			{Output: "restarted", Err: nil}, // reload
 		},
 	}
 	c := NewWithExecutor(&Config{
@@ -391,8 +391,8 @@ func TestDeployCertificate_ReloadFailed_NonFatal(t *testing.T) {
 
 	mock := &mockExecutor{
 		responses: []mockResponse{
-			{Output: "", Err: nil},                        // delete
-			{Output: "Imported", Err: nil},                // import
+			{Output: "", Err: nil},                                   // delete
+			{Output: "Imported", Err: nil},                           // import
 			{Output: "Failed to restart", Err: fmt.Errorf("exit 1")}, // reload fails
 		},
 	}

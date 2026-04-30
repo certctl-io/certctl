@@ -1574,9 +1574,9 @@ func TestLoadProvisionerKey_FileNotReadable(t *testing.T) {
 
 	// Test with a provisioner key path that can't be read
 	config := stepca.Config{
-		CAURL:              srv.URL,
-		ProvisionerName:    "test-provisioner",
-		ProvisionerKeyPath: "/root/.ssh/no_such_key", // Permission denied or doesn't exist
+		CAURL:               srv.URL,
+		ProvisionerName:     "test-provisioner",
+		ProvisionerKeyPath:  "/root/.ssh/no_such_key", // Permission denied or doesn't exist
 		ProvisionerPassword: "password",
 	}
 
@@ -1770,4 +1770,3 @@ func TestIntegration_FullLifecycle(t *testing.T) {
 		t.Errorf("Expected status 'completed', got '%s'", status.Status)
 	}
 }
-

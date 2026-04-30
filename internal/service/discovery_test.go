@@ -12,17 +12,17 @@ import (
 
 // mockDiscoveryRepo is a test implementation of DiscoveryRepository
 type mockDiscoveryRepo struct {
-	Scans              map[string]*domain.DiscoveryScan
-	Discovered         map[string]*domain.DiscoveredCertificate
-	CreateScanErr      error
-	GetScanErr         error
-	ListScansErr       error
+	Scans               map[string]*domain.DiscoveryScan
+	Discovered          map[string]*domain.DiscoveredCertificate
+	CreateScanErr       error
+	GetScanErr          error
+	ListScansErr        error
 	CreateDiscoveredErr error
-	GetDiscoveredErr   error
-	ListDiscoveredErr  error
-	UpdateStatusErr    error
+	GetDiscoveredErr    error
+	ListDiscoveredErr   error
+	UpdateStatusErr     error
 	GetByFingerprintErr error
-	CountByStatusErr   error
+	CountByStatusErr    error
 }
 
 func newMockDiscoveryRepository() *mockDiscoveryRepo {
@@ -268,20 +268,20 @@ func TestListDiscovered_Success(t *testing.T) {
 
 	now := time.Now()
 	cert1 := &domain.DiscoveredCertificate{
-		ID:           "dcert-1",
-		AgentID:      "agent-1",
-		CommonName:   "example.com",
-		Status:       domain.DiscoveryStatusUnmanaged,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:         "dcert-1",
+		AgentID:    "agent-1",
+		CommonName: "example.com",
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	cert2 := &domain.DiscoveredCertificate{
-		ID:           "dcert-2",
-		AgentID:      "agent-1",
-		CommonName:   "api.example.com",
-		Status:       domain.DiscoveryStatusManaged,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:         "dcert-2",
+		AgentID:    "agent-1",
+		CommonName: "api.example.com",
+		Status:     domain.DiscoveryStatusManaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert1.ID] = cert1
 	discoveryRepo.Discovered[cert2.ID] = cert2
@@ -304,20 +304,20 @@ func TestListDiscovered_WithStatusFilter(t *testing.T) {
 
 	now := time.Now()
 	cert1 := &domain.DiscoveredCertificate{
-		ID:        "dcert-1",
-		AgentID:   "agent-1",
+		ID:         "dcert-1",
+		AgentID:    "agent-1",
 		CommonName: "example.com",
-		Status:    domain.DiscoveryStatusUnmanaged,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	cert2 := &domain.DiscoveredCertificate{
-		ID:        "dcert-2",
-		AgentID:   "agent-1",
+		ID:         "dcert-2",
+		AgentID:    "agent-1",
 		CommonName: "api.example.com",
-		Status:    domain.DiscoveryStatusManaged,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:     domain.DiscoveryStatusManaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert1.ID] = cert1
 	discoveryRepo.Discovered[cert2.ID] = cert2
@@ -340,11 +340,11 @@ func TestGetDiscovered_Success(t *testing.T) {
 
 	now := time.Now()
 	cert := &domain.DiscoveredCertificate{
-		ID:           "dcert-1",
-		CommonName:   "example.com",
-		Status:       domain.DiscoveryStatusUnmanaged,
-		CreatedAt:    now,
-		UpdatedAt:    now,
+		ID:         "dcert-1",
+		CommonName: "example.com",
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
@@ -363,12 +363,12 @@ func TestClaimDiscovered_Success(t *testing.T) {
 
 	now := time.Now()
 	discoveredCert := &domain.DiscoveredCertificate{
-		ID:                   "dcert-1",
-		CommonName:           "example.com",
-		FingerprintSHA256:    "abc123",
-		Status:               domain.DiscoveryStatusUnmanaged,
-		CreatedAt:            now,
-		UpdatedAt:            now,
+		ID:                "dcert-1",
+		CommonName:        "example.com",
+		FingerprintSHA256: "abc123",
+		Status:            domain.DiscoveryStatusUnmanaged,
+		CreatedAt:         now,
+		UpdatedAt:         now,
 	}
 	discoveryRepo.Discovered[discoveredCert.ID] = discoveredCert
 
@@ -415,11 +415,11 @@ func TestClaimDiscovered_MissingManagedCertID(t *testing.T) {
 
 	now := time.Now()
 	cert := &domain.DiscoveredCertificate{
-		ID:        "dcert-1",
+		ID:         "dcert-1",
 		CommonName: "example.com",
-		Status:    domain.DiscoveryStatusUnmanaged,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
@@ -434,11 +434,11 @@ func TestClaimDiscovered_ManagedCertNotFound(t *testing.T) {
 
 	now := time.Now()
 	cert := &domain.DiscoveredCertificate{
-		ID:        "dcert-1",
+		ID:         "dcert-1",
 		CommonName: "example.com",
-		Status:    domain.DiscoveryStatusUnmanaged,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 
@@ -456,11 +456,11 @@ func TestDismissDiscovered_Success(t *testing.T) {
 
 	now := time.Now()
 	cert := &domain.DiscoveredCertificate{
-		ID:        "dcert-1",
+		ID:         "dcert-1",
 		CommonName: "example.com",
-		Status:    domain.DiscoveryStatusUnmanaged,
-		CreatedAt: now,
-		UpdatedAt: now,
+		Status:     domain.DiscoveryStatusUnmanaged,
+		CreatedAt:  now,
+		UpdatedAt:  now,
 	}
 	discoveryRepo.Discovered[cert.ID] = cert
 

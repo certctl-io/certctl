@@ -53,9 +53,9 @@ func TestValidateHTTPSScheme(t *testing.T) {
 			wantErrSub: "plaintext http://",
 		},
 		{
-			name:       "bare host missing scheme rejected",
-			serverURL:  "localhost:8443",
-			wantErr:    true,
+			name:      "bare host missing scheme rejected",
+			serverURL: "localhost:8443",
+			wantErr:   true,
 			// url.Parse treats "localhost:8443" as scheme=localhost, opaque=8443
 			// — exercises the default arm (unsupported scheme) rather than the
 			// empty-scheme arm. Both are fail-closed, which is what we care about.

@@ -12,16 +12,16 @@ import (
 
 // mockAgentGroupRepo is a test implementation of AgentGroupRepository
 type mockAgentGroupRepo struct {
-	groups             map[string]*domain.AgentGroup
-	members            map[string][]*domain.Agent
-	CreateErr          error
-	UpdateErr          error
-	DeleteErr          error
-	GetErr             error
-	ListErr            error
-	ListMembersErr     error
-	AddMemberErr       error
-	RemoveMemberErr    error
+	groups          map[string]*domain.AgentGroup
+	members         map[string][]*domain.Agent
+	CreateErr       error
+	UpdateErr       error
+	DeleteErr       error
+	GetErr          error
+	ListErr         error
+	ListMembersErr  error
+	AddMemberErr    error
+	RemoveMemberErr error
 }
 
 func newMockAgentGroupRepository() *mockAgentGroupRepo {

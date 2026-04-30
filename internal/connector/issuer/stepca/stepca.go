@@ -168,9 +168,9 @@ type signRequest struct {
 
 // signResponse is the JSON response from the step-ca /sign endpoint.
 type signResponse struct {
-	ServerPEM certificateChain `json:"serverPEM,omitempty"`
-	CaPEM     certificateChain `json:"caPEM,omitempty"`
-	CertChainPEM []certBlock  `json:"certChainPEM,omitempty"`
+	ServerPEM    certificateChain `json:"serverPEM,omitempty"`
+	CaPEM        certificateChain `json:"caPEM,omitempty"`
+	CertChainPEM []certBlock      `json:"certChainPEM,omitempty"`
 }
 
 type certificateChain struct {
@@ -380,14 +380,14 @@ func (c *Connector) generateProvisionerToken(subject string, sans []string) (str
 
 	// step-ca expects: aud = <ca-url>/1.0/sign (the sign endpoint audience)
 	claims := map[string]interface{}{
-		"sub":  subject,
-		"iss":  c.config.ProvisionerName,
-		"aud":  c.config.CAURL + "/1.0/sign",
-		"nbf":  now.Unix(),
-		"iat":  now.Unix(),
-		"exp":  now.Add(5 * time.Minute).Unix(),
-		"jti":  generateJTI(),
-		"sha":  kid, // step-ca uses this to look up the provisioner by key fingerprint
+		"sub": subject,
+		"iss": c.config.ProvisionerName,
+		"aud": c.config.CAURL + "/1.0/sign",
+		"nbf": now.Unix(),
+		"iat": now.Unix(),
+		"exp": now.Add(5 * time.Minute).Unix(),
+		"jti": generateJTI(),
+		"sha": kid, // step-ca uses this to look up the provisioner by key fingerprint
 	}
 
 	if len(sans) > 0 {

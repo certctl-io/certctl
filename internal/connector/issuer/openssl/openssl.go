@@ -479,9 +479,9 @@ func (c *Connector) parseCertificate(certPEM []byte) (*x509.Certificate, string,
 // Format: [{"serial": "...", "revoked_at": "...", "reason_code": ...}, ...]
 func (c *Connector) marshalRevokedSerials(revokedCerts []issuer.RevokedCertEntry) ([]byte, error) {
 	type RevokedEntry struct {
-		Serial      string `json:"serial"`
-		RevokedAt   string `json:"revoked_at"`
-		ReasonCode  int    `json:"reason_code"`
+		Serial     string `json:"serial"`
+		RevokedAt  string `json:"revoked_at"`
+		ReasonCode int    `json:"reason_code"`
 	}
 
 	entries := make([]RevokedEntry, len(revokedCerts))

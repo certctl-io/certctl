@@ -86,10 +86,10 @@ func TestBulkRenew_PartialFailure_ReportsBoth(t *testing.T) {
 	svc := &mockBulkRenewalService{
 		BulkRenewFn: func(ctx context.Context, criteria domain.BulkRenewalCriteria, actor string) (*domain.BulkRenewalResult, error) {
 			return &domain.BulkRenewalResult{
-				TotalMatched: 3,
+				TotalMatched:  3,
 				TotalEnqueued: 2,
-				TotalSkipped: 0,
-				TotalFailed:  1,
+				TotalSkipped:  0,
+				TotalFailed:   1,
 				Errors: []domain.BulkOperationError{
 					{CertificateID: "mc-failed", Error: "renewal job enqueue failed: db timeout"},
 				},

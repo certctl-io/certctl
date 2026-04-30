@@ -19,11 +19,11 @@ import (
 // to a directory that Envoy watches via its SDS (Secret Discovery Service)
 // file-based configuration or static filename references in the bootstrap config.
 type Config struct {
-	CertDir       string `json:"cert_dir"`        // Directory where Envoy watches for cert files (required)
-	CertFilename  string `json:"cert_filename"`   // Filename for certificate (default: cert.pem)
-	KeyFilename   string `json:"key_filename"`    // Filename for private key (default: key.pem)
-	ChainFilename string `json:"chain_filename"`  // Optional filename for chain (if set, chain written separately)
-	SDSConfig     bool   `json:"sds_config"`      // If true, write an SDS discovery JSON file for file-based SDS
+	CertDir       string `json:"cert_dir"`       // Directory where Envoy watches for cert files (required)
+	CertFilename  string `json:"cert_filename"`  // Filename for certificate (default: cert.pem)
+	KeyFilename   string `json:"key_filename"`   // Filename for private key (default: key.pem)
+	ChainFilename string `json:"chain_filename"` // Optional filename for chain (if set, chain written separately)
+	SDSConfig     bool   `json:"sds_config"`     // If true, write an SDS discovery JSON file for file-based SDS
 }
 
 // SDSResource represents an Envoy SDS tls_certificate resource for file-based SDS.
@@ -34,9 +34,9 @@ type SDSResource struct {
 
 // SDSTLSCertificate represents a single SDS tls_certificate entry.
 type SDSTLSCertificate struct {
-	Type            string         `json:"@type"`
-	Name            string         `json:"name"`
-	TLSCertificate  TLSCertificate `json:"tls_certificate"`
+	Type           string         `json:"@type"`
+	Name           string         `json:"name"`
+	TLSCertificate TLSCertificate `json:"tls_certificate"`
 }
 
 // TLSCertificate contains the file paths for cert and key in Envoy's SDS format.

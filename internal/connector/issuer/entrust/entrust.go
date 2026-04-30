@@ -89,9 +89,9 @@ func NewWithHTTPClient(config *Config, logger *slog.Logger, client *http.Client)
 
 // enrollmentRequest is the JSON body for Entrust enrollment submission.
 type enrollmentRequest struct {
-	CSR                 string `json:"csr"`
-	ProfileId           string `json:"profileId,omitempty"`
-	SubjectAltNames     []san  `json:"subjectAltNames,omitempty"`
+	CSR                  string `json:"csr"`
+	ProfileId            string `json:"profileId,omitempty"`
+	SubjectAltNames      []san  `json:"subjectAltNames,omitempty"`
 	CertificateAuthority string `json:"certificateAuthority,omitempty"`
 }
 

@@ -11,14 +11,14 @@ import (
 
 // mockRenewalService is a mock implementation for testing.
 type mockRenewalService struct {
-	mu                 sync.Mutex
-	callCount          int
-	callTimes          []time.Time
-	expireCallCount    int
-	expireCallTimes    []time.Time
-	slowDelay          time.Duration
-	shouldError        bool
-	blockCh            chan struct{} // if non-nil, blocks until closed (ignores context)
+	mu              sync.Mutex
+	callCount       int
+	callTimes       []time.Time
+	expireCallCount int
+	expireCallTimes []time.Time
+	slowDelay       time.Duration
+	shouldError     bool
+	blockCh         chan struct{} // if non-nil, blocks until closed (ignores context)
 }
 
 func (m *mockRenewalService) CheckExpiringCertificates(ctx context.Context) error {
@@ -137,7 +137,6 @@ func (m *mockJobService) RetryFailedJobs(ctx context.Context, maxRetries int) er
 	}
 	return nil
 }
-
 
 // ReapTimedOutJobs is the scheduler-driven counterpart to ProcessPendingJobs that
 // covers coverage gap I-003: JobService.ReapTimedOutJobs (via JobReaperService interface)

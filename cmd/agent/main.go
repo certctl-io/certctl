@@ -34,16 +34,16 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
-	pf "github.com/shankar0123/certctl/internal/connector/target/postfix"
-	sshconn "github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
-	jks "github.com/shankar0123/certctl/internal/connector/target/javakeystore"
-	k8s "github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
-	wcs "github.com/shankar0123/certctl/internal/connector/target/wincertstore"
 	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
 	"github.com/shankar0123/certctl/internal/connector/target/iis"
+	jks "github.com/shankar0123/certctl/internal/connector/target/javakeystore"
+	k8s "github.com/shankar0123/certctl/internal/connector/target/k8ssecret"
 	"github.com/shankar0123/certctl/internal/connector/target/nginx"
+	pf "github.com/shankar0123/certctl/internal/connector/target/postfix"
+	sshconn "github.com/shankar0123/certctl/internal/connector/target/ssh"
 	"github.com/shankar0123/certctl/internal/connector/target/traefik"
+	wcs "github.com/shankar0123/certctl/internal/connector/target/wincertstore"
 )
 
 // AgentConfig represents the agent-side configuration.
@@ -80,10 +80,10 @@ type Agent struct {
 	client *http.Client
 
 	// Configuration
-	heartbeatInterval     time.Duration
-	pollInterval          time.Duration
-	discoveryInterval     time.Duration
-	consecutiveFailures   int
+	heartbeatInterval   time.Duration
+	pollInterval        time.Duration
+	discoveryInterval   time.Duration
+	consecutiveFailures int
 
 	// I-004: terminal retirement signal. retiredSignal is closed exactly once
 	// (guarded by retiredOnce) when either sendHeartbeat or pollForWork

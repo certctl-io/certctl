@@ -36,9 +36,9 @@ func mkRunningJob(id, agentID string) *domain.Job {
 	a := agentID
 	now := time.Now()
 	return &domain.Job{
-		ID:       id,
-		AgentID:  &a,
-		Status:   domain.JobStatusRunning,
+		ID:        id,
+		AgentID:   &a,
+		Status:    domain.JobStatusRunning,
 		CreatedAt: now.Add(-2 * time.Hour),
 	}
 }

@@ -871,8 +871,8 @@ func TestJobService_ReapTimedOutJobs_ContinuesOnIndividualUpdateFailure(t *testi
 			jobA.ID: jobA,
 			jobB.ID: jobB,
 		},
-		StatusUpdates:    make(map[string]domain.JobStatus),
-		UpdateErrorByID:  make(map[string]error),
+		StatusUpdates:     make(map[string]domain.JobStatus),
+		UpdateErrorByID:   make(map[string]error),
 		UpdateErrorByIDMu: sync.Mutex{},
 	}
 	// Make Update fail only for jobA
@@ -892,7 +892,7 @@ func TestJobService_ReapTimedOutJobs_ContinuesOnIndividualUpdateFailure(t *testi
 	jobAAfter := jobRepo.Jobs[jobA.ID]
 	jobBAfter := jobRepo.Jobs[jobB.ID]
 	if jobAAfter.Status != domain.JobStatusFailed || jobBAfter.Status != domain.JobStatusFailed {
-		t.Fatalf("expected both jobs status Failed (modified before Update), got A=%s B=%s", 
+		t.Fatalf("expected both jobs status Failed (modified before Update), got A=%s B=%s",
 			jobAAfter.Status, jobBAfter.Status)
 	}
 

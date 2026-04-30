@@ -43,16 +43,16 @@ import "sync/atomic"
 // New labels MUST also be added to OCSPCounters.Snapshot AND to the
 // Prometheus exposer in Phase 8.
 type OCSPCounters struct {
-	requestGET       atomic.Uint64
-	requestPOST      atomic.Uint64
-	requestSuccess   atomic.Uint64
-	requestInvalid   atomic.Uint64
-	issuerNotFound   atomic.Uint64
-	certNotFound     atomic.Uint64
-	signingFailed    atomic.Uint64
-	nonceEchoed      atomic.Uint64
-	nonceMalformed   atomic.Uint64
-	rateLimited      atomic.Uint64
+	requestGET     atomic.Uint64
+	requestPOST    atomic.Uint64
+	requestSuccess atomic.Uint64
+	requestInvalid atomic.Uint64
+	issuerNotFound atomic.Uint64
+	certNotFound   atomic.Uint64
+	signingFailed  atomic.Uint64
+	nonceEchoed    atomic.Uint64
+	nonceMalformed atomic.Uint64
+	rateLimited    atomic.Uint64
 }
 
 // NewOCSPCounters constructs a zero-value counter table. The caller

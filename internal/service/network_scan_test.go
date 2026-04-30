@@ -377,8 +377,8 @@ func TestExpandCIDR_AllowsPrivateRanges(t *testing.T) {
 		cidr string
 		min  int
 	}{
-		{"10/8 sample", "10.0.0.0/30", 2},         // 2 usable (after removing network/broadcast)
-		{"172.16/12 sample", "172.16.0.0/30", 2}, // 2 usable
+		{"10/8 sample", "10.0.0.0/30", 2},          // 2 usable (after removing network/broadcast)
+		{"172.16/12 sample", "172.16.0.0/30", 2},   // 2 usable
 		{"192.168/16 sample", "192.168.1.1/32", 1}, // Single IP
 	}
 

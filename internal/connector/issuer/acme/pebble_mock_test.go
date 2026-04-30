@@ -106,7 +106,7 @@ type pebbleMockServer struct {
 	idSeq    int64
 	// Behavior toggles for failure-mode tests.
 	failNewAccount   bool
-	rateLimitedOrder int32 // atomic counter; non-zero ⇒ first N orders return 429
+	rateLimitedOrder int32  // atomic counter; non-zero ⇒ first N orders return 429
 	finalizeReturns  string // "" (default), "processing-stuck", "invalid"
 	authzPending     bool   // when true, new authzs start as "pending" and only flip to "valid" after the challenge endpoint is POSTed
 	challengeType    string // when set, the per-authz challenge type emitted (default "http-01")
@@ -990,12 +990,12 @@ func TestPebbleMock_ContextCancel_DuringIssuance(t *testing.T) {
 // ─────────────────────────────────────────────────────────────────────────────
 
 type mockDNSSolver struct {
-	mu              sync.Mutex
-	presented       map[string]string // domain → keyAuth (or recordValue)
-	cleanedUp       map[string]bool
-	presentErr      error
-	cleanErr        error
-	presentDelay    time.Duration
+	mu           sync.Mutex
+	presented    map[string]string // domain → keyAuth (or recordValue)
+	cleanedUp    map[string]bool
+	presentErr   error
+	cleanErr     error
+	presentDelay time.Duration
 }
 
 func newMockDNSSolver() *mockDNSSolver {

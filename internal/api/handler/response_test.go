@@ -346,8 +346,8 @@ func TestCursorPagedResponse_EmptyNextCursor(t *testing.T) {
 
 func TestFilterFields_SingleObject(t *testing.T) {
 	data := map[string]interface{}{
-		"id":    "cert-123",
-		"name":  "My Cert",
+		"id":     "cert-123",
+		"name":   "My Cert",
 		"expiry": "2025-01-01",
 		"status": "active",
 	}
@@ -379,8 +379,8 @@ func TestFilterFields_SingleObject(t *testing.T) {
 func TestFilterFields_EmptyFields(t *testing.T) {
 	// Empty fields list should return data unchanged
 	data := map[string]interface{}{
-		"id":    "cert-123",
-		"name":  "My Cert",
+		"id":   "cert-123",
+		"name": "My Cert",
 	}
 
 	result := filterFields(data, []string{})
@@ -398,8 +398,8 @@ func TestFilterFields_EmptyFields(t *testing.T) {
 
 func TestFilterFields_NoMatchingFields(t *testing.T) {
 	data := map[string]interface{}{
-		"id":    "cert-123",
-		"name":  "My Cert",
+		"id":   "cert-123",
+		"name": "My Cert",
 	}
 
 	result := filterFields(data, []string{"nonexistent", "also-not-there"})

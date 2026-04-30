@@ -1,11 +1,11 @@
 package handler
 
 import (
-	"github.com/shankar0123/certctl/internal/repository"
-	"errors"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"github.com/shankar0123/certctl/internal/repository"
 	"log/slog"
 	"net/http"
 	"strings"

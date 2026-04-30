@@ -457,13 +457,13 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		Message:       "Certificate uploaded and SSL profile updated via iControl REST",
 		DeployedAt:    time.Now(),
 		Metadata: map[string]string{
-			"host":             c.config.Host,
-			"partition":        c.config.Partition,
-			"ssl_profile":      c.config.SSLProfile,
-			"cert_object_name": certName,
-			"key_object_name":  keyName,
+			"host":              c.config.Host,
+			"partition":         c.config.Partition,
+			"ssl_profile":       c.config.SSLProfile,
+			"cert_object_name":  certName,
+			"key_object_name":   keyName,
 			"chain_object_name": chainName,
-			"duration_ms":      fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
+			"duration_ms":       fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
 		},
 	}, nil
 }
@@ -561,12 +561,12 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 		Message:       fmt.Sprintf("SSL profile %q has cert %q configured", c.config.SSLProfile, profile.Cert),
 		ValidatedAt:   time.Now(),
 		Metadata: map[string]string{
-			"host":        c.config.Host,
-			"ssl_profile": c.config.SSLProfile,
-			"current_cert": profile.Cert,
-			"current_key":  profile.Key,
+			"host":          c.config.Host,
+			"ssl_profile":   c.config.SSLProfile,
+			"current_cert":  profile.Cert,
+			"current_key":   profile.Key,
 			"current_chain": profile.Chain,
-			"duration_ms": fmt.Sprintf("%d", validationDuration.Milliseconds()),
+			"duration_ms":   fmt.Sprintf("%d", validationDuration.Milliseconds()),
 		},
 	}, nil
 }

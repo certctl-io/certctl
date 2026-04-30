@@ -26,11 +26,11 @@ import (
 
 // MockRenewalPolicyService is a mock implementation of RenewalPolicyService.
 type MockRenewalPolicyService struct {
-	ListRenewalPoliciesFn  func(page, perPage int) ([]domain.RenewalPolicy, int64, error)
-	GetRenewalPolicyFn     func(id string) (*domain.RenewalPolicy, error)
-	CreateRenewalPolicyFn  func(rp domain.RenewalPolicy) (*domain.RenewalPolicy, error)
-	UpdateRenewalPolicyFn  func(id string, rp domain.RenewalPolicy) (*domain.RenewalPolicy, error)
-	DeleteRenewalPolicyFn  func(id string) error
+	ListRenewalPoliciesFn func(page, perPage int) ([]domain.RenewalPolicy, int64, error)
+	GetRenewalPolicyFn    func(id string) (*domain.RenewalPolicy, error)
+	CreateRenewalPolicyFn func(rp domain.RenewalPolicy) (*domain.RenewalPolicy, error)
+	UpdateRenewalPolicyFn func(id string, rp domain.RenewalPolicy) (*domain.RenewalPolicy, error)
+	DeleteRenewalPolicyFn func(id string) error
 }
 
 func (m *MockRenewalPolicyService) ListRenewalPolicies(_ context.Context, page, perPage int) ([]domain.RenewalPolicy, int64, error) {
@@ -199,11 +199,11 @@ func TestCreateRenewalPolicy_Success(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":                  "New Policy",
-		"renewal_window_days":   30,
-		"max_retries":           3,
+		"name":                   "New Policy",
+		"renewal_window_days":    30,
+		"max_retries":            3,
 		"retry_interval_seconds": 3600,
-		"auto_renew":            true,
+		"auto_renew":             true,
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -221,8 +221,8 @@ func TestCreateRenewalPolicy_Success(t *testing.T) {
 
 func TestCreateRenewalPolicy_MissingName(t *testing.T) {
 	body := map[string]interface{}{
-		"renewal_window_days":   30,
-		"max_retries":           3,
+		"renewal_window_days":    30,
+		"max_retries":            3,
 		"retry_interval_seconds": 3600,
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -261,9 +261,9 @@ func TestCreateRenewalPolicy_DuplicateName(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":                  "Duplicate",
-		"renewal_window_days":   30,
-		"max_retries":           3,
+		"name":                   "Duplicate",
+		"renewal_window_days":    30,
+		"max_retries":            3,
 		"retry_interval_seconds": 3600,
 	}
 	bodyBytes, _ := json.Marshal(body)
@@ -308,11 +308,11 @@ func TestUpdateRenewalPolicy_Success(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":                  "Updated Policy",
-		"renewal_window_days":   45,
-		"max_retries":           5,
+		"name":                   "Updated Policy",
+		"renewal_window_days":    45,
+		"max_retries":            5,
 		"retry_interval_seconds": 1800,
-		"auto_renew":            true,
+		"auto_renew":             true,
 	}
 	bodyBytes, _ := json.Marshal(body)
 
@@ -336,9 +336,9 @@ func TestUpdateRenewalPolicy_NotFound(t *testing.T) {
 	}
 
 	body := map[string]interface{}{
-		"name":                  "Updated",
-		"renewal_window_days":   30,
-		"max_retries":           3,
+		"name":                   "Updated",
+		"renewal_window_days":    30,
+		"max_retries":            3,
 		"retry_interval_seconds": 3600,
 	}
 	bodyBytes, _ := json.Marshal(body)

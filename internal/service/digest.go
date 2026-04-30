@@ -31,20 +31,20 @@ type HTMLEmailSender interface {
 
 // DigestData holds the aggregated data for a digest email.
 type DigestData struct {
-	GeneratedAt          time.Time              `json:"generated_at"`
-	TotalCertificates    int64                  `json:"total_certificates"`
-	ExpiringCertificates int64                  `json:"expiring_certificates"`
-	ExpiredCertificates  int64                  `json:"expired_certificates"`
-	RevokedCertificates  int64                  `json:"revoked_certificates"`
-	ActiveAgents         int64                  `json:"active_agents"`
-	OfflineAgents        int64                  `json:"offline_agents"`
-	TotalAgents          int64                  `json:"total_agents"`
-	PendingJobs          int64                  `json:"pending_jobs"`
-	FailedJobs           int64                  `json:"failed_jobs"`
-	CompletedJobs        int64                  `json:"completed_jobs"`
-	ExpiringCerts        []DigestCertEntry      `json:"expiring_certs"`
-	RecentFailures       []DigestJobEntry       `json:"recent_failures"`
-	StatusCounts         []DigestStatusCount    `json:"status_counts"`
+	GeneratedAt          time.Time           `json:"generated_at"`
+	TotalCertificates    int64               `json:"total_certificates"`
+	ExpiringCertificates int64               `json:"expiring_certificates"`
+	ExpiredCertificates  int64               `json:"expired_certificates"`
+	RevokedCertificates  int64               `json:"revoked_certificates"`
+	ActiveAgents         int64               `json:"active_agents"`
+	OfflineAgents        int64               `json:"offline_agents"`
+	TotalAgents          int64               `json:"total_agents"`
+	PendingJobs          int64               `json:"pending_jobs"`
+	FailedJobs           int64               `json:"failed_jobs"`
+	CompletedJobs        int64               `json:"completed_jobs"`
+	ExpiringCerts        []DigestCertEntry   `json:"expiring_certs"`
+	RecentFailures       []DigestJobEntry    `json:"recent_failures"`
+	StatusCounts         []DigestStatusCount `json:"status_counts"`
 }
 
 // DigestCertEntry represents a certificate entry in the digest.

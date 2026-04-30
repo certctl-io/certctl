@@ -149,10 +149,10 @@ func (c *qaClient) do(method, path string, body string) (*http.Response, error) 
 	return c.http.Do(req)
 }
 
-func (c *qaClient) get(path string) (*http.Response, error)            { return c.do("GET", path, "") }
-func (c *qaClient) post(path, body string) (*http.Response, error)     { return c.do("POST", path, body) }
-func (c *qaClient) put(path, body string) (*http.Response, error)      { return c.do("PUT", path, body) }
-func (c *qaClient) delete(path string) (*http.Response, error)         { return c.do("DELETE", path, "") }
+func (c *qaClient) get(path string) (*http.Response, error)        { return c.do("GET", path, "") }
+func (c *qaClient) post(path, body string) (*http.Response, error) { return c.do("POST", path, body) }
+func (c *qaClient) put(path, body string) (*http.Response, error)  { return c.do("PUT", path, body) }
+func (c *qaClient) delete(path string) (*http.Response, error)     { return c.do("DELETE", path, "") }
 
 // statusCode makes a request and returns the HTTP status code.
 func (c *qaClient) statusCode(method, path, body string) (int, error) {
@@ -228,11 +228,11 @@ type qaCert struct {
 }
 
 type qaJob struct {
-	ID              string  `json:"id"`
-	Type            string  `json:"type"`
-	Status          string  `json:"status"`
-	CertificateID   string  `json:"certificate_id"`
-	AgentID         *string `json:"agent_id"`
+	ID            string  `json:"id"`
+	Type          string  `json:"type"`
+	Status        string  `json:"status"`
+	CertificateID string  `json:"certificate_id"`
+	AgentID       *string `json:"agent_id"`
 }
 
 type qaIssuer struct {
@@ -261,15 +261,15 @@ type qaAgent struct {
 }
 
 type qaNotification struct {
-	ID     string `json:"id"`
-	Read   bool   `json:"read"`
+	ID   string `json:"id"`
+	Read bool   `json:"read"`
 }
 
 type qaStats struct {
-	TotalCertificates int `json:"total_certificates"`
-	ActiveCertificates int `json:"active_certificates"`
+	TotalCertificates    int `json:"total_certificates"`
+	ActiveCertificates   int `json:"active_certificates"`
 	ExpiringCertificates int `json:"expiring_certificates"`
-	TotalAgents int `json:"total_agents"`
+	TotalAgents          int `json:"total_agents"`
 }
 
 type qaMetrics struct {

@@ -75,8 +75,8 @@ func verifyDeployment(
 		// calls, issuer connector communication, or any operation that trusts the
 		// certificate. The verification result compares SHA-256 fingerprints only.
 		// See TICKET-016 for full security audit rationale.
-		InsecureSkipVerify: true, //nolint:gosec // verification probe; documented above + docs/tls.md L-001 table
-		ServerName:        targetHost, // For SNI
+		InsecureSkipVerify: true,       //nolint:gosec // verification probe; documented above + docs/tls.md L-001 table
+		ServerName:         targetHost, // For SNI
 	})
 	if err != nil {
 		return nil, fmt.Errorf("failed to connect to %s: %w", address, err)
@@ -161,11 +161,11 @@ func (a *Agent) reportVerificationResult(
 
 	// Build the request payload
 	payload := map[string]interface{}{
-		"target_id":             targetID,
-		"expected_fingerprint":  result.ExpectedFingerprint,
-		"actual_fingerprint":    result.ActualFingerprint,
-		"verified":              result.Verified,
-		"error":                 result.Error,
+		"target_id":            targetID,
+		"expected_fingerprint": result.ExpectedFingerprint,
+		"actual_fingerprint":   result.ActualFingerprint,
+		"verified":             result.Verified,
+		"error":                result.Error,
 	}
 
 	body, err := json.Marshal(payload)
@@ -247,7 +247,7 @@ func (a *Agent) verifyAndReportDeployment(
 ) {
 	// Perform verification with configured timeout and delay
 	result, err := verifyDeployment(ctx, targetHost, targetPort, certPEM,
-		2*time.Second, // delay before probing
+		2*time.Second,  // delay before probing
 		10*time.Second, // timeout for TLS connection
 		a.logger)
 
@@ -261,7 +261,7 @@ func (a *Agent) verifyAndReportDeployment(
 		}
 		// Probe failure: report error but continue
 		result = &VerificationResult{
-			Error: err.Error(),
+			Error:      err.Error(),
 			VerifiedAt: time.Now().UTC(),
 		}
 	}

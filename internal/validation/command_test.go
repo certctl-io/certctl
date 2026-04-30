@@ -525,4 +525,3 @@ func TestSanitizeForShell(t *testing.T) {
 		})
 	}
 }
-

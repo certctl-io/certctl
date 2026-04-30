@@ -310,4 +310,3 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 
 // Ensure Connector implements target.Connector.
 var _ target.Connector = (*Connector)(nil)
-

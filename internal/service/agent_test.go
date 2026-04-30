@@ -10,7 +10,6 @@ import (
 	"github.com/shankar0123/certctl/internal/domain"
 )
 
-
 func TestRegisterAgent(t *testing.T) {
 	ctx := context.Background()
 	agentRepo := &mockAgentRepo{

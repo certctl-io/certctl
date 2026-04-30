@@ -56,8 +56,8 @@ func adversarialPathInputs() []struct {
 		{"null_byte_trailing", "mc-001\x00"},
 		{"null_byte_embedded", "mc-\x00-001"},
 		{"long_id_10k", strings.Repeat("A", 10000)},
-		{"unicode_homoglyph_hyphen", "mc\u2010001"},          // U+2010 HYPHEN
-		{"unicode_homoglyph_fullwidth", "mc\uFF0D001"},       // U+FF0D FULLWIDTH HYPHEN-MINUS
+		{"unicode_homoglyph_hyphen", "mc\u2010001"},    // U+2010 HYPHEN
+		{"unicode_homoglyph_fullwidth", "mc\uFF0D001"}, // U+FF0D FULLWIDTH HYPHEN-MINUS
 		{"control_char_newline", "mc-001\n"},
 		{"control_char_tab", "mc\t001"},
 		{"control_char_bell", "mc\x07001"},

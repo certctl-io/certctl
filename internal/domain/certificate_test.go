@@ -4,14 +4,14 @@ import "testing"
 
 func TestCertificateStatus_Constants(t *testing.T) {
 	tests := map[string]CertificateStatus{
-		"Pending":             CertificateStatusPending,
-		"Active":              CertificateStatusActive,
-		"Expiring":            CertificateStatusExpiring,
-		"Expired":             CertificateStatusExpired,
-		"RenewalInProgress":   CertificateStatusRenewalInProgress,
-		"Failed":              CertificateStatusFailed,
-		"Revoked":             CertificateStatusRevoked,
-		"Archived":            CertificateStatusArchived,
+		"Pending":           CertificateStatusPending,
+		"Active":            CertificateStatusActive,
+		"Expiring":          CertificateStatusExpiring,
+		"Expired":           CertificateStatusExpired,
+		"RenewalInProgress": CertificateStatusRenewalInProgress,
+		"Failed":            CertificateStatusFailed,
+		"Revoked":           CertificateStatusRevoked,
+		"Archived":          CertificateStatusArchived,
 	}
 	for expected, got := range tests {
 		if string(got) != expected {

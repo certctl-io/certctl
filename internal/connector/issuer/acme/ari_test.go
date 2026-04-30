@@ -74,8 +74,8 @@ func TestGetRenewalInfo_NotFound(t *testing.T) {
 		if r.URL.Path == "/directory" && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
-				"newOrder":    "/acme/new-order",
-				"newAccount":  "/acme/new-account",
+				"newOrder":   "/acme/new-order",
+				"newAccount": "/acme/new-account",
 			})
 			return
 		}
@@ -115,8 +115,8 @@ func TestGetRenewalInfo_ServerError(t *testing.T) {
 		if r.URL.Path == "/directory" && r.Method == http.MethodGet {
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{
-				"newOrder":    "/acme/new-order",
-				"newAccount":  "/acme/new-account",
+				"newOrder":   "/acme/new-order",
+				"newAccount": "/acme/new-account",
 			})
 			return
 		}

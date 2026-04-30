@@ -14,19 +14,19 @@ import (
 
 // mockHealthCheckRepo implements the HealthCheckRepository interface for testing.
 type mockHealthCheckRepo struct {
-	checks              map[string]*domain.EndpointHealthCheck
-	history             []*domain.HealthHistoryEntry
-	createErr           error
-	getErr              error
-	updateErr           error
-	deleteErr           error
-	listErr             error
-	listDueErr          error
-	getHistoryErr       error
-	recordHistoryErr    error
-	purgeHistoryErr     error
-	getSummaryErr       error
-	getSummaryResult    *domain.HealthCheckSummary
+	checks           map[string]*domain.EndpointHealthCheck
+	history          []*domain.HealthHistoryEntry
+	createErr        error
+	getErr           error
+	updateErr        error
+	deleteErr        error
+	listErr          error
+	listDueErr       error
+	getHistoryErr    error
+	recordHistoryErr error
+	purgeHistoryErr  error
+	getSummaryErr    error
+	getSummaryResult *domain.HealthCheckSummary
 }
 
 func newMockHealthCheckRepo() *mockHealthCheckRepo {
@@ -151,9 +151,9 @@ func TestHealthCheckService_Create_Success(t *testing.T) {
 	svc := NewHealthCheckService(repo, nil, logger, 10, 5*time.Second, 30*24*time.Hour, false)
 
 	check := &domain.EndpointHealthCheck{
-		Endpoint:       "example.com:443",
-		Status:         domain.HealthStatusUnknown,
-		Enabled:        true,
+		Endpoint:          "example.com:443",
+		Status:            domain.HealthStatusUnknown,
+		Enabled:           true,
 		CheckIntervalSecs: 300,
 	}
 

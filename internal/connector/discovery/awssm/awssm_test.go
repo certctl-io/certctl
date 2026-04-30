@@ -20,10 +20,10 @@ import (
 
 // mockSMClient is a mock implementation of SMClient for testing.
 type mockSMClient struct {
-	secrets          map[string]string            // secret name -> secret value
-	secretMetadata   map[string]SecretMetadata    // secret name -> metadata
-	listError        error
-	getErrors        map[string]error // secret name -> error
+	secrets        map[string]string         // secret name -> secret value
+	secretMetadata map[string]SecretMetadata // secret name -> metadata
+	listError      error
+	getErrors      map[string]error // secret name -> error
 }
 
 func newMockSMClient() *mockSMClient {
@@ -369,4 +369,3 @@ func TestSource_Discover_AgentIDAndSourcePath(t *testing.T) {
 		t.Errorf("expected source path 'aws-sm://eu-west-1/my-secret', got %s", report.Certificates[0].SourcePath)
 	}
 }
-

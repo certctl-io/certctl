@@ -56,10 +56,10 @@ func TestRetireAgentHandler_Success_200(t *testing.T) {
 	}
 
 	var body struct {
-		RetiredAt      time.Time                     `json:"retired_at"`
-		AlreadyRetired bool                          `json:"already_retired"`
-		Cascade        bool                          `json:"cascade"`
-		Counts         domain.AgentDependencyCounts  `json:"counts"`
+		RetiredAt      time.Time                    `json:"retired_at"`
+		AlreadyRetired bool                         `json:"already_retired"`
+		Cascade        bool                         `json:"cascade"`
+		Counts         domain.AgentDependencyCounts `json:"counts"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode 200 body: %v", err)
@@ -273,10 +273,10 @@ func TestRetireAgentHandler_ForceCascade_200(t *testing.T) {
 	}
 
 	var body struct {
-		RetiredAt      time.Time                     `json:"retired_at"`
-		AlreadyRetired bool                          `json:"already_retired"`
-		Cascade        bool                          `json:"cascade"`
-		Counts         domain.AgentDependencyCounts  `json:"counts"`
+		RetiredAt      time.Time                    `json:"retired_at"`
+		AlreadyRetired bool                         `json:"already_retired"`
+		Cascade        bool                         `json:"cascade"`
+		Counts         domain.AgentDependencyCounts `json:"counts"`
 	}
 	if err := json.NewDecoder(w.Body).Decode(&body); err != nil {
 		t.Fatalf("decode force-cascade 200 body: %v", err)

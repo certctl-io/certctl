@@ -24,34 +24,34 @@ func IsValidHealthStatus(s string) bool {
 
 // EndpointHealthCheck represents a monitored TLS endpoint.
 type EndpointHealthCheck struct {
-	ID                  string        `json:"id"`
-	Endpoint            string        `json:"endpoint"`
-	CertificateID       *string       `json:"certificate_id,omitempty"`
-	NetworkScanTargetID *string       `json:"network_scan_target_id,omitempty"`
-	ExpectedFingerprint string        `json:"expected_fingerprint"`
-	ObservedFingerprint string        `json:"observed_fingerprint"`
-	Status              HealthStatus  `json:"status"`
-	ConsecutiveFailures int           `json:"consecutive_failures"`
-	ResponseTimeMs      int           `json:"response_time_ms"`
-	TLSVersion          string        `json:"tls_version"`
-	CipherSuite         string        `json:"cipher_suite"`
-	CertSubject         string        `json:"cert_subject"`
-	CertIssuer          string        `json:"cert_issuer"`
-	CertExpiry          *time.Time    `json:"cert_expiry,omitempty"`
-	LastCheckedAt       *time.Time    `json:"last_checked_at,omitempty"`
-	LastSuccessAt       *time.Time    `json:"last_success_at,omitempty"`
-	LastFailureAt       *time.Time    `json:"last_failure_at,omitempty"`
-	LastTransitionAt    *time.Time    `json:"last_transition_at,omitempty"`
-	FailureReason       string        `json:"failure_reason"`
-	DegradedThreshold   int           `json:"degraded_threshold"`
-	DownThreshold       int           `json:"down_threshold"`
-	CheckIntervalSecs   int           `json:"check_interval_seconds"`
-	Enabled             bool          `json:"enabled"`
-	Acknowledged        bool          `json:"acknowledged"`
-	AcknowledgedBy      string        `json:"acknowledged_by,omitempty"`
-	AcknowledgedAt      *time.Time    `json:"acknowledged_at,omitempty"`
-	CreatedAt           time.Time     `json:"created_at"`
-	UpdatedAt           time.Time     `json:"updated_at"`
+	ID                  string       `json:"id"`
+	Endpoint            string       `json:"endpoint"`
+	CertificateID       *string      `json:"certificate_id,omitempty"`
+	NetworkScanTargetID *string      `json:"network_scan_target_id,omitempty"`
+	ExpectedFingerprint string       `json:"expected_fingerprint"`
+	ObservedFingerprint string       `json:"observed_fingerprint"`
+	Status              HealthStatus `json:"status"`
+	ConsecutiveFailures int          `json:"consecutive_failures"`
+	ResponseTimeMs      int          `json:"response_time_ms"`
+	TLSVersion          string       `json:"tls_version"`
+	CipherSuite         string       `json:"cipher_suite"`
+	CertSubject         string       `json:"cert_subject"`
+	CertIssuer          string       `json:"cert_issuer"`
+	CertExpiry          *time.Time   `json:"cert_expiry,omitempty"`
+	LastCheckedAt       *time.Time   `json:"last_checked_at,omitempty"`
+	LastSuccessAt       *time.Time   `json:"last_success_at,omitempty"`
+	LastFailureAt       *time.Time   `json:"last_failure_at,omitempty"`
+	LastTransitionAt    *time.Time   `json:"last_transition_at,omitempty"`
+	FailureReason       string       `json:"failure_reason"`
+	DegradedThreshold   int          `json:"degraded_threshold"`
+	DownThreshold       int          `json:"down_threshold"`
+	CheckIntervalSecs   int          `json:"check_interval_seconds"`
+	Enabled             bool         `json:"enabled"`
+	Acknowledged        bool         `json:"acknowledged"`
+	AcknowledgedBy      string       `json:"acknowledged_by,omitempty"`
+	AcknowledgedAt      *time.Time   `json:"acknowledged_at,omitempty"`
+	CreatedAt           time.Time    `json:"created_at"`
+	UpdatedAt           time.Time    `json:"updated_at"`
 }
 
 // TransitionStatus computes the new health status based on the probe result.
@@ -89,13 +89,13 @@ func (h *EndpointHealthCheck) TransitionStatus(probeSuccess bool, observedFinger
 
 // HealthHistoryEntry represents a single probe record.
 type HealthHistoryEntry struct {
-	ID            string    `json:"id"`
-	HealthCheckID string    `json:"health_check_id"`
-	Status        string    `json:"status"`
-	ResponseTimeMs int      `json:"response_time_ms"`
-	Fingerprint   string    `json:"fingerprint"`
-	FailureReason string    `json:"failure_reason"`
-	CheckedAt     time.Time `json:"checked_at"`
+	ID             string    `json:"id"`
+	HealthCheckID  string    `json:"health_check_id"`
+	Status         string    `json:"status"`
+	ResponseTimeMs int       `json:"response_time_ms"`
+	Fingerprint    string    `json:"fingerprint"`
+	FailureReason  string    `json:"failure_reason"`
+	CheckedAt      time.Time `json:"checked_at"`
 }
 
 // HealthCheckSummary contains aggregate counts by status.

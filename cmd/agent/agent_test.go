@@ -692,10 +692,10 @@ func TestMakeRequest_InvalidURL(t *testing.T) {
 // TestCertKeyInfo tests extraction of key algorithm and size from certificates.
 func TestCertKeyInfo(t *testing.T) {
 	tests := []struct {
-		name         string
-		genKey       func() interface{}
-		expectedAlg  string
-		minBitSize   int
+		name        string
+		genKey      func() interface{}
+		expectedAlg string
+		minBitSize  int
 	}{
 		{
 			name: "ECDSA P-256",
@@ -1503,9 +1503,9 @@ func TestValidateHTTPSScheme(t *testing.T) {
 			wantErrSub: "plaintext http://",
 		},
 		{
-			name:       "bare host missing scheme falls through to unsupported",
-			serverURL:  "localhost:8443",
-			wantErr:    true,
+			name:      "bare host missing scheme falls through to unsupported",
+			serverURL: "localhost:8443",
+			wantErr:   true,
 			// url.Parse treats "localhost:8443" as scheme=localhost,
 			// opaque=8443 — exercises the default arm (unsupported scheme)
 			// rather than the empty-scheme arm. Both are fail-closed, which

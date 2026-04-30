@@ -21,9 +21,9 @@ import (
 // Supports in-cluster auth by default (ServiceAccount token auto-mounted) or
 // out-of-cluster auth via kubeconfig file.
 type Config struct {
-	Namespace      string            `json:"namespace"`                // Required. Kubernetes namespace.
-	SecretName     string            `json:"secret_name"`              // Required. Name of the kubernetes.io/tls Secret.
-	Labels         map[string]string `json:"labels,omitempty"`         // Optional. Additional labels to add to the Secret.
+	Namespace      string            `json:"namespace"`                 // Required. Kubernetes namespace.
+	SecretName     string            `json:"secret_name"`               // Required. Name of the kubernetes.io/tls Secret.
+	Labels         map[string]string `json:"labels,omitempty"`          // Optional. Additional labels to add to the Secret.
 	KubeconfigPath string            `json:"kubeconfig_path,omitempty"` // Optional. Path to kubeconfig for out-of-cluster auth.
 }
 

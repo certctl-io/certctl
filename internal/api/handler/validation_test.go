@@ -333,7 +333,7 @@ func TestValidateCSRPEM_InvalidInputs(t *testing.T) {
 // TestValidatePolicyType_ValidTypes tests valid policy types.
 func TestValidatePolicyType_ValidTypes(t *testing.T) {
 	validTypes := []struct {
-		name string
+		name  string
 		ptype interface{}
 	}{
 		{

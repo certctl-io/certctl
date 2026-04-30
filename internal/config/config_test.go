@@ -990,9 +990,9 @@ func TestGetLogLevel_AllLevels(t *testing.T) {
 		{"info", slog.LevelInfo},
 		{"warn", slog.LevelWarn},
 		{"error", slog.LevelError},
-		{"unknown", slog.LevelInfo},  // default fallback
-		{"", slog.LevelInfo},         // empty string
-		{"DEBUG", slog.LevelInfo},    // case-sensitive, no match → default
+		{"unknown", slog.LevelInfo}, // default fallback
+		{"", slog.LevelInfo},        // empty string
+		{"DEBUG", slog.LevelInfo},   // case-sensitive, no match → default
 	}
 	for _, tt := range tests {
 		t.Run(tt.level, func(t *testing.T) {
@@ -1091,6 +1091,7 @@ func TestGetEnvBool(t *testing.T) {
 		})
 	}
 }
+
 // I-003: Job timeout reaper configuration tests
 func TestConfig_Scheduler_JobTimeoutDefaults(t *testing.T) {
 	clearCertctlEnv(t)

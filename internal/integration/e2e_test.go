@@ -704,17 +704,17 @@ func TestM20EnhancedQueryAPI(t *testing.T) {
 	// Setup: Create a certificate for testing
 	now := time.Now()
 	cert := &domain.ManagedCertificate{
-		ID:          "mc-m20-test-1",
-		Name:        "M20 Test Cert",
-		CommonName:  "m20.example.com",
-		Environment: "production",
-		Status:      domain.CertificateStatusActive,
-		IssuerID:    "iss-local",
-		OwnerID:     "owner-ops",
-		TeamID:      "team-platform",
+		ID:                   "mc-m20-test-1",
+		Name:                 "M20 Test Cert",
+		CommonName:           "m20.example.com",
+		Environment:          "production",
+		Status:               domain.CertificateStatusActive,
+		IssuerID:             "iss-local",
+		OwnerID:              "owner-ops",
+		TeamID:               "team-platform",
 		CertificateProfileID: "prof-standard",
-		CreatedAt:   now,
-		UpdatedAt:   now,
+		CreatedAt:            now,
+		UpdatedAt:            now,
 	}
 	certRepo.certs["mc-m20-test-1"] = cert
 

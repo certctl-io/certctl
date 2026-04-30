@@ -290,11 +290,11 @@ func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 	}
 
 	limiter := &keyedRateLimiter{
-		ipRate:       cfg.RPS,
-		ipBurst:      float64(cfg.BurstSize),
-		userRate:     perUserRPS,
-		userBurst:    perUserBurst,
-		buckets:      make(map[string]*tokenBucket),
+		ipRate:    cfg.RPS,
+		ipBurst:   float64(cfg.BurstSize),
+		userRate:  perUserRPS,
+		userBurst: perUserBurst,
+		buckets:   make(map[string]*tokenBucket),
 	}
 
 	return func(next http.Handler) http.Handler {

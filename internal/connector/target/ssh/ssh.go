@@ -411,9 +411,9 @@ func (c *realSSHClient) Connect(ctx context.Context) error {
 	}
 
 	sshConfig := &ssh.ClientConfig{
-		User:            c.config.User,
-		Auth:            authMethods,
-		Timeout:         time.Duration(c.config.Timeout) * time.Second,
+		User:    c.config.User,
+		Auth:    authMethods,
+		Timeout: time.Duration(c.config.Timeout) * time.Second,
 		// InsecureIgnoreHostKey is used intentionally: certctl deploys to known
 		// infrastructure (the operator explicitly configures each target host).
 		// This is the same security rationale as network scanner's InsecureSkipVerify

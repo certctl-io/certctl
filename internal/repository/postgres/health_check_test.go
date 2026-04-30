@@ -235,8 +235,8 @@ func TestHealthCheckRepository_ListDueForCheck(t *testing.T) {
 	ctx := context.Background()
 
 	now := time.Now().UTC().Truncate(time.Microsecond)
-	pastDue := now.Add(-10 * time.Minute)   // > 300s ago, enabled → due
-	recent := now.Add(-30 * time.Second)    // < 300s ago, enabled → not due
+	pastDue := now.Add(-10 * time.Minute) // > 300s ago, enabled → due
+	recent := now.Add(-30 * time.Second)  // < 300s ago, enabled → not due
 
 	// (a) enabled + null last_checked_at — NULLS FIRST puts this first
 	a := newHealthCheck("hc-due-a", "a.example.com:443", domain.HealthStatusUnknown, true)

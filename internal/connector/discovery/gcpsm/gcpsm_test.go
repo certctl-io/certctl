@@ -82,7 +82,7 @@ func generateTestCertificate(cn string, expire time.Duration) (*x509.Certificate
 		ExtKeyUsage: []x509.ExtKeyUsage{
 			x509.ExtKeyUsageServerAuth,
 		},
-		DNSNames:    []string{"example.com", "*.example.com"},
+		DNSNames:       []string{"example.com", "*.example.com"},
 		EmailAddresses: []string{"test@example.com"},
 	}
 

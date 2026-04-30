@@ -59,12 +59,12 @@ func (h *HealthCheckHandler) ListHealthChecks(w http.ResponseWriter, r *http.Req
 	}
 
 	filter := &repository.HealthCheckFilter{
-		Status:               status,
-		CertificateID:        certificateID,
-		NetworkScanTargetID:  networkScanTargetID,
-		Enabled:              enabledFilter,
-		Page:                 page,
-		PerPage:              perPage,
+		Status:              status,
+		CertificateID:       certificateID,
+		NetworkScanTargetID: networkScanTargetID,
+		Enabled:             enabledFilter,
+		Page:                page,
+		PerPage:             perPage,
 	}
 
 	checks, total, err := h.service.List(r.Context(), filter)

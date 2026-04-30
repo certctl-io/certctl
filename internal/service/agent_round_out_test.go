@@ -109,9 +109,9 @@ func TestAgentService_UpdateJobStatus_DelegatesToReportJobStatus(t *testing.T) {
 	svc, repo, _, jobRepo, _ := newTestAgentSvc(t)
 	repo.Agents["a-1"] = &domain.Agent{ID: "a-1", Status: domain.AgentStatusOnline}
 	jobRepo.Jobs["j-1"] = &domain.Job{
-		ID:       "j-1",
-		AgentID:  strPtr("a-1"),
-		Status:   domain.JobStatusRunning,
+		ID:      "j-1",
+		AgentID: strPtr("a-1"),
+		Status:  domain.JobStatusRunning,
 	}
 	err := svc.UpdateJobStatus(context.Background(), "a-1", "j-1", "Completed", "")
 	if err != nil {

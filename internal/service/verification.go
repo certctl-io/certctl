@@ -11,9 +11,9 @@ import (
 
 // VerificationService handles recording and querying certificate deployment verification results.
 type VerificationService struct {
-	jobRepo       repository.JobRepository
-	auditService  *AuditService
-	logger        *slog.Logger
+	jobRepo      repository.JobRepository
+	auditService *AuditService
+	logger       *slog.Logger
 }
 
 // NewVerificationService creates a new verification service.
@@ -23,9 +23,9 @@ func NewVerificationService(
 	logger *slog.Logger,
 ) *VerificationService {
 	return &VerificationService{
-		jobRepo:       jobRepo,
-		auditService:  auditService,
-		logger:        logger,
+		jobRepo:      jobRepo,
+		auditService: auditService,
+		logger:       logger,
 	}
 }
 
@@ -76,11 +76,11 @@ func (s *VerificationService) RecordVerificationResult(ctx context.Context, resu
 	// Record audit event
 	auditEvent := "job_verification_success"
 	auditDetails := map[string]interface{}{
-		"job_id":                  result.JobID,
-		"target_id":               result.TargetID,
-		"expected_fingerprint":    result.ExpectedFingerprint,
-		"actual_fingerprint":      result.ActualFingerprint,
-		"verified":                result.Verified,
+		"job_id":               result.JobID,
+		"target_id":            result.TargetID,
+		"expected_fingerprint": result.ExpectedFingerprint,
+		"actual_fingerprint":   result.ActualFingerprint,
+		"verified":             result.Verified,
 	}
 
 	if result.Error != "" {
@@ -114,7 +114,7 @@ func (s *VerificationService) GetVerificationResult(ctx context.Context, jobID s
 	}
 
 	result := &domain.VerificationResult{
-		JobID:  job.ID,
+		JobID:    job.ID,
 		Verified: job.VerificationStatus == domain.VerificationSuccess,
 	}
 

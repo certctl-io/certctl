@@ -643,7 +643,7 @@ func generateTestCSR(cn string) (*x509.CertificateRequest, string, error) {
 	}
 
 	csrTemplate := x509.CertificateRequest{
-		Subject: subject,
+		Subject:  subject,
 		DNSNames: []string{cn, "www." + cn},
 	}
 
