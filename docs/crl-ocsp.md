@@ -285,24 +285,106 @@ will pull on its own cadence.
 
 ---
 
+## Production hardening II additions (post-2026-04-30)
+
+The following capabilities were folded into V2 (free) by the production
+hardening II bundle. Each closes a real procurement-team checklist gap
+without requiring a paid tier.
+
+### OCSP nonce extension (RFC 6960 §4.4.1)
+
+The POST OCSP handler echoes the request's nonce extension (OID
+`1.3.6.1.5.5.7.48.1.2`) in the response. Defends against replay attacks
+where a relying party's cached response is replayed against a now-revoked
+cert. Always-on; no operator opt-out.
+
+Failure modes:
+
+- **No nonce in request** — back-compat; response omits the extension.
+- **Well-formed nonce ≤ 32 bytes** — response echoes it; tracked in
+  `certctl_ocsp_counter_total{label="nonce_echoed"}`.
+- **Empty or oversized nonce (> 32 bytes per CA/B Forum BR §4.10.2)** —
+  responder returns the canonical "unauthorized" status (RFC 6960 §2.3
+  status 6); tracked in `certctl_ocsp_counter_total{label="nonce_malformed"}`.
+
+### OCSP pre-signed response cache
+
+Mirrors the existing CRL cache. Per-(issuer, serial) entries pre-signed
+and stored in `ocsp_response_cache`; the read-through facade in
+`CAOperationsSvc.GetOCSPResponseWithNonce` consults the cache for
+nil-nonce requests and falls through to live signing on miss + writes
+the result back. Nonce-bearing requests always live-sign because the
+cache stores nil-nonce blobs.
+
+**Load-bearing security wire:** `RevocationSvc.RevokeCertificateWithActor`
+calls `InvalidateOnRevoke` after a successful revocation so the next
+OCSP fetch returns the revoked status. There is no stale-good window
+after revoke.
+
+### Per-source-IP OCSP rate limit + per-actor cert-export rate limit
+
+Defaults: 1000 req/min/IP for OCSP; 50 exports/hr/operator for the
+cert-export endpoints. Configurable via
+`CERTCTL_OCSP_RATE_LIMIT_PER_IP_MIN` and
+`CERTCTL_CERT_EXPORT_RATE_LIMIT_PER_ACTOR_HR`; zero disables.
+
+OCSP rate-limit trip: canonical "unauthorized" OCSP blob plus
+`Retry-After: 60`. Cert-export trip: HTTP 429 + JSON
+`{"error":"rate_limit_exceeded","retry_after_seconds":3600}`.
+
+The OCSP limiter does NOT honor `X-Forwarded-For` because OCSP is
+publicly reachable and untrusted intermediaries could spoof the header
+to bypass the cap.
+
+### CRL HTTP caching headers (RFC 7232)
+
+`GET /.well-known/pki/crl/{issuer_id}` now returns weak-form ETag,
+`Cache-Control: public, max-age=3600, must-revalidate`, and respects
+`If-None-Match` for HTTP 304 short-circuits. Lets CDNs and reverse
+proxies serve repeated fetches from edge cache.
+
+### CRL DistributionPoint auto-injection
+
+Local issuer config field `CRLDistributionPointURLs []string`; when
+non-empty, every issued cert carries the RFC 5280 §4.2.1.13
+`id-ce-cRLDistributionPoints` extension pointing at certctl's CRL
+endpoint. Refusing to silently inject an empty CDP is deliberate —
+silent-empty fails relying-party validation worse than no CDP.
+
+### Cert-export typed audit codes + Prometheus per-area metrics
+
+Audit emission now carries typed action constants
+(`cert_export_pem`, `cert_export_pkcs12`, `cert_export_failed`)
+alongside legacy bare codes. Detail map enriched with
+`has_private_key` (always false in V2) and `cipher`
+(`AES-256-CBC-PBE2-SHA256` — pinned).
+
+`GET /api/v1/metrics/prometheus` surfaces the new per-area counters
+under the `certctl_<area>_counter_total{label=...}` family. OCSP
+shipped in this bundle; alert recommendations:
+
+- `{label="rate_limited"}` rate > 0 sustained > 5m → notify (limiter
+  is doing its job; investigate source IP).
+- `{label="nonce_malformed"}` > 0 → notify (legitimate clients don't
+  send malformed nonces).
+- `{label="signing_failed"}` > 0 → page on-call (issuer connector
+  failing).
+
 ## What this release does NOT include (V3-Pro)
 
-The following are explicitly out of scope for the V2 (free) bundle and are
-tracked for the certctl Pro release:
+Still out of scope for V2; tracked for V3-Pro:
 
 - **Delta CRLs (RFC 5280 §5.2.4).** Useful for very large CRLs (10k+
-  revoked certs); the data model already accommodates the Base CRL Number
+  revoked certs); the data model accommodates the Base CRL Number
   reference but the pipeline only emits Base CRLs in V2.
-- **OCSP rate-limiting per relying party.** Per-IP token bucket on the OCSP
-  endpoint — V3-Pro because it justifies per-seat pricing for high-traffic
-  responders.
-- **OCSP stapling.** Server-side: cache pre-fetched OCSP responses + serve
-  in TLS handshake. Client-side: a "stapling fetcher" agent for non-stapling
-  origins.
-
-The MaxBytesReader cap is the only request-level guard in V2; the
-unauthenticated-by-design relying-party endpoints are intentionally not
-rate-limited per IP.
+- **OCSP stapling at SCEP/EST CertRep response time.** Server-side
+  pre-staple into the TLS handshake context.
+- **OCSP request signature verification (RFC 6960 §4.1.1).** Optional
+  per-spec; certctl currently ignores the signature.
+- **OCSP responder HA / multi-region replication.** Active-active
+  OCSP cache with Postgres logical replication.
+- **CRL Issuing Distribution Point (IDP) extension** (RFC 5280
+  §5.2.5) — for sharded CRL deployments.
 
 ---
 
