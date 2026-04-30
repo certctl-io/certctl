@@ -124,6 +124,17 @@ jobs:
           path: coverage.out
           retention-days: 30
 
+      - name: Coverage PR comment
+        # ci-pipeline-cleanup Phase 10 / frozen decision 0.9: self-hosted
+        # alternative to Codecov / Coveralls. Posts a per-package coverage
+        # delta as a PR comment; updates in place on subsequent pushes.
+        if: github.event_name == 'pull_request'
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          PR_NUMBER: ${{ github.event.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+        run: bash scripts/ci-guards/coverage-pr-comment.sh
+
       # Bundle P / Strengthening #6 — QA-doc drift guards. Forces every PR
       # that adds a Part to docs/testing-guide.md OR a seed row to
       # migrations/seed_demo.sql to keep docs/qa-test-guide.md in sync. This
