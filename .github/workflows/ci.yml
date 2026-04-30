@@ -28,6 +28,28 @@ jobs:
           go build ./cmd/mcp-server/...
           go build ./cmd/cli/...
 
+      - name: gofmt drift (Makefile::verify parity)
+        # ci-pipeline-cleanup Phase 4 / frozen decision 0.13: Makefile::verify
+        # checks gofmt + vet + golangci-lint + go test. CI runs vet, lint, test
+        # already — but NOT gofmt. This step closes the parity gap.
+        # Mirrors the Makefile::verify shape: any gofmt output means the
+        # source needs reformatting.
+        run: |
+          out=$(gofmt -l .)
+          if [ -n "$out" ]; then
+            echo "::error::gofmt would reformat these files (run 'gofmt -w' locally):"
+            echo "$out"
+            exit 1
+          fi
+
+      - name: go mod tidy drift
+        # ci-pipeline-cleanup Phase 4: catches PRs that import a package
+        # without committing the go.mod / go.sum update. Standard Go-CI
+        # gate; absent before this bundle.
+        run: |
+          go mod tidy
+          git diff --exit-code go.mod go.sum
+
       - name: Go Vet
         run: go vet ./...
 
