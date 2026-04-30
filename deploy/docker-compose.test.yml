@@ -616,7 +616,12 @@ services:
       dockerfile: deploy/test/f5-mock-icontrol/Dockerfile
     container_name: certctl-test-f5-mock
     ports:
-      - "20443:443"
+      # Host port 20449 (NOT 20443 — apache-test owns 20443). The
+      # ci-pipeline-cleanup Phase 5 vendor-matrix collapse brings up
+      # all sidecars simultaneously; the original Phase 1 design
+      # accidentally double-bound 20443 because the per-vendor matrix
+      # only ever ran one sidecar at a time, hiding the collision.
+      - "20449:443"
     networks:
       certctl-test:
         ipv4_address: 10.30.50.28

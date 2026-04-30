@@ -52,7 +52,7 @@ var sidecarMap = map[string]vendorSidecar{
 	"postfix":     {name: "postfix-test", hostPort: "127.0.0.1:20465"},
 	"dovecot":     {name: "dovecot-test", hostPort: "127.0.0.1:20993"},
 	"openssh":     {name: "openssh-test", hostPort: "127.0.0.1:20022"},
-	"f5-mock":     {name: "f5-mock-icontrol", hostPort: "127.0.0.1:20443"},
+	"f5-mock":     {name: "f5-mock-icontrol", hostPort: "127.0.0.1:20449"},
 	"k8s-kind":    {name: "k8s-kind-test", hostPort: ""},
 	"windows-iis": {name: "windows-iis-test", hostPort: "127.0.0.1:20448"},
 }
