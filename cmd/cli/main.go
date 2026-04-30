@@ -41,6 +41,14 @@ Commands:
                    Required: --owner-id, --team-id, --renewal-policy-id, --issuer-id
                    Optional: --name-template (default {cn}), --environment (default imported)
 
+  est cacerts      --profile <p>                 EST GET cacerts (RFC 7030 §4.1)
+  est csrattrs     --profile <p>                 EST GET csrattrs (RFC 7030 §4.5)
+  est enroll       --profile <p> --csr <path>    EST POST simpleenroll (RFC 7030 §4.2)
+  est reenroll     --profile <p> --csr <path>    EST POST simplereenroll (RFC 7030 §4.2.2)
+  est serverkeygen --profile <p> --csr <path> --out <prefix>
+                                                 EST POST serverkeygen (RFC 7030 §4.4)
+  est test         --profile <p>                 Smoke-test cacerts + csrattrs
+
   status           Show server health + summary stats
   version          Show CLI version
 
@@ -99,6 +107,8 @@ Examples:
 		err = handleJobs(client, cmdArgs)
 	case "import":
 		err = handleImport(client, cmdArgs)
+	case "est":
+		err = handleEST(client, cmdArgs)
 	case "status":
 		err = handleStatus(client)
 	case "version":
@@ -253,6 +263,35 @@ func handleImport(client *cli.Client, args []string) error {
 
 func handleStatus(client *cli.Client) error {
 	return client.GetStatus()
+}
+
+// handleEST dispatches the `est` subcommands. Mirrors the existing
+// handleCerts / handleAgents pattern verbatim. EST RFC 7030 hardening
+// master bundle Phase 9.1.
+func handleEST(client *cli.Client, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: est <cacerts|csrattrs|enroll|reenroll|serverkeygen|test> [options]\n")
+		return nil
+	}
+	subcommand := args[0]
+	subArgs := args[1:]
+	switch subcommand {
+	case "cacerts":
+		return client.EstCacerts(subArgs)
+	case "csrattrs":
+		return client.EstCsrattrs(subArgs)
+	case "enroll":
+		return client.EstEnroll(subArgs)
+	case "reenroll":
+		return client.EstReEnroll(subArgs)
+	case "serverkeygen":
+		return client.EstServerKeygen(subArgs)
+	case "test":
+		return client.EstTest(subArgs)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown subcommand: est %s\n", subcommand)
+		return nil
+	}
 }
 
 // validateHTTPSScheme rejects plaintext and empty-scheme server URLs at

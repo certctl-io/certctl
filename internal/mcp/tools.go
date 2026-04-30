@@ -29,6 +29,7 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	registerMetricsTools(s, client)
 	registerDigestTools(s, client)
 	registerHealthTools(s, client)
+	registerESTTools(s, client)
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────

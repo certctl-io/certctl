@@ -727,6 +727,43 @@ export interface SCEPProfilesResponse {
   generated_at: string;
 }
 
+// EST RFC 7030 hardening master bundle Phase 7.1 / 8 GUI:
+// per-profile snapshot returned by GET /api/v1/admin/est/profiles. Mirrors
+// the Go-side service.ESTStatsSnapshot 1:1.
+export interface ESTTrustAnchorInfo {
+  subject: string;
+  not_before: string;
+  not_after: string;
+  days_to_expiry: number;
+  expired: boolean;
+}
+
+export interface ESTStatsSnapshot {
+  path_id: string;
+  issuer_id: string;
+  profile_id?: string;
+  // 12 named labels — see service/est_counters.go.
+  counters: Record<string, number>;
+  mtls_enabled: boolean;
+  basic_auth_configured: boolean;
+  server_keygen_enabled: boolean;
+  trust_anchors?: ESTTrustAnchorInfo[];
+  trust_anchor_path?: string;
+  now: string;
+}
+
+export interface ESTProfilesResponse {
+  profiles: ESTStatsSnapshot[];
+  profile_count: number;
+  generated_at: string;
+}
+
+export interface ESTReloadTrustResponse {
+  reloaded: boolean;
+  path_id: string;
+  reloaded_at: string;
+}
+
 // SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe.
 //
 // Backs the SCEP Probe section on the Network Scan page. The probe

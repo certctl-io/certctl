@@ -1,4 +1,4 @@
-import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse, SCEPProfilesResponse, SCEPProbeResult, SCEPProbesResponse } from './types';
+import type { Certificate, CertificateVersion, Agent, Job, Notification, AuditEvent, PolicyRule, PolicyViolation, RenewalPolicy, Issuer, Target, CertificateProfile, Owner, Team, AgentGroup, PaginatedResponse, DashboardSummary, CertificateStatusCount, ExpirationBucket, JobTrendDataPoint, IssuanceRateDataPoint, MetricsResponse, DiscoveredCertificate, DiscoveryScan, DiscoverySummary, NetworkScanTarget, EndpointHealthCheck, HealthHistoryEntry, HealthCheckSummary, AgentDependencyCounts, RetireAgentResponse, BlockedByDependenciesResponse, CRLCacheResponse, IntuneStatsResponse, IntuneReloadTrustResponse, SCEPProfilesResponse, SCEPProbeResult, SCEPProbesResponse, ESTProfilesResponse, ESTReloadTrustResponse } from './types';
 
 const BASE = '/api/v1';
 
@@ -319,6 +319,22 @@ export const reloadAdminSCEPIntuneTrust = (pathID: string) =>
 // getAdminSCEPIntuneStats helper.
 export const getAdminSCEPProfiles = () =>
   fetchJSON<SCEPProfilesResponse>(`${BASE}/admin/scep/profiles`);
+
+// EST RFC 7030 hardening master bundle Phase 7.2 admin endpoints.
+//
+// Backend handler: internal/api/handler/admin_est.go.
+// Both endpoints are M-008 admin-gated; the ESTAdminPage component
+// gates the React-Query `enabled` flag on useAuth().admin so non-admin
+// callers never see the page (the route itself is also conditional on
+// the admin flag in main.tsx).
+export const getAdminESTProfiles = () =>
+  fetchJSON<ESTProfilesResponse>(`${BASE}/admin/est/profiles`);
+
+export const reloadAdminESTTrust = (pathID: string) =>
+  fetchJSON<ESTReloadTrustResponse>(`${BASE}/admin/est/reload-trust`, {
+    method: 'POST',
+    body: JSON.stringify({ path_id: pathID }),
+  });
 
 // SCEP RFC 8894 + Intune master bundle Phase 11.5: SCEP probe
 // (capability + posture). Synchronous — the caller blocks until the

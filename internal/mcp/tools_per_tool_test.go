@@ -359,6 +359,14 @@ var allHappyPathCases = []toolCase{
 	{"certctl_ready", map[string]any{}, http.MethodGet, "/ready"},
 	{"certctl_auth_check", map[string]any{}, http.MethodGet, "/api/v1/auth/check"},
 	{"certctl_auth_info", map[string]any{}, http.MethodGet, "/api/v1/auth/whoami"},
+
+	// EST RFC 7030 hardening Phase 9.2 — 6 EST tools.
+	{"est_list_profiles", map[string]any{}, http.MethodGet, "/api/v1/admin/est/profiles"},
+	{"est_admin_stats", map[string]any{}, http.MethodGet, "/api/v1/admin/est/profiles"},
+	{"est_get_cacerts", map[string]any{"profile": "corp"}, http.MethodGet, "/.well-known/est/corp/cacerts"},
+	{"est_get_csrattrs", map[string]any{"profile": "corp"}, http.MethodGet, "/.well-known/est/corp/csrattrs"},
+	{"est_enroll", map[string]any{"profile": "corp", "csr": "-----BEGIN CERTIFICATE REQUEST-----\nXXX\n-----END CERTIFICATE REQUEST-----"}, http.MethodPost, "/.well-known/est/corp/simpleenroll"},
+	{"est_reenroll", map[string]any{"profile": "corp", "csr": "-----BEGIN CERTIFICATE REQUEST-----\nXXX\n-----END CERTIFICATE REQUEST-----"}, http.MethodPost, "/.well-known/est/corp/simplereenroll"},
 }
 
 // TestMCP_AllTools_HappyPath dispatches every tool against the mock API in

@@ -33,6 +33,7 @@ import JobDetailPage from './pages/JobDetailPage';
 import IssuerDetailPage from './pages/IssuerDetailPage';
 import TargetDetailPage from './pages/TargetDetailPage';
 import SCEPAdminPage from './pages/SCEPAdminPage';
+import ESTAdminPage from './pages/ESTAdminPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -91,6 +92,13 @@ createRoot(document.getElementById('root')!).render(
                   {/* Backward-compat alias for external bookmarks the Phase 9
                       release advertised. Lands on the Intune Monitoring tab. */}
                   <Route path="scep/intune" element={<SCEPAdminPage />} />
+                  {/* EST RFC 7030 hardening master bundle Phase 8: per-profile
+                      EST Administration page with Profiles / Recent Activity /
+                      Trust Bundle tabs. Same admin-gate pattern as SCEP — the
+                      route is unconditional; the page renders an "Admin access
+                      required" banner for non-admin callers and skips the
+                      underlying API calls so the server never sees a 403. */}
+                  <Route path="est" element={<ESTAdminPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

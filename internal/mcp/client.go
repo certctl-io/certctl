@@ -92,6 +92,39 @@ func (c *Client) DeleteWithQuery(path string, query url.Values) (json.RawMessage
 	return c.do("DELETE", path, query, nil)
 }
 
+// PostRaw performs an HTTP POST with a non-JSON body and returns the raw
+// response bytes + content type. Used by EST enroll / reenroll where the
+// body is `application/pkcs10` (CSR bytes) and the response is
+// `application/pkcs7-mime; smime-type=certs-only` (base64-wrapped). EST
+// RFC 7030 hardening master bundle Phase 9.2.
+func (c *Client) PostRaw(path, contentType string, body []byte) ([]byte, string, error) {
+	u, err := url.JoinPath(c.baseURL, path)
+	if err != nil {
+		return nil, "", fmt.Errorf("invalid URL: %w", err)
+	}
+	req, err := http.NewRequest("POST", u, bytes.NewReader(body))
+	if err != nil {
+		return nil, "", fmt.Errorf("creating request: %w", err)
+	}
+	req.Header.Set("Content-Type", contentType)
+	if c.apiKey != "" {
+		req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	}
+	resp, err := c.httpClient.Do(req)
+	if err != nil {
+		return nil, "", fmt.Errorf("request failed: %w", err)
+	}
+	defer resp.Body.Close()
+	data, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return nil, "", fmt.Errorf("reading response: %w", err)
+	}
+	if resp.StatusCode >= 400 {
+		return nil, "", fmt.Errorf("API error (HTTP %d): %s", resp.StatusCode, string(data))
+	}
+	return data, resp.Header.Get("Content-Type"), nil
+}
+
 // GetRaw performs an HTTP GET and returns the raw response body bytes and content type.
 // Used for binary responses (DER CRL, OCSP).
 func (c *Client) GetRaw(path string) ([]byte, string, error) {
