@@ -50,11 +50,11 @@ const (
 	AuditActionCertExportFailed = "cert_export_failed"
 )
 
-// Cipher identifier emitted in the PKCS#12 export audit detail.
-// Pinned here so a future dependency upgrade that silently changes
-// the underlying go-pkcs12 default is caught by the audit drift
-// review (operator notices the value diverging from what's
-// advertised in docs/security.md).
+// PKCS12CipherModernAES256 is the cipher identifier emitted in the
+// PKCS#12 export audit detail. Pinned here so a future dependency
+// upgrade that silently changes the underlying go-pkcs12 default is
+// caught by the audit drift review (operator notices the value
+// diverging from what's advertised in docs/crl-ocsp.md).
 //
 // pkcs12.Modern (the SSLMate library) produces AES-256-CBC PBE2
 // with SHA-256 KDF. Documented in github.com/SSLMate/go-pkcs12 v0.7+.
