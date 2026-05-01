@@ -70,25 +70,6 @@ jobs:
           # maintainability/correctness issues that the smaller security-extended
           # suite skips. Comparable scope to what Aikido / SonarCloud run.
           queries: security-and-quality
-          # Custom config that pulls in the local model pack at
-          # .github/codeql/certctl-models/. The pack declares
-          # internal/validation.ValidateSafeURL as a request-forgery barrier
-          # via Models-as-Data, dismissing the alert that fires at every
-          # call site using the validator (scep_probe.go, webhook.go)
-          # without per-line `// codeql[...]` suppressions. See
-          # .github/codeql/certctl-models/qlpack.yml for the full motivation.
-          # Requires CodeQL CLI ≥ 2.25.2 for the barrierModel extension;
-          # codeql-action@v3 ships a recent enough CLI by default.
-          config-file: ./.github/codeql/codeql-config.yml
-          # Tells the CodeQL CLI's pack resolver where to find unpublished
-          # local packs. The pack referenced by name in codeql-config.yml's
-          # `packs:` directive (shankar0123/certctl-models) is resolved
-          # against this path. Without it, the name would fail to resolve
-          # and the pack would silently not load — that's exactly what
-          # happened to commits d8026d5 + 4bb7a74 (alert #23 stayed open
-          # across two CodeQL runs because the pack never made it into the
-          # analysis). Verified pattern: github/vscode-codeql.
-          additional-packs: .github/codeql
 
       - name: Autobuild
         uses: github/codeql-action/autobuild@v3
