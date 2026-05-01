@@ -1,0 +1,42 @@
+# certctl CodeQL model pack — extends the standard Go queries with project-
+# specific data-flow knowledge (sanitizers, sinks, summaries).
+#
+# Why this exists: CodeQL's standard `go/request-forgery` query is a syntactic
+# taint-tracking rule. It traces operator-supplied URLs into HTTP egress sinks
+# (`http.Client.Do`) and reports — but it has no built-in knowledge of
+# certctl's `internal/validation.ValidateSafeURL` SSRF guard. The validator
+# IS a sanitizer (rejects loopback, link-local incl. cloud metadata
+# 169.254.169.254, multicast, broadcast, unspecified, IPv6 link-local;
+# rejects DNS names whose A/AAAA records resolve into any of those ranges)
+# but CodeQL doesn't know that, so the analyzer reports a finding the
+# runtime defense already mitigates.
+#
+# This pack uses Models-as-Data (MaD) extensions to declare the validator as
+# a barrier for the request-forgery query. After this pack is loaded:
+#   - The alert at internal/service/scep_probe.go:232 (CodeQL #23) is
+#     dismissed at source, not via per-line `// codeql[...]` suppression.
+#   - The same model applies to the second site of this shape — webhook
+#     notifier's outbound `client.Do` (internal/connector/notifier/webhook/
+#     webhook.go) — without per-line annotations.
+#   - Future code that flows operator URLs through ValidateSafeURL gets the
+#     same treatment automatically.
+#
+# Loading: codeql-config.yml's `packs:` field references this pack by its
+# `name` below. The `extensionTargets:` map declares which upstream pack the
+# extension data plugs into (codeql/go-all is the Go standard library pack).
+# The `dataExtensions:` glob matches the .model.yml files in models/.
+#
+# MaD `barrierModel` extension was added for Go in CodeQL 2.25.2 (2026-04-21).
+# `github/codeql-action@v3` (pinned in .github/workflows/codeql.yml) pulls a
+# CLI version >= 2.25.2 by default. If a future analysis fails with
+# "unknown extensible predicate barrierModel", the action's CLI version has
+# regressed below 2.25.2 — pin a newer action version rather than reverting
+# this pack.
+
+name: shankar0123/certctl-codeql-models
+version: 0.0.1
+library: true
+extensionTargets:
+  codeql/go-all: '*'
+dataExtensions:
+  - models/*.model.yml

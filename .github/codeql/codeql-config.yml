@@ -1,0 +1,36 @@
+# CodeQL analysis config for certctl.
+#
+# Loaded by .github/workflows/codeql.yml's `Initialize CodeQL` step via
+# `config-file:`. Two responsibilities:
+#
+#  1. Re-declare the query suite the workflow runs (security-and-quality)
+#     so that disabling the action's default suite via `disable-default-
+#     queries: true` doesn't accidentally drop coverage.
+#
+#  2. Load the local model pack at .github/codeql/, which adds project-
+#     specific Models-as-Data extensions (sanitizers, sinks, summaries)
+#     for the standard Go queries. See ./qlpack.yml for the full motivation.
+#
+# Path-ignore is intentionally empty — every path that ships with the
+# repo is in scope. Test files are NOT excluded; if a vulnerability
+# regresses in a test fixture and is later promoted to production, we
+# want CodeQL to catch it on first appearance.
+
+name: certctl-codeql
+
+# Run the same query suite the workflow has been running pre-config-file:
+# security-and-quality (security findings + maintainability/correctness).
+# Listing it here ensures the suite stays in scope even if the action's
+# default behavior shifts.
+queries:
+  - uses: security-and-quality
+
+# Load the local model pack. This is what makes the SSRF sanitizer
+# barrier rows in models/request-forgery-sanitizers.model.yml apply to
+# the standard go/request-forgery query.
+#
+# `${{ }}` is not used here — the path is relative to the config file's
+# directory, not to the repo root, per CodeQL action docs.
+packs:
+  go:
+    - ./

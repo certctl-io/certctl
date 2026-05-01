@@ -1,0 +1,57 @@
+# Models-as-Data sanitizer rows for the go/request-forgery query.
+#
+# Each row in `data` is a 9-tuple matching the `barrierModel` extensible
+# predicate signature for Go:
+#
+#   (package, type, subtypes, name, signature, ext, output, kind, provenance)
+#
+# Where:
+#   - package    — Go import path of the sanitizer
+#   - type       — receiver type ("" for package-level functions)
+#   - subtypes   — false for non-method functions; true to apply to subtypes
+#   - name       — function/method name
+#   - signature  — empty for Go (the column is not used)
+#   - ext        — empty (reserved)
+#   - output     — access path that becomes the barrier; "Argument[N]" means
+#                  the Nth argument is sanitized after the call
+#   - kind       — taint kind the barrier applies to ("request-forgery" for
+#                  the go/request-forgery query)
+#   - provenance — origin tag for the model row ("manual" — hand-authored)
+#
+# References:
+#   - https://codeql.github.com/docs/codeql-language-guides/customizing-library-models-for-go/
+#   - https://github.blog/changelog/2026-04-21-codeql-now-supports-sanitizers-and-validators-in-models-as-data/
+
+extensions:
+  # ---------------------------------------------------------------------------
+  # validation.ValidateSafeURL — primary egress URL validator.
+  # ---------------------------------------------------------------------------
+  # Signature: func ValidateSafeURL(rawURL string) error
+  #
+  # Rejects (returns non-nil error for):
+  #   - non-http/https schemes (file://, gopher://, ftp://, data:, etc.)
+  #   - URLs missing a host
+  #   - literal-IP hosts in: 127/8 + ::1 (loopback), 169.254.0.0/16 (link-
+  #     local incl. AWS/Azure/GCP cloud metadata at 169.254.169.254),
+  #     224.0.0.0/4 + ff00::/8 (multicast), 255.255.255.255 (broadcast),
+  #     0.0.0.0 + :: (unspecified), fe80::/10 (IPv6 link-local)
+  #   - DNS names whose A/AAAA resolution returns any IP in the set above
+  #
+  # Source of truth: internal/validation/ssrf.go (ValidateSafeURL +
+  # IsReservedIP + isReservedIPForDial). RFC 1918 (10/8, 172.16/12,
+  # 192.168/16) is intentionally NOT blocked — see the comment block at
+  # ssrf.go:17-21 for the design rationale.
+  #
+  # The companion runtime defense is SafeHTTPDialContext (installed on the
+  # http.Transport via http.Transport.DialContext) which re-resolves the
+  # host at dial time and pins the dial to a literal non-reserved IP,
+  # defeating DNS rebinding. SafeHTTPDialContext returns a closure rather
+  # than acting as a direct sanitizer in dataflow terms, so it isn't
+  # modeled here — but ValidateSafeURL alone is sufficient to dismiss the
+  # request-forgery alerts at the call sites that use it (scep_probe.go,
+  # webhook.go).
+  - addsTo:
+      pack: codeql/go-all
+      extensible: barrierModel
+    data:
+      - ["github.com/shankar0123/certctl/internal/validation", "", false, "ValidateSafeURL", "", "", "Argument[0]", "request-forgery", "manual"]
