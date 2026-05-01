@@ -2,8 +2,6 @@
   <img src="docs/screenshots/logo/certctl-logo.png" alt="certctl logo" width="450">
 </p>
 
-<img referrerpolicy="no-referrer-when-downgrade" src="https://static.scarf.sh/a.png?x-pxid=89db181e-76e0-45cc-b9c0-790c3dfdfc73" />
-
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
