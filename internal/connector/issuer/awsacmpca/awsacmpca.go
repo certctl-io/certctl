@@ -1,24 +1,38 @@
-// Package awsacmpca implements the issuer.Connector interface for AWS Certificate Authority Service (CAS).
+// Package awsacmpca implements the issuer.Connector interface for AWS Certificate Manager Private CA (ACM PCA).
 //
-// AWS ACM Private CA (ACM PCA) provides a fully managed private certificate authority
-// with certificate signing, revocation, and CRL capabilities. This connector uses the
-// AWS ACM PCA API to issue and manage certificates.
+// AWS ACM Private CA provides a fully managed private certificate authority
+// with certificate signing, revocation, CRL, and OCSP capabilities. This
+// connector uses the AWS SDK v2 (aws-sdk-go-v2/service/acmpca) to drive the
+// ACM PCA API.
 //
-// This connector issues certificates synchronously: the IssueCertificate call returns
-// the issued certificate immediately. GetOrderStatus always returns "completed" since
-// issuance is synchronous. CRL and OCSP operations are delegated to AWS PCA's own
-// endpoints.
+// Issuance is asynchronous at the API level — IssueCertificate returns a
+// certificate ARN immediately, and GetCertificate is then polled until the
+// cert reaches the CERTIFICATE_ISSUED state. The sdkClient wrapper hides
+// this asynchrony behind the connector's two-call pattern by running the
+// SDK's NewCertificateIssuedWaiter between the IssueCertificate and
+// GetCertificate calls. Callers see synchronous-via-waiter behavior with
+// a configurable wait deadline (default 5 minutes; see WaiterTimeout).
 //
-// Authentication: AWS credentials via the standard credential chain (environment variables,
-// IAM role, instance profile, or SSO). Configuration specifies the CA ARN, region, and
-// optional signing algorithm and validity days.
+// Authentication: AWS credentials via the standard credential chain
+// (environment variables, shared config / shared credentials files,
+// IAM role for service accounts, EC2 instance profile, ECS task role,
+// SSO). awsconfig.LoadDefaultConfig handles all of these transparently;
+// certctl does not store AWS credentials directly. Configuration
+// specifies the CA ARN, region, and optional signing algorithm,
+// validity days, and template ARN.
 //
-// AWS ACM PCA API used (abstracted via ACMPCAClient interface):
+// CRL and OCSP are served by AWS ACM PCA directly (the CA owns those
+// endpoints). certctl records revocations locally and notifies AWS
+// via the RevokeCertificate API with RFC 5280 reason mapping.
 //
-//	IssueCertificate  - Issue a certificate from a CSR
-//	GetCertificate    - Retrieve the issued certificate
-//	RevokeCertificate - Revoke a certificate
-//	GetCACertificate  - Get the CA certificate chain
+// AWS ACM PCA SDK calls used (abstracted via the local ACMPCAClient
+// interface so tests can inject a mock without depending on the SDK):
+//
+//	IssueCertificate                       — submit a CSR for signing
+//	GetCertificate                         — retrieve the issued cert
+//	RevokeCertificate                      — revoke an issued cert
+//	GetCertificateAuthorityCertificate     — fetch the CA cert + chain
+//	NewCertificateIssuedWaiter (internal)  — wait for cert to be ready
 package awsacmpca
 
 import (
@@ -32,17 +46,28 @@ import (
 	"strings"
 	"time"
 
+	"github.com/aws/aws-sdk-go-v2/aws"
+	awsconfig "github.com/aws/aws-sdk-go-v2/config"
+	"github.com/aws/aws-sdk-go-v2/service/acmpca"
+	acmpcatypes "github.com/aws/aws-sdk-go-v2/service/acmpca/types"
+
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 )
+
+// defaultWaiterTimeout is how long sdkClient.IssueCertificate will wait for
+// the issued cert to reach CERTIFICATE_ISSUED state before giving up. Five
+// minutes covers slow CA backends and short-lived rate-limit pauses; the
+// SDK waiter retries with exponential backoff inside this window.
+const defaultWaiterTimeout = 5 * time.Minute
 
 // Config represents the AWS ACM Private CA issuer connector configuration.
 type Config struct {
 	// Region is the AWS region where the CA resides (e.g., "us-east-1").
-	// Required. Set via CERTCTL_GOOGLE_CAS_PROJECT environment variable.
+	// Required. Set via CERTCTL_AWS_PCA_REGION environment variable.
 	Region string `json:"region"`
 
-	// CAArn is the ARN of the AWS Certificate Authority Service CA.
-	// Required. Set via CERTCTL_GOOGLE_CAS_CA_ARN environment variable.
+	// CAArn is the ARN of the AWS Certificate Manager Private CA.
+	// Required. Set via CERTCTL_AWS_PCA_CA_ARN environment variable.
 	// Example: arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012
 	CAArn string `json:"ca_arn"`
 
@@ -62,18 +87,27 @@ type Config struct {
 }
 
 // ACMPCAClient defines the interface for interacting with AWS ACM Private CA.
-// This allows for dependency injection and testing with mock clients.
+// This allows for dependency injection and testing with mock clients without
+// importing aws-sdk-go-v2 from test code.
+//
+// The production implementation (sdkClient) wraps *acmpca.Client and
+// translates between local input/output types and the SDK's typed
+// inputs/outputs. The sdkClient also runs the SDK's
+// NewCertificateIssuedWaiter inside IssueCertificate so callers see
+// synchronous-via-waiter semantics; the waiter is hidden from the
+// interface to keep mock implementations simple.
 type ACMPCAClient interface {
-	// IssueCertificate issues a new certificate.
+	// IssueCertificate submits a CSR for signing and waits for the issued
+	// cert to be retrievable. Returns the certificate ARN.
 	IssueCertificate(ctx context.Context, input *IssueCertificateInput) (*IssueCertificateOutput, error)
 
-	// GetCertificate retrieves an issued certificate.
+	// GetCertificate retrieves a previously issued certificate by ARN.
 	GetCertificate(ctx context.Context, input *GetCertificateInput) (*GetCertificateOutput, error)
 
-	// RevokeCertificate revokes a certificate.
+	// RevokeCertificate revokes a certificate by serial number.
 	RevokeCertificate(ctx context.Context, input *RevokeCertificateInput) error
 
-	// GetCACertificate retrieves the CA certificate chain.
+	// GetCACertificate retrieves the CA certificate and chain.
 	GetCACertificate(ctx context.Context, input *GetCACertificateInput) (*GetCACertificateOutput, error)
 }
 
@@ -128,9 +162,21 @@ type Connector struct {
 	logger *slog.Logger
 }
 
-// New creates a new AWS ACM Private CA connector with the given configuration and logger.
-// The real client will use the AWS SDK via the standard credential chain.
-func New(config *Config, logger *slog.Logger) *Connector {
+// New creates a new AWS ACM Private CA connector with the given configuration
+// and logger. If config is non-nil and config.Region is set, New attempts to
+// load the AWS SDK default credential chain (environment variables, shared
+// config, IAM role, instance profile, SSO) and constructs an *acmpca.Client
+// pinned to the region. Returns an error if SDK config load fails.
+//
+// If config is nil or config.Region is empty, the connector is constructed
+// with no client; ValidateConfig will lazily build the client on first
+// successful validation. This keeps backward compatibility with the
+// "construct then validate" pattern used by tests that exercise
+// ValidateConfig in isolation.
+//
+// Callers wanting to inject a mock client (tests, fake CAs) should use
+// NewWithClient instead, which bypasses the SDK loading path entirely.
+func New(config *Config, logger *slog.Logger) (*Connector, error) {
 	if config != nil {
 		if config.SigningAlgorithm == "" {
 			config.SigningAlgorithm = "SHA256WITHRSA"
@@ -140,15 +186,25 @@ func New(config *Config, logger *slog.Logger) *Connector {
 		}
 	}
 
-	return &Connector{
+	c := &Connector{
 		config: config,
-		client: &stubClient{}, // Placeholder; real AWS client will be injected or implemented
 		logger: logger,
 	}
+
+	if config != nil && config.Region != "" {
+		client, err := buildSDKClient(context.Background(), config.Region)
+		if err != nil {
+			return nil, fmt.Errorf("AWS ACM PCA SDK init: %w", err)
+		}
+		c.client = client
+	}
+
+	return c, nil
 }
 
-// NewWithClient creates a new AWS ACM Private CA connector with a custom client.
-// Used primarily for testing with mock clients.
+// NewWithClient creates a new AWS ACM Private CA connector with a custom
+// client implementation. Used primarily for testing with mock clients;
+// production code should use New, which wires the real SDK-backed client.
 func NewWithClient(config *Config, client ACMPCAClient, logger *slog.Logger) *Connector {
 	if config != nil {
 		if config.SigningAlgorithm == "" {
@@ -166,27 +222,120 @@ func NewWithClient(config *Config, client ACMPCAClient, logger *slog.Logger) *Co
 	}
 }
 
-// stubClient is a placeholder client that returns "not implemented" errors.
-// In production, this would be replaced with a real AWS SDK client.
-type stubClient struct{}
-
-func (s *stubClient) IssueCertificate(ctx context.Context, input *IssueCertificateInput) (*IssueCertificateOutput, error) {
-	return nil, fmt.Errorf("AWS SDK client not initialized (stub)")
+// buildSDKClient loads the AWS default credential chain pinned to the given
+// region and returns a sdkClient ready for use. Separated from New so
+// ValidateConfig can also call it when the connector was constructed with
+// no config (the test-init path).
+func buildSDKClient(ctx context.Context, region string) (ACMPCAClient, error) {
+	awsCfg, err := awsconfig.LoadDefaultConfig(ctx, awsconfig.WithRegion(region))
+	if err != nil {
+		return nil, fmt.Errorf("LoadDefaultConfig: %w", err)
+	}
+	return &sdkClient{
+		client:        acmpca.NewFromConfig(awsCfg),
+		waiterTimeout: defaultWaiterTimeout,
+	}, nil
 }
 
-func (s *stubClient) GetCertificate(ctx context.Context, input *GetCertificateInput) (*GetCertificateOutput, error) {
-	return nil, fmt.Errorf("AWS SDK client not initialized (stub)")
+// sdkClient wraps *acmpca.Client and translates between local input/output
+// types and the SDK's typed inputs/outputs. The waiter for asynchronous
+// issuance is run inside IssueCertificate so the connector layer's two-call
+// pattern (IssueCertificate → GetCertificate) sees synchronous-via-waiter
+// semantics.
+type sdkClient struct {
+	client        *acmpca.Client
+	waiterTimeout time.Duration
 }
 
-func (s *stubClient) RevokeCertificate(ctx context.Context, input *RevokeCertificateInput) error {
-	return fmt.Errorf("AWS SDK client not initialized (stub)")
+func (s *sdkClient) IssueCertificate(ctx context.Context, input *IssueCertificateInput) (*IssueCertificateOutput, error) {
+	sdkInput := &acmpca.IssueCertificateInput{
+		CertificateAuthorityArn: aws.String(input.CAArn),
+		Csr:                     input.CSR,
+		SigningAlgorithm:        acmpcatypes.SigningAlgorithm(input.SigningAlgorithm),
+		Validity: &acmpcatypes.Validity{
+			Type:  acmpcatypes.ValidityPeriodTypeDays,
+			Value: aws.Int64(int64(input.ValidityDays)),
+		},
+	}
+	if input.TemplateArn != "" {
+		sdkInput.TemplateArn = aws.String(input.TemplateArn)
+	}
+
+	output, err := s.client.IssueCertificate(ctx, sdkInput)
+	if err != nil {
+		return nil, fmt.Errorf("acmpca IssueCertificate: %w", err)
+	}
+	if output == nil || output.CertificateArn == nil {
+		return nil, fmt.Errorf("acmpca IssueCertificate returned no CertificateArn")
+	}
+
+	// Wait for the certificate to reach CERTIFICATE_ISSUED state. The SDK's
+	// waiter polls GetCertificate with exponential backoff until either the
+	// cert is ready or the deadline expires.
+	waiter := acmpca.NewCertificateIssuedWaiter(s.client)
+	waitErr := waiter.Wait(ctx, &acmpca.GetCertificateInput{
+		CertificateAuthorityArn: aws.String(input.CAArn),
+		CertificateArn:          output.CertificateArn,
+	}, s.waiterTimeout)
+	if waitErr != nil {
+		return nil, fmt.Errorf("acmpca waiter (waiting for issuance): %w", waitErr)
+	}
+
+	return &IssueCertificateOutput{
+		CertificateArn: aws.ToString(output.CertificateArn),
+	}, nil
 }
 
-func (s *stubClient) GetCACertificate(ctx context.Context, input *GetCACertificateInput) (*GetCACertificateOutput, error) {
-	return nil, fmt.Errorf("AWS SDK client not initialized (stub)")
+func (s *sdkClient) GetCertificate(ctx context.Context, input *GetCertificateInput) (*GetCertificateOutput, error) {
+	output, err := s.client.GetCertificate(ctx, &acmpca.GetCertificateInput{
+		CertificateAuthorityArn: aws.String(input.CAArn),
+		CertificateArn:          aws.String(input.CertificateArn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acmpca GetCertificate: %w", err)
+	}
+	if output == nil {
+		return nil, fmt.Errorf("acmpca GetCertificate returned nil output")
+	}
+	return &GetCertificateOutput{
+		Certificate:      aws.ToString(output.Certificate),
+		CertificateChain: aws.ToString(output.CertificateChain),
+	}, nil
+}
+
+func (s *sdkClient) RevokeCertificate(ctx context.Context, input *RevokeCertificateInput) error {
+	_, err := s.client.RevokeCertificate(ctx, &acmpca.RevokeCertificateInput{
+		CertificateAuthorityArn: aws.String(input.CAArn),
+		CertificateSerial:       aws.String(input.CertificateSerial),
+		RevocationReason:        acmpcatypes.RevocationReason(input.RevocationReason),
+	})
+	if err != nil {
+		return fmt.Errorf("acmpca RevokeCertificate: %w", err)
+	}
+	return nil
+}
+
+func (s *sdkClient) GetCACertificate(ctx context.Context, input *GetCACertificateInput) (*GetCACertificateOutput, error) {
+	output, err := s.client.GetCertificateAuthorityCertificate(ctx, &acmpca.GetCertificateAuthorityCertificateInput{
+		CertificateAuthorityArn: aws.String(input.CAArn),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("acmpca GetCertificateAuthorityCertificate: %w", err)
+	}
+	if output == nil {
+		return nil, fmt.Errorf("acmpca GetCertificateAuthorityCertificate returned nil output")
+	}
+	return &GetCACertificateOutput{
+		Certificate:      aws.ToString(output.Certificate),
+		CertificateChain: aws.ToString(output.CertificateChain),
+	}, nil
 }
 
 // ValidateConfig checks that the AWS ACM Private CA configuration is valid.
+// On success, ValidateConfig also lazily builds the SDK client if the
+// connector was constructed with no config (the test-init path: New(nil, ...)).
+// In production, the factory always passes a fully-populated config to New,
+// so the SDK client is built at New time and ValidateConfig only re-validates.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
 	if err := json.Unmarshal(rawConfig, &cfg); err != nil {
@@ -239,11 +388,27 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		"signing_algorithm", cfg.SigningAlgorithm,
 		"validity_days", cfg.ValidityDays)
 
+	// Lazily build the SDK client if the connector was constructed without one
+	// (e.g., New(nil, logger)). NewWithClient injects a mock and we leave it
+	// alone; production New with a populated config builds the client up
+	// front and we leave it alone too.
+	if c.client == nil {
+		client, err := buildSDKClient(ctx, cfg.Region)
+		if err != nil {
+			return fmt.Errorf("AWS ACM PCA SDK init: %w", err)
+		}
+		c.client = client
+	}
+
 	return nil
 }
 
 // IssueCertificate issues a new certificate using AWS ACM Private CA.
 func (c *Connector) IssueCertificate(ctx context.Context, request issuer.IssuanceRequest) (*issuer.IssuanceResult, error) {
+	if c.client == nil {
+		return nil, fmt.Errorf("AWS ACM PCA client not initialized; ValidateConfig must be called first")
+	}
+
 	c.logger.Info("processing AWS ACM PCA issuance request",
 		"common_name", request.CommonName,
 		"san_count", len(request.SANs))
@@ -254,7 +419,10 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("failed to decode CSR PEM")
 	}
 
-	// Call AWS API to issue certificate
+	// Call AWS API to issue certificate. The sdkClient hides the asynchronous
+	// IssueCertificate → waiter → GetCertificate dance behind this single call;
+	// IssueCertificate returns only after the cert has reached
+	// CERTIFICATE_ISSUED state (or the waiter timeout has expired).
 	issueOutput, err := c.client.IssueCertificate(ctx, &IssueCertificateInput{
 		CAArn:            c.config.CAArn,
 		CSR:              csrBlock.Bytes,
@@ -328,6 +496,10 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 
 // RevokeCertificate revokes a certificate at AWS ACM Private CA.
 func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.RevocationRequest) error {
+	if c.client == nil {
+		return fmt.Errorf("AWS ACM PCA client not initialized; ValidateConfig must be called first")
+	}
+
 	c.logger.Info("processing AWS ACM PCA revocation request", "serial", request.Serial)
 
 	// Map RFC 5280 reason string to AWS reason
@@ -346,8 +518,10 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	return nil
 }
 
-// GetOrderStatus returns the status of an AWS ACM PCA order.
-// AWS ACM PCA issues synchronously, so orders are always "completed" immediately.
+// GetOrderStatus returns the status of an AWS ACM PCA order. From the
+// connector's perspective, issuance is synchronous (the sdkClient runs the
+// SDK waiter inside IssueCertificate), so by the time a caller reaches
+// GetOrderStatus the cert is already available.
 func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer.OrderStatus, error) {
 	return &issuer.OrderStatus{
 		OrderID:   orderID,
@@ -368,6 +542,10 @@ func (c *Connector) SignOCSPResponse(ctx context.Context, req issuer.OCSPSignReq
 
 // GetCACertPEM retrieves the CA certificate from AWS ACM Private CA.
 func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
+	if c.client == nil {
+		return "", fmt.Errorf("AWS ACM PCA client not initialized; ValidateConfig must be called first")
+	}
+
 	caCertOutput, err := c.client.GetCACertificate(ctx, &GetCACertificateInput{
 		CAArn: c.config.CAArn,
 	})
@@ -388,7 +566,9 @@ func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer
 	return nil, nil
 }
 
-// mapRevocationReason converts RFC 5280 reason strings to AWS ACM PCA reason codes.
+// mapRevocationReason converts RFC 5280 reason strings to AWS ACM PCA reason
+// codes. The returned string corresponds to a valid acmpcatypes.RevocationReason
+// value, which sdkClient.RevokeCertificate then casts back to the SDK enum.
 func mapRevocationReason(reason *string) string {
 	if reason == nil {
 		return "UNSPECIFIED"
@@ -414,3 +594,6 @@ func mapRevocationReason(reason *string) string {
 
 // Ensure Connector implements the issuer.Connector interface.
 var _ issuer.Connector = (*Connector)(nil)
+
+// Ensure sdkClient implements the ACMPCAClient interface.
+var _ ACMPCAClient = (*sdkClient)(nil)

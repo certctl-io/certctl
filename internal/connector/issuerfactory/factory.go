@@ -90,7 +90,11 @@ func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.L
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid AWS ACM PCA config: %w", err)
 		}
-		return awsacmpca.New(&cfg, logger), nil
+		conn, err := awsacmpca.New(&cfg, logger)
+		if err != nil {
+			return nil, fmt.Errorf("AWS ACM PCA init: %w", err)
+		}
+		return conn, nil
 
 	case "Entrust", "entrust":
 		var cfg entrust.Config

@@ -489,7 +489,7 @@ Location: `internal/connector/issuer/googlecas/googlecas.go`
 
 ### Built-in: AWS ACM Private CA
 
-AWS Certificate Manager Private Certificate Authority — managed private CA on AWS. Synchronous issuance via ACM PCA API with standard AWS credential chain (env vars, IAM roles, instance profiles, SSO).
+AWS Certificate Manager Private Certificate Authority — managed private CA on AWS. Synchronous-via-waiter issuance: the connector calls `IssueCertificate` (which is asynchronous at the ACM PCA API level), then runs the SDK's `NewCertificateIssuedWaiter` until the cert reaches `CERTIFICATE_ISSUED` state, then `GetCertificate` to retrieve the PEM. Default waiter timeout is 5 minutes; tune by editing `defaultWaiterTimeout` in the connector.
 
 | Setting | Required | Default | Description |
 |---------|----------|---------|-------------|
@@ -501,9 +501,57 @@ AWS Certificate Manager Private Certificate Authority — managed private CA on 
 
 **Supported signing algorithms:** SHA256WITHRSA, SHA384WITHRSA, SHA512WITHRSA, SHA256WITHECDSA, SHA384WITHECDSA, SHA512WITHECDSA.
 
-**Authentication:** Standard AWS credential chain. The connector uses `aws-sdk-go-v2/config.LoadDefaultConfig()` which supports environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`), IAM roles (EC2/ECS), instance profiles, and SSO credentials.
+**Authentication:** Standard AWS credential chain via `aws-sdk-go-v2/config.LoadDefaultConfig()`. Resolves credentials in this order: environment variables (`AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`, `AWS_SESSION_TOKEN`), shared config files (`~/.aws/config`, `~/.aws/credentials`, profile via `AWS_PROFILE`), IAM Roles for Service Accounts (EKS), EC2 instance profiles, ECS task roles, and SSO. certctl never stores AWS credentials directly — set them in the certctl process's environment or via the IAM role attached to the host.
 
-**Note:** CRL and OCSP are managed by AWS ACM PCA directly. certctl records revocations locally and notifies AWS via the RevokeCertificate API with RFC 5280 reason mapping.
+**Minimal IAM policy.** The IAM principal that certctl authenticates as needs the following actions against the CA's ARN:
+
+```json
+{
+  "Version": "2012-10-17",
+  "Statement": [
+    {
+      "Effect": "Allow",
+      "Action": [
+        "acm-pca:IssueCertificate",
+        "acm-pca:GetCertificate",
+        "acm-pca:RevokeCertificate",
+        "acm-pca:GetCertificateAuthorityCertificate"
+      ],
+      "Resource": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012"
+    }
+  ]
+}
+```
+
+Replace the `Resource` ARN with your own CA ARN. If you use a `TemplateArn` (subordinate-CA template), the policy needs no additional permissions — `IssueCertificate` covers it.
+
+**Worked example.** Add an AWSACMPCA issuer via the API:
+
+```bash
+curl -k -X POST https://localhost:8443/api/v1/issuers \
+  -H 'Content-Type: application/json' \
+  -d '{
+    "id": "iss-aws-prod",
+    "name": "AWS ACM PCA (prod)",
+    "type": "AWSACMPCA",
+    "config": {
+      "region": "us-east-1",
+      "ca_arn": "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012",
+      "signing_algorithm": "SHA256WITHRSA",
+      "validity_days": 90
+    }
+  }'
+```
+
+The certctl server process must have AWS credentials available before the issuer is created (or before any subsequent issuance call). For a local dev run with shared-config creds: `export AWS_PROFILE=my-profile` before `docker compose up`. For an EKS deployment: attach an IRSA-bound IAM role to the certctl pod's service account.
+
+**Troubleshooting.**
+
+- **`AccessDeniedException: User ... is not authorized to perform: acm-pca:IssueCertificate`** — the IAM principal certctl is using lacks the required actions. Apply the IAM policy above (scoped to your CA ARN) to the role/user. The principal can be inspected with `aws sts get-caller-identity` from the certctl host.
+- **`ResourceNotFoundException: Could not find Certificate Authority`** — the `CAArn` doesn't match any CA in the configured region. Common causes: region mismatch (CA is in `us-west-2`, certctl region is set to `us-east-1`), CA was deleted, ARN typo. Verify with `aws acm-pca describe-certificate-authority --certificate-authority-arn <arn> --region <region>`.
+- **`acmpca waiter (waiting for issuance): exceeded max wait time`** — the cert was submitted but didn't reach `CERTIFICATE_ISSUED` state within 5 minutes. Check the CA's CloudWatch metrics for backlog; check the CA's audit reports for any policy violations on the request. If the wait is consistently slow, edit `defaultWaiterTimeout` in `internal/connector/issuer/awsacmpca/awsacmpca.go` and rebuild.
+
+**Note:** CRL and OCSP are managed by AWS ACM PCA directly. certctl records revocations locally and notifies AWS via the `RevokeCertificate` API with RFC 5280 reason mapping (e.g., `keyCompromise` → `KEY_COMPROMISE`). AWS ACM PCA's CRL distribution point and OCSP responder serve the resulting status to verifying clients; certctl is not in the OCSP path for this connector.
 
 Location: `internal/connector/issuer/awsacmpca/awsacmpca.go`
 
