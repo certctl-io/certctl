@@ -284,26 +284,34 @@ services:
       CERTCTL_EST_ENABLED: "true"
       CERTCTL_EST_ISSUER_ID: iss-local
 
-      # SCEP RFC 8894 + Intune master prompt §10.2 + §13 acceptance
-      # (deploy/test/scep_intune_e2e_test.go integration variant).
-      # Closed in the 2026-04-29 audit-closure bundle (Phase I).
+      # SCEP intentionally NOT configured in this stack.
       #
-      # Publishes /scep/e2eintune?operation=... with the Intune
-      # dispatcher enabled. The deterministic Connector signing cert
-      # is bind-mounted at the path below; the matching private key
-      # lives ONLY on the test side (see
-      # deploy/test/scep_intune_e2e_test.go::generateE2EIntuneTrustAnchor).
-      CERTCTL_SCEP_ENABLED: "true"
-      CERTCTL_SCEP_PROFILES: "e2eintune"
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_ISSUER_ID: iss-local
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_RA_CERT_PATH: /etc/certctl/scep/ra.crt
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_RA_KEY_PATH: /etc/certctl/scep/ra.key
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_ENABLED: "true"
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CONNECTOR_CERT_PATH: /etc/certctl/scep/intune_trust_anchor.pem
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_AUDIENCE: https://localhost:8443/scep/e2eintune
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CHALLENGE_VALIDITY: 60m
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CLOCK_SKEW_TOLERANCE: 60s
-      CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_PER_DEVICE_RATE_LIMIT_24H: 3
+      # The 2026-04-29 master bundle Phase I added an `e2eintune` SCEP
+      # profile to this compose file with the intent that
+      # deploy/test/scep_intune_e2e_test.go would exercise it. That
+      # integration test exists (//go:build integration) but no CI job
+      # actually selects it — ci.yml's deploy-vendor-e2e job runs only
+      # `-run 'VendorEdge_'` (line 379), and no other job ever invokes
+      # `go test -tags integration` with a SCEP selector.
+      #
+      # The result was dead config: SCEP_ENABLED=true triggered the
+      # per-profile validator chain at server boot, but the supporting
+      # fixtures (ra.crt + ra.key + intune_trust_anchor.pem) were never
+      # committed to deploy/test/fixtures/ — only the README documenting
+      # how to regenerate them. Pre-Phase-5 (ci-pipeline-cleanup matrix
+      # collapse) the test stack didn't fully boot the certctl-server in
+      # CI, so the gap was hidden. Once the matrix collapsed and the
+      # collapsed deploy-vendor-e2e job started actually booting the
+      # server, the fail-loud gate at config.go:2069 (CWE-306, empty
+      # CHALLENGE_PASSWORD) fired and blocked CI.
+      #
+      # CERTCTL_SCEP_ENABLED is unset → default false → the validator
+      # skips the entire SCEP block. Coherence guard at
+      # scripts/ci-guards/test-compose-scep-coherence.sh refuses any
+      # future edit that re-enables SCEP without ALSO (a) adding a CI
+      # job that runs the SCEP integration test and (b) committing the
+      # required fixtures. The README at deploy/test/fixtures/README.md
+      # keeps the regen recipe so the eventual SCEP CI job lands cleanly.
 
       # Dynamic issuer/target config encryption (M34/M35).
       #
@@ -346,15 +354,11 @@ services:
       # agent mounts the same host path at the same container path (see below)
       # so /etc/certctl/tls/ca.crt resolves to the *same* bytes on both sides.
       - ./test/certs:/etc/certctl/tls:ro
-      # SCEP RFC 8894 + Intune master prompt §10.2 + §13 acceptance: the
-      # e2eintune profile's RA cert/key + Intune Connector trust anchor
-      # PEM. The PEM is the deterministic public cert matching the test-
-      # side private key in deploy/test/scep_intune_e2e_test.go (re-run
-      # `go test -tags integration -run='^TestRegenerateE2EIntuneFixture$'
-      # -update-fixture ./deploy/test/...` to regenerate after a seed
-      # change). RA cert/key live alongside; tls-init container generates
-      # them at boot.
-      - ./test/fixtures:/etc/certctl/scep:ro
+      # SCEP fixtures volume mount removed alongside the SCEP env vars
+      # above. When a CI job that runs scep_intune_e2e_test.go is added,
+      # restore both this mount AND the env vars together — the coherence
+      # guard at scripts/ci-guards/test-compose-scep-coherence.sh
+      # enforces that they move as a unit.
     networks:
       certctl-test:
         ipv4_address: 10.30.50.6
