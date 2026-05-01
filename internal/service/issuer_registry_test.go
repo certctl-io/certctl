@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"log/slog"
 	"os"
@@ -101,7 +102,7 @@ func TestIssuerRegistry_Rebuild_Enabled(t *testing.T) {
 		},
 	}
 
-	err := reg.Rebuild(configs, "")
+	err := reg.Rebuild(context.Background(), configs, "")
 	if err != nil {
 		t.Fatalf("Rebuild failed: %v", err)
 	}
@@ -142,7 +143,7 @@ func TestIssuerRegistry_Rebuild_WithEncryption(t *testing.T) {
 		},
 	}
 
-	err = reg.Rebuild(configs, "test-key")
+	err = reg.Rebuild(context.Background(), configs, "test-key")
 	if err != nil {
 		t.Fatalf("Rebuild with encryption failed: %v", err)
 	}
@@ -168,7 +169,7 @@ func TestIssuerRegistry_Rebuild_NilKeyFallback(t *testing.T) {
 
 	// Empty passphrase is safe when no EncryptedConfig is present — falls back to config column.
 	// The C-2 fail-closed sentinel only fires when EncryptedConfig is non-empty.
-	err := reg.Rebuild(configs, "")
+	err := reg.Rebuild(context.Background(), configs, "")
 	if err != nil {
 		t.Fatalf("Rebuild with empty key failed: %v", err)
 	}
@@ -200,7 +201,7 @@ func TestIssuerRegistry_Rebuild_InvalidConfig(t *testing.T) {
 	}
 
 	// Should return an error indicating partial failure, but still load valid issuers
-	err := reg.Rebuild(configs, "")
+	err := reg.Rebuild(context.Background(), configs, "")
 	if err == nil {
 		t.Fatal("Rebuild should return error when some issuers fail to load")
 	}
@@ -232,7 +233,7 @@ func TestIssuerRegistry_Rebuild_ReplacesExisting(t *testing.T) {
 		},
 	}
 
-	err := reg.Rebuild(configs, "")
+	err := reg.Rebuild(context.Background(), configs, "")
 	if err != nil {
 		t.Fatalf("Rebuild failed: %v", err)
 	}
@@ -277,7 +278,7 @@ func TestIssuerRegistry_Rebuild_Empty(t *testing.T) {
 
 	reg.Set("iss-existing", &mockIssuerConnector{})
 
-	err := reg.Rebuild([]*domain.Issuer{}, "")
+	err := reg.Rebuild(context.Background(), []*domain.Issuer{}, "")
 	if err != nil {
 		t.Fatalf("Rebuild with empty configs failed: %v", err)
 	}

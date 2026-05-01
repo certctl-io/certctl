@@ -276,7 +276,7 @@ func (s *IssuerService) TestConnection(ctx context.Context, id string) error {
 	}
 
 	// Instantiate a throwaway connector and validate
-	connector, err := issuerfactory.NewFromConfig(string(iss.Type), configJSON, s.logger)
+	connector, err := issuerfactory.NewFromConfig(ctx, string(iss.Type), configJSON, s.logger)
 	if err != nil {
 		s.updateTestStatus(ctx, iss, "failed")
 		return fmt.Errorf("failed to create connector: %w", err)
@@ -300,7 +300,7 @@ func (s *IssuerService) BuildRegistry(ctx context.Context) error {
 		return fmt.Errorf("failed to load issuers from database: %w", err)
 	}
 
-	if err := s.registry.Rebuild(issuers, s.encryptionKey); err != nil {
+	if err := s.registry.Rebuild(ctx, issuers, s.encryptionKey); err != nil {
 		// Log the error but don't fail — some issuers loaded successfully.
 		s.logger.Warn("issuer registry rebuilt with errors", "error", err)
 	}

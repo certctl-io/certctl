@@ -176,7 +176,12 @@ type Connector struct {
 //
 // Callers wanting to inject a mock client (tests, fake CAs) should use
 // NewWithClient instead, which bypasses the SDK loading path entirely.
-func New(config *Config, logger *slog.Logger) (*Connector, error) {
+//
+// ctx is used only for the SDK config load (LoadDefaultConfig may probe IMDS
+// or remote credential sources). Callers that don't have a useful deadline
+// should pass context.Background(); the SDK has its own internal timeouts
+// for credential resolution.
+func New(ctx context.Context, config *Config, logger *slog.Logger) (*Connector, error) {
 	if config != nil {
 		if config.SigningAlgorithm == "" {
 			config.SigningAlgorithm = "SHA256WITHRSA"
@@ -192,7 +197,7 @@ func New(config *Config, logger *slog.Logger) (*Connector, error) {
 	}
 
 	if config != nil && config.Region != "" {
-		client, err := buildSDKClient(context.Background(), config.Region)
+		client, err := buildSDKClient(ctx, config.Region)
 		if err != nil {
 			return nil, fmt.Errorf("AWS ACM PCA SDK init: %w", err)
 		}

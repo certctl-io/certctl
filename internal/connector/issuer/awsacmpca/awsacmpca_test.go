@@ -72,11 +72,14 @@ func (m *mockACMPCAClient) GetCACertificate(ctx context.Context, input *awsacmpc
 
 // mustNew is a test helper that calls awsacmpca.New and fails the test if
 // New returns an error. Use this for the ValidateConfig-only test sites
-// where config is nil; New(nil, ...) skips SDK loading and never errors,
-// so this helper is just to keep the call sites terse.
-func mustNew(t *testing.T, config *awsacmpca.Config, logger *slog.Logger) *awsacmpca.Connector {
+// where config is nil; New(ctx, nil, ...) skips SDK loading and never
+// errors, so this helper is just to keep the call sites terse. The ctx
+// parameter exists for contextcheck-lint cleanliness — when callers have
+// ctx in scope, they should pass it through to New, which threads it
+// into the SDK config load.
+func mustNew(t *testing.T, ctx context.Context, config *awsacmpca.Config, logger *slog.Logger) *awsacmpca.Connector {
 	t.Helper()
-	c, err := awsacmpca.New(config, logger)
+	c, err := awsacmpca.New(ctx, config, logger)
 	if err != nil {
 		t.Fatalf("awsacmpca.New: %v", err)
 	}
@@ -155,7 +158,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			ValidityDays:     365,
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err != nil {
@@ -172,7 +175,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			TemplateArn:      "arn:aws:acm-pca:eu-west-1:123456789012:template/WebServer",
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err != nil {
@@ -181,7 +184,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 	})
 
 	t.Run("ValidateConfig_InvalidJSON", func(t *testing.T) {
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		err := connector.ValidateConfig(ctx, []byte(`{invalid json}`))
 		if err == nil {
 			t.Fatal("Expected error for invalid JSON")
@@ -196,7 +199,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			CAArn: "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012",
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err == nil {
@@ -212,7 +215,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			Region: "us-east-1",
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err == nil {
@@ -229,7 +232,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			CAArn:  "not-an-arn",
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err == nil {
@@ -247,7 +250,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			SigningAlgorithm: "INVALID_ALGO",
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err == nil {
@@ -265,7 +268,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			ValidityDays: -1,
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err == nil {
@@ -595,7 +598,7 @@ func TestAWSACMPCAConnector(t *testing.T) {
 			// SigningAlgorithm and ValidityDays not set
 		}
 
-		connector := mustNew(t, nil, logger)
+		connector := mustNew(t, ctx, nil, logger)
 		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err != nil {
@@ -668,7 +671,7 @@ func TestNew_ProductionPath(t *testing.T) {
 			Region: "us-east-1",
 			CAArn:  "arn:aws:acm-pca:us-east-1:123456789012:certificate-authority/12345678-1234-1234-1234-123456789012",
 		}
-		c, err := awsacmpca.New(cfg, logger)
+		c, err := awsacmpca.New(ctx, cfg, logger)
 		if err != nil {
 			t.Fatalf("New with valid config returned error: %v", err)
 		}
@@ -702,7 +705,7 @@ func TestNew_ProductionPath(t *testing.T) {
 		// the connector is constructed with no client and ValidateConfig
 		// must be called before any operation. This documents the lazy
 		// initialization contract.
-		c, err := awsacmpca.New(nil, logger)
+		c, err := awsacmpca.New(ctx, nil, logger)
 		if err != nil {
 			t.Fatalf("New(nil, logger) returned error: %v", err)
 		}
@@ -728,7 +731,7 @@ func TestNew_ProductionPath(t *testing.T) {
 		// New(nil, ...) leaves client nil; ValidateConfig with a valid
 		// config should build it. After ValidateConfig succeeds, client-
 		// using methods should work end-to-end (modulo network errors).
-		c, err := awsacmpca.New(nil, logger)
+		c, err := awsacmpca.New(ctx, nil, logger)
 		if err != nil {
 			t.Fatalf("New(nil, logger): %v", err)
 		}
@@ -760,7 +763,7 @@ func TestNew_ProductionPath(t *testing.T) {
 	t.Run("RevokeBeforeInitFailsFast", func(t *testing.T) {
 		// The audit also flagged RevokeCertificate as part of the stub
 		// blocker. Verify the nil-client guard fires for revoke too.
-		c, err := awsacmpca.New(nil, logger)
+		c, err := awsacmpca.New(ctx, nil, logger)
 		if err != nil {
 			t.Fatalf("New(nil, logger): %v", err)
 		}
@@ -776,7 +779,7 @@ func TestNew_ProductionPath(t *testing.T) {
 	})
 
 	t.Run("GetCAPEMBeforeInitFailsFast", func(t *testing.T) {
-		c, err := awsacmpca.New(nil, logger)
+		c, err := awsacmpca.New(ctx, nil, logger)
 		if err != nil {
 			t.Fatalf("New(nil, logger): %v", err)
 		}

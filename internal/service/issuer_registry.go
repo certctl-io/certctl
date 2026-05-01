@@ -1,6 +1,7 @@
 package service
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -115,7 +116,7 @@ func (r *IssuerRegistry) Len() int {
 // for v2 blobs is performed inside [crypto.DecryptIfKeySet]. Empty passphrase
 // fails closed via [crypto.ErrEncryptionKeyRequired] when encrypted configs
 // are encountered. See M-8 in certctl-audit-report.md.
-func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey string) error {
+func (r *IssuerRegistry) Rebuild(ctx context.Context, configs []*domain.Issuer, encryptionKey string) error {
 	newIssuers := make(map[string]IssuerConnector)
 	var errors []string
 
@@ -141,7 +142,7 @@ func (r *IssuerRegistry) Rebuild(configs []*domain.Issuer, encryptionKey string)
 			configJSON = json.RawMessage("{}")
 		}
 
-		connector, err := issuerfactory.NewFromConfig(string(cfg.Type), configJSON, r.logger)
+		connector, err := issuerfactory.NewFromConfig(ctx, string(cfg.Type), configJSON, r.logger)
 		if err != nil {
 			errors = append(errors, fmt.Sprintf("issuer %s: factory error: %v", cfg.ID, err))
 			continue

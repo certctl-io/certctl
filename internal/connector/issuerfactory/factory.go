@@ -1,6 +1,7 @@
 package issuerfactory
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -23,7 +24,13 @@ import (
 // NewFromConfig instantiates an issuer connector from its type string and config JSON.
 // The config JSON keys use snake_case matching the connector Config struct json tags.
 // This replaces the manual wiring in cmd/server/main.go.
-func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.Logger) (issuer.Connector, error) {
+//
+// ctx is currently used only by the AWSACMPCA branch (passed to
+// awsconfig.LoadDefaultConfig for SDK credential chain resolution). Other
+// connectors take no context at construction; the parameter is kept on the
+// signature so callers that have a ctx in scope thread it through cleanly
+// (contextcheck linter).
+func NewFromConfig(ctx context.Context, issuerType string, configJSON json.RawMessage, logger *slog.Logger) (issuer.Connector, error) {
 	if len(configJSON) == 0 {
 		configJSON = []byte("{}")
 	}
@@ -90,7 +97,7 @@ func NewFromConfig(issuerType string, configJSON json.RawMessage, logger *slog.L
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid AWS ACM PCA config: %w", err)
 		}
-		conn, err := awsacmpca.New(&cfg, logger)
+		conn, err := awsacmpca.New(ctx, &cfg, logger)
 		if err != nil {
 			return nil, fmt.Errorf("AWS ACM PCA init: %w", err)
 		}
