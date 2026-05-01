@@ -30,8 +30,61 @@ if [ ${#REFS[@]} -eq 0 ]; then
   exit 0
 fi
 
+# ---------------------------------------------------------------------------
+# Excluded refs — digests for images CI never pulls.
+# ---------------------------------------------------------------------------
+# The guard's purpose is "every digest CI actually depends on is valid."
+# Images that exist in compose only as documentation for an operator's
+# manual workflow (e.g., Windows containers we cannot start on Linux
+# runners) shouldn't add CI brittleness against external-registry
+# rate-limiting we don't control.
+#
+# Each entry below is a substring matched against the full ref line
+# (`<image>:<tag>@sha256:<digest>`). When a ref matches, it is logged as
+# `SKIP (excluded)` and the loop continues. The match is by image-path
+# substring, not by digest, so a future tag/digest update still excludes
+# the right image without needing this list to be re-edited.
+#
+# Add an entry only with a documented reason in the comment block above
+# the entry. This list is NOT a place to silence transient flakes — those
+# get fixed by retries in the script itself, not by exclusion.
+EXCLUDED_PATTERNS=(
+  # mcr.microsoft.com/windows/servercore/iis
+  #   Windows-only image gated behind compose profiles=[deploy-e2e-windows]
+  #   (deploy/docker-compose.test.yml:700). Linux CI runners cannot start
+  #   the windows-iis-test sidecar — the entire Windows matrix was deleted
+  #   per ci-pipeline-cleanup Phase 6 / frozen decision 0.5, and IIS
+  #   validation moved to docs/connector-iis.md::Operator validation
+  #   playbook. All 10 TestVendorEdge_IIS_*_E2E tests are on
+  #   scripts/vendor-e2e-skip-allowlist.txt for the same reason.
+  #
+  #   Without this exclusion, Linux CI runners HEAD this digest from MCR
+  #   on every push. MCR rate-limits unauthenticated requests by source IP;
+  #   GitHub-hosted runner IPs are heavily reused across users; the result
+  #   is ~one transient 4xx/5xx every N runs (CI run #376 hit it). Re-runs
+  #   pass because runner IPs rotate. The image itself is fine — we just
+  #   don't need Linux CI to verify it.
+  "mcr.microsoft.com/windows/servercore/iis"
+)
+
 fail=0
+verified=0
+skipped=0
 for ref in "${REFS[@]}"; do
+  # Apply exclusion list before any work on the ref.
+  excluded=0
+  for pat in "${EXCLUDED_PATTERNS[@]}"; do
+    if [[ "$ref" == *"$pat"* ]]; then
+      echo "SKIP (excluded) $ref"
+      excluded=1
+      skipped=$((skipped + 1))
+      break
+    fi
+  done
+  if [ "$excluded" -eq 1 ]; then
+    continue
+  fi
+
   digest="${ref##*@}"
   imgtag="${ref%@*}"
   tag="${imgtag##*:}"
@@ -96,9 +149,14 @@ for ref in "${REFS[@]}"; do
     fail=1
   else
     echo "OK  $ref"
+    verified=$((verified + 1))
   fi
 done
 
 [ $fail -eq 0 ] || exit 1
 echo ""
-echo "digest-validity: clean — all ${#REFS[@]} digest references resolve."
+if [ "$skipped" -gt 0 ]; then
+  echo "digest-validity: clean — ${verified} verified, ${skipped} excluded (CI never pulls)."
+else
+  echo "digest-validity: clean — all ${verified} digest references resolve."
+fi
