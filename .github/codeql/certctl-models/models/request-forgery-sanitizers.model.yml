@@ -54,4 +54,8 @@ extensions:
       pack: codeql/go-all
       extensible: barrierModel
     data:
-      - ["github.com/shankar0123/certctl/internal/validation", "", false, "ValidateSafeURL", "", "", "Argument[0]", "request-forgery", "manual"]
+      # subtypes uses Python-style `False` (capitalized) to match every
+      # shipped CodeQL Go .model.yml — see e.g. github/codeql/go/ql/lib/ext/
+      # database.sql.model.yml. SnakeYAML accepts lowercase too, but
+      # capitalized matches the canonical convention.
+      - ["github.com/shankar0123/certctl/internal/validation", "", False, "ValidateSafeURL", "", "", "Argument[0]", "request-forgery", "manual"]

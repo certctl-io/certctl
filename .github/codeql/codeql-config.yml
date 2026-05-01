@@ -7,9 +7,10 @@
 #     so that disabling the action's default suite via `disable-default-
 #     queries: true` doesn't accidentally drop coverage.
 #
-#  2. Load the local model pack at .github/codeql/, which adds project-
-#     specific Models-as-Data extensions (sanitizers, sinks, summaries)
-#     for the standard Go queries. See ./qlpack.yml for the full motivation.
+#  2. Load the local model pack at .github/codeql/certctl-models/, which
+#     adds project-specific Models-as-Data extensions (barriers, sinks,
+#     summaries) for the standard Go queries. See
+#     certctl-models/qlpack.yml for the full motivation.
 #
 # Path-ignore is intentionally empty — every path that ships with the
 # repo is in scope. Test files are NOT excluded; if a vulnerability
@@ -25,12 +26,16 @@ name: certctl-codeql
 queries:
   - uses: security-and-quality
 
-# Load the local model pack. This is what makes the SSRF sanitizer
-# barrier rows in models/request-forgery-sanitizers.model.yml apply to
-# the standard go/request-forgery query.
+# Load the local model pack BY NAME. The action's `init` step resolves
+# this name against the path it was given via `additional-packs: .github/
+# codeql` — that path is the parent directory of certctl-models/, where
+# the pack's qlpack.yml declares `name: shankar0123/certctl-models`.
 #
-# `${{ }}` is not used here — the path is relative to the config file's
-# directory, not to the repo root, per CodeQL action docs.
+# An earlier draft used `packs: { go: ['./'] }` (a relative path). That's
+# the wrong syntax — the `packs:` field expects pack NAMES, not paths.
+# Local-by-path is not supported here; the discovery happens via
+# additional-packs + name lookup. Verified against the github/vscode-codeql
+# working setup.
 packs:
   go:
-    - ./
+    - shankar0123/certctl-models

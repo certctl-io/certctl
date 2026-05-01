@@ -21,10 +21,23 @@
 #   - Future code that flows operator URLs through ValidateSafeURL gets the
 #     same treatment automatically.
 #
-# Loading: codeql-config.yml's `packs:` field references this pack by its
-# `name` below. The `extensionTargets:` map declares which upstream pack the
-# extension data plugs into (codeql/go-all is the Go standard library pack).
-# The `dataExtensions:` glob matches the .model.yml files in models/.
+# Pack-loading mechanism (post-correction in commit fix-up):
+#   - This pack lives at .github/codeql/certctl-models/. Its NAME is the
+#     `name:` field below.
+#   - .github/workflows/codeql.yml's Initialize CodeQL step passes
+#     `additional-packs: .github/codeql` to the action — that's the parent
+#     directory the CodeQL CLI's resolver searches for unpublished packs.
+#   - .github/codeql/codeql-config.yml then references this pack by NAME
+#     in `packs: { go: [shankar0123/certctl-models] }`. The CLI looks the
+#     name up against the additional-packs path, finds this qlpack.yml,
+#     loads the pack and its data extensions.
+#
+# An earlier draft (commit d8026d5) tried `packs: { go: ['./'] }` in
+# codeql-config.yml, which is the wrong syntax — that field expects pack
+# names, not paths. The pack silently never loaded; alert #23 stayed open
+# across two CodeQL runs (d8026d5 + 4bb7a74). Pack-name + additional-packs
+# is the supported path; verified against the github/vscode-codeql working
+# example.
 #
 # MaD `barrierModel` extension was added for Go in CodeQL 2.25.2 (2026-04-21).
 # `github/codeql-action@v3` (pinned in .github/workflows/codeql.yml) pulls a
@@ -33,7 +46,7 @@
 # regressed below 2.25.2 — pin a newer action version rather than reverting
 # this pack.
 
-name: shankar0123/certctl-codeql-models
+name: shankar0123/certctl-models
 version: 0.0.1
 library: true
 extensionTargets:
