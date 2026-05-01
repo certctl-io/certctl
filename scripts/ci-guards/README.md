@@ -53,7 +53,7 @@ Current helpers:
 4. CI auto-picks up new scripts via the `for g in scripts/ci-guards/*.sh`
    loop in the `Regression guards` step — no ci.yml change required.
 
-## The 20 guards in this directory
+## The 21 guards in this directory
 
 | ID | Finding | Catches |
 |---|---|---|
@@ -77,6 +77,7 @@ Current helpers:
 | `bundle-8-L-015-target-blank-rel-noopener` | L-015 (CWE-1022) reverse-tabnabbing | `target="_blank"` without `rel="noopener noreferrer"` |
 | `bundle-8-L-019-dangerously-set-inner-html` | L-019 (CWE-79) XSS | `dangerouslySetInnerHTML` outside `safeHtml.ts` |
 | `bundle-8-M-009-bare-usemutation` | M-009 + M-029 mutation contract | Bare `useMutation()` outside `useTrackedMutation` wrapper |
+| `H-1-encryption-key-min-length` | H-1 closure follow-up (post-Phase-5 surfacing) | `CERTCTL_CONFIG_ENCRYPTION_KEY` literal in any `deploy/docker-compose*.yml` shorter than the 32-byte floor enforced by `internal/config/config.go::Validate()` |
 
 ## Guards explicitly NOT here
 

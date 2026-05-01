@@ -305,8 +305,28 @@ services:
       CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_CLOCK_SKEW_TOLERANCE: 60s
       CERTCTL_SCEP_PROFILE_E2EINTUNE_INTUNE_PER_DEVICE_RATE_LIMIT_24H: 3
 
-      # Dynamic issuer/target config encryption (M34/M35)
-      CERTCTL_CONFIG_ENCRYPTION_KEY: test-encryption-key-32chars!!
+      # Dynamic issuer/target config encryption (M34/M35).
+      #
+      # MUST be ≥ 32 bytes. The H-1 closure (commit 6cb4414, "feat(security):
+      # encryption-key validation") added internal/config/config.go's
+      # minEncryptionKeyLength = 32 byte floor; values shorter than that are
+      # rejected at server boot with `Failed to load configuration:
+      # CERTCTL_CONFIG_ENCRYPTION_KEY too short`. The previous test value
+      # `test-encryption-key-32chars!!` was 29 bytes (the name claimed 32 but
+      # the author miscounted — 4+1+10+1+3+1+2+5+2 = 29). Pre-H-1 the
+      # validator accepted any non-empty string, so the gap was silent. Once
+      # the test stack actually boots the certctl-server (which the
+      # ci-pipeline-cleanup Phase 5 matrix collapse forced for the first
+      # time), the server now hard-fails at startup and the deploy-vendor-e2e
+      # job's `dependency failed to start: container certctl-test-server
+      # is unhealthy` error fires.
+      #
+      # The replacement below is 49 bytes — 17 bytes of safety margin over
+      # the floor so a future tightening (32 → 33+) does not break this
+      # fixture. It is clearly test-only / deterministic; do NOT copy this
+      # to production. Operators set CERTCTL_CONFIG_ENCRYPTION_KEY from
+      # `openssl rand -base64 32` per the README.
+      CERTCTL_CONFIG_ENCRYPTION_KEY: test-encryption-key-deterministic-32-byte-fixture
 
       # Network scanning
       CERTCTL_NETWORK_SCAN_ENABLED: "true"
