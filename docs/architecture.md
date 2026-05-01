@@ -703,20 +703,17 @@ The EST (Enrollment over Secure Transport) server provides an industry-standard 
 
 **Architecture:** EST is a handler-level protocol that delegates certificate issuance to an existing `IssuerConnector`. This means EST is not a new issuer — it's a new *interface* to the existing issuance infrastructure. The `ESTService` bridges the `ESTHandler` to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID`.
 
-```
-Client (WiFi AP, MDM, IoT)
-    │
-    ▼
-ESTHandler (handler layer)
-    │  CSR parsing, PKCS#7 response encoding
-    ▼
-ESTService (service layer)
-    │  CSR validation, CN/SAN extraction, audit recording
-    ▼
-IssuerConnector (connector layer via IssuerConnectorAdapter)
-    │  Certificate signing (Local CA, step-ca, etc.)
-    ▼
-Signed certificate returned as PKCS#7 certs-only
+```mermaid
+flowchart TD
+    Client["Client (WiFi AP, MDM, IoT)"]
+    Handler["ESTHandler (handler layer)"]
+    Service["ESTService (service layer)"]
+    Issuer["IssuerConnector (connector layer via IssuerConnectorAdapter)"]
+    Result["Signed certificate returned as PKCS#7 certs-only"]
+    Client --> Handler
+    Handler -->|"CSR parsing, PKCS#7 response encoding"| Service
+    Service -->|"CSR validation, CN/SAN extraction, audit recording"| Issuer
+    Issuer -->|"certificate signing (Local CA, step-ca, etc.)"| Result
 ```
 
 **Wire format:** EST uses PKCS#7 (RFC 2315) certs-only degenerate SignedData for certificate responses and base64-encoded DER for CSR requests. The handler includes a hand-rolled ASN.1 PKCS#7 builder — no external PKCS#7 dependency. The CSR reader accepts both base64-encoded DER (standard EST wire format) and PEM-encoded PKCS#10 (convenience for debugging).
@@ -795,20 +792,17 @@ The SCEP (Simple Certificate Enrollment Protocol) server provides certificate en
 
 **Architecture:** SCEP follows the exact same layering as EST — a handler-level protocol that delegates certificate issuance to an existing `IssuerConnector`. The `SCEPService` bridges the `SCEPHandler` to whichever issuer connector is configured via `CERTCTL_SCEP_ISSUER_ID`.
 
-```
-Client (MDM, network device, SCEP client)
-    │
-    ▼
-SCEPHandler (handler layer)
-    │  PKCS#7 envelope parsing, CSR extraction, challenge password extraction
-    ▼
-SCEPService (service layer)
-    │  Challenge password validation, CSR validation, CN/SAN extraction, audit recording
-    ▼
-IssuerConnector (connector layer via IssuerConnectorAdapter)
-    │  Certificate signing (Local CA, step-ca, etc.)
-    ▼
-Signed certificate returned as PKCS#7 certs-only
+```mermaid
+flowchart TD
+    Client["Client (MDM, network device, SCEP client)"]
+    Handler["SCEPHandler (handler layer)"]
+    Service["SCEPService (service layer)"]
+    Issuer["IssuerConnector (connector layer via IssuerConnectorAdapter)"]
+    Result["Signed certificate returned as PKCS#7 certs-only"]
+    Client --> Handler
+    Handler -->|"PKCS#7 envelope parsing, CSR extraction, challenge password extraction"| Service
+    Service -->|"challenge password validation, CSR validation, CN/SAN extraction, audit recording"| Issuer
+    Issuer -->|"certificate signing (Local CA, step-ca, etc.)"| Result
 ```
 
 **Wire format:** Two paths, tried in order. The new RFC 8894 path (post-2026-04-29) parses the full PKIMessage shape: ContentInfo → SignedData → SignerInfo (POPO over auth-attrs verified via `internal/pkcs7/signedinfo.go::SignerInfo.VerifySignature` with the canonical SET-OF Attribute re-serialisation per RFC 5652 §5.4) → EnvelopedData (decrypted via `internal/pkcs7/envelopeddata.go::EnvelopedData.Decrypt` with RSA PKCS#1v1.5 keyTrans + AES-CBC content + constant-time PKCS#7 unpad to close the padding-oracle leak) → inner PKCS#10 CSR. Auth-attrs (messageType, transactionID, senderNonce) flow through to the service layer via `domain.SCEPRequestEnvelope`. The handler dispatches on messageType: PKCSReq (19) → initial enrollment; RenewalReq (17) → re-enrollment with chain validation; GetCertInitial (20) → polling stub returns FAILURE+badCertID. Responses are full CertRep PKIMessages (`internal/pkcs7/certrep.go::BuildCertRepPKIMessage`) signed by the per-profile RA cert/key with the issued cert chain encrypted to the device's transient signing cert (RFC 8894 §3.3.2). On parse failure the handler falls through to the legacy MVP path: base64-encoded PKCS#7 and raw CSR submissions are still accepted; responses use the legacy PKCS#7 certs-only shape via the shared `internal/pkcs7` package. The MVP fall-through is non-negotiable — backward compat with lightweight SCEP clients that don't speak full RFC 8894. Single certs are returned as raw DER for `GetCACert`, chains as PKCS#7.
@@ -890,23 +884,27 @@ each per-profile dispatcher carries its own **trust anchor pool**:
 the public certs the operator extracted from the Connector's
 installation. Every Intune-flavored enrollment goes through:
 
-```
-                          ┌─────────────────────────────────┐
-                          │ Per-profile TrustAnchorHolder    │
-                          │ (RWMutex pool, SIGHUP-reloadable) │
-                          └────────────┬────────────────────┘
-                                       │ Get()
-                                       ▼
-device → SCEP PKIMessage → handler → SCEPService.dispatchIntuneChallenge
-                                       │
-                                       ├─► intune.ValidateChallenge (sig + iat/exp + audience)
-                                       ├─► claim.DeviceMatchesCSR (set-equality)
-                                       ├─► intune.ReplayCache.CheckAndInsert
-                                       ├─► intune.PerDeviceRateLimiter.Allow
-                                       └─► (V3-Pro) ComplianceCheck hook
-                                       │
-                                       ▼
-                              processEnrollment → IssuerConnector
+```mermaid
+flowchart TD
+    TAH["Per-profile TrustAnchorHolder<br/>(RWMutex pool, SIGHUP-reloadable)"]
+    Device[device]
+    Handler[handler]
+    Dispatch["SCEPService.dispatchIntuneChallenge"]
+    Validate["intune.ValidateChallenge<br/>(sig + iat/exp + audience)"]
+    Match["claim.DeviceMatchesCSR<br/>(set-equality)"]
+    Replay["intune.ReplayCache.CheckAndInsert"]
+    Rate["intune.PerDeviceRateLimiter.Allow"]
+    Compliance["(V3-Pro) ComplianceCheck hook"]
+    Process["processEnrollment → IssuerConnector"]
+    Device -->|SCEP PKIMessage| Handler
+    Handler --> Dispatch
+    TAH -.->|Get()| Dispatch
+    Dispatch --> Validate
+    Dispatch --> Match
+    Dispatch --> Replay
+    Dispatch --> Rate
+    Dispatch --> Compliance
+    Dispatch --> Process
 ```
 
 The trust anchor file is mode-0600 on disk; certctl loads it at
@@ -932,22 +930,16 @@ See [`scep-intune.md`](scep-intune.md) for the full migration playbook
 
 The local issuer's CA private key is wrapped behind the `signer.Signer` interface in `internal/crypto/signer/`. Every CA-signing call site — leaf certificate issuance (`x509.CreateCertificate`), CRL generation (`x509.CreateRevocationList`), and OCSP response signing (`ocsp.CreateResponse`) — accesses the key through this interface rather than touching `crypto.Signer` directly. The interface embeds the stdlib `crypto.Signer` and adds a single `Algorithm() Algorithm` method so call sites can pick the matching `x509.SignatureAlgorithm` without reflecting on the concrete key type.
 
-```
-                                          ┌─────────────────────────────────┐
-                                          │  signer.Driver (pluggable)      │
-                                          ├─────────────────────────────────┤
-internal/connector/issuer/local           │  signer.FileDriver  (default)   │
-   c.caSigner signer.Signer  ──────────►  │    PEM key on disk              │
-                                          │                                 │
-                                          │  signer.MemoryDriver  (tests)   │
-                                          │    in-memory only               │
-                                          │                                 │
-                                          │  signer.PKCS11Driver  (V3-Pro)  │
-                                          │    HSM token (future)           │
-                                          │                                 │
-                                          │  signer.CloudKMSDriver (V3-Pro) │
-                                          │    AWS / GCP / Azure (future)   │
-                                          └─────────────────────────────────┘
+```mermaid
+flowchart LR
+    Local["internal/connector/issuer/local<br/>c.caSigner signer.Signer"]
+    subgraph Driver["signer.Driver (pluggable)"]
+        File["signer.FileDriver (default)<br/>PEM key on disk"]
+        Memory["signer.MemoryDriver (tests)<br/>in-memory only"]
+        PKCS11["signer.PKCS11Driver (V3-Pro)<br/>HSM token (future)"]
+        Cloud["signer.CloudKMSDriver (V3-Pro)<br/>AWS / GCP / Azure (future)"]
+    end
+    Local --> Driver
 ```
 
 Today only `FileDriver` (production) and `MemoryDriver` (tests) ship. The interface exists so PKCS#11/HSM and cloud-KMS drivers can land in follow-on packages (`internal/crypto/signer/pkcs11`, etc.) without modifying any call site or any other driver. The L-014 file-on-disk threat-model carve-out documented at the top of `internal/connector/issuer/local/local.go` applies to `FileDriver`-backed signers; alternative drivers that keep the key inside an HSM token or cloud KMS close the disk-exposure leg of the threat model entirely.

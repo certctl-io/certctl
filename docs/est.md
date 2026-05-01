@@ -251,20 +251,16 @@ This recipe stands up an EAP-TLS-authenticated corporate WiFi network
 where certctl issues every device certificate via EST. End-to-end
 flow:
 
-```
-┌─────────────┐      ┌──────────────────┐      ┌─────────────┐
-│ Laptop /    │ EAP  │ WiFi access      │ Radius│ FreeRADIUS  │
-│ supplicant  │─────▶│ point (NAS)      │──────▶│ (validate   │
-│ (wpa_       │      │                  │      │  cert chain)│
-│  supplicant │      └──────────────────┘      └──────┬──────┘
-│  / iwd /    │                                       │
-│  Apple WiFi)│                                       │ trusts
-└──────┬──────┘                                       ▼
-       │ EST (one-time, then renewal)         ┌─────────────┐
-       │ /simpleenroll, /simplereenroll       │ certctl CA  │
-       └────────────────────────────────────▶│ (EST profile│
-                                              │  "wifi")    │
-                                              └─────────────┘
+```mermaid
+flowchart LR
+    Laptop["Laptop / supplicant<br/>(wpa_supplicant / iwd / Apple WiFi)"]
+    AP["WiFi access point (NAS)"]
+    Radius["FreeRADIUS<br/>(validate cert chain)"]
+    CA["certctl CA<br/>(EST profile 'wifi')"]
+    Laptop -->|EAP| AP
+    AP -->|Radius| Radius
+    Radius -.->|trusts| CA
+    Laptop -->|"EST: /simpleenroll, /simplereenroll<br/>(one-time, then renewal)"| CA
 ```
 
 ### certctl-side: EST profile config for 802.1X

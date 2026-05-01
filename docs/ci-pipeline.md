@@ -17,17 +17,28 @@ This guide covers the **on-push pipeline** only.
 
 ## On-push pipeline (7 status checks)
 
-```
-push to master
-  ├── CI workflow (5 jobs)
-  │   ├── go-build-and-test       (~6-7 min)
-  │   ├── frontend-build          (~1 min)
-  │   ├── helm-lint               (~10 sec)
-  │   ├── deploy-vendor-e2e       (~5 min, depends on go-build-and-test)
-  │   └── image-and-supply-chain  (~3 min, parallel)
-  └── CodeQL workflow (2 jobs)
-      ├── Analyze (go)            (~5 min, parallel)
-      └── Analyze (javascript-typescript)  (~5 min, parallel)
+```mermaid
+flowchart TD
+    Push["push to master"]
+    CI["CI workflow (5 jobs)"]
+    CodeQL["CodeQL workflow (2 jobs)"]
+    GoBuild["go-build-and-test<br/>~6-7 min"]
+    Frontend["frontend-build<br/>~1 min"]
+    HelmLint["helm-lint<br/>~10 sec"]
+    Vendor["deploy-vendor-e2e<br/>~5 min, depends on go-build-and-test"]
+    Image["image-and-supply-chain<br/>~3 min, parallel"]
+    AnalyzeGo["Analyze (go)<br/>~5 min, parallel"]
+    AnalyzeJS["Analyze (javascript-typescript)<br/>~5 min, parallel"]
+    Push --> CI
+    Push --> CodeQL
+    CI --> GoBuild
+    CI --> Frontend
+    CI --> HelmLint
+    CI --> Vendor
+    CI --> Image
+    CodeQL --> AnalyzeGo
+    CodeQL --> AnalyzeJS
+    GoBuild -.depends on.-> Vendor
 ```
 
 End-to-end wall-clock: dominated by `go-build-and-test` + `deploy-vendor-e2e` chain (~12 min) running in parallel with CodeQL (~5 min). Target ~10 min.

@@ -36,21 +36,13 @@ What you get over NDES:
 
 ## Architecture
 
-```
-┌──────────────┐       ┌──────────────────────┐       ┌──────────────┐
-│ Intune cloud │──────▶│ Intune Certificate   │──────▶│ certctl SCEP │
-│              │       │ Connector            │       │ server       │
-│ (Microsoft)  │       │ (customer infra)     │       │ (you)        │
-└──────────────┘       └──────────────────────┘       └──────┬───────┘
-                                                              │
-                                                              ▼
-                                                       ┌──────────────┐
-                                                       │ issuer       │
-                                                       │ connector    │
-                                                       │ (local CA /  │
-                                                       │  Vault /     │
-                                                       │  EJBCA / …)  │
-                                                       └──────────────┘
+```mermaid
+flowchart LR
+    Cloud["Intune cloud<br/>(Microsoft)"]
+    Connector["Intune Certificate Connector<br/>(customer infra)"]
+    Server["certctl SCEP server<br/>(you)"]
+    Issuer["issuer connector<br/>(local CA / Vault / EJBCA / …)"]
+    Cloud --> Connector --> Server --> Issuer
 ```
 
 **certctl replaces NDES, not the Connector.** The Intune Certificate

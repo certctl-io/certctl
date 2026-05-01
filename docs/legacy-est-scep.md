@@ -37,12 +37,13 @@ straight at certctl on `:8443`.
 
 ## Architecture
 
-```
-                          ┌─── TLS 1.2/1.3 ────┐         ┌─── TLS 1.3 ───┐
-[legacy EST/SCEP client]──>│ nginx / HAProxy   │────────>│ certctl :8443 │
-                          │ reverse proxy      │         │               │
-                          └────────────────────┘         └───────────────┘
-        Allowed TLS 1.2                  Re-encrypts as TLS 1.3
+```mermaid
+flowchart LR
+    Client["legacy EST/SCEP client"]
+    Proxy["nginx / HAProxy<br/>reverse proxy"]
+    Server["certctl :8443"]
+    Client -->|"TLS 1.2/1.3<br/>(allowed TLS 1.2)"| Proxy
+    Proxy -->|"TLS 1.3<br/>(re-encrypts as TLS 1.3)"| Server
 ```
 
 The reverse proxy:

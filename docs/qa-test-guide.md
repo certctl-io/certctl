@@ -38,22 +38,15 @@ either manual-only by design or pending QA-suite coverage:
 
 ## Architecture
 
-```
-┌────────────────────────┐     ┌─────────────────────────────────┐
-│  qa_test.go            │────▶│  certctl demo stack             │
-│  (//go:build qa)       │     │  docker-compose.yml +           │
-│                        │     │  docker-compose.demo.yml        │
-│  TestQA(t *testing.T)  │     │                                 │
-│   ├─ Part01_Infra      │     │  ┌─ certctl-server :8443        │
-│   ├─ Part02_Auth       │     │  ├─ postgres :5432              │
-│   ├─ Part03_CertCRUD   │     │  └─ certctl-agent (×N)          │
-│   ├─ ...               │     │      ↑ seed_demo.sql provisions │
-│   └─ Part52_HelmChart  │     │        12 agent rows (1 active, │
-└────────────────────────┘     │        2 retired, 9 reserved /  │
-                               │        sentinel) for the soft-  │
-                               │        retire / FSM coverage    │
-                               │        Parts 55–56 exercise.    │
-                               └─────────────────────────────────┘
+```mermaid
+flowchart LR
+    QA["qa_test.go (//go:build qa)<br/><br/>TestQA(t *testing.T)<br/>├─ Part01_Infra<br/>├─ Part02_Auth<br/>├─ Part03_CertCRUD<br/>├─ ...<br/>└─ Part52_HelmChart"]
+    subgraph Stack["certctl demo stack<br/>docker-compose.yml + docker-compose.demo.yml"]
+        Server["certctl-server :8443"]
+        Postgres["postgres :5432"]
+        Agents["certctl-agent (×N)<br/>↑ seed_demo.sql provisions 12 agent rows<br/>(1 active, 2 retired, 9 reserved/sentinel)<br/>for the soft-retire / FSM coverage Parts 55–56 exercise"]
+    end
+    QA --> Stack
 ```
 
 > **Multi-agent demo stack (Bundle Q / L-004 closure).** The demo
