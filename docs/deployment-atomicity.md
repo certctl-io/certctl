@@ -19,12 +19,52 @@ a single shared primitive:
 
 | Gap | Pre-bundle | Post-bundle |
 |---|---|---|
-| **Atomic deploy with rollback** | F5 only (transactional API) | All 13 connectors via `deploy.Apply` |
+| **Atomic deploy with rollback** | F5 only (transactional API) | 12 of 13 connectors via `deploy.Apply` (K8s pending Bundle 2 — see [Section 1.5](#15-audit-closure-status-2026-05-02-deployment-target-audit)) |
 | **Post-deploy TLS verification** | None | NGINX/Apache/HAProxy/Traefik/Caddy/Envoy/Postfix all do TLS handshake + SHA-256 fingerprint compare; fail → rollback |
 | **Vendor-specific deployment recipes** | Light docs | (Bundle II — `cowork/deploy-hardening-ii-prompt.md`) |
 
 This document describes the operator-visible surface. The Go-level
 contract lives at `internal/deploy/doc.go`.
+
+## 1.5. Audit closure status (2026-05-02 deployment-target audit)
+
+The 2026-05-02 deployment-target coverage audit
+(`cowork/deployment-target-audit-2026-05-02/RESULTS.md`) tightened the
+atomic + rollback contract on the connectors below. All bundles in the
+table are committed to `master` as of this section's last edit; commit
+hashes pin to the canonical landing commit for each piece of work.
+
+| Connector       | Bundle    | Commit    | Closes |
+|-----------------|-----------|-----------|--------|
+| envoy           | Bundle 3  | `d8cd981` | atomic SDS JSON write + post-deploy watcher pickup poll |
+| traefik         | Bundle 4  | `37634e6` | single `deploy.Apply` Plan + all-files atomicity + rollback |
+| iis             | Bundle 5  | `223f279` | pre-deploy `Get-WebBinding` snapshot + on-failure binding rollback |
+| ssh             | Bundle 6  | `eb39059` | pre-deploy SFTP snapshot + reload-failure rollback |
+| wincertstore    | Bundle 7  | `1dd1dd4` | `Get-ChildItem` snapshot + on-import-failure rollback |
+| javakeystore    | Bundle 8  | `87e0009` | `keytool -exportkeystore` snapshot + on-import-failure rollback + operator playbook for argv password |
+| caddy           | Bundle 9  | `8cda860` | duration metric fix + file-mode PEM validate + api-mode SHA-256 idempotency |
+| postfix/dovecot | Bundle 11 | `88e8881` | applyDefaults + verify-fails-rollback test pin under Mode=dovecot |
+
+**Outstanding from the same audit:**
+
+- **Bundle 2 (k8ssecret).** The production `realK8sClient` is still a
+  stub (see Section 3 / row `k8ssecret` below). Replacing it with a
+  real `k8s.io/client-go` implementation + `ResourceVersion` plumbing
+  + post-deploy SHA-256 verify + kubelet sync poll is the remaining
+  V2 P0 blocker. Tracking prompt:
+  `cowork/deployment-target-audit-2026-05-02/k8s-real-client-prompt.md`.
+
+Bundle 10 (per-connector loadtest harness, commit `6286cd4`) does not
+modify the per-connector contract table; it's a CI / observability
+addition documented separately at `deploy/test/loadtest/README.md`.
+
+The original Bundle 1 audit spec read "soften the IIS / SSH /
+WinCertStore / JavaKeystore rollback claims first while bundles 5–8
+catch the implementation up". Execution order inverted that loop —
+Bundles 3–11 shipped before the doc-realignment commit, so the rows
+in Section 3 below are honest as-shipped without ever needing a
+softening pass. The K8s row is the one exception, and Section 3's
+notes call it out explicitly.
 
 ## 2. The atomic-write primitive — `Plan` / `Apply`
 
@@ -92,7 +132,7 @@ Apply's algorithm:
 | ssh | (Connect probe) | (SCP upload + remote chmod) | `tls.Dial` to remote TLS port | Pre-deploy SCP backup of remote files |
 | wincertstore | (Get-ChildItem Cert:\) | (Import-PfxCertificate) | (admin probe) | Get-ChildItem snapshot for rollback |
 | javakeystore | (`keytool -list`) | (`keytool -importkeystore`) | (admin probe) | keytool snapshot; rollback via `keytool -delete` + re-import |
-| k8ssecret | (GetSecret RBAC probe) | (Update Secret) | SHA-256 verify of returned Secret | Atomic at API server; kubelet sync polled via `Pod.Status.ContainerStatuses` |
+| k8ssecret | (V2 blocker — see note below) | (V2 blocker — see note below) | (V2 blocker — see note below) | **V2 blocker — Bundle 2 of the 2026-05-02 deployment-target audit.** Production `realK8sClient` at `internal/connector/target/k8ssecret/k8ssecret.go:397-420` is a stub (every method returns `"real Kubernetes client not implemented — use NewWithClient for tests"`). The SHA-256 post-deploy verify and kubelet sync poll are designed but not yet implemented; production deploys to a real cluster fail with "not implemented" until Bundle 2 lands. Test mocks via `NewWithClient` work today. Tracking prompt: `cowork/deployment-target-audit-2026-05-02/k8s-real-client-prompt.md`. |
 
 ## 4. Post-deploy TLS verification
 
