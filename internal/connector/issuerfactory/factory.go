@@ -122,7 +122,11 @@ func NewFromConfig(ctx context.Context, issuerType string, configJSON json.RawMe
 		if err := json.Unmarshal(configJSON, &cfg); err != nil {
 			return nil, fmt.Errorf("invalid EJBCA config: %w", err)
 		}
-		return ejbca.New(&cfg, logger), nil
+		conn, err := ejbca.New(&cfg, logger)
+		if err != nil {
+			return nil, fmt.Errorf("EJBCA init: %w", err)
+		}
+		return conn, nil
 
 	default:
 		return nil, fmt.Errorf("unknown issuer type: %q", issuerType)

@@ -21,28 +21,40 @@ func quietStubLogger() *slog.Logger {
 }
 
 func TestStub_GenerateCRL(t *testing.T) {
-	c := New(&Config{}, quietStubLogger())
-	_, err := c.GenerateCRL(context.Background(), nil)
+	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.GenerateCRL(context.Background(), nil)
 	if err == nil {
 		t.Fatal("expected error from stub GenerateCRL")
 	}
 }
 
 func TestStub_SignOCSPResponse(t *testing.T) {
-	c := New(&Config{}, quietStubLogger())
-	_, err := c.SignOCSPResponse(context.Background(), issuer.OCSPSignRequest{})
+	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
+	_, err = c.SignOCSPResponse(context.Background(), issuer.OCSPSignRequest{})
 	if err == nil {
 		t.Fatal("expected error from stub SignOCSPResponse")
 	}
 }
 
 func TestStub_GetCACertPEM(t *testing.T) {
-	c := New(&Config{}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	_, _ = c.GetCACertPEM(context.Background())
 }
 
 func TestStub_GetRenewalInfo(t *testing.T) {
-	c := New(&Config{}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	if err != nil {
+		t.Fatalf("New: %v", err)
+	}
 	res, err := c.GetRenewalInfo(context.Background(), "any-pem")
 	_ = res
 	_ = err

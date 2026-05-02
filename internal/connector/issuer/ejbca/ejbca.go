@@ -20,6 +20,7 @@ package ejbca
 import (
 	"bytes"
 	"context"
+	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -77,13 +78,66 @@ type Connector struct {
 }
 
 // New creates a new EJBCA connector with the given configuration and logger.
-func New(config *Config, logger *slog.Logger) *Connector {
-	return &Connector{
-		config: config,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+//
+// When config.AuthMode is "mtls" (or empty — mtls is the default), New
+// loads config.ClientCertPath + config.ClientKeyPath via tls.LoadX509KeyPair
+// and configures *http.Transport.TLSClientConfig so the client presents the
+// cert on every request. When AuthMode is "oauth2", New returns a client
+// with no transport customization (the OAuth2 Bearer header path is wired
+// in setAuthHeaders). Any other AuthMode value returns (nil, error).
+//
+// Returns an error if mTLS cert/key load fails (missing file, malformed
+// PEM, mismatched cert/key) so misconfigured operators get an immediate
+// failure at issuer construction rather than a cryptic 401 at first
+// issuance.
+//
+// Callers wanting to inject a pre-built *http.Client (tests, fake EJBCA
+// servers) should use NewWithHTTPClient.
+func New(config *Config, logger *slog.Logger) (*Connector, error) {
+	authMode := "mtls"
+	if config != nil && config.AuthMode != "" {
+		authMode = config.AuthMode
+	}
+
+	switch authMode {
+	case "mtls":
+		// Build a fresh *http.Transport (do NOT clone http.DefaultTransport
+		// — mutation would leak across the package boundary). Set
+		// MinVersion: TLS 1.2 as a compatibility floor for on-prem EJBCA
+		// installs that may predate TLS 1.3.
+		if config == nil || config.ClientCertPath == "" || config.ClientKeyPath == "" {
+			return nil, fmt.Errorf("EJBCA mTLS requires client_cert_path and client_key_path")
+		}
+		cert, err := tls.LoadX509KeyPair(config.ClientCertPath, config.ClientKeyPath)
+		if err != nil {
+			return nil, fmt.Errorf("EJBCA mTLS cert load: %w", err)
+		}
+		transport := &http.Transport{
+			TLSClientConfig: &tls.Config{
+				Certificates: []tls.Certificate{cert},
+				MinVersion:   tls.VersionTLS12,
+			},
+		}
+		return &Connector{
+			config: config,
+			logger: logger,
+			httpClient: &http.Client{
+				Timeout:   30 * time.Second,
+				Transport: transport,
+			},
+		}, nil
+	case "oauth2":
+		// OAuth2 path uses default transport; setAuthHeaders adds the
+		// Bearer header on every request.
+		return &Connector{
+			config: config,
+			logger: logger,
+			httpClient: &http.Client{
+				Timeout: 30 * time.Second,
+			},
+		}, nil
+	default:
+		return nil, fmt.Errorf("EJBCA invalid auth_mode %q (must be \"mtls\" or \"oauth2\")", authMode)
 	}
 }
 
