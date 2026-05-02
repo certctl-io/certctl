@@ -383,6 +383,11 @@ func main() {
 	// I-001: emit "job_retry" audit events when the scheduler resets Failed→Pending.
 	// SetAuditService is optional — JobService falls back to nil-guarded no-op if unwired.
 	jobService.SetAuditService(auditService)
+	// Audit fix #9: bound the per-tick goroutine fan-out so a 5k-cert
+	// sweep doesn't trip upstream-CA rate limits. Default 25 from
+	// CERTCTL_RENEWAL_CONCURRENCY; ≤0 normalised to 1 (sequential)
+	// inside the setter.
+	jobService.SetRenewalConcurrency(cfg.Scheduler.RenewalConcurrency)
 	agentService := service.NewAgentService(agentRepo, certificateRepo, jobRepo, targetRepo, auditService, issuerRegistry, renewalService)
 	agentService.SetProfileRepo(profileRepo)
 	issuerService := service.NewIssuerService(issuerRepo, auditService, issuerRegistry, encryptionKey, logger)

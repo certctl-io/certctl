@@ -1205,7 +1205,7 @@ Single SQL `UNION` query replaces the previous "fetch all, filter in Go" approac
 | Loop | Default Interval | Always-on | Env Var | Description |
 |---|---|---|---|---|
 | Renewal check | 1 hour | Yes | `CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL` | Check expiring certs, query ARI, create renewal jobs |
-| Job processor | 30 seconds | Yes | `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | Process pending jobs |
+| Job processor | 30 seconds | Yes | `CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL` | Process pending jobs (concurrency cap via `CERTCTL_RENEWAL_CONCURRENCY`, default 25) |
 | Job retry | 5 minutes | Yes | `CERTCTL_SCHEDULER_RETRY_INTERVAL` | Retry Failed jobs (I-001) |
 | Job timeout reaper | 10 minutes | Yes | `CERTCTL_JOB_TIMEOUT_INTERVAL` (per-state thresholds: `CERTCTL_JOB_AWAITING_APPROVAL_TIMEOUT`, `CERTCTL_JOB_AWAITING_CSR_TIMEOUT`) | Fail AwaitingCSR/AwaitingApproval jobs past timeout (I-003) |
 | Agent health check | 2 minutes | Yes | `CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL` | Check agent heartbeat staleness |

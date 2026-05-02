@@ -17,6 +17,7 @@ require (
 	github.com/masterzen/winrm v0.0.0-20250927112105-5f8e6c707321
 	github.com/pkg/sftp v1.13.10
 	golang.org/x/crypto v0.45.0
+	golang.org/x/sync v0.18.0
 	software.sslmate.com/src/go-pkcs12 v0.7.0
 )
 

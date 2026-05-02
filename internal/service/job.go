@@ -6,7 +6,11 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
+
+	"golang.org/x/sync/semaphore"
 
 	"github.com/shankar0123/certctl/internal/domain"
 	"github.com/shankar0123/certctl/internal/repository"
@@ -29,6 +33,14 @@ type JobService struct {
 	deploymentService *DeploymentService
 	auditService      *AuditService
 	logger            *slog.Logger
+
+	// renewalConcurrency caps the number of concurrent goroutines that
+	// ProcessPendingJobs spawns. 0 (zero-value) means "sequential" so
+	// existing test wiring that constructs JobService directly via
+	// NewJobService keeps its strict-serial behaviour. Production
+	// wiring calls SetRenewalConcurrency(cfg.Scheduler.RenewalConcurrency)
+	// to switch on the bounded fan-out. Audit fix #9.
+	renewalConcurrency int
 }
 
 // NewJobService creates a new job service.
@@ -54,6 +66,28 @@ func NewJobService(
 		deploymentService: deploymentService,
 		logger:            logger,
 	}
+}
+
+// SetRenewalConcurrency wires the per-tick fan-out concurrency cap that
+// ProcessPendingJobs uses. Called from cmd/server/main.go with
+// cfg.Scheduler.RenewalConcurrency (default 25). Values ≤ 0 are
+// normalised to 1 — fail-safe to sequential rather than panicking on
+// semaphore.NewWeighted(0) which constructs a semaphore that blocks
+// every Acquire.
+//
+// Audit fix #9: bounded scheduler concurrency. Pre-fix
+// ProcessPendingJobs ran every claimed job sequentially in a single
+// goroutine (slow but safe); operators with large fleets needed a
+// performance lever, but switching to fire-and-forget per-job
+// goroutines would have unbounded the upstream-CA call rate and
+// tripped DigiCert / Entrust / Sectigo rate limits. The cap gives
+// the operator a knob (CERTCTL_RENEWAL_CONCURRENCY) to dial
+// throughput up without losing the rate-limit headroom.
+func (s *JobService) SetRenewalConcurrency(n int) {
+	if n <= 0 {
+		n = 1
+	}
+	s.renewalConcurrency = n
 }
 
 // SetAuditService wires an optional audit service for emitting lifecycle
@@ -88,21 +122,34 @@ func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
 
 	s.logger.Info("processing pending jobs", "count", len(pendingJobs))
 
+	// Audit fix #9: bounded concurrent fan-out. When renewalConcurrency
+	// is the zero value (caller never set it), fall through to the
+	// historical strict-sequential loop so every existing test path
+	// keeps its byte-for-byte behaviour. Production wiring in
+	// cmd/server/main.go always calls SetRenewalConcurrency with the
+	// configured cap (default 25), so the bounded path is always taken
+	// in real deployments.
+	if s.renewalConcurrency <= 0 {
+		return s.processPendingJobsSequential(ctx, pendingJobs)
+	}
+	return s.processPendingJobsConcurrent(ctx, pendingJobs, s.renewalConcurrency)
+}
+
+// processPendingJobsSequential is the legacy strict-serial fan-out
+// (preserved for unit-test wiring that constructs JobService via
+// NewJobService and never calls SetRenewalConcurrency). One job at a
+// time, no concurrency.
+func (s *JobService) processPendingJobsSequential(ctx context.Context, pendingJobs []*domain.Job) error {
 	var processedCount int
 	var failedCount int
 
-	// Process each job
 	for _, job := range pendingJobs {
-		// Skip deployment jobs that have an agent_id — those are meant for agent
-		// pickup via GetPendingWork(), not server-side processing. The server should
-		// only process deployment jobs without an agent (legacy/serverless targets).
-		if job.Type == domain.JobTypeDeployment && job.AgentID != nil && *job.AgentID != "" {
+		if shouldSkipJob(job) {
 			s.logger.Debug("skipping agent-routed deployment job",
 				"job_id", job.ID,
 				"agent_id", *job.AgentID)
 			continue
 		}
-
 		if err := s.processJob(ctx, job); err != nil {
 			s.logger.Error("failed to process job",
 				"job_id", job.ID,
@@ -120,6 +167,94 @@ func (s *JobService) ProcessPendingJobs(ctx context.Context) error {
 		"total", len(pendingJobs))
 
 	return nil
+}
+
+// processPendingJobsConcurrent is the production entry point for the
+// bounded fan-out — it pins the per-job work function to s.processJob.
+// Test code at internal/service/job_concurrency_test.go drives
+// boundedFanOut directly with a counter-tracking stub so the
+// concurrency cap can be asserted without standing up the full
+// renewal/deployment service graph.
+func (s *JobService) processPendingJobsConcurrent(ctx context.Context, pendingJobs []*domain.Job, capN int) error {
+	return boundedFanOut(ctx, pendingJobs, capN, s.processJob, s.logger)
+}
+
+// boundedFanOut runs `work` over `pendingJobs` with at most `capN`
+// goroutines in flight at any moment, using
+// golang.org/x/sync/semaphore.Weighted for the gate. The Acquire(ctx,
+// 1) call BLOCKS the loop when at the cap, providing real backpressure
+// rather than fire-and-forget — the scheduler tick can't outrun the
+// upstream-CA rate limit. ctx cancellation propagates through Acquire
+// so a context.Done() interrupts the fan-out promptly; in-flight
+// goroutines drain via Wait before the function returns, so no
+// goroutine outlives the scheduler tick.
+//
+// processed / failed are tracked via atomic.Int64 to avoid mutex
+// overhead on every job completion; the final log line reads both
+// after Wait, so the values reflect every dispatched job.
+//
+// Audit fix #9: the cap is a load-bearing pre-condition for "operators
+// with permissive upstream limits and large fleets can scale up the
+// renewal sweep without losing rate-limit headroom."
+func boundedFanOut(ctx context.Context, pendingJobs []*domain.Job, capN int, work func(context.Context, *domain.Job) error, logger *slog.Logger) error {
+	var processed, failed atomic.Int64
+	sem := semaphore.NewWeighted(int64(capN))
+	var wg sync.WaitGroup
+
+	for _, job := range pendingJobs {
+		if shouldSkipJob(job) {
+			logger.Debug("skipping agent-routed deployment job",
+				"job_id", job.ID,
+				"agent_id", *job.AgentID)
+			continue
+		}
+
+		// Acquire BEFORE launching so the offered load to upstream
+		// CAs respects the cap regardless of how fast individual
+		// jobs complete.
+		if err := sem.Acquire(ctx, 1); err != nil {
+			dispatched := processed.Load() + failed.Load()
+			logger.Warn("renewal fan-out cancelled mid-tick",
+				"reason", err,
+				"jobs_dispatched", dispatched,
+				"jobs_remaining", int64(len(pendingJobs))-dispatched)
+			break
+		}
+
+		wg.Add(1)
+		go func(j *domain.Job) {
+			defer wg.Done()
+			defer sem.Release(1)
+
+			if err := work(ctx, j); err != nil {
+				logger.Error("failed to process job",
+					"job_id", j.ID,
+					"job_type", j.Type,
+					"error", err)
+				failed.Add(1)
+				return
+			}
+			processed.Add(1)
+		}(job)
+	}
+
+	wg.Wait()
+
+	logger.Info("job processing completed",
+		"processed", processed.Load(),
+		"failed", failed.Load(),
+		"total", len(pendingJobs),
+		"concurrency_cap", capN)
+
+	return nil
+}
+
+// shouldSkipJob returns true for deployment jobs that have an agent_id —
+// those are meant for agent pickup via GetPendingWork(), not server-side
+// processing. The server should only process deployment jobs without an
+// agent (legacy/serverless targets).
+func shouldSkipJob(job *domain.Job) bool {
+	return job.Type == domain.JobTypeDeployment && job.AgentID != nil && *job.AgentID != ""
 }
 
 // processJob routes a single job to the appropriate service based on type.

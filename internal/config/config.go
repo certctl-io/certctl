@@ -1143,6 +1143,25 @@ type SchedulerConfig struct {
 	// Setting: CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL environment variable.
 	JobProcessorInterval time.Duration
 
+	// RenewalConcurrency caps the number of concurrent renewal/issuance/
+	// deployment goroutines launched per job-processor tick. Default 25 —
+	// high enough to make use of HTTP/1.1 connection reuse against an
+	// upstream CA, low enough to stay under typical per-customer rate
+	// limits. Operators with permissive upstream limits and large fleets
+	// (>10k certs) can bump to 100; operators with strict limits or
+	// async-CA-heavy fleets should keep at 25 or lower.
+	//
+	// Values ≤ 0 fall back to 1 (sequential) — fail-safe rather than
+	// panicking on semaphore.NewWeighted(0) semantics.
+	//
+	// Closes the #9 acquisition-readiness blocker from the 2026-05-01
+	// issuer coverage audit. Pre-fix the per-tick fan-out had no cap,
+	// so a 5k-cert sweep launched 5k in-flight HTTP calls to upstream
+	// CAs and tripped DigiCert/Entrust/Sectigo rate limits.
+	//
+	// Setting: CERTCTL_RENEWAL_CONCURRENCY environment variable.
+	RenewalConcurrency int
+
 	// AgentHealthCheckInterval is how often the scheduler checks agent heartbeats.
 	// Default: 2 minutes. Minimum: 1 second. Marks agents offline if no recent heartbeat.
 	// Setting: CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL environment variable.
@@ -1434,8 +1453,11 @@ func Load() (*Config, error) {
 			DemoSeed:       getEnvBool("CERTCTL_DEMO_SEED", false),
 		},
 		Scheduler: SchedulerConfig{
-			RenewalCheckInterval:        getEnvDuration("CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL", 1*time.Hour),
-			JobProcessorInterval:        getEnvDuration("CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL", 30*time.Second),
+			RenewalCheckInterval: getEnvDuration("CERTCTL_SCHEDULER_RENEWAL_CHECK_INTERVAL", 1*time.Hour),
+			JobProcessorInterval: getEnvDuration("CERTCTL_SCHEDULER_JOB_PROCESSOR_INTERVAL", 30*time.Second),
+			// Audit fix #9 — per-tick concurrency cap on the renewal/issuance/
+			// deployment goroutine fan-out. ≤0 → 1 (sequential).
+			RenewalConcurrency:          getEnvInt("CERTCTL_RENEWAL_CONCURRENCY", 25),
 			AgentHealthCheckInterval:    getEnvDuration("CERTCTL_SCHEDULER_AGENT_HEALTH_CHECK_INTERVAL", 2*time.Minute),
 			NotificationProcessInterval: getEnvDuration("CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL", 1*time.Minute),
 			// I-005: retry sweep for failed notifications. Mirrors RetryInterval
