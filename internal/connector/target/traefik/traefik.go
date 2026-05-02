@@ -1,8 +1,12 @@
 // Package traefik implements the Traefik file-provider target
-// connector. As of deploy-hardening I Phase 7: atomic-write via
-// internal/deploy.AtomicWriteFile + optional post-deploy TLS
-// verify. No PreCommit/PostCommit because Traefik watches the
-// directory via inotify and auto-reloads on file change.
+// connector. Bundle 4 of the 2026-05-02 deployment-target audit:
+// upgraded from two separate deploy.AtomicWriteFile calls (cert,
+// key) to a single deploy.Apply Plan with all-files atomicity.
+// Traefik has no PreCommit (no `nginx -t` equivalent) and no
+// PostCommit (file watcher auto-reloads on rename). Post-deploy
+// TLS verify (optional) confirms the watcher picked up the new
+// cert; on verify failure, restoreFromBackups rewrites every File
+// path from its backup so the watcher reloads to the prior state.
 package traefik
 
 import (
@@ -92,10 +96,22 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	return nil
 }
 
-// DeployCertificate writes cert + chain (combined) and key as
-// separate files via deploy.AtomicWriteFile. Traefik's inotify
-// watcher picks up the changes and auto-reloads. Post-deploy
-// verify (if enabled) handshakes against the configured endpoint.
+// DeployCertificate writes cert + chain (combined) and key via a
+// single deploy.Apply Plan. Bundle 4 of the 2026-05-02 deployment-
+// target audit replaced the prior two-AtomicWriteFile approach,
+// which broke all-files atomicity (a key-write failure after a
+// successful cert write left an orphaned cert and the dedicated
+// rollback helper only restored the cert).
+//
+// Traefik has no PreCommit (no validate-with-target command) and
+// no PostCommit (inotify watcher auto-reloads on rename). Apply
+// gives us SHA-256 idempotency over both files and rollback
+// semantics if the rename loop ever fails mid-stream.
+//
+// Post-deploy TLS verify (optional via PostDeployVerify) confirms
+// the watcher picked up the new bytes; on mismatch, restoreFromBackups
+// rewrites both files from their backups and the watcher will
+// auto-reload to the prior state on its next tick.
 func (c *Connector) DeployCertificate(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
 	c.logger.Info("deploying certificate to Traefik",
 		"cert_dir", c.config.CertDir, "cert_file", c.config.CertFile, "key_file", c.config.KeyFile)
@@ -104,9 +120,54 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	certPath := filepath.Join(c.config.CertDir, c.config.CertFile)
 	keyPath := filepath.Join(c.config.CertDir, c.config.KeyFile)
 
-	// Preserve the pre-Phase-7 trailing-newline convention so
-	// existing operator deploys + tests don't break on byte-equal
-	// comparisons.
+	plan := c.buildPlan(request, certPath, keyPath)
+
+	res, err := deploy.Apply(ctx, plan)
+	if err != nil {
+		return c.failureResult(certPath, "deploy.Apply", err, startTime), err
+	}
+
+	// Post-deploy TLS verify (skip when nothing changed).
+	if !res.SkippedAsIdempotent {
+		if vErr := c.runPostDeployVerify(ctx, request.CertPEM); vErr != nil {
+			c.logger.Error("post-deploy TLS verify failed; rolling back", "error", vErr)
+			rbErr := c.restoreFromBackups(ctx, res.BackupPaths)
+			if rbErr != nil {
+				return c.failureResult(certPath, "verify+rollback both failed",
+					fmt.Errorf("verify: %w; rollback: %v", vErr, rbErr), startTime), rbErr
+			}
+			return c.failureResult(certPath, "post-deploy verify failed; rolled back", vErr, startTime), vErr
+		}
+	}
+
+	dur := time.Since(startTime)
+	idemNote := ""
+	if res.SkippedAsIdempotent {
+		idemNote = " (idempotent skip — bytes unchanged)"
+	}
+	c.logger.Info("certificate deployed to Traefik successfully",
+		"duration", dur.String(), "cert_path", certPath, "idempotent", res.SkippedAsIdempotent)
+	return &target.DeploymentResult{
+		Success:       true,
+		TargetAddress: certPath,
+		DeploymentID:  fmt.Sprintf("traefik-%d", time.Now().Unix()),
+		Message:       "Certificate deployed to Traefik (file watcher will auto-reload)" + idemNote,
+		DeployedAt:    time.Now(),
+		Metadata: map[string]string{
+			"cert_path": certPath, "key_path": keyPath,
+			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
+			"idempotent":  fmt.Sprintf("%t", res.SkippedAsIdempotent),
+		},
+	}, nil
+}
+
+// buildPlan assembles the deploy.Plan for one cert+(optional)key
+// deployment. Cert and key are separate Files in the same Plan so
+// Apply runs SHA-256 idempotency all-files and produces all-or-
+// nothing atomicity. The combined-PEM (cert + "\n" + chain + "\n")
+// shape is preserved for byte-equal compatibility with pre-Bundle-4
+// deploys.
+func (c *Connector) buildPlan(request target.DeploymentRequest, certPath, keyPath string) deploy.Plan {
 	combined := request.CertPEM + "\n"
 	if request.ChainPEM != "" {
 		combined = combined + request.ChainPEM + "\n"
@@ -120,61 +181,26 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		keyMode = 0600
 	}
 
-	certRes, err := deploy.AtomicWriteFile(ctx, certPath, []byte(combined), deploy.WriteOptions{
-		Mode: certMode, Owner: c.config.CertFileOwner, Group: c.config.CertFileGroup,
-		BackupRetention: c.config.BackupRetention,
-	})
-	if err != nil {
-		return c.failureResult(certPath, "write cert", err, startTime), err
-	}
+	files := []deploy.File{{
+		Path:  certPath,
+		Bytes: []byte(combined),
+		Mode:  certMode,
+		Owner: c.config.CertFileOwner,
+		Group: c.config.CertFileGroup,
+	}}
 	if request.KeyPEM != "" {
-		_, err := deploy.AtomicWriteFile(ctx, keyPath, []byte(request.KeyPEM), deploy.WriteOptions{
-			Mode: keyMode, Owner: c.config.KeyFileOwner, Group: c.config.KeyFileGroup,
-			BackupRetention: c.config.BackupRetention,
+		files = append(files, deploy.File{
+			Path:  keyPath,
+			Bytes: []byte(request.KeyPEM),
+			Mode:  keyMode,
+			Owner: c.config.KeyFileOwner,
+			Group: c.config.KeyFileGroup,
 		})
-		if err != nil {
-			// Cert already written; try to roll back the cert too.
-			if certRes.BackupPath != "" {
-				if bytes, rErr := os.ReadFile(certRes.BackupPath); rErr == nil {
-					_, _ = deploy.AtomicWriteFile(ctx, certPath, bytes, deploy.WriteOptions{SkipIdempotent: true, BackupRetention: -1})
-				}
-			}
-			return c.failureResult(keyPath, "write key", err, startTime), err
-		}
 	}
-
-	// Post-deploy TLS verify.
-	if !certRes.Idempotent {
-		if vErr := c.runPostDeployVerify(ctx, request.CertPEM); vErr != nil {
-			c.logger.Error("post-deploy TLS verify failed; rolling back", "error", vErr)
-			rbErr := c.rollbackCertAndKey(ctx, certPath, certRes.BackupPath, keyPath)
-			if rbErr != nil {
-				return c.failureResult(certPath, "verify+rollback both failed",
-					fmt.Errorf("verify: %w; rollback: %v", vErr, rbErr), startTime), rbErr
-			}
-			return c.failureResult(certPath, "post-deploy verify failed; rolled back", vErr, startTime), vErr
-		}
+	return deploy.Plan{
+		Files:           files,
+		BackupRetention: c.config.BackupRetention,
 	}
-
-	dur := time.Since(startTime)
-	idemNote := ""
-	if certRes.Idempotent {
-		idemNote = " (idempotent skip — bytes unchanged)"
-	}
-	c.logger.Info("certificate deployed to Traefik successfully",
-		"duration", dur.String(), "cert_path", certPath, "idempotent", certRes.Idempotent)
-	return &target.DeploymentResult{
-		Success:       true,
-		TargetAddress: certPath,
-		DeploymentID:  fmt.Sprintf("traefik-%d", time.Now().Unix()),
-		Message:       "Certificate deployed to Traefik (file watcher will auto-reload)" + idemNote,
-		DeployedAt:    time.Now(),
-		Metadata: map[string]string{
-			"cert_path": certPath, "key_path": keyPath,
-			"duration_ms": fmt.Sprintf("%d", dur.Milliseconds()),
-			"idempotent":  fmt.Sprintf("%t", certRes.Idempotent),
-		},
-	}, nil
 }
 
 // ValidateOnly returns ErrValidateOnlyNotSupported. Traefik has no
@@ -228,18 +254,37 @@ func (c *Connector) runPostDeployVerify(ctx context.Context, deployedCertPEM str
 	return lastErr
 }
 
-func (c *Connector) rollbackCertAndKey(ctx context.Context, certPath, certBackup, keyPath string) error {
-	if certBackup == "" {
-		if err := os.Remove(certPath); err != nil && !errors.Is(err, os.ErrNotExist) {
-			return err
+// restoreFromBackups iterates the BackupPaths returned by deploy.Apply
+// and rewrites every destination from its backup via AtomicWriteFile
+// {SkipIdempotent:true, BackupRetention:-1}. The -1 prevents
+// backup-of-the-backup pollution when a rollback fires.
+//
+// For files that did not exist before the deploy (BackupPath == ""),
+// restore = remove. Mirrors nginx.go::rollbackToBackups (L487-515)
+// with the reload step elided — Traefik's inotify watcher will
+// pick up the restored bytes on its next tick.
+//
+// Bundle 4 of the 2026-05-02 deployment-target audit. Replaces the
+// pre-fix rollbackCertAndKey helper which only restored the cert
+// (key was orphaned on verify failure).
+func (c *Connector) restoreFromBackups(ctx context.Context, backupPaths map[string]string) error {
+	for finalPath, backupPath := range backupPaths {
+		if backupPath == "" {
+			// File didn't exist pre-deploy → restore = remove.
+			if err := os.Remove(finalPath); err != nil && !errors.Is(err, os.ErrNotExist) {
+				return fmt.Errorf("rollback remove %s: %w", finalPath, err)
+			}
+			continue
 		}
-	} else {
-		bytes, err := os.ReadFile(certBackup)
+		bytes, err := os.ReadFile(backupPath)
 		if err != nil {
-			return fmt.Errorf("read cert backup: %w", err)
+			return fmt.Errorf("rollback read backup %s: %w", backupPath, err)
 		}
-		if _, err := deploy.AtomicWriteFile(ctx, certPath, bytes, deploy.WriteOptions{SkipIdempotent: true, BackupRetention: -1}); err != nil {
-			return err
+		if _, err := deploy.AtomicWriteFile(ctx, finalPath, bytes, deploy.WriteOptions{
+			SkipIdempotent:  true,
+			BackupRetention: -1, // don't backup the rollback
+		}); err != nil {
+			return fmt.Errorf("rollback write %s: %w", finalPath, err)
 		}
 	}
 	return nil
