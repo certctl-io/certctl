@@ -619,6 +619,22 @@ func (m *mockCertificateRepository) GetByIssuerAndSerial(ctx context.Context, is
 	return nil, sql.ErrNoRows
 }
 
+// GetVersionBySerial mirrors GetByIssuerAndSerial but returns the version
+// row (where the PEM lives) — used by the ACME serial-only revoke path.
+func (m *mockCertificateRepository) GetVersionBySerial(ctx context.Context, issuerID, serial string) (*domain.CertificateVersion, error) {
+	for _, cert := range m.certs {
+		if cert.IssuerID != issuerID {
+			continue
+		}
+		for _, v := range m.versions[cert.ID] {
+			if v.SerialNumber == serial {
+				return v, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
 type mockJobRepository struct {
 	jobs map[string]*domain.Job
 }

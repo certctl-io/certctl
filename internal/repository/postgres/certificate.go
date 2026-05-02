@@ -608,6 +608,47 @@ func (r *CertificateRepository) GetExpiringCertificates(ctx context.Context, bef
 	return certs, nil
 }
 
+// GetVersionBySerial returns the certificate_versions row whose serial_number
+// matches the supplied serial, scoped to the issuer via a JOIN on
+// managed_certificates. Returns sql.ErrNoRows when no match exists so callers
+// can distinguish "unknown cert" from a real repository error.
+//
+// Callers needing this method are protocol endpoints that carry the issuer
+// in the request path (ACME revoke-by-serial, OCSP, CRL generation); per RFC
+// 5280 §5.2.3 serial numbers are unique only within a single issuer, so a
+// serial-only lookup would be ambiguous across issuers.
+//
+// Audit fix #7: ACME revoke-by-serial uses this to recover the leaf cert PEM
+// when the operator only has a serial in hand.
+func (r *CertificateRepository) GetVersionBySerial(ctx context.Context, issuerID, serial string) (*domain.CertificateVersion, error) {
+	var v domain.CertificateVersion
+	var csrPEM sql.NullString
+	var keyAlgo sql.NullString
+	var keySize sql.NullInt64
+	err := r.db.QueryRowContext(ctx, `
+		SELECT cv.id, cv.certificate_id, cv.serial_number, cv.not_before, cv.not_after,
+		       cv.fingerprint_sha256, cv.pem_chain, cv.csr_pem, cv.key_algorithm, cv.key_size, cv.created_at
+		FROM certificate_versions cv
+		JOIN managed_certificates mc ON mc.id = cv.certificate_id
+		WHERE mc.issuer_id = $1 AND cv.serial_number = $2
+		ORDER BY cv.created_at DESC
+		LIMIT 1
+	`, issuerID, serial).Scan(&v.ID, &v.CertificateID, &v.SerialNumber, &v.NotBefore, &v.NotAfter,
+		&v.FingerprintSHA256, &v.PEMChain, &csrPEM, &keyAlgo, &keySize, &v.CreatedAt)
+	v.CSRPEM = csrPEM.String
+	v.KeyAlgorithm = keyAlgo.String
+	v.KeySize = int(keySize.Int64)
+
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, sql.ErrNoRows
+		}
+		return nil, fmt.Errorf("failed to get certificate version by issuer+serial: %w", err)
+	}
+
+	return &v, nil
+}
+
 // GetLatestVersion returns the most recent certificate version for a certificate.
 func (r *CertificateRepository) GetLatestVersion(ctx context.Context, certID string) (*domain.CertificateVersion, error) {
 	var v domain.CertificateVersion

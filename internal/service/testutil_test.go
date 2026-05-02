@@ -168,6 +168,22 @@ func (m *mockCertRepo) GetByIssuerAndSerial(ctx context.Context, issuerID, seria
 	return nil, sql.ErrNoRows
 }
 
+// GetVersionBySerial mirrors GetByIssuerAndSerial but returns the version
+// row — exists to support the ACME serial-only revoke path tests.
+func (m *mockCertRepo) GetVersionBySerial(ctx context.Context, issuerID, serial string) (*domain.CertificateVersion, error) {
+	for _, cert := range m.Certs {
+		if cert.IssuerID != issuerID {
+			continue
+		}
+		for _, v := range m.Versions[cert.ID] {
+			if v.SerialNumber == serial {
+				return v, nil
+			}
+		}
+	}
+	return nil, sql.ErrNoRows
+}
+
 func (m *mockCertRepo) AddCert(cert *domain.ManagedCertificate) {
 	m.Certs[cert.ID] = cert
 }

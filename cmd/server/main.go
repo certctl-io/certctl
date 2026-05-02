@@ -223,6 +223,14 @@ func main() {
 	issuanceMetrics := service.NewIssuanceMetrics(service.DefaultIssuanceBucketBoundaries)
 	issuerRegistry.SetIssuanceMetrics(issuanceMetrics)
 
+	// Audit fix #7: wire the cert-version lookup so ACME connectors
+	// built by Rebuild can recover the leaf-cert DER from a serial-
+	// only revoke request. The postgres CertificateRepository
+	// satisfies acme.CertificateLookupRepo via its GetVersionBySerial
+	// method. Without this, ACME RevokeCertificate falls back to the
+	// legacy V1 "not supported" error.
+	issuerRegistry.SetACMECertLookup(certificateRepo)
+
 	// Initialize revocation repository
 	revocationRepo := postgres.NewRevocationRepository(db)
 

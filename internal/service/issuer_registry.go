@@ -8,6 +8,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
 	"github.com/shankar0123/certctl/internal/connector/issuerfactory"
 	"github.com/shankar0123/certctl/internal/crypto"
@@ -38,6 +39,14 @@ type IssuerRegistry struct {
 	// the per-issuer-type counter + histogram + failure tables.
 	// Closes the #4 audit-readiness blocker (per-issuer-type metrics).
 	metrics *IssuanceMetrics
+
+	// acmeCertLookup — when set, every freshly-constructed
+	// *acme.Connector is wired with SetCertificateLookup + SetIssuerID
+	// so its serial-only revoke path can recover the leaf-cert DER
+	// from the local cert store. Closes the #7 audit-readiness blocker.
+	// Nil leaves the legacy "ACME revocation by serial requires
+	// CertificateLookup wiring" error in place for old wiring paths.
+	acmeCertLookup acme.CertificateLookupRepo
 }
 
 // LocalIssuerDeps groups the optional dependencies that the local
@@ -81,6 +90,24 @@ func (r *IssuerRegistry) SetIssuanceMetrics(m *IssuanceMetrics) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.metrics = m
+}
+
+// SetACMECertLookup wires the cert-version lookup repo for every
+// *acme.Connector constructed by Rebuild. The lookup is used by the
+// serial-only revoke path (RevokeCertificate) to recover the leaf-
+// cert DER bytes from the local cert store; without it, ACME
+// RevokeCertificate falls back to the legacy V1 "not supported"
+// error. Closes the #7 audit-readiness blocker.
+//
+// Wire on the registry, not per-call: the registry already owns the
+// post-factory wiring step (mirrors SetLocalIssuerDeps), and the same
+// repo serves every ACME connector regardless of issuer ID — the
+// connector scopes its own lookups via the issuer ID injected by
+// SetIssuerID inside Rebuild.
+func (r *IssuerRegistry) SetACMECertLookup(repo acme.CertificateLookupRepo) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.acmeCertLookup = repo
 }
 
 // Get returns the issuer connector for the given ID and whether it exists.
@@ -187,6 +214,18 @@ func (r *IssuerRegistry) Rebuild(ctx context.Context, configs []*domain.Issuer, 
 			r.logger.Info("local issuer wired with dedicated OCSP responder deps",
 				"id", cfg.ID,
 				"key_dir", r.localDeps.KeyDir)
+		}
+
+		// Audit fix #7: when the cert-version lookup is configured on
+		// the registry, inject it into every freshly-constructed
+		// *acme.Connector so its serial-only revoke path can recover
+		// the leaf-cert DER bytes. SetIssuerID is paired so the lookup
+		// can scope by issuer per RFC 5280 §5.2.3.
+		if acmeConn, ok := connector.(*acme.Connector); ok && r.acmeCertLookup != nil {
+			acmeConn.SetIssuerID(cfg.ID)
+			acmeConn.SetCertificateLookup(r.acmeCertLookup)
+			r.logger.Info("ACME issuer wired with cert-version lookup for serial-only revoke",
+				"id", cfg.ID)
 		}
 
 		adapter := NewIssuerConnectorAdapter(connector)

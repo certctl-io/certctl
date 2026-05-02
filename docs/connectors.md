@@ -261,6 +261,14 @@ The connector is registered in the issuer registry under `iss-acme-staging` and 
 
 **Note:** ACME-issued certificates rely on the Local CA for CRL/OCSP endpoints if they are stored in certctl's inventory. For issuers with their own public CRL/OCSP infrastructure (e.g., Let's Encrypt), clients should validate against the issuer's endpoints instead.
 
+**Revocation by serial number.** RFC 8555 §7.6 requires the certificate DER bytes (not just the serial) on the revoke wire — but a CLM platform's job is to abstract over that limitation. Operators routinely have only the serial in hand: the original PEM was lost, the private key was rotated, the operator clicked "revoke" in the GUI based on a row in the certs list. certctl's ACME `RevokeCertificate(ctx, RevocationRequest{Serial: ...})` looks the serial up in the local cert store (`certificate_versions.pem_chain`), decodes the leaf-cert PEM into DER, and calls the ACME revoke endpoint with `(accountKey, der, reasonCode)` — RFC 8555 §7.6 case 1, "revocation request signed with account key". This works because the same account key issued the cert, so authority is intrinsic.
+
+The cert version must exist in the local store: this means the cert was issued through certctl, not imported. If `GetVersionBySerial` returns `sql.ErrNoRows`, the connector returns an actionable error pointing at the local-store requirement. Revoke-by-serial is therefore only available for ACME certs that certctl issued.
+
+Reason codes follow RFC 5280 §5.3.1: nil reason maps to `unspecified` (0), and the connector accepts the canonical camelCase form (`keyCompromise`, `cACompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aACompromise`) plus underscore_lower and ALL_CAPS_UNDERSCORE variants. An unknown reason returns an error rather than silently demoting to `unspecified` — operators rely on the reason for compliance reporting (PCI-DSS §3.6, HIPAA §164.312).
+
+Audit reference: `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` Top-10 fix #7.
+
 Location: `internal/connector/issuer/acme/acme.go`, `internal/connector/issuer/acme/dns.go`
 
 ### Built-in: step-ca (Smallstep Private CA)

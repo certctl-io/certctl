@@ -71,6 +71,13 @@ type CertificateRepository interface {
 	// issuer. Returns sql.ErrNoRows when no match exists so callers can
 	// distinguish "unknown cert" from a real repository error.
 	GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.ManagedCertificate, error)
+	// GetVersionBySerial retrieves the certificate_versions row whose
+	// serial_number matches, scoped to the issuer via a JOIN on
+	// managed_certificates. Returns the version (PEMChain, NotBefore,
+	// NotAfter, etc.) — used by the ACME serial-only revoke path to
+	// recover the leaf-cert DER when the operator no longer has the
+	// PEM in hand. Returns sql.ErrNoRows when no match exists.
+	GetVersionBySerial(ctx context.Context, issuerID, serial string) (*domain.CertificateVersion, error)
 }
 
 // RevocationRepository defines operations for managing certificate revocations.

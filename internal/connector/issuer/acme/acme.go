@@ -7,9 +7,11 @@ import (
 	"crypto/rand"
 	"crypto/tls"
 	"crypto/x509"
+	"database/sql"
 	"encoding/base64"
 	"encoding/json"
 	"encoding/pem"
+	"errors"
 	"fmt"
 	"io"
 	"log/slog"
@@ -24,6 +26,7 @@ import (
 	"golang.org/x/crypto/acme"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/domain"
 )
 
 // Config represents the ACME issuer connector configuration.
@@ -84,6 +87,28 @@ type Config struct {
 	Insecure bool `json:"insecure,omitempty"`
 }
 
+// CertificateLookupRepo lets the ACME connector recover a previously-issued
+// certificate's PEM chain from the local cert store given only the serial.
+// RFC 8555 §7.6 requires the certificate DER bytes (not just the serial) on
+// the revoke wire — this interface bridges the gap so an operator who calls
+// RevokeCertificate with just a serial in hand (lost PEM, rotated key, GUI
+// revoke action) gets the same outcome as one who supplies the full DER.
+//
+// Defined at the connector boundary on purpose: the connector doesn't import
+// the service or repository packages — it accepts whatever satisfies this
+// shape. Production wiring in cmd/server/main.go injects the postgres
+// CertificateRepository (which has GetVersionBySerial); tests inject a fake.
+//
+// Audit fix #7.
+type CertificateLookupRepo interface {
+	// GetVersionBySerial returns the certificate version (the row that
+	// holds the PEM chain) whose SerialNumber matches the supplied
+	// serial, scoped to the issuerID. Returns sql.ErrNoRows when no
+	// match exists. Per RFC 5280 §5.2.3 serials are unique only within
+	// a single issuer, so the scope is required.
+	GetVersionBySerial(ctx context.Context, issuerID, serial string) (*domain.CertificateVersion, error)
+}
+
 // Connector implements the issuer.Connector interface for ACME-compatible CAs
 // (Let's Encrypt, Sectigo, ZeroSSL, etc.).
 //
@@ -104,6 +129,35 @@ type Connector struct {
 
 	// DNS-01 challenge solver (nil if using HTTP-01)
 	dnsSolver DNSSolver
+
+	// issuerID + certLookup are wired by the registry's Rebuild via
+	// SetIssuerID + SetCertificateLookup. When certLookup is nil, the
+	// serial-only revoke path falls back to the legacy "not supported"
+	// error so old wiring paths keep their behaviour. Audit fix #7.
+	issuerID   string
+	certLookup CertificateLookupRepo
+}
+
+// SetIssuerID records the issuer ID so the serial-only revoke path can
+// scope the cert-version lookup correctly. Per RFC 5280 §5.2.3 serial
+// numbers are only unique within a single issuer, so the scope is
+// required for the lookup to be deterministic. Mirrors the existing
+// SetIssuerID setter on local.Connector.
+//
+// Audit fix #7.
+func (c *Connector) SetIssuerID(id string) {
+	c.issuerID = id
+}
+
+// SetCertificateLookup wires the cert-version lookup so the ACME
+// connector can recover the leaf-cert PEM (and thus the DER bytes
+// needed by RFC 8555 §7.6) from a serial-only revoke request. nil
+// means revoke-by-serial is not supported (the historical V1
+// behaviour, preserved for old wiring paths).
+//
+// Audit fix #7.
+func (c *Connector) SetCertificateLookup(repo CertificateLookupRepo) {
+	c.certLookup = repo
 }
 
 // New creates a new ACME connector with the given configuration and logger.
@@ -515,20 +569,146 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 	})
 }
 
-// RevokeCertificate revokes a certificate at the ACME CA.
+// RevokeCertificate revokes a certificate at the ACME CA. RFC 8555 §7.6
+// requires the certificate DER bytes (not just the serial) on the revoke
+// wire — but a CLM platform's job is to abstract over that limitation.
+// Operators routinely have only the serial in hand: lost PEM, rotated
+// key, GUI revoke action driven by a row in the certs list.
+//
+// This method recovers the leaf-cert DER by looking the serial up in
+// the local cert-version store (CertificateLookupRepo, wired by the
+// registry's Rebuild), decoding the PEM chain into DER, and calling
+// golang.org/x/crypto/acme.Client.RevokeCert with (accountKey, der,
+// reasonCode). The reason is mapped from the RFC 5280 string in the
+// request via mapRevocationReason; nil reason maps to 0 (unspecified).
+//
+// Audit fix #7. Pre-fix this returned the literal error
+// "ACME revocation by serial not supported in V1; provide certificate
+// DER" which made GUI-driven revoke unusable for ACME-issued certs.
 func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.RevocationRequest) error {
 	c.logger.Info("processing ACME revocation request", "serial", request.Serial)
 
-	if err := c.ensureClient(ctx); err != nil {
-		return fmt.Errorf("ACME client init: %w", err)
+	if c.certLookup == nil {
+		// Backward-compat fallback. Only fires in test paths or old
+		// wiring where SetCertificateLookup was not called. The audit
+		// mandates the lookup wire as the production path; this is
+		// retained for the test cases that build the connector
+		// directly without the registry.
+		return fmt.Errorf("ACME revocation by serial requires CertificateLookup wiring; call SetCertificateLookup")
 	}
 
-	// ACME revocation requires the certificate DER, not just the serial.
-	// For now, log a warning. Full revocation requires storing the cert DER
-	// or re-fetching it from the order.
-	c.logger.Warn("ACME revocation requires certificate DER bytes; serial-only revocation not supported in V1",
-		"serial", request.Serial)
-	return fmt.Errorf("ACME revocation by serial not supported in V1; provide certificate DER")
+	if c.issuerID == "" {
+		// Same backward-compat reasoning. The registry calls
+		// SetIssuerID alongside SetCertificateLookup; both are
+		// required for the lookup to be deterministic per RFC 5280
+		// §5.2.3.
+		return fmt.Errorf("ACME revocation by serial requires issuer ID wiring; call SetIssuerID")
+	}
+
+	version, err := c.certLookup.GetVersionBySerial(ctx, c.issuerID, request.Serial)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("ACME revoke: no local cert with serial %s for issuer %s (cert may not have been issued through certctl)", request.Serial, c.issuerID)
+		}
+		return fmt.Errorf("ACME revoke: cert version lookup: %w", err)
+	}
+
+	if version == nil || version.PEMChain == "" {
+		return fmt.Errorf("ACME revoke: local cert version row has empty PEM chain (corrupt row?) — serial=%s", request.Serial)
+	}
+
+	// PEMChain is "leaf cert PEM\nchain PEMs..."; we only need the
+	// leaf for the ACME revoke wire. pem.Decode returns the FIRST
+	// block, which is exactly the leaf, then leaves the rest in the
+	// trailing slice (which we discard).
+	block, _ := pem.Decode([]byte(version.PEMChain))
+	if block == nil {
+		return fmt.Errorf("ACME revoke: cert version PEM malformed — no PEM block found in chain (serial=%s)", request.Serial)
+	}
+	if block.Type != "CERTIFICATE" {
+		return fmt.Errorf("ACME revoke: cert version PEM has unexpected block type %q (expected CERTIFICATE, serial=%s)", block.Type, request.Serial)
+	}
+	der := block.Bytes
+
+	if err := c.ensureClient(ctx); err != nil {
+		return fmt.Errorf("ACME revoke: client init: %w", err)
+	}
+
+	reasonCode, err := mapRevocationReason(request.Reason)
+	if err != nil {
+		return fmt.Errorf("ACME revoke: %w", err)
+	}
+
+	// golang.org/x/crypto/acme.Client.RevokeCert authenticates the
+	// revoke with the supplied account key (RFC 8555 §7.6 case 1,
+	// "revocation request signed with account key"). The same account
+	// key issued the cert, so this path covers all certctl-issued
+	// ACME certs. Revocation via the cert's private key is the
+	// alternative auth path (RFC 8555 §7.6 case 2) and is out of
+	// scope here.
+	c.logger.Info("ACME revoke: issuing RevokeCert", "serial", request.Serial, "reason_code", reasonCode)
+	if err := c.client.RevokeCert(ctx, c.accountKey, der, reasonCode); err != nil {
+		return fmt.Errorf("ACME RevokeCert: %w", err)
+	}
+
+	c.logger.Info("ACME certificate revoked", "serial", request.Serial)
+	return nil
+}
+
+// mapRevocationReason translates an RFC 5280 §5.3.1 reason string (as
+// it appears in a RevocationRequest from the certctl service layer)
+// into the integer reason code that
+// golang.org/x/crypto/acme.CRLReasonCode expects. Codes match RFC 5280 §5.3.1: 0 unspecified,
+// 1 keyCompromise, 2 cACompromise, 3 affiliationChanged, 4 superseded,
+// 5 cessationOfOperation, 6 certificateHold, 8 removeFromCRL,
+// 9 privilegeWithdrawn, 10 aACompromise. (7 is reserved.)
+//
+// A nil reason maps to 0 (unspecified) per RFC 5280 §5.3.1's "if the
+// reason code extension is absent the reason is unspecified". An
+// unknown reason string returns an error rather than silently mapping
+// to unspecified — operators rely on the reason for compliance
+// reporting (PCI-DSS / HIPAA) and a silent demotion would obscure a
+// real bug.
+//
+// Accepted forms: the canonical RFC 5280 camelCase ("keyCompromise"),
+// underscore_lower ("key_compromise"), and ALL_CAPS_UNDERSCORE
+// ("KEY_COMPROMISE"). The certctl revocation service emits the
+// camelCase form today, but the more relaxed parsing makes it
+// trivially safe for operators typing reasons via the API.
+//
+// Audit fix #7.
+func mapRevocationReason(reason *string) (acme.CRLReasonCode, error) {
+	if reason == nil || *reason == "" {
+		return acme.CRLReasonUnspecified, nil
+	}
+	// Normalise: lowercase, strip underscores. "keyCompromise",
+	// "key_compromise", "KEY_COMPROMISE" all collapse to
+	// "keycompromise" and match.
+	normalized := strings.ToLower(strings.ReplaceAll(*reason, "_", ""))
+	switch normalized {
+	case "unspecified":
+		return acme.CRLReasonUnspecified, nil
+	case "keycompromise":
+		return acme.CRLReasonKeyCompromise, nil
+	case "cacompromise":
+		return acme.CRLReasonCACompromise, nil
+	case "affiliationchanged":
+		return acme.CRLReasonAffiliationChanged, nil
+	case "superseded":
+		return acme.CRLReasonSuperseded, nil
+	case "cessationofoperation":
+		return acme.CRLReasonCessationOfOperation, nil
+	case "certificatehold":
+		return acme.CRLReasonCertificateHold, nil
+	case "removefromcrl":
+		return acme.CRLReasonRemoveFromCRL, nil
+	case "privilegewithdrawn":
+		return acme.CRLReasonPrivilegeWithdrawn, nil
+	case "aacompromise":
+		return acme.CRLReasonAACompromise, nil
+	default:
+		return 0, fmt.Errorf("unknown revocation reason %q (expected one of: unspecified, keyCompromise, cACompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, removeFromCRL, privilegeWithdrawn, aACompromise)", *reason)
+	}
 }
 
 // GetOrderStatus retrieves the current status of an ACME order.

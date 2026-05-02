@@ -563,10 +563,17 @@ func TestFetchNonce_HappyPath(t *testing.T) {
 
 // ---------------------------------------------------------------------------
 // RevokeCertificate / GetCACertPEM / GenerateCRL / SignOCSPResponse —
-// always-error paths
+// fallback / always-error paths
 // ---------------------------------------------------------------------------
 
-func TestRevokeCertificate_AlwaysError(t *testing.T) {
+// TestRevokeCertificate_UnwiredCertLookupFallback exercises the
+// backward-compat branch in RevokeCertificate that fires when
+// SetCertificateLookup was never called. Audit fix #7 replaced the
+// historical "ACME revocation by serial not supported in V1" error
+// with a more actionable one pointing at the wiring requirement; the
+// production path always wires the lookup, so this branch only fires
+// in tests / old wiring paths.
+func TestRevokeCertificate_UnwiredCertLookupFallback(t *testing.T) {
 	ts := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
 		_, _ = io.WriteString(w, `{"newOrder":"","newAccount":"","newNonce":""}`)
@@ -578,17 +585,19 @@ func TestRevokeCertificate_AlwaysError(t *testing.T) {
 		Email:         "test@example.com",
 		ChallengeType: "http-01",
 	})
+	// Intentionally do NOT call SetCertificateLookup — that's the
+	// behaviour under test.
 
-	reason := "key compromise"
+	reason := "keyCompromise"
 	err := c.RevokeCertificate(context.Background(), issuer.RevocationRequest{
 		Serial: "ABC123",
 		Reason: &reason,
 	})
 	if err == nil {
-		t.Fatal("expected error from V1 ACME revocation")
+		t.Fatal("expected error when CertificateLookup is unwired")
 	}
-	if !strings.Contains(err.Error(), "not supported") {
-		t.Errorf("error %q should mention 'not supported'", err)
+	if !strings.Contains(err.Error(), "CertificateLookup") {
+		t.Errorf("error %q should reference CertificateLookup wiring", err)
 	}
 }
 
