@@ -39,9 +39,10 @@ type Config struct {
 	// reloaded yet, etc.). Same shape as nginx.go::PostDeployVerify.
 	// Default behavior is opt-in: nil PostDeployVerify or
 	// PostDeployVerify.Enabled=false skips the verify step entirely.
-	PostDeployVerify         *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
-	PostDeployVerifyAttempts int                     `json:"post_deploy_verify_attempts,omitempty"`
-	PostDeployVerifyBackoff  time.Duration           `json:"post_deploy_verify_backoff,omitempty"`
+	PostDeployVerify           *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
+	PostDeployVerifyAttempts   int                     `json:"post_deploy_verify_attempts,omitempty"`
+	PostDeployVerifyBackoff    time.Duration           `json:"post_deploy_verify_backoff,omitempty"`
+	PostDeployVerifyMaxBackoff time.Duration           `json:"post_deploy_verify_max_backoff,omitempty"`
 
 	// Bundle 3: backup retention. Zero =
 	// deploy.DefaultBackupRetention (3); -1 = disable backups. Mirrors
@@ -431,40 +432,28 @@ func (c *Connector) runPostDeployVerify(ctx context.Context, deployedCertPEM str
 	}
 	want = strings.ToLower(want)
 
-	attempts := c.config.PostDeployVerifyAttempts
-	if attempts <= 0 {
-		attempts = 3
-	}
-	backoff := c.config.PostDeployVerifyBackoff
-	if backoff <= 0 {
-		backoff = 2 * time.Second
+	retryCfg := tlsprobe.RetryConfig{
+		Attempts:       c.config.PostDeployVerifyAttempts,
+		InitialBackoff: c.config.PostDeployVerifyBackoff,
+		MaxBackoff:     c.config.PostDeployVerifyMaxBackoff,
 	}
 
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-		res := c.probe(ctx, endpoint, timeout)
+	probe := func(probectx context.Context) error {
+		res := c.probe(probectx, endpoint, timeout)
 		if !res.Success {
-			lastErr = fmt.Errorf("TLS probe failed: %s", res.Error)
-			continue
+			return fmt.Errorf("TLS probe failed: %s", res.Error)
 		}
 		got := strings.ToLower(res.Fingerprint)
-		if got == want {
-			c.logger.Info("post-deploy TLS verify succeeded",
-				"endpoint", endpoint,
-				"fingerprint", got,
-				"attempt", i+1)
-			return nil
+		if got != want {
+			return fmt.Errorf("post-deploy TLS verify SHA-256 mismatch: got %s, want %s", got, want)
 		}
-		lastErr = fmt.Errorf("post-deploy TLS verify SHA-256 mismatch: got %s, want %s", got, want)
+		c.logger.Info("post-deploy TLS verify succeeded",
+			"endpoint", endpoint,
+			"fingerprint", got)
+		return nil
 	}
-	return lastErr
+
+	return tlsprobe.VerifyWithExponentialBackoff(ctx, retryCfg, probe)
 }
 
 // restoreFromBackups iterates the WriteResults from a successful per-file

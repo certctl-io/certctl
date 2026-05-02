@@ -399,3 +399,56 @@ func TestTraefik_Atomic_VerifyMismatch_BothFilesRollBack(t *testing.T) {
 		t.Errorf("key not restored on rollback (Bundle 4 regression: pre-fix this would fail because rollbackCertAndKey ignored the key): got %q want %q", string(gotKey), sentinelKey)
 	}
 }
+
+// TestTraefik_VerifyExponentialBackoff_GrowsBetweenAttempts: post-deploy verify
+// retries with exponential backoff (Top-10 fix #8). 4 attempts, 10ms initial,
+// 80ms cap; expected gaps 10ms, 20ms, 40ms.
+func TestTraefik_VerifyExponentialBackoff_GrowsBetweenAttempts(t *testing.T) {
+	dir := t.TempDir()
+	c := traefik.New(&traefik.Config{
+		CertDir: dir, CertFile: "cert.pem", KeyFile: "key.pem",
+		PostDeployVerifyAttempts:   4,
+		PostDeployVerifyBackoff:    10 * time.Millisecond,
+		PostDeployVerifyMaxBackoff: 80 * time.Millisecond,
+		PostDeployVerify: &traefik.PostDeployVerifyConfig{
+			Enabled: true, Endpoint: "h:443", Timeout: 100 * time.Millisecond,
+		},
+	}, quietLogger())
+
+	var callTimes []time.Time
+	probeCallCount := atomic.Int32{}
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		callTimes = append(callTimes, time.Now())
+		count := probeCallCount.Add(1)
+		if count == 4 {
+			return tlsprobe.ProbeResult{Success: true, Fingerprint: fingerprintOfPEM(certA)}
+		}
+		return tlsprobe.ProbeResult{Success: false, Error: "cert not yet deployed"}
+	})
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA, KeyPEM: keyA,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected Success=true")
+	}
+	if len(callTimes) != 4 {
+		t.Fatalf("expected 4 probe calls, got %d", len(callTimes))
+	}
+	const tolerance = 25 * time.Millisecond
+	expectedGaps := []time.Duration{
+		10 * time.Millisecond,
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+	}
+	for i := 0; i < len(expectedGaps); i++ {
+		gap := callTimes[i+1].Sub(callTimes[i])
+		expected := expectedGaps[i]
+		if gap < expected-tolerance || gap > expected+tolerance {
+			t.Errorf("gap[%d]: expected ~%v, got %v", i, expected, gap)
+		}
+	}
+}

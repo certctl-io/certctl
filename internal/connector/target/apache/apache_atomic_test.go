@@ -605,3 +605,66 @@ func TestApache_Metadata_Populated(t *testing.T) {
 
 // _ avoid unused fixture warning
 var _ = certB
+
+// TestApache_VerifyExponentialBackoff_GrowsBetweenAttempts: post-deploy verify
+// retries with exponential backoff.
+func TestApache_VerifyExponentialBackoff_GrowsBetweenAttempts(t *testing.T) {
+	dir := t.TempDir()
+	cfg := &apache.Config{
+		CertPath:                   filepath.Join(dir, "cert.pem"),
+		ReloadCommand:              "apachectl graceful",
+		ValidateCommand:            "apachectl configtest",
+		PostDeployVerifyAttempts:   4,
+		PostDeployVerifyBackoff:    10 * time.Millisecond,
+		PostDeployVerifyMaxBackoff: 80 * time.Millisecond,
+		PostDeployVerify: &apache.PostDeployVerifyConfig{
+			Enabled:  true,
+			Endpoint: "localhost:443",
+			Timeout:  100 * time.Millisecond,
+		},
+	}
+	c := newC(t, cfg)
+
+	var callTimes []time.Time
+	probeCallCount := atomic.Int32{}
+
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		callTimes = append(callTimes, time.Now())
+		count := probeCallCount.Add(1)
+		if count == 4 {
+			return tlsprobe.ProbeResult{Success: true, Fingerprint: fingerprintOfPEM(t, certA)}
+		}
+		return tlsprobe.ProbeResult{Success: false, Error: "cert not yet deployed"}
+	})
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA,
+		KeyPEM:  keyA,
+	})
+
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected Success=true")
+	}
+
+	if len(callTimes) != 4 {
+		t.Fatalf("expected 4 probe calls, got %d", len(callTimes))
+	}
+
+	const tolerance = 20 * time.Millisecond
+	expectedGaps := []time.Duration{
+		10 * time.Millisecond,
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+	}
+
+	for i := 0; i < len(expectedGaps); i++ {
+		gap := callTimes[i+1].Sub(callTimes[i])
+		expected := expectedGaps[i]
+		if gap < expected-tolerance || gap > expected+tolerance {
+			t.Errorf("gap[%d]: expected ~%v, got %v", i, expected, gap)
+		}
+	}
+}

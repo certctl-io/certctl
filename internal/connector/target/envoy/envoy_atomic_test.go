@@ -331,3 +331,62 @@ func entryNames(entries []os.DirEntry) []string {
 	}
 	return names
 }
+
+// TestEnvoy_VerifyExponentialBackoff_GrowsBetweenAttempts: post-deploy verify
+// retries with exponential backoff (Top-10 fix #8). 4 attempts, 10ms initial,
+// 80ms cap; expected gaps 10ms, 20ms, 40ms.
+func TestEnvoy_VerifyExponentialBackoff_GrowsBetweenAttempts(t *testing.T) {
+	dir := t.TempDir()
+	cfg := envoy.Config{
+		CertDir:      dir,
+		CertFilename: "cert.pem",
+		KeyFilename:  "key.pem",
+		PostDeployVerify: &envoy.PostDeployVerifyConfig{
+			Enabled:  true,
+			Endpoint: "envoy.test.invalid:443",
+			Timeout:  100 * time.Millisecond,
+		},
+		PostDeployVerifyAttempts:   4,
+		PostDeployVerifyBackoff:    10 * time.Millisecond,
+		PostDeployVerifyMaxBackoff: 80 * time.Millisecond,
+	}
+	c := envoy.New(&cfg, newTestLogger())
+
+	want := certPEMFingerprint(t, certA)
+	var callTimes []time.Time
+	calls := atomic.Int64{}
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		callTimes = append(callTimes, time.Now())
+		n := calls.Add(1)
+		if n == 4 {
+			return tlsprobe.ProbeResult{Success: true, Fingerprint: want}
+		}
+		return tlsprobe.ProbeResult{Success: true, Fingerprint: "deadbeef"}
+	})
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA, KeyPEM: keyA,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected Success=true")
+	}
+	if len(callTimes) != 4 {
+		t.Fatalf("expected 4 probe calls, got %d", len(callTimes))
+	}
+	const tolerance = 25 * time.Millisecond
+	expectedGaps := []time.Duration{
+		10 * time.Millisecond,
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+	}
+	for i := 0; i < len(expectedGaps); i++ {
+		gap := callTimes[i+1].Sub(callTimes[i])
+		expected := expectedGaps[i]
+		if gap < expected-tolerance || gap > expected+tolerance {
+			t.Errorf("gap[%d]: expected ~%v, got %v", i, expected, gap)
+		}
+	}
+}

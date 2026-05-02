@@ -37,17 +37,18 @@ type Config struct {
 	ValidateCommand string `json:"validate_command"`
 
 	// Phase 7: file ownership + mode + verify + retention.
-	CertFileMode             os.FileMode             `json:"cert_file_mode,omitempty"`
-	KeyFileMode              os.FileMode             `json:"key_file_mode,omitempty"`
-	ChainFileMode            os.FileMode             `json:"chain_file_mode,omitempty"`
-	CertFileOwner            string                  `json:"cert_file_owner,omitempty"`
-	CertFileGroup            string                  `json:"cert_file_group,omitempty"`
-	KeyFileOwner             string                  `json:"key_file_owner,omitempty"`
-	KeyFileGroup             string                  `json:"key_file_group,omitempty"`
-	PostDeployVerify         *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
-	PostDeployVerifyAttempts int                     `json:"post_deploy_verify_attempts,omitempty"`
-	PostDeployVerifyBackoff  time.Duration           `json:"post_deploy_verify_backoff,omitempty"`
-	BackupRetention          int                     `json:"backup_retention,omitempty"`
+	CertFileMode               os.FileMode             `json:"cert_file_mode,omitempty"`
+	KeyFileMode                os.FileMode             `json:"key_file_mode,omitempty"`
+	ChainFileMode              os.FileMode             `json:"chain_file_mode,omitempty"`
+	CertFileOwner              string                  `json:"cert_file_owner,omitempty"`
+	CertFileGroup              string                  `json:"cert_file_group,omitempty"`
+	KeyFileOwner               string                  `json:"key_file_owner,omitempty"`
+	KeyFileGroup               string                  `json:"key_file_group,omitempty"`
+	PostDeployVerify           *PostDeployVerifyConfig `json:"post_deploy_verify,omitempty"`
+	PostDeployVerifyAttempts   int                     `json:"post_deploy_verify_attempts,omitempty"`
+	PostDeployVerifyBackoff    time.Duration           `json:"post_deploy_verify_backoff,omitempty"`
+	PostDeployVerifyMaxBackoff time.Duration           `json:"post_deploy_verify_max_backoff,omitempty"`
+	BackupRetention            int                     `json:"backup_retention,omitempty"`
 }
 
 type PostDeployVerifyConfig struct {
@@ -289,36 +290,27 @@ func (c *Connector) runPostDeployVerify(ctx context.Context, deployedCertPEM str
 	if err != nil {
 		return fmt.Errorf("compute deployed cert fingerprint: %w", err)
 	}
-	attempts := c.config.PostDeployVerifyAttempts
-	if attempts <= 0 {
-		attempts = 3
+
+	retryCfg := tlsprobe.RetryConfig{
+		Attempts:       c.config.PostDeployVerifyAttempts,
+		InitialBackoff: c.config.PostDeployVerifyBackoff,
+		MaxBackoff:     c.config.PostDeployVerifyMaxBackoff,
 	}
-	backoff := c.config.PostDeployVerifyBackoff
-	if backoff <= 0 {
-		backoff = 2 * time.Second
-	}
-	var lastErr error
-	for i := 0; i < attempts; i++ {
-		if i > 0 {
-			select {
-			case <-ctx.Done():
-				return ctx.Err()
-			case <-time.After(backoff):
-			}
-		}
-		res := c.probe(ctx, endpoint, timeout)
+
+	probe := func(probectx context.Context) error {
+		res := c.probe(probectx, endpoint, timeout)
 		if !res.Success {
-			lastErr = fmt.Errorf("TLS probe failed: %s", res.Error)
-			continue
+			return fmt.Errorf("TLS probe failed: %s", res.Error)
 		}
 		got := strings.ToLower(res.Fingerprint)
-		want = strings.ToLower(want)
-		if got == want {
-			return nil
+		wantLower := strings.ToLower(want)
+		if got != wantLower {
+			return fmt.Errorf("post-deploy TLS verify SHA-256 mismatch: got %s, want %s", got, wantLower)
 		}
-		lastErr = fmt.Errorf("post-deploy TLS verify SHA-256 mismatch: got %s, want %s", got, want)
+		return nil
 	}
-	return lastErr
+
+	return tlsprobe.VerifyWithExponentialBackoff(ctx, retryCfg, probe)
 }
 
 func (c *Connector) rollbackToBackups(ctx context.Context, backupPaths map[string]string) error {

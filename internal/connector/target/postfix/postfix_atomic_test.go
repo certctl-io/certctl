@@ -430,3 +430,68 @@ func TestPostfix_Atomic_DovecotMode_VerifyFails_Rollback(t *testing.T) {
 		t.Errorf("rollback did not restore original key bytes:\n  got:  %q\n  want: %q", gotKey, origKey)
 	}
 }
+
+func TestPostfix_VerifyExponentialBackoff_GrowsBetweenAttempts(t *testing.T) {
+	dir := t.TempDir()
+	c := newC(t, &postfix.Config{
+		Mode:                       "postfix",
+		CertPath:                   filepath.Join(dir, "cert.pem"),
+		ReloadCommand:              "postfix reload",
+		PostDeployVerifyAttempts:   4,
+		PostDeployVerifyBackoff:    10 * time.Millisecond,
+		PostDeployVerifyMaxBackoff: 80 * time.Millisecond,
+		PostDeployVerify: &postfix.PostDeployVerifyConfig{
+			Enabled:  true,
+			Endpoint: "localhost:25",
+			Timeout:  100 * time.Millisecond,
+		},
+	})
+
+	var callTimes []time.Time
+	probeCallCount := atomic.Int32{}
+
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		callTimes = append(callTimes, time.Now())
+		count := probeCallCount.Add(1)
+		if count == 4 {
+			// Succeed on 4th attempt
+			return tlsprobe.ProbeResult{Success: true, Fingerprint: fingerprintOfPEM(certA)}
+		}
+		// Fail on attempts 1-3
+		return tlsprobe.ProbeResult{Success: false, Error: "cert not yet deployed"}
+	})
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA,
+		KeyPEM:  keyA,
+	})
+
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatal("expected Success=true")
+	}
+
+	// Verify we made exactly 4 calls
+	if len(callTimes) != 4 {
+		t.Fatalf("expected 4 probe calls, got %d", len(callTimes))
+	}
+
+	// Assert gaps between attempts are approximately 10ms, 20ms, 40ms.
+	// Allow ±20ms tolerance for scheduler noise.
+	const tolerance = 20 * time.Millisecond
+	expectedGaps := []time.Duration{
+		10 * time.Millisecond,
+		20 * time.Millisecond,
+		40 * time.Millisecond,
+	}
+
+	for i := 0; i < len(expectedGaps); i++ {
+		gap := callTimes[i+1].Sub(callTimes[i])
+		expected := expectedGaps[i]
+		if gap < expected-tolerance || gap > expected+tolerance {
+			t.Errorf("gap[%d]: expected ~%v, got %v", i, expected, gap)
+		}
+	}
+}

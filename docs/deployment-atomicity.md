@@ -160,9 +160,12 @@ if res.Fingerprint != certPEMToFingerprint(deployedCertPEM) {
 }
 ```
 
-Retry with backoff (default 3 attempts, 2s exponential) defends
+Retry with **exponential backoff** (default 3 attempts; 1s initial, 16s cap) defends
 against load-balanced targets where the verify might hit a
-different pod that hasn't picked up the new cert yet:
+different pod that hasn't picked up the new cert yet. Backoff grows 1s → 2s → 4s → 8s → 16s,
+giving the LB fleet time to converge before giving up. Operators preserving V2 linear semantics
+(every attempt waits the same interval) set `post_deploy_verify_max_backoff` equal to
+`post_deploy_verify_backoff`.
 
 ```yaml
 post_deploy_verify:
@@ -170,7 +173,8 @@ post_deploy_verify:
   endpoint: "nginx.svc.cluster.local:443"
   timeout: 10s
 post_deploy_verify_attempts: 3
-post_deploy_verify_backoff: 2s
+post_deploy_verify_backoff: 1s
+post_deploy_verify_max_backoff: 16s
 ```
 
 ## 5. Rollback semantics
