@@ -1,0 +1,162 @@
+# =============================================================================
+# certctl Load-Test Harness — Docker Compose
+# =============================================================================
+#
+# Spins up a minimal certctl stack and runs a k6 driver against it to capture
+# p50 / p95 / p99 latency for the certificate-management API hot path.
+#
+# Stack:
+#   1. postgres            — empty database (server runs migrations + seeds at boot)
+#   2. certctl-tls-init    — one-shot init container; writes self-signed
+#                            server.crt/.key/ca.crt into ./certs (bind mount,
+#                            host-readable so the k6 container can pin against
+#                            it via volumes)
+#   3. certctl-server      — HTTPS API on :8443, demo-seed enabled so the k6
+#                            script has iss-local + an operator + a team
+#                            ready to reference in CreateCertificate payloads
+#   4. k6                  — runs k6.js once and exits with the threshold-
+#                            driven exit code (zero on green, non-zero on any
+#                            threshold breach so `make loadtest` surfaces
+#                            regressions as a failed shell command)
+#
+# Usage:  make loadtest  (from the repo root)
+# Manual: cd deploy/test/loadtest && docker compose up --abort-on-container-exit --exit-code-from k6
+#
+# Audit reference: cowork/issuer-coverage-audit-2026-05-01/RESULTS.md fix #8.
+# =============================================================================
+
+services:
+
+  # ---------------------------------------------------------------------------
+  # Self-signed TLS bootstrap. Mirrors the deploy/docker-compose.test.yml
+  # tls-init pattern exactly: bind-mount instead of named volume so the host
+  # (and the sibling k6 container) can read ca.crt without a chown dance.
+  # See deploy/docker-compose.test.yml::certctl-tls-init for the full rationale.
+  # ---------------------------------------------------------------------------
+  certctl-tls-init:
+    image: alpine/openssl:latest
+    container_name: certctl-loadtest-tls-init
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        CERT=/etc/certctl/tls/server.crt
+        KEY=/etc/certctl/tls/server.key
+        CA=/etc/certctl/tls/ca.crt
+        if [ -f "$$CERT" ] && [ -f "$$KEY" ] && [ -f "$$CA" ]; then
+          echo "TLS cert already present — skipping generation"
+        else
+          mkdir -p /etc/certctl/tls
+          openssl req -x509 -newkey ec \
+            -pkeyopt ec_paramgen_curve:P-256 \
+            -nodes \
+            -keyout "$$KEY" \
+            -out "$$CERT" \
+            -days 3650 \
+            -subj "/CN=certctl-server" \
+            -addext "subjectAltName=DNS:certctl-server,DNS:localhost,IP:127.0.0.1"
+          cp "$$CERT" "$$CA"
+          echo "Generated self-signed TLS cert (ECDSA-P256, 3650d, CN=certctl-server)"
+        fi
+        chmod 0644 "$$CERT" "$$CA"
+        chmod 0600 "$$KEY"
+    volumes:
+      - ./certs:/etc/certctl/tls
+
+  # ---------------------------------------------------------------------------
+  # Database. The server runs migrations + seed.sql + (because
+  # CERTCTL_DEMO_SEED=true below) seed_demo.sql at boot — so the load-test
+  # k6 script can reference iss-local, o-alice, t-platform, and rp-default
+  # without a separate seed step.
+  # ---------------------------------------------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: certctl-loadtest-postgres
+    environment:
+      POSTGRES_DB: certctl
+      POSTGRES_USER: certctl
+      POSTGRES_PASSWORD: loadtestpass
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U certctl"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  # ---------------------------------------------------------------------------
+  # certctl server. Built from the repo root Dockerfile (same as production).
+  # Demo seed is enabled so referenced FK rows exist when the k6 script
+  # POSTs CreateCertificate payloads. Auth is api-key with a deterministic
+  # token the k6 script knows.
+  # ---------------------------------------------------------------------------
+  certctl-server:
+    build:
+      context: ../../..
+      dockerfile: Dockerfile
+      args:
+        HTTP_PROXY: ${HTTP_PROXY:-}
+        HTTPS_PROXY: ${HTTPS_PROXY:-}
+        NO_PROXY: ${NO_PROXY:-}
+    container_name: certctl-loadtest-server
+    depends_on:
+      postgres:
+        condition: service_healthy
+      certctl-tls-init:
+        condition: service_completed_successfully
+    environment:
+      CERTCTL_DATABASE_URL: postgres://certctl:loadtestpass@postgres:5432/certctl?sslmode=disable
+      CERTCTL_SERVER_HOST: 0.0.0.0
+      CERTCTL_SERVER_PORT: 8443
+      CERTCTL_SERVER_TLS_CERT_PATH: /etc/certctl/tls/server.crt
+      CERTCTL_SERVER_TLS_KEY_PATH: /etc/certctl/tls/server.key
+      CERTCTL_LOG_LEVEL: warn
+      CERTCTL_AUTH_TYPE: api-key
+      CERTCTL_AUTH_SECRET: load-test-token
+      CERTCTL_KEYGEN_MODE: agent
+      # CERTCTL_DEMO_SEED=true triggers seed_demo.sql which creates iss-local,
+      # o-alice, t-platform, rp-standard so CreateCertificate FK validation
+      # has rows to bind to.
+      CERTCTL_DEMO_SEED: "true"
+      # Bigger body limit so listing 100s of certs in the GET scenario
+      # doesn't 413 once the harness has been running for a few minutes.
+      CERTCTL_MAX_BODY_SIZE: "10485760"
+      # Encryption key (≥32 bytes per H-1 floor — the test compose's
+      # documented value).
+      CERTCTL_CONFIG_ENCRYPTION_KEY: "loadtest-key-must-be-32-bytes-long-yes"
+    volumes:
+      - ./certs:/etc/certctl/tls:ro
+    healthcheck:
+      # /healthz is unauthenticated. -k because the cert is self-signed.
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O- https://localhost:8443/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 30
+      start_period: 60s
+
+  # ---------------------------------------------------------------------------
+  # k6 driver. Pinned to a specific version so threshold expressions stay
+  # stable across runs. --insecure-skip-tls-verify because the server cert is
+  # self-signed; the load test isn't a TLS conformance test. The k6 process
+  # exits non-zero if any threshold is breached, which the parent
+  # `docker compose up --exit-code-from k6` propagates as the compose exit
+  # code, which `make loadtest` then surfaces as the make-target exit code.
+  # ---------------------------------------------------------------------------
+  k6:
+    image: grafana/k6:0.54.0
+    container_name: certctl-loadtest-k6
+    depends_on:
+      certctl-server:
+        condition: service_healthy
+    environment:
+      CERTCTL_BASE: https://certctl-server:8443
+      CERTCTL_TOKEN: load-test-token
+      K6_INSECURE_SKIP_TLS_VERIFY: "true"
+    volumes:
+      - ./k6.js:/scripts/k6.js:ro
+      - ./results:/results
+    command:
+      - run
+      - --summary-export=/results/summary.json
+      - /scripts/k6.js

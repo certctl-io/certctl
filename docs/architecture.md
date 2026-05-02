@@ -1312,6 +1312,16 @@ certctl is extensively tested across eight layers with CI-enforced coverage gate
 
 For detailed test procedures, smoke tests, and the release sign-off checklist, see the [Testing Guide](testing-guide.md). For setting up the Docker Compose test environment with real CA backends, see [Test Environment](test-env.md).
 
+## Performance Characteristics
+
+Closes the #8 acquisition-readiness blocker from the 2026-05-01 issuer coverage audit (see `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md`). Pre-audit, certctl had no benchmarks or load tests for any API path, so any throughput claim was hand-waved; the harness in `deploy/test/loadtest/` substantiates the API-tier capacity numbers with reproducible methodology.
+
+The harness drives a k6 client at sustained 50 req/s × 2 scenarios × 5 minutes against a docker-compose stack of postgres + tls-init + certctl-server. Two scenarios run in parallel: `POST /api/v1/certificates` (issuance-acceptance hot path: auth + JSON decode + validation + service `CreateCertificate` + `managed_certificates` insert) and `GET /api/v1/certificates?per_page=50` (most-trafficked read endpoint). Hard regression-guard thresholds: p99 < 5 s for issuance-acceptance, p99 < 2 s for list, error rate < 1% globally. k6 exits non-zero on any threshold breach so a future PR that pushes p99 above the bar fails `make loadtest`. Run via `make loadtest` from the repo root or via `.github/workflows/loadtest.yml` (`workflow_dispatch` + weekly cron — never per-push).
+
+What this measures vs what it does NOT: the harness intentionally measures the API tier (auth → DB), not the issuer connector round-trip latency. Connector calls (DigiCert, ACME, Vault, AWS ACM PCA, etc.) happen asynchronously through the renewal scheduler and are pinned by the `certctl_issuance_duration_seconds{issuer_type=...}` Prometheus histogram (audit fix #4 from the same audit). Driving them through k6 would amount to load-testing someone else's API, which is the wrong thing to do. The full ACME enrollment flow (multi-RTT order/challenge/finalize against pebble) is deferred — sustained 100/s through that flow needs pebble tuning + crypto helpers k6 doesn't ship out of the box.
+
+Captured baseline numbers are committed in `deploy/test/loadtest/README.md` once an operator runs the harness on a representative workstation; future tuning commits land alongside refreshed baseline numbers so each commit's impact is diffable. Operators considering certctl for a 50k-cert fleet at 47-day TLS rotation (CA/B Forum SC-081v3, lands 2029) have a published number with documented methodology to compare against, not a claim.
+
 ## What's Next
 
 - [Quick Start](quickstart.md) — Get certctl running locally

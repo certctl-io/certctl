@@ -1,0 +1,10 @@
+# Per-run artifacts. summary.json + summary.txt are regenerated on
+# every `make loadtest` run; committing them would create huge diffs
+# on each invocation. The README captures the canonical baseline
+# numbers manually.
+results/*
+!results/.gitkeep
+
+# tls-init bind mount — server cert + key are regenerated on every
+# fresh run.
+certs/

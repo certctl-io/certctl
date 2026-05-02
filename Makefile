@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-docs verify-deploy clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-docs verify-deploy loadtest clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -18,6 +18,7 @@ help:
 	@echo "  make verify         Pre-commit gate: fmt + vet + lint + test (CI-parity)"
 	@echo "  make verify-docs    Pre-tag gate:    QA-doc drift checks (operator-facing docs)"
 	@echo "  make verify-deploy  Pre-push gate:   digest validity + OpenAPI parity + docker build smoke"
+	@echo "  make loadtest       k6 throughput run against postgres + certctl (NOT in verify; manual + cron only)"
 	@echo ""
 	@echo "Database:"
 	@echo "  make migrate-up     Run migrations (requires DB_URL)"
@@ -149,6 +150,23 @@ verify-deploy:
 	@docker build -f Dockerfile.agent  -t certctl-agent:verify     .
 	@echo ""
 	@echo "verify-deploy: PASS — safe to push"
+
+# Load-test harness — closes the #8 acquisition-readiness blocker from
+# the 2026-05-01 issuer coverage audit. Boots a minimal certctl stack
+# (postgres + tls-init + certctl-server) and runs k6 against the API
+# tier for ~5 minutes. Exits non-zero on any threshold breach.
+#
+# NOT in `make verify` — load tests take minutes, not seconds, and
+# don't gate per-PR signal. CI gates this behind workflow_dispatch +
+# weekly cron in .github/workflows/loadtest.yml. See
+# deploy/test/loadtest/README.md for thresholds, baseline, and how to
+# interpret a regression.
+loadtest:
+	@echo "==> spinning up postgres + certctl + k6 driver (this takes ~7m)"
+	@cd deploy/test/loadtest && docker compose up --build --abort-on-container-exit --exit-code-from k6
+	@echo ""
+	@echo "==> results landed in deploy/test/loadtest/results/"
+	@if [ -f deploy/test/loadtest/results/summary.txt ]; then cat deploy/test/loadtest/results/summary.txt; fi
 
 # Database targets (requires migrate tool)
 migrate-up:

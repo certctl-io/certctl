@@ -1,0 +1,3 @@
+# Placeholder so `results/` exists in a fresh checkout. The k6
+# container mounts this directory and writes summary.{json,txt} into
+# it on every run; both outputs are gitignored.

@@ -1,0 +1,73 @@
+# Load-test workflow — closes the #8 acquisition-readiness blocker from
+# the 2026-05-01 issuer coverage audit (see
+# cowork/issuer-coverage-audit-2026-05-01/RESULTS.md).
+#
+# CADENCE: workflow_dispatch + weekly cron, NOT per-push. Load tests
+# are minutes long and don't provide useful per-PR signal — per-push
+# pressure goes through ci.yml. This workflow exists to (a) catch
+# gradual regressions from cumulative changes that no single PR
+# triggered, and (b) give an operator a one-click way to capture
+# numbers before tagging a release.
+#
+# THRESHOLDS: defined in deploy/test/loadtest/k6.js (p99 < 5s for
+# issuance-acceptance, p99 < 2s for list, error rate < 1%). k6 exits
+# non-zero on any breach, which propagates through `docker compose up
+# --exit-code-from k6` → `make loadtest` → this workflow's exit.
+
+name: loadtest
+
+on:
+  workflow_dispatch:
+    # Manual trigger from the Actions tab. Use before tagging a
+    # release or after a meaningful tuning commit.
+
+  schedule:
+    # Mondays at 06:00 UTC. Off-peak; catches regressions accumulated
+    # over the previous week's merges. Once a baseline is committed
+    # in deploy/test/loadtest/README.md, drift relative to that
+    # baseline is the signal — diff the captured summary.json
+    # against the committed numbers.
+    - cron: '0 6 * * 1'
+
+# Reduce permissions — this workflow doesn't write to PRs or push tags.
+permissions:
+  contents: read
+
+jobs:
+  k6:
+    name: k6 throughput run
+    runs-on: ubuntu-latest
+    # 15-minute hard cap. The harness itself is ~7 minutes (5m run +
+    # 2m for image build + healthcheck wait); the cap absorbs slow CI
+    # runners and cold image caches without letting a stuck container
+    # consume the runner indefinitely.
+    timeout-minutes: 15
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Docker Buildx
+        # The compose stack builds the certctl image from the repo
+        # root Dockerfile. Buildx gives the build a usable cache and
+        # works with newer compose versions.
+        uses: docker/setup-buildx-action@v3
+
+      - name: Run loadtest
+        run: make loadtest
+        env:
+          # Disable BuildKit progress noise so the run log is
+          # diff-able against past runs.
+          BUILDKIT_PROGRESS: plain
+
+      - name: Upload summary
+        # Always upload the summary so a regression has a diffable
+        # artifact even when k6 exited non-zero. summary.json is the
+        # authoritative machine-readable form; summary.txt is the
+        # human-readable text the README baseline tracks.
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: k6-summary-${{ github.run_id }}
+          path: deploy/test/loadtest/results/
+          retention-days: 90
