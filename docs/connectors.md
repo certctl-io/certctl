@@ -941,6 +941,49 @@ All commands are validated against shell injection via `validation.ValidateShell
 
 Location: `internal/connector/target/postfix/postfix.go`
 
+#### Choosing Mode=postfix vs Mode=dovecot
+
+The connector supports two modes via the `mode` config field, switching the daemon-specific defaults. **Both modes share the same Go connector code** (atomic-write, PreCommit/PostCommit hooks, post-deploy verify, rollback), so the rollback contract is identical across modes.
+
+**Choose `mode: postfix` when** your target host runs Postfix as the MTA (typically port 25 SMTP/STARTTLS, 465 SMTPS, or 587 submission). Defaults applied by `applyDefaults` (see `internal/connector/target/postfix/postfix.go`):
+
+| Default | Value |
+|---|---|
+| `cert_path` | `/etc/postfix/certs/cert.pem` |
+| `key_path` | `/etc/postfix/certs/key.pem` |
+| `validate_command` | `postfix check` |
+| `reload_command` | `postfix reload` |
+
+`mode: postfix` is also the **default when `mode` is unset**.
+
+**Choose `mode: dovecot` when** your target host runs Dovecot as the IMAPS / POP3S server (typically port 993 IMAPS or 995 POP3S). Defaults applied by `applyDefaults`:
+
+| Default | Value |
+|---|---|
+| `cert_path` | `/etc/dovecot/certs/cert.pem` |
+| `key_path` | `/etc/dovecot/certs/key.pem` |
+| `validate_command` | `doveconf -n` |
+| `reload_command` | `doveadm reload` |
+
+**Post-deploy TLS verify** is operator-supplied via `post_deploy_verify` (`enabled` + `endpoint` + `timeout`) — the connector does NOT bake in a per-mode default port. Operators that opt in should set `endpoint` to their daemon's listener (e.g. `mail.example.com:25` for Postfix STARTTLS, `mail.example.com:993` for Dovecot IMAPS).
+
+**Hosts running BOTH Postfix and Dovecot** (the common mail-server pattern): configure **two separate targets** in the certctl control plane, one per daemon. Each gets its own cert path, its own validate/reload command, and its own optional verify endpoint. The cert + key bytes can be identical across the two targets if your mail server uses the same TLS material for both daemons (which many do); certctl does not deduplicate the deploys, but the byte-equal cert hits the SHA-256 idempotency short-circuit on subsequent renewals when the target paths haven't changed.
+
+**Sharing a single cert file across daemons** via a filesystem symlink works fine with the connector — the atomic-write path's `os.Rename` follows symlinks. Configure both targets to point at the same canonical path, or have one target's `cert_path` symlink into the other's. Operators who want byte-deduplication should rely on this approach rather than asking certctl to coordinate it.
+
+**Daemon-specific quirks worth knowing:**
+
+- **Postfix STARTTLS** (port 25) typically requires the cert to chain to a public root for receiving mail from arbitrary external MTAs that validate SMTP-side server certs. If you're deploying a self-signed cert from `iss-local`, configure the receiving Postfix accordingly (e.g. `smtpd_use_tls=yes` + `smtpd_tls_security_level=may` for opportunistic TLS so external senders that don't validate continue to deliver).
+- **Dovecot IMAPS** (port 993) is typically client-facing — the chain you ship matters more here because IMAPS clients (Thunderbird, Outlook) actively validate. Set `chain_path` if your certificate chain is supplied separately; when `chain_path` is unset, the connector appends the chain bytes to `cert_path`.
+- **Postfix and Dovecot do not share a TLS session cache** by default. Both reload independently, so a cert renewal that updates both targets via certctl requires both reloads to succeed before clients re-handshake. The two targets are fully independent in the certctl scheduler — one reload failing rolls back that target only.
+
+**Test pin**: Bundle 11 (commit `88e8881`) added end-to-end tests for `Mode=dovecot`:
+
+- `TestPostfix_Atomic_DovecotMode_HappyPath` — confirms `applyDefaults` populates the dovecot validate + reload commands AND the deploy threads them through to `runValidate` + `runReload`.
+- `TestPostfix_Atomic_DovecotMode_VerifyFails_Rollback` — confirms the rollback path under `Mode=dovecot` restores pre-deploy cert + key bytes byte-exact.
+
+The `Mode=postfix` branch has equivalent test coverage in the same file (see `TestPostfix_HappyPath`, `TestPostfix_VerifyMismatch_Rollback`, `TestPostfix_ReloadFails_Rollback`).
+
 ### F5 BIG-IP (Implemented)
 
 The F5 BIG-IP target connector deploys certificates to F5 load balancers via the iControl REST API. F5 appliances can't run agents directly, so this connector uses the **proxy agent pattern**: a designated certctl agent in the same network zone polls for F5 deployment jobs and executes iControl REST calls on behalf of the control plane. Minimum supported BIG-IP version: 12.0+.

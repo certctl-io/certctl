@@ -134,6 +134,11 @@ Apply's algorithm:
 | javakeystore | (`keytool -list`) | (`keytool -importkeystore`) | (admin probe) | keytool snapshot; rollback via `keytool -delete` + re-import |
 | k8ssecret | (V2 blocker — see note below) | (V2 blocker — see note below) | (V2 blocker — see note below) | **V2 blocker — Bundle 2 of the 2026-05-02 deployment-target audit.** Production `realK8sClient` at `internal/connector/target/k8ssecret/k8ssecret.go:397-420` is a stub (every method returns `"real Kubernetes client not implemented — use NewWithClient for tests"`). The SHA-256 post-deploy verify and kubelet sync poll are designed but not yet implemented; production deploys to a real cluster fail with "not implemented" until Bundle 2 lands. Test mocks via `NewWithClient` work today. Tracking prompt: `cowork/deployment-target-audit-2026-05-02/k8s-real-client-prompt.md`. |
 
+> **Postfix vs Dovecot mode**: see "Choosing Mode=postfix vs Mode=dovecot" in
+> `docs/connectors.md` for the per-mode defaults (cert/key paths, validate +
+> reload commands), the dual-deploy guidance for mail servers running both
+> daemons, and the test-pin reference (Bundle 11 commit `88e8881`).
+
 ## 4. Post-deploy TLS verification
 
 Frozen decision 0.3 (deploy-hardening I): post-deploy verify is
