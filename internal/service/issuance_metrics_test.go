@@ -22,9 +22,9 @@ func TestIssuanceMetrics_RecordAndSnapshot(t *testing.T) {
 	m := NewIssuanceMetrics(DefaultIssuanceBucketBoundaries)
 
 	// Record three issuances: two success (one fast, one slow), one failure.
-	m.RecordIssuance("local", "success", 50*time.Millisecond)  // 0.05 bucket
-	m.RecordIssuance("local", "success", 2*time.Second)        // 2.5 bucket
-	m.RecordIssuance("digicert", "failure", 90*time.Second)    // 120 bucket
+	m.RecordIssuance("local", "success", 50*time.Millisecond) // 0.05 bucket
+	m.RecordIssuance("local", "success", 2*time.Second)       // 2.5 bucket
+	m.RecordIssuance("digicert", "failure", 90*time.Second)   // 120 bucket
 	m.RecordFailure("digicert", "rate_limited")
 
 	counters := m.SnapshotCounters()
