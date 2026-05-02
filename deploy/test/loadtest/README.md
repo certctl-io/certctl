@@ -99,13 +99,45 @@ diff target.
 | Scenario | p50 | p95 | p99 | Error rate |
 |---|---|---|---|---|
 | **issuance_acceptance** (threshold) | — | < 2 s | < 5 s | < 1% |
-| **issuance_acceptance** (baseline) | TBD | TBD | TBD | TBD |
+| **issuance_acceptance** (baseline)[^1] | 2.12 ms | 6.19 ms | 8.58 ms | 0.00% |
 | **list_certificates** (threshold) | — | < 800 ms | < 2 s | < 1% |
-| **list_certificates** (baseline) | TBD | TBD | TBD | TBD |
+| **list_certificates** (baseline)[^1] | 2.12 ms | 6.19 ms | 8.58 ms | 0.00% |
 
-**Methodology pinned at baseline capture:**
-- Hardware: TBD (operator's workstation specs at capture time).
-- Postgres: 16-alpine, default config.
+[^1]: **Sandbox-aggregate placeholder** — captured at HEAD on a Linux/aarch64
+  unprivileged sandbox (no Docker, no GitHub-hosted runner). Both rows show
+  the same aggregate combined-load numbers because the sandbox run did not
+  break out per-scenario tags in `summary.json`. Treat these as a sanity
+  floor (proof the API tier handles 100 req/s combined with zero errors and
+  sub-10ms p99), **not** as the per-scenario baselines the threshold contract
+  is written against. Replace via `gh workflow run loadtest.yml` on the
+  canonical `ubuntu-latest` runner — that produces per-scenario tagged
+  metrics in `summary.json`.
+
+**Methodology of the sandbox-placeholder capture above:**
+- Hardware: Linux/aarch64 unprivileged sandbox (uid 1019, no root,
+  ~1.2 GiB free disk). NOT canonical hardware.
+- Postgres: 14.22 (Ubuntu, native binaries, unix-socket dir `/tmp/pg-sock`),
+  unix sockets only, port 55432.
+- certctl: built from HEAD via `go build -o bin/certctl-server ./cmd/server`.
+- Concurrency: 50 req/s sustained per scenario, both scenarios in parallel
+  (= 100 req/s combined).
+- Duration: **10 seconds** per scenario (NOT 5 minutes — sandbox bash-call
+  budget is bounded; canonical-hardware run uses 5 minutes).
+- TLS: ECDSA-P256 self-signed `localhost` cert at `/tmp/certctl-tls/`.
+- Auth: api-key, single Bearer token (`CERTCTL_AUTH_SECRET=load-test-token`).
+- Rate limiting: **disabled** (`CERTCTL_RATE_LIMIT_ENABLED=false`) — without
+  this, the 100 req/s combined load trips the default token-bucket and
+  drives error rate to ~40%, masking real latency.
+- Encryption: `CERTCTL_CONFIG_ENCRYPTION_KEY` set (32+ bytes).
+- Captured: 2026-05-02. Total: 1002 requests, 100.15 req/s sustained,
+  0 failures, 100% checks passed. Raw `summary.json` is not committed
+  (gitignored per the existing `results/` convention).
+
+**Methodology pinned at canonical baseline capture (replace placeholder):**
+- Hardware: GitHub-hosted `ubuntu-latest` runner (4 vCPU / 16 GiB / SSD).
+  Run via `gh workflow run loadtest.yml`; raw `summary.json` is available
+  for 90 days as a workflow artifact.
+- Postgres: 16-alpine in compose, default config.
 - certctl: image built from this repo at the commit referenced below.
 - Concurrency: 50 req/s sustained per scenario (100 req/s total).
 - Duration: 5 minutes per scenario, 5s stagger.
