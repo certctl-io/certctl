@@ -3,6 +3,7 @@ package caddy
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"io"
@@ -13,6 +14,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/connector/target/certutil"
 	"github.com/shankar0123/certctl/internal/deploy"
 )
 
@@ -114,7 +116,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	// Try API mode if configured
 	if c.config.Mode == "api" {
-		result, err := c.deployViaAPI(ctx, request)
+		result, err := c.deployViaAPI(ctx, request, startTime)
 		if err == nil {
 			c.logger.Info("certificate deployed to Caddy via API",
 				"duration", time.Since(startTime).String())
@@ -128,7 +130,15 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 }
 
 // deployViaAPI deploys a certificate using Caddy's admin API.
-func (c *Connector) deployViaAPI(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
+//
+// Bundle 9 of the 2026-05-02 deployment-target audit:
+//   - Fix 1: duration_ms metric uses the caller-passed startTime (was
+//     time.Since(time.Now()) which always rounded to ~0ms).
+//   - Fix 3: SHA-256 idempotency short-circuit — GET the current loaded
+//     certs and compare to the deploy payload's cert bytes; skip the POST
+//     when they match. Conservative: any GET failure (network, non-200,
+//     parse error, hash mismatch) falls through to today's POST behavior.
+func (c *Connector) deployViaAPI(ctx context.Context, request target.DeploymentRequest, startTime time.Time) (*target.DeploymentResult, error) {
 	c.logger.Debug("attempting API deployment", "url", c.config.AdminAPI)
 
 	// Build the certificate payload with combined cert and chain
@@ -137,13 +147,41 @@ func (c *Connector) deployViaAPI(ctx context.Context, request target.DeploymentR
 		certData += request.ChainPEM + "\n"
 	}
 
+	apiURL := c.config.AdminAPI + "/config/apps/tls/certificates/load"
+
+	// Bundle 9 Fix 3: idempotency short-circuit. GET the current loaded
+	// certs and SHA-256 compare to the deploy payload — if they match,
+	// skip the POST and return success with metadata.idempotent=true.
+	// Caddy's response shape varies between operators / config versions;
+	// handle BOTH the array-of-objects and single-object shapes. Any
+	// failure during the GET (network, non-200, JSON parse error, hash
+	// mismatch) silently falls through to the POST below — false
+	// negatives are safe; false positives are dangerous.
+	deployHash := sha256.Sum256([]byte(certData))
+	if c.idempotencySkipPOST(ctx, apiURL, deployHash) {
+		c.logger.Debug("Caddy already has this certificate loaded; skipping POST",
+			"admin_url", c.config.AdminAPI)
+		return &target.DeploymentResult{
+			Success:       true,
+			TargetAddress: c.config.AdminAPI,
+			DeploymentID:  fmt.Sprintf("caddy-api-idem-%d", time.Now().Unix()),
+			Message:       "Caddy already has this certificate loaded (idempotent skip)",
+			DeployedAt:    time.Now(),
+			Metadata: map[string]string{
+				"method":      "api",
+				"admin_url":   c.config.AdminAPI,
+				"idempotent":  "true",
+				"duration_ms": fmt.Sprintf("%d", time.Since(startTime).Milliseconds()),
+			},
+		}, nil
+	}
+
 	payload := map[string]string{
 		"cert": certData,
 		"key":  request.KeyPEM,
 	}
 
 	bodyBytes, _ := json.Marshal(payload)
-	apiURL := c.config.AdminAPI + "/config/apps/tls/certificates/load"
 
 	req, err := http.NewRequestWithContext(ctx, "POST", apiURL, bytes.NewReader(bodyBytes))
 	if err != nil {
@@ -173,9 +211,63 @@ func (c *Connector) deployViaAPI(ctx context.Context, request target.DeploymentR
 		Metadata: map[string]string{
 			"method":      "api",
 			"admin_url":   c.config.AdminAPI,
-			"duration_ms": fmt.Sprintf("%d", time.Since(time.Now()).Milliseconds()),
+			"duration_ms": fmt.Sprintf("%d", time.Since(startTime).Milliseconds()),
 		},
 	}, nil
+}
+
+// idempotencySkipPOST returns true iff GET-ing the Caddy admin API at the
+// same path returns a cert whose SHA-256 matches the deploy payload's
+// SHA-256. The function is best-effort: it returns false (= "fall through
+// to the POST") on any error along the way (network, non-200, JSON parse,
+// no matching entry, hash mismatch).
+//
+// Caddy's response shape can be either:
+//   - a single object: {"cert": "...", "key": "..."}
+//   - an array of objects: [{"cert": "...", "key": "..."}, ...]
+//
+// We try both shapes; the first that decodes AND has a matching hash wins.
+//
+// Bundle 9 Fix 3 of the 2026-05-02 deployment-target audit.
+func (c *Connector) idempotencySkipPOST(ctx context.Context, apiURL string, deployHash [32]byte) bool {
+	getReq, err := http.NewRequestWithContext(ctx, "GET", apiURL, nil)
+	if err != nil {
+		return false
+	}
+	getReq.Header.Set("Accept", "application/json")
+	resp, err := c.client.Do(getReq)
+	if err != nil {
+		return false
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return false
+	}
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		return false
+	}
+	// Try array-of-objects shape first.
+	var asArray []map[string]string
+	if err := json.Unmarshal(body, &asArray); err == nil {
+		for _, entry := range asArray {
+			if entry["cert"] == "" {
+				continue
+			}
+			if sha256.Sum256([]byte(entry["cert"])) == deployHash {
+				return true
+			}
+		}
+		return false
+	}
+	// Fall back to single-object shape.
+	var asObject map[string]string
+	if err := json.Unmarshal(body, &asObject); err == nil {
+		if asObject["cert"] != "" && sha256.Sum256([]byte(asObject["cert"])) == deployHash {
+			return true
+		}
+	}
+	return false
 }
 
 // deployViaFile deploys a certificate by writing files to the cert directory.
@@ -262,7 +354,15 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 
 	startTime := time.Now()
 
-	// For file mode, verify files exist
+	// For file mode, verify files exist AND the cert is valid PEM/x509.
+	//
+	// Bundle 9 Fix 2 of the 2026-05-02 deployment-target audit: pre-fix,
+	// this branch checked file existence only (os.Stat). A cert file that
+	// existed but contained malformed bytes passed validation; Caddy's
+	// file-watcher silently failed to load it; operators saw "validation
+	// green" + "TLS handshake fails" with no obvious connection. Post-fix,
+	// the cert file is read and parsed via certutil.ParseCertificatePEM so
+	// only files that Caddy can actually load pass validation.
 	if c.config.Mode == "file" || c.config.CertDir != "" {
 		certPath := filepath.Join(c.config.CertDir, c.config.CertFile)
 		keyPath := filepath.Join(c.config.CertDir, c.config.KeyFile)
@@ -286,6 +386,34 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 				Valid:         false,
 				Serial:        request.Serial,
 				TargetAddress: keyPath,
+				Message:       errMsg,
+				ValidatedAt:   time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+
+		// Bundle 9 Fix 2: PEM-parse the cert file. A malformed cert that
+		// Caddy's watcher would silently reject must fail validation here
+		// instead of bubbling up as a confusing "TLS handshake fails"
+		// later.
+		certBytes, err := os.ReadFile(certPath)
+		if err != nil {
+			errMsg := fmt.Sprintf("failed to read certificate file %s: %v", certPath, err)
+			c.logger.Error("validation failed", "error", err)
+			return &target.ValidationResult{
+				Valid:         false,
+				Serial:        request.Serial,
+				TargetAddress: certPath,
+				Message:       errMsg,
+				ValidatedAt:   time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		if _, err := certutil.ParseCertificatePEM(string(certBytes)); err != nil {
+			errMsg := fmt.Sprintf("certificate file %s is not valid PEM/x509: %v", certPath, err)
+			c.logger.Error("validation failed", "error", err)
+			return &target.ValidationResult{
+				Valid:         false,
+				Serial:        request.Serial,
+				TargetAddress: certPath,
 				Message:       errMsg,
 				ValidatedAt:   time.Now(),
 			}, fmt.Errorf("%s", errMsg)
