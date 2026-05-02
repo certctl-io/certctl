@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer/sectigo"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: sectigo failure-mode round-out (79.4% → ≥85%).
@@ -22,8 +23,8 @@ func buildSectigoConnector(t *testing.T, baseURL string) *sectigo.Connector {
 	cfg := sectigo.Config{
 		BaseURL:            baseURL,
 		CustomerURI:        "tcust",
-		Login:              "user",
-		Password:           "pw",
+		Login:              secret.NewRefFromString("user"),
+		Password:           secret.NewRefFromString("pw"),
 		CertType:           1,
 		OrgID:              2,
 		Term:               365,

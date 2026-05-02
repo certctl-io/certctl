@@ -20,6 +20,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/globalsign"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 func TestGlobalSignConnector(t *testing.T) {
@@ -44,8 +45,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := globalsign.Config{
 			APIUrl:         srv.URL,
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: "unused_for_httptest",
 			ClientKeyPath:  "unused_for_httptest",
 		}
@@ -63,8 +64,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 	t.Run("ValidateConfig_MissingAPIUrl", func(t *testing.T) {
 		config := globalsign.Config{
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: "/tmp/cert.pem",
 			ClientKeyPath:  "/tmp/key.pem",
 		}
@@ -83,7 +84,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingAPIKey", func(t *testing.T) {
 		config := globalsign.Config{
 			APIUrl:         "https://api.example.com",
-			APISecret:      "gs-test-secret",
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: "/tmp/cert.pem",
 			ClientKeyPath:  "/tmp/key.pem",
 		}
@@ -102,7 +103,7 @@ func TestGlobalSignConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingAPISecret", func(t *testing.T) {
 		config := globalsign.Config{
 			APIUrl:         "https://api.example.com",
-			APIKey:         "gs-test-key",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
 			ClientCertPath: "/tmp/cert.pem",
 			ClientKeyPath:  "/tmp/key.pem",
 		}
@@ -121,8 +122,8 @@ func TestGlobalSignConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingClientCertPath", func(t *testing.T) {
 		config := globalsign.Config{
 			APIUrl:        "https://api.example.com",
-			APIKey:        "gs-test-key",
-			APISecret:     "gs-test-secret",
+			APIKey:        secret.NewRefFromString("gs-test-key"),
+			APISecret:     secret.NewRefFromString("gs-test-secret"),
 			ClientKeyPath: "/tmp/key.pem",
 		}
 
@@ -140,8 +141,8 @@ func TestGlobalSignConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingClientKeyPath", func(t *testing.T) {
 		config := globalsign.Config{
 			APIUrl:         "https://api.example.com",
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: "/tmp/cert.pem",
 		}
 
@@ -187,8 +188,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -235,8 +236,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -276,8 +277,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -318,8 +319,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -356,8 +357,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:             mockServer.URL,
-			APIKey:             "gs-test-key",
-			APISecret:          "gs-test-secret",
+			APIKey:             secret.NewRefFromString("gs-test-key"),
+			APISecret:          secret.NewRefFromString("gs-test-secret"),
 			PollMaxWaitSeconds: 1, // keep async-pending tests fast
 		}
 
@@ -400,8 +401,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -445,8 +446,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -478,8 +479,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -524,8 +525,8 @@ func TestGlobalSignConnector(t *testing.T) {
 
 		config := &globalsign.Config{
 			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIKey:    secret.NewRefFromString("gs-test-key"),
+			APISecret: secret.NewRefFromString("gs-test-secret"),
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)
@@ -613,15 +614,22 @@ func TestGlobalSign_ServerTLSConfig(t *testing.T) {
 		clientCert, clientKey := writeClientMTLS(t)
 		config := globalsign.Config{
 			APIUrl:         srv.URL,
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: clientCert,
 			ClientKeyPath:  clientKey,
 			ServerCAPath:   caPath,
 		}
 
 		connector := globalsign.New(&config, logger)
-		rawConfig, _ := json.Marshal(config)
+		// Build rawConfig as a JSON literal so the secrets round-trip
+		// intact via UnmarshalJSON (json.Marshal redacts *secret.Ref →
+		// "[redacted]" by design; it MUST NOT be used to construct a
+		// rawConfig that ValidateConfig will then header-write back).
+		rawConfig := []byte(fmt.Sprintf(
+			`{"api_url":%q,"api_key":"gs-test-key","api_secret":"gs-test-secret","client_cert_path":%q,"client_key_path":%q,"server_ca_path":%q}`,
+			config.APIUrl, config.ClientCertPath, config.ClientKeyPath, config.ServerCAPath,
+		))
 		if err := connector.ValidateConfig(ctx, rawConfig); err != nil {
 			t.Fatalf("ValidateConfig with pinned CA should succeed, got: %v", err)
 		}
@@ -645,8 +653,8 @@ func TestGlobalSign_ServerTLSConfig(t *testing.T) {
 		clientCert, clientKey := writeClientMTLS(t)
 		config := globalsign.Config{
 			APIUrl:         srv.URL,
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: clientCert,
 			ClientKeyPath:  clientKey,
 			ServerCAPath:   caPath,
@@ -671,8 +679,8 @@ func TestGlobalSign_ServerTLSConfig(t *testing.T) {
 		clientCert, clientKey := writeClientMTLS(t)
 		config := globalsign.Config{
 			APIUrl:         "https://example.invalid",
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: clientCert,
 			ClientKeyPath:  clientKey,
 			ServerCAPath:   "/nonexistent/path/to/ca.pem",
@@ -699,8 +707,8 @@ func TestGlobalSign_ServerTLSConfig(t *testing.T) {
 
 		config := globalsign.Config{
 			APIUrl:         "https://example.invalid",
-			APIKey:         "gs-test-key",
-			APISecret:      "gs-test-secret",
+			APIKey:         secret.NewRefFromString("gs-test-key"),
+			APISecret:      secret.NewRefFromString("gs-test-secret"),
 			ClientCertPath: clientCert,
 			ClientKeyPath:  clientKey,
 			ServerCAPath:   badCAPath,

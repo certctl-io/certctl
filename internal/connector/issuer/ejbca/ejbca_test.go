@@ -27,6 +27,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // mustNewForValidateConfig returns an EJBCA connector wired in OAuth2 mode
@@ -40,7 +41,7 @@ func mustNewForValidateConfig(t *testing.T, logger *slog.Logger) *ejbca.Connecto
 	c, err := ejbca.New(&ejbca.Config{
 		APIUrl:   "https://placeholder",
 		AuthMode: "oauth2",
-		Token:    "placeholder",
+		Token:    secret.NewRefFromString("placeholder"),
 		CAName:   "placeholder",
 	}, logger)
 	if err != nil {
@@ -79,7 +80,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := ejbca.Config{
 			APIUrl:   "https://ejbca.example.com:8443/ejbca/ejbca-rest-api/v1",
 			AuthMode: "oauth2",
-			Token:    "test-oauth2-token",
+			Token:    secret.NewRefFromString("test-oauth2-token"),
 			CAName:   "Management CA",
 		}
 
@@ -224,7 +225,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   srv.URL,
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -291,7 +292,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:      srv.URL,
 			AuthMode:    "oauth2",
-			Token:       "test-token",
+			Token:       secret.NewRefFromString("test-token"),
 			CAName:      "Management CA",
 			CertProfile: "ENDUSER",
 			EEProfile:   "ENDUSER",
@@ -324,7 +325,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   srv.URL,
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -363,7 +364,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   srv.URL,
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -405,7 +406,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   srv.URL,
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -451,7 +452,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   srv.URL,
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -506,7 +507,7 @@ func TestEJBCAConnector(t *testing.T) {
 				config := &ejbca.Config{
 					APIUrl:   srv.URL,
 					AuthMode: "oauth2",
-					Token:    "test-token",
+					Token:    secret.NewRefFromString("test-token"),
 					CAName:   "Management CA",
 				}
 				connector := ejbca.NewWithHTTPClient(config, logger, srv.Client())
@@ -528,7 +529,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   "https://ejbca.example.com:8443/ejbca/ejbca-rest-api/v1",
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector, err := ejbca.New(config, logger)
@@ -549,7 +550,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   "https://ejbca.example.com:8443/ejbca/ejbca-rest-api/v1",
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector, err := ejbca.New(config, logger)
@@ -570,7 +571,7 @@ func TestEJBCAConnector(t *testing.T) {
 		config := &ejbca.Config{
 			APIUrl:   "https://ejbca.example.com:8443/ejbca/ejbca-rest-api/v1",
 			AuthMode: "oauth2",
-			Token:    "test-token",
+			Token:    secret.NewRefFromString("test-token"),
 			CAName:   "Management CA",
 		}
 		connector, err := ejbca.New(config, logger)
@@ -778,7 +779,7 @@ func TestNew_OAuth2NoTransportTuning(t *testing.T) {
 	cfg := &ejbca.Config{
 		APIUrl:   "https://placeholder",
 		AuthMode: "oauth2",
-		Token:    "test-token",
+		Token:    secret.NewRefFromString("test-token"),
 		CAName:   "Management CA",
 	}
 	conn, err := ejbca.New(cfg, logger)
@@ -803,7 +804,7 @@ func TestNew_InvalidAuthMode(t *testing.T) {
 	cfg := &ejbca.Config{
 		APIUrl:   "https://placeholder",
 		AuthMode: "invalid",
-		Token:    "test-token",
+		Token:    secret.NewRefFromString("test-token"),
 		CAName:   "Management CA",
 	}
 	_, err := ejbca.New(cfg, logger)

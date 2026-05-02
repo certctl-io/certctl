@@ -13,6 +13,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: ejbca failure-mode round-out (76.5% → ≥85%).
@@ -24,7 +25,7 @@ func buildEJBCAConnector(t *testing.T, baseURL string) *ejbca.Connector {
 	cfg := &ejbca.Config{
 		APIUrl:      baseURL,
 		AuthMode:    "oauth2",
-		Token:       "tok",
+		Token:       secret.NewRefFromString("tok"),
 		CAName:      "TestCA",
 		CertProfile: "TestProfile",
 		EEProfile:   "TestEEProfile",

@@ -40,6 +40,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Config represents the GlobalSign Atlas HVCA issuer connector configuration.
@@ -51,11 +52,16 @@ type Config struct {
 
 	// APIKey is the GlobalSign API key for request authentication.
 	// Required. Set via CERTCTL_GLOBALSIGN_API_KEY environment variable.
-	APIKey string `json:"api_key"`
+	//
+	// Type: *secret.Ref (audit fix #6 Phase 2). Never stringifies;
+	// MarshalJSON returns "[redacted]"; bytes are zeroed after each
+	// header write via Ref.Use.
+	APIKey *secret.Ref `json:"api_key"`
 
 	// APISecret is the GlobalSign API secret for request authentication.
 	// Required. Set via CERTCTL_GLOBALSIGN_API_SECRET environment variable.
-	APISecret string `json:"api_secret"`
+	// Same *secret.Ref protections as APIKey.
+	APISecret *secret.Ref `json:"api_secret"`
 
 	// ClientCertPath is the filesystem path to the mTLS client certificate PEM file.
 	// The certificate must be signed by GlobalSign and loaded for TLS handshake.
@@ -159,11 +165,11 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("GlobalSign api_url is required")
 	}
 
-	if cfg.APIKey == "" {
+	if cfg.APIKey.IsEmpty() {
 		return fmt.Errorf("GlobalSign api_key is required")
 	}
 
-	if cfg.APISecret == "" {
+	if cfg.APISecret.IsEmpty() {
 		return fmt.Errorf("GlobalSign api_secret is required")
 	}
 
@@ -204,9 +210,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	}
 
 	// Add both authentication layers
-	req.Header.Set("ApiKey", cfg.APIKey)
-	req.Header.Set("ApiSecret", cfg.APISecret)
-	req.Header.Set("Content-Type", "application/json")
+	setAuthHeaders(req, &cfg)
 
 	resp, err := validationClient.Do(req)
 	if err != nil {
@@ -262,6 +266,34 @@ func (c *Connector) getHTTPClient(ctx context.Context) (*http.Client, error) {
 		},
 		Timeout: 30 * time.Second,
 	}, nil
+}
+
+// setAuthHeaders writes the GlobalSign double-auth headers (ApiKey,
+// ApiSecret) plus Content-Type: application/json onto req. The secret
+// values are pulled from the *secret.Ref via Use, which zero-fills the
+// per-call buffer after the header string is set; the Ref's underlying
+// bytes remain encrypted at rest. The Use return value is intentionally
+// ignored — Set never errors and the only failure modes inside Use are
+// nil-Ref / empty-Ref which the upstream IsEmpty validation has already
+// excluded for production paths. ValidateConfig and the steady-state
+// IssueCertificate / RevokeCertificate / pollCertificateOnce sites all
+// route through here so any future header-shape change applies once.
+//
+// Audit fix #6 Phase 2.
+func setAuthHeaders(req *http.Request, cfg *Config) {
+	if cfg.APIKey != nil {
+		_ = cfg.APIKey.Use(func(buf []byte) error {
+			req.Header.Set("ApiKey", string(buf))
+			return nil
+		})
+	}
+	if cfg.APISecret != nil {
+		_ = cfg.APISecret.Use(func(buf []byte) error {
+			req.Header.Set("ApiSecret", string(buf))
+			return nil
+		})
+	}
+	req.Header.Set("Content-Type", "application/json")
 }
 
 // buildServerTLSConfig returns a TLS configuration for the GlobalSign Atlas
@@ -333,9 +365,7 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	}
 
 	// Apply double auth: mTLS + headers
-	req.Header.Set("ApiKey", c.config.APIKey)
-	req.Header.Set("ApiSecret", c.config.APISecret)
-	req.Header.Set("Content-Type", "application/json")
+	setAuthHeaders(req, c.config)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -422,9 +452,7 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 		return fmt.Errorf("failed to create revoke request: %w", err)
 	}
 
-	req.Header.Set("ApiKey", c.config.APIKey)
-	req.Header.Set("ApiSecret", c.config.APISecret)
-	req.Header.Set("Content-Type", "application/json")
+	setAuthHeaders(req, c.config)
 
 	resp, err := client.Do(req)
 	if err != nil {
@@ -510,9 +538,7 @@ func (c *Connector) pollCertificateOnce(ctx context.Context, orderID string) (*i
 		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
 
-	req.Header.Set("ApiKey", c.config.APIKey)
-	req.Header.Set("ApiSecret", c.config.APISecret)
-	req.Header.Set("Content-Type", "application/json")
+	setAuthHeaders(req, c.config)
 
 	resp, err := client.Do(req)
 	if err != nil {

@@ -20,6 +20,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/sectigo"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 func TestSectigoConnector(t *testing.T) {
@@ -47,18 +48,16 @@ func TestSectigoConnector(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		config := sectigo.Config{
-			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
-			OrgID:       12345,
-			CertType:    423,
-			Term:        365,
-			BaseURL:     srv.URL,
-		}
+		// Build rawConfig as a JSON literal so the secrets round-trip
+		// intact via UnmarshalJSON (json.Marshal redacts *secret.Ref →
+		// "[redacted]" by design; it MUST NOT be used to construct a
+		// rawConfig that ValidateConfig will then header-write back).
+		rawConfig := []byte(fmt.Sprintf(
+			`{"customer_uri":"test-org","login":"api-user","password":"api-pass","org_id":12345,"cert_type":423,"term":365,"base_url":%q}`,
+			srv.URL,
+		))
 
 		connector := sectigo.New(nil, logger)
-		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err != nil {
 			t.Fatalf("ValidateConfig failed: %v", err)
@@ -67,8 +66,8 @@ func TestSectigoConnector(t *testing.T) {
 
 	t.Run("ValidateConfig_MissingCustomerURI", func(t *testing.T) {
 		config := sectigo.Config{
-			Login:    "api-user",
-			Password: "api-pass",
+			Login:    secret.NewRefFromString("api-user"),
+			Password: secret.NewRefFromString("api-pass"),
 			OrgID:    12345,
 		}
 
@@ -86,7 +85,7 @@ func TestSectigoConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingLogin", func(t *testing.T) {
 		config := sectigo.Config{
 			CustomerURI: "test-org",
-			Password:    "api-pass",
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 		}
 
@@ -104,7 +103,7 @@ func TestSectigoConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingPassword", func(t *testing.T) {
 		config := sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
+			Login:       secret.NewRefFromString("api-user"),
 			OrgID:       12345,
 		}
 
@@ -122,8 +121,8 @@ func TestSectigoConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingOrgID", func(t *testing.T) {
 		config := sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 		}
 
 		connector := sectigo.New(nil, logger)
@@ -150,8 +149,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := sectigo.Config{
 			CustomerURI: "bad-org",
-			Login:       "bad-user",
-			Password:    "bad-pass",
+			Login:       secret.NewRefFromString("bad-user"),
+			Password:    secret.NewRefFromString("bad-pass"),
 			OrgID:       12345,
 			BaseURL:     srv.URL,
 		}
@@ -215,8 +214,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			Term:        365,
@@ -265,8 +264,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			Term:        365,
@@ -305,8 +304,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			Term:        365,
@@ -346,8 +345,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			BaseURL:     srv.URL,
 		}
@@ -382,8 +381,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI:        "test-org",
-			Login:              "api-user",
-			Password:           "api-pass",
+			Login:              secret.NewRefFromString("api-user"),
+			Password:           secret.NewRefFromString("api-pass"),
 			OrgID:              12345,
 			BaseURL:            srv.URL,
 			PollMaxWaitSeconds: 1, // keep pending tests fast
@@ -416,8 +415,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			BaseURL:     srv.URL,
 		}
@@ -451,8 +450,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI:        "test-org",
-			Login:              "api-user",
-			Password:           "api-pass",
+			Login:              secret.NewRefFromString("api-user"),
+			Password:           secret.NewRefFromString("api-pass"),
 			OrgID:              12345,
 			BaseURL:            srv.URL,
 			PollMaxWaitSeconds: 1, // keep collect-not-ready tests fast
@@ -487,8 +486,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			Term:        365,
@@ -543,8 +542,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			BaseURL:     srv.URL,
 		}
@@ -571,8 +570,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			BaseURL:     srv.URL,
 		}
@@ -591,8 +590,8 @@ func TestSectigoConnector(t *testing.T) {
 	t.Run("GetRenewalInfo_ReturnsNil", func(t *testing.T) {
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			BaseURL:     "https://cert-manager.com/api",
 		}
@@ -610,8 +609,8 @@ func TestSectigoConnector(t *testing.T) {
 	t.Run("DefaultTerm", func(t *testing.T) {
 		config := &sectigo.Config{
 			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
+			Login:       secret.NewRefFromString("api-user"),
+			Password:    secret.NewRefFromString("api-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			// Term intentionally left as 0
@@ -697,8 +696,8 @@ func TestSectigoConnector(t *testing.T) {
 
 		config := &sectigo.Config{
 			CustomerURI: "verify-org",
-			Login:       "verify-user",
-			Password:    "verify-pass",
+			Login:       secret.NewRefFromString("verify-user"),
+			Password:    secret.NewRefFromString("verify-pass"),
 			OrgID:       12345,
 			CertType:    423,
 			Term:        365,
@@ -753,8 +752,8 @@ func TestSectigoConnector(t *testing.T) {
 
 				config := &sectigo.Config{
 					CustomerURI: "test-org",
-					Login:       "api-user",
-					Password:    "api-pass",
+					Login:       secret.NewRefFromString("api-user"),
+					Password:    secret.NewRefFromString("api-pass"),
 					OrgID:       12345,
 					BaseURL:     srv.URL,
 				}

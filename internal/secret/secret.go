@@ -31,6 +31,7 @@
 package secret
 
 import (
+	"encoding/json"
 	"fmt"
 	"io"
 )
@@ -122,6 +123,28 @@ func (r *Ref) String() string { return "[redacted]" }
 // serialization path.
 func (r *Ref) MarshalJSON() ([]byte, error) {
 	return []byte(`"[redacted]"`), nil
+}
+
+// UnmarshalJSON parses a JSON string into a Ref via NewRefFromString.
+// Required for the production wiring path where issuer Config structs
+// are JSON-deserialized from the DB-stored config blob (the factory's
+// NewFromConfig in internal/connector/issuerfactory).
+//
+// Accepts either a JSON string ("abc") or null (treated as nil Ref).
+// Other JSON shapes (numbers, objects, arrays) are rejected — a
+// credential is always either a string or absent.
+func (r *Ref) UnmarshalJSON(data []byte) error {
+	if string(data) == "null" {
+		// nil-Ref unmarshal is a no-op; the field on the parent
+		// struct stays nil and IsEmpty() reports true.
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return fmt.Errorf("secret.Ref: expected JSON string, got: %w", err)
+	}
+	*r = *NewRefFromString(s)
+	return nil
 }
 
 // IsEmpty reports whether the source returns an empty byte slice

@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer/globalsign"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: globalsign failure-mode round-out (78.2% → ≥85%).
@@ -20,8 +21,8 @@ func buildGlobalsignConnector(t *testing.T, baseURL string) *globalsign.Connecto
 	t.Helper()
 	cfg := &globalsign.Config{
 		APIUrl:             baseURL,
-		APIKey:             "k",
-		APISecret:          "s",
+		APIKey:             secret.NewRefFromString("k"),
+		APISecret:          secret.NewRefFromString("s"),
 		PollMaxWaitSeconds: 1, // keep async-pending tests fast
 	}
 	// Use NewWithHTTPClient with a test client so getHTTPClient short-circuits
@@ -133,8 +134,8 @@ func TestGlobalsign_GetHTTPClient_NoMTLSCertPaths_ReturnsClientAsIs(t *testing.T
 	// the production-default 10 minutes.
 	cfg := &globalsign.Config{
 		APIUrl:             "http://example.invalid",
-		APIKey:             "k",
-		APISecret:          "s",
+		APIKey:             secret.NewRefFromString("k"),
+		APISecret:          secret.NewRefFromString("s"),
 		PollMaxWaitSeconds: 1,
 		// no cert paths
 	}
@@ -153,8 +154,8 @@ func TestGlobalsign_GetHTTPClient_MTLSPathConfigured_LoadsKeyPair(t *testing.T) 
 	// LoadX509KeyPair error branch in getHTTPClient.
 	cfg := &globalsign.Config{
 		APIUrl:         "http://example.invalid",
-		APIKey:         "k",
-		APISecret:      "s",
+		APIKey:         secret.NewRefFromString("k"),
+		APISecret:      secret.NewRefFromString("s"),
 		ClientCertPath: "/nonexistent/cert.pem",
 		ClientKeyPath:  "/nonexistent/key.pem",
 	}

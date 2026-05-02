@@ -14,6 +14,7 @@ import (
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 func quietStubLogger() *slog.Logger {
@@ -21,7 +22,7 @@ func quietStubLogger() *slog.Logger {
 }
 
 func TestStub_GenerateCRL(t *testing.T) {
-	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: secret.NewRefFromString("dummy")}, quietStubLogger())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -32,7 +33,7 @@ func TestStub_GenerateCRL(t *testing.T) {
 }
 
 func TestStub_SignOCSPResponse(t *testing.T) {
-	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: secret.NewRefFromString("dummy")}, quietStubLogger())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -43,7 +44,7 @@ func TestStub_SignOCSPResponse(t *testing.T) {
 }
 
 func TestStub_GetCACertPEM(t *testing.T) {
-	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: secret.NewRefFromString("dummy")}, quietStubLogger())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}
@@ -51,7 +52,7 @@ func TestStub_GetCACertPEM(t *testing.T) {
 }
 
 func TestStub_GetRenewalInfo(t *testing.T) {
-	c, err := New(&Config{AuthMode: "oauth2", Token: "dummy"}, quietStubLogger())
+	c, err := New(&Config{AuthMode: "oauth2", Token: secret.NewRefFromString("dummy")}, quietStubLogger())
 	if err != nil {
 		t.Fatalf("New: %v", err)
 	}

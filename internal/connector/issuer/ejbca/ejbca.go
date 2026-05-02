@@ -33,6 +33,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Config represents the EJBCA issuer connector configuration.
@@ -55,7 +56,15 @@ type Config struct {
 
 	// Token is the OAuth2 Bearer token for authentication.
 	// Required when auth_mode=oauth2. Set via CERTCTL_EJBCA_TOKEN environment variable.
-	Token string `json:"token"`
+	//
+	// Type: *secret.Ref (audit fix #6 Phase 2). Wrapping the token in
+	// a Ref means: it never stringifies (Config marshals as
+	// "[redacted]"), the bytes are zeroed after each Use/WriteTo
+	// invocation (defeats heap-dump extraction), and outbound HTTP
+	// header writes go through Ref.WriteTo so the staging buffer is
+	// short-lived. JSON unmarshal of a string value populates the
+	// Ref via NewRefFromString.
+	Token *secret.Ref `json:"token"`
 
 	// CAName is the EJBCA CA name for certificate issuance.
 	// Required. Set via CERTCTL_EJBCA_CA_NAME environment variable.
@@ -185,7 +194,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 			return fmt.Errorf("EJBCA client_key_path is required for auth_mode=mtls")
 		}
 	case "oauth2":
-		if cfg.Token == "" {
+		if cfg.Token.IsEmpty() {
 			return fmt.Errorf("EJBCA token is required for auth_mode=oauth2")
 		}
 	default:
@@ -520,10 +529,16 @@ func (c *Connector) GetRenewalInfo(ctx context.Context, certPEM string) (*issuer
 	return nil, nil
 }
 
-// setAuthHeaders sets the appropriate authentication headers based on configured auth mode.
+// setAuthHeaders sets the appropriate authentication headers based on
+// configured auth mode. For OAuth2, the Bearer token is fetched from
+// the *secret.Ref via Use; the staging buffer is zeroed after the
+// header value is constructed (audit fix #6 Phase 2).
 func (c *Connector) setAuthHeaders(req *http.Request) {
-	if c.config.AuthMode == "oauth2" {
-		req.Header.Set("Authorization", fmt.Sprintf("Bearer %s", c.config.Token))
+	if c.config.AuthMode == "oauth2" && c.config.Token != nil {
+		_ = c.config.Token.Use(func(buf []byte) error {
+			req.Header.Set("Authorization", "Bearer "+string(buf))
+			return nil
+		})
 	}
 	// mTLS is handled via http.Client with tls.Config
 }

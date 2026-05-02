@@ -175,6 +175,74 @@ func TestRef_IsEmpty(t *testing.T) {
 	}
 }
 
+// TestRef_UnmarshalJSON — parse a JSON string into a Ref via
+// NewRefFromString. Required for the factory's JSON-deserialization
+// path that loads issuer configs from the DB.
+func TestRef_UnmarshalJSON(t *testing.T) {
+	type cfg struct {
+		Token *Ref `json:"token"`
+	}
+
+	t.Run("string_value", func(t *testing.T) {
+		var c cfg
+		if err := json.Unmarshal([]byte(`{"token":"my-secret-token"}`), &c); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if c.Token == nil {
+			t.Fatal("expected non-nil Ref")
+		}
+		_ = c.Token.Use(func(buf []byte) error {
+			if string(buf) != "my-secret-token" {
+				t.Errorf("Use: want 'my-secret-token', got %q", buf)
+			}
+			return nil
+		})
+	})
+
+	t.Run("null", func(t *testing.T) {
+		var c cfg
+		if err := json.Unmarshal([]byte(`{"token":null}`), &c); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if c.Token != nil {
+			t.Errorf("null should leave Ref nil, got %v", c.Token)
+		}
+	})
+
+	t.Run("missing_key", func(t *testing.T) {
+		var c cfg
+		if err := json.Unmarshal([]byte(`{}`), &c); err != nil {
+			t.Fatalf("Unmarshal: %v", err)
+		}
+		if c.Token != nil {
+			t.Error("missing key should leave Ref nil")
+		}
+	})
+
+	t.Run("number_rejected", func(t *testing.T) {
+		var c cfg
+		err := json.Unmarshal([]byte(`{"token":123}`), &c)
+		if err == nil {
+			t.Error("expected error for non-string Ref input")
+		}
+	})
+
+	t.Run("roundtrip_marshal_then_unmarshal", func(t *testing.T) {
+		// Marshal returns "[redacted]" — round-tripping through
+		// Unmarshal would store the string "[redacted]" as the
+		// new credential. Documented behavior; operators marshal
+		// for inspection, not for re-loading.
+		original := cfg{Token: NewRefFromString("real-secret")}
+		marshaled, err := json.Marshal(original)
+		if err != nil {
+			t.Fatalf("Marshal: %v", err)
+		}
+		if string(marshaled) != `{"token":"[redacted]"}` {
+			t.Errorf("Marshal: got %s", marshaled)
+		}
+	})
+}
+
 // TestZero — direct test of the zero helper to lock the
 // implementation: every byte set to 0.
 func TestZero(t *testing.T) {

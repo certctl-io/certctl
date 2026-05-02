@@ -38,6 +38,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Config represents the Sectigo Certificate Manager issuer connector configuration.
@@ -48,11 +49,16 @@ type Config struct {
 
 	// Login is the Sectigo API account login.
 	// Required. Set via CERTCTL_SECTIGO_LOGIN environment variable.
-	Login string `json:"login"`
+	//
+	// Type: *secret.Ref (audit fix #6 Phase 2). Login can be tied to
+	// a privileged service-account identity, so it's protected from
+	// accidental logging the same way Password is.
+	Login *secret.Ref `json:"login"`
 
 	// Password is the Sectigo API account password or API key.
 	// Required. Set via CERTCTL_SECTIGO_PASSWORD environment variable.
-	Password string `json:"password"`
+	// Same *secret.Ref protections as Login.
+	Password *secret.Ref `json:"password"`
 
 	// OrgID is the Sectigo organization ID for certificate enrollments.
 	// Required. Set via CERTCTL_SECTIGO_ORG_ID environment variable.
@@ -144,10 +150,27 @@ type statusResponse struct {
 }
 
 // setAuthHeaders sets the three Sectigo authentication headers on a request.
+//
+// Login and Password are pulled from *secret.Ref via Use, which zero-fills
+// the per-call buffer after the header string is set; the Ref's underlying
+// bytes remain encrypted at rest. The Use return value is intentionally
+// ignored — Set never errors and the only failure modes inside Use are
+// nil-Ref / empty-Ref which the upstream IsEmpty validation has already
+// excluded for production paths. Audit fix #6 Phase 2.
 func (c *Connector) setAuthHeaders(req *http.Request) {
 	req.Header.Set("customerUri", c.config.CustomerURI)
-	req.Header.Set("login", c.config.Login)
-	req.Header.Set("password", c.config.Password)
+	if c.config.Login != nil {
+		_ = c.config.Login.Use(func(buf []byte) error {
+			req.Header.Set("login", string(buf))
+			return nil
+		})
+	}
+	if c.config.Password != nil {
+		_ = c.config.Password.Use(func(buf []byte) error {
+			req.Header.Set("password", string(buf))
+			return nil
+		})
+	}
 	req.Header.Set("Content-Type", "application/json")
 }
 
@@ -162,11 +185,11 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("Sectigo customer_uri is required")
 	}
 
-	if cfg.Login == "" {
+	if cfg.Login.IsEmpty() {
 		return fmt.Errorf("Sectigo login is required")
 	}
 
-	if cfg.Password == "" {
+	if cfg.Password.IsEmpty() {
 		return fmt.Errorf("Sectigo password is required")
 	}
 
@@ -188,8 +211,18 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("failed to create API test request: %w", err)
 	}
 	req.Header.Set("customerUri", cfg.CustomerURI)
-	req.Header.Set("login", cfg.Login)
-	req.Header.Set("password", cfg.Password)
+	if cfg.Login != nil {
+		_ = cfg.Login.Use(func(buf []byte) error {
+			req.Header.Set("login", string(buf))
+			return nil
+		})
+	}
+	if cfg.Password != nil {
+		_ = cfg.Password.Use(func(buf []byte) error {
+			req.Header.Set("password", string(buf))
+			return nil
+		})
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
