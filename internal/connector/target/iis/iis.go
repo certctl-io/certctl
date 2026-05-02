@@ -226,12 +226,16 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 // the IIS binding to use the new certificate.
 //
 // Deployment flow:
-//  1. Convert PEM cert+key+chain to PFX format (go-pkcs12 with random password)
-//  2. Write PFX to temp file (cleaned up on exit, even on error)
-//  3. Compute SHA-1 thumbprint from DER cert (matches Windows certutil output)
-//  4. Import PFX to Windows cert store via Import-PfxCertificate
-//  5. Update IIS HTTPS binding via New-WebBinding + AddSslCertificate
-//  6. Return result with thumbprint in metadata
+//  1. Snapshot the existing binding's SSL cert thumbprint via Get-WebBinding
+//     (Bundle 5: enables rollback on binding-update failure)
+//  2. Convert PEM cert+key+chain to PFX format (go-pkcs12 with random password)
+//  3. Write PFX to temp file (cleaned up on exit, even on error)
+//  4. Compute SHA-1 thumbprint from DER cert (matches Windows certutil output)
+//  5. Import PFX to Windows cert store via Import-PfxCertificate
+//  6. Update IIS HTTPS binding via New-WebBinding + AddSslCertificate
+//  7. On binding failure (Bundle 5): rollback — remove new cert from store
+//     and re-bind old thumbprint (if any); verify rollback via Get-WebBinding
+//  8. Return result with thumbprint in metadata
 func (c *Connector) DeployCertificate(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
 	c.logger.Info("deploying certificate to IIS",
 		"site_name", c.config.SiteName,
@@ -248,6 +252,27 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			Message:    errMsg,
 			DeployedAt: time.Now(),
 		}, fmt.Errorf("%s", errMsg)
+	}
+
+	// Bundle 5 (2026-05-02 deployment-target audit): pre-deploy snapshot
+	// of the existing binding's SSL thumbprint so a binding-update failure
+	// can roll back to the pre-deploy state. Empty oldThumbprint means
+	// there is no existing binding (first-time deploy) — rollback removes
+	// the new cert but does not re-bind anything.
+	oldThumbprint, err := c.snapshotOldBinding(ctx)
+	if err != nil {
+		errMsg := fmt.Sprintf("pre-deploy binding snapshot failed: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+	if oldThumbprint != "" {
+		c.logger.Debug("pre-deploy binding snapshot captured", "old_thumbprint", oldThumbprint)
+	} else {
+		c.logger.Debug("pre-deploy snapshot: no existing binding (first-time deploy)")
 	}
 
 	// Step 1: Create PFX from PEM inputs
@@ -391,12 +416,61 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 
 	output, err = c.executor.Execute(ctx, bindingScript)
 	if err != nil {
-		errMsg := fmt.Sprintf("IIS binding update failed: %v (output: %s)", err, strings.TrimSpace(output))
-		c.logger.Error("IIS binding update failed",
-			"error", err,
-			"output", strings.TrimSpace(output),
-			"site_name", c.config.SiteName)
-		// Cert is imported but binding failed — partial success
+		bindingErr := err
+		bindingOutput := strings.TrimSpace(output)
+		c.logger.Error("IIS binding update failed; attempting rollback",
+			"error", bindingErr,
+			"output", bindingOutput,
+			"site_name", c.config.SiteName,
+			"new_thumbprint", thumbprint,
+			"old_thumbprint", oldThumbprint)
+
+		// Bundle 5: roll back. Remove the freshly-imported cert from the
+		// store; if there was an old binding, re-bind the old thumbprint.
+		// Then verify the rollback by re-reading Get-WebBinding.
+		rbErr := c.rollbackBinding(ctx, oldThumbprint, thumbprint)
+		if rbErr != nil {
+			// Operator-actionable: binding update AND rollback both failed.
+			// The cert store may contain the orphaned new cert AND the
+			// binding may be in an indeterminate state. Surface both
+			// errors and flag for manual inspection.
+			c.logger.Error("IIS rollback also failed",
+				"binding_error", bindingErr,
+				"rollback_error", rbErr,
+				"new_thumbprint", thumbprint,
+				"old_thumbprint", oldThumbprint)
+			combined := fmt.Errorf("binding update failed (%w) AND rollback also failed (%v); manual operator inspection required", bindingErr, rbErr)
+			return &target.DeploymentResult{
+				Success:       false,
+				TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+				Message:       combined.Error(),
+				DeployedAt:    time.Now(),
+				Metadata: map[string]string{
+					"thumbprint":             thumbprint,
+					"old_thumbprint":         oldThumbprint,
+					"cert_store":             c.config.CertStore,
+					"binding_error":          bindingOutput,
+					"rollback_error":         rbErr.Error(),
+					"rolled_back":            "false",
+					"manual_action_required": "true",
+				},
+			}, combined
+		}
+
+		// Rollback succeeded. Best-effort verification — non-fatal warning
+		// if the verify probe disagrees (only fires when there was an old
+		// thumbprint to verify against).
+		verifyNote := ""
+		if oldThumbprint != "" {
+			if vErr := c.verifyRollback(ctx, oldThumbprint); vErr != nil {
+				verifyNote = fmt.Sprintf(" (warning: %v)", vErr)
+				c.logger.Warn("IIS rollback verification disagreed",
+					"error", vErr,
+					"old_thumbprint", oldThumbprint)
+			}
+		}
+
+		errMsg := fmt.Sprintf("IIS binding update failed; rolled back%s: %v (output: %s)", verifyNote, bindingErr, bindingOutput)
 		return &target.DeploymentResult{
 			Success:       false,
 			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
@@ -404,9 +478,10 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			DeployedAt:    time.Now(),
 			Metadata: map[string]string{
 				"thumbprint":     thumbprint,
+				"old_thumbprint": oldThumbprint,
 				"cert_store":     c.config.CertStore,
-				"import_success": "true",
-				"binding_error":  strings.TrimSpace(output),
+				"binding_error":  bindingOutput,
+				"rolled_back":    "true",
 			},
 		}, fmt.Errorf("%s", errMsg)
 	}
@@ -557,6 +632,134 @@ func (c *Connector) ValidateDeployment(ctx context.Context, request target.Valid
 			},
 		}, fmt.Errorf("%s", errMsg)
 	}
+}
+
+// snapshotOldBinding returns the SSL certificate thumbprint currently bound to
+// the configured (site, port). Returns "" + nil if there is no existing
+// binding (first-time deploy — rollback removes the new cert but does not
+// re-bind anything). Returns "" + error if the snapshot script itself fails;
+// the caller bails out of the deploy entirely (no cert-store mutation has
+// happened yet).
+//
+// Bundle 5 of the 2026-05-02 deployment-target audit.
+func (c *Connector) snapshotOldBinding(ctx context.Context) (string, error) {
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
+	// The "# CERTCTL_SNAPSHOT" comment tag makes the script uniquely
+	// identifiable to test mocks via strings.Contains, isolating it from
+	// the binding-update / rollback / verify scripts which all also call
+	// Get-WebBinding.
+	script := fmt.Sprintf(
+		"# CERTCTL_SNAPSHOT\n"+
+			"$existing = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; "+
+			"if ($existing -and $existing.certificateHash) { Write-Output ('OLD_THUMBPRINT:' + $existing.certificateHash) } "+
+			"else { Write-Output 'NO_OLD_BINDING' }",
+		c.config.SiteName, port)
+	output, err := c.executor.Execute(ctx, script)
+	if err != nil {
+		return "", fmt.Errorf("Get-WebBinding snapshot: %w (output: %s)", err, strings.TrimSpace(output))
+	}
+	out := strings.TrimSpace(output)
+	if strings.HasPrefix(out, "OLD_THUMBPRINT:") {
+		return strings.TrimSpace(strings.TrimPrefix(out, "OLD_THUMBPRINT:")), nil
+	}
+	// "NO_OLD_BINDING" or any other unexpected output — treat as
+	// first-time deploy (no rollback target).
+	return "", nil
+}
+
+// rollbackBinding removes the freshly-imported cert (newThumbprint) from the
+// configured store and, if oldThumbprint is non-empty, re-binds the old cert
+// via AddSslCertificate. Falls through to New-WebBinding + AddSslCertificate
+// when the old binding entry has been removed (e.g. by the failed binding
+// script's Remove-WebBinding step).
+//
+// Bundle 5 of the 2026-05-02 deployment-target audit. The "# CERTCTL_ROLLBACK"
+// comment tag identifies the script to test mocks.
+func (c *Connector) rollbackBinding(ctx context.Context, oldThumbprint, newThumbprint string) error {
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
+	ipAddress := c.config.IPAddress
+	if ipAddress == "" {
+		ipAddress = "*"
+	}
+	hostHeader := c.config.BindingInfo
+	sniFlag := 0
+	if c.config.SNI {
+		sniFlag = 1
+	}
+
+	var b strings.Builder
+	b.WriteString("# CERTCTL_ROLLBACK\n")
+	// Always remove the freshly-imported cert. Even when oldThumbprint is
+	// empty (first-time deploy), the new cert must come out so the store
+	// is left in pre-deploy state.
+	fmt.Fprintf(&b,
+		"Remove-Item -Path 'Cert:\\LocalMachine\\%s\\%s' -Force -ErrorAction SilentlyContinue; ",
+		c.config.CertStore, newThumbprint)
+	if oldThumbprint != "" {
+		// Re-bind the old cert. Two branches: if Get-WebBinding still
+		// returns a binding (the failed bindingScript's Remove-WebBinding
+		// either ran and a new binding was partially created, or didn't
+		// run), AddSslCertificate against it. If no binding exists,
+		// recreate via New-WebBinding + AddSslCertificate.
+		fmt.Fprintf(&b,
+			"$binding = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; "+
+				"if ($binding) { $binding.AddSslCertificate('%s', '%s'); Write-Output 'REBOUND_EXISTING' } "+
+				"else { New-WebBinding -Name '%s' -Protocol 'https' -Port %d -IPAddress '%s' -HostHeader '%s' -SslFlags %d; "+
+				"$nb = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d; "+
+				"$nb.AddSslCertificate('%s', '%s'); Write-Output 'REBOUND_NEW' }",
+			c.config.SiteName, port,
+			oldThumbprint, c.config.CertStore,
+			c.config.SiteName, port, ipAddress, hostHeader, sniFlag,
+			c.config.SiteName, port,
+			oldThumbprint, c.config.CertStore)
+	} else {
+		b.WriteString("Write-Output 'CERT_REMOVED_NO_REBIND'")
+	}
+
+	output, err := c.executor.Execute(ctx, b.String())
+	if err != nil {
+		return fmt.Errorf("rollback script: %w (output: %s)", err, strings.TrimSpace(output))
+	}
+	c.logger.Info("IIS rollback completed",
+		"old_thumbprint", oldThumbprint,
+		"new_thumbprint", newThumbprint,
+		"output", strings.TrimSpace(output))
+	return nil
+}
+
+// verifyRollback re-reads Get-WebBinding and confirms the bound thumbprint
+// matches oldThumbprint. Returns nil on match; returns a non-fatal warning
+// error on mismatch (the rollback's Remove-Item already ran; the verify is
+// best-effort confirmation that the rebind succeeded).
+//
+// Bundle 5 of the 2026-05-02 deployment-target audit.
+func (c *Connector) verifyRollback(ctx context.Context, oldThumbprint string) error {
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
+	script := fmt.Sprintf(
+		"# CERTCTL_VERIFY\n"+
+			"$check = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; "+
+			"if ($check -and $check.certificateHash -eq '%s') { Write-Output 'VERIFY_OK' } "+
+			"elseif ($check) { Write-Output ('VERIFY_FAILED:' + $check.certificateHash) } "+
+			"else { Write-Output 'VERIFY_FAILED:NO_BINDING' }",
+		c.config.SiteName, port, oldThumbprint)
+	output, err := c.executor.Execute(ctx, script)
+	if err != nil {
+		return fmt.Errorf("verify probe: %w", err)
+	}
+	out := strings.TrimSpace(output)
+	if out == "VERIFY_OK" {
+		return nil
+	}
+	return fmt.Errorf("rollback verification disagreed: %s", out)
 }
 
 // NOTE: PFX creation, key parsing, thumbprint computation, and password generation

@@ -316,19 +316,25 @@ func TestIISConnector_DeployCertificate_Success(t *testing.T) {
 		t.Errorf("expected 40-char thumbprint, got %d", len(result.Metadata["thumbprint"]))
 	}
 
-	// Verify both import and binding scripts were executed
-	if len(executor.commands) != 2 {
-		t.Errorf("expected 2 PowerShell commands, got %d", len(executor.commands))
+	// Bundle 5: snapshot script runs FIRST, then import, then binding.
+	// Three PowerShell commands total on the success path.
+	if len(executor.commands) != 3 {
+		t.Errorf("expected 3 PowerShell commands (snapshot, import, binding), got %d", len(executor.commands))
 	}
 
-	// First command should be PFX import
-	if len(executor.commands) > 0 && !strings.Contains(executor.commands[0], "Import-PfxCertificate") {
-		t.Errorf("expected Import-PfxCertificate in first command, got: %s", executor.commands[0])
+	// First command should be the Bundle 5 snapshot.
+	if len(executor.commands) > 0 && !strings.Contains(executor.commands[0], "# CERTCTL_SNAPSHOT") {
+		t.Errorf("expected # CERTCTL_SNAPSHOT in first command, got: %s", executor.commands[0])
 	}
 
-	// Second command should be binding update
-	if len(executor.commands) > 1 && !strings.Contains(executor.commands[1], "New-WebBinding") {
-		t.Errorf("expected New-WebBinding in second command, got: %s", executor.commands[1])
+	// Second command should be PFX import.
+	if len(executor.commands) > 1 && !strings.Contains(executor.commands[1], "Import-PfxCertificate") {
+		t.Errorf("expected Import-PfxCertificate in second command, got: %s", executor.commands[1])
+	}
+
+	// Third command should be binding update.
+	if len(executor.commands) > 2 && !strings.Contains(executor.commands[2], "New-WebBinding") {
+		t.Errorf("expected New-WebBinding in third command, got: %s", executor.commands[2])
 	}
 
 	// Verify metadata
@@ -451,19 +457,47 @@ func TestIISConnector_DeployCertificate_ImportFails(t *testing.T) {
 	}
 }
 
-func TestIISConnector_DeployCertificate_BindingFails(t *testing.T) {
+// --- Bundle 5: pre-deploy binding snapshot + on-failure rollback ---
+//
+// Mock matchers below use the unique `# CERTCTL_*` PowerShell comment tags
+// inserted by snapshotOldBinding / rollbackBinding / verifyRollback. The
+// binding-update script is matched via "Remove-WebBinding" — that token is
+// only present in the binding-update script (the rollback script uses
+// "Remove-Item" instead, and the snapshot/verify scripts only read state).
+// The import script is matched via "Import-PfxCertificate" (only present
+// in the import script). This isolation is required because the rollback
+// script's no-old-binding fallback branch contains "New-WebBinding", which
+// would otherwise collide with the binding-update script and produce
+// non-deterministic mock matching under Go's randomized map iteration.
+
+func TestIIS_BindingUpdateFails_RemovesNewCert_RebindsOld(t *testing.T) {
 	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
 	if err != nil {
 		t.Fatalf("failed to generate test cert: %v", err)
 	}
 
 	executor := newMockExecutor()
-	// Import succeeds
+	// Snapshot returns a pre-existing thumbprint (rollback target).
+	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
+		output: "OLD_THUMBPRINT:abc123\n",
+		err:    nil,
+	}
+	// Import succeeds.
 	executor.responses["Import-PfxCertificate"] = mockResponse{output: "OK", err: nil}
-	// Binding fails
-	executor.responses["New-WebBinding"] = mockResponse{
+	// Binding update fails.
+	executor.responses["Remove-WebBinding"] = mockResponse{
 		output: "The website 'Default Web Site' already has a binding",
 		err:    fmt.Errorf("exit status 1"),
+	}
+	// Rollback succeeds.
+	executor.responses["# CERTCTL_ROLLBACK"] = mockResponse{
+		output: "REBOUND_EXISTING\n",
+		err:    nil,
+	}
+	// Verify confirms old thumbprint is back.
+	executor.responses["# CERTCTL_VERIFY"] = mockResponse{
+		output: "VERIFY_OK\n",
+		err:    nil,
 	}
 
 	connector := NewWithExecutor(&Config{
@@ -484,12 +518,203 @@ func TestIISConnector_DeployCertificate_BindingFails(t *testing.T) {
 	if result.Success {
 		t.Fatal("expected failure result")
 	}
-	// Partial success: cert was imported but binding failed
-	if result.Metadata["import_success"] != "true" {
-		t.Error("expected import_success=true in metadata (cert imported but binding failed)")
+	if !strings.Contains(err.Error(), "binding update failed") {
+		t.Errorf("expected error to mention 'binding update failed', got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rolled back") {
+		t.Errorf("expected error to mention 'rolled back', got: %v", err)
+	}
+
+	// Find the rollback script in the recorded commands.
+	var rollbackCmd string
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "# CERTCTL_ROLLBACK") {
+			rollbackCmd = cmd
+			break
+		}
+	}
+	if rollbackCmd == "" {
+		t.Fatal("expected rollback script to be executed")
+	}
+
+	// Rollback must remove the freshly-imported cert.
+	thumbprint := result.Metadata["thumbprint"]
+	if thumbprint == "" {
+		t.Fatal("expected thumbprint in metadata")
+	}
+	if !strings.Contains(rollbackCmd, "Remove-Item") {
+		t.Errorf("expected rollback to contain Remove-Item, got: %s", rollbackCmd)
+	}
+	if !strings.Contains(rollbackCmd, thumbprint) {
+		t.Errorf("expected rollback to reference new thumbprint %q, got: %s", thumbprint, rollbackCmd)
+	}
+	// Rollback must re-bind the old thumbprint.
+	if !strings.Contains(rollbackCmd, "AddSslCertificate('abc123'") {
+		t.Errorf("expected rollback to AddSslCertificate('abc123', ...), got: %s", rollbackCmd)
+	}
+
+	if result.Metadata["old_thumbprint"] != "abc123" {
+		t.Errorf("expected old_thumbprint=abc123 in metadata, got: %s", result.Metadata["old_thumbprint"])
+	}
+	if result.Metadata["rolled_back"] != "true" {
+		t.Errorf("expected rolled_back=true in metadata, got: %s", result.Metadata["rolled_back"])
+	}
+}
+
+func TestIIS_BindingUpdateFails_NoOldBinding_RemovesNewCertOnly(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	// First-time deploy: snapshot finds no existing binding.
+	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
+		output: "NO_OLD_BINDING\n",
+		err:    nil,
+	}
+	executor.responses["Import-PfxCertificate"] = mockResponse{output: "OK", err: nil}
+	executor.responses["Remove-WebBinding"] = mockResponse{
+		output: "binding update failed",
+		err:    fmt.Errorf("exit status 1"),
+	}
+	// Rollback succeeds (cert removed, no rebind).
+	executor.responses["# CERTCTL_ROLLBACK"] = mockResponse{
+		output: "CERT_REMOVED_NO_REBIND\n",
+		err:    nil,
+	}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when binding update fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Find the rollback script.
+	var rollbackCmd string
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "# CERTCTL_ROLLBACK") {
+			rollbackCmd = cmd
+			break
+		}
+	}
+	if rollbackCmd == "" {
+		t.Fatal("expected rollback script to be executed")
+	}
+
+	// Rollback must remove the freshly-imported cert.
+	if !strings.Contains(rollbackCmd, "Remove-Item") {
+		t.Errorf("expected rollback to contain Remove-Item, got: %s", rollbackCmd)
+	}
+	// First-time deploy: rollback must NOT call AddSslCertificate (nothing
+	// to re-bind to). The rollback emits the CERT_REMOVED_NO_REBIND marker
+	// instead.
+	if strings.Contains(rollbackCmd, "AddSslCertificate") {
+		t.Errorf("expected no AddSslCertificate call when oldThumbprint is empty, got: %s", rollbackCmd)
+	}
+	if !strings.Contains(rollbackCmd, "CERT_REMOVED_NO_REBIND") {
+		t.Errorf("expected CERT_REMOVED_NO_REBIND marker in rollback script, got: %s", rollbackCmd)
+	}
+
+	// No verify script should run when oldThumbprint is empty.
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "# CERTCTL_VERIFY") {
+			t.Errorf("did not expect verify script when oldThumbprint is empty, got: %s", cmd)
+		}
+	}
+
+	if result.Metadata["old_thumbprint"] != "" {
+		t.Errorf("expected empty old_thumbprint in metadata, got: %s", result.Metadata["old_thumbprint"])
+	}
+	if result.Metadata["rolled_back"] != "true" {
+		t.Errorf("expected rolled_back=true in metadata, got: %s", result.Metadata["rolled_back"])
+	}
+}
+
+func TestIIS_BindingUpdateFails_RollbackAlsoFails_OperatorActionable(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
+		output: "OLD_THUMBPRINT:abc123\n",
+		err:    nil,
+	}
+	executor.responses["Import-PfxCertificate"] = mockResponse{output: "OK", err: nil}
+	executor.responses["Remove-WebBinding"] = mockResponse{
+		output: "binding error",
+		err:    fmt.Errorf("binding-step exit status 1"),
+	}
+	// Rollback ALSO fails — operator-actionable case.
+	executor.responses["# CERTCTL_ROLLBACK"] = mockResponse{
+		output: "rollback step failed",
+		err:    fmt.Errorf("rollback-step exit status 2"),
+	}
+
+	connector := NewWithExecutor(&Config{
+		Hostname:  "web01",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+	}, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when both binding and rollback fail")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Wrapped error must reference BOTH the binding error and the rollback
+	// error so an operator can see what state the host is in.
+	if !strings.Contains(err.Error(), "binding update failed") {
+		t.Errorf("expected error to mention binding error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rollback also failed") {
+		t.Errorf("expected error to mention rollback error, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "manual operator inspection required") {
+		t.Errorf("expected error to flag manual operator inspection, got: %v", err)
+	}
+
+	// Metadata must explicitly flag manual action and surface both errors.
+	if result.Metadata["manual_action_required"] != "true" {
+		t.Errorf("expected manual_action_required=true in metadata, got: %s", result.Metadata["manual_action_required"])
+	}
+	if result.Metadata["rolled_back"] != "false" {
+		t.Errorf("expected rolled_back=false in metadata, got: %s", result.Metadata["rolled_back"])
+	}
+	if result.Metadata["rollback_error"] == "" {
+		t.Error("expected rollback_error to be populated in metadata")
+	}
+	if result.Metadata["binding_error"] == "" {
+		t.Error("expected binding_error to be populated in metadata")
 	}
 	if result.Metadata["thumbprint"] == "" {
-		t.Error("expected thumbprint in metadata even on binding failure")
+		t.Error("expected thumbprint in metadata even on rollback failure")
+	}
+	if result.Metadata["old_thumbprint"] != "abc123" {
+		t.Errorf("expected old_thumbprint=abc123 in metadata, got: %s", result.Metadata["old_thumbprint"])
 	}
 }
 
@@ -523,11 +748,11 @@ func TestIISConnector_DeployCertificate_SNIEnabled(t *testing.T) {
 		t.Fatalf("expected success, got: %s", result.Message)
 	}
 
-	// Verify SNI flag was passed in the binding script
-	if len(executor.commands) < 2 {
-		t.Fatal("expected at least 2 commands")
+	// Bundle 5: snapshot is commands[0], import is commands[1], binding is commands[2].
+	if len(executor.commands) < 3 {
+		t.Fatal("expected at least 3 commands (snapshot, import, binding)")
 	}
-	bindingCmd := executor.commands[1]
+	bindingCmd := executor.commands[2]
 	if !strings.Contains(bindingCmd, "-SslFlags 1") {
 		t.Errorf("expected -SslFlags 1 for SNI, got: %s", bindingCmd)
 	}
