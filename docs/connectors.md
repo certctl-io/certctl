@@ -436,8 +436,9 @@ The DigiCert connector integrates with DigiCert's CertCentral REST API for order
 | `CERTCTL_DIGICERT_ORG_ID` | — | DigiCert organization ID |
 | `CERTCTL_DIGICERT_PRODUCT_TYPE` | `ssl_basic` | Certificate product (e.g., `ssl_basic`, `ssl_plus`, `ssl_ev`) |
 | `CERTCTL_DIGICERT_BASE_URL` | `https://www.digicert.com/services/v2` | DigiCert API base URL |
+| `CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. See [docs/async-polling.md](async-polling.md). |
 
-The connector submits certificate orders to DigiCert's `/order/certificate/create` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by DigiCert) and poll-based completion. The connector periodically checks order status via `/order/certificate/{order_id}` until the certificate is available.
+The connector submits certificate orders to DigiCert's `/order/certificate/create` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by DigiCert) and poll-based completion. `GetOrderStatus` runs bounded internal polling (5s/15s/45s/2m/5m capped, ±20% jitter, default 10-minute deadline) — see [async-polling.md](async-polling.md).
 
 **Authentication:** API key passed via `X-DC-DEVKEY` header, with organization ID in request body.
 
@@ -460,8 +461,9 @@ The Sectigo connector integrates with Sectigo Certificate Manager's REST API for
 | `CERTCTL_SECTIGO_CERT_TYPE` | — | Certificate type ID (integer, from `/ssl/v1/types`) |
 | `CERTCTL_SECTIGO_TERM` | `365` | Certificate validity in days |
 | `CERTCTL_SECTIGO_BASE_URL` | `https://cert-manager.com/api` | Sectigo API base URL |
+| `CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. The `collectNotReady` sentinel (cert approved but not yet retrievable) rides the same backoff schedule. See [docs/async-polling.md](async-polling.md). |
 
-The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by Sectigo) and poll-based completion. The connector periodically checks enrollment status via `/ssl/v1/{sslId}` and downloads the PEM bundle via `/ssl/v1/collect/{sslId}/pem` when issued.
+The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by Sectigo) and poll-based completion. `GetOrderStatus` runs bounded internal polling — see [async-polling.md](async-polling.md).
 
 **Authentication:** Three custom headers on every request — `customerUri`, `login`, and `password`.
 
@@ -566,6 +568,7 @@ Entrust CA Gateway REST API with mutual TLS (mTLS) client certificate authentica
 | `CERTCTL_ENTRUST_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
 | `CERTCTL_ENTRUST_CA_ID` | Yes | — | Certificate Authority ID (from `GET /certificate-authorities`) |
 | `CERTCTL_ENTRUST_PROFILE_ID` | No | — | Optional enrollment profile ID |
+| `CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. Approval-pending workflows where humans approve enrollments should bump to `86400` (24h) so a single tick can wait through the approval window. See [docs/async-polling.md](async-polling.md). |
 
 **Authentication:** Mutual TLS — the client certificate and key are loaded via `tls.LoadX509KeyPair()` and attached to the HTTP transport. No API key or token required.
 
@@ -587,6 +590,7 @@ GlobalSign Atlas High Volume CA REST API with dual authentication: mTLS for the 
 | `CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH` | Yes | — | Path to mTLS client certificate PEM |
 | `CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
 | `CERTCTL_GLOBALSIGN_SERVER_CA_PATH` | No | system trust store | PEM bundle used to verify the Atlas API server certificate. Set this for private/lab Atlas deployments whose server TLS chain is not in the host's default trust bundle. |
+| `CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. GlobalSign tracks orders by serial number rather than order ID; the polling shape is identical. See [docs/async-polling.md](async-polling.md). |
 
 **Authentication:** Dual — mTLS client certificate for TLS handshake plus `X-API-Key` and `X-API-Secret` headers on every request.
 

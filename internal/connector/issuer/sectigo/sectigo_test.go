@@ -381,11 +381,12 @@ func TestSectigoConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &sectigo.Config{
-			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
-			OrgID:       12345,
-			BaseURL:     srv.URL,
+			CustomerURI:        "test-org",
+			Login:              "api-user",
+			Password:           "api-pass",
+			OrgID:              12345,
+			BaseURL:            srv.URL,
+			PollMaxWaitSeconds: 1, // keep pending tests fast
 		}
 		connector := sectigo.New(config, logger)
 
@@ -449,11 +450,12 @@ func TestSectigoConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &sectigo.Config{
-			CustomerURI: "test-org",
-			Login:       "api-user",
-			Password:    "api-pass",
-			OrgID:       12345,
-			BaseURL:     srv.URL,
+			CustomerURI:        "test-org",
+			Login:              "api-user",
+			Password:           "api-pass",
+			OrgID:              12345,
+			BaseURL:            srv.URL,
+			PollMaxWaitSeconds: 1, // keep collect-not-ready tests fast
 		}
 		connector := sectigo.New(config, logger)
 

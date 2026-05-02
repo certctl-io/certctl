@@ -34,6 +34,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
 )
 
 // Config represents the Entrust Certificate Services issuer connector configuration.
@@ -58,6 +59,25 @@ type Config struct {
 	// If set, constrains enrollments to use this profile.
 	// Set via CERTCTL_ENTRUST_PROFILE_ID environment variable.
 	ProfileId string `json:"profile_id,omitempty"`
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling before returning
+	// StillPending. Default 600 (10 minutes); operators using
+	// approval-pending workflows where humans approve enrollments
+	// should bump this to a higher value (e.g., 86400 = 24h) so a
+	// single scheduler tick can wait through the approval window.
+	//
+	// Set via CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int `json:"poll_max_wait_seconds,omitempty"`
+}
+
+// pollMaxWait returns the configured PollMaxWait as a time.Duration,
+// or the asyncpoll package default if unset.
+func (c *Config) pollMaxWait() time.Duration {
+	if c.PollMaxWaitSeconds <= 0 {
+		return asyncpoll.DefaultMaxWait
+	}
+	return time.Duration(c.PollMaxWaitSeconds) * time.Second
 }
 
 // Connector implements the issuer.Connector interface for Entrust Certificate Services.
@@ -336,56 +356,102 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	return nil
 }
 
-// GetOrderStatus checks the status of an Entrust enrollment.
-// If the enrollment is "ISSUED", returns the certificate.
-// If still pending, returns pending status for continued polling.
+// GetOrderStatus checks the status of an Entrust enrollment using
+// bounded internal polling (asyncpoll.Poll). One call blocks for up
+// to PollMaxWait (default 10m; operators using approval-pending
+// workflows can raise to 24h) doing exponential backoff with jitter.
+//
+// Audit fix #5 Phase 2: previously each scheduler tick made one HTTP
+// call. Approval-pending enrollments now ride the backoff schedule
+// rather than tight-loop polling.
 func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer.OrderStatus, error) {
 	c.logger.Debug("checking Entrust enrollment status", "tracking_id", orderID)
 
+	var done *issuer.OrderStatus
+	var lastPendingMsg string
+	cfg := asyncpoll.Config{MaxWait: c.config.pollMaxWait()}
+
+	res, err := asyncpoll.Poll(ctx, cfg, func(ctx context.Context) (asyncpoll.Result, error) {
+		status, result, pollErr := c.pollEnrollmentOnce(ctx, orderID)
+		if status != nil {
+			switch result {
+			case asyncpoll.Done:
+				done = status
+			case asyncpoll.StillPending:
+				if status.Message != nil {
+					lastPendingMsg = *status.Message
+				}
+			}
+		}
+		return result, pollErr
+	})
+
+	now := time.Now()
+	switch res {
+	case asyncpoll.Done:
+		return done, nil
+	case asyncpoll.Failed:
+		return nil, err
+	default:
+		msg := lastPendingMsg
+		if msg == "" {
+			msg = fmt.Sprintf("enrollment %s still pending after PollMaxWait", orderID)
+		}
+		return &issuer.OrderStatus{
+			OrderID:   orderID,
+			Status:    "pending",
+			Message:   &msg,
+			UpdatedAt: now,
+		}, nil
+	}
+}
+
+// pollEnrollmentOnce makes one HTTP GET against the Entrust enrollment
+// status endpoint. 4xx (not 429) is permanent; 5xx / 429 / network is
+// transient and rides the backoff schedule.
+func (c *Connector) pollEnrollmentOnce(ctx context.Context, orderID string) (*issuer.OrderStatus, asyncpoll.Result, error) {
 	statusURL := fmt.Sprintf("%s/v1/certificate-authorities/%s/enrollments/%s",
 		c.config.APIUrl, c.config.CAId, orderID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create status request: %w", err)
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("Entrust status request failed: %w", err)
+		return nil, asyncpoll.StillPending, fmt.Errorf("Entrust status request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read status response: %w", err)
+		return nil, asyncpoll.StillPending, fmt.Errorf("failed to read status response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("Entrust enrollment status returned %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("Entrust enrollment status returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return nil, asyncpoll.StillPending, err
+		}
+		return nil, asyncpoll.Failed, err
 	}
 
 	var statusResp enrollmentStatusResponse
 	if err := json.Unmarshal(respBody, &statusResp); err != nil {
-		return nil, fmt.Errorf("failed to parse status response: %w", err)
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to parse status response: %w", err)
 	}
 
 	now := time.Now()
-
 	switch statusResp.Status {
 	case "ISSUED":
 		if statusResp.Certificate == "" {
-			return nil, fmt.Errorf("enrollment is ISSUED but certificate is missing")
+			return nil, asyncpoll.Failed, fmt.Errorf("enrollment is ISSUED but certificate is missing")
 		}
-
 		serial, notBefore, notAfter, err := parseCertMetadata(statusResp.Certificate)
 		if err != nil {
-			return nil, fmt.Errorf("failed to parse certificate metadata: %w", err)
+			return nil, asyncpoll.Failed, fmt.Errorf("failed to parse certificate metadata: %w", err)
 		}
-
-		c.logger.Info("Entrust enrollment completed",
-			"tracking_id", orderID,
-			"serial", serial)
-
+		c.logger.Info("Entrust enrollment completed", "tracking_id", orderID, "serial", serial)
 		return &issuer.OrderStatus{
 			OrderID:   orderID,
 			Status:    "completed",
@@ -395,7 +461,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			NotBefore: &notBefore,
 			NotAfter:  &notAfter,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	case "PENDING", "PROCESSING", "AWAITING_APPROVAL":
 		msg := fmt.Sprintf("enrollment %s is %s", orderID, statusResp.Status)
@@ -404,7 +470,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 
 	case "REJECTED", "DENIED", "FAILED":
 		msg := fmt.Sprintf("enrollment %s was %s", orderID, statusResp.Status)
@@ -413,7 +479,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "failed",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	default:
 		msg := fmt.Sprintf("unknown enrollment status: %s", statusResp.Status)
@@ -422,7 +488,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 	}
 }
 

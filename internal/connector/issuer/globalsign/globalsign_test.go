@@ -355,9 +355,10 @@ func TestGlobalSignConnector(t *testing.T) {
 		defer mockServer.Close()
 
 		config := &globalsign.Config{
-			APIUrl:    mockServer.URL,
-			APIKey:    "gs-test-key",
-			APISecret: "gs-test-secret",
+			APIUrl:             mockServer.URL,
+			APIKey:             "gs-test-key",
+			APISecret:          "gs-test-secret",
+			PollMaxWaitSeconds: 1, // keep async-pending tests fast
 		}
 
 		connector := globalsign.NewWithHTTPClient(config, logger, httpClient)

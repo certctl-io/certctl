@@ -20,13 +20,14 @@ func buildSectigoConnector(t *testing.T, baseURL string) *sectigo.Connector {
 	t.Helper()
 	c := sectigo.New(nil, slog.Default())
 	cfg := sectigo.Config{
-		BaseURL:     baseURL,
-		CustomerURI: "tcust",
-		Login:       "user",
-		Password:    "pw",
-		CertType:    1,
-		OrgID:       2,
-		Term:        365,
+		BaseURL:            baseURL,
+		CustomerURI:        "tcust",
+		Login:              "user",
+		Password:           "pw",
+		CertType:           1,
+		OrgID:              2,
+		Term:               365,
+		PollMaxWaitSeconds: 1, // keep async-pending tests fast
 	}
 	raw, _ := json.Marshal(cfg)
 	if err := c.ValidateConfig(context.Background(), raw); err != nil {

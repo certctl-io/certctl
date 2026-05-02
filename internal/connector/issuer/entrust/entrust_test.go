@@ -344,10 +344,11 @@ func TestEntrustConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &entrust.Config{
-			APIUrl:         srv.URL,
-			ClientCertPath: "/dev/null",
-			ClientKeyPath:  "/dev/null",
-			CAId:           "ca-123",
+			APIUrl:             srv.URL,
+			ClientCertPath:     "/dev/null",
+			ClientKeyPath:      "/dev/null",
+			CAId:               "ca-123",
+			PollMaxWaitSeconds: 1, // keep async-pending tests fast
 		}
 		connector := entrust.NewWithHTTPClient(config, logger, srv.Client())
 

@@ -19,9 +19,10 @@ import (
 func buildGlobalsignConnector(t *testing.T, baseURL string) *globalsign.Connector {
 	t.Helper()
 	cfg := &globalsign.Config{
-		APIUrl:    baseURL,
-		APIKey:    "k",
-		APISecret: "s",
+		APIUrl:             baseURL,
+		APIKey:             "k",
+		APISecret:          "s",
+		PollMaxWaitSeconds: 1, // keep async-pending tests fast
 	}
 	// Use NewWithHTTPClient with a test client so getHTTPClient short-circuits
 	// (no mTLS cert loading). Custom transport is required so the
@@ -125,19 +126,26 @@ func TestGlobalsign_GetOrderStatus_IssuedWithMalformedPEM_NonFatalParseDateWarni
 func TestGlobalsign_GetHTTPClient_NoMTLSCertPaths_ReturnsClientAsIs(t *testing.T) {
 	// When ClientCertPath and ClientKeyPath are both empty, getHTTPClient
 	// returns httpClient as-is — exercises that branch.
+	//
+	// PollMaxWaitSeconds=1 keeps this test fast: a network failure on
+	// the invalid host is now treated as transient by the bounded-
+	// polling Poller, so without the deadline the call blocks for
+	// the production-default 10 minutes.
 	cfg := &globalsign.Config{
-		APIUrl:    "http://example.invalid",
-		APIKey:    "k",
-		APISecret: "s",
+		APIUrl:             "http://example.invalid",
+		APIKey:             "k",
+		APISecret:          "s",
+		PollMaxWaitSeconds: 1,
 		// no cert paths
 	}
 	c := globalsign.NewWithHTTPClient(cfg, slog.Default(), &http.Client{})
-	// GetOrderStatus will fail at HTTP do (invalid host), but getHTTPClient
-	// will have been exercised through the no-mTLS branch.
-	_, err := c.GetOrderStatus(context.Background(), "x")
-	if err == nil {
-		t.Errorf("expected error from invalid host")
-	}
+	// GetOrderStatus blocks briefly (1s) due to bounded polling, then
+	// returns a pending OrderStatus (transient network err did not
+	// become a permanent failure). The test exercises the
+	// no-mTLS branch in getHTTPClient — the post-poll status doesn't
+	// matter; we just need GetOrderStatus to be invoked through the
+	// branch.
+	_, _ = c.GetOrderStatus(context.Background(), "x")
 }
 
 func TestGlobalsign_GetHTTPClient_MTLSPathConfigured_LoadsKeyPair(t *testing.T) {

@@ -21,8 +21,9 @@ import (
 func buildEntrustConnector(t *testing.T, baseURL string) *Connector {
 	t.Helper()
 	cfg := &Config{
-		APIUrl: baseURL,
-		CAId:   "test-ca-id",
+		APIUrl:             baseURL,
+		CAId:               "test-ca-id",
+		PollMaxWaitSeconds: 1, // keep async-pending tests fast
 	}
 	httpClient := &http.Client{Transport: &http.Transport{TLSClientConfig: &tls.Config{InsecureSkipVerify: true}}} //nolint:gosec
 	return NewWithHTTPClient(cfg, slog.Default(), httpClient)

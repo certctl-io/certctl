@@ -122,6 +122,13 @@ type EntrustConfig struct {
 	// ProfileId is the optional enrollment profile identifier.
 	// Setting: CERTCTL_ENTRUST_PROFILE_ID environment variable.
 	ProfileId string
+
+	// PollMaxWaitSeconds caps GetOrderStatus's bounded-polling
+	// deadline. Approval-pending workflows should bump this (e.g.,
+	// 86400 = 24h) so a single tick can wait through the approval
+	// window. Default 600. Audit fix #5.
+	// Setting: CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS.
+	PollMaxWaitSeconds int
 }
 
 // GlobalSignConfig contains GlobalSign Atlas HVCA issuer connector configuration.
@@ -154,6 +161,11 @@ type GlobalSignConfig struct {
 	// present in the host's default trust bundle.
 	// Setting: CERTCTL_GLOBALSIGN_SERVER_CA_PATH environment variable.
 	ServerCAPath string
+
+	// PollMaxWaitSeconds caps GetOrderStatus's bounded-polling
+	// deadline. Default 600 (10 minutes). Audit fix #5.
+	// Setting: CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS.
+	PollMaxWaitSeconds int
 }
 
 // EJBCAConfig contains EJBCA (Keyfactor) issuer connector configuration.
@@ -439,6 +451,12 @@ type DigiCertConfig struct {
 	// Default: "https://www.digicert.com/services/v2".
 	// Setting: CERTCTL_DIGICERT_BASE_URL environment variable.
 	BaseURL string
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling before returning. Default
+	// 600 (10 minutes); 0 falls back to asyncpoll default.
+	// Setting: CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int
 }
 
 // SectigoConfig contains Sectigo Certificate Manager issuer connector configuration.
@@ -476,6 +494,12 @@ type SectigoConfig struct {
 	// Default: "https://cert-manager.com/api".
 	// Setting: CERTCTL_SECTIGO_BASE_URL environment variable.
 	BaseURL string
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling. Default 600. Sectigo's
+	// collectNotReady sentinel rides the backoff schedule.
+	// Setting: CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int
 }
 
 // GoogleCASConfig contains Google Cloud Certificate Authority Service configuration.
@@ -1532,19 +1556,21 @@ func Load() (*Config, error) {
 			TTL:   getEnv("CERTCTL_VAULT_TTL", "8760h"),
 		},
 		DigiCert: DigiCertConfig{
-			APIKey:      getEnv("CERTCTL_DIGICERT_API_KEY", ""),
-			OrgID:       getEnv("CERTCTL_DIGICERT_ORG_ID", ""),
-			ProductType: getEnv("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
-			BaseURL:     getEnv("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
+			APIKey:             getEnv("CERTCTL_DIGICERT_API_KEY", ""),
+			OrgID:              getEnv("CERTCTL_DIGICERT_ORG_ID", ""),
+			ProductType:        getEnv("CERTCTL_DIGICERT_PRODUCT_TYPE", "ssl_basic"),
+			BaseURL:            getEnv("CERTCTL_DIGICERT_BASE_URL", "https://www.digicert.com/services/v2"),
+			PollMaxWaitSeconds: getEnvInt("CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS", 0),
 		},
 		Sectigo: SectigoConfig{
-			CustomerURI: getEnv("CERTCTL_SECTIGO_CUSTOMER_URI", ""),
-			Login:       getEnv("CERTCTL_SECTIGO_LOGIN", ""),
-			Password:    getEnv("CERTCTL_SECTIGO_PASSWORD", ""),
-			OrgID:       getEnvInt("CERTCTL_SECTIGO_ORG_ID", 0),
-			CertType:    getEnvInt("CERTCTL_SECTIGO_CERT_TYPE", 0),
-			Term:        getEnvInt("CERTCTL_SECTIGO_TERM", 365),
-			BaseURL:     getEnv("CERTCTL_SECTIGO_BASE_URL", "https://cert-manager.com/api"),
+			CustomerURI:        getEnv("CERTCTL_SECTIGO_CUSTOMER_URI", ""),
+			Login:              getEnv("CERTCTL_SECTIGO_LOGIN", ""),
+			Password:           getEnv("CERTCTL_SECTIGO_PASSWORD", ""),
+			OrgID:              getEnvInt("CERTCTL_SECTIGO_ORG_ID", 0),
+			CertType:           getEnvInt("CERTCTL_SECTIGO_CERT_TYPE", 0),
+			Term:               getEnvInt("CERTCTL_SECTIGO_TERM", 365),
+			BaseURL:            getEnv("CERTCTL_SECTIGO_BASE_URL", "https://cert-manager.com/api"),
+			PollMaxWaitSeconds: getEnvInt("CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS", 0),
 		},
 		GoogleCAS: GoogleCASConfig{
 			Project:     getEnv("CERTCTL_GOOGLE_CAS_PROJECT", ""),
@@ -1561,19 +1587,21 @@ func Load() (*Config, error) {
 			TemplateArn:      getEnv("CERTCTL_AWS_PCA_TEMPLATE_ARN", ""),
 		},
 		Entrust: EntrustConfig{
-			APIUrl:         getEnv("CERTCTL_ENTRUST_API_URL", ""),
-			ClientCertPath: getEnv("CERTCTL_ENTRUST_CLIENT_CERT_PATH", ""),
-			ClientKeyPath:  getEnv("CERTCTL_ENTRUST_CLIENT_KEY_PATH", ""),
-			CAId:           getEnv("CERTCTL_ENTRUST_CA_ID", ""),
-			ProfileId:      getEnv("CERTCTL_ENTRUST_PROFILE_ID", ""),
+			APIUrl:             getEnv("CERTCTL_ENTRUST_API_URL", ""),
+			ClientCertPath:     getEnv("CERTCTL_ENTRUST_CLIENT_CERT_PATH", ""),
+			ClientKeyPath:      getEnv("CERTCTL_ENTRUST_CLIENT_KEY_PATH", ""),
+			CAId:               getEnv("CERTCTL_ENTRUST_CA_ID", ""),
+			ProfileId:          getEnv("CERTCTL_ENTRUST_PROFILE_ID", ""),
+			PollMaxWaitSeconds: getEnvInt("CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS", 0),
 		},
 		GlobalSign: GlobalSignConfig{
-			APIUrl:         getEnv("CERTCTL_GLOBALSIGN_API_URL", ""),
-			APIKey:         getEnv("CERTCTL_GLOBALSIGN_API_KEY", ""),
-			APISecret:      getEnv("CERTCTL_GLOBALSIGN_API_SECRET", ""),
-			ClientCertPath: getEnv("CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH", ""),
-			ClientKeyPath:  getEnv("CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH", ""),
-			ServerCAPath:   getEnv("CERTCTL_GLOBALSIGN_SERVER_CA_PATH", ""),
+			APIUrl:             getEnv("CERTCTL_GLOBALSIGN_API_URL", ""),
+			APIKey:             getEnv("CERTCTL_GLOBALSIGN_API_KEY", ""),
+			APISecret:          getEnv("CERTCTL_GLOBALSIGN_API_SECRET", ""),
+			ClientCertPath:     getEnv("CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH", ""),
+			ClientKeyPath:      getEnv("CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH", ""),
+			ServerCAPath:       getEnv("CERTCTL_GLOBALSIGN_SERVER_CA_PATH", ""),
+			PollMaxWaitSeconds: getEnvInt("CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS", 0),
 		},
 		EJBCA: EJBCAConfig{
 			APIUrl:         getEnv("CERTCTL_EJBCA_API_URL", ""),

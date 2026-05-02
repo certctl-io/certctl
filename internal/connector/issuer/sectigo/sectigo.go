@@ -37,6 +37,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
 )
 
 // Config represents the Sectigo Certificate Manager issuer connector configuration.
@@ -69,6 +70,25 @@ type Config struct {
 	// Default: "https://cert-manager.com/api".
 	// Set via CERTCTL_SECTIGO_BASE_URL environment variable.
 	BaseURL string `json:"base_url"`
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling before returning
+	// StillPending. Default 600 (10 minutes). Sectigo's
+	// collectNotReady sentinel maps to StillPending so recently-
+	// issued certs that aren't yet retrievable get the backoff
+	// schedule rather than tight-loop polling.
+	//
+	// Set via CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int `json:"poll_max_wait_seconds,omitempty"`
+}
+
+// pollMaxWait returns the configured PollMaxWait as a time.Duration,
+// or the asyncpoll package default if unset.
+func (c *Config) pollMaxWait() time.Duration {
+	if c.PollMaxWaitSeconds <= 0 {
+		return asyncpoll.DefaultMaxWait
+	}
+	return time.Duration(c.PollMaxWaitSeconds) * time.Second
 }
 
 // Connector implements the issuer.Connector interface for Sectigo Certificate Manager.
@@ -355,30 +375,94 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	return nil
 }
 
-// GetOrderStatus checks the status of a Sectigo certificate enrollment.
-// If the enrollment is "Issued", downloads the certificate and returns it.
-// If still pending, returns pending status for continued polling.
+// GetOrderStatus checks the status of a Sectigo certificate enrollment
+// using bounded internal polling (asyncpoll.Poll). One call blocks for
+// up to PollMaxWait (default 10m) doing exponential backoff with
+// jitter; returns Done with the cert, Failed with the rejection
+// reason, or StillPending if the deadline expires (caller can
+// re-invoke).
+//
+// Audit fix #5 Phase 2: previously each scheduler tick made one HTTP
+// call against an unready order. Sectigo's collectNotReady sentinel
+// (cert approved but not yet generated) now maps to StillPending and
+// rides the backoff schedule rather than tight-loop polling.
 func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer.OrderStatus, error) {
 	c.logger.Debug("checking Sectigo enrollment status", "ssl_id", orderID)
 
-	// Parse sslId from string
+	// Parse sslId from string once at entry — invalid ID is a
+	// permanent error, no point polling.
 	var sslId int
 	if _, err := fmt.Sscanf(orderID, "%d", &sslId); err != nil {
 		return nil, fmt.Errorf("invalid Sectigo ssl_id: %s", orderID)
 	}
 
+	var done *issuer.OrderStatus
+	var lastPendingMsg string
+	cfg := asyncpoll.Config{MaxWait: c.config.pollMaxWait()}
+
+	res, err := asyncpoll.Poll(ctx, cfg, func(ctx context.Context) (asyncpoll.Result, error) {
+		status, result, pollErr := c.pollEnrollmentOnce(ctx, sslId, orderID)
+		if status != nil {
+			switch result {
+			case asyncpoll.Done:
+				done = status
+			case asyncpoll.StillPending:
+				if status.Message != nil {
+					lastPendingMsg = *status.Message
+				}
+			}
+		}
+		return result, pollErr
+	})
+
+	now := time.Now()
+	switch res {
+	case asyncpoll.Done:
+		return done, nil
+	case asyncpoll.Failed:
+		return nil, err
+	default:
+		msg := lastPendingMsg
+		if msg == "" {
+			msg = fmt.Sprintf("enrollment %s still pending after PollMaxWait", orderID)
+		}
+		return &issuer.OrderStatus{
+			OrderID:   orderID,
+			Status:    "pending",
+			Message:   &msg,
+			UpdatedAt: now,
+		}, nil
+	}
+}
+
+// pollEnrollmentOnce makes one HTTP GET against the Sectigo SCM
+// status endpoint and translates the response into an asyncpoll.Result
+// plus (when applicable) a populated OrderStatus.
+//
+// collectNotReady is the load-bearing Sectigo sentinel: even when
+// the SCM status endpoint reports "Issued", the cert may not yet be
+// retrievable from the collect endpoint. We treat this as
+// StillPending so the backoff schedule applies.
+func (c *Connector) pollEnrollmentOnce(ctx context.Context, sslId int, orderID string) (*issuer.OrderStatus, asyncpoll.Result, error) {
 	status, err := c.checkStatus(ctx, sslId)
 	if err != nil {
-		return nil, err
+		// Triage by examining the wrapped status code: 4xx (not 429)
+		// is permanent (404 = enrollment doesn't exist, 400 = bad
+		// request, 401/403 = auth). Parse failures are also
+		// permanent — the upstream's response shape is broken.
+		// 5xx / 429 / network errors are transient and ride the
+		// backoff schedule.
+		if isPermanentStatusError(err) {
+			return nil, asyncpoll.Failed, err
+		}
+		return nil, asyncpoll.StillPending, err
 	}
 
 	now := time.Now()
-
 	switch status.Status {
 	case "Issued":
 		certPEM, chainPEM, serial, notBefore, notAfter, collectErr := c.collectCertificate(ctx, sslId)
 		if collectErr != nil {
-			// Cert approved but not yet generated — treat as pending
 			if isCollectNotReady(collectErr) {
 				msg := fmt.Sprintf("enrollment %s is issued but certificate not yet generated", orderID)
 				return &issuer.OrderStatus{
@@ -386,15 +470,11 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 					Status:    "pending",
 					Message:   &msg,
 					UpdatedAt: now,
-				}, nil
+				}, asyncpoll.StillPending, nil
 			}
-			return nil, fmt.Errorf("failed to collect certificate: %w", collectErr)
+			return nil, asyncpoll.Failed, fmt.Errorf("failed to collect certificate: %w", collectErr)
 		}
-
-		c.logger.Info("Sectigo enrollment completed",
-			"ssl_id", orderID,
-			"serial", serial)
-
+		c.logger.Info("Sectigo enrollment completed", "ssl_id", orderID, "serial", serial)
 		return &issuer.OrderStatus{
 			OrderID:   orderID,
 			Status:    "completed",
@@ -404,7 +484,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			NotBefore: &notBefore,
 			NotAfter:  &notAfter,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	case "Applied", "Pending":
 		msg := fmt.Sprintf("enrollment %s is %s", orderID, status.Status)
@@ -413,7 +493,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 
 	case "Rejected":
 		msg := fmt.Sprintf("enrollment %s was rejected", orderID)
@@ -422,7 +502,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "failed",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	case "Revoked", "Expired", "Not Enrolled":
 		msg := fmt.Sprintf("enrollment %s has status: %s", orderID, status.Status)
@@ -431,7 +511,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "failed",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	default:
 		msg := fmt.Sprintf("unknown enrollment status: %s", status.Status)
@@ -440,8 +520,30 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 	}
+}
+
+// isPermanentStatusError reports whether an error returned from
+// checkStatus represents a permanent client-side failure (4xx other
+// than 429, or a body-parse failure). Used by pollEnrollmentOnce to
+// distinguish "stop polling" from "transient; keep polling".
+//
+// Heuristic-based on the error wrap shape: checkStatus formats HTTP
+// status errors as "Sectigo status returned %d:" so we can grep for
+// known permanent codes. Parse-failure errors contain "parse status
+// response".
+func isPermanentStatusError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	for _, code := range []string{"returned 400", "returned 401", "returned 403", "returned 404"} {
+		if strings.Contains(msg, code) {
+			return true
+		}
+	}
+	return strings.Contains(msg, "parse status response")
 }
 
 // checkStatus retrieves the enrollment status from Sectigo.

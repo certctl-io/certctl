@@ -39,6 +39,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
 )
 
 // Config represents the GlobalSign Atlas HVCA issuer connector configuration.
@@ -73,6 +74,24 @@ type Config struct {
 	// internal CA not present in the host's default trust bundle.
 	// Set via CERTCTL_GLOBALSIGN_SERVER_CA_PATH environment variable.
 	ServerCAPath string `json:"server_ca_path,omitempty"`
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling before returning
+	// StillPending. Default 600 (10 minutes). GlobalSign tracks
+	// orders by serial number rather than order ID, but the polling
+	// shape is identical.
+	//
+	// Set via CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int `json:"poll_max_wait_seconds,omitempty"`
+}
+
+// pollMaxWait returns the configured PollMaxWait as a time.Duration,
+// or the asyncpoll package default if unset.
+func (c *Config) pollMaxWait() time.Duration {
+	if c.PollMaxWaitSeconds <= 0 {
+		return asyncpoll.DefaultMaxWait
+	}
+	return time.Duration(c.PollMaxWaitSeconds) * time.Second
 }
 
 // Connector implements the issuer.Connector interface for GlobalSign Atlas HVCA.
@@ -423,21 +442,72 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	return nil
 }
 
-// GetOrderStatus checks the status of a GlobalSign certificate order by serial number.
-// Polls the certificate endpoint; when status is "issued", downloads and returns the cert.
+// GetOrderStatus checks the status of a GlobalSign certificate order
+// by serial number, using bounded internal polling (asyncpoll.Poll).
+// One call blocks for up to PollMaxWait (default 10m) doing
+// exponential backoff with jitter; returns Done with the cert,
+// Failed with the rejection reason, or StillPending if the deadline
+// expires (caller can re-invoke).
+//
+// Audit fix #5 Phase 2: previously each scheduler tick made one HTTP
+// call against an unready order. GlobalSign tracks orders by serial
+// number rather than order ID, but the polling shape is identical.
 func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer.OrderStatus, error) {
 	c.logger.Debug("checking GlobalSign certificate status", "serial", orderID)
 
+	var done *issuer.OrderStatus
+	var lastPendingMsg string
+	cfg := asyncpoll.Config{MaxWait: c.config.pollMaxWait()}
+
+	res, err := asyncpoll.Poll(ctx, cfg, func(ctx context.Context) (asyncpoll.Result, error) {
+		status, result, pollErr := c.pollCertificateOnce(ctx, orderID)
+		if status != nil {
+			switch result {
+			case asyncpoll.Done:
+				done = status
+			case asyncpoll.StillPending:
+				if status.Message != nil {
+					lastPendingMsg = *status.Message
+				}
+			}
+		}
+		return result, pollErr
+	})
+
+	now := time.Now()
+	switch res {
+	case asyncpoll.Done:
+		return done, nil
+	case asyncpoll.Failed:
+		return nil, err
+	default:
+		msg := lastPendingMsg
+		if msg == "" {
+			msg = fmt.Sprintf("certificate %s still pending after PollMaxWait", orderID)
+		}
+		return &issuer.OrderStatus{
+			OrderID:   orderID,
+			Status:    "pending",
+			Message:   &msg,
+			UpdatedAt: now,
+		}, nil
+	}
+}
+
+// pollCertificateOnce makes one HTTP GET against the GlobalSign Atlas
+// HVCA certificate status endpoint and translates the response into
+// an asyncpoll.Result. 4xx (not 429) is permanent; 5xx / 429 / network
+// is transient.
+func (c *Connector) pollCertificateOnce(ctx context.Context, orderID string) (*issuer.OrderStatus, asyncpoll.Result, error) {
 	client, err := c.getHTTPClient(ctx)
 	if err != nil {
-		return nil, err
+		return nil, asyncpoll.Failed, err
 	}
 
-	// GlobalSign status endpoint: GET /v2/certificates/{serial}
 	statusURL := strings.TrimSuffix(c.config.APIUrl, "/") + fmt.Sprintf("/v2/certificates/%s", orderID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create status request: %w", err)
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
 
 	req.Header.Set("ApiKey", c.config.APIKey)
@@ -446,40 +516,39 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("GlobalSign status request failed: %w", err)
+		return nil, asyncpoll.StillPending, fmt.Errorf("GlobalSign status request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read status response: %w", err)
+		return nil, asyncpoll.StillPending, fmt.Errorf("failed to read status response: %w", err)
 	}
 
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("GlobalSign certificate status returned %d: %s", resp.StatusCode, string(respBody))
+		statusErr := fmt.Errorf("GlobalSign certificate status returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return nil, asyncpoll.StillPending, statusErr
+		}
+		return nil, asyncpoll.Failed, statusErr
 	}
 
 	var certResp certificateResponse
 	if err := json.Unmarshal(respBody, &certResp); err != nil {
-		return nil, fmt.Errorf("failed to parse status response: %w", err)
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to parse status response: %w", err)
 	}
 
 	now := time.Now()
-
 	switch certResp.Status {
 	case "issued":
 		if certResp.Certificate == "" {
-			return nil, fmt.Errorf("certificate status is issued but certificate PEM is missing")
+			return nil, asyncpoll.Failed, fmt.Errorf("certificate status is issued but certificate PEM is missing")
 		}
-
 		notBefore, notAfter, err := parseCertDates(certResp.Certificate)
 		if err != nil {
 			c.logger.Warn("failed to parse certificate dates", "error", err)
 		}
-
-		c.logger.Info("GlobalSign certificate ready",
-			"serial", orderID)
-
+		c.logger.Info("GlobalSign certificate ready", "serial", orderID)
 		return &issuer.OrderStatus{
 			OrderID:   orderID,
 			Status:    "completed",
@@ -489,7 +558,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			NotBefore: &notBefore,
 			NotAfter:  &notAfter,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	case "pending", "processing":
 		msg := fmt.Sprintf("certificate %s is %s", orderID, certResp.Status)
@@ -498,7 +567,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 
 	case "rejected", "denied", "failed":
 		msg := fmt.Sprintf("certificate %s was %s", orderID, certResp.Status)
@@ -507,7 +576,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "failed",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	default:
 		msg := fmt.Sprintf("unknown certificate status: %s", certResp.Status)
@@ -516,7 +585,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 	}
 }
 
