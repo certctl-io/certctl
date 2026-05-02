@@ -16,6 +16,7 @@ import (
 	"io"
 	"log/slog"
 	"strconv"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -135,10 +136,19 @@ func TestBoundedFanOut_SkipsAgentRoutedDeployments(t *testing.T) {
 	}
 
 	var seen atomic.Int64
-	var seenIDs []string
+	// seenIDs is appended from multiple worker goroutines; the
+	// surrounding mutex serialises the slice mutation so the
+	// race detector stays clean. (atomic.Int64 alone isn't
+	// sufficient: the slice header is the racing memory.)
+	var (
+		mu      sync.Mutex
+		seenIDs []string
+	)
 	work := func(ctx context.Context, job *domain.Job) error {
 		seen.Add(1)
+		mu.Lock()
 		seenIDs = append(seenIDs, job.ID)
+		mu.Unlock()
 		return nil
 	}
 
@@ -147,7 +157,9 @@ func TestBoundedFanOut_SkipsAgentRoutedDeployments(t *testing.T) {
 	}
 
 	if got := seen.Load(); got != 2 {
+		mu.Lock()
 		t.Errorf("expected 2 jobs to run (renewal + issuance, deployment-with-agent skipped), got %d (ids=%v)", got, seenIDs)
+		mu.Unlock()
 	}
 }
 
