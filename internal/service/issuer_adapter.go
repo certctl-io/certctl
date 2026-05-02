@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 )
@@ -9,13 +10,53 @@ import (
 // IssuerConnectorAdapter bridges the connector-layer issuer.Connector interface with the
 // service-layer IssuerConnector interface. This maintains dependency inversion: the service
 // layer defines the interface it needs, and this adapter wraps the concrete connector.
+//
+// Metrics: when issuerType + metrics are set via SetMetrics, the adapter
+// records every IssueCertificate / RenewCertificate call into the
+// IssuanceMetrics tables (audit fix #4). Untyped or unmetricked
+// adapters (test path) skip the recording — nil-guard everywhere.
 type IssuerConnectorAdapter struct {
-	connector issuer.Connector
+	connector  issuer.Connector
+	issuerType string
+	metrics    *IssuanceMetrics
 }
 
-// NewIssuerConnectorAdapter wraps an issuer.Connector to implement service.IssuerConnector.
+// NewIssuerConnectorAdapter wraps an issuer.Connector to implement
+// service.IssuerConnector. Existing call sites (28+) keep this
+// signature; metrics are wired via SetMetrics post-construction by
+// the production code path (issuer_registry.go) so test sites that
+// don't care about metrics stay one-arg.
 func NewIssuerConnectorAdapter(c issuer.Connector) IssuerConnector {
 	return &IssuerConnectorAdapter{connector: c}
+}
+
+// SetMetrics wires per-issuer-type issuance metrics. issuerType is the
+// factory key (e.g. "local", "acme", "digicert") — must match one of
+// the closed-enum values the metrics doc references. metrics may be
+// nil to disable recording. Closes the #4 audit-readiness blocker
+// (per-issuer-type metrics).
+func (a *IssuerConnectorAdapter) SetMetrics(issuerType string, metrics *IssuanceMetrics) {
+	a.issuerType = issuerType
+	a.metrics = metrics
+}
+
+// recordIssuance is the metrics-recording side effect at the adapter
+// boundary. Bumps the issuance counter (success/failure) and the
+// duration histogram; on failure also bumps the failure-by-error-class
+// counter via ClassifyError.
+//
+// nil-guarded: when metrics or issuerType are unset, it's a no-op.
+func (a *IssuerConnectorAdapter) recordIssuance(start time.Time, err error) {
+	if a.metrics == nil || a.issuerType == "" {
+		return
+	}
+	duration := time.Since(start)
+	if err != nil {
+		a.metrics.RecordIssuance(a.issuerType, "failure", duration)
+		a.metrics.RecordFailure(a.issuerType, ClassifyError(err))
+	} else {
+		a.metrics.RecordIssuance(a.issuerType, "success", duration)
+	}
 }
 
 // IssueCertificate delegates to the underlying connector's IssueCertificate method,
@@ -26,6 +67,7 @@ func NewIssuerConnectorAdapter(c issuer.Connector) IssuerConnector {
 // honors it (RFC 7633 id-pe-tlsfeature extension); upstream connectors
 // silently ignore the field.
 func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
+	start := time.Now()
 	result, err := a.connector.IssueCertificate(ctx, issuer.IssuanceRequest{
 		CommonName:    commonName,
 		SANs:          sans,
@@ -34,6 +76,7 @@ func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonNam
 		MaxTTLSeconds: maxTTLSeconds,
 		MustStaple:    mustStaple,
 	})
+	a.recordIssuance(start, err)
 	if err != nil {
 		return nil, err
 	}
@@ -47,8 +90,12 @@ func (a *IssuerConnectorAdapter) IssueCertificate(ctx context.Context, commonNam
 }
 
 // RenewCertificate delegates to the underlying connector's RenewCertificate method,
-// translating between service-layer and connector-layer types.
+// translating between service-layer and connector-layer types. Metrics:
+// renewal is recorded into the same certctl_issuance_* series as
+// initial issuance — operationally, renewal IS issuance from the
+// connector's perspective.
 func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonName string, sans []string, csrPEM string, ekus []string, maxTTLSeconds int, mustStaple bool) (*IssuanceResult, error) {
+	start := time.Now()
 	result, err := a.connector.RenewCertificate(ctx, issuer.RenewalRequest{
 		CommonName:    commonName,
 		SANs:          sans,
@@ -57,6 +104,7 @@ func (a *IssuerConnectorAdapter) RenewCertificate(ctx context.Context, commonNam
 		MaxTTLSeconds: maxTTLSeconds,
 		MustStaple:    mustStaple,
 	})
+	a.recordIssuance(start, err)
 	if err != nil {
 		return nil, err
 	}

@@ -32,6 +32,12 @@ type IssuerRegistry struct {
 	// with the CA key directly (the historical behaviour, preserved for
 	// callers that don't supply these deps).
 	localDeps *LocalIssuerDeps
+
+	// metrics — when set, every adapter constructed by Rebuild is
+	// wired with SetMetrics so issuance / renewal calls flow through
+	// the per-issuer-type counter + histogram + failure tables.
+	// Closes the #4 audit-readiness blocker (per-issuer-type metrics).
+	metrics *IssuanceMetrics
 }
 
 // LocalIssuerDeps groups the optional dependencies that the local
@@ -65,6 +71,16 @@ func (r *IssuerRegistry) SetLocalIssuerDeps(deps *LocalIssuerDeps) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.localDeps = deps
+}
+
+// SetIssuanceMetrics wires per-issuer-type issuance metrics. Every
+// adapter constructed by Rebuild after this call records issuance /
+// renewal calls into the supplied metrics tables. Closes the #4
+// audit-readiness blocker (per-issuer-type metrics).
+func (r *IssuerRegistry) SetIssuanceMetrics(m *IssuanceMetrics) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.metrics = m
 }
 
 // Get returns the issuer connector for the given ID and whether it exists.
@@ -173,7 +189,19 @@ func (r *IssuerRegistry) Rebuild(ctx context.Context, configs []*domain.Issuer, 
 				"key_dir", r.localDeps.KeyDir)
 		}
 
-		newIssuers[cfg.ID] = NewIssuerConnectorAdapter(connector)
+		adapter := NewIssuerConnectorAdapter(connector)
+		// Wire per-issuer-type metrics (audit fix #4) when SetIssuanceMetrics
+		// was called. The adapter is the IssuerConnector interface; type-
+		// assert to the concrete *IssuerConnectorAdapter so we can call
+		// SetMetrics. Tests that hand-construct adapters via the bare
+		// NewIssuerConnectorAdapter constructor get nil metrics — the
+		// adapter no-ops the recording in that case.
+		if r.metrics != nil {
+			if a, ok := adapter.(*IssuerConnectorAdapter); ok {
+				a.SetMetrics(string(cfg.Type), r.metrics)
+			}
+		}
+		newIssuers[cfg.ID] = adapter
 		r.logger.Info("issuer loaded into registry", "id", cfg.ID, "type", cfg.Type)
 	}
 

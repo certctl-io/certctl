@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"net/http"
 	"sort"
+	"strconv"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/shankar0123/certctl/internal/service"
 )
 
 // MetricsService defines the service interface for metrics collection.
@@ -51,6 +53,13 @@ type DeployCounterSnapshotter interface {
 	Snapshot() []DeploySnapshotEntry
 }
 
+// IssuanceCounterEntry / IssuanceFailureEntry / IssuanceDurationEntry
+// and the IssuanceMetricsSnapshotter interface live in
+// internal/service (issuance_metrics.go). Handler can't define them
+// locally because internal/api/handler is imported by service — the
+// reverse import would create a cycle. The exposer below takes the
+// types via the interface defined in service.
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
@@ -64,6 +73,12 @@ type MetricsHandler struct {
 	ocspCounters CounterSnapshotter
 	// Phase 10 (deploy-hardening I) — per-target-type deploy counters.
 	deployCounters DeployCounterSnapshotter
+	// Per-issuer-type issuance metrics (audit fix #4). nil disables
+	// the new metric block; main.go wires the instance at startup.
+	// The interface lives in service to avoid an import cycle (handler
+	// imports service for admin_est.go etc., so service can't import
+	// handler back).
+	issuanceCounters service.IssuanceMetricsSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -87,6 +102,14 @@ func (h *MetricsHandler) SetOCSPCounters(c CounterSnapshotter) {
 // of the deploy-hardening I master bundle.
 func (h *MetricsHandler) SetDeployCounters(c DeployCounterSnapshotter) {
 	h.deployCounters = c
+}
+
+// SetIssuanceCounters wires the per-issuer-type issuance metrics for
+// the Prometheus exposition. nil disables the block. Closes the #4
+// acquisition-readiness blocker from the 2026-05-01 issuer coverage
+// audit (per-issuer-type metrics).
+func (h *MetricsHandler) SetIssuanceCounters(c service.IssuanceMetricsSnapshotter) {
+	h.issuanceCounters = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -344,6 +367,71 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 			fmt.Fprintf(w, "certctl_deploy_idempotent_skip_total{target_type=%q} %d\n", s.TargetType, s.IdempotentSkips)
 		}
 	}
+
+	// Per-issuer-type issuance metrics (audit fix #4). Three series:
+	//   certctl_issuance_total{issuer_type, outcome}            counter
+	//   certctl_issuance_duration_seconds{issuer_type}          histogram
+	//   certctl_issuance_failures_total{issuer_type, error_class} counter
+	//
+	// Cardinality: 12 issuer_types × 2 outcomes (24) +
+	//              12 × 11 buckets+sum+count (~156) +
+	//              12 × 8 error_classes (96) = ~276 series. Comfortable
+	// for any Prometheus instance.
+	if h.issuanceCounters != nil {
+		// certctl_issuance_total
+		fmt.Fprintf(w, "\n# HELP certctl_issuance_total Total certificate issuance attempts, labelled by issuer type and outcome.\n")
+		fmt.Fprintf(w, "# TYPE certctl_issuance_total counter\n")
+		counters := h.issuanceCounters.SnapshotCounters()
+		sort.Slice(counters, func(i, j int) bool {
+			if counters[i].IssuerType != counters[j].IssuerType {
+				return counters[i].IssuerType < counters[j].IssuerType
+			}
+			return counters[i].Outcome < counters[j].Outcome
+		})
+		for _, c := range counters {
+			fmt.Fprintf(w, "certctl_issuance_total{issuer_type=%q,outcome=%q} %d\n", c.IssuerType, c.Outcome, c.Count)
+		}
+
+		// certctl_issuance_duration_seconds histogram
+		fmt.Fprintf(w, "\n# HELP certctl_issuance_duration_seconds Certificate issuance duration in seconds, labelled by issuer type. Cumulative histogram with +Inf.\n")
+		fmt.Fprintf(w, "# TYPE certctl_issuance_duration_seconds histogram\n")
+		durations := h.issuanceCounters.SnapshotDurations()
+		boundaries := h.issuanceCounters.BucketBoundaries()
+		sort.Slice(durations, func(i, j int) bool { return durations[i].IssuerType < durations[j].IssuerType })
+		for _, d := range durations {
+			for i, le := range boundaries {
+				if i < len(d.Buckets) {
+					fmt.Fprintf(w, "certctl_issuance_duration_seconds_bucket{issuer_type=%q,le=%q} %d\n",
+						d.IssuerType, formatLE(le), d.Buckets[i])
+				}
+			}
+			fmt.Fprintf(w, "certctl_issuance_duration_seconds_bucket{issuer_type=%q,le=\"+Inf\"} %d\n", d.IssuerType, d.Count)
+			fmt.Fprintf(w, "certctl_issuance_duration_seconds_sum{issuer_type=%q} %g\n", d.IssuerType, d.Sum)
+			fmt.Fprintf(w, "certctl_issuance_duration_seconds_count{issuer_type=%q} %d\n", d.IssuerType, d.Count)
+		}
+
+		// certctl_issuance_failures_total
+		fmt.Fprintf(w, "\n# HELP certctl_issuance_failures_total Issuance failures by issuer type and error class. error_class is a closed enum (timeout, auth, rate_limited, validation, upstream_5xx, upstream_4xx, network, other).\n")
+		fmt.Fprintf(w, "# TYPE certctl_issuance_failures_total counter\n")
+		failures := h.issuanceCounters.SnapshotFailures()
+		sort.Slice(failures, func(i, j int) bool {
+			if failures[i].IssuerType != failures[j].IssuerType {
+				return failures[i].IssuerType < failures[j].IssuerType
+			}
+			return failures[i].ErrorClass < failures[j].ErrorClass
+		})
+		for _, f := range failures {
+			fmt.Fprintf(w, "certctl_issuance_failures_total{issuer_type=%q,error_class=%q} %d\n", f.IssuerType, f.ErrorClass, f.Count)
+		}
+	}
+}
+
+// formatLE formats a histogram bucket boundary the way Prometheus
+// expects: no trailing zeros, no scientific notation for typical
+// sub-second / sub-minute values. Used for the `le` label in the
+// issuance-duration histogram exposer.
+func formatLE(v float64) string {
+	return strconv.FormatFloat(v, 'f', -1, 64)
 }
 
 // DashboardSummary mirrors the service.DashboardSummary for JSON unmarshaling.

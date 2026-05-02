@@ -215,6 +215,13 @@ func main() {
 	}
 
 	issuerRegistry := service.NewIssuerRegistry(logger)
+	// Per-issuer-type issuance metrics (audit fix #4: closes the
+	// per-issuer-type observability gap). Same instance is wired into
+	// the registry (so adapters record issuance/renewal calls) AND
+	// into the metrics handler (so the Prometheus exposer emits
+	// certctl_issuance_total / _duration_seconds / _failures_total).
+	issuanceMetrics := service.NewIssuanceMetrics(service.DefaultIssuanceBucketBoundaries)
+	issuerRegistry.SetIssuanceMetrics(issuanceMetrics)
 
 	// Initialize revocation repository
 	revocationRepo := postgres.NewRevocationRepository(db)
@@ -544,6 +551,9 @@ func main() {
 	// alert on certctl_ocsp_counter_total{label="rate_limited"},
 	// {label="nonce_malformed"}, etc.
 	metricsHandler.SetOCSPCounters(ocspCounters)
+	// Audit fix #4: wire the per-issuer-type issuance metrics so the
+	// /api/v1/metrics/prometheus exposer emits the new series.
+	metricsHandler.SetIssuanceCounters(issuanceMetrics)
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
