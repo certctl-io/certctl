@@ -1027,6 +1027,7 @@ The IIS target connector supports two deployment modes — agent-local (recommen
 - `ip_address` (string, default "*"): Specific IP to bind to, or "*" for all IPs
 - `binding_info` (string, optional): Host header for SNI bindings
 - `mode` (string, default "local"): Deployment mode — `local` (agent-local PowerShell) or `winrm` (remote via WinRM)
+- `exec_deadline` (duration, default `60s`): Per-PowerShell-subprocess cap that fires only when the caller's `ctx` has no deadline of its own. A caller-supplied deadline always wins; this is a safety net so a hung WinRM session or stuck `Cert:` provider call cannot block the deploy worker indefinitely. Operators on slow links (high-latency WinRM, slow Windows VMs) can extend with e.g. `"exec_deadline": "5m"`.
 
 **WinRM fields (required when `mode` is `winrm`):**
 - `winrm.winrm_host` (string, required): Remote Windows server hostname or IP
@@ -1133,6 +1134,7 @@ The Windows Certificate Store connector imports certificates into the Windows ce
 | `winrm_password` | string | | WinRM password (required for winrm mode) |
 | `winrm_https` | boolean | `false` | Use HTTPS for WinRM |
 | `winrm_insecure` | boolean | `false` | Skip TLS verification for WinRM |
+| `exec_deadline` | duration | `60s` | Per-PowerShell-subprocess cap that fires only when the caller's `ctx` has no deadline of its own. A caller-supplied deadline always wins; this is a safety net so a hung WinRM session or stuck `Cert:` provider call cannot block the deploy worker indefinitely. Operators on slow links can extend with e.g. `"exec_deadline": "5m"`. |
 
 Location: `internal/connector/target/wincertstore/wincertstore.go`
 

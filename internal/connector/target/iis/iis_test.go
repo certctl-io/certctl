@@ -1426,3 +1426,97 @@ func TestWinRMConfig_DefaultPorts(t *testing.T) {
 		t.Fatal("expected non-nil HTTPS executor")
 	}
 }
+
+// --- Top-10 fix #4: default-deadline ctx wrapper for PowerShell exec calls ---
+//
+// These two tests pin realExecutor's safety-net behavior: a default ExecDeadline
+// caps each subprocess invocation when the caller's ctx has no deadline of its
+// own; a tighter caller-supplied deadline always wins. The actual subprocess
+// is irrelevant — on Linux/macOS runners powershell.exe is missing and
+// exec.Cmd fails fast at Start(); on Windows runners the wrapper's ctx
+// deadline cancels the running PowerShell process. Either path returns well
+// under 500ms; what we assert is the contract (fast return + error), which
+// regresses if a future refactor removes the wrapper.
+
+func TestIIS_RealExecutor_AttachesDefaultDeadlineWhenCallerHasNone(t *testing.T) {
+	e := &realExecutor{deadline: 100 * time.Millisecond}
+	start := time.Now()
+	_, err := e.Execute(context.Background(), "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected fast return (default deadline = 100ms), took %v: err=%v", elapsed, err)
+	}
+	if err == nil {
+		t.Error("expected an error (context.DeadlineExceeded on Windows / powershell.exe missing on Linux)")
+	}
+}
+
+func TestIIS_RealExecutor_RespectsCallerDeadlineWhenSet(t *testing.T) {
+	e := &realExecutor{deadline: 10 * time.Second} // long fallback
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _ = e.Execute(ctx, "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	// Caller's tight 50ms deadline must win over the executor's 10s fallback.
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected caller's tight 50ms deadline to fire fast, took %v", elapsed)
+	}
+}
+
+func TestIIS_RealExecutor_NoDeadlineWiredWhenZero(t *testing.T) {
+	// deadline=0 means "no fallback wrapper" — caller is fully in charge.
+	// Pass a tight caller deadline so the test still terminates fast.
+	e := &realExecutor{deadline: 0}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _ = e.Execute(ctx, "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected caller deadline to bound the call, took %v", elapsed)
+	}
+}
+
+func TestIIS_New_DefaultsExecDeadlineTo60s(t *testing.T) {
+	// New() applies the 60s default when ExecDeadline is unset. The local
+	// realExecutor captures the value at construction.
+	cfg := &Config{
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Mode:      "winrm", // winrm path skips realExecutor (uses winrmExecutor); won't fail-fast
+		WinRM: WinRMConfig{
+			Host:     "server.example.com",
+			Username: "admin",
+			Password: "pass",
+		},
+	}
+	c, err := New(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if c.config.ExecDeadline != 60*time.Second {
+		t.Errorf("expected default ExecDeadline=60s, got %v", c.config.ExecDeadline)
+	}
+}
+
+func TestIIS_New_RespectsExplicitExecDeadline(t *testing.T) {
+	cfg := &Config{
+		SiteName:     "Default Web Site",
+		CertStore:    "My",
+		Mode:         "winrm",
+		ExecDeadline: 10 * time.Minute,
+		WinRM: WinRMConfig{
+			Host:     "server.example.com",
+			Username: "admin",
+			Password: "pass",
+		},
+	}
+	c, err := New(cfg, testLogger())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if c.config.ExecDeadline != 10*time.Minute {
+		t.Errorf("expected ExecDeadline=10m, got %v", c.config.ExecDeadline)
+	}
+}

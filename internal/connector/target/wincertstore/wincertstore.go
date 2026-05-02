@@ -41,6 +41,14 @@ type Config struct {
 	// Mode is the deployment mode: "local" (default) or "winrm".
 	Mode string `json:"mode"`
 
+	// ExecDeadline caps each PowerShell subprocess (local mode) to this
+	// duration when the caller's ctx has no deadline of its own. Operators
+	// on slow Windows links can extend; default is 60s. Caller-supplied
+	// deadlines (via ctx) always win — the wrapper is a safety net for code
+	// paths that forgot to attach one. Top-10 fix #4 of the 2026-05-02
+	// deployment-target audit re-run.
+	ExecDeadline time.Duration `json:"exec_deadline,omitempty"`
+
 	// WinRM settings (only used when Mode is "winrm").
 	WinRMHost     string `json:"winrm_host,omitempty"`
 	WinRMPort     int    `json:"winrm_port,omitempty"`
@@ -55,10 +63,22 @@ type PowerShellExecutor interface {
 	Execute(ctx context.Context, script string) (string, error)
 }
 
-// realExecutor calls powershell.exe on the local system.
-type realExecutor struct{}
+// realExecutor calls powershell.exe on the local system. The deadline field
+// caps each subprocess invocation when the caller's ctx has no deadline of
+// its own — see Top-10 fix #4 of the 2026-05-02 deployment-target audit.
+type realExecutor struct {
+	deadline time.Duration
+}
 
 func (e *realExecutor) Execute(ctx context.Context, script string) (string, error) {
+	// Attach the configured default deadline ONLY when the caller's ctx has
+	// no deadline of its own. Caller deadlines always win — this wrapper is
+	// a safety net for code paths that forgot to attach one.
+	if _, ok := ctx.Deadline(); !ok && e.deadline > 0 {
+		var cancel context.CancelFunc
+		ctx, cancel = context.WithTimeout(ctx, e.deadline)
+		defer cancel()
+	}
 	cmd := exec.CommandContext(ctx, "powershell.exe", "-NoProfile", "-NonInteractive", "-Command", script)
 	out, err := cmd.CombinedOutput()
 	return strings.TrimSpace(string(out)), err
@@ -89,7 +109,7 @@ func New(cfg *Config, logger *slog.Logger) (*Connector, error) {
 	return &Connector{
 		config:   cfg,
 		logger:   logger,
-		executor: &realExecutor{},
+		executor: &realExecutor{deadline: cfg.ExecDeadline},
 	}, nil
 }
 
@@ -115,6 +135,13 @@ func applyDefaults(cfg *Config) {
 	}
 	if cfg.Mode == "" {
 		cfg.Mode = "local"
+	}
+	// Top-10 fix #4: default the per-PowerShell-subprocess deadline so a hung
+	// WinRM / cert-store call does not block the deploy worker indefinitely
+	// when the caller's ctx has no deadline. Operators on slow links can
+	// override via JSON config (`exec_deadline`).
+	if cfg.ExecDeadline == 0 {
+		cfg.ExecDeadline = 60 * time.Second
 	}
 }
 

@@ -839,3 +839,74 @@ func TestValidateDeployment_BySerial(t *testing.T) {
 		t.Error("expected serial number query in script")
 	}
 }
+
+// --- Top-10 fix #4: default-deadline ctx wrapper for PowerShell exec calls ---
+//
+// These tests pin realExecutor's safety-net behavior. See the matching pair
+// in iis_test.go for the rationale (subprocess fails fast on non-Windows
+// runners / deadline cancels on Windows; either path must return fast).
+
+func TestWinCertStore_RealExecutor_AttachesDefaultDeadlineWhenCallerHasNone(t *testing.T) {
+	e := &realExecutor{deadline: 100 * time.Millisecond}
+	start := time.Now()
+	_, err := e.Execute(context.Background(), "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected fast return (default deadline = 100ms), took %v: err=%v", elapsed, err)
+	}
+	if err == nil {
+		t.Error("expected an error (context.DeadlineExceeded on Windows / powershell.exe missing on Linux)")
+	}
+}
+
+func TestWinCertStore_RealExecutor_RespectsCallerDeadlineWhenSet(t *testing.T) {
+	e := &realExecutor{deadline: 10 * time.Second} // long fallback
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _ = e.Execute(ctx, "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected caller's tight 50ms deadline to fire fast, took %v", elapsed)
+	}
+}
+
+func TestWinCertStore_RealExecutor_NoDeadlineWiredWhenZero(t *testing.T) {
+	// deadline=0 means "no fallback wrapper". Pass a tight caller deadline.
+	e := &realExecutor{deadline: 0}
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+	start := time.Now()
+	_, _ = e.Execute(ctx, "Start-Sleep -Seconds 5")
+	elapsed := time.Since(start)
+	if elapsed > 500*time.Millisecond {
+		t.Errorf("expected caller deadline to bound the call, took %v", elapsed)
+	}
+}
+
+func TestWinCertStore_New_DefaultsExecDeadlineTo60s(t *testing.T) {
+	c, err := New(&Config{
+		StoreName:     "My",
+		StoreLocation: "LocalMachine",
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if c.config.ExecDeadline != 60*time.Second {
+		t.Errorf("expected default ExecDeadline=60s, got %v", c.config.ExecDeadline)
+	}
+}
+
+func TestWinCertStore_New_RespectsExplicitExecDeadline(t *testing.T) {
+	c, err := New(&Config{
+		StoreName:     "My",
+		StoreLocation: "LocalMachine",
+		ExecDeadline:  10 * time.Minute,
+	}, testLogger())
+	if err != nil {
+		t.Fatalf("New failed: %v", err)
+	}
+	if c.config.ExecDeadline != 10*time.Minute {
+		t.Errorf("expected ExecDeadline=10m, got %v", c.config.ExecDeadline)
+	}
+}
