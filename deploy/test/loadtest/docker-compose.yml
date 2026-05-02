@@ -3,26 +3,58 @@
 # =============================================================================
 #
 # Spins up a minimal certctl stack and runs a k6 driver against it to capture
-# p50 / p95 / p99 latency for the certificate-management API hot path.
+# p50 / p95 / p99 latency for the certificate-management API hot path AND
+# (Bundle 10 of the 2026-05-02 deployment-target audit) per-target-type
+# TCP+TLS handshake throughput against four target sidecars (nginx, apache,
+# haproxy, f5-mock).
 #
 # Stack:
-#   1. postgres            — empty database (server runs migrations + seeds at boot)
-#   2. certctl-tls-init    — one-shot init container; writes self-signed
-#                            server.crt/.key/ca.crt into ./certs (bind mount,
-#                            host-readable so the k6 container can pin against
-#                            it via volumes)
-#   3. certctl-server      — HTTPS API on :8443, demo-seed enabled so the k6
-#                            script has iss-local + an operator + a team
-#                            ready to reference in CreateCertificate payloads
-#   4. k6                  — runs k6.js once and exits with the threshold-
-#                            driven exit code (zero on green, non-zero on any
-#                            threshold breach so `make loadtest` surfaces
-#                            regressions as a failed shell command)
+#   1. postgres                 — empty database (server runs migrations + seeds at boot)
+#   2. certctl-tls-init         — one-shot init container; writes self-signed
+#                                  server.crt/.key/ca.crt into ./certs (bind
+#                                  mount, host-readable so the k6 container
+#                                  can pin against it via volumes)
+#   3. certctl-server           — HTTPS API on :8443, demo-seed enabled so
+#                                  the k6 script has iss-local + an operator
+#                                  + a team ready to reference in
+#                                  CreateCertificate payloads
+#   4. target-tls-init          — Bundle 10: shared starter cert+key for the
+#                                  four target sidecars (nginx, apache,
+#                                  haproxy, f5-mock). Each daemon boots with
+#                                  this cert; the loadtest scenarios connect
+#                                  at sustained rates to measure handshake
+#                                  latency tagged by target_type.
+#   5. nginx-target             — Bundle 10: HTTPS on internal :443.
+#   6. apache-target            — Bundle 10: HTTPS on internal :443.
+#   7. haproxy-target           — Bundle 10: HTTPS on internal :443.
+#   8. f5-mock-target           — Bundle 10: iControl REST on internal :443
+#                                  + plaintext HTTP on internal :8080. Runs
+#                                  the in-tree f5-mock-icontrol image
+#                                  (deploy/test/f5-mock-icontrol/).
+#   9. k6                       — runs k6.js once and exits with the
+#                                  threshold-driven exit code (zero on green,
+#                                  non-zero on any threshold breach so
+#                                  `make loadtest` surfaces regressions as a
+#                                  failed shell command).
+#
+# Out of scope for v1 of the connector-tier harness (Bundle 10):
+#   - Kubernetes target via kind-in-docker. kind requires `privileged: true`
+#     and Docker-in-Docker semantics that are operationally fragile in CI;
+#     the K8s connector loadtest is a follow-up that needs Bundle 2's real
+#     k8s.io/client-go to land first.
+#   - Full agent-driven deploy poll loop (POST cert → poll deployments →
+#     verify served cert matches what was deployed). The harness measures
+#     handshake throughput against the target sidecars directly — that's
+#     enough to validate the sidecars are operational under load and gives
+#     procurement a per-target latency number that doesn't depend on the
+#     agent registration + target-binding API surface being plumbed
+#     end-to-end in the loadtest stack.
 #
 # Usage:  make loadtest  (from the repo root)
 # Manual: cd deploy/test/loadtest && docker compose up --abort-on-container-exit --exit-code-from k6
 #
-# Audit reference: cowork/issuer-coverage-audit-2026-05-01/RESULTS.md fix #8.
+# Audit reference (API tier):       cowork/issuer-coverage-audit-2026-05-01/RESULTS.md fix #8.
+# Audit reference (connector tier): cowork/deployment-target-audit-2026-05-02/RESULTS.md Bundle 10.
 # =============================================================================
 
 services:
@@ -136,6 +168,138 @@ services:
       start_period: 60s
 
   # ---------------------------------------------------------------------------
+  # Bundle 10: target-side TLS bootstrap. Mints a single ECDSA-P256 self-
+  # signed cert + key into a shared ./fixtures/target-certs/ volume that the
+  # four target sidecars (nginx, apache, haproxy) mount read-only. f5-mock
+  # generates its own self-signed cert at startup (see
+  # deploy/test/f5-mock-icontrol/tls.go) so it doesn't need this volume.
+  #
+  # The loadtest scenarios don't care which cert the target serves — only
+  # that the daemon is up and completing TLS handshakes at the configured
+  # rate. The starter cert exists so each daemon boots green; once Bundle 2
+  # (real K8s client) + agent-driven deploy poll is plumbed in v2 of the
+  # harness, deploys would overwrite this cert.
+  # ---------------------------------------------------------------------------
+  target-tls-init:
+    image: alpine/openssl:latest
+    container_name: certctl-loadtest-target-tls-init
+    restart: "no"
+    entrypoint: /bin/sh
+    command:
+      - -c
+      - |
+        set -eu
+        CERT=/certs/target.crt
+        KEY=/certs/target.key
+        PEM=/certs/target.pem
+        if [ -f "$$CERT" ] && [ -f "$$KEY" ] && [ -f "$$PEM" ]; then
+          echo "Target TLS cert already present — skipping generation"
+        else
+          mkdir -p /certs
+          openssl req -x509 -newkey ec \
+            -pkeyopt ec_paramgen_curve:P-256 \
+            -nodes \
+            -keyout "$$KEY" \
+            -out "$$CERT" \
+            -days 365 \
+            -subj "/CN=loadtest-target" \
+            -addext "subjectAltName=DNS:nginx-target,DNS:apache-target,DNS:haproxy-target,DNS:f5-mock-target,DNS:localhost,IP:127.0.0.1"
+          # HAProxy expects cert+key concatenated into a single PEM file
+          # at the path supplied to `bind ... ssl crt <path>`. Build it
+          # alongside the cert/key pair so the haproxy-target's mount
+          # works without a per-daemon ENTRYPOINT shim.
+          cat "$$CERT" "$$KEY" > "$$PEM"
+          echo "Generated target starter cert (ECDSA-P256, 365d, multi-SAN)"
+        fi
+        # World-readable so non-root container users (haproxy uses uid 99,
+        # apache uses uid 1) can read the key. This is fine for a load-test
+        # starter cert; production wouldn't do this.
+        chmod 0644 "$$CERT" "$$KEY" "$$PEM"
+    volumes:
+      - ./fixtures/target-certs:/certs
+
+  # ---------------------------------------------------------------------------
+  # nginx-target. Listens on internal :443 with the starter cert. The
+  # k6 nginx_handshake scenario connects at 100 conns/min for 5 minutes.
+  # ---------------------------------------------------------------------------
+  nginx-target:
+    image: nginx:1.27-alpine
+    container_name: certctl-loadtest-nginx
+    depends_on:
+      target-tls-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./fixtures/target-certs:/etc/nginx/certs:ro
+      - ./fixtures/nginx.conf:/etc/nginx/nginx.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O- https://localhost:443/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # apache-target. Listens on internal :443. The bundled httpd.conf loads
+  # the minimum module set + a single SSL-terminated vhost.
+  # ---------------------------------------------------------------------------
+  apache-target:
+    image: httpd:2.4-alpine
+    container_name: certctl-loadtest-apache
+    depends_on:
+      target-tls-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./fixtures/target-certs:/usr/local/apache2/conf/certs:ro
+      - ./fixtures/httpd.conf:/usr/local/apache2/conf/httpd.conf:ro
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --no-check-certificate -O- https://localhost:443/ || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # haproxy-target. Listens on internal :443 with SSL termination. The
+  # haproxy.cfg references /usr/local/etc/haproxy/certs/target.pem which
+  # target-tls-init writes (cert + key concatenated).
+  # ---------------------------------------------------------------------------
+  haproxy-target:
+    image: haproxy:2.9-alpine
+    container_name: certctl-loadtest-haproxy
+    depends_on:
+      target-tls-init:
+        condition: service_completed_successfully
+    volumes:
+      - ./fixtures/target-certs:/usr/local/etc/haproxy/certs:ro
+      - ./fixtures/haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    healthcheck:
+      # HAProxy doesn't ship with wget/curl; use the openssl-based handshake
+      # check instead. The /dev/null redirect drops the response body so
+      # large logs don't accumulate over the run.
+      test: ["CMD-SHELL", "echo Q | openssl s_client -connect localhost:443 -servername localhost 2>/dev/null | grep -q 'BEGIN CERTIFICATE'"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
+  # f5-mock target. Re-uses the in-tree f5-mock-icontrol image (already
+  # used by the deploy-vendor-e2e CI job). Generates its own self-signed
+  # cert at startup; listens on internal :443 (HTTPS, iControl REST) and
+  # :8080 (plaintext HTTP). The k6 f5_handshake scenario hits the
+  # /healthz endpoint.
+  # ---------------------------------------------------------------------------
+  f5-mock-target:
+    build: ../f5-mock-icontrol
+    container_name: certctl-loadtest-f5-mock
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 20
+      start_period: 15s
+
+  # ---------------------------------------------------------------------------
   # k6 driver. Pinned to a specific version so threshold expressions stay
   # stable across runs. --insecure-skip-tls-verify because the server cert is
   # self-signed; the load test isn't a TLS conformance test. The k6 process
@@ -149,10 +313,29 @@ services:
     depends_on:
       certctl-server:
         condition: service_healthy
+      # Bundle 10: wait for the four target sidecars to be healthy before
+      # firing the connector-tier scenarios. Saves the operator from
+      # spurious "connection refused" errors during the first ~15s of the
+      # run while target daemons are coming up.
+      nginx-target:
+        condition: service_healthy
+      apache-target:
+        condition: service_healthy
+      haproxy-target:
+        condition: service_healthy
+      f5-mock-target:
+        condition: service_healthy
     environment:
       CERTCTL_BASE: https://certctl-server:8443
       CERTCTL_TOKEN: load-test-token
       K6_INSECURE_SKIP_TLS_VERIFY: "true"
+      # Bundle 10: per-target sidecar URLs the connector-tier scenarios
+      # connect to. Internal docker-compose DNS — k6 resolves these via
+      # the default user network's resolver.
+      NGINX_TARGET_URL:   https://nginx-target:443
+      APACHE_TARGET_URL:  https://apache-target:443
+      HAPROXY_TARGET_URL: https://haproxy-target:443
+      F5_TARGET_URL:      https://f5-mock-target:443
     volumes:
       - ./k6.js:/scripts/k6.js:ro
       - ./results:/results

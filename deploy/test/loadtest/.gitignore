@@ -8,3 +8,7 @@ results/*
 # tls-init bind mount — server cert + key are regenerated on every
 # fresh run.
 certs/
+
+# Bundle 10: target-tls-init bind mount — target sidecar starter cert is
+# regenerated on every fresh run alongside the server cert.
+fixtures/target-certs/

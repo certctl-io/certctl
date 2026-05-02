@@ -155,6 +155,116 @@ The workflow does **not** run per-push. Load tests are minutes long
 and would not provide useful per-PR signal; per-push pressure goes
 through `make verify` (which is fast) and the deploy-vendor-e2e job.
 
+## Connector-tier baseline (Bundle 10 of the 2026-05-02 deployment-target audit)
+
+Bundle 10 extended the harness to cover per-target-type handshake throughput
+in addition to the API-tier issuance/list throughput documented above. The
+docker-compose stack now boots four target sidecars (nginx, apache, haproxy,
+f5-mock) each serving a starter cert from a shared `target-tls-init`
+container, and k6 runs four additional scenarios — `nginx_handshake`,
+`apache_handshake`, `haproxy_handshake`, `f5_handshake` — at sustained
+100 conns/min for 5 minutes against each.
+
+### What the connector tier measures
+
+End-to-end TCP connect + TLS handshake + tiny HTTP request/response latency
+per target type, tagged via the k6 `target_type` label so summary.json's
+`connector_tier` section breaks the numbers out per sidecar:
+
+```json
+{
+  "connector_tier": {
+    "nginx":   { "p50": ..., "p95": ..., "p99": ..., "error_rate": ..., "iterations": ... },
+    "apache":  { ... },
+    "haproxy": { ... },
+    "f5":      { ... }
+  }
+}
+```
+
+This validates the target sidecar daemons are operational under sustained
+connection load. Procurement asks "can certctl's nginx target handle 5,000
+endpoints at 47-day rotation?" — the connector code's correctness is pinned
+by per-connector unit tests; **the underlying daemon's connection-rate
+ceiling is what these scenarios pin**.
+
+### What the connector tier explicitly does NOT measure (v1)
+
+- **The full agent-driven deploy hot path.** v1 measures handshake
+  throughput against the sidecars directly. v2 of the harness is a
+  follow-up that POSTs cert requests bound to per-target-type targets,
+  polls the deployments endpoint until the agent reports complete, and
+  measures the full POST → poll → cert-served loop. v2 needs the agent
+  registration + target-binding API surface plumbed end-to-end in the
+  loadtest stack — meaningful work, but not a blocker for the connection-
+  rate procurement question.
+- **Kubernetes connector.** kind-in-docker requires `privileged: true`
+  and is operationally fragile in CI. Deferred until Bundle 2 (real
+  `k8s.io/client-go`) lands and a CI-friendly envtest harness is wired.
+- **Real F5 BIG-IP.** The harness uses the in-tree `f5-mock-icontrol`
+  Go server (already used by the deploy-vendor-e2e CI job). Real F5
+  appliance benchmarking is out of scope; operators with a real F5
+  vagrant box per `docs/connector-f5.md` can substitute it manually.
+
+### Threshold contract
+
+Defined in `k6.js`'s `thresholds` block. Any change pushing past these
+fails the test:
+
+| Target type | p95 | p99 | Error rate |
+|---|---|---|---|
+| `nginx`   | < 1 s   | < 3 s | < 1% (global) |
+| `apache`  | < 1 s   | < 3 s | < 1% (global) |
+| `haproxy` | < 1 s   | < 3 s | < 1% (global) |
+| `f5`      | < 1.5 s | < 5 s | < 1% (global) |
+
+f5-mock's threshold is looser because the iControl REST handler does
+slightly more work per request (login+upload+install dance the F5
+connector itself drives — not exercised here, but the daemon's request
+handler is heavier).
+
+### Connector-tier captured baseline
+
+| Target type | p50 | p95 | p99 | Error rate | Iterations |
+|---|---|---|---|---|---|
+| **nginx** (threshold)   | — | < 1 s   | < 3 s | < 1% | n/a |
+| **nginx** (baseline)    | TBD | TBD | TBD | TBD | TBD |
+| **apache** (threshold)  | — | < 1 s   | < 3 s | < 1% | n/a |
+| **apache** (baseline)   | TBD | TBD | TBD | TBD | TBD |
+| **haproxy** (threshold) | — | < 1 s   | < 3 s | < 1% | n/a |
+| **haproxy** (baseline)  | TBD | TBD | TBD | TBD | TBD |
+| **f5** (threshold)      | — | < 1.5 s | < 5 s | < 1% | n/a |
+| **f5** (baseline)       | TBD | TBD | TBD | TBD | TBD |
+
+The em-dash placeholders are deliberate: do **not** commit numeric values
+without running the loadtest on canonical hardware first. Numbers from a
+developer laptop are misleading. The first `gh workflow run loadtest.yml`
+on a clean GitHub runner captures the baseline; commit the captured numbers
+into the table above as a follow-up commit alongside the methodology line.
+
+**Methodology pinned at baseline capture (canonical hardware):**
+
+- Hardware: GitHub-hosted `ubuntu-latest` runners (currently 4 vCPU /
+  16 GiB / SSD-backed). Operator captures from `gh workflow run loadtest.yml`
+  to keep the hardware constant across runs.
+- Sidecar images: nginx:1.27-alpine, httpd:2.4-alpine, haproxy:2.9-alpine,
+  in-tree f5-mock-icontrol (built from `deploy/test/f5-mock-icontrol/`).
+- Concurrency: 100 conns/min sustained per target type (400 conns/min
+  total across the four target scenarios + 100 req/s on the API tier).
+- Duration: 5 minutes per scenario, 10s stagger between API tier and
+  connector tier so warmup overlap doesn't skew the first 30 seconds.
+- TLS: starter cert from `target-tls-init` (ECDSA P-256, multi-SAN). The
+  loadtest scenarios connect with `K6_INSECURE_SKIP_TLS_VERIFY=true`.
+
+To recapture the connector-tier baseline after a tuning commit affecting
+target sidecars or the connector code:
+
+```sh
+make loadtest
+# Inspect deploy/test/loadtest/results/summary.json for the
+# connector_tier object and update the table above.
+```
+
 ## Files in this directory
 
 ```
@@ -163,9 +273,15 @@ deploy/test/loadtest/
 ├── docker-compose.yml
 ├── k6.js             (the load script)
 ├── certs/            (gitignored — tls-init writes here)
+├── fixtures/         (Bundle 10: target sidecar configs + shared starter cert)
+│   ├── nginx.conf
+│   ├── httpd.conf
+│   ├── haproxy.cfg
+│   └── target-certs/ (gitignored — target-tls-init writes here)
 └── results/          (gitignored — k6 writes summary.{json,txt} here)
 ```
 
-## Audit reference
+## Audit references
 
-`cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` Top-10 fix #8.
+- API tier:       `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` fix #8.
+- Connector tier: `cowork/deployment-target-audit-2026-05-02/RESULTS.md` Bundle 10.

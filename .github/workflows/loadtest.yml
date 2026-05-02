@@ -37,11 +37,15 @@ jobs:
   k6:
     name: k6 throughput run
     runs-on: ubuntu-latest
-    # 15-minute hard cap. The harness itself is ~7 minutes (5m run +
-    # 2m for image build + healthcheck wait); the cap absorbs slow CI
+    # 25-minute hard cap. Pre-Bundle-10: 15min was enough for the API
+    # tier alone (~7 minutes total). Post-Bundle-10 the harness boots
+    # four additional target sidecars (nginx, apache, haproxy, f5-mock)
+    # before the k6 run; their healthchecks add ~30-60s. The k6 scenarios
+    # themselves are still 5 minutes (run in parallel with the API
+    # scenarios, not serially). 25 minutes absorbs that plus slow CI
     # runners and cold image caches without letting a stuck container
     # consume the runner indefinitely.
-    timeout-minutes: 15
+    timeout-minutes: 25
 
     steps:
       - name: Checkout
