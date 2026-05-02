@@ -2,26 +2,54 @@ Business Source License 1.1
 
 Parameters
 
-Licensor:             Shankar Reddy
+Licensor:             Shankar Kambam
 Licensed Work:        certctl
-                      The Licensed Work is (c) 2026 Shankar Reddy.
-Additional Use Grant: You may make use of the Licensed Work, provided that
-                      you may not use the Licensed Work for a Commercial
-                      Certificate Service. A "Commercial Certificate Service"
-                      is any product, service, or offering in which a third
-                      party (other than your employees and contractors
-                      acting on your behalf) accesses, uses, or benefits
-                      from the Licensed Work's certificate management
-                      functionality — including but not limited to lifecycle
-                      management, discovery, monitoring, alerting, renewal
-                      automation, deployment, and revocation — as part of
-                      or in connection with an offering for which
-                      compensation is received. This restriction applies
-                      regardless of whether the Licensed Work is hosted,
-                      managed, embedded, bundled, or integrated with
-                      another product or service.
+                      The Licensed Work is © 2026 Shankar Kambam.
 
-Change Date:          March 14, 2126
+Additional Use Grant: You may make use of the Licensed Work, including in
+                      production for your internal business operations and
+                      for operations that provide products or services to
+                      your own customers, provided that you may not offer
+                      the Licensed Work as a Commercial Certificate Service.
+
+                      A "Commercial Certificate Service" is a product or
+                      service whose principal value to a third party is the
+                      certificate management functionality of the Licensed
+                      Work — including but not limited to lifecycle
+                      management, discovery, monitoring, alerting, renewal
+                      automation, deployment, and revocation — where the
+                      third party accesses or controls that functionality
+                      and compensation is received for that access or
+                      control.
+
+                      For the avoidance of doubt:
+
+                      (a) you may run the Licensed Work in production to
+                          manage certificates for products or services
+                          that you offer to your customers, where the
+                          principal value of those products or services is
+                          something other than the Licensed Work's
+                          certificate management functionality (for
+                          example, you operate a banking application and
+                          use the Licensed Work internally to manage TLS
+                          certificates for that application);
+
+                      (b) for the purposes of this Additional Use Grant,
+                          "third party" excludes (i) your employees, (ii)
+                          your contractors acting on your behalf, and (iii)
+                          your Affiliates. "Affiliate" means any entity
+                          that controls, is controlled by, or is under
+                          common control with, you, where "control" means
+                          ownership of more than fifty percent (50%) of
+                          the voting interests of the entity;
+
+                      (c) the restriction on offering a Commercial
+                          Certificate Service applies regardless of whether
+                          the Licensed Work is hosted, managed, embedded,
+                          bundled, or integrated with another product or
+                          service.
+
+Change Date:          March 14, 2076
 
 Change License:       Apache License, Version 2.0
 
@@ -60,13 +88,47 @@ of the Licensed Work. If you receive the Licensed Work in original or
 modified form from a third party, the terms and conditions set forth in this
 License apply to your use of that work.
 
-Any use of the Licensed Work in violation of this License will automatically
-terminate your rights under this License for the current and all other
-versions of the Licensed Work.
+Patent non-assertion. During the term of this License, Licensor covenants
+not to assert any patent claim that Licensor controls against any person
+whose use of the Licensed Work complies with this License, with respect to
+the Licensed Work as distributed by Licensor. This covenant terminates with
+respect to any person who initiates a patent infringement action against
+the Licensor or against any contributor to the Licensed Work.
 
-This License does not grant you any right in any trademark or logo of
-Licensor or its affiliates (provided that you may use a trademark or logo of
-Licensor as expressly required by this License).
+Termination and reinstatement. Any use of the Licensed Work in violation of
+this License will automatically terminate your rights under this License
+for the current and all other versions of the Licensed Work. Your rights
+are reinstated automatically if you cease the violation and provide written
+notice to the Licensor at the contact address above within thirty (30) days
+of becoming aware of the violation. If you violate this License a second
+time after such reinstatement, your rights are not subject to further
+reinstatement.
+
+Contributions. The Licensor does not accept third-party contributions to
+the Licensed Work. Any code, documentation, or other material submitted to
+the Licensor or to any repository hosting the Licensed Work is provided at
+the submitter's sole risk, confers no rights or obligations on the
+Licensor, and is not incorporated into the Licensed Work.
+
+This License does not grant you any right in any trademark or logo of the
+Licensor or its Affiliates.
+
+Governing law and venue. This License shall be governed by and construed in
+accordance with the laws of the State of Florida, USA, without giving
+effect to any choice or conflict of law provision or rule. Any dispute
+arising from or relating to this License shall be brought exclusively in
+the state or federal courts located in the State of Florida, and the
+parties consent to the personal jurisdiction of such courts.
+
+Severability. If any provision of this License is held to be invalid,
+illegal, or unenforceable in any jurisdiction, that holding does not
+affect the validity, legality, or enforceability of any other provision of
+this License, which remains in full force and effect.
+
+Survival. The disclaimers of warranty, the patent non-assertion provisions
+(with respect to acts occurring before termination), the governing-law and
+venue provisions, and this survival provision survive any termination of
+this License.
 
 TO THE EXTENT PERMITTED BY APPLICABLE LAW, THE LICENSED WORK IS PROVIDED ON
 AN "AS IS" BASIS. LICENSOR HEREBY DISCLAIMS ALL WARRANTIES AND CONDITIONS,
