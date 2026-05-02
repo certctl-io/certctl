@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/base64"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log/slog"
@@ -242,5 +243,190 @@ func TestPostfix_DovecotMode(t *testing.T) {
 	}
 	if !strings.HasPrefix(res.DeploymentID, "dovecot-") {
 		t.Errorf("DeploymentID = %q", res.DeploymentID)
+	}
+}
+
+// --- Bundle 11: Mode=dovecot atomic-test variants ---
+//
+// The existing TestPostfix_DovecotMode (above) is a smoke test that
+// asserts the DeploymentID prefix only — it sets ReloadCommand and
+// ValidateCommand explicitly, so it doesn't pin applyDefaults's
+// dovecot-specific behavior. The two tests below close that gap:
+//
+//   1. TestPostfix_Atomic_DovecotMode_HappyPath: builds a Config with
+//      Mode="dovecot" and NO ValidateCommand / NO ReloadCommand set,
+//      runs ValidateConfig (which is what triggers applyDefaults),
+//      then asserts the deploy uses `doveconf -n` for validate and
+//      `doveadm reload` for reload — i.e. applyDefaults populated
+//      them AND DeployCertificate threaded them all the way to the
+//      runValidate / runReload hooks.
+//
+//   2. TestPostfix_Atomic_DovecotMode_VerifyFails_Rollback: pre-populates
+//      cert+key with known "ORIG" bytes, configures the post-deploy
+//      TLS verify probe to fail, and asserts the rollback restored
+//      the original bytes verbatim under Mode="dovecot". Mirrors the
+//      existing TestPostfix_VerifyMismatch_Rollback (which exercises
+//      Mode="postfix") but additionally pins the file-content
+//      restoration that the existing test doesn't.
+
+func TestPostfix_Atomic_DovecotMode_HappyPath(t *testing.T) {
+	dir := t.TempDir()
+
+	// Build the Config WITHOUT setting ValidateCommand / ReloadCommand.
+	// The whole point of this test is to assert applyDefaults populates
+	// them with the dovecot strings (`doveconf -n` / `doveadm reload`)
+	// — and that DeployCertificate then threads those captured values
+	// through to the test hooks.
+	cfgIn := postfix.Config{
+		Mode:     "dovecot",
+		CertPath: filepath.Join(dir, "cert.pem"),
+		KeyPath:  filepath.Join(dir, "key.pem"),
+		// NO ChainPath: empty path means the connector appends the
+		// chain to the cert (mail-server convention; preserved by
+		// applyDefaults's no-op for an unset ChainPath).
+	}
+	rawCfg, err := json.Marshal(cfgIn)
+	if err != nil {
+		t.Fatalf("marshal config: %v", err)
+	}
+
+	// Build an empty Config — ValidateConfig will overwrite the
+	// connector's internal config from the parsed-and-defaulted JSON.
+	c := postfix.New(&postfix.Config{}, quietLogger())
+
+	var capturedValidateCmd, capturedReloadCmd string
+	c.SetTestRunValidate(func(_ context.Context, cmd string) ([]byte, error) {
+		capturedValidateCmd = cmd
+		return nil, nil
+	})
+	c.SetTestRunReload(func(_ context.Context, cmd string) ([]byte, error) {
+		capturedReloadCmd = cmd
+		return nil, nil
+	})
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		return tlsprobe.ProbeResult{Success: true, Fingerprint: "x"}
+	})
+
+	// Trigger applyDefaults via ValidateConfig — that's what populates
+	// the dovecot-specific defaults onto cfgIn.
+	if err := c.ValidateConfig(context.Background(), rawCfg); err != nil {
+		t.Fatalf("ValidateConfig: %v", err)
+	}
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA,
+		KeyPEM:  keyA,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !res.Success {
+		t.Fatalf("expected success, got: %s", res.Message)
+	}
+
+	// applyDefaults must have populated the dovecot validate command
+	// AND DeployCertificate must have threaded it through to runValidate.
+	if capturedValidateCmd == "" {
+		t.Fatal("expected runValidate to be invoked (ValidateCommand should be populated by applyDefaults)")
+	}
+	if !strings.Contains(capturedValidateCmd, "doveconf -n") {
+		t.Errorf("expected validate command to contain 'doveconf -n', got: %q", capturedValidateCmd)
+	}
+
+	// Same contract for ReloadCommand → runReload.
+	if capturedReloadCmd == "" {
+		t.Fatal("expected runReload to be invoked (ReloadCommand should be populated by applyDefaults)")
+	}
+	if !strings.Contains(capturedReloadCmd, "doveadm reload") {
+		t.Errorf("expected reload command to contain 'doveadm reload', got: %q", capturedReloadCmd)
+	}
+
+	// DeploymentID prefix sanity (matches the smoke test's assertion +
+	// confirms Mode=dovecot survived through to the result message).
+	if !strings.HasPrefix(res.DeploymentID, "dovecot-") {
+		t.Errorf("expected DeploymentID prefix 'dovecot-', got: %q", res.DeploymentID)
+	}
+	if res.Metadata["mode"] != "dovecot" {
+		t.Errorf("expected metadata.mode='dovecot', got: %q", res.Metadata["mode"])
+	}
+}
+
+func TestPostfix_Atomic_DovecotMode_VerifyFails_Rollback(t *testing.T) {
+	dir := t.TempDir()
+	certPath := filepath.Join(dir, "cert.pem")
+	keyPath := filepath.Join(dir, "key.pem")
+
+	// Pre-populate cert AND key with known "ORIG" bytes so the rollback
+	// has something to restore to (vs. first-time deploy where rollback
+	// removes the new files instead). This is a Bundle-11 strengthening
+	// over the existing TestPostfix_VerifyMismatch_Rollback (Mode=postfix)
+	// which only pre-creates the cert.
+	const origCert = "-----BEGIN CERTIFICATE-----\nT1JJRy1DRVJU\n-----END CERTIFICATE-----\n"
+	const origKey = "-----BEGIN PRIVATE KEY-----\nT1JJRy1LRVk=\n-----END PRIVATE KEY-----\n"
+	if err := os.WriteFile(certPath, []byte(origCert), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(keyPath, []byte(origKey), 0600); err != nil {
+		t.Fatal(err)
+	}
+
+	// PostDeployVerifyAttempts=1 so the verify path fails fast (default
+	// is 3 attempts × 2s backoff = 4+ seconds; we don't need that for
+	// a unit test). Endpoint just needs to be non-empty so
+	// runPostDeployVerify takes the probe path rather than the
+	// "no endpoint configured; skipping" early-return.
+	c := newC(t, &postfix.Config{
+		Mode:                     "dovecot",
+		CertPath:                 certPath,
+		KeyPath:                  keyPath,
+		ReloadCommand:            "doveadm reload",
+		ValidateCommand:          "doveconf -n",
+		PostDeployVerifyAttempts: 1,
+		PostDeployVerify: &postfix.PostDeployVerifyConfig{
+			Enabled:  true,
+			Endpoint: "loadtest-target:993", // dovecot IMAPS — value unused by the test probe stub.
+			Timeout:  100 * time.Millisecond,
+		},
+	})
+
+	// Probe stub returns Success=false. runPostDeployVerify treats this
+	// as a verify failure → DeployCertificate calls rollbackToBackups.
+	c.SetTestProbe(func(_ context.Context, _ string, _ time.Duration) tlsprobe.ProbeResult {
+		return tlsprobe.ProbeResult{Success: false, Error: "tls handshake failed"}
+	})
+
+	res, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certA,
+		KeyPEM:  keyA,
+	})
+	if err == nil {
+		t.Fatal("expected verify-failure error")
+	}
+	if res != nil && res.Success {
+		t.Fatal("expected Success=false on verify-failure")
+	}
+	// runPostDeployVerify wraps the probe failure as "TLS probe failed:
+	// <error>"; assert that surfaces in the returned error so operators
+	// see what failed instead of a generic "deploy failed" message.
+	if !strings.Contains(err.Error(), "TLS probe failed") {
+		t.Errorf("expected error to mention TLS probe failure, got: %v", err)
+	}
+
+	// Rollback must have restored the ORIGINAL cert + key bytes verbatim.
+	// This is the load-bearing assertion Bundle 11 adds over the existing
+	// Mode=postfix variant.
+	gotCert, err := os.ReadFile(certPath)
+	if err != nil {
+		t.Fatalf("read cert after rollback: %v", err)
+	}
+	if string(gotCert) != origCert {
+		t.Errorf("rollback did not restore original cert bytes:\n  got:  %q\n  want: %q", gotCert, origCert)
+	}
+	gotKey, err := os.ReadFile(keyPath)
+	if err != nil {
+		t.Fatalf("read key after rollback: %v", err)
+	}
+	if string(gotKey) != origKey {
+		t.Errorf("rollback did not restore original key bytes:\n  got:  %q\n  want: %q", gotKey, origKey)
 	}
 }
