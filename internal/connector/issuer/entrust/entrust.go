@@ -35,6 +35,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/shankar0123/certctl/internal/connector/issuer/mtlscache"
 )
 
 // Config represents the Entrust Certificate Services issuer connector configuration.
@@ -85,6 +86,13 @@ type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	httpClient *http.Client
+
+	// mtls caches the parsed client keypair + a precomputed
+	// *http.Transport so steady-state API calls don't re-parse
+	// the keypair on every request. nil in test mode
+	// (NewWithHTTPClient) and on the first ValidateConfig call.
+	// Audit fix #10.
+	mtls *mtlscache.Cache
 }
 
 // New creates a new Entrust Certificate Services connector with the given configuration and logger.
@@ -210,6 +218,47 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	return nil
 }
 
+// getHTTPClient returns the HTTP client to use for an Entrust API
+// call. If a test injected a custom client via NewWithHTTPClient (or
+// ValidateConfig pre-built one with its own transport), that client
+// is returned as-is — the cache layer must not intercept the test
+// path. Otherwise a cached mTLS client is returned, refreshing the
+// keypair from disk if the cert file's mtime has advanced since the
+// last load — rotation-via-mv-f takes effect on the next call without
+// a process restart. Audit fix #10.
+func (c *Connector) getHTTPClient(ctx context.Context) (*http.Client, error) {
+	// Test mode: NewWithHTTPClient + custom transport, OR a
+	// ValidateConfig-built client. Either way, the caller has
+	// already wired the transport they want; don't override.
+	if c.httpClient != nil && c.httpClient.Transport != nil {
+		return c.httpClient, nil
+	}
+
+	if c.config == nil || c.config.ClientCertPath == "" || c.config.ClientKeyPath == "" {
+		// Cert paths not configured — return whatever was supplied
+		// at construction (typically the bare default-timeout
+		// client from New).
+		return c.httpClient, nil
+	}
+
+	// Production mode: lazy-build the cache on the first call so
+	// the constructor stays cheap (no disk I/O). Subsequent calls
+	// take the fast path through the cache's RWMutex.
+	if c.mtls == nil {
+		cache, err := mtlscache.New(c.config.ClientCertPath, c.config.ClientKeyPath, mtlscache.Options{
+			HTTPTimeout: 30 * time.Second,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to build Entrust mTLS cache: %w", err)
+		}
+		c.mtls = cache
+	} else if err := c.mtls.RefreshIfStale(); err != nil {
+		return nil, fmt.Errorf("failed to refresh Entrust mTLS cache: %w", err)
+	}
+
+	return c.mtls.Client(), nil
+}
+
 // IssueCertificate submits a certificate enrollment to Entrust.
 // If the certificate is issued immediately, returns the cert.
 // If pending, returns OrderID with empty CertPEM for polling.
@@ -248,7 +297,11 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient(ctx)
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("Entrust enrollment request failed: %w", err)
 	}
@@ -341,7 +394,11 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	}
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient(ctx)
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("Entrust revoke request failed: %w", err)
 	}
@@ -417,7 +474,11 @@ func (c *Connector) pollEnrollmentOnce(ctx context.Context, orderID string) (*is
 		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient(ctx)
+	if err != nil {
+		return nil, asyncpoll.Failed, fmt.Errorf("Entrust status client init: %w", err)
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, asyncpoll.StillPending, fmt.Errorf("Entrust status request failed: %w", err)
 	}

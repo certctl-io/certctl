@@ -40,6 +40,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/shankar0123/certctl/internal/connector/issuer/mtlscache"
 	"github.com/shankar0123/certctl/internal/secret"
 )
 
@@ -105,6 +106,14 @@ type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	httpClient *http.Client
+
+	// mtls caches the parsed client keypair + a precomputed
+	// *http.Transport so steady-state API calls don't re-parse the
+	// keypair on every request. Audit fix #10. nil in test mode
+	// (NewWithHTTPClient) and on the first ValidateConfig call
+	// before the cache is wired; getHTTPClient falls through to
+	// httpClient when nil so test paths keep their behaviour.
+	mtls *mtlscache.Cache
 }
 
 // New creates a new GlobalSign Atlas HVCA connector with the given configuration and logger.
@@ -236,36 +245,52 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 
 // getHTTPClient returns the HTTP client to use, creating one with mTLS if needed.
 // If the connector was created with NewWithHTTPClient (test mode), uses that client directly.
-// Otherwise, creates a fresh mTLS client with the configured certificate.
+// Otherwise, returns the cached mTLS client (audit fix #10), refreshing it
+// from disk if the cert file's mtime has advanced since the last load —
+// rotation-via-mv-f takes effect on the next call without a process restart.
 func (c *Connector) getHTTPClient(ctx context.Context) (*http.Client, error) {
-	// Check if we're in test mode (httpClient was explicitly provided and has non-nil transport)
+	// Test mode: NewWithHTTPClient supplied a pre-built client with a
+	// non-nil Transport. The cache layer must NOT intercept this
+	// branch — tests need their httptest-backed transport, not an
+	// mTLS one against a (probably non-existent) cert file.
 	if c.httpClient != nil && c.httpClient.Transport != nil {
 		return c.httpClient, nil
 	}
 
-	// For tests with default client (nil or minimal), check if cert paths are available
+	// Test mode 2: bare default client + no cert paths configured.
+	// Same rationale — return what the caller supplied as-is.
 	if c.config.ClientCertPath == "" || c.config.ClientKeyPath == "" {
-		// Test mode: use httpClient as-is (won't load certs)
 		return c.httpClient, nil
 	}
 
-	// Production mode: load mTLS certificate
-	cert, err := tls.LoadX509KeyPair(c.config.ClientCertPath, c.config.ClientKeyPath)
-	if err != nil {
-		return nil, fmt.Errorf("failed to load GlobalSign client certificate: %w", err)
+	// Production mode: lazy-build the cache on the first call so the
+	// constructor stays cheap (no disk I/O). Subsequent calls take
+	// the fast path through the cache's RWMutex.
+	if c.mtls == nil {
+		// Capture the config pointer so the TLSConfigBuilder closure
+		// reads the current ServerCAPath. The cache itself owns the
+		// rebuild on rotation.
+		cfg := c.config
+		cache, err := mtlscache.New(c.config.ClientCertPath, c.config.ClientKeyPath, mtlscache.Options{
+			TLSConfigBuilder: func(cert tls.Certificate) (*tls.Config, error) {
+				return buildServerTLSConfig(cfg, cert)
+			},
+			HTTPTimeout: 30 * time.Second,
+		})
+		if err != nil {
+			return nil, fmt.Errorf("failed to load GlobalSign client certificate (mTLS cache build): %w", err)
+		}
+		c.mtls = cache
+	} else if err := c.mtls.RefreshIfStale(); err != nil {
+		// stat / parse failure on rotation should bubble up — a
+		// missing cert file is a real outage signal. The cache
+		// keeps serving the previous keypair on parse error
+		// because reload only commits on success, but stat error
+		// is surfaced to the caller.
+		return nil, fmt.Errorf("failed to refresh GlobalSign mTLS cache: %w", err)
 	}
 
-	tlsConfig, err := buildServerTLSConfig(c.config, cert)
-	if err != nil {
-		return nil, fmt.Errorf("failed to build GlobalSign TLS config: %w", err)
-	}
-
-	return &http.Client{
-		Transport: &http.Transport{
-			TLSClientConfig: tlsConfig,
-		},
-		Timeout: 30 * time.Second,
-	}, nil
+	return c.mtls.Client(), nil
 }
 
 // setAuthHeaders writes the GlobalSign double-auth headers (ApiKey,

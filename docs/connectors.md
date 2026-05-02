@@ -584,7 +584,9 @@ Entrust CA Gateway REST API with mutual TLS (mTLS) client certificate authentica
 
 **Note:** CRL and OCSP are managed by Entrust. certctl records revocations locally and notifies Entrust via `PUT /v1/certificate-authorities/{caId}/certificates/{serial}/revoke`.
 
-Location: `internal/connector/issuer/entrust/entrust.go`
+**mTLS keypair caching (audit fix #10):** The parsed client certificate plus a precomputed `*http.Transport` are cached on the connector after the first API call. Steady-state calls reuse the cached transport — no per-call disk read or `tls.X509KeyPair` parse. Rotation is picked up automatically via mtime polling: when the cert file's mtime advances beyond the last-loaded value, the next API call re-parses and rebuilds the transport. Operator workflow: `mv -f new.crt /etc/certctl/entrust/client.crt` (mtime changes), no process restart required, takes effect on the next API call. `os.Stat` errors during rotation surface as connector errors rather than silently serving stale credentials.
+
+Location: `internal/connector/issuer/entrust/entrust.go` (cache shared at `internal/connector/issuer/mtlscache/`).
 
 ### Built-in: GlobalSign Atlas HVCA
 
@@ -608,7 +610,9 @@ GlobalSign Atlas High Volume CA REST API with dual authentication: mTLS for the 
 
 **Note:** CRL and OCSP are managed by GlobalSign. certctl records revocations locally and notifies GlobalSign via `PUT /v2/certificates/{serial}/revoke`.
 
-Location: `internal/connector/issuer/globalsign/globalsign.go`
+**mTLS keypair caching (audit fix #10):** The parsed client certificate plus a precomputed `*http.Transport` (with `ServerCAPath` pinning preserved when configured) are cached on the connector after the first API call. Steady-state calls reuse the cached transport — no per-call disk read or `tls.X509KeyPair` parse. Rotation is picked up automatically via mtime polling: when the cert file's mtime advances beyond the last-loaded value, the next API call re-parses and rebuilds the transport. Operator workflow: `mv -f new.crt /etc/certctl/globalsign/client.crt` (mtime changes), no process restart required, takes effect on the next API call. `os.Stat` errors during rotation surface as connector errors rather than silently serving stale credentials.
+
+Location: `internal/connector/issuer/globalsign/globalsign.go` (cache shared at `internal/connector/issuer/mtlscache/`).
 
 ### Built-in: EJBCA (Keyfactor)
 
