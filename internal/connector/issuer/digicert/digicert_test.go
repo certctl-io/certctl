@@ -289,9 +289,10 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
-			OrgID:   "12345",
-			BaseURL: srv.URL,
+			APIKey:             "dc-test-key",
+			OrgID:              "12345",
+			BaseURL:            srv.URL,
+			PollMaxWaitSeconds: 1, // keep async-pending tests fast
 		}
 		connector := digicert.New(config, logger)
 

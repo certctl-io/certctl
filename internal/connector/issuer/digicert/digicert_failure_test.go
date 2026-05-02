@@ -19,7 +19,11 @@ import (
 func buildDigicertConnector(t *testing.T, baseURL string) *digicert.Connector {
 	t.Helper()
 	c := digicert.New(nil, slog.Default())
-	cfg := digicert.Config{APIKey: "k", OrgID: "1", ProductType: "ssl_basic", BaseURL: baseURL}
+	// PollMaxWaitSeconds=1 keeps async-pending tests fast — pending
+	// status returns within ~1s instead of the 10-minute production
+	// default. Tests that exercise issued/failed/parse-error paths
+	// don't block on the wait.
+	cfg := digicert.Config{APIKey: "k", OrgID: "1", ProductType: "ssl_basic", BaseURL: baseURL, PollMaxWaitSeconds: 1}
 	raw, _ := json.Marshal(cfg)
 	if err := c.ValidateConfig(context.Background(), raw); err != nil {
 		t.Fatalf("ValidateConfig: %v", err)

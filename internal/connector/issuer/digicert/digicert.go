@@ -38,6 +38,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
 )
 
 // Config represents the DigiCert CertCentral issuer connector configuration.
@@ -59,6 +60,25 @@ type Config struct {
 	// Default: "https://www.digicert.com/services/v2".
 	// Set via CERTCTL_DIGICERT_BASE_URL environment variable.
 	BaseURL string `json:"base_url"`
+
+	// PollMaxWaitSeconds caps how long GetOrderStatus blocks doing
+	// internal exponential-backoff polling before returning
+	// StillPending to the caller. Default 600 (10 minutes); 0 falls
+	// back to the asyncpoll package default. Bound only on the
+	// per-call wall-clock; the caller (scheduler) can re-invoke on
+	// the next tick if its policy allows.
+	//
+	// Set via CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS. Audit fix #5.
+	PollMaxWaitSeconds int `json:"poll_max_wait_seconds,omitempty"`
+}
+
+// pollMaxWait returns the configured PollMaxWait as a time.Duration,
+// or the asyncpoll package default if unset.
+func (c *Config) pollMaxWait() time.Duration {
+	if c.PollMaxWaitSeconds <= 0 {
+		return asyncpoll.DefaultMaxWait
+	}
+	return time.Duration(c.PollMaxWaitSeconds) * time.Second
 }
 
 // Connector implements the issuer.Connector interface for DigiCert CertCentral.
@@ -328,57 +348,124 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	return nil
 }
 
-// GetOrderStatus checks the status of a DigiCert certificate order.
-// If the order is "issued", downloads the certificate and returns it.
-// If still "pending", returns pending status for continued polling.
+// GetOrderStatus checks the status of a DigiCert certificate order
+// using bounded internal polling (asyncpoll.Poll). One call blocks
+// for up to PollMaxWait (default 10m) doing exponential backoff;
+// returns Done with the cert, Failed with the rejection reason, or
+// StillPending if the deadline expires (caller can re-invoke).
+//
+// Audit fix #5: previously this method made one HTTP call per
+// scheduler tick. Under load that pile-drives the upstream rate
+// limit. asyncpoll wraps the one-shot logic with backoff + jitter.
 func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer.OrderStatus, error) {
 	c.logger.Debug("checking DigiCert order status", "order_id", orderID)
 
+	// Closure-scoped accumulators — Poll passes back only the Result;
+	// the cert / pending message land here for the wrapper to return.
+	var done *issuer.OrderStatus
+	var lastPendingMsg string
+
+	cfg := asyncpoll.Config{MaxWait: c.config.pollMaxWait()}
+
+	res, err := asyncpoll.Poll(ctx, cfg, func(ctx context.Context) (asyncpoll.Result, error) {
+		status, result, pollErr := c.pollOrderOnce(ctx, orderID)
+		if status != nil {
+			switch result {
+			case asyncpoll.Done:
+				done = status
+			case asyncpoll.StillPending:
+				if status.Message != nil {
+					lastPendingMsg = *status.Message
+				}
+			}
+		}
+		return result, pollErr
+	})
+
+	now := time.Now()
+	switch res {
+	case asyncpoll.Done:
+		return done, nil
+	case asyncpoll.Failed:
+		// Permanent failure — surface the upstream's error to the
+		// caller so handler middleware / scheduler can mark the job
+		// failed with the actual reason.
+		return nil, err
+	default: // StillPending — MaxWait or ctx cancel
+		msg := lastPendingMsg
+		if msg == "" {
+			msg = fmt.Sprintf("order %s still pending after PollMaxWait", orderID)
+		}
+		return &issuer.OrderStatus{
+			OrderID:   orderID,
+			Status:    "pending",
+			Message:   &msg,
+			UpdatedAt: now,
+		}, nil
+	}
+}
+
+// pollOrderOnce makes one HTTP GET against the DigiCert order-status
+// endpoint and translates the response into an asyncpoll.Result plus
+// (when applicable) a populated OrderStatus. Used by GetOrderStatus
+// as the per-iteration closure for asyncpoll.Poll.
+func (c *Connector) pollOrderOnce(ctx context.Context, orderID string) (*issuer.OrderStatus, asyncpoll.Result, error) {
 	statusURL := fmt.Sprintf("%s/order/certificate/%s", c.config.BaseURL, orderID)
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, statusURL, nil)
 	if err != nil {
-		return nil, fmt.Errorf("failed to create status request: %w", err)
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
 	req.Header.Set("X-DC-DEVKEY", c.config.APIKey)
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
-		return nil, fmt.Errorf("DigiCert status request failed: %w", err)
+		// Transient network error — keep polling. Caller's MaxWait
+		// will eventually fire if it persists.
+		return nil, asyncpoll.StillPending, fmt.Errorf("DigiCert status request failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	respBody, err := io.ReadAll(resp.Body)
 	if err != nil {
-		return nil, fmt.Errorf("failed to read status response: %w", err)
+		return nil, asyncpoll.StillPending, fmt.Errorf("failed to read status response: %w", err)
 	}
 
+	// Status-code triage:
+	//   2xx          → fall through to body parse below.
+	//   429          → StillPending (rate limited; retry with backoff).
+	//   5xx          → StillPending (upstream unhealthy; transient).
+	//   other 4xx    → Failed (permanent client error: 400 bad
+	//                  request, 401 auth, 403 forbidden, 404 order
+	//                  doesn't exist). No amount of polling fixes
+	//                  these.
 	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("DigiCert order status returned %d: %s", resp.StatusCode, string(respBody))
+		err := fmt.Errorf("DigiCert order status returned %d: %s", resp.StatusCode, string(respBody))
+		if resp.StatusCode == http.StatusTooManyRequests || resp.StatusCode >= 500 {
+			return nil, asyncpoll.StillPending, err
+		}
+		return nil, asyncpoll.Failed, err
 	}
 
 	var statusResp orderStatusResponse
 	if err := json.Unmarshal(respBody, &statusResp); err != nil {
-		return nil, fmt.Errorf("failed to parse status response: %w", err)
+		// Parse errors are permanent — the upstream's response shape
+		// changed or the body is corrupted. Retrying produces the
+		// same parse error.
+		return nil, asyncpoll.Failed, fmt.Errorf("failed to parse status response: %w", err)
 	}
 
 	now := time.Now()
-
 	switch statusResp.Status {
 	case "issued":
 		if statusResp.Certificate.ID == 0 {
-			return nil, fmt.Errorf("order is issued but certificate_id is missing")
+			return nil, asyncpoll.Failed, fmt.Errorf("order is issued but certificate_id is missing")
 		}
-
 		certPEM, chainPEM, serial, notBefore, notAfter, err := c.downloadCertificate(ctx, statusResp.Certificate.ID)
 		if err != nil {
-			return nil, fmt.Errorf("failed to download certificate: %w", err)
+			return nil, asyncpoll.Failed, fmt.Errorf("failed to download certificate: %w", err)
 		}
-
-		c.logger.Info("DigiCert order completed",
-			"order_id", orderID,
-			"serial", serial)
-
+		c.logger.Info("DigiCert order completed", "order_id", orderID, "serial", serial)
 		return &issuer.OrderStatus{
 			OrderID:   orderID,
 			Status:    "completed",
@@ -388,7 +475,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			NotBefore: &notBefore,
 			NotAfter:  &notAfter,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	case "pending", "processing":
 		msg := fmt.Sprintf("order %s is %s", orderID, statusResp.Status)
@@ -397,16 +484,20 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 
 	case "rejected", "denied":
+		// Completed-with-negative-answer. NOT a transient failure
+		// (the order won't un-reject itself), but also not a
+		// caller-facing Go error — wrap in OrderStatus{Status:"failed"}
+		// so the scheduler sees a definitive completion.
 		msg := fmt.Sprintf("order %s was %s", orderID, statusResp.Status)
 		return &issuer.OrderStatus{
 			OrderID:   orderID,
 			Status:    "failed",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.Done, nil
 
 	default:
 		msg := fmt.Sprintf("unknown order status: %s", statusResp.Status)
@@ -415,7 +506,7 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 			Status:    "pending",
 			Message:   &msg,
 			UpdatedAt: now,
-		}, nil
+		}, asyncpoll.StillPending, nil
 	}
 }
 
