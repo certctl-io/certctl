@@ -197,10 +197,12 @@ func TestDeployCertificate_Success(t *testing.T) {
 		t.Fatalf("generate cert: %v", err)
 	}
 
-	// Bundle 7: success path runs 3 PowerShell scripts in order:
-	// snapshot → import → cleanup. Seed responses for each.
+	// Bundle 10: idempotency probe runs first (returns IDEM_MISS by default),
+	// then Bundle 7: success path runs 3 PowerShell scripts in order:
+	// probe → snapshot → import → cleanup. Seed responses for each.
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"TEMPDIR:/tmp/certctl-snapshot-abc",
 			"SUCCESS:AABBCCDD",
 			"CLEANUP_OK",
@@ -228,22 +230,131 @@ func TestDeployCertificate_Success(t *testing.T) {
 		t.Errorf("expected store_name metadata 'My', got: %s", result.Metadata["store_name"])
 	}
 
-	// Bundle 7: 3 scripts on success path (snapshot + import + cleanup).
-	if len(mock.scripts) != 3 {
-		t.Fatalf("expected 3 script calls (snapshot + import + cleanup), got %d", len(mock.scripts))
+	// Bundle 10: 4 scripts on success path (probe + snapshot + import + cleanup).
+	if len(mock.scripts) != 4 {
+		t.Fatalf("expected 4 script calls (probe + snapshot + import + cleanup), got %d", len(mock.scripts))
 	}
-	if !strings.Contains(mock.scripts[0], "# CERTCTL_SNAPSHOT") {
-		t.Errorf("expected # CERTCTL_SNAPSHOT in first script, got: %s", mock.scripts[0])
+	if !strings.Contains(mock.scripts[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected # CERTCTL_IDEM_PROBE in first script, got: %s", mock.scripts[0])
 	}
-	importScript := mock.scripts[1]
+	if !strings.Contains(mock.scripts[1], "# CERTCTL_SNAPSHOT") {
+		t.Errorf("expected # CERTCTL_SNAPSHOT in second script, got: %s", mock.scripts[1])
+	}
+	importScript := mock.scripts[2]
 	if !strings.Contains(importScript, "Import-PfxCertificate") {
-		t.Error("expected Import-PfxCertificate in second script")
+		t.Error("expected Import-PfxCertificate in third script")
 	}
 	if !strings.Contains(importScript, "Cert:\\LocalMachine\\My") {
-		t.Error("expected correct cert store path in second script")
+		t.Error("expected correct cert store path in third script")
 	}
-	if !strings.Contains(mock.scripts[2], "# CERTCTL_CLEANUP") {
-		t.Errorf("expected # CERTCTL_CLEANUP in third script, got: %s", mock.scripts[2])
+	if !strings.Contains(mock.scripts[3], "# CERTCTL_CLEANUP") {
+		t.Errorf("expected # CERTCTL_CLEANUP in fourth script, got: %s", mock.scripts[3])
+	}
+}
+
+func TestWinCertStore_Idempotent_SkipsImportWhenCertInStore(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+
+	// Probe returns IDEM_MATCH
+	mock := &mockExecutor{
+		responses: []string{"IDEM_MATCH"},
+	}
+	c := NewWithExecutor(&Config{
+		StoreName:     "My",
+		StoreLocation: "LocalMachine",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// Verify idempotent flag is set
+	if result.Metadata["idempotent"] != "true" {
+		t.Errorf("expected idempotent=true, got %s", result.Metadata["idempotent"])
+	}
+
+	// Only the probe should have run (1 script call)
+	if len(mock.scripts) != 1 {
+		t.Errorf("expected 1 script call (probe only), got %d", len(mock.scripts))
+	}
+	if !strings.Contains(mock.scripts[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected probe script, got: %s", mock.scripts[0])
+	}
+
+	// Verify no Import-PfxCertificate call
+	for i, script := range mock.scripts {
+		if strings.Contains(script, "Import-PfxCertificate") {
+			t.Errorf("script %d should not contain Import-PfxCertificate (idempotent short-circuit): %s", i, script)
+		}
+	}
+}
+
+func TestWinCertStore_Idempotent_NotInStore_FallsThroughToDeploy(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+
+	// Probe returns IDEM_MISS, then standard snapshot + import + cleanup responses
+	mock := &mockExecutor{
+		responses: []string{
+			"IDEM_MISS",
+			"TEMPDIR:/tmp/certctl-snapshot-def",
+			"SUCCESS:DDEEFFGG",
+			"CLEANUP_OK",
+		},
+	}
+	c := NewWithExecutor(&Config{
+		StoreName:     "My",
+		StoreLocation: "LocalMachine",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// Verify idempotent flag is NOT set
+	if result.Metadata["idempotent"] != "" {
+		t.Errorf("expected no idempotent flag, got %s", result.Metadata["idempotent"])
+	}
+
+	// Full flow: probe + snapshot + import + cleanup = 4 scripts
+	if len(mock.scripts) != 4 {
+		t.Errorf("expected 4 script calls (probe, snapshot, import, cleanup), got %d", len(mock.scripts))
+	}
+
+	// Verify probe ran first
+	if !strings.Contains(mock.scripts[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected probe as first script, got: %s", mock.scripts[0])
+	}
+
+	// Verify import happened
+	hasImport := false
+	for _, script := range mock.scripts {
+		if strings.Contains(script, "Import-PfxCertificate") {
+			hasImport = true
+			break
+		}
+	}
+	if !hasImport {
+		t.Error("expected Import-PfxCertificate in scripts")
 	}
 }
 
@@ -279,16 +390,18 @@ func TestDeployCertificate_ImportFailed(t *testing.T) {
 		t.Fatalf("generate cert: %v", err)
 	}
 
-	// Bundle 7: snapshot returns empty (no thumbprints in store) → import
-	// fails → rollback runs (and succeeds since snapshot was empty, only
-	// removes the new cert if it landed). Mock seeds 3 responses.
+	// Bundle 10 / Top-10 fix #3 idempotency probe runs first → IDEM_MISS,
+	// fall through. Bundle 7: snapshot returns empty → import fails →
+	// rollback runs (and succeeds since snapshot was empty, only removes
+	// the new cert if it landed).
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"TEMPDIR:/tmp/certctl-snapshot-xyz",
 			"Access denied",
 			"ROLLBACK_OK",
 		},
-		errors: []error{nil, fmt.Errorf("exit code 1"), nil},
+		errors: []error{nil, nil, fmt.Errorf("exit code 1"), nil},
 	}
 	c := NewWithExecutor(&Config{}, testLogger(), mock)
 
@@ -314,6 +427,7 @@ func TestDeployCertificate_WithFriendlyName(t *testing.T) {
 
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"TEMPDIR:/tmp/certctl-snapshot-fn",
 			"SUCCESS:AABB",
 			"CLEANUP_OK",
@@ -331,11 +445,11 @@ func TestDeployCertificate_WithFriendlyName(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deploy failed: %v", err)
 	}
-	// Bundle 7: import script is now mock.scripts[1] (snapshot is [0]).
-	if len(mock.scripts) < 2 {
-		t.Fatalf("expected at least 2 scripts (snapshot + import), got %d", len(mock.scripts))
+	// Bundle 10: probe at [0], snapshot at [1], import at [2].
+	if len(mock.scripts) < 3 {
+		t.Fatalf("expected at least 3 scripts (probe + snapshot + import), got %d", len(mock.scripts))
 	}
-	if !strings.Contains(mock.scripts[1], "FriendlyName") {
+	if !strings.Contains(mock.scripts[2], "FriendlyName") {
 		t.Error("expected FriendlyName in import script")
 	}
 }
@@ -348,6 +462,7 @@ func TestDeployCertificate_WithRemoveExpired(t *testing.T) {
 
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"TEMPDIR:/tmp/certctl-snapshot-re",
 			"SUCCESS:AABB",
 			"CLEANUP_OK",
@@ -365,11 +480,11 @@ func TestDeployCertificate_WithRemoveExpired(t *testing.T) {
 	if err != nil {
 		t.Fatalf("deploy failed: %v", err)
 	}
-	// Bundle 7: import script is mock.scripts[1].
-	if len(mock.scripts) < 2 {
-		t.Fatalf("expected at least 2 scripts (snapshot + import), got %d", len(mock.scripts))
+	// Bundle 10: probe at [0], snapshot at [1], import at [2].
+	if len(mock.scripts) < 3 {
+		t.Fatalf("expected at least 3 scripts (probe + snapshot + import), got %d", len(mock.scripts))
 	}
-	if !strings.Contains(mock.scripts[1], "Remove-Item") {
+	if !strings.Contains(mock.scripts[2], "Remove-Item") {
 		t.Error("expected Remove-Item for expired cert cleanup in import script")
 	}
 }
@@ -392,16 +507,17 @@ func TestWinCertStore_ImportFails_RemovesNewCert_RestoresOldFromSnapshot(t *test
 		t.Fatalf("generate cert: %v", err)
 	}
 
-	// Snapshot finds one same-Subject cert and exports it.
-	// Import fails. Rollback succeeds. Verify confirms.
+	// Probe → IDEM_MISS, fall through. Snapshot finds one same-Subject
+	// cert and exports it. Import fails. Rollback succeeds. Verify confirms.
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"SNAPSHOT:OLDTHUMB123:/tmp/certctl-snapshot-abc/OLDTHUMB123.pfx\nTEMPDIR:/tmp/certctl-snapshot-abc",
 			"PFX import error",
 			"ROLLBACK_OK",
 			"VERIFY_OK",
 		},
-		errors: []error{nil, fmt.Errorf("exit code 1"), nil, nil},
+		errors: []error{nil, nil, fmt.Errorf("exit code 1"), nil, nil},
 	}
 	c := NewWithExecutor(&Config{
 		StoreName:     "My",
@@ -428,9 +544,9 @@ func TestWinCertStore_ImportFails_RemovesNewCert_RestoresOldFromSnapshot(t *test
 		t.Errorf("expected error to mention 'rolled back', got: %v", err)
 	}
 
-	// 4 scripts: snapshot + import + rollback + verify.
-	if len(mock.scripts) != 4 {
-		t.Fatalf("expected 4 scripts (snapshot + import + rollback + verify), got %d", len(mock.scripts))
+	// 5 scripts: probe + snapshot + import + rollback + verify.
+	if len(mock.scripts) != 5 {
+		t.Fatalf("expected 5 scripts (probe + snapshot + import + rollback + verify), got %d", len(mock.scripts))
 	}
 
 	// Locate the rollback script and assert it contains BOTH a Remove-Item
@@ -467,17 +583,19 @@ func TestWinCertStore_ImportFails_NoExistingSameSubject_RemovesNewCertOnly(t *te
 		t.Fatalf("generate cert: %v", err)
 	}
 
-	// Snapshot returns THUMB lines (different-Subject certs in store) but
-	// NO SNAPSHOT lines — no same-Subject cert was exported. Rollback
-	// removes the new cert but does NOT call Import-PfxCertificate.
+	// Probe → IDEM_MISS, fall through. Snapshot returns THUMB lines
+	// (different-Subject certs in store) but NO SNAPSHOT lines — no
+	// same-Subject cert was exported. Rollback removes the new cert but
+	// does NOT call Import-PfxCertificate.
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"THUMB:UNRELATED1\nTHUMB:UNRELATED2\nTEMPDIR:/tmp/certctl-snapshot-noss",
 			"PFX import error",
 			"ROLLBACK_OK",
 			"VERIFY_OK",
 		},
-		errors: []error{nil, fmt.Errorf("exit code 1"), nil, nil},
+		errors: []error{nil, nil, fmt.Errorf("exit code 1"), nil, nil},
 	}
 	c := NewWithExecutor(&Config{
 		StoreName:     "My",
@@ -524,12 +642,13 @@ func TestWinCertStore_FriendlyNameFails_NewCertRemoved_OldCertsRestored(t *testi
 	// failed (FriendlyName, Get-ChildItem verify, RemoveExpired).
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"SNAPSHOT:OLDTHUMB456:/tmp/certctl-snapshot-fn/OLDTHUMB456.pfx\nTEMPDIR:/tmp/certctl-snapshot-fn",
 			"Cannot set FriendlyName: invalid character in friendly name",
 			"ROLLBACK_OK",
 			"VERIFY_OK",
 		},
-		errors: []error{nil, fmt.Errorf("Set-ItemProperty failed"), nil, nil},
+		errors: []error{nil, nil, fmt.Errorf("Set-ItemProperty failed"), nil, nil},
 	}
 	c := NewWithExecutor(&Config{
 		StoreName:     "My",
@@ -581,16 +700,18 @@ func TestWinCertStore_ImportFails_RollbackAlsoFails_OperatorActionable(t *testin
 		t.Fatalf("generate cert: %v", err)
 	}
 
-	// Snapshot succeeds; import fails; rollback ALSO fails. Operator-
-	// actionable case: both errors must be surfaced + metadata flags
-	// manual_action_required.
+	// Probe → IDEM_MISS, fall through. Snapshot succeeds; import fails;
+	// rollback ALSO fails. Operator-actionable case: both errors must be
+	// surfaced + metadata flags manual_action_required.
 	mock := &mockExecutor{
 		responses: []string{
+			"IDEM_MISS",
 			"SNAPSHOT:OLDTHUMB789:/tmp/certctl-snapshot-rbf/OLDTHUMB789.pfx\nTEMPDIR:/tmp/certctl-snapshot-rbf",
 			"Import error",
 			"Rollback step failed",
 		},
 		errors: []error{
+			nil,
 			nil,
 			fmt.Errorf("import-step exit code 1"),
 			fmt.Errorf("rollback-step exit code 2"),

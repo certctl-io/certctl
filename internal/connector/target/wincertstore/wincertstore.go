@@ -223,6 +223,36 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 	newSubject := newCert.Subject.String()
 
+	// Bundle 10 / Top-10 fix #3: SHA-1 idempotency short-circuit. If the
+	// cert is already in the store AND not expired, skip the destructive
+	// import cycle entirely. Conservative: any error during the probe falls
+	// through to today's full deploy path. False negatives are safe; false
+	// positives are dangerous.
+	thumbprintEarly, err := certutil.ComputeThumbprint(request.CertPEM)
+	if err != nil {
+		return nil, fmt.Errorf("compute thumbprint: %w", err)
+	}
+
+	already, idemErr := c.isCertAlreadyInStore(ctx, thumbprintEarly)
+	if idemErr == nil && already {
+		c.logger.Info("WinCertStore already has this cert; skipping deploy",
+			"thumbprint", thumbprintEarly,
+			"store_name", c.config.StoreName)
+		return &target.DeploymentResult{
+			Success:       true,
+			TargetAddress: fmt.Sprintf("cert:\\%s\\%s", c.config.StoreLocation, c.config.StoreName),
+			DeploymentID:  fmt.Sprintf("wincertstore-idem-%d", time.Now().Unix()),
+			Message:       "Cert already in store and valid; idempotent skip",
+			DeployedAt:    time.Now(),
+			Metadata: map[string]string{
+				"thumbprint":     thumbprintEarly,
+				"store_name":     c.config.StoreName,
+				"store_location": c.config.StoreLocation,
+				"idempotent":     "true",
+			},
+		}, nil
+	}
+
 	// Bundle 7: pre-deploy snapshot. A separate transient export password
 	// from the import PFX password — different lifecycle, different
 	// PowerShell script. Held in memory only; never logged or persisted.
@@ -639,4 +669,36 @@ func (c *Connector) cleanupSnapshot(ctx context.Context, state *snapshotState) e
 		return fmt.Errorf("cleanup script: %w", err)
 	}
 	return nil
+}
+
+// isCertAlreadyInStore checks if the given thumbprint is already in the
+// configured certificate store and is still valid (NotAfter in future).
+// Returns (true, nil) iff the cert is in the store AND not expired.
+// Returns (false, nil) on any mismatch or missing cert. Returns (false, error)
+// only on executor errors — falls through to the full deploy path (conservative).
+//
+// Bundle 10 / Top-10 fix #3 of the 2026-05-02 deployment-target audit.
+func (c *Connector) isCertAlreadyInStore(ctx context.Context, thumbprint string) (bool, error) {
+	script := fmt.Sprintf(
+		"# CERTCTL_IDEM_PROBE\n"+
+			"$cert = Get-ChildItem 'Cert:\\%s\\%s\\%s' -ErrorAction SilentlyContinue; "+
+			"if ($cert -and $cert.NotAfter -gt (Get-Date)) { Write-Output 'IDEM_MATCH' } else { Write-Output 'IDEM_MISS' }",
+		c.config.StoreLocation, c.config.StoreName, thumbprint,
+	)
+
+	output, err := c.executor.Execute(ctx, script)
+	if err != nil {
+		// Executor error: return false (conservative — fall through to full deploy)
+		c.logger.Debug("idempotency probe executor error", "error", err, "output", output)
+		return false, nil
+	}
+
+	out := strings.TrimSpace(output)
+	if out == "IDEM_MATCH" {
+		c.logger.Debug("idempotency probe matched", "thumbprint", thumbprint)
+		return true, nil
+	}
+	// "IDEM_MISS" or any other output
+	c.logger.Debug("idempotency probe missed", "output", out)
+	return false, nil
 }

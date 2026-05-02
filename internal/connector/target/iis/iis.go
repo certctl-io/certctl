@@ -254,6 +254,42 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		}, fmt.Errorf("%s", errMsg)
 	}
 
+	// Bundle 10 / Top-10 fix #3: SHA-1 (Windows cert-store convention)
+	// idempotency short-circuit. If the configured site's active binding's
+	// certificateHash already matches the new thumbprint AND the cert exists
+	// in the store, skip the destructive Remove+Import cycle entirely.
+	// Conservative: any error during the probe falls through to today's full
+	// deploy path. False negatives are safe; false positives are dangerous.
+	thumbprint, err := certutil.ComputeThumbprint(request.CertPEM)
+	if err != nil {
+		errMsg := fmt.Sprintf("failed to compute certificate thumbprint: %v", err)
+		c.logger.Error("deployment failed", "error", err)
+		return &target.DeploymentResult{
+			Success:    false,
+			Message:    errMsg,
+			DeployedAt: time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
+	already, idemErr := c.isCertAlreadyDeployed(ctx, thumbprint)
+	if idemErr == nil && already {
+		c.logger.Info("IIS already has this cert bound; skipping deploy",
+			"thumbprint", thumbprint, "site", c.config.SiteName)
+		return &target.DeploymentResult{
+			Success:       true,
+			TargetAddress: fmt.Sprintf("%s (IIS: %s)", c.config.Hostname, c.config.SiteName),
+			DeploymentID:  fmt.Sprintf("iis-idem-%d", time.Now().Unix()),
+			Message:       "Cert already deployed and bound; idempotent skip",
+			DeployedAt:    time.Now(),
+			Metadata: map[string]string{
+				"thumbprint": thumbprint,
+				"site_name":  c.config.SiteName,
+				"cert_store": c.config.CertStore,
+				"idempotent": "true",
+			},
+		}, nil
+	}
+
 	// Bundle 5 (2026-05-02 deployment-target audit): pre-deploy snapshot
 	// of the existing binding's SSL thumbprint so a binding-update failure
 	// can roll back to the pre-deploy state. Empty oldThumbprint means
@@ -298,19 +334,10 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		}, fmt.Errorf("%s", errMsg)
 	}
 
-	// Step 2+3: Compute thumbprint and import PFX
+	// Step 2+3: Import PFX
 	// In local mode: write PFX to temp file, import via file path
 	// In WinRM mode: base64-encode PFX, decode on remote side to temp file, import, clean up
-	thumbprint, err := certutil.ComputeThumbprint(request.CertPEM)
-	if err != nil {
-		errMsg := fmt.Sprintf("failed to compute certificate thumbprint: %v", err)
-		c.logger.Error("deployment failed", "error", err)
-		return &target.DeploymentResult{
-			Success:    false,
-			Message:    errMsg,
-			DeployedAt: time.Now(),
-		}, fmt.Errorf("%s", errMsg)
-	}
+	// (thumbprint already computed in the idempotency check above)
 
 	c.logger.Debug("certificate thumbprint computed", "thumbprint", thumbprint)
 
@@ -760,6 +787,47 @@ func (c *Connector) verifyRollback(ctx context.Context, oldThumbprint string) er
 		return nil
 	}
 	return fmt.Errorf("rollback verification disagreed: %s", out)
+}
+
+// isCertAlreadyDeployed checks if the given thumbprint is already deployed
+// and bound to the configured site's active HTTPS binding.
+// Returns (true, nil) iff the cert is in the store AND the binding's
+// certificateHash matches the thumbprint. Returns (false, nil) on any
+// mismatch or missing binding. Returns (false, error) only on executor errors
+// — falls through to the full deploy path (conservative).
+//
+// Bundle 10 / Top-10 fix #3 of the 2026-05-02 deployment-target audit.
+func (c *Connector) isCertAlreadyDeployed(ctx context.Context, thumbprint string) (bool, error) {
+	port := c.config.Port
+	if port == 0 {
+		port = 443
+	}
+
+	script := fmt.Sprintf(
+		"# CERTCTL_IDEM_PROBE\n"+
+			"$cert = Get-ChildItem 'Cert:\\LocalMachine\\%s\\%s' -ErrorAction SilentlyContinue; "+
+			"$binding = Get-WebBinding -Name '%s' -Protocol 'https' -Port %d -ErrorAction SilentlyContinue; "+
+			"if ($cert -and $binding -and $binding.certificateHash -eq '%s') { Write-Output 'IDEM_MATCH' } else { Write-Output 'IDEM_MISS' }",
+		c.config.CertStore, thumbprint,
+		c.config.SiteName, port,
+		thumbprint,
+	)
+
+	output, err := c.executor.Execute(ctx, script)
+	if err != nil {
+		// Executor error: return false (conservative — fall through to full deploy)
+		c.logger.Debug("idempotency probe executor error", "error", err, "output", strings.TrimSpace(output))
+		return false, nil
+	}
+
+	out := strings.TrimSpace(output)
+	if out == "IDEM_MATCH" {
+		c.logger.Debug("idempotency probe matched", "thumbprint", thumbprint)
+		return true, nil
+	}
+	// "IDEM_MISS" or any other output
+	c.logger.Debug("idempotency probe missed", "output", out)
+	return false, nil
 }
 
 // NOTE: PFX creation, key parsing, thumbprint computation, and password generation

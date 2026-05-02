@@ -10,6 +10,8 @@ package javakeystore
 
 import (
 	"context"
+	"crypto/sha256"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"log/slog"
@@ -210,6 +212,43 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		"keystore", c.config.KeystorePath,
 		"alias", c.config.Alias,
 		"type", c.config.KeystoreType)
+
+	// Bundle 10 / Top-10 fix #3: SHA-256 idempotency short-circuit. Only
+	// when the keystore exists (not first-time deploy). If the existing
+	// alias's SHA-256 fingerprint matches the new cert, skip the -delete +
+	// -importkeystore cycle entirely. Conservative: any error during the
+	// probe falls through to today's full deploy path.
+	if _, err := os.Stat(c.config.KeystorePath); err == nil {
+		// Keystore exists; try the probe
+		newCert, err := certutil.ParseCertificatePEM(request.CertPEM)
+		if err == nil {
+			// Compute SHA-256 of the new cert's DER-encoded bytes
+			sha256Hex := computeCertSHA256DERHex(newCert)
+
+			already, idemErr := c.isAliasAlreadyDeployedWithThumbprint(ctx, sha256Hex)
+			if idemErr == nil && already {
+				c.logger.Info("JavaKeystore already has this cert; skipping deploy",
+					"keystore", c.config.KeystorePath,
+					"alias", c.config.Alias)
+				// Compute SHA-1 thumbprint for metadata compatibility
+				sha1Thumb, _ := certutil.ComputeThumbprint(request.CertPEM)
+				return &target.DeploymentResult{
+					Success:       true,
+					TargetAddress: fmt.Sprintf("jks:%s#%s", c.config.KeystorePath, c.config.Alias),
+					DeploymentID:  fmt.Sprintf("jks-idem-%d", time.Now().Unix()),
+					Message:       "Alias already deployed with matching cert; idempotent skip",
+					DeployedAt:    time.Now(),
+					Metadata: map[string]string{
+						"keystore_path": c.config.KeystorePath,
+						"alias":         c.config.Alias,
+						"keystore_type": c.config.KeystoreType,
+						"thumbprint":    sha1Thumb,
+						"idempotent":    "true",
+					},
+				}, nil
+			}
+		}
+	}
 
 	// Step 1: Convert PEM to temporary PKCS#12 file
 	pfxPassword, err := certutil.GenerateRandomPassword(32)
@@ -588,4 +627,61 @@ func (c *Connector) pruneBackups() {
 				"path", path, "error", err)
 		}
 	}
+}
+
+// computeCertSHA256DERHex computes SHA-256 of cert's raw DER encoding as lowercase hex.
+func computeCertSHA256DERHex(cert *x509.Certificate) string {
+	h := sha256.Sum256(cert.Raw)
+	return fmt.Sprintf("%x", h)
+}
+
+// isAliasAlreadyDeployedWithThumbprint checks if the alias exists in the
+// keystore and its SHA-256 fingerprint matches the given thumbprint.
+// Runs `keytool -list -alias -v` and parses the output for the SHA-256 line.
+// Returns (true, nil) iff the alias exists AND fingerprint matches.
+// Returns (false, nil) on mismatch or alias missing. Returns (false, error)
+// only on executor errors — falls through to the full deploy path (conservative).
+//
+// Bundle 10 / Top-10 fix #3 of the 2026-05-02 deployment-target audit.
+func (c *Connector) isAliasAlreadyDeployedWithThumbprint(ctx context.Context, sha256Hex string) (bool, error) {
+	args := []string{
+		"-list",
+		"-alias", c.config.Alias,
+		"-keystore", c.config.KeystorePath,
+		"-storepass", c.config.KeystorePassword,
+		"-storetype", c.config.KeystoreType,
+		"-v",
+	}
+
+	output, err := c.executor.Execute(ctx, c.config.KeytoolPath, args...)
+	if err != nil {
+		// Alias missing, keystore missing, or executor error: treat as miss, fall through
+		c.logger.Debug("idempotency probe executor error or alias missing",
+			"error", err,
+			"output", output)
+		return false, nil
+	}
+
+	// Parse output for SHA256 line. Real keytool output has format:
+	// "SHA256: AA:BB:CC:..." (colons every 2 chars, uppercase hex)
+	// or sometimes "SHA-256: ..." depending on JDK version
+	lines := strings.Split(output, "\n")
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+		if strings.HasPrefix(line, "SHA256:") || strings.HasPrefix(line, "SHA-256:") {
+			// Extract hex part: remove colons, convert to lowercase
+			parts := strings.SplitN(line, ":", 2)
+			if len(parts) == 2 {
+				hexWithColons := strings.TrimSpace(parts[1])
+				hexNormalized := strings.ToLower(strings.ReplaceAll(hexWithColons, ":", ""))
+				if hexNormalized == sha256Hex {
+					c.logger.Debug("idempotency probe matched", "alias", c.config.Alias)
+					return true, nil
+				}
+			}
+		}
+	}
+
+	c.logger.Debug("idempotency probe missed", "alias", c.config.Alias)
+	return false, nil
 }

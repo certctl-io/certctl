@@ -5,6 +5,7 @@ import (
 	"crypto/ecdsa"
 	"crypto/elliptic"
 	"crypto/rand"
+	"crypto/sha256"
 	"crypto/x509"
 	"crypto/x509/pkix"
 	"encoding/json"
@@ -13,11 +14,13 @@ import (
 	"log/slog"
 	"math/big"
 	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/shankar0123/certctl/internal/connector/target/certutil"
 )
 
 func testLogger() *slog.Logger {
@@ -604,6 +607,8 @@ func TestJKS_Snapshot_RunsBefore_Delete(t *testing.T) {
 
 	mock := &mockExecutor{
 		responses: []mockResponse{
+			// Top-10 fix #3 idempotency probe — alias missing → IDEM_MISS, fall through.
+			{Output: "", Err: fmt.Errorf("keytool exit 1: alias <server> does not exist")},
 			{Output: "Imported keystore for alias <server>", Err: nil}, // -exportkeystore (snapshot)
 			{Output: "", Err: nil},                         // -delete (alias may exist)
 			{Output: "Import command completed", Err: nil}, // -importkeystore (the actual deploy)
@@ -627,42 +632,48 @@ func TestJKS_Snapshot_RunsBefore_Delete(t *testing.T) {
 		t.Error("expected success=true")
 	}
 
-	// 3 keytool calls: export (snapshot) → delete → import. The order is
-	// load-bearing: snapshot MUST run before delete, otherwise the delete
-	// destroys the very state the snapshot is meant to capture.
-	if len(mock.calls) != 3 {
-		t.Fatalf("expected 3 keytool calls (export + delete + import), got %d", len(mock.calls))
+	// 4 keytool calls: probe → export (snapshot) → delete → import. The
+	// snapshot-before-delete ordering is load-bearing: the delete destroys
+	// the state the snapshot is meant to capture.
+	if len(mock.calls) != 4 {
+		t.Fatalf("expected 4 keytool calls (probe + export + delete + import), got %d", len(mock.calls))
 	}
 
-	// Call 0: -exportkeystore.
-	if mock.calls[0].Name != "keytool" {
-		t.Errorf("call 0: expected keytool, got %s", mock.calls[0].Name)
-	}
+	// Call 0: probe (-list -alias -v).
 	args0 := strings.Join(mock.calls[0].Args, " ")
-	if !strings.Contains(args0, "-exportkeystore") {
-		t.Errorf("call 0: expected -exportkeystore in args, got: %s", args0)
+	if !strings.Contains(args0, "-list") {
+		t.Errorf("call 0: expected -list probe, got: %s", args0)
 	}
-	if !strings.Contains(args0, "-srckeystore "+keystorePath) {
-		t.Errorf("call 0: expected -srckeystore %s, got: %s", keystorePath, args0)
+
+	// Call 1: -exportkeystore.
+	if mock.calls[1].Name != "keytool" {
+		t.Errorf("call 1: expected keytool, got %s", mock.calls[1].Name)
+	}
+	args1 := strings.Join(mock.calls[1].Args, " ")
+	if !strings.Contains(args1, "-exportkeystore") {
+		t.Errorf("call 1: expected -exportkeystore in args, got: %s", args1)
+	}
+	if !strings.Contains(args1, "-srckeystore "+keystorePath) {
+		t.Errorf("call 1: expected -srckeystore %s, got: %s", keystorePath, args1)
 	}
 	// Backup path: <tmpDir>/.certctl-bak.<unix-nanos>.p12
-	if !strings.Contains(args0, ".certctl-bak.") || !strings.Contains(args0, ".p12") {
-		t.Errorf("call 0: expected .certctl-bak.*.p12 backup path, got: %s", args0)
+	if !strings.Contains(args1, ".certctl-bak.") || !strings.Contains(args1, ".p12") {
+		t.Errorf("call 1: expected .certctl-bak.*.p12 backup path, got: %s", args1)
 	}
 
-	// Call 1: -delete.
-	args1 := strings.Join(mock.calls[1].Args, " ")
-	if !strings.Contains(args1, "-delete") {
-		t.Errorf("call 1: expected -delete in args, got: %s", args1)
-	}
-
-	// Call 2: -importkeystore (the deploy itself).
+	// Call 2: -delete.
 	args2 := strings.Join(mock.calls[2].Args, " ")
-	if !strings.Contains(args2, "-importkeystore") {
-		t.Errorf("call 2: expected -importkeystore in args, got: %s", args2)
+	if !strings.Contains(args2, "-delete") {
+		t.Errorf("call 2: expected -delete in args, got: %s", args2)
 	}
-	if !strings.Contains(args2, "-destkeystore "+keystorePath) {
-		t.Errorf("call 2: expected -destkeystore %s, got: %s", keystorePath, args2)
+
+	// Call 3: -importkeystore (the deploy itself).
+	args3 := strings.Join(mock.calls[3].Args, " ")
+	if !strings.Contains(args3, "-importkeystore") {
+		t.Errorf("call 3: expected -importkeystore in args, got: %s", args3)
+	}
+	if !strings.Contains(args3, "-destkeystore "+keystorePath) {
+		t.Errorf("call 3: expected -destkeystore %s, got: %s", keystorePath, args3)
 	}
 }
 
@@ -729,11 +740,13 @@ func TestJKS_ImportFails_RollsBack(t *testing.T) {
 	// rollback delete (best-effort) + rollback re-import from backup PFX.
 	mock := &mockExecutor{
 		responses: []mockResponse{
-			{Output: "Imported keystore for alias <server>", Err: nil}, // 0: -exportkeystore (snapshot)
-			{Output: "", Err: nil}, // 1: -delete (pre-import)
-			{Output: "keystore corruption error", Err: fmt.Errorf("exit 1")}, // 2: -importkeystore FAILS
-			{Output: "", Err: nil}, // 3: -delete (rollback step 1)
-			{Output: "Imported keystore for alias <server>", Err: nil}, // 4: -importkeystore (rollback step 2)
+			// Top-10 fix #3 idempotency probe — alias missing → fall through.
+			{Output: "", Err: fmt.Errorf("alias <server> does not exist")},
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 1: -exportkeystore (snapshot)
+			{Output: "", Err: nil}, // 2: -delete (pre-import)
+			{Output: "keystore corruption error", Err: fmt.Errorf("exit 1")}, // 3: -importkeystore FAILS
+			{Output: "", Err: nil}, // 4: -delete (rollback step 1)
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 5: -importkeystore (rollback step 2)
 		},
 	}
 	c := NewWithExecutor(&Config{
@@ -760,23 +773,24 @@ func TestJKS_ImportFails_RollsBack(t *testing.T) {
 		t.Errorf("expected error to mention rollback from <backup>, got: %v", err)
 	}
 
-	// 5 keytool calls: export, delete, import-fail, rollback-delete,
-	// rollback-import. Locate the rollback re-import call (call 4) and
-	// assert it references the backup path.
-	if len(mock.calls) != 5 {
-		t.Fatalf("expected 5 keytool calls (export, delete, import, rollback-delete, rollback-import), got %d", len(mock.calls))
+	// 6 keytool calls with the new probe at index 0:
+	//   probe, export, delete, import-fail, rollback-delete, rollback-import.
+	// Locate the rollback re-import call (now at index 5) and assert it
+	// references the backup path that the snapshot wrote.
+	if len(mock.calls) != 6 {
+		t.Fatalf("expected 6 keytool calls (probe, export, delete, import, rollback-delete, rollback-import), got %d", len(mock.calls))
 	}
-	rollbackImportArgs := strings.Join(mock.calls[4].Args, " ")
+	rollbackImportArgs := strings.Join(mock.calls[5].Args, " ")
 	if !strings.Contains(rollbackImportArgs, "-importkeystore") {
-		t.Errorf("call 4: expected -importkeystore for rollback, got: %s", rollbackImportArgs)
+		t.Errorf("call 5: expected -importkeystore for rollback, got: %s", rollbackImportArgs)
 	}
 	if !strings.Contains(rollbackImportArgs, ".certctl-bak.") {
-		t.Errorf("call 4: expected backup path (.certctl-bak.*) as -srckeystore, got: %s", rollbackImportArgs)
+		t.Errorf("call 5: expected backup path (.certctl-bak.*) as -srckeystore, got: %s", rollbackImportArgs)
 	}
-	// The same backup path that the snapshot wrote should be the source
-	// for the rollback re-import — verify by extracting both and comparing.
-	exportArgs := strings.Join(mock.calls[0].Args, " ")
-	for _, arg := range mock.calls[0].Args {
+	// The backup path that the snapshot wrote (call 1) must be the source
+	// for the rollback re-import (call 5).
+	exportArgs := strings.Join(mock.calls[1].Args, " ")
+	for _, arg := range mock.calls[1].Args {
 		if strings.Contains(arg, ".certctl-bak.") && strings.HasSuffix(arg, ".p12") {
 			if !strings.Contains(rollbackImportArgs, arg) {
 				t.Errorf("rollback re-import did not reference snapshot backup %q\n  export args: %s\n  rollback args: %s", arg, exportArgs, rollbackImportArgs)
@@ -797,17 +811,19 @@ func TestJKS_ImportFails_RollbackAlsoFails_OperatorActionable(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	// Snapshot → delete → import-fail → rollback-delete → rollback-import
-	// ALSO fails. Operator-actionable case: BOTH errors AND the backup
-	// path must be in the wrapped error so operators can manually recover
-	// from the .p12 file on disk.
+	// Probe → snapshot → delete → import-fail → rollback-delete →
+	// rollback-import ALSO fails. Operator-actionable case: BOTH errors
+	// AND the backup path must be in the wrapped error so operators can
+	// manually recover from the .p12 file on disk.
 	mock := &mockExecutor{
 		responses: []mockResponse{
-			{Output: "Imported keystore for alias <server>", Err: nil}, // 0: snapshot
-			{Output: "", Err: nil}, // 1: pre-import delete
-			{Output: "import-step error", Err: fmt.Errorf("import exit 1")}, // 2: import FAILS
-			{Output: "", Err: nil}, // 3: rollback delete
-			{Output: "rollback-step error", Err: fmt.Errorf("rollback exit 2")}, // 4: rollback import FAILS
+			// Top-10 fix #3 idempotency probe — alias missing → fall through.
+			{Output: "", Err: fmt.Errorf("alias <server> does not exist")},
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 1: snapshot
+			{Output: "", Err: nil}, // 2: pre-import delete
+			{Output: "import-step error", Err: fmt.Errorf("import exit 1")}, // 3: import FAILS
+			{Output: "", Err: nil}, // 4: rollback delete
+			{Output: "rollback-step error", Err: fmt.Errorf("rollback exit 2")}, // 5: rollback import FAILS
 		},
 	}
 	c := NewWithExecutor(&Config{
@@ -1116,4 +1132,174 @@ func TestJKS_Snapshot_AliasNotInKeystore_ProceedsCleanly(t *testing.T) {
 	if !result.Success {
 		t.Error("expected success=true")
 	}
+}
+
+func TestJKS_Idempotent_SkipsDeployWhenAliasMatches(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "jks-idem-test-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	keystorePath := filepath.Join(tmpDir, "test.p12")
+	// Create a placeholder keystore file
+	if err := os.WriteFile(keystorePath, []byte("placeholder"), 0644); err != nil {
+		t.Fatalf("write keystore: %v", err)
+	}
+
+	// Compute SHA-256 of the new cert's DER
+	newCert, _ := certutil.ParseCertificatePEM(certPEM)
+	sha256Hex := fmt.Sprintf("%x", sha256.Sum256(newCert.Raw))
+
+	// Format as keytool output: "SHA256: AA:BB:CC:..."
+	keytoolOutput := fmt.Sprintf("Alias name: server\n"+
+		"Creation date: ...\n"+
+		"Certificate fingerprints (SHA-256):\n"+
+		"SHA256: %s\n",
+		formatSHA256WithColons(sha256Hex))
+
+	// Probe returns the matching output; no other calls should run.
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: keytoolOutput, Err: nil}, // probe — match
+		},
+	}
+
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "password",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// Verify idempotent flag is set
+	if result.Metadata["idempotent"] != "true" {
+		t.Errorf("expected idempotent=true, got %s", result.Metadata["idempotent"])
+	}
+
+	// Only the probe should have run (1 keytool call). Subsequent keytool
+	// invocations would be -delete / -importkeystore — none of those should
+	// fire on idempotent skip.
+	if len(mock.calls) != 1 {
+		t.Errorf("expected 1 keytool call (probe only), got %d", len(mock.calls))
+	}
+	if len(mock.calls) > 0 {
+		args := mock.calls[0].Args
+		hasList := false
+		for _, a := range args {
+			if a == "-list" {
+				hasList = true
+				break
+			}
+		}
+		if !hasList {
+			t.Errorf("expected first call to be `-list` probe, got args: %v", args)
+		}
+	}
+}
+
+func TestJKS_Idempotent_DifferentAlias_FallsThroughToDeploy(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+
+	tmpDir, err := os.MkdirTemp("", "jks-idem-test-*")
+	if err != nil {
+		t.Fatalf("create temp dir: %v", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	keystorePath := filepath.Join(tmpDir, "test.p12")
+	// Create a placeholder keystore file
+	if err := os.WriteFile(keystorePath, []byte("placeholder"), 0644); err != nil {
+		t.Fatalf("write keystore: %v", err)
+	}
+
+	// Probe returns a DIFFERENT SHA-256 → IDEM_MISS → fall through to full
+	// snapshot+delete+importkeystore deploy path. Bundle 8 snapshot uses
+	// keytool -exportkeystore, which simulateExportSideEffect needs to
+	// fake on disk so post-deploy file checks see the backup.
+	differentFingerprint := "SHA256: FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF:FF\n"
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: differentFingerprint, Err: nil},       // probe — miss
+			{Output: "Keystore exported", Err: nil},        // snapshot -exportkeystore
+			{Output: "", Err: nil},                         // -delete (best-effort)
+			{Output: "Import command completed", Err: nil}, // -importkeystore
+		},
+		onCall: simulateExportSideEffect(t),
+	}
+
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "password",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// Verify idempotent flag is NOT set (full deploy path ran)
+	if result.Metadata["idempotent"] != "" {
+		t.Errorf("expected no idempotent flag, got %q", result.Metadata["idempotent"])
+	}
+
+	// 4 keytool calls expected: probe, snapshot -exportkeystore, -delete, -importkeystore.
+	if len(mock.calls) != 4 {
+		t.Errorf("expected 4 keytool calls (probe + snapshot + delete + import), got %d", len(mock.calls))
+		for i, c := range mock.calls {
+			t.Logf("call[%d] args=%v", i, c.Args)
+		}
+	}
+	// First call must be the -list probe.
+	if len(mock.calls) > 0 {
+		hasList := false
+		for _, a := range mock.calls[0].Args {
+			if a == "-list" {
+				hasList = true
+				break
+			}
+		}
+		if !hasList {
+			t.Errorf("expected first call to be `-list` probe, got args: %v", mock.calls[0].Args)
+		}
+	}
+}
+
+func formatSHA256WithColons(hexStr string) string {
+	var result strings.Builder
+	for i := 0; i < len(hexStr); i += 2 {
+		if i > 0 {
+			result.WriteString(":")
+		}
+		result.WriteString(strings.ToUpper(hexStr[i : i+2]))
+	}
+	return result.String()
 }

@@ -316,25 +316,31 @@ func TestIISConnector_DeployCertificate_Success(t *testing.T) {
 		t.Errorf("expected 40-char thumbprint, got %d", len(result.Metadata["thumbprint"]))
 	}
 
-	// Bundle 5: snapshot script runs FIRST, then import, then binding.
-	// Three PowerShell commands total on the success path.
-	if len(executor.commands) != 3 {
-		t.Errorf("expected 3 PowerShell commands (snapshot, import, binding), got %d", len(executor.commands))
+	// Bundle 10: idempotency probe runs FIRST (returns IDEM_MISS by default),
+	// then Bundle 5 snapshot, then import, then binding.
+	// Four PowerShell commands total on the success path.
+	if len(executor.commands) != 4 {
+		t.Errorf("expected 4 PowerShell commands (probe, snapshot, import, binding), got %d", len(executor.commands))
 	}
 
-	// First command should be the Bundle 5 snapshot.
-	if len(executor.commands) > 0 && !strings.Contains(executor.commands[0], "# CERTCTL_SNAPSHOT") {
-		t.Errorf("expected # CERTCTL_SNAPSHOT in first command, got: %s", executor.commands[0])
+	// First command should be the Bundle 10 idempotency probe.
+	if len(executor.commands) > 0 && !strings.Contains(executor.commands[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected # CERTCTL_IDEM_PROBE in first command, got: %s", executor.commands[0])
 	}
 
-	// Second command should be PFX import.
-	if len(executor.commands) > 1 && !strings.Contains(executor.commands[1], "Import-PfxCertificate") {
-		t.Errorf("expected Import-PfxCertificate in second command, got: %s", executor.commands[1])
+	// Second command should be the Bundle 5 snapshot.
+	if len(executor.commands) > 1 && !strings.Contains(executor.commands[1], "# CERTCTL_SNAPSHOT") {
+		t.Errorf("expected # CERTCTL_SNAPSHOT in second command, got: %s", executor.commands[1])
 	}
 
-	// Third command should be binding update.
-	if len(executor.commands) > 2 && !strings.Contains(executor.commands[2], "New-WebBinding") {
-		t.Errorf("expected New-WebBinding in third command, got: %s", executor.commands[2])
+	// Third command should be PFX import.
+	if len(executor.commands) > 2 && !strings.Contains(executor.commands[2], "Import-PfxCertificate") {
+		t.Errorf("expected Import-PfxCertificate in third command, got: %s", executor.commands[2])
+	}
+
+	// Fourth command should be binding update.
+	if len(executor.commands) > 3 && !strings.Contains(executor.commands[3], "New-WebBinding") {
+		t.Errorf("expected New-WebBinding in fourth command, got: %s", executor.commands[3])
 	}
 
 	// Verify metadata
@@ -346,6 +352,120 @@ func TestIISConnector_DeployCertificate_Success(t *testing.T) {
 	}
 	if _, ok := result.Metadata["duration_ms"]; !ok {
 		t.Error("expected duration_ms in metadata")
+	}
+}
+
+func TestIIS_Idempotent_SkipsDeployWhenBindingMatches(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	// Seed the probe to return IDEM_MATCH
+	executor.responses["# CERTCTL_IDEM_PROBE"] = mockResponse{output: "IDEM_MATCH\n", err: nil}
+
+	cfg := &Config{
+		Hostname:  "web01.example.com",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+		IPAddress: "*",
+	}
+
+	connector := NewWithExecutor(cfg, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+
+	// Verify idempotent flag is set
+	if result.Metadata["idempotent"] != "true" {
+		t.Errorf("expected idempotent=true, got %s", result.Metadata["idempotent"])
+	}
+
+	// Only the probe should have run, no import/binding calls
+	if len(executor.commands) != 1 {
+		t.Errorf("expected 1 command (probe only), got %d", len(executor.commands))
+	}
+	if !strings.Contains(executor.commands[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected probe command, got: %s", executor.commands[0])
+	}
+
+	// Verify no Import-PfxCertificate call
+	for i, cmd := range executor.commands {
+		if strings.Contains(cmd, "Import-PfxCertificate") {
+			t.Errorf("command %d should not contain Import-PfxCertificate (idempotent short-circuit): %s", i, cmd)
+		}
+	}
+}
+
+func TestIIS_Idempotent_DifferentBinding_FallsThroughToDeploy(t *testing.T) {
+	certPEM, keyPEM, chainPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("failed to generate test cert: %v", err)
+	}
+
+	executor := newMockExecutor()
+	executor.defaultOutput = "OK"
+	// Seed the probe to return IDEM_MISS
+	executor.responses["# CERTCTL_IDEM_PROBE"] = mockResponse{output: "IDEM_MISS\n", err: nil}
+
+	cfg := &Config{
+		Hostname:  "web01.example.com",
+		SiteName:  "Default Web Site",
+		CertStore: "My",
+		Port:      443,
+		IPAddress: "*",
+	}
+
+	connector := NewWithExecutor(cfg, testLogger(), executor)
+
+	result, err := connector.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM:  certPEM,
+		KeyPEM:   keyPEM,
+		ChainPEM: chainPEM,
+	})
+	if err != nil {
+		t.Fatalf("DeployCertificate failed: %v", err)
+	}
+	if !result.Success {
+		t.Fatalf("expected success, got: %s", result.Message)
+	}
+
+	// Verify idempotent flag is NOT set
+	if result.Metadata["idempotent"] != "" {
+		t.Errorf("expected no idempotent flag, got %s", result.Metadata["idempotent"])
+	}
+
+	// Full flow: probe + snapshot + import + binding = 4 commands
+	if len(executor.commands) != 4 {
+		t.Errorf("expected 4 commands (probe, snapshot, import, binding), got %d", len(executor.commands))
+	}
+
+	// Verify probe ran first
+	if !strings.Contains(executor.commands[0], "# CERTCTL_IDEM_PROBE") {
+		t.Errorf("expected probe as first command, got: %s", executor.commands[0])
+	}
+
+	// Verify import happened
+	hasImport := false
+	for _, cmd := range executor.commands {
+		if strings.Contains(cmd, "Import-PfxCertificate") {
+			hasImport = true
+			break
+		}
+	}
+	if !hasImport {
+		t.Error("expected Import-PfxCertificate in commands")
 	}
 }
 
@@ -477,6 +597,11 @@ func TestIIS_BindingUpdateFails_RemovesNewCert_RebindsOld(t *testing.T) {
 	}
 
 	executor := newMockExecutor()
+	// Probe returns IDEM_MISS (cert not already deployed).
+	executor.responses["# CERTCTL_IDEM_PROBE"] = mockResponse{
+		output: "IDEM_MISS\n",
+		err:    nil,
+	}
 	// Snapshot returns a pre-existing thumbprint (rollback target).
 	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
 		output: "OLD_THUMBPRINT:abc123\n",
@@ -568,6 +693,11 @@ func TestIIS_BindingUpdateFails_NoOldBinding_RemovesNewCertOnly(t *testing.T) {
 	}
 
 	executor := newMockExecutor()
+	// Probe returns IDEM_MISS (cert not already deployed).
+	executor.responses["# CERTCTL_IDEM_PROBE"] = mockResponse{
+		output: "IDEM_MISS\n",
+		err:    nil,
+	}
 	// First-time deploy: snapshot finds no existing binding.
 	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
 		output: "NO_OLD_BINDING\n",
@@ -651,6 +781,11 @@ func TestIIS_BindingUpdateFails_RollbackAlsoFails_OperatorActionable(t *testing.
 	}
 
 	executor := newMockExecutor()
+	// Probe returns IDEM_MISS (cert not already deployed).
+	executor.responses["# CERTCTL_IDEM_PROBE"] = mockResponse{
+		output: "IDEM_MISS\n",
+		err:    nil,
+	}
 	executor.responses["# CERTCTL_SNAPSHOT"] = mockResponse{
 		output: "OLD_THUMBPRINT:abc123\n",
 		err:    nil,
@@ -748,11 +883,11 @@ func TestIISConnector_DeployCertificate_SNIEnabled(t *testing.T) {
 		t.Fatalf("expected success, got: %s", result.Message)
 	}
 
-	// Bundle 5: snapshot is commands[0], import is commands[1], binding is commands[2].
-	if len(executor.commands) < 3 {
-		t.Fatal("expected at least 3 commands (snapshot, import, binding)")
+	// Bundle 10: probe is commands[0], Bundle 5: snapshot is commands[1], import is commands[2], binding is commands[3].
+	if len(executor.commands) < 4 {
+		t.Fatal("expected at least 4 commands (probe, snapshot, import, binding)")
 	}
-	bindingCmd := executor.commands[2]
+	bindingCmd := executor.commands[3]
 	if !strings.Contains(bindingCmd, "-SslFlags 1") {
 		t.Errorf("expected -SslFlags 1 for SNI, got: %s", bindingCmd)
 	}
