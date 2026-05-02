@@ -7,7 +7,9 @@ package ssh
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 	"log/slog"
 	"net"
 	"os"
@@ -52,8 +54,22 @@ type SSHClient interface {
 	WriteFile(remotePath string, data []byte, mode os.FileMode) error
 	// Execute runs a command on the remote server and returns combined output.
 	Execute(ctx context.Context, command string) (string, error)
-	// StatFile checks if a remote file exists and returns its size.
-	StatFile(remotePath string) (int64, error)
+	// StatFile returns os.FileInfo for a remote file. The Mode field is
+	// load-bearing for the Bundle 6 pre-deploy snapshot — restoring an
+	// original file requires the original mode for fidelity. Callers
+	// detect "file does not exist" via errors.Is(err, os.ErrNotExist).
+	StatFile(remotePath string) (os.FileInfo, error)
+	// ReadFile reads the entire contents of a remote file. Used by the
+	// Bundle 6 pre-deploy snapshot to capture original bytes for
+	// reload-failure rollback. Callers should StatFile first to bound
+	// the read size.
+	ReadFile(remotePath string) ([]byte, error)
+	// Remove deletes a remote file. Used by the Bundle 6 rollback path
+	// to clean up first-time-deploy partial state — when reload fails
+	// and the path didn't exist pre-deploy, the new bytes must come
+	// off the remote so the daemon doesn't pick them up on a later
+	// manual restart.
+	Remove(remotePath string) error
 	// Close closes the SSH connection.
 	Close() error
 }
@@ -192,12 +208,20 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 // DeployCertificate deploys a certificate to the remote server via SSH/SFTP.
 //
 // Steps:
-//  1. Connect to remote host via SSH
-//  2. Write certificate (+ chain if chain_path not set) to cert_path
-//  3. Write private key to key_path with restricted permissions
-//  4. If chain_path is set and chain provided, write chain separately
-//  5. If reload_command is set, execute it via SSH
-//  6. Close connection
+//  1. Connect to remote host via SSH.
+//  2. Pre-deploy snapshot (Bundle 6, 2026-05-02 audit): for each path the
+//     deploy will write to (cert, key, optional chain), capture original
+//     bytes + mode into in-memory backup buffers. StatFile errors with
+//     os.ErrNotExist mean the path doesn't exist (rollback = remove);
+//     other stat errors bail out before any write happens.
+//  3. Write certificate (+ chain appended if chain_path not set) to cert_path.
+//  4. Write private key to key_path with restricted permissions.
+//  5. If chain_path is set and chain provided, write chain separately.
+//  6. If reload_command is set, execute it via SSH.
+//  7. On reload failure, restore each backed-up file (or Remove if no
+//     pre-existing) and re-run reload as a best-effort retry. The remote
+//     ends up in pre-deploy state if the rollback succeeds.
+//  8. Close connection.
 func (c *Connector) DeployCertificate(ctx context.Context, request target.DeploymentRequest) (*target.DeploymentResult, error) {
 	c.logger.Info("deploying certificate via SSH",
 		"host", c.config.Host,
@@ -220,6 +244,18 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 	defer c.client.Close()
 
+	// Validate we have a private key (required for the deploy to proceed)
+	if request.KeyPEM == "" {
+		errMsg := "SSH deployment requires private key (KeyPEM)"
+		c.logger.Error("missing private key")
+		return &target.DeploymentResult{
+			Success:       false,
+			TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+			Message:       errMsg,
+			DeployedAt:    time.Now(),
+		}, fmt.Errorf("%s", errMsg)
+	}
+
 	// Parse file permissions
 	certMode, _ := parsePermissions(c.config.CertMode)
 	keyMode, _ := parsePermissions(c.config.KeyMode)
@@ -228,6 +264,79 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	certData := request.CertPEM
 	if request.ChainPEM != "" && c.config.ChainPath == "" {
 		certData += "\n" + request.ChainPEM
+	}
+
+	// Bundle 6: determine the paths the deploy will write to. Chain is
+	// written separately only when ChainPath is configured AND ChainPEM
+	// is non-empty (otherwise the chain is appended to the cert above).
+	chainSeparate := c.config.ChainPath != "" && request.ChainPEM != ""
+
+	type pathSpec struct {
+		key  string // metadata key suffix: "cert" / "key" / "chain"
+		path string
+	}
+	writePaths := []pathSpec{
+		{"cert", c.config.CertPath},
+		{"key", c.config.KeyPath},
+	}
+	if chainSeparate {
+		writePaths = append(writePaths, pathSpec{"chain", c.config.ChainPath})
+	}
+
+	// Bundle 6: pre-deploy snapshot. For each path the deploy will touch,
+	// StatFile to detect existence; if present, ReadFile into an in-memory
+	// backup buffer keyed by remote path. Original mode captured for
+	// fidelity on restore. Empty backup map entry = first-time deploy
+	// (rollback for that path = Remove).
+	backups := make(map[string][]byte)
+	modes := make(map[string]os.FileMode)
+	backupStatus := map[string]string{
+		"cert":  "no_pre_existing",
+		"key":   "no_pre_existing",
+		"chain": "n/a",
+	}
+	if chainSeparate {
+		backupStatus["chain"] = "no_pre_existing"
+	}
+
+	for _, p := range writePaths {
+		info, err := c.client.StatFile(p.path)
+		if err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				// First-time deploy for this path. Rollback = Remove.
+				continue
+			}
+			// Real stat error — bail out before writing anything.
+			errMsg := fmt.Sprintf("pre-deploy stat failed for %s: %v", p.path, err)
+			c.logger.Error("pre-deploy stat failed", "error", err, "path", p.path)
+			return &target.DeploymentResult{
+				Success:       false,
+				TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+				Message:       errMsg,
+				DeployedAt:    time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		data, err := c.client.ReadFile(p.path)
+		if err != nil {
+			// File exists per stat but read failed — outage signal. Bail.
+			errMsg := fmt.Sprintf("pre-deploy backup read failed for %s: %v", p.path, err)
+			c.logger.Error("pre-deploy backup read failed", "error", err, "path", p.path)
+			return &target.DeploymentResult{
+				Success:       false,
+				TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+				Message:       errMsg,
+				DeployedAt:    time.Now(),
+			}, fmt.Errorf("%s", errMsg)
+		}
+		backups[p.path] = data
+		if info != nil {
+			modes[p.path] = info.Mode().Perm()
+		}
+		backupStatus[p.key] = "snapshotted"
+		c.logger.Debug("pre-deploy snapshot captured",
+			"path", p.path,
+			"size_bytes", len(data),
+			"mode", modes[p.path])
 	}
 
 	// Write certificate
@@ -242,17 +351,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		}, fmt.Errorf("%s", errMsg)
 	}
 
-	// Write private key (must have KeyPEM)
-	if request.KeyPEM == "" {
-		errMsg := "SSH deployment requires private key (KeyPEM)"
-		c.logger.Error("missing private key")
-		return &target.DeploymentResult{
-			Success:       false,
-			TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
-			Message:       errMsg,
-			DeployedAt:    time.Now(),
-		}, fmt.Errorf("%s", errMsg)
-	}
+	// Write private key
 	if err := c.client.WriteFile(c.config.KeyPath, []byte(request.KeyPEM), keyMode); err != nil {
 		errMsg := fmt.Sprintf("failed to write private key: %v", err)
 		c.logger.Error("key write failed", "error", err, "path", c.config.KeyPath)
@@ -265,7 +364,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 	}
 
 	// Write chain separately if chain_path configured
-	if c.config.ChainPath != "" && request.ChainPEM != "" {
+	if chainSeparate {
 		if err := c.client.WriteFile(c.config.ChainPath, []byte(request.ChainPEM), certMode); err != nil {
 			errMsg := fmt.Sprintf("failed to write chain: %v", err)
 			c.logger.Error("chain write failed", "error", err, "path", c.config.ChainPath)
@@ -283,13 +382,88 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		c.logger.Debug("executing reload command", "command", c.config.ReloadCommand)
 		output, err := c.client.Execute(ctx, c.config.ReloadCommand)
 		if err != nil {
-			errMsg := fmt.Sprintf("reload command failed: %v (output: %s)", err, output)
-			c.logger.Error("reload command failed", "error", err, "output", output)
+			// Bundle 6: reload failed. Walk the writePaths list and either
+			// restore from the in-memory backup (file existed pre-deploy)
+			// or Remove (first-time deploy partial state). Re-run reload
+			// as a best-effort retry once restore completes — if THAT
+			// succeeds the target is fully back to pre-deploy state.
+			c.logger.Error("reload command failed; attempting rollback",
+				"error", err,
+				"output", output,
+				"reload_command", c.config.ReloadCommand)
+			var paths []string
+			for _, p := range writePaths {
+				paths = append(paths, p.path)
+			}
+			rollbackErr, restoreStatuses := c.restoreFromBackups(ctx, paths, backups, modes)
+			// Merge per-key restore status into backupStatus so operators
+			// see whether the rollback ran cleanly per file. restoreFromBackups
+			// returns statuses keyed by metadata key (cert/key/chain), not
+			// by remote path.
+			for _, p := range writePaths {
+				if s, ok := restoreStatuses[p.key]; ok {
+					backupStatus[p.key] = s
+				}
+			}
+
+			if rollbackErr != nil {
+				// Both reload AND rollback failed — operator-actionable.
+				combined := fmt.Errorf("reload failed (%w); rollback also failed (%v); manual operator inspection required", err, rollbackErr)
+				c.logger.Error("SSH rollback also failed",
+					"reload_error", err,
+					"rollback_error", rollbackErr)
+				return &target.DeploymentResult{
+					Success:       false,
+					TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+					Message:       combined.Error(),
+					DeployedAt:    time.Now(),
+					Metadata: buildMetadataWithBackup(c.config, startTime, backupStatus, map[string]string{
+						"reload_error":           output,
+						"rollback_error":         rollbackErr.Error(),
+						"rolled_back":            "false",
+						"manual_action_required": "true",
+					}),
+				}, combined
+			}
+
+			// Rollback succeeded. Best-effort retry-reload — if it works,
+			// the daemon is serving the original cert again. If it fails,
+			// remote files are pre-deploy but daemon may be in a stuck
+			// state; surface as wrapped error so the operator knows to
+			// investigate the daemon, not the files.
+			retryOutput, retryErr := c.client.Execute(ctx, c.config.ReloadCommand)
+			if retryErr != nil {
+				wrapped := fmt.Errorf("reload failed (%w); rolled back files; retry-reload also failed (%v) — daemon may need manual restart", err, retryErr)
+				c.logger.Error("SSH retry-reload after rollback failed",
+					"reload_error", err,
+					"retry_reload_error", retryErr,
+					"retry_output", retryOutput)
+				return &target.DeploymentResult{
+					Success:       false,
+					TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
+					Message:       wrapped.Error(),
+					DeployedAt:    time.Now(),
+					Metadata: buildMetadataWithBackup(c.config, startTime, backupStatus, map[string]string{
+						"reload_error":         output,
+						"retry_reload_error":   retryOutput,
+						"rolled_back":          "true",
+						"daemon_state_unknown": "true",
+					}),
+				}, wrapped
+			}
+
+			// Clean recoverable failure: files restored, daemon reloaded
+			// to pre-deploy state.
+			errMsg := fmt.Sprintf("reload command failed; rolled back to pre-deploy state: %v (output: %s)", err, output)
 			return &target.DeploymentResult{
 				Success:       false,
 				TargetAddress: fmt.Sprintf("%s:%d", c.config.Host, c.config.Port),
 				Message:       errMsg,
 				DeployedAt:    time.Now(),
+				Metadata: buildMetadataWithBackup(c.config, startTime, backupStatus, map[string]string{
+					"reload_error": output,
+					"rolled_back":  "true",
+				}),
 			}, fmt.Errorf("%s", errMsg)
 		}
 	}
@@ -306,13 +480,93 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 		DeploymentID:  fmt.Sprintf("ssh-%s-%d", c.config.Host, time.Now().Unix()),
 		Message:       fmt.Sprintf("Certificate deployed via SSH to %s", c.config.Host),
 		DeployedAt:    time.Now(),
-		Metadata: map[string]string{
-			"host":        c.config.Host,
-			"cert_path":   c.config.CertPath,
-			"key_path":    c.config.KeyPath,
-			"duration_ms": fmt.Sprintf("%d", deploymentDuration.Milliseconds()),
-		},
+		Metadata:      buildMetadataWithBackup(c.config, startTime, backupStatus, nil),
 	}, nil
+}
+
+// restoreFromBackups walks the configured deploy paths and either restores
+// each path from the in-memory backup (when the file existed pre-deploy) or
+// Removes the new bytes (first-time-deploy partial state). Returns the
+// first error encountered — caller surfaces the wrapped error to the
+// operator. The per-path status map is always populated so callers can
+// emit accurate Metadata.
+//
+// Bundle 6 of the 2026-05-02 deployment-target audit.
+func (c *Connector) restoreFromBackups(ctx context.Context, paths []string, backups map[string][]byte, modes map[string]os.FileMode) (error, map[string]string) {
+	statuses := make(map[string]string, len(paths))
+	pathToKey := map[string]string{
+		c.config.CertPath:  "cert",
+		c.config.KeyPath:   "key",
+		c.config.ChainPath: "chain",
+	}
+
+	var firstErr error
+	for _, path := range paths {
+		key := pathToKey[path]
+		if data, ok := backups[path]; ok {
+			// File existed pre-deploy — restore from backup with the
+			// original mode (default 0600 if mode capture failed).
+			mode := modes[path]
+			if mode == 0 {
+				mode = 0600
+			}
+			if err := c.client.WriteFile(path, data, mode); err != nil {
+				wrapped := fmt.Errorf("restore %s: %w", path, err)
+				if firstErr == nil {
+					firstErr = wrapped
+				}
+				if key != "" {
+					statuses[key] = "restore_failed"
+				}
+				c.logger.Error("rollback restore failed", "error", err, "path", path)
+				continue
+			}
+			if key != "" {
+				statuses[key] = "restored"
+			}
+			c.logger.Info("rollback restored file from backup", "path", path, "size_bytes", len(data))
+		} else {
+			// First-time deploy for this path — Remove the new bytes.
+			if err := c.client.Remove(path); err != nil {
+				wrapped := fmt.Errorf("remove %s: %w", path, err)
+				if firstErr == nil {
+					firstErr = wrapped
+				}
+				if key != "" {
+					statuses[key] = "remove_failed"
+				}
+				c.logger.Error("rollback remove failed", "error", err, "path", path)
+				continue
+			}
+			if key != "" {
+				statuses[key] = "removed"
+			}
+			c.logger.Info("rollback removed first-time-deploy file", "path", path)
+		}
+	}
+	return firstErr, statuses
+}
+
+// buildMetadataWithBackup assembles the per-deploy Metadata map with the
+// standard host / cert_path / key_path / duration_ms fields plus the
+// per-path backup_status_{cert,key,chain} fields populated from the
+// snapshot phase. Extra k/v pairs (e.g. error context) are merged on top.
+//
+// Bundle 6 of the 2026-05-02 deployment-target audit.
+func buildMetadataWithBackup(cfg *Config, startTime time.Time, backupStatus map[string]string, extra map[string]string) map[string]string {
+	md := map[string]string{
+		"host":                cfg.Host,
+		"cert_path":           cfg.CertPath,
+		"key_path":            cfg.KeyPath,
+		"duration_ms":         fmt.Sprintf("%d", time.Since(startTime).Milliseconds()),
+		"backup_status_cert":  backupStatus["cert"],
+		"backup_status_key":   backupStatus["key"],
+		"backup_status_chain": backupStatus["chain"],
+	}
+	for k, v := range extra {
+		md[k] = v
+	}
+	return md
 }
 
 // ValidateDeployment verifies that the deployed certificate files exist on the remote server.
@@ -532,18 +786,59 @@ func (c *realSSHClient) Execute(ctx context.Context, command string) (string, er
 	return string(output), err
 }
 
-// StatFile checks if a remote file exists and returns its size.
-func (c *realSSHClient) StatFile(remotePath string) (int64, error) {
+// StatFile returns os.FileInfo for a remote file via SFTP. Bundle 6 evolved
+// the signature from int64 (size only) to os.FileInfo so the pre-deploy
+// snapshot can capture the original mode for accurate rollback restoration.
+// Errors from SFTP wrapping a non-existent-file syscall preserve the
+// os.ErrNotExist sentinel through the %w wrap, so callers can use
+// errors.Is(err, os.ErrNotExist) to distinguish "file doesn't exist" from
+// real stat errors.
+func (c *realSSHClient) StatFile(remotePath string) (os.FileInfo, error) {
 	if c.sftpClient == nil {
-		return 0, fmt.Errorf("SFTP client not connected")
+		return nil, fmt.Errorf("SFTP client not connected")
 	}
 
 	info, err := c.sftpClient.Stat(remotePath)
 	if err != nil {
-		return 0, fmt.Errorf("failed to stat remote file %s: %w", remotePath, err)
+		return nil, fmt.Errorf("failed to stat remote file %s: %w", remotePath, err)
 	}
 
-	return info.Size(), nil
+	return info, nil
+}
+
+// ReadFile reads the entire contents of a remote file via SFTP. Used by
+// Bundle 6's pre-deploy snapshot to capture original bytes for the
+// reload-failure rollback path. Callers cap the read size by inspecting
+// StatFile first.
+func (c *realSSHClient) ReadFile(remotePath string) ([]byte, error) {
+	if c.sftpClient == nil {
+		return nil, fmt.Errorf("SFTP client not connected")
+	}
+
+	f, err := c.sftpClient.Open(remotePath)
+	if err != nil {
+		return nil, fmt.Errorf("sftp open %s: %w", remotePath, err)
+	}
+	defer f.Close()
+
+	data, err := io.ReadAll(f)
+	if err != nil {
+		return nil, fmt.Errorf("sftp read %s: %w", remotePath, err)
+	}
+	return data, nil
+}
+
+// Remove deletes a remote file via SFTP. Used by Bundle 6's rollback path
+// to clean up first-time-deploy partial state — when reload fails and the
+// path didn't exist pre-deploy, the new bytes must come off the remote.
+func (c *realSSHClient) Remove(remotePath string) error {
+	if c.sftpClient == nil {
+		return fmt.Errorf("SFTP client not connected")
+	}
+	if err := c.sftpClient.Remove(remotePath); err != nil {
+		return fmt.Errorf("sftp remove %s: %w", remotePath, err)
+	}
+	return nil
 }
 
 // Close closes the SFTP and SSH connections.

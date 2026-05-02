@@ -7,9 +7,28 @@ import (
 	"log/slog"
 	"os"
 	"testing"
+	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/target"
 )
+
+// stubFileInfo implements os.FileInfo for tests that need to return a
+// FileInfo from the mock SSHClient's StatFile. Bundle 6 of the
+// 2026-05-02 deployment-target audit evolved StatFile's signature from
+// (int64, error) to (os.FileInfo, error) so the pre-deploy snapshot
+// can capture the original mode for accurate rollback restoration.
+type stubFileInfo struct {
+	size int64
+	mode os.FileMode
+	name string
+}
+
+func (s *stubFileInfo) Name() string       { return s.name }
+func (s *stubFileInfo) Size() int64        { return s.size }
+func (s *stubFileInfo) Mode() os.FileMode  { return s.mode }
+func (s *stubFileInfo) ModTime() time.Time { return time.Time{} }
+func (s *stubFileInfo) IsDir() bool        { return false }
+func (s *stubFileInfo) Sys() any           { return nil }
 
 // testLogger returns a slog.Logger for test output.
 func testLogger() *slog.Logger {
@@ -19,24 +38,48 @@ func testLogger() *slog.Logger {
 // --- Mock SSH Client ---
 
 // mockSSHClient records all calls and returns configurable results.
+//
+// Bundle 6 of the 2026-05-02 deployment-target audit added per-path
+// response maps (statByPath / readByPath / writeFileErrByPath) so the
+// new snapshot/rollback tests can simulate (a) pre-existing remote
+// files for the snapshot to read, (b) per-call WriteFile failures to
+// inject restore-failure paths, and (c) sequenced Execute errors so
+// the reload-then-retry-reload tests can drive both calls
+// independently. The legacy global fields (statFileSize / statFileErr
+// / writeFileErr / executeErr) are still honored when no per-path
+// override matches, so existing tests remain green.
 type mockSSHClient struct {
-	connectCalls   int
-	connectErr     error
-	writeFileCalls []writeFileCall
-	writeFileErr   error
-	executeCalls   []string
-	executeOutput  string
-	executeErr     error
-	statFileCalls  []string
-	statFileSize   int64
-	statFileErr    error
-	closeCalls     int
+	connectCalls       int
+	connectErr         error
+	writeFileCalls     []writeFileCall
+	writeFileErr       error
+	writeFileErrByPath map[string]error // per-path WriteFile error overrides
+	executeCalls       []string
+	executeOutput      string
+	executeErr         error
+	executeErrSequence []error  // per-call Execute errors; falls back to executeErr after exhaustion
+	executeOutSequence []string // per-call Execute outputs; mirrors executeErrSequence
+	statFileCalls      []string
+	statFileSize       int64
+	statFileErr        error
+	statByPath         map[string]statResponse // per-path StatFile responses
+	readByPath         map[string][]byte       // per-path ReadFile bytes (existence implies success)
+	readErrByPath      map[string]error        // per-path ReadFile error overrides
+	removeCalls        []string
+	removeErr          error
+	removeErrByPath    map[string]error
+	closeCalls         int
 }
 
 type writeFileCall struct {
 	Path string
 	Data []byte
 	Mode os.FileMode
+}
+
+type statResponse struct {
+	info os.FileInfo
+	err  error
 }
 
 func (m *mockSSHClient) Connect(ctx context.Context) error {
@@ -46,17 +89,66 @@ func (m *mockSSHClient) Connect(ctx context.Context) error {
 
 func (m *mockSSHClient) WriteFile(remotePath string, data []byte, mode os.FileMode) error {
 	m.writeFileCalls = append(m.writeFileCalls, writeFileCall{Path: remotePath, Data: data, Mode: mode})
+	if m.writeFileErrByPath != nil {
+		if err, ok := m.writeFileErrByPath[remotePath]; ok {
+			return err
+		}
+	}
 	return m.writeFileErr
 }
 
 func (m *mockSSHClient) Execute(ctx context.Context, command string) (string, error) {
+	idx := len(m.executeCalls)
 	m.executeCalls = append(m.executeCalls, command)
+	if idx < len(m.executeErrSequence) {
+		out := ""
+		if idx < len(m.executeOutSequence) {
+			out = m.executeOutSequence[idx]
+		}
+		return out, m.executeErrSequence[idx]
+	}
 	return m.executeOutput, m.executeErr
 }
 
-func (m *mockSSHClient) StatFile(remotePath string) (int64, error) {
+func (m *mockSSHClient) StatFile(remotePath string) (os.FileInfo, error) {
 	m.statFileCalls = append(m.statFileCalls, remotePath)
-	return m.statFileSize, m.statFileErr
+	if m.statByPath != nil {
+		if resp, ok := m.statByPath[remotePath]; ok {
+			return resp.info, resp.err
+		}
+	}
+	if m.statFileErr != nil {
+		return nil, m.statFileErr
+	}
+	// Default: synthesise a FileInfo with the legacy size + a sane mode.
+	return &stubFileInfo{size: m.statFileSize, mode: 0644, name: remotePath}, nil
+}
+
+func (m *mockSSHClient) ReadFile(remotePath string) ([]byte, error) {
+	if m.readErrByPath != nil {
+		if err, ok := m.readErrByPath[remotePath]; ok {
+			return nil, err
+		}
+	}
+	if m.readByPath != nil {
+		if data, ok := m.readByPath[remotePath]; ok {
+			return data, nil
+		}
+	}
+	// Default: empty bytes, no error. Tests that don't exercise the
+	// snapshot path see this fall-through (the read still succeeds so
+	// the snapshot phase doesn't block their deploy hot path).
+	return []byte{}, nil
+}
+
+func (m *mockSSHClient) Remove(remotePath string) error {
+	m.removeCalls = append(m.removeCalls, remotePath)
+	if m.removeErrByPath != nil {
+		if err, ok := m.removeErrByPath[remotePath]; ok {
+			return err
+		}
+	}
+	return m.removeErr
 }
 
 func (m *mockSSHClient) Close() error {
@@ -571,6 +663,388 @@ func TestDeployCertificate_ReloadFailure(t *testing.T) {
 	}
 }
 
+// --- Bundle 6: pre-deploy snapshot + reload-failure rollback ---
+//
+// These four tests pin the load-bearing rollback contract added in
+// Bundle 6 of the 2026-05-02 deployment-target audit:
+//   - happy rollback path: pre-existing remote bytes restored verbatim;
+//   - first-time deploy partial-state cleanup via Remove;
+//   - both reload AND rollback fail → operator-actionable wrapped error;
+//   - rollback succeeds but the retry-reload after rollback fails →
+//     daemon-state-unknown wrapped error.
+
+func TestSSH_ReloadFails_FilesRestored(t *testing.T) {
+	originalCert := []byte("-----BEGIN CERTIFICATE-----\nORIGINAL_CERT\n-----END CERTIFICATE-----\n")
+	originalKey := []byte("-----BEGIN PRIVATE KEY-----\nORIGINAL_KEY\n-----END PRIVATE KEY-----\n")
+	originalChain := []byte("-----BEGIN CERTIFICATE-----\nORIGINAL_CHAIN\n-----END CERTIFICATE-----\n")
+
+	mock := &mockSSHClient{
+		// Pre-existing files for all three paths; mode 0644 / 0600 / 0644.
+		statByPath: map[string]statResponse{
+			"/etc/ssl/cert.pem":  {info: &stubFileInfo{size: int64(len(originalCert)), mode: 0644}},
+			"/etc/ssl/key.pem":   {info: &stubFileInfo{size: int64(len(originalKey)), mode: 0600}},
+			"/etc/ssl/chain.pem": {info: &stubFileInfo{size: int64(len(originalChain)), mode: 0644}},
+		},
+		readByPath: map[string][]byte{
+			"/etc/ssl/cert.pem":  originalCert,
+			"/etc/ssl/key.pem":   originalKey,
+			"/etc/ssl/chain.pem": originalChain,
+		},
+		// First Execute (reload) fails; second Execute (retry-reload after
+		// restore) succeeds — clean recoverable failure.
+		executeErrSequence: []error{fmt.Errorf("reload failed: exit status 1"), nil},
+		executeOutSequence: []string{"reload error output", "ok"},
+	}
+
+	cfg := &Config{
+		Host:          "server.local",
+		Port:          22,
+		CertPath:      "/etc/ssl/cert.pem",
+		KeyPath:       "/etc/ssl/key.pem",
+		ChainPath:     "/etc/ssl/chain.pem",
+		CertMode:      "0644",
+		KeyMode:       "0600",
+		ReloadCommand: "systemctl reload nginx",
+	}
+	c := NewWithClient(cfg, mock, testLogger())
+
+	req := target.DeploymentRequest{
+		CertPEM:  "-----BEGIN CERTIFICATE-----\nNEW_CERT\n-----END CERTIFICATE-----\n",
+		KeyPEM:   "-----BEGIN PRIVATE KEY-----\nNEW_KEY\n-----END PRIVATE KEY-----\n",
+		ChainPEM: "-----BEGIN CERTIFICATE-----\nNEW_CHAIN\n-----END CERTIFICATE-----\n",
+	}
+
+	result, err := c.DeployCertificate(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when reload fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Error must mention reload failure + rollback success.
+	if !containsString(err.Error(), "reload command failed") && !containsString(err.Error(), "reload failed") {
+		t.Errorf("expected error to mention reload failure, got: %v", err)
+	}
+	if !containsString(err.Error(), "rolled back") {
+		t.Errorf("expected error to mention 'rolled back', got: %v", err)
+	}
+
+	// Build a path → bytes view of every WriteFile call for the assertions.
+	// On the success path the deploy writes new bytes; on the rollback path
+	// it writes the originals back. We expect each path to be written at
+	// least twice (once with new bytes, once with originals).
+	writesByPath := map[string][][]byte{}
+	for _, w := range mock.writeFileCalls {
+		writesByPath[w.Path] = append(writesByPath[w.Path], w.Data)
+	}
+
+	for _, path := range []string{"/etc/ssl/cert.pem", "/etc/ssl/key.pem", "/etc/ssl/chain.pem"} {
+		writes := writesByPath[path]
+		if len(writes) < 2 {
+			t.Errorf("expected at least 2 WriteFile calls for %s (deploy + restore), got %d", path, len(writes))
+			continue
+		}
+		// Last write to each path is the rollback restore — must equal
+		// the pre-existing bytes captured in the snapshot.
+		lastWrite := writes[len(writes)-1]
+		var want []byte
+		switch path {
+		case "/etc/ssl/cert.pem":
+			want = originalCert
+		case "/etc/ssl/key.pem":
+			want = originalKey
+		case "/etc/ssl/chain.pem":
+			want = originalChain
+		}
+		if string(lastWrite) != string(want) {
+			t.Errorf("rollback for %s did not restore original bytes:\n  got:  %q\n  want: %q", path, lastWrite, want)
+		}
+	}
+
+	// No Remove calls — every path had a pre-existing snapshot to restore from.
+	if len(mock.removeCalls) != 0 {
+		t.Errorf("expected 0 Remove calls (all paths had backups), got %d: %v", len(mock.removeCalls), mock.removeCalls)
+	}
+
+	// Both Execute calls (initial reload + retry-reload after rollback)
+	// must have run.
+	if len(mock.executeCalls) != 2 {
+		t.Errorf("expected 2 Execute calls (reload + retry-reload), got %d", len(mock.executeCalls))
+	}
+
+	// Metadata reflects per-path snapshot status.
+	if result.Metadata["backup_status_cert"] != "restored" {
+		t.Errorf("expected backup_status_cert=restored, got %q", result.Metadata["backup_status_cert"])
+	}
+	if result.Metadata["backup_status_key"] != "restored" {
+		t.Errorf("expected backup_status_key=restored, got %q", result.Metadata["backup_status_key"])
+	}
+	if result.Metadata["backup_status_chain"] != "restored" {
+		t.Errorf("expected backup_status_chain=restored, got %q", result.Metadata["backup_status_chain"])
+	}
+	if result.Metadata["rolled_back"] != "true" {
+		t.Errorf("expected rolled_back=true, got %q", result.Metadata["rolled_back"])
+	}
+}
+
+func TestSSH_NoExistingCert_ReloadFails_NewCertRemoved(t *testing.T) {
+	mock := &mockSSHClient{
+		// All three paths report "no such file" — first-time deploy.
+		statByPath: map[string]statResponse{
+			"/etc/ssl/cert.pem":  {err: fmt.Errorf("stat: %w", os.ErrNotExist)},
+			"/etc/ssl/key.pem":   {err: fmt.Errorf("stat: %w", os.ErrNotExist)},
+			"/etc/ssl/chain.pem": {err: fmt.Errorf("stat: %w", os.ErrNotExist)},
+		},
+		// Reload fails; retry-reload after rollback succeeds.
+		executeErrSequence: []error{fmt.Errorf("reload failed"), nil},
+		executeOutSequence: []string{"reload error", "ok"},
+	}
+
+	cfg := &Config{
+		Host:          "server.local",
+		Port:          22,
+		CertPath:      "/etc/ssl/cert.pem",
+		KeyPath:       "/etc/ssl/key.pem",
+		ChainPath:     "/etc/ssl/chain.pem",
+		CertMode:      "0644",
+		KeyMode:       "0600",
+		ReloadCommand: "systemctl reload nginx",
+	}
+	c := NewWithClient(cfg, mock, testLogger())
+
+	req := target.DeploymentRequest{
+		CertPEM:  "-----BEGIN CERTIFICATE-----\nNEW_CERT\n-----END CERTIFICATE-----\n",
+		KeyPEM:   "-----BEGIN PRIVATE KEY-----\nNEW_KEY\n-----END PRIVATE KEY-----\n",
+		ChainPEM: "-----BEGIN CERTIFICATE-----\nNEW_CHAIN\n-----END CERTIFICATE-----\n",
+	}
+
+	result, err := c.DeployCertificate(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when reload fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Rollback for first-time deploys must call Remove on every written path.
+	expectedRemoves := map[string]bool{
+		"/etc/ssl/cert.pem":  true,
+		"/etc/ssl/key.pem":   true,
+		"/etc/ssl/chain.pem": true,
+	}
+	if len(mock.removeCalls) != len(expectedRemoves) {
+		t.Errorf("expected %d Remove calls, got %d: %v", len(expectedRemoves), len(mock.removeCalls), mock.removeCalls)
+	}
+	for _, p := range mock.removeCalls {
+		if !expectedRemoves[p] {
+			t.Errorf("unexpected Remove path: %s", p)
+		}
+	}
+
+	// First-time deploy: WriteFile is called only during the initial
+	// deploy, never during rollback (no backup to restore from).
+	expectedWrites := 3 // cert + key + chain (all configured paths)
+	if len(mock.writeFileCalls) != expectedWrites {
+		t.Errorf("expected exactly %d WriteFile calls (deploy only, no restore), got %d", expectedWrites, len(mock.writeFileCalls))
+	}
+
+	// Metadata reflects "removed" status for all paths.
+	if result.Metadata["backup_status_cert"] != "removed" {
+		t.Errorf("expected backup_status_cert=removed, got %q", result.Metadata["backup_status_cert"])
+	}
+	if result.Metadata["backup_status_key"] != "removed" {
+		t.Errorf("expected backup_status_key=removed, got %q", result.Metadata["backup_status_key"])
+	}
+	if result.Metadata["backup_status_chain"] != "removed" {
+		t.Errorf("expected backup_status_chain=removed, got %q", result.Metadata["backup_status_chain"])
+	}
+}
+
+func TestSSH_ReloadFails_RollbackAlsoFails_OperatorActionable(t *testing.T) {
+	originalCert := []byte("ORIGINAL_CERT")
+	originalKey := []byte("ORIGINAL_KEY")
+
+	mock := &mockSSHClient{
+		statByPath: map[string]statResponse{
+			"/etc/ssl/cert.pem": {info: &stubFileInfo{size: int64(len(originalCert)), mode: 0644}},
+			"/etc/ssl/key.pem":  {info: &stubFileInfo{size: int64(len(originalKey)), mode: 0600}},
+		},
+		readByPath: map[string][]byte{
+			"/etc/ssl/cert.pem": originalCert,
+			"/etc/ssl/key.pem":  originalKey,
+		},
+		// Initial deploy WriteFile calls succeed; rollback's WriteFile to
+		// restore the cert FAILS. This injects the operator-actionable
+		// case: reload failed AND the restore can't complete.
+		writeFileErrByPath: map[string]error{},
+		executeErrSequence: []error{fmt.Errorf("reload step failed")},
+		executeOutSequence: []string{"reload error"},
+	}
+	// Track call count so we can fail only the SECOND WriteFile to
+	// /etc/ssl/cert.pem (i.e. the restore call, not the initial deploy
+	// write). Done via a wrapper because writeFileErrByPath is a flat map.
+	wrapped := &writeOrderTrackingMock{base: mock}
+	wrapped.failOnNthWriteForPath = map[string]int{
+		"/etc/ssl/cert.pem": 2, // 1st = deploy write (succeed); 2nd = restore (fail)
+	}
+
+	cfg := &Config{
+		Host:          "server.local",
+		Port:          22,
+		CertPath:      "/etc/ssl/cert.pem",
+		KeyPath:       "/etc/ssl/key.pem",
+		CertMode:      "0644",
+		KeyMode:       "0600",
+		ReloadCommand: "systemctl reload nginx",
+	}
+	c := NewWithClient(cfg, wrapped, testLogger())
+
+	req := target.DeploymentRequest{
+		CertPEM: "NEW_CERT",
+		KeyPEM:  "NEW_KEY",
+	}
+
+	result, err := c.DeployCertificate(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when both reload and rollback fail")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Wrapped error must mention BOTH the reload error and the rollback error.
+	if !containsString(err.Error(), "reload failed") {
+		t.Errorf("expected error to mention reload failure, got: %v", err)
+	}
+	if !containsString(err.Error(), "rollback also failed") {
+		t.Errorf("expected error to mention 'rollback also failed', got: %v", err)
+	}
+	if !containsString(err.Error(), "manual operator inspection required") {
+		t.Errorf("expected error to flag manual inspection, got: %v", err)
+	}
+
+	// Metadata must surface manual_action_required + both error strings.
+	if result.Metadata["manual_action_required"] != "true" {
+		t.Errorf("expected manual_action_required=true, got %q", result.Metadata["manual_action_required"])
+	}
+	if result.Metadata["rolled_back"] != "false" {
+		t.Errorf("expected rolled_back=false, got %q", result.Metadata["rolled_back"])
+	}
+	if result.Metadata["rollback_error"] == "" {
+		t.Error("expected rollback_error in metadata")
+	}
+}
+
+func TestSSH_ReloadFails_RestoreThenSecondReloadFails(t *testing.T) {
+	originalCert := []byte("ORIGINAL_CERT")
+	originalKey := []byte("ORIGINAL_KEY")
+
+	mock := &mockSSHClient{
+		statByPath: map[string]statResponse{
+			"/etc/ssl/cert.pem": {info: &stubFileInfo{size: int64(len(originalCert)), mode: 0644}},
+			"/etc/ssl/key.pem":  {info: &stubFileInfo{size: int64(len(originalKey)), mode: 0600}},
+		},
+		readByPath: map[string][]byte{
+			"/etc/ssl/cert.pem": originalCert,
+			"/etc/ssl/key.pem":  originalKey,
+		},
+		// Both Execute calls (initial reload + retry-reload after rollback)
+		// fail. The remote files are back to pre-deploy state but the
+		// daemon may be in a stuck/partial state — operator needs to
+		// know that.
+		executeErrSequence: []error{fmt.Errorf("reload step 1 failed"), fmt.Errorf("reload step 2 failed")},
+		executeOutSequence: []string{"out1", "out2"},
+	}
+
+	cfg := &Config{
+		Host:          "server.local",
+		Port:          22,
+		CertPath:      "/etc/ssl/cert.pem",
+		KeyPath:       "/etc/ssl/key.pem",
+		CertMode:      "0644",
+		KeyMode:       "0600",
+		ReloadCommand: "systemctl reload nginx",
+	}
+	c := NewWithClient(cfg, mock, testLogger())
+
+	req := target.DeploymentRequest{
+		CertPEM: "NEW_CERT",
+		KeyPEM:  "NEW_KEY",
+	}
+
+	result, err := c.DeployCertificate(context.Background(), req)
+	if err == nil {
+		t.Fatal("expected error when retry-reload after rollback fails")
+	}
+	if result.Success {
+		t.Fatal("expected failure result")
+	}
+
+	// Wrapped error mentions reload failure, rollback success, and
+	// retry-reload failure — operator must understand the daemon may
+	// not be running the original config even though the files are back.
+	if !containsString(err.Error(), "rolled back files") {
+		t.Errorf("expected error to mention 'rolled back files', got: %v", err)
+	}
+	if !containsString(err.Error(), "retry-reload also failed") {
+		t.Errorf("expected error to mention retry-reload failure, got: %v", err)
+	}
+	if !containsString(err.Error(), "daemon may need manual restart") {
+		t.Errorf("expected error to flag daemon state, got: %v", err)
+	}
+
+	// Metadata flags daemon_state_unknown + rolled_back=true (files OK).
+	if result.Metadata["daemon_state_unknown"] != "true" {
+		t.Errorf("expected daemon_state_unknown=true, got %q", result.Metadata["daemon_state_unknown"])
+	}
+	if result.Metadata["rolled_back"] != "true" {
+		t.Errorf("expected rolled_back=true, got %q", result.Metadata["rolled_back"])
+	}
+
+	// Both Execute calls happened; both WriteFile-on-restore calls
+	// happened (cert + key restored).
+	if len(mock.executeCalls) != 2 {
+		t.Errorf("expected 2 Execute calls, got %d", len(mock.executeCalls))
+	}
+}
+
+// writeOrderTrackingMock wraps mockSSHClient to fail the Nth WriteFile
+// for a given path. Used by TestSSH_ReloadFails_RollbackAlsoFails_-
+// OperatorActionable to fail the restore (2nd write) while letting the
+// initial deploy (1st write) succeed for the same path.
+type writeOrderTrackingMock struct {
+	base                  *mockSSHClient
+	writeCountByPath      map[string]int
+	failOnNthWriteForPath map[string]int
+}
+
+func (w *writeOrderTrackingMock) Connect(ctx context.Context) error { return w.base.Connect(ctx) }
+func (w *writeOrderTrackingMock) WriteFile(remotePath string, data []byte, mode os.FileMode) error {
+	if w.writeCountByPath == nil {
+		w.writeCountByPath = map[string]int{}
+	}
+	w.writeCountByPath[remotePath]++
+	w.base.writeFileCalls = append(w.base.writeFileCalls, writeFileCall{Path: remotePath, Data: data, Mode: mode})
+	if n, ok := w.failOnNthWriteForPath[remotePath]; ok {
+		if w.writeCountByPath[remotePath] == n {
+			return fmt.Errorf("injected write failure on call %d to %s", n, remotePath)
+		}
+	}
+	return nil
+}
+func (w *writeOrderTrackingMock) Execute(ctx context.Context, cmd string) (string, error) {
+	return w.base.Execute(ctx, cmd)
+}
+func (w *writeOrderTrackingMock) StatFile(remotePath string) (os.FileInfo, error) {
+	return w.base.StatFile(remotePath)
+}
+func (w *writeOrderTrackingMock) ReadFile(remotePath string) ([]byte, error) {
+	return w.base.ReadFile(remotePath)
+}
+func (w *writeOrderTrackingMock) Remove(remotePath string) error { return w.base.Remove(remotePath) }
+func (w *writeOrderTrackingMock) Close() error                   { return w.base.Close() }
+
 // --- ValidateDeployment tests ---
 
 func TestValidateDeployment_Success(t *testing.T) {
@@ -882,13 +1356,24 @@ func (m *conditionalStatMockSSHClient) Execute(ctx context.Context, command stri
 	return m.base.Execute(ctx, command)
 }
 
-func (m *conditionalStatMockSSHClient) StatFile(remotePath string) (int64, error) {
+func (m *conditionalStatMockSSHClient) StatFile(remotePath string) (os.FileInfo, error) {
 	m.callCount++
-	// First call succeeds (cert), second call fails (key)
+	// First call succeeds (cert), second call fails (key) — wrap
+	// os.ErrNotExist so the connector's errors.Is check propagates the
+	// "file not found" semantics through the Bundle 6 stat-error
+	// handling.
 	if m.callCount == 2 {
-		return 0, fmt.Errorf("file not found")
+		return nil, fmt.Errorf("file not found: %w", os.ErrNotExist)
 	}
-	return 1024, nil
+	return &stubFileInfo{size: 1024, mode: 0644}, nil
+}
+
+func (m *conditionalStatMockSSHClient) ReadFile(remotePath string) ([]byte, error) {
+	return m.base.ReadFile(remotePath)
+}
+
+func (m *conditionalStatMockSSHClient) Remove(remotePath string) error {
+	return m.base.Remove(remotePath)
 }
 
 func (m *conditionalStatMockSSHClient) Close() error {

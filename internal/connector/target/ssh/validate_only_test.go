@@ -20,7 +20,9 @@ func (s *stubSSHClient) Connect(_ context.Context) error                     { r
 func (s *stubSSHClient) Close() error                                        { return nil }
 func (s *stubSSHClient) WriteFile(_ string, _ []byte, _ os.FileMode) error   { return nil }
 func (s *stubSSHClient) Execute(_ context.Context, _ string) (string, error) { return "", nil }
-func (s *stubSSHClient) StatFile(_ string) (int64, error)                    { return 0, nil }
+func (s *stubSSHClient) StatFile(_ string) (os.FileInfo, error)              { return nil, os.ErrNotExist }
+func (s *stubSSHClient) ReadFile(_ string) ([]byte, error)                   { return nil, os.ErrNotExist }
+func (s *stubSSHClient) Remove(_ string) error                               { return nil }
 
 func TestSSH_ValidateOnly_Connect_Succeeds(t *testing.T) {
 	c := NewWithClient(&Config{Host: "h", User: "u"}, &stubSSHClient{}, nil)

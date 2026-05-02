@@ -532,21 +532,21 @@ func TestRealSSHClient_WriteFile_StatFile_RoundTrip(t *testing.T) {
 		t.Fatalf("WriteFile: %v", err)
 	}
 
-	size, err := c.StatFile(target)
+	info, err := c.StatFile(target)
 	if err != nil {
 		t.Fatalf("StatFile: %v", err)
 	}
-	if size != int64(len(payload)) {
-		t.Errorf("expected size %d, got %d", len(payload), size)
+	if info.Size() != int64(len(payload)) {
+		t.Errorf("expected size %d, got %d", len(payload), info.Size())
 	}
 
 	// Verify mode 0640 was set.
-	info, err := os.Stat(target)
+	osInfo, err := os.Stat(target)
 	if err != nil {
 		t.Fatalf("os.Stat: %v", err)
 	}
-	if info.Mode().Perm() != 0640 {
-		t.Errorf("expected mode 0640, got %v", info.Mode().Perm())
+	if osInfo.Mode().Perm() != 0640 {
+		t.Errorf("expected mode 0640, got %v", osInfo.Mode().Perm())
 	}
 
 	// Verify content round-trips.
