@@ -18,12 +18,27 @@ type RevocationSvc struct {
 	auditService    *AuditService
 	notificationSvc *NotificationService
 	issuerRegistry  *IssuerRegistry
+	// tx — when set, wraps the cert status update + revocation row
+	// insert + audit row in a single transaction. Closes the #3 audit-
+	// readiness blocker for the revocation path. Optional via
+	// SetTransactor; nil means legacy non-transactional behavior
+	// (cert.Update committed independently from revocation row +
+	// audit, with revocation insert + audit logged-but-not-failed).
+	tx repository.Transactor
 	// ocspCacheInvalidator — production hardening II Phase 2 load-
 	// bearing security wire. After a successful revocation, the
 	// service MUST invalidate the OCSP response cache for this
 	// (issuer, serial) so the next OCSP fetch returns the revoked
 	// status (not the stale "good" cached blob).
 	ocspCacheInvalidator OCSPCacheInvalidator
+}
+
+// SetTransactor wires a Transactor for atomic revocation (cert update
+// + revocation row + audit row in a single transaction). Closes the
+// #3 audit-readiness blocker for the revocation path. Optional —
+// nil reverts to the legacy non-transactional behavior.
+func (s *RevocationSvc) SetTransactor(tx repository.Transactor) {
+	s.tx = tx
 }
 
 // OCSPCacheInvalidator is the minimum surface RevocationSvc needs
@@ -100,31 +115,73 @@ func (s *RevocationSvc) RevokeCertificateWithActor(ctx context.Context, certID s
 		return fmt.Errorf("failed to get certificate version: %w", err)
 	}
 
-	// 3. Update certificate status to Revoked
+	// 3. + 4. + audit: cert status update + revocation row + audit row.
+	// Atomic path (when SetTransactor was wired) keeps these three
+	// writes consistent: a failure in any one rolls back the others.
+	// Closes the #3 audit-readiness blocker for the revocation path.
 	now := time.Now()
 	cert.Status = domain.CertificateStatusRevoked
 	cert.RevokedAt = &now
 	cert.RevocationReason = reason
 	cert.UpdatedAt = now
-	if err := s.certRepo.Update(ctx, cert); err != nil {
-		return fmt.Errorf("failed to update certificate status: %w", err)
+
+	auditDetails := map[string]interface{}{
+		"common_name": cert.CommonName,
+		"serial":      version.SerialNumber,
+		"reason":      reason,
 	}
 
-	// 4. Record revocation in certificate_revocations table (for CRL generation)
-	if s.revocationRepo != nil {
-		revocation := &domain.CertificateRevocation{
-			ID:            generateID("rev"),
-			CertificateID: certID,
-			SerialNumber:  version.SerialNumber,
-			Reason:        reason,
-			RevokedBy:     actor,
-			RevokedAt:     now,
-			IssuerID:      cert.IssuerID,
-			CreatedAt:     now,
+	if s.tx != nil {
+		// Atomic three-write path.
+		if err := s.tx.WithinTx(ctx, func(q repository.Querier) error {
+			if err := s.certRepo.UpdateWithTx(ctx, q, cert); err != nil {
+				return fmt.Errorf("failed to update certificate status: %w", err)
+			}
+			if s.revocationRepo != nil {
+				revocation := &domain.CertificateRevocation{
+					ID:            generateID("rev"),
+					CertificateID: certID,
+					SerialNumber:  version.SerialNumber,
+					Reason:        reason,
+					RevokedBy:     actor,
+					RevokedAt:     now,
+					IssuerID:      cert.IssuerID,
+					CreatedAt:     now,
+				}
+				if err := s.revocationRepo.CreateWithTx(ctx, q, revocation); err != nil {
+					return fmt.Errorf("failed to record revocation: %w", err)
+				}
+			}
+			if err := s.auditService.RecordEventWithTx(ctx, q, actor, domain.ActorTypeUser,
+				"certificate_revoked", "certificate", certID, auditDetails); err != nil {
+				return fmt.Errorf("failed to record audit event: %w", err)
+			}
+			return nil
+		}); err != nil {
+			return err
 		}
-		if err := s.revocationRepo.Create(ctx, revocation); err != nil {
-			slog.Error("failed to record revocation for CRL", "error", err, "certificate_id", certID)
-			// Don't fail the overall revocation — the cert status is already updated
+	} else {
+		// Legacy non-transactional path. Pre-fix behavior preserved
+		// for backward compat with callers that haven't wired
+		// SetTransactor.
+		if err := s.certRepo.Update(ctx, cert); err != nil {
+			return fmt.Errorf("failed to update certificate status: %w", err)
+		}
+		if s.revocationRepo != nil {
+			revocation := &domain.CertificateRevocation{
+				ID:            generateID("rev"),
+				CertificateID: certID,
+				SerialNumber:  version.SerialNumber,
+				Reason:        reason,
+				RevokedBy:     actor,
+				RevokedAt:     now,
+				IssuerID:      cert.IssuerID,
+				CreatedAt:     now,
+			}
+			if err := s.revocationRepo.Create(ctx, revocation); err != nil {
+				slog.Error("failed to record revocation for CRL", "error", err, "certificate_id", certID)
+				// Don't fail the overall revocation — the cert status is already updated
+			}
 		}
 	}
 
@@ -171,15 +228,13 @@ func (s *RevocationSvc) RevokeCertificateWithActor(ctx context.Context, certID s
 		}
 	}
 
-	// 6. Record audit event
-	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
-		"certificate_revoked", "certificate", certID,
-		map[string]interface{}{
-			"common_name": cert.CommonName,
-			"serial":      version.SerialNumber,
-			"reason":      reason,
-		}); err != nil {
-		slog.Error("failed to record audit event", "error", err)
+	// 6. Record audit event (legacy non-transactional path only — the
+	// atomic path already recorded the audit inside the tx above).
+	if s.tx == nil {
+		if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
+			"certificate_revoked", "certificate", certID, auditDetails); err != nil {
+			slog.Error("failed to record audit event", "error", err)
+		}
 	}
 
 	// 7. Send revocation notification

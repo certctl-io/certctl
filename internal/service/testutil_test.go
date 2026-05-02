@@ -70,6 +70,13 @@ func (m *mockCertRepo) Create(ctx context.Context, cert *domain.ManagedCertifica
 	return nil
 }
 
+// CreateWithTx mirrors Create — mocks have no DB, so the Querier
+// argument is ignored. Production behavior comes from postgres.WithTx
+// path; mocks just exercise the in-memory state.
+func (m *mockCertRepo) CreateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
+	return m.Create(ctx, cert)
+}
+
 func (m *mockCertRepo) Update(ctx context.Context, cert *domain.ManagedCertificate) error {
 	if m.UpdateErr != nil {
 		return m.UpdateErr
@@ -77,6 +84,11 @@ func (m *mockCertRepo) Update(ctx context.Context, cert *domain.ManagedCertifica
 	m.Certs[cert.ID] = cert
 	m.Updated = append(m.Updated, cert)
 	return nil
+}
+
+// UpdateWithTx mirrors Update — see CreateWithTx note.
+func (m *mockCertRepo) UpdateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
+	return m.Update(ctx, cert)
 }
 
 func (m *mockCertRepo) Archive(ctx context.Context, id string) error {
@@ -107,6 +119,11 @@ func (m *mockCertRepo) CreateVersion(ctx context.Context, version *domain.Certif
 	}
 	m.Versions[version.CertificateID] = append(m.Versions[version.CertificateID], version)
 	return nil
+}
+
+// CreateVersionWithTx mirrors CreateVersion.
+func (m *mockCertRepo) CreateVersionWithTx(ctx context.Context, q repository.Querier, version *domain.CertificateVersion) error {
+	return m.CreateVersion(ctx, version)
 }
 
 func (m *mockCertRepo) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
@@ -662,6 +679,11 @@ func (m *mockAuditRepo) Create(ctx context.Context, event *domain.AuditEvent) er
 	}
 	m.Events = append(m.Events, event)
 	return nil
+}
+
+// CreateWithTx mirrors Create — mocks have no DB; the Querier is ignored.
+func (m *mockAuditRepo) CreateWithTx(ctx context.Context, q repository.Querier, event *domain.AuditEvent) error {
+	return m.Create(ctx, event)
 }
 
 func (m *mockAuditRepo) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
@@ -1380,6 +1402,31 @@ func newMockRenewalPolicyRepository() *mockRenewalPolicyRepo {
 	}
 }
 
+// mockTransactor is a no-op repository.Transactor for tests. It runs fn
+// synchronously without any DB; the Querier passed to fn is nil because
+// the mock repo *WithTx methods ignore it. If fn returns an error, the
+// "transaction" is not committed — but since mocks share state, in-memory
+// rollback isn't simulated. Tests that need rollback semantics use
+// mockTransactor with WantRollbackOnErr=true to assert fn's error
+// propagated correctly.
+type mockTransactor struct {
+	WantRollbackOnErr bool
+	BeginTxErr        error
+	CommitErr         error
+}
+
+func (m *mockTransactor) WithinTx(ctx context.Context, fn func(q repository.Querier) error) error {
+	if m.BeginTxErr != nil {
+		return m.BeginTxErr
+	}
+	if err := fn(nil); err != nil {
+		return err
+	}
+	return m.CommitErr
+}
+
+func newMockTransactor() *mockTransactor { return &mockTransactor{} }
+
 func newMockAgentRepository() *mockAgentRepo {
 	return &mockAgentRepo{
 		Agents:           make(map[string]*domain.Agent),
@@ -1489,6 +1536,11 @@ type mockRevocationRepo struct {
 	ListAllCalls      int
 	ListByIssuerCalls int
 	LastListIssuerID  string
+}
+
+// CreateWithTx mirrors Create — mocks have no DB; the Querier is ignored.
+func (m *mockRevocationRepo) CreateWithTx(ctx context.Context, q repository.Querier, revocation *domain.CertificateRevocation) error {
+	return m.Create(ctx, revocation)
 }
 
 func (m *mockRevocationRepo) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {

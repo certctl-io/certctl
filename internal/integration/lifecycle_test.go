@@ -548,9 +548,17 @@ func (m *mockCertificateRepository) Create(ctx context.Context, cert *domain.Man
 	return nil
 }
 
+func (m *mockCertificateRepository) CreateWithTx(ctx context.Context, _ repository.Querier, cert *domain.ManagedCertificate) error {
+	return m.Create(ctx, cert)
+}
+
 func (m *mockCertificateRepository) Update(ctx context.Context, cert *domain.ManagedCertificate) error {
 	m.certs[cert.ID] = cert
 	return nil
+}
+
+func (m *mockCertificateRepository) UpdateWithTx(ctx context.Context, _ repository.Querier, cert *domain.ManagedCertificate) error {
+	return m.Update(ctx, cert)
 }
 
 func (m *mockCertificateRepository) Archive(ctx context.Context, id string) error {
@@ -569,6 +577,10 @@ func (m *mockCertificateRepository) ListVersions(ctx context.Context, certID str
 func (m *mockCertificateRepository) CreateVersion(ctx context.Context, version *domain.CertificateVersion) error {
 	m.versions[version.CertificateID] = append(m.versions[version.CertificateID], version)
 	return nil
+}
+
+func (m *mockCertificateRepository) CreateVersionWithTx(ctx context.Context, _ repository.Querier, version *domain.CertificateVersion) error {
+	return m.CreateVersion(ctx, version)
 }
 
 func (m *mockCertificateRepository) GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error) {
@@ -787,6 +799,10 @@ func newMockAuditRepository() *mockAuditRepository {
 func (m *mockAuditRepository) Create(ctx context.Context, event *domain.AuditEvent) error {
 	m.events = append(m.events, event)
 	return nil
+}
+
+func (m *mockAuditRepository) CreateWithTx(ctx context.Context, _ repository.Querier, event *domain.AuditEvent) error {
+	return m.Create(ctx, event)
 }
 
 func (m *mockAuditRepository) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
@@ -1388,6 +1404,10 @@ func newMockRevocationRepository() *mockRevocationRepository {
 func (m *mockRevocationRepository) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
 	m.revocations = append(m.revocations, revocation)
 	return nil
+}
+
+func (m *mockRevocationRepository) CreateWithTx(ctx context.Context, _ repository.Querier, revocation *domain.CertificateRevocation) error {
+	return m.Create(ctx, revocation)
 }
 
 func (m *mockRevocationRepository) GetByIssuerAndSerial(ctx context.Context, issuerID, serial string) (*domain.CertificateRevocation, error) {

@@ -313,7 +313,19 @@ func (r *CertificateRepository) GetByIssuerAndSerial(ctx context.Context, issuer
 }
 
 // Create stores a new certificate
+// Create stores a new certificate using the repository's package-level
+// *sql.DB. Use CreateWithTx when the cert insert must be atomic with
+// another database operation in a service-layer transaction (typically
+// the audit row for issuance).
 func (r *CertificateRepository) Create(ctx context.Context, cert *domain.ManagedCertificate) error {
+	return r.CreateWithTx(ctx, r.db, cert)
+}
+
+// CreateWithTx stores a new certificate using the supplied Querier.
+// Pass *sql.Tx (typically from postgres.WithinTx) to participate in a
+// caller's transaction; pass *sql.DB or call Create for stand-alone
+// inserts. Closes the audit-atomicity blocker for the issuance path.
+func (r *CertificateRepository) CreateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
 	if cert.ID == "" {
 		cert.ID = uuid.New().String()
 	}
@@ -333,7 +345,7 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 		revocationReason = &cert.RevocationReason
 	}
 
-	err = r.db.QueryRowContext(ctx, `
+	err = q.QueryRowContext(ctx, `
 		INSERT INTO managed_certificates (
 			id, name, common_name, sans, environment, owner_id, team_id, issuer_id, renewal_policy_id,
 			certificate_profile_id, status, expires_at, tags, last_renewal_at, last_deployment_at, revoked_at, revocation_reason, source, created_at, updated_at
@@ -353,8 +365,19 @@ func (r *CertificateRepository) Create(ctx context.Context, cert *domain.Managed
 	return nil
 }
 
-// Update modifies an existing certificate
+// Update modifies an existing certificate using the repository's
+// package-level *sql.DB. Use UpdateWithTx when the cert update must be
+// atomic with another database operation (typically a revocation row +
+// audit row).
 func (r *CertificateRepository) Update(ctx context.Context, cert *domain.ManagedCertificate) error {
+	return r.UpdateWithTx(ctx, r.db, cert)
+}
+
+// UpdateWithTx modifies an existing certificate using the supplied
+// Querier. Closes the audit-atomicity blocker for the revocation path
+// (cert status update must be atomic with the revocation_events insert
+// + audit row insert).
+func (r *CertificateRepository) UpdateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
 	tagsJSON, err := json.Marshal(cert.Tags)
 	if err != nil {
 		return fmt.Errorf("failed to marshal tags: %w", err)
@@ -370,7 +393,7 @@ func (r *CertificateRepository) Update(ctx context.Context, cert *domain.Managed
 		revocationReason = &cert.RevocationReason
 	}
 
-	result, err := r.db.ExecContext(ctx, `
+	result, err := q.ExecContext(ctx, `
 		UPDATE managed_certificates SET
 			name = $1,
 			common_name = $2,
@@ -471,13 +494,23 @@ func (r *CertificateRepository) ListVersions(ctx context.Context, certID string)
 	return versions, nil
 }
 
-// CreateVersion stores a new certificate version
+// CreateVersion stores a new certificate version using the repository's
+// package-level *sql.DB. Use CreateVersionWithTx when the version
+// insert must be atomic with another database operation (typically the
+// audit row for renewal).
 func (r *CertificateRepository) CreateVersion(ctx context.Context, version *domain.CertificateVersion) error {
+	return r.CreateVersionWithTx(ctx, r.db, version)
+}
+
+// CreateVersionWithTx stores a new certificate version using the
+// supplied Querier. Closes the audit-atomicity blocker for the
+// renewal path (new version row must be atomic with the audit row).
+func (r *CertificateRepository) CreateVersionWithTx(ctx context.Context, q repository.Querier, version *domain.CertificateVersion) error {
 	if version.ID == "" {
 		version.ID = uuid.New().String()
 	}
 
-	err := r.db.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		INSERT INTO certificate_versions (
 			id, certificate_id, serial_number, not_before, not_after,
 			fingerprint_sha256, pem_chain, csr_pem, key_algorithm, key_size, created_at

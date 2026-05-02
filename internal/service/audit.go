@@ -58,6 +58,41 @@ func (s *AuditService) RecordEvent(ctx context.Context, actor string, actorType 
 	return nil
 }
 
+// RecordEventWithTx records an audit event using the supplied repository.Querier.
+//
+// Pass *sql.Tx (typically obtained from postgres.WithinTx) to participate in
+// a caller's transaction so the audit row is atomic with the operation that
+// triggered it. Closes the #3 acquisition-readiness blocker from the
+// 2026-05-01 issuer coverage audit (audit row not transactional with the
+// operation it audits).
+//
+// Same redaction + marshalling contract as RecordEvent; only the database
+// handle changes.
+func (s *AuditService) RecordEventWithTx(ctx context.Context, q repository.Querier, actor string, actorType domain.ActorType, action string, resourceType string, resourceID string, details map[string]interface{}) error {
+	redacted := RedactDetailsForAudit(details)
+	detailsJSON, err := json.Marshal(redacted)
+	if err != nil {
+		detailsJSON = []byte("{}")
+	}
+
+	event := &domain.AuditEvent{
+		ID:           generateID("audit"),
+		Timestamp:    time.Now(),
+		Actor:        actor,
+		ActorType:    actorType,
+		Action:       action,
+		ResourceType: resourceType,
+		ResourceID:   resourceID,
+		Details:      json.RawMessage(detailsJSON),
+	}
+
+	if err := s.auditRepo.CreateWithTx(ctx, q, event); err != nil {
+		return fmt.Errorf("failed to record audit event: %w", err)
+	}
+
+	return nil
+}
+
 // List returns audit events matching filter criteria.
 func (s *AuditService) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
 	events, err := s.auditRepo.List(ctx, filter)

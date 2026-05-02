@@ -24,6 +24,13 @@ var (
 )
 
 // CertificateRepository defines operations for managing certificates.
+//
+// The *WithTx variants on Create / Update / CreateVersion exist so
+// service-layer code can run those writes in a single transaction with
+// the audit row insert (postgres.WithinTx). Use the bare methods for
+// stand-alone operations that do not need transactional semantics; the
+// concrete postgres implementation has the bare methods delegate to
+// the *WithTx variant using the package-level *sql.DB.
 type CertificateRepository interface {
 	// List returns a paginated list of certificates matching the filter criteria.
 	List(ctx context.Context, filter *CertificateFilter) ([]*domain.ManagedCertificate, int, error)
@@ -31,14 +38,28 @@ type CertificateRepository interface {
 	Get(ctx context.Context, id string) (*domain.ManagedCertificate, error)
 	// Create stores a new certificate.
 	Create(ctx context.Context, cert *domain.ManagedCertificate) error
+	// CreateWithTx stores a new certificate using the supplied Querier
+	// (typically *sql.Tx from postgres.WithinTx). Closes the audit-
+	// atomicity blocker for the issuance path.
+	CreateWithTx(ctx context.Context, q Querier, cert *domain.ManagedCertificate) error
 	// Update modifies an existing certificate.
 	Update(ctx context.Context, cert *domain.ManagedCertificate) error
+	// UpdateWithTx modifies an existing certificate using the supplied
+	// Querier. Closes the audit-atomicity blocker for the revocation
+	// path (cert status update must be atomic with the revocation row +
+	// audit row insert).
+	UpdateWithTx(ctx context.Context, q Querier, cert *domain.ManagedCertificate) error
 	// Archive marks a certificate as archived.
 	Archive(ctx context.Context, id string) error
 	// ListVersions returns all versions of a certificate.
 	ListVersions(ctx context.Context, certID string) ([]*domain.CertificateVersion, error)
 	// CreateVersion stores a new certificate version.
 	CreateVersion(ctx context.Context, version *domain.CertificateVersion) error
+	// CreateVersionWithTx stores a new certificate version using the
+	// supplied Querier. Closes the audit-atomicity blocker for the
+	// renewal path (version row must be atomic with the audit row
+	// insert).
+	CreateVersionWithTx(ctx context.Context, q Querier, version *domain.CertificateVersion) error
 	// GetExpiringCertificates returns certificates expiring before the given time.
 	GetExpiringCertificates(ctx context.Context, before time.Time) ([]*domain.ManagedCertificate, error)
 	// GetLatestVersion returns the most recent certificate version for a certificate.
@@ -58,6 +79,12 @@ type RevocationRepository interface {
 	// (issuer_id, serial_number) per RFC 5280 §5.2.3, so duplicate serials
 	// across different issuers are permitted.
 	Create(ctx context.Context, revocation *domain.CertificateRevocation) error
+	// CreateWithTx records a revocation using the supplied Querier
+	// (typically *sql.Tx from postgres.WithinTx). Closes the audit-
+	// atomicity blocker for the revocation path: the
+	// certificate_revocations row must be atomic with the
+	// managed_certificates status update + audit row insert.
+	CreateWithTx(ctx context.Context, q Querier, revocation *domain.CertificateRevocation) error
 	// GetByIssuerAndSerial retrieves a revocation by the (issuer_id, serial_number)
 	// pair. Callers (OCSP, CRL generation) always know the issuer because
 	// protocol endpoints carry it in the request path; RFC 5280 §5.2.3 guarantees
@@ -426,9 +453,31 @@ type PolicyRepository interface {
 }
 
 // AuditRepository defines operations for recording and retrieving audit logs.
+//
+// Atomicity contract (closes the #3 acquisition-readiness blocker from the
+// 2026-05-01 issuer coverage audit, Part 1.5 finding #1): callers that
+// emit an audit row as part of a logical operation (issuance, renewal,
+// revocation) MUST use CreateWithTx and pass the same *sql.Tx that wraps
+// the operation's other writes. The bare Create method exists only for
+// stand-alone admin operations that do not have a paired state change
+// (manual audit entry, system events that are themselves the only
+// state change). Callers using the bare method MUST NOT rely on its
+// behavior for compliance-relevant audit trails — those go through
+// CreateWithTx + WithinTx.
+//
+// SOX §404 over IT general controls, PCI-DSS §10 audit logging, HIPAA
+// §164.312(b) audit controls, and CA/B Forum Baseline Requirements
+// §5.4.1 audit log records all presume audit-with-operation atomicity.
 type AuditRepository interface {
-	// Create stores a new audit event.
+	// Create stores a new audit event using the repository's package-
+	// level *sql.DB. Use CreateWithTx when the audit event must be
+	// atomic with another database operation in a service-layer
+	// transaction.
 	Create(ctx context.Context, event *domain.AuditEvent) error
+	// CreateWithTx stores a new audit event using the supplied Querier.
+	// Pass *sql.Tx (typically from postgres.WithinTx) to participate in
+	// a caller's transaction. Closes the audit-atomicity blocker.
+	CreateWithTx(ctx context.Context, q Querier, event *domain.AuditEvent) error
 	// List returns audit events matching the filter criteria.
 	List(ctx context.Context, filter *AuditFilter) ([]*domain.AuditEvent, error)
 }

@@ -26,7 +26,15 @@ func NewRevocationRepository(db *sql.DB) *RevocationRepository {
 // collisions across different issuer connectors. The composite ON CONFLICT
 // target matches migration 000012's unique index.
 func (r *RevocationRepository) Create(ctx context.Context, revocation *domain.CertificateRevocation) error {
-	_, err := r.db.ExecContext(ctx, `
+	return r.CreateWithTx(ctx, r.db, revocation)
+}
+
+// CreateWithTx records a revocation using the supplied Querier. Closes
+// the audit-atomicity blocker for the revocation path: the
+// certificate_revocations row must be atomic with the managed_certificates
+// status update + audit row insert.
+func (r *RevocationRepository) CreateWithTx(ctx context.Context, q repository.Querier, revocation *domain.CertificateRevocation) error {
+	_, err := q.ExecContext(ctx, `
 		INSERT INTO certificate_revocations (
 			id, certificate_id, serial_number, reason, revoked_by, revoked_at,
 			issuer_id, issuer_notified, created_at

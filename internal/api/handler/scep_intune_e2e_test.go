@@ -160,6 +160,12 @@ func (r *intuneE2EAuditRepo) Create(_ context.Context, e *domain.AuditEvent) err
 	return nil
 }
 
+// CreateWithTx mirrors Create — handler-test mocks have no DB; the
+// Querier is ignored.
+func (r *intuneE2EAuditRepo) CreateWithTx(ctx context.Context, _ repository.Querier, e *domain.AuditEvent) error {
+	return r.Create(ctx, e)
+}
+
 func (r *intuneE2EAuditRepo) List(_ context.Context, _ *repository.AuditFilter) ([]*domain.AuditEvent, error) {
 	return nil, nil
 }

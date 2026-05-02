@@ -19,6 +19,13 @@ type CertificateService struct {
 	auditService  *AuditService
 	revSvc        *RevocationSvc
 	caSvc         *CAOperationsSvc
+	// tx, when set, wraps the issuance write (cert insert + audit row)
+	// in a single transaction so the audit row cannot be silently lost
+	// after a successful cert insert. Closes the #3 audit-readiness
+	// blocker (atomic audit rows). Optional via SetTransactor — when
+	// nil, Create falls back to the legacy non-transactional path
+	// (cert.Create + best-effort RecordEvent) for backward compatibility.
+	tx repository.Transactor
 	// crlCacheSvc, when set, makes GenerateDERCRL serve from the
 	// pre-generated cache instead of regenerating per request. Bundle
 	// CRL/OCSP-Responder Phase 4. Optional; when nil GenerateDERCRL
@@ -38,6 +45,16 @@ func NewCertificateService(
 		policyService: policyService,
 		auditService:  auditService,
 	}
+}
+
+// SetTransactor wires a Transactor for atomic issuance (cert insert +
+// audit row) and atomic revocation (cert update + revocation row + audit
+// row). Closes the #3 acquisition-readiness blocker from the 2026-05-01
+// issuer coverage audit. Optional — when nil, Create falls back to the
+// legacy non-transactional path for backward compat with callers that
+// haven't been updated.
+func (s *CertificateService) SetTransactor(tx repository.Transactor) {
+	s.tx = tx
 }
 
 // SetRevocationSvc sets the revocation service.
@@ -133,19 +150,37 @@ func (s *CertificateService) Create(ctx context.Context, cert *domain.ManagedCer
 		}
 	}
 
-	// Store certificate
+	auditDetails := map[string]interface{}{"common_name": cert.CommonName}
+
+	// Atomic path (production): cert insert + audit row in a single
+	// transaction. Closes the #3 audit-readiness blocker — if the audit
+	// insert fails after the cert insert, the cert insert rolls back so
+	// the operator sees the failure and the audit trail is never silently
+	// incomplete.
+	if s.tx != nil {
+		return s.tx.WithinTx(ctx, func(q repository.Querier) error {
+			if err := s.certRepo.CreateWithTx(ctx, q, cert); err != nil {
+				return fmt.Errorf("failed to create certificate: %w", err)
+			}
+			if err := s.auditService.RecordEventWithTx(ctx, q, actor, domain.ActorTypeUser,
+				"certificate_created", "certificate", cert.ID, auditDetails); err != nil {
+				return fmt.Errorf("failed to record audit event: %w", err)
+			}
+			return nil
+		})
+	}
+
+	// Legacy non-transactional path — kept for callers that haven't
+	// wired SetTransactor yet. Fails open on audit-insert failure (logs
+	// and returns success), which is the pre-fix behavior; do not
+	// rely on this path for compliance-relevant audit trails.
 	if err := s.certRepo.Create(ctx, cert); err != nil {
 		return fmt.Errorf("failed to create certificate: %w", err)
 	}
-
-	// Record audit event
 	if err := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser,
-		"certificate_created", "certificate", cert.ID,
-		map[string]interface{}{"common_name": cert.CommonName}); err != nil {
-		// Log but don't fail the operation
+		"certificate_created", "certificate", cert.ID, auditDetails); err != nil {
 		slog.Error("failed to record audit event", "error", err)
 	}
-
 	return nil
 }
 

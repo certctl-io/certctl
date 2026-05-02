@@ -12,6 +12,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	localissuer "github.com/shankar0123/certctl/internal/connector/issuer/local"
 	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 	"github.com/shankar0123/certctl/internal/service"
 )
 
@@ -86,6 +87,9 @@ func (r *fakeCRLCacheRepo) ListGenerationEvents(_ context.Context, issuerID stri
 type fakeRevocationRepo struct{}
 
 func (fakeRevocationRepo) Create(context.Context, *domain.CertificateRevocation) error {
+	return nil
+}
+func (fakeRevocationRepo) CreateWithTx(context.Context, repository.Querier, *domain.CertificateRevocation) error {
 	return nil
 }
 func (fakeRevocationRepo) GetByIssuerAndSerial(context.Context, string, string) (*domain.CertificateRevocation, error) {

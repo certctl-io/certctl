@@ -229,6 +229,14 @@ func main() {
 	// (FK-RESTRICT against managed_certificates.renewal_policy_id).
 	renewalPolicyService := service.NewRenewalPolicyService(renewalPolicyRepo)
 	certificateService := service.NewCertificateService(certificateRepo, policyService, auditService)
+	// Atomic audit-row plumbing (closes the #3 acquisition-readiness
+	// blocker from the 2026-05-01 issuer coverage audit). The same
+	// transactor instance is shared across CertificateService /
+	// RevocationSvc / RenewalService so all three audit-emitting
+	// service paths run their writes in transactions backed by the
+	// same *sql.DB handle.
+	transactor := postgres.NewTransactor(db)
+	certificateService.SetTransactor(transactor)
 	notifierRegistry := make(map[string]service.Notifier)
 
 	// Wire notifier connectors from config
@@ -289,6 +297,7 @@ func main() {
 
 	// Create RevocationSvc with its dependencies
 	revocationSvc := service.NewRevocationSvc(certificateRepo, revocationRepo, auditService)
+	revocationSvc.SetTransactor(transactor)
 	revocationSvc.SetIssuerRegistry(issuerRegistry)
 	revocationSvc.SetNotificationService(notificationService)
 
@@ -352,6 +361,7 @@ func main() {
 	certificateService.SetJobRepo(jobRepo)
 	certificateService.SetKeygenMode(cfg.Keygen.Mode)
 	renewalService := service.NewRenewalService(certificateRepo, jobRepo, renewalPolicyRepo, profileRepo, auditService, notificationService, issuerRegistry, cfg.Keygen.Mode)
+	renewalService.SetTransactor(transactor)
 	renewalService.SetTargetRepo(targetRepo)
 	deploymentService := service.NewDeploymentService(jobRepo, targetRepo, agentRepo, certificateRepo, auditService, notificationService)
 	jobService := service.NewJobService(jobRepo, certificateRepo, ownerRepo, renewalService, deploymentService, logger)

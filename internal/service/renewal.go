@@ -31,11 +31,23 @@ type RenewalService struct {
 	notificationSvc   *NotificationService
 	issuerRegistry    *IssuerRegistry
 	keygenMode        string // "agent" (default) or "server" (demo only)
+	// tx — when set, wraps the cert version insert + cert update + audit
+	// row in a single transaction. Closes the #3 audit-readiness blocker
+	// for the renewal path. Optional via SetTransactor.
+	tx repository.Transactor
 }
 
 // SetTargetRepo sets the target repository for resolving agent_id on deployment jobs.
 func (s *RenewalService) SetTargetRepo(repo repository.TargetRepository) {
 	s.targetRepo = repo
+}
+
+// SetTransactor wires a Transactor for atomic renewal completion (cert
+// version insert + cert update + audit row in a single transaction).
+// Closes the #3 audit-readiness blocker for the renewal path. Optional
+// — nil reverts to legacy non-transactional behavior.
+func (s *RenewalService) SetTransactor(tx repository.Transactor) {
+	s.tx = tx
 }
 
 // IssuerConnector defines the service-layer interface for interacting with certificate issuers.
@@ -508,23 +520,58 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 		CreatedAt:         time.Now(),
 	}
 
-	if err := s.certRepo.CreateVersion(ctx, version); err != nil {
-		s.failJob(ctx, job, fmt.Sprintf("version creation failed: %v", err))
-		return fmt.Errorf("failed to create certificate version: %w", err)
-	}
-
 	// Update certificate status and expiry
 	cert.Status = domain.CertificateStatusActive
 	cert.ExpiresAt = result.NotAfter
 	now := time.Now()
 	cert.LastRenewalAt = &now
 	cert.UpdatedAt = now
-	if err := s.certRepo.Update(ctx, cert); err != nil {
-		s.failJob(ctx, job, fmt.Sprintf("cert update failed: %v", err))
-		return fmt.Errorf("failed to update certificate: %w", err)
+
+	auditDetails := map[string]interface{}{
+		"job_id":      job.ID,
+		"serial":      result.Serial,
+		"not_after":   result.NotAfter,
+		"keygen_mode": "server",
 	}
 
-	// Mark renewal job as completed
+	// Atomic three-write path (when SetTransactor was wired): version
+	// insert + cert update + audit row in a single transaction. Closes
+	// the #3 audit-readiness blocker for the renewal path.
+	if s.tx != nil {
+		if err := s.tx.WithinTx(ctx, func(q repository.Querier) error {
+			if err := s.certRepo.CreateVersionWithTx(ctx, q, version); err != nil {
+				return fmt.Errorf("failed to create certificate version: %w", err)
+			}
+			if err := s.certRepo.UpdateWithTx(ctx, q, cert); err != nil {
+				return fmt.Errorf("failed to update certificate: %w", err)
+			}
+			if err := s.auditService.RecordEventWithTx(ctx, q, "system", domain.ActorTypeSystem,
+				"renewal_job_completed", "certificate", job.CertificateID, auditDetails); err != nil {
+				return fmt.Errorf("failed to record audit event: %w", err)
+			}
+			return nil
+		}); err != nil {
+			s.failJob(ctx, job, err.Error())
+			return err
+		}
+	} else {
+		// Legacy non-transactional path — pre-fix behavior.
+		if err := s.certRepo.CreateVersion(ctx, version); err != nil {
+			s.failJob(ctx, job, fmt.Sprintf("version creation failed: %v", err))
+			return fmt.Errorf("failed to create certificate version: %w", err)
+		}
+		if err := s.certRepo.Update(ctx, cert); err != nil {
+			s.failJob(ctx, job, fmt.Sprintf("cert update failed: %v", err))
+			return fmt.Errorf("failed to update certificate: %w", err)
+		}
+		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+			"renewal_job_completed", "certificate", job.CertificateID, auditDetails); auditErr != nil {
+			slog.Error("failed to record audit event", "error", auditErr)
+		}
+	}
+
+	// Mark renewal job as completed (independent of the cert/audit
+	// transaction — job state lives outside the audit-atomicity scope).
 	if err := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusCompleted, ""); err != nil {
 		return fmt.Errorf("failed to update job status: %w", err)
 	}
@@ -535,18 +582,6 @@ func (s *RenewalService) processRenewalServerKeygen(ctx context.Context, job *do
 	// Send success notification
 	if err := s.notificationSvc.SendRenewalNotification(ctx, cert, true, nil); err != nil {
 		slog.Error("failed to send renewal notification", "error", err)
-	}
-
-	// Record audit event
-	if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
-		"renewal_job_completed", "certificate", job.CertificateID,
-		map[string]interface{}{
-			"job_id":      job.ID,
-			"serial":      result.Serial,
-			"not_after":   result.NotAfter,
-			"keygen_mode": "server",
-		}); auditErr != nil {
-		slog.Error("failed to record audit event", "error", auditErr)
 	}
 
 	return nil

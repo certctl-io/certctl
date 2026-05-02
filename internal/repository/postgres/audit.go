@@ -21,13 +21,26 @@ func NewAuditRepository(db *sql.DB) *AuditRepository {
 	return &AuditRepository{db: db}
 }
 
-// Create stores a new audit event
+// Create stores a new audit event using the repository's package-level
+// *sql.DB. Use CreateWithTx when the audit event must be atomic with
+// another database operation in a service-layer transaction.
 func (r *AuditRepository) Create(ctx context.Context, event *domain.AuditEvent) error {
+	return r.CreateWithTx(ctx, r.db, event)
+}
+
+// CreateWithTx stores a new audit event using the supplied Querier.
+// Pass *sql.Tx (typically from postgres.WithinTx) to participate in a
+// caller's transaction; pass *sql.DB or call Create for stand-alone
+// inserts. The SQL and side-effect contract is identical to Create —
+// CreateWithTx is the load-bearing path that closes the audit's
+// atomicity blocker (audit row must be transactional with the
+// operation that triggered it).
+func (r *AuditRepository) CreateWithTx(ctx context.Context, q repository.Querier, event *domain.AuditEvent) error {
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
 
-	err := r.db.QueryRowContext(ctx, `
+	err := q.QueryRowContext(ctx, `
 		INSERT INTO audit_events (
 			id, actor, actor_type, action, resource_type, resource_id, details, timestamp
 		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)

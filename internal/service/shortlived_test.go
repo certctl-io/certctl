@@ -178,7 +178,15 @@ func (m *mockCertRepoWithGetError) Create(ctx context.Context, cert *domain.Mana
 	return nil
 }
 
+func (m *mockCertRepoWithGetError) CreateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
+	return nil
+}
+
 func (m *mockCertRepoWithGetError) Update(ctx context.Context, cert *domain.ManagedCertificate) error {
+	return nil
+}
+
+func (m *mockCertRepoWithGetError) UpdateWithTx(ctx context.Context, q repository.Querier, cert *domain.ManagedCertificate) error {
 	return nil
 }
 
@@ -191,6 +199,10 @@ func (m *mockCertRepoWithGetError) ListVersions(ctx context.Context, certID stri
 }
 
 func (m *mockCertRepoWithGetError) CreateVersion(ctx context.Context, version *domain.CertificateVersion) error {
+	return nil
+}
+
+func (m *mockCertRepoWithGetError) CreateVersionWithTx(ctx context.Context, q repository.Querier, version *domain.CertificateVersion) error {
 	return nil
 }
 
