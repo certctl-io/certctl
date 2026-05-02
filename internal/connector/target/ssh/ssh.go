@@ -668,11 +668,17 @@ func (c *realSSHClient) Connect(ctx context.Context) error {
 		User:    c.config.User,
 		Auth:    authMethods,
 		Timeout: time.Duration(c.config.Timeout) * time.Second,
-		// InsecureIgnoreHostKey is used intentionally: certctl deploys to known
-		// infrastructure (the operator explicitly configures each target host).
-		// This is the same security rationale as network scanner's InsecureSkipVerify
-		// and F5 connector's insecure flag. Host key verification would require
-		// an additional known_hosts management layer that is out of scope.
+		// InsecureIgnoreHostKey is used intentionally — see "Operator playbook:
+		// SSH host-key verification" in docs/connectors.md (SSH section) for
+		// the threat model accepted, the threat model rejected, available
+		// mitigations (custom HostKeyCallback via NewWithClient + known_hosts;
+		// SSH certificate authentication; network segmentation), and when not
+		// to use this connector. Same security rationale as the network
+		// scanner's InsecureSkipVerify and the F5 connector's insecure flag:
+		// certctl deploys to operator-configured target infrastructure on
+		// operator-controlled networks. Built-in known_hosts management is
+		// V3-Pro work (see WORKSPACE-ROADMAP.md). Top-10 fix #7 of the
+		// 2026-05-02 deployment-target audit re-run.
 		HostKeyCallback: ssh.InsecureIgnoreHostKey(),
 	}
 

@@ -1108,6 +1108,43 @@ The SSH target connector enables agentless certificate deployment to any Linux/U
 
 Location: `internal/connector/target/ssh/ssh.go`
 
+#### Operator playbook: SSH host-key verification
+
+certctl's SSH connector dials each target with `HostKeyCallback: ssh.InsecureIgnoreHostKey()`, meaning **the connector accepts any server host key without comparison against `known_hosts`**. This is a documented design choice (see `internal/connector/target/ssh/ssh.go` near `realSSHClient.Connect`) and not an oversight. The rationale + when it's safe + what to layer on top when it isn't:
+
+**Why the connector accepts any host key:**
+
+- certctl deploys to **operator-configured target infrastructure**. Each target is registered explicitly in the control plane with hostname + auth credentials + cert/key paths; the operator implicitly trusts the host they're deploying to (otherwise why give it a TLS cert).
+- Mirrors the same posture certctl applies to the network scanner (`InsecureSkipVerify` for cert-monitoring TLS handshakes) and the F5 connector (`Insecure` flag for self-signed BIG-IP management interfaces).
+- Avoids a heavyweight per-target `known_hosts` management layer that would shift complexity onto operators with no proportional security gain when the network model is "operator-configured infrastructure on operator-controlled network".
+
+**Threat model the design choice accepts:**
+
+- A **passive eavesdropper** on the agent-to-target link. SSH's transport encryption still applies — host-key acceptance affects MITM vulnerability, not on-the-wire confidentiality.
+- A **MITM attacker** on the agent-to-target link who can intercept the SSH TCP handshake AND has positioned themselves on a hostname the operator has registered as a deploy target. Layered authentication (per-target SSH keys with strong passphrases stored at the agent) limits the blast radius — the MITM gets one target's cert+key payload, not the agent's broader credentials.
+
+**Threat model the design choice does NOT accept:**
+
+- Deploying across the **public internet** to a host whose IP rotates (e.g. ephemeral cloud instances behind a load balancer that doesn't pin SSH host keys). In that scenario, `InsecureIgnoreHostKey` opens an MITM window during IP rotation — register a `known_hosts` file path or use SSH certificates (below) instead.
+- **Multi-tenant networks** where another tenant could plausibly impersonate the target host. certctl's design assumes operator-controlled network paths.
+
+**Mitigations operators can layer on:**
+
+- **`known_hosts` enforcement**: implement a custom `SSHClient` (the connector's `SSHClient` interface accepts injected clients via `NewWithClient`) whose `Connect` method builds an `ssh.ClientConfig` with `HostKeyCallback` set to `knownhosts.New("/path/to/known_hosts")` from `golang.org/x/crypto/ssh/knownhosts`. Configure the agent to use that client.
+- **SSH certificate authentication**: use OpenSSH 5.4+ host certificates signed by an organizational CA. Configure the agent's `known_hosts` CA pinning via `@cert-authority` lines so any host presenting a certificate signed by the CA is trusted, regardless of IP rotation.
+- **Network segmentation**: run the certctl agent on the same private network segment as its targets; require VPN tunnels for cross-network deploys; use bastion hosts with their own host-key validation.
+- **Per-target SSH keys**: rotate the agent's SSH credentials per target so a successful MITM compromise is bounded to that one target's cert+key, not the agent's broader credential set.
+
+**When you should NOT use the SSH connector:**
+
+- Deploying to **unknown / dynamic / multi-tenant** hosts where the IP-to-hostname binding isn't operator-controlled.
+- Environments with strict **regulatory MITM-resistance** requirements (PCI-DSS Level 1, FedRAMP High, etc.) — the inline-comment "out of scope" framing doesn't satisfy compliance auditors who want documented host-key verification at the connector level.
+- For these cases, switch to a different connector (Kubernetes Secrets, WinCertStore, F5 with iControl REST under operator-managed cert pinning) **OR** layer a custom `SSHClient` with full `known_hosts` validation per the mitigations above.
+
+**V3-Pro forward path:**
+
+The operator-managed `known_hosts` integration (config field + `HostKeyCallback` plumbing + per-target root-of-trust enforcement) is documented as V3-Pro work. Tracking: `WORKSPACE-ROADMAP.md` (search for "SSH known_hosts").
+
 ### Windows Certificate Store
 
 The Windows Certificate Store connector imports certificates into the Windows cert store via PowerShell, without managing IIS site bindings. Use this for non-IIS Windows services that read certificates from the cert store (Exchange, RDP, SQL Server, ADFS, etc.). Same injectable `PowerShellExecutor` pattern as the IIS connector, with optional WinRM proxy mode.
