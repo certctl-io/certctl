@@ -395,7 +395,7 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 			for _, p := range writePaths {
 				paths = append(paths, p.path)
 			}
-			rollbackErr, restoreStatuses := c.restoreFromBackups(ctx, paths, backups, modes)
+			restoreStatuses, rollbackErr := c.restoreFromBackups(ctx, paths, backups, modes)
 			// Merge per-key restore status into backupStatus so operators
 			// see whether the rollback ran cleanly per file. restoreFromBackups
 			// returns statuses keyed by metadata key (cert/key/chain), not
@@ -487,12 +487,12 @@ func (c *Connector) DeployCertificate(ctx context.Context, request target.Deploy
 // restoreFromBackups walks the configured deploy paths and either restores
 // each path from the in-memory backup (when the file existed pre-deploy) or
 // Removes the new bytes (first-time-deploy partial state). Returns the
-// first error encountered — caller surfaces the wrapped error to the
-// operator. The per-path status map is always populated so callers can
-// emit accurate Metadata.
+// per-path status map (always populated, used by callers to emit accurate
+// Metadata) and the first error encountered — caller surfaces the wrapped
+// error to the operator. Per staticcheck ST1008, error is the last return.
 //
 // Bundle 6 of the 2026-05-02 deployment-target audit.
-func (c *Connector) restoreFromBackups(ctx context.Context, paths []string, backups map[string][]byte, modes map[string]os.FileMode) (error, map[string]string) {
+func (c *Connector) restoreFromBackups(ctx context.Context, paths []string, backups map[string][]byte, modes map[string]os.FileMode) (map[string]string, error) {
 	statuses := make(map[string]string, len(paths))
 	pathToKey := map[string]string{
 		c.config.CertPath:  "cert",
@@ -544,7 +544,7 @@ func (c *Connector) restoreFromBackups(ctx context.Context, paths []string, back
 			c.logger.Info("rollback removed first-time-deploy file", "path", path)
 		}
 	}
-	return firstErr, statuses
+	return statuses, firstErr
 }
 
 // buildMetadataWithBackup assembles the per-deploy Metadata map with the
