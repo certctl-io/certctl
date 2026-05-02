@@ -25,10 +25,17 @@ func testLogger() *slog.Logger {
 }
 
 // mockExecutor records commands and returns configurable responses.
+//
+// Bundle 8 (2026-05-02 deployment-target audit) added the optional
+// `onCall` hook so retention-pruning tests can simulate keytool's
+// file-write side effects (e.g. -exportkeystore writes a .p12 to the
+// -destkeystore path). Existing tests that don't set onCall behave
+// identically to before.
 type mockExecutor struct {
 	calls     []mockCall
 	responses []mockResponse
 	callIndex int
+	onCall    func(name string, args []string)
 }
 
 type mockCall struct {
@@ -43,12 +50,49 @@ type mockResponse struct {
 
 func (m *mockExecutor) Execute(ctx context.Context, name string, args ...string) (string, error) {
 	m.calls = append(m.calls, mockCall{Name: name, Args: args})
+	if m.onCall != nil {
+		m.onCall(name, args)
+	}
 	idx := m.callIndex
 	m.callIndex++
 	if idx < len(m.responses) {
 		return m.responses[idx].Output, m.responses[idx].Err
 	}
 	return "", nil
+}
+
+// simulateExportSideEffect returns an onCall handler that mimics what real
+// keytool -exportkeystore does: writes a small placeholder file at the
+// path passed via -destkeystore. Used by Bundle 8 retention-pruning tests
+// where the deploy-created backup file needs to actually exist on disk
+// for the pruner's ReadDir to find it.
+func simulateExportSideEffect(t *testing.T) func(name string, args []string) {
+	t.Helper()
+	return func(name string, args []string) {
+		isExport := false
+		for _, a := range args {
+			if a == "-exportkeystore" {
+				isExport = true
+				break
+			}
+		}
+		if !isExport {
+			return
+		}
+		var dest string
+		for i, a := range args {
+			if a == "-destkeystore" && i+1 < len(args) {
+				dest = args[i+1]
+				break
+			}
+		}
+		if dest == "" {
+			return
+		}
+		if err := os.WriteFile(dest, []byte("simulated-backup-pkcs12"), 0644); err != nil {
+			t.Logf("simulateExportSideEffect: write %s failed: %v", dest, err)
+		}
+	}
 }
 
 // generateTestCertAndKey creates a self-signed certificate and key for testing.
@@ -527,5 +571,549 @@ func TestValidateDeployment_SerialMismatch(t *testing.T) {
 	}
 	if result.Metadata["serial_match"] != "false" {
 		t.Error("expected serial_match=false")
+	}
+}
+
+// --- Bundle 8: pre-delete snapshot + on-import-failure rollback ---
+//
+// These seven tests pin the load-bearing rollback contract added in
+// Bundle 8 of the 2026-05-02 deployment-target audit:
+//   - snapshot order (export runs BEFORE delete BEFORE import);
+//   - first-time deploy skips the snapshot (no keystore file = nothing
+//     to roll back to, so no -exportkeystore call);
+//   - happy rollback path (import fails → rollback re-imports from the
+//     backup PFX);
+//   - rollback-also-fails (operator-actionable wrapped error containing
+//     both errors AND the backup path for manual recovery);
+//   - retention pruning (5 pre-existing → 3 newest kept after deploy);
+//   - retention zero defaults to 3;
+//   - retention negative opts out of pruning entirely.
+
+func TestJKS_Snapshot_RunsBefore_Delete(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	// Pre-create the keystore file so the snapshot phase fires (the
+	// snapshot is gated on os.Stat returning nil for the keystore path).
+	if err := os.WriteFile(keystorePath, []byte("fake-existing-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil}, // -exportkeystore (snapshot)
+			{Output: "", Err: nil},                         // -delete (alias may exist)
+			{Output: "Import command completed", Err: nil}, // -importkeystore (the actual deploy)
+		},
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// 3 keytool calls: export (snapshot) → delete → import. The order is
+	// load-bearing: snapshot MUST run before delete, otherwise the delete
+	// destroys the very state the snapshot is meant to capture.
+	if len(mock.calls) != 3 {
+		t.Fatalf("expected 3 keytool calls (export + delete + import), got %d", len(mock.calls))
+	}
+
+	// Call 0: -exportkeystore.
+	if mock.calls[0].Name != "keytool" {
+		t.Errorf("call 0: expected keytool, got %s", mock.calls[0].Name)
+	}
+	args0 := strings.Join(mock.calls[0].Args, " ")
+	if !strings.Contains(args0, "-exportkeystore") {
+		t.Errorf("call 0: expected -exportkeystore in args, got: %s", args0)
+	}
+	if !strings.Contains(args0, "-srckeystore "+keystorePath) {
+		t.Errorf("call 0: expected -srckeystore %s, got: %s", keystorePath, args0)
+	}
+	// Backup path: <tmpDir>/.certctl-bak.<unix-nanos>.p12
+	if !strings.Contains(args0, ".certctl-bak.") || !strings.Contains(args0, ".p12") {
+		t.Errorf("call 0: expected .certctl-bak.*.p12 backup path, got: %s", args0)
+	}
+
+	// Call 1: -delete.
+	args1 := strings.Join(mock.calls[1].Args, " ")
+	if !strings.Contains(args1, "-delete") {
+		t.Errorf("call 1: expected -delete in args, got: %s", args1)
+	}
+
+	// Call 2: -importkeystore (the deploy itself).
+	args2 := strings.Join(mock.calls[2].Args, " ")
+	if !strings.Contains(args2, "-importkeystore") {
+		t.Errorf("call 2: expected -importkeystore in args, got: %s", args2)
+	}
+	if !strings.Contains(args2, "-destkeystore "+keystorePath) {
+		t.Errorf("call 2: expected -destkeystore %s, got: %s", keystorePath, args2)
+	}
+}
+
+func TestJKS_Snapshot_FirstTimeDeploy_NoExport(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	// NO keystore file pre-created — first-time deploy. Snapshot phase
+	// gated on os.Stat returning nil; with no file, the snapshot is
+	// skipped, the -delete is skipped, only the -importkeystore runs.
+	keystorePath := tmpDir + "/app.p12"
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Import command completed", Err: nil}, // -importkeystore only
+		},
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
+	}
+
+	// Exactly 1 call: -importkeystore. No -exportkeystore (no keystore
+	// file existed pre-deploy), no -delete (same reason).
+	if len(mock.calls) != 1 {
+		t.Fatalf("expected 1 keytool call (import only), got %d: %v", len(mock.calls), mock.calls)
+	}
+	args := strings.Join(mock.calls[0].Args, " ")
+	if strings.Contains(args, "-exportkeystore") {
+		t.Errorf("expected no -exportkeystore on first-time deploy, got: %s", args)
+	}
+	if !strings.Contains(args, "-importkeystore") {
+		t.Errorf("expected -importkeystore in args, got: %s", args)
+	}
+}
+
+func TestJKS_ImportFails_RollsBack(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-existing-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Snapshot succeeds → delete succeeds → import fails → rollback runs:
+	// rollback delete (best-effort) + rollback re-import from backup PFX.
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 0: -exportkeystore (snapshot)
+			{Output: "", Err: nil}, // 1: -delete (pre-import)
+			{Output: "keystore corruption error", Err: fmt.Errorf("exit 1")}, // 2: -importkeystore FAILS
+			{Output: "", Err: nil}, // 3: -delete (rollback step 1)
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 4: -importkeystore (rollback step 2)
+		},
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	_, err = c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when import fails")
+	}
+	// Wrapped error must surface BOTH the import failure AND the rollback
+	// success ("rolled back from <backupPath>") so operators know they
+	// don't need to manually recover.
+	if !strings.Contains(err.Error(), "keytool import failed") {
+		t.Errorf("expected error to mention import failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rolled back from") {
+		t.Errorf("expected error to mention rollback from <backup>, got: %v", err)
+	}
+
+	// 5 keytool calls: export, delete, import-fail, rollback-delete,
+	// rollback-import. Locate the rollback re-import call (call 4) and
+	// assert it references the backup path.
+	if len(mock.calls) != 5 {
+		t.Fatalf("expected 5 keytool calls (export, delete, import, rollback-delete, rollback-import), got %d", len(mock.calls))
+	}
+	rollbackImportArgs := strings.Join(mock.calls[4].Args, " ")
+	if !strings.Contains(rollbackImportArgs, "-importkeystore") {
+		t.Errorf("call 4: expected -importkeystore for rollback, got: %s", rollbackImportArgs)
+	}
+	if !strings.Contains(rollbackImportArgs, ".certctl-bak.") {
+		t.Errorf("call 4: expected backup path (.certctl-bak.*) as -srckeystore, got: %s", rollbackImportArgs)
+	}
+	// The same backup path that the snapshot wrote should be the source
+	// for the rollback re-import — verify by extracting both and comparing.
+	exportArgs := strings.Join(mock.calls[0].Args, " ")
+	for _, arg := range mock.calls[0].Args {
+		if strings.Contains(arg, ".certctl-bak.") && strings.HasSuffix(arg, ".p12") {
+			if !strings.Contains(rollbackImportArgs, arg) {
+				t.Errorf("rollback re-import did not reference snapshot backup %q\n  export args: %s\n  rollback args: %s", arg, exportArgs, rollbackImportArgs)
+			}
+			break
+		}
+	}
+}
+
+func TestJKS_ImportFails_RollbackAlsoFails_OperatorActionable(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-existing-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Snapshot → delete → import-fail → rollback-delete → rollback-import
+	// ALSO fails. Operator-actionable case: BOTH errors AND the backup
+	// path must be in the wrapped error so operators can manually recover
+	// from the .p12 file on disk.
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil}, // 0: snapshot
+			{Output: "", Err: nil}, // 1: pre-import delete
+			{Output: "import-step error", Err: fmt.Errorf("import exit 1")}, // 2: import FAILS
+			{Output: "", Err: nil}, // 3: rollback delete
+			{Output: "rollback-step error", Err: fmt.Errorf("rollback exit 2")}, // 4: rollback import FAILS
+		},
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	_, err = c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err == nil {
+		t.Fatal("expected error when both import and rollback fail")
+	}
+	// Wrapped error must mention BOTH errors AND the backup path so the
+	// operator can manually recover.
+	if !strings.Contains(err.Error(), "keytool import failed") {
+		t.Errorf("expected error to mention import failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "rollback also failed") {
+		t.Errorf("expected error to mention rollback failure, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), "manual operator inspection required") {
+		t.Errorf("expected error to flag manual inspection, got: %v", err)
+	}
+	if !strings.Contains(err.Error(), ".certctl-bak.") {
+		t.Errorf("expected error to surface the backup path so operator can recover manually, got: %v", err)
+	}
+}
+
+func TestJKS_BackupRetention_PrunesOldBackups(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create 5 backup files with staggered ModTimes so the pruner
+	// has a deterministic newest-first ordering. The deploy will create
+	// a 6th; with retention=3, pruning keeps the 3 newest (which are
+	// the deploy-created backup + the two newest pre-existing).
+	preExistingNames := []string{
+		".certctl-bak.100000000.p12", // oldest
+		".certctl-bak.200000000.p12",
+		".certctl-bak.300000000.p12",
+		".certctl-bak.400000000.p12",
+		".certctl-bak.500000000.p12", // newest pre-existing
+	}
+	baseTime := time.Now().Add(-24 * time.Hour)
+	for i, name := range preExistingNames {
+		path := tmpDir + "/" + name
+		if err := os.WriteFile(path, []byte("backup"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		// Stagger ModTime: oldest = baseTime, newest = baseTime + 4 hours.
+		modTime := baseTime.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil}, // export
+			{Output: "", Err: nil},                         // delete
+			{Output: "Import command completed", Err: nil}, // import
+		},
+		onCall: simulateExportSideEffect(t),
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+		BackupRetention:  3,
+	}, testLogger(), mock)
+
+	_, err = c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+
+	// Count remaining .certctl-bak.*.p12 files. Should be exactly 3:
+	// - the newest pre-existing (500000000) — survives
+	// - the second-newest pre-existing (400000000) — survives
+	// - the deploy-created backup — survives (just-now ModTime is the
+	//   newest of all)
+	// The 3 oldest pre-existing (300000000, 200000000, 100000000) are
+	// pruned.
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var remaining []string
+	for _, e := range entries {
+		name := e.Name()
+		if strings.HasPrefix(name, ".certctl-bak.") && strings.HasSuffix(name, ".p12") {
+			remaining = append(remaining, name)
+		}
+	}
+	if len(remaining) != 3 {
+		t.Errorf("expected exactly 3 backups after pruning (BackupRetention=3), got %d: %v", len(remaining), remaining)
+	}
+	// The two newest pre-existing must survive.
+	for _, want := range []string{".certctl-bak.500000000.p12", ".certctl-bak.400000000.p12"} {
+		found := false
+		for _, got := range remaining {
+			if got == want {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("expected %s to survive pruning, got remaining: %v", want, remaining)
+		}
+	}
+	// The three oldest pre-existing must be pruned.
+	for _, gone := range []string{".certctl-bak.100000000.p12", ".certctl-bak.200000000.p12", ".certctl-bak.300000000.p12"} {
+		for _, got := range remaining {
+			if got == gone {
+				t.Errorf("expected %s to be pruned, but it remained: %v", gone, remaining)
+			}
+		}
+	}
+}
+
+func TestJKS_BackupRetention_Zero_DefaultsTo3(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create 5 staggered backups; with retention=0 (which defaults
+	// to 3), the pruner should behave identically to the explicit-3 test.
+	baseTime := time.Now().Add(-24 * time.Hour)
+	for i := 0; i < 5; i++ {
+		path := tmpDir + "/.certctl-bak." + fmt.Sprintf("%d", (i+1)*100000000) + ".p12"
+		if err := os.WriteFile(path, []byte("backup"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		modTime := baseTime.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil},
+			{Output: "", Err: nil},
+			{Output: "Import command completed", Err: nil},
+		},
+		onCall: simulateExportSideEffect(t),
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+		BackupRetention:  0, // explicit zero — must default to 3
+	}, testLogger(), mock)
+
+	_, err = c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".certctl-bak.") && strings.HasSuffix(e.Name(), ".p12") {
+			count++
+		}
+	}
+	if count != 3 {
+		t.Errorf("expected 3 backups after pruning (BackupRetention=0 → default 3), got %d", count)
+	}
+}
+
+func TestJKS_BackupRetention_Negative_OptsOut(t *testing.T) {
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-keystore"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	// Pre-create 5 backups; with retention=-1, NONE are pruned. After the
+	// deploy creates a 6th, all 6 remain.
+	baseTime := time.Now().Add(-24 * time.Hour)
+	for i := 0; i < 5; i++ {
+		path := tmpDir + "/.certctl-bak." + fmt.Sprintf("%d", (i+1)*100000000) + ".p12"
+		if err := os.WriteFile(path, []byte("backup"), 0644); err != nil {
+			t.Fatal(err)
+		}
+		modTime := baseTime.Add(time.Duration(i) * time.Hour)
+		if err := os.Chtimes(path, modTime, modTime); err != nil {
+			t.Fatal(err)
+		}
+	}
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			{Output: "Imported keystore for alias <server>", Err: nil},
+			{Output: "", Err: nil},
+			{Output: "Import command completed", Err: nil},
+		},
+		onCall: simulateExportSideEffect(t),
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+		BackupRetention:  -1, // opt out
+	}, testLogger(), mock)
+
+	_, err = c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy failed: %v", err)
+	}
+
+	entries, err := os.ReadDir(tmpDir)
+	if err != nil {
+		t.Fatal(err)
+	}
+	count := 0
+	for _, e := range entries {
+		if strings.HasPrefix(e.Name(), ".certctl-bak.") && strings.HasSuffix(e.Name(), ".p12") {
+			count++
+		}
+	}
+	// 5 pre-existing + 1 deploy-created = 6; retention=-1 means no pruning.
+	if count != 6 {
+		t.Errorf("expected 6 backups after deploy with BackupRetention=-1, got %d", count)
+	}
+}
+
+func TestJKS_Snapshot_AliasNotInKeystore_ProceedsCleanly(t *testing.T) {
+	// Edge case: keystore file exists but the configured alias isn't
+	// present in it. keytool -exportkeystore returns non-zero with
+	// "alias <X> does not exist" — the snapshot helper recognises this
+	// as a normal first-time-on-existing-keystore signal and returns
+	// ("", nil), letting the deploy proceed without a backup.
+	// The subsequent import-failure path then becomes the no-backup
+	// branch (returns the import error verbatim).
+	certPEM, keyPEM, err := generateTestCertAndKey()
+	if err != nil {
+		t.Fatalf("generate cert: %v", err)
+	}
+	tmpDir := t.TempDir()
+	keystorePath := tmpDir + "/app.p12"
+	if err := os.WriteFile(keystorePath, []byte("fake-keystore-with-other-aliases"), 0644); err != nil {
+		t.Fatal(err)
+	}
+
+	mock := &mockExecutor{
+		responses: []mockResponse{
+			// keytool -exportkeystore: alias not present → non-zero exit
+			// with the well-known "Alias <server> does not exist" message.
+			{Output: "keytool error: java.lang.Exception: Alias <server> does not exist", Err: fmt.Errorf("exit 1")},
+			{Output: "", Err: nil},                         // -delete (best-effort, alias may not exist)
+			{Output: "Import command completed", Err: nil}, // -importkeystore (deploy)
+		},
+	}
+	c := NewWithExecutor(&Config{
+		KeystorePath:     keystorePath,
+		KeystorePassword: "changeit",
+		KeystoreType:     "PKCS12",
+		Alias:            "server",
+	}, testLogger(), mock)
+
+	result, err := c.DeployCertificate(context.Background(), target.DeploymentRequest{
+		CertPEM: certPEM,
+		KeyPEM:  keyPEM,
+	})
+	if err != nil {
+		t.Fatalf("deploy should succeed when alias not in pre-existing keystore: %v", err)
+	}
+	if !result.Success {
+		t.Error("expected success=true")
 	}
 }
