@@ -652,6 +652,105 @@ func jsonUnmarshalACME(data []byte, v interface{}) error {
 	return json.Unmarshal(data, v)
 }
 
+// --- Phase 4 — key rollover + revocation auth helper ------------------
+
+// ErrACMEAccountKeyConcurrentUpdate is returned by UpdateAccountJWKWithTx
+// when the row's stored thumbprint no longer matches expectedOldThumbprint.
+// This is the "concurrent rollover" race signal: two requests both
+// pre-validated their inner JWS against the SAME current key, but only
+// one of them got into the WithinTx first. The loser's expectedOldThumb-
+// print is now stale → the row's current thumbprint is the WINNER's NEW
+// thumbprint. Caller maps to RFC 8555 §7.3.5 "key already exists".
+var ErrACMEAccountKeyConcurrentUpdate = errors.New("acme: account key was rotated concurrently; re-fetch and retry")
+
+// UpdateAccountJWKWithTx atomically swaps an account row's JWK
+// (thumbprint + PEM) using a SELECT … FOR UPDATE guard plus an
+// expectedOldThumbprint precondition.
+//
+// The row is locked for update; the precondition check then runs
+// against the locked row inside the same tx. If a concurrent rollover
+// committed first, this caller observes the new thumbprint and returns
+// ErrACMEAccountKeyConcurrentUpdate (caller maps to 409). Postgres's
+// row-level lock guarantees the two concurrent transactions serialize.
+//
+// Returns repository.ErrNotFound when the account row is missing.
+func (r *ACMERepository) UpdateAccountJWKWithTx(
+	ctx context.Context,
+	q repository.Querier,
+	accountID string,
+	expectedOldThumbprint, newThumbprint, newJWKPEM string,
+) error {
+	// SELECT … FOR UPDATE serializes concurrent rollovers on the same
+	// row. The lock is released when the surrounding tx commits / rolls
+	// back; the second concurrent caller blocks here until the first
+	// commits + then sees the new thumbprint on its read.
+	var current string
+	err := q.QueryRowContext(ctx, `
+		SELECT jwk_thumbprint
+		FROM acme_accounts
+		WHERE account_id = $1
+		FOR UPDATE
+	`, accountID).Scan(&current)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return fmt.Errorf("account not found: %w", repository.ErrNotFound)
+		}
+		return fmt.Errorf("acme: lock account for key rollover: %w", err)
+	}
+	if current != expectedOldThumbprint {
+		return ErrACMEAccountKeyConcurrentUpdate
+	}
+
+	res, err := q.ExecContext(ctx, `
+		UPDATE acme_accounts
+		SET jwk_thumbprint = $2, jwk_pem = $3, updated_at = NOW()
+		WHERE account_id = $1 AND jwk_thumbprint = $4
+	`, accountID, newThumbprint, newJWKPEM, expectedOldThumbprint)
+	if err != nil {
+		// Postgres SQLSTATE 23505 = unique_violation on
+		// (profile_id, jwk_thumbprint). RFC 8555 §7.3.5 says the
+		// server SHOULD return 409 Conflict in that case.
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			return ErrACMEAccountDuplicateThumbprint
+		}
+		return fmt.Errorf("acme: update account jwk: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("acme: update account jwk rows affected: %w", err)
+	}
+	if n == 0 {
+		// SELECT … FOR UPDATE found the row but the UPDATE WHERE
+		// jwk_thumbprint=$4 did not. That means the thumbprint changed
+		// between the SELECT result + the UPDATE — should be impossible
+		// under the row lock. Treat defensively as a concurrency error.
+		return ErrACMEAccountKeyConcurrentUpdate
+	}
+	return nil
+}
+
+// AccountOwnsCertificate returns true when there is at least one
+// acme_orders row with (account_id = accountID, certificate_id =
+// certificateID). Used by ACMEService.RevokeCert (kid path) to confirm
+// the requesting account had an order that produced the cert. The
+// query is a single indexed lookup; we don't materialize the full row.
+func (r *ACMERepository) AccountOwnsCertificate(ctx context.Context, accountID, certificateID string) (bool, error) {
+	if accountID == "" || certificateID == "" {
+		return false, nil
+	}
+	var count int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM acme_orders
+		WHERE account_id = $1 AND certificate_id = $2
+	`, accountID, certificateID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("acme: account-owns-certificate: %w", err)
+	}
+	return count > 0, nil
+}
+
 // scanACMEAccount is the shared shape for the SELECT-by-X account
 // queries above. Returns sql.ErrNoRows-wrapped repository.ErrNotFound
 // on miss; any other scan failure surfaces verbatim.

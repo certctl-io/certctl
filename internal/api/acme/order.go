@@ -90,6 +90,15 @@ type FinalizeRequest struct {
 	CSR string `json:"csr"`
 }
 
+// RevokeCertRequest is the payload shape RFC 8555 §7.6 mandates for
+// revoke-cert. `certificate` is the base64url-DER of the leaf cert
+// being revoked; `reason` is an optional RFC 5280 §5.3.1 numeric reason
+// code (defaults to 0/unspecified when absent).
+type RevokeCertRequest struct {
+	Certificate string `json:"certificate"`
+	Reason      int    `json:"reason,omitempty"`
+}
+
 // AuthorizationResponseJSON is the wire shape RFC 8555 §7.1.4 mandates
 // for the authz GET (POST-as-GET) response.
 type AuthorizationResponseJSON struct {

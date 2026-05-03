@@ -51,6 +51,10 @@ type ACMEService interface {
 	LookupCertificate(ctx context.Context, certID, accountID string) (string, error)
 	// Phase 3 — challenge validation.
 	RespondToChallenge(ctx context.Context, accountID, challengeID string, accountJWK *jose.JSONWebKey) (*domain.ACMEChallenge, error)
+	// Phase 4 — key rollover + revocation + ARI.
+	RotateAccountKey(ctx context.Context, oldAccount *domain.ACMEAccount, newJWK *jose.JSONWebKey) (*domain.ACMEAccount, error)
+	RevokeCert(ctx context.Context, verified *acme.VerifiedRequest, certDER []byte, reasonCode int) error
+	RenewalInfo(ctx context.Context, profileID, certID string) (*acme.RenewalInfoResponse, time.Duration, error)
 }
 
 // ACMEHandler exposes the ACME server's RFC 8555 endpoints under the
@@ -227,6 +231,49 @@ func writeServiceError(w http.ResponseWriter, err error) {
 			Detail: "challenge is no longer in pending state",
 			Status: http.StatusBadRequest,
 		})
+	case errors.Is(err, service.ErrACMERevocationUnconfigured):
+		acme.WriteProblem(w, acme.ServerInternal("revocation pipeline is not wired"))
+	case errors.Is(err, service.ErrACMEKeyRolloverConcurrent),
+		errors.Is(err, service.ErrACMEKeyRolloverDuplicateKey):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:unauthorized",
+			Detail: "the supplied new account key is unavailable: " + err.Error(),
+			Status: http.StatusConflict,
+		})
+	case errors.Is(err, service.ErrACMEKeyRolloverInvalid):
+		acme.WriteProblem(w, acme.Malformed("key rollover request rejected"))
+	case errors.Is(err, service.ErrACMERevocationCertNotFound):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:malformed",
+			Detail: "the supplied certificate is not known to this server",
+			Status: http.StatusNotFound,
+		})
+	case errors.Is(err, service.ErrACMERevocationUnauthorized):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:unauthorized",
+			Detail: "the requester is not authorized to revoke this certificate",
+			Status: http.StatusUnauthorized,
+		})
+	case errors.Is(err, service.ErrACMERevocationAlreadyRevoked):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:alreadyRevoked",
+			Detail: "the certificate has already been revoked",
+			Status: http.StatusBadRequest,
+		})
+	case errors.Is(err, service.ErrACMERevocationBadCSR):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:badCSR",
+			Detail: "the supplied `certificate` field is not a valid X.509 cert",
+			Status: http.StatusBadRequest,
+		})
+	case errors.Is(err, service.ErrACMEARIDisabled):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:malformed",
+			Detail: "ACME Renewal Information is disabled on this server",
+			Status: http.StatusNotFound,
+		})
+	case errors.Is(err, service.ErrACMEARIBadCertID):
+		acme.WriteProblem(w, acme.Malformed("ARI cert-id is malformed"))
 	default:
 		// Avoid leaking internal error text per master-prompt
 		// criterion #10 (operator-actionable errors with no info
@@ -884,4 +931,191 @@ func marshalChallengeResponse(ch *domain.ACMEChallenge, urlBuilder func(string) 
 		out.Error = &acme.Problem{Type: ch.Error.Type, Detail: ch.Error.Detail, Status: ch.Error.Status}
 	}
 	return out
+}
+
+// --- Phase 4 — key rollover + revocation + ARI -------------------------
+
+// KeyChange handles POST /acme/profile/{id}/key-change (RFC 8555 §7.3.5).
+// Doubly-signed JWS: the OUTER is signed by the OLD account key (kid
+// path); the inner — embedded as the outer's payload — is signed by the
+// NEW account key (jwk path).
+//
+// We run the outer through the existing VerifyJWS pipeline (kid path,
+// nonce consumed there), then ParseAndVerifyKeyChangeInner against the
+// outer's verified payload bytes. The service's RotateAccountKey is the
+// committing actor: it asserts uniqueness and atomically swaps the
+// row's jwk_thumbprint + jwk_pem under SELECT…FOR UPDATE.
+func (h ACMEHandler) KeyChange(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false /*expectNewAccount*/, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	// The outer's verified payload IS the inner JWS (compact-serialized).
+	// Reconstruct the OLD account's stored JWK so the inner can assert
+	// payload.oldKey matches it.
+	registeredOldJWK, err := acme.ParseJWKFromPEM(verified.Account.JWKPEM)
+	if err != nil {
+		acme.WriteProblem(w, acme.ServerInternal("could not parse stored account JWK"))
+		return
+	}
+
+	outerKID := h.accountKID(r, profileID)(verified.Account.AccountID)
+	inner, err := acme.ParseAndVerifyKeyChangeInner(
+		verified.Payload, outerKID, requestURL, registeredOldJWK,
+	)
+	if err != nil {
+		acme.WriteProblem(w, acme.MapKeyChangeErrorToProblem(err))
+		return
+	}
+
+	rolled, err := h.svc.RotateAccountKey(r.Context(), verified.Account, inner.NewJWK)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(
+		acme.MarshalAccount(rolled, h.accountOrdersURL(r, profileID, rolled.AccountID)),
+	)
+}
+
+// RevokeCert handles POST /acme/profile/{id}/revoke-cert (RFC 8555 §7.6).
+// JWS may use EITHER kid (account that owns the cert) OR jwk (the cert's
+// own public key). VerifyJWS produces either Account-set (kid) or
+// JWK-set (jwk). The service's RevokeCert routes through the existing
+// RevocationSvc pipeline.
+func (h ACMEHandler) RevokeCert(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	// RFC 8555 §7.6 explicitly permits both kid and jwk on revoke-cert.
+	// Run a kid-first verify; on the kid-path-specific
+	// "this endpoint requires kid" failure, retry as jwk path.
+	verified, errKid := h.svc.VerifyJWS(r.Context(), body, requestURL, false /*expectNewAccount=false → kid*/, h.accountKID(r, profileID))
+	if errKid != nil && (errors.Is(errKid, acme.ErrJWSExpectKidGotJWK) || errors.Is(errKid, acme.ErrJWSAccountNotFound)) {
+		// jwk path. ExpectNewAccount=true asserts jwk + rejects kid.
+		v2, err2 := h.svc.VerifyJWS(r.Context(), body, requestURL, true /*expectNewAccount=true → jwk*/, h.accountKID(r, profileID))
+		if err2 != nil {
+			acme.WriteProblem(w, acme.MapJWSErrorToProblem(err2))
+			return
+		}
+		verified = v2
+	} else if errKid != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(errKid))
+		return
+	}
+
+	var req acme.RevokeCertRequest
+	if err := json.Unmarshal(verified.Payload, &req); err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not parse revoke-cert payload"))
+		return
+	}
+	certDER, err := base64.RawURLEncoding.DecodeString(req.Certificate)
+	if err != nil || len(certDER) == 0 {
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:badCSR",
+			Detail: "`certificate` is not valid base64url-DER",
+			Status: http.StatusBadRequest,
+		})
+		return
+	}
+
+	if err := h.svc.RevokeCert(r.Context(), verified, certDER, req.Reason); err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	_ = profileID
+	w.WriteHeader(http.StatusOK)
+}
+
+// RenewalInfo handles GET /acme/profile/{id}/renewal-info/{cert_id}
+// (RFC 9773). UNAUTHENTICATED — RFC 9773 §4 mandates ARI be readable
+// without JWS so cert-manager-shaped clients can fetch the suggested
+// window cheaply.
+func (h ACMEHandler) RenewalInfo(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	certID := r.PathValue("cert_id")
+
+	resp, retryAfter, err := h.svc.RenewalInfo(r.Context(), profileID, certID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+	if retryAfter > 0 {
+		// RFC 7231 §7.1.3 Retry-After accepts either an HTTP-date or a
+		// delta-seconds. ACME ARI uses delta-seconds per RFC 9773 §4.2.
+		secs := int(retryAfter.Seconds())
+		if secs < 1 {
+			secs = 1
+		}
+		w.Header().Set("Retry-After", itoaForRetryAfter(secs))
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.Header().Set("Cache-Control", "no-store")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+// itoaForRetryAfter is a localized integer-to-string helper. Using
+// strconv.Itoa would be marginally more idiomatic but pulls a fresh
+// import for one call site; this one-off is fine.
+func itoaForRetryAfter(n int) string {
+	if n == 0 {
+		return "0"
+	}
+	negative := false
+	if n < 0 {
+		negative = true
+		n = -n
+	}
+	var buf [20]byte
+	i := len(buf)
+	for n > 0 {
+		i--
+		buf[i] = byte('0' + n%10)
+		n /= 10
+	}
+	if negative {
+		i--
+		buf[i] = '-'
+	}
+	return string(buf[i:])
 }

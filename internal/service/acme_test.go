@@ -8,6 +8,7 @@ import (
 	"crypto/rand"
 	"crypto/rsa"
 	"errors"
+	"fmt"
 	"testing"
 	"time"
 
@@ -145,6 +146,23 @@ func (f *fakeACMERepo) UpdateChallengeWithTx(ctx context.Context, q repository.Q
 }
 func (f *fakeACMERepo) UpdateAuthzStatusWithTx(ctx context.Context, q repository.Querier, authzID string, status domain.ACMEAuthzStatus) error {
 	return nil
+}
+func (f *fakeACMERepo) UpdateAccountJWKWithTx(ctx context.Context, q repository.Querier, accountID, expectedOldThumbprint, newThumbprint, newJWKPEM string) error {
+	for _, acct := range f.accounts {
+		if acct.AccountID != accountID {
+			continue
+		}
+		if acct.JWKThumbprint != expectedOldThumbprint {
+			return fmt.Errorf("acme: account key was rotated concurrently; retry")
+		}
+		acct.JWKThumbprint = newThumbprint
+		acct.JWKPEM = newJWKPEM
+		return nil
+	}
+	return repository.ErrNotFound
+}
+func (f *fakeACMERepo) AccountOwnsCertificate(ctx context.Context, accountID, certificateID string) (bool, error) {
+	return false, nil
 }
 
 // fakeTransactor is the repository.Transactor stand-in: runs fn

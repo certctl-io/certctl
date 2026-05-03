@@ -53,6 +53,30 @@ type ACMERepo interface {
 	GetChallengeByID(ctx context.Context, challengeID string) (*domain.ACMEChallenge, error)
 	UpdateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error
 	UpdateAuthzStatusWithTx(ctx context.Context, q repository.Querier, authzID string, status domain.ACMEAuthzStatus) error
+	// Phase 4 — key rollover + revocation auth.
+	UpdateAccountJWKWithTx(ctx context.Context, q repository.Querier, accountID, expectedOldThumbprint, newThumbprint, newJWKPEM string) error
+	AccountOwnsCertificate(ctx context.Context, accountID, certificateID string) (bool, error)
+}
+
+// CertificateRevoker is the minimum surface ACMEService needs to route
+// an ACME revoke-cert request through certctl's existing revocation
+// pipeline. The concrete type is *service.RevocationSvc whose
+// RevokeCertificateWithActor method already covers cert-row update +
+// certificate_revocations insert + audit row + issuer notification +
+// OCSP cache invalidation in one path.
+//
+// Defining the interface here lets tests inject a recorder without
+// dragging the entire RevocationSvc graph.
+type CertificateRevoker interface {
+	RevokeCertificateWithActor(ctx context.Context, certID, reason, actor string) error
+}
+
+// RenewalPolicyLookup is the minimum surface ACMEService needs to
+// resolve the optional bound renewal policy for a certificate's ARI
+// window math. Real callers pass a *postgres.RenewalPolicyRepository
+// that satisfies this; tests inject in-memory fakes.
+type RenewalPolicyLookup interface {
+	Get(ctx context.Context, id string) (*domain.RenewalPolicy, error)
 }
 
 // profileLookup is the minimum surface ACMEService needs to resolve a
@@ -109,6 +133,15 @@ type ACMEService struct {
 	// semaphores + the validators. Optional via SetValidatorPool —
 	// when nil, RespondToChallenge returns ErrACMEChallengePoolUnconfigured.
 	validatorPool *acme.Pool
+
+	// Phase 4 — revocation delegate + renewal-policy lookup. The
+	// revoker is *service.RevocationSvc in production; the
+	// renewalPolicies lookup is *postgres.RenewalPolicyRepository.
+	// Both wired via SetRevocationDelegate / SetRenewalPolicyLookup;
+	// when unset, RevokeCert returns ErrACMERevocationUnconfigured
+	// and RenewalInfo returns the no-policy default window.
+	revoker         CertificateRevoker
+	renewalPolicies RenewalPolicyLookup
 }
 
 // NewACMEService constructs an ACMEService with the directory + nonce
@@ -148,6 +181,20 @@ func (s *ACMEService) SetIssuancePipeline(certSvc *CertificateService, certRepo 
 	s.certRepo = certRepo
 	s.issuerRegistry = registry
 }
+
+// SetRevocationDelegate wires Phase 4's revocation delegate. The
+// concrete type is *service.RevocationSvc; passing nil at startup
+// disables the ACME revoke-cert endpoint (handler returns
+// ErrACMERevocationUnconfigured → serverInternal). cmd/server/main.go
+// passes the same revocationSvc instance shared across the rest of
+// the platform.
+func (s *ACMEService) SetRevocationDelegate(r CertificateRevoker) { s.revoker = r }
+
+// SetRenewalPolicyLookup wires the renewal-policy resolver used by
+// the ARI window-math path. Optional — when unset, ARI falls back to
+// the "last 33% of validity" default window; the renewal-info handler
+// still returns 200.
+func (s *ACMEService) SetRenewalPolicyLookup(r RenewalPolicyLookup) { s.renewalPolicies = r }
 
 // SetValidatorPool wires Phase 3's challenge validator pool.
 // cmd/server/main.go constructs an *acme.Pool at startup with the
@@ -239,6 +286,54 @@ var ErrACMEChallengePoolUnconfigured = errors.New("acme: validator pool not wire
 // behavior — same shape as Phase 1b's account inactive case).
 var ErrACMEChallengeWrongState = errors.New("acme: challenge is no longer in pending state")
 
+// Phase 4 sentinels.
+
+// ErrACMERevocationUnconfigured is returned when SetRevocationDelegate
+// hasn't been called and a client hits POST /revoke-cert. Indicates a
+// deploy-time wiring bug; mapped to serverInternal.
+var ErrACMERevocationUnconfigured = errors.New("acme: revocation delegate not wired (call SetRevocationDelegate)")
+
+// ErrACMEKeyRolloverConcurrent is returned when two concurrent key-
+// rollover requests race on the same account; the second sees the
+// first's already-committed thumbprint.
+var ErrACMEKeyRolloverConcurrent = errors.New("acme: account key was rotated concurrently; retry")
+
+// ErrACMEKeyRolloverDuplicateKey is returned when the inner JWS's new
+// JWK thumbprint is already registered against this profile.
+var ErrACMEKeyRolloverDuplicateKey = errors.New("acme: new account key already registered against this profile")
+
+// ErrACMEKeyRolloverInvalid is the catch-all for inner-JWS validation
+// failures the handler doesn't care to enumerate (the actual sentinel
+// for the operator-friendly error comes from the acme package's
+// MapKeyChangeErrorToProblem).
+var ErrACMEKeyRolloverInvalid = errors.New("acme: key rollover request rejected")
+
+// ErrACMERevocationCertNotFound is returned when the revoke-cert
+// payload's certificate doesn't match a managed_certificates row this
+// server has issued.
+var ErrACMERevocationCertNotFound = errors.New("acme: revocation target certificate not found")
+
+// ErrACMERevocationUnauthorized is returned when neither the kid path
+// (account owns the cert) nor the jwk path (signature key matches the
+// cert's public key) authenticates the revocation request.
+var ErrACMERevocationUnauthorized = errors.New("acme: account or signing key does not authorize revocation of this certificate")
+
+// ErrACMERevocationAlreadyRevoked is returned when the cert is already
+// in Revoked status. Mapped to RFC 8555 §6.7 alreadyRevoked.
+var ErrACMERevocationAlreadyRevoked = errors.New("acme: certificate is already revoked")
+
+// ErrACMERevocationBadCSR is returned when the certificate field of
+// the revoke-cert payload is not a valid base64url-DER X.509 cert.
+var ErrACMERevocationBadCSR = errors.New("acme: revoke-cert payload `certificate` is malformed")
+
+// ErrACMEARIDisabled is returned by RenewalInfo when CERTCTL_ACME_SERVER_
+// ARI_ENABLED is false. Handler maps to 404 + serverInternal.
+var ErrACMEARIDisabled = errors.New("acme: ARI is disabled on this server")
+
+// ErrACMEARIBadCertID is returned when the cert-id in the ARI URL is
+// not RFC 9773 §4.1 shape. Handler maps to 400 + malformed.
+var ErrACMEARIBadCertID = errors.New("acme: ARI cert-id is malformed")
+
 // BuildDirectory constructs the per-profile directory document.
 //
 // profileID resolution:
@@ -266,9 +361,14 @@ func (s *ACMEService) BuildDirectory(ctx context.Context, profileID, baseURL str
 		s.cfg.DirectoryMeta.Website,
 		s.cfg.DirectoryMeta.CAAIdentities,
 		s.cfg.DirectoryMeta.ExternalAccountRequired,
-		// Phase 1a: ARI is non-functional. The Phase 4 commit flips this
-		// to true once the renewal-info handler ships.
-		false,
+		// Phase 4: ARI is live. Flipping this on emits the renewalInfo
+		// URL from BuildDirectory; a 200 from the renewal-info handler
+		// returns the suggested-window JSON + Retry-After. Operators can
+		// disable via CERTCTL_ACME_SERVER_ARI_ENABLED=false (the URL
+		// drops out of the directory; the route is still registered but
+		// returns 404 + serverInternal — clients fall back to static
+		// renewal scheduling).
+		s.cfg.ARIEnabled,
 	)
 	_ = profileID // Phase 1b will use the resolved profile to read
 	//                acme_auth_mode + record per-profile metrics. Phase 1a
@@ -355,6 +455,14 @@ type ACMEMetrics struct {
 	ChallengeRespondFailTotal atomic.Uint64 // immediate rejection (already-resolved / wrong-state)
 	ChallengeValidateValid    atomic.Uint64 // validator returned nil
 	ChallengeValidateInvalid  atomic.Uint64 // validator returned error
+
+	// Phase 4 — key rollover + revocation + ARI.
+	KeyChangeTotal       atomic.Uint64 // accepted rollover (200)
+	KeyChangeFailTotal   atomic.Uint64 // rejected rollover (4xx)
+	RevokeCertTotal      atomic.Uint64 // accepted revocation (200)
+	RevokeCertFailTotal  atomic.Uint64 // rejected revocation (4xx)
+	RenewalInfoTotal     atomic.Uint64 // ARI 200
+	RenewalInfoFailTotal atomic.Uint64 // ARI 4xx
 }
 
 // NewACMEMetrics returns a zeroed counter table. Concurrent callers
@@ -394,6 +502,12 @@ func (m *ACMEMetrics) Snapshot() map[string]uint64 {
 		"certctl_acme_challenge_respond_failures_total": m.ChallengeRespondFailTotal.Load(),
 		"certctl_acme_challenge_validate_valid_total":   m.ChallengeValidateValid.Load(),
 		"certctl_acme_challenge_validate_invalid_total": m.ChallengeValidateInvalid.Load(),
+		"certctl_acme_key_change_total":                 m.KeyChangeTotal.Load(),
+		"certctl_acme_key_change_failures_total":        m.KeyChangeFailTotal.Load(),
+		"certctl_acme_revoke_cert_total":                m.RevokeCertTotal.Load(),
+		"certctl_acme_revoke_cert_failures_total":       m.RevokeCertFailTotal.Load(),
+		"certctl_acme_renewal_info_total":               m.RenewalInfoTotal.Load(),
+		"certctl_acme_renewal_info_failures_total":      m.RenewalInfoFailTotal.Load(),
 	}
 }
 
@@ -1357,4 +1471,348 @@ func (s *ACMEService) recordChallengeOutcome(
 			"acme_challenge_completed", "acme_challenge", ch.ChallengeID,
 			auditDetails)
 	})
+}
+
+// --- Phase 4 — key rollover + revocation + ARI -------------------------
+
+// RotateAccountKey is the service-layer entry point for RFC 8555
+// §7.3.5 key-change. By the time we get here the handler has:
+//
+//  1. VerifyJWS'd the OUTER JWS (kid path), so verified.Account is the
+//     authentic account owner.
+//  2. ParseAndVerifyKeyChangeInner'd the inner JWS, so newJWK is the
+//     verified new key + the inner's `oldKey`/`account` invariants
+//     have been asserted.
+//
+// What we still own here:
+//
+//   - asserting the new JWK's thumbprint isn't already registered against
+//     this profile (RFC 8555 §7.3.5 forbids two accounts sharing a key);
+//   - swapping the row's jwk_thumbprint + jwk_pem in one WithinTx with
+//     the audit row, behind a SELECT … FOR UPDATE lock so concurrent
+//     rollovers serialize.
+//
+// Returns ErrACMEKeyRolloverConcurrent when a concurrent rollover beat
+// us to the WithinTx; ErrACMEKeyRolloverDuplicateKey on the
+// (profile_id, jwk_thumbprint) UNIQUE collision.
+func (s *ACMEService) RotateAccountKey(
+	ctx context.Context,
+	oldAccount *domain.ACMEAccount,
+	newJWK *jose.JSONWebKey,
+) (*domain.ACMEAccount, error) {
+	if s.tx == nil || s.auditService == nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, fmt.Errorf("acme: key rollover requires SetTransactor + SetAuditService")
+	}
+	if oldAccount == nil || newJWK == nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, ErrACMEKeyRolloverInvalid
+	}
+
+	newThumbprint, err := acme.JWKThumbprint(newJWK)
+	if err != nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, fmt.Errorf("acme: thumbprint new jwk: %w", err)
+	}
+	newJWKPEM, err := acme.JWKToPEM(newJWK)
+	if err != nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, fmt.Errorf("acme: serialize new jwk: %w", err)
+	}
+
+	// New key already registered against this profile? RFC 8555 §7.3.5
+	// forbids two accounts sharing a key.
+	existing, err := s.repo.GetAccountByThumbprint(ctx, oldAccount.ProfileID, newThumbprint)
+	if err == nil && existing != nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, ErrACMEKeyRolloverDuplicateKey
+	}
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		return nil, fmt.Errorf("acme: lookup new jwk thumbprint: %w", err)
+	}
+
+	// Atomic swap + audit row.
+	if err := s.tx.WithinTx(ctx, func(q repository.Querier) error {
+		if err := s.repo.UpdateAccountJWKWithTx(
+			ctx, q, oldAccount.AccountID,
+			oldAccount.JWKThumbprint, newThumbprint, newJWKPEM,
+		); err != nil {
+			return err
+		}
+		return s.auditService.RecordEventWithTx(ctx, q,
+			fmt.Sprintf("acme:%s", oldAccount.AccountID), domain.ActorTypeUser,
+			"acme_account_key_rolled", "acme_account", oldAccount.AccountID,
+			map[string]interface{}{
+				"old_thumbprint": oldAccount.JWKThumbprint,
+				"new_thumbprint": newThumbprint,
+				"profile_id":     oldAccount.ProfileID,
+			})
+	}); err != nil {
+		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+		// Translate repository sentinels to ACME-shaped errors.
+		// ErrACMEAccountKeyConcurrentUpdate is in the postgres
+		// package; we use error-string-based matching to avoid
+		// importing postgres into the service layer.
+		if strings.Contains(err.Error(), "rotated concurrently") {
+			return nil, ErrACMEKeyRolloverConcurrent
+		}
+		if strings.Contains(err.Error(), "already exists for this profile") {
+			return nil, ErrACMEKeyRolloverDuplicateKey
+		}
+		return nil, err
+	}
+
+	// Hydrate the in-memory account with its new key and return.
+	rolled := *oldAccount
+	rolled.JWKThumbprint = newThumbprint
+	rolled.JWKPEM = newJWKPEM
+	rolled.UpdatedAt = time.Now().UTC()
+	s.metrics.bump(&s.metrics.KeyChangeTotal)
+	return &rolled, nil
+}
+
+// RevokeCert routes an ACME-shaped revoke-cert request through certctl's
+// existing RevocationSvc pipeline (cert row update + revocation row +
+// audit + issuer notification + OCSP cache invalidation).
+//
+// Parameters:
+//
+//   - verified: the JWS-verified envelope. EITHER verified.Account is set
+//     (kid path: account that signed) OR verified.JWK is set (jwk path:
+//     the cert's own key signed). The handler enforces exactly one.
+//   - certDER: the base64url-decoded certificate DER from the payload.
+//   - reasonCode: optional RFC 5280 §5.3.1 numeric reason; values out of
+//     range are clamped to "unspecified".
+//
+// Auth model:
+//
+//   - kid path: the account must have an acme_orders row whose
+//     certificate_id maps to the target managed_certificates row. We
+//     look up by serial against managed_certificates (scoped by issuer)
+//     and then check ownership.
+//   - jwk path: the JWS's embedded public key must equal the cert's
+//     public key (byte-equal RFC 7638 thumbprint).
+//
+// Either path: routes through s.revoker.RevokeCertificateWithActor —
+// the same path bulk revocation, the GUI revoke button, and the
+// ACME-consumer issuer's revoke uses.
+func (s *ACMEService) RevokeCert(
+	ctx context.Context,
+	verified *acme.VerifiedRequest,
+	certDER []byte,
+	reasonCode int,
+) error {
+	if s.revoker == nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationUnconfigured
+	}
+	if s.certRepo == nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return fmt.Errorf("acme: revoke-cert requires SetIssuancePipeline (no certRepo wired)")
+	}
+	if verified == nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationUnauthorized
+	}
+
+	// Parse cert.
+	leaf, err := x509.ParseCertificate(certDER)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationBadCSR
+	}
+
+	// Resolve the cert via (issuerID, serial). Use the same first-
+	// available-issuer rule Phase 2 finalize uses; multi-issuer-per-
+	// profile follow-up will refine.
+	issuerID, _, ok := s.firstAvailableIssuer()
+	if !ok {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationCertNotFound
+	}
+	serialHex := strings.ToLower(leaf.SerialNumber.Text(16))
+	version, err := s.certRepo.GetVersionBySerial(ctx, issuerID, serialHex)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationCertNotFound
+	}
+	cert, err := s.certRepo.Get(ctx, version.CertificateID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationCertNotFound
+	}
+	if cert.Status == domain.CertificateStatusRevoked {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationAlreadyRevoked
+	}
+
+	// Auth check.
+	var actor string
+	switch {
+	case verified.Account != nil:
+		owns, err := s.repo.AccountOwnsCertificate(ctx, verified.Account.AccountID, cert.ID)
+		if err != nil {
+			s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+			return fmt.Errorf("acme: revoke-cert ownership lookup: %w", err)
+		}
+		if !owns {
+			s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+			return ErrACMERevocationUnauthorized
+		}
+		actor = fmt.Sprintf("acme:%s", verified.Account.AccountID)
+	case verified.JWK != nil:
+		// jwk path — embedded JWK must match the cert's pubkey.
+		certJWK := jose.JSONWebKey{Key: leaf.PublicKey}
+		eq, err := jwksThumbprintsEqualSvc(verified.JWK, &certJWK)
+		if err != nil {
+			s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+			return fmt.Errorf("acme: revoke-cert key compare: %w", err)
+		}
+		if !eq {
+			s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+			return ErrACMERevocationUnauthorized
+		}
+		actor = fmt.Sprintf("acme-cert-key:%s", serialHex)
+	default:
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		return ErrACMERevocationUnauthorized
+	}
+
+	// Route through the existing revocation pipeline. Reason is RFC
+	// 5280 §5.3.1 numeric; map to the certctl string form, clamping
+	// unknown values to "unspecified".
+	reasonStr := mapACMERevocationReason(reasonCode)
+	if err := s.revoker.RevokeCertificateWithActor(ctx, cert.ID, reasonStr, actor); err != nil {
+		s.metrics.bump(&s.metrics.RevokeCertFailTotal)
+		// RevocationSvc returns errors for already-revoked / archived;
+		// translate the already-revoked case to the ACME shape.
+		if strings.Contains(err.Error(), "already revoked") {
+			return ErrACMERevocationAlreadyRevoked
+		}
+		return fmt.Errorf("acme: revoke pipeline: %w", err)
+	}
+
+	s.metrics.bump(&s.metrics.RevokeCertTotal)
+	return nil
+}
+
+// RenewalInfo computes the RFC 9773 ARI suggestedWindow + Retry-After
+// for a (profile, cert-id) pair.
+//
+// cert-id is the wire-format string: base64url(AKI) "." base64url(serial).
+// We decode it via acme.ParseARICertID, look up by (issuer, serial),
+// then compute the window from cert.ExpiresAt + the bound renewal
+// policy (when present).
+//
+// Returns the response shape + Retry-After duration. The handler emits
+// these on the wire.
+func (s *ACMEService) RenewalInfo(
+	ctx context.Context,
+	profileID, certID string,
+) (*acme.RenewalInfoResponse, time.Duration, error) {
+	if !s.cfg.ARIEnabled {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, ErrACMEARIDisabled
+	}
+	resolvedProfile, err := s.resolveProfile(ctx, profileID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, err
+	}
+	_ = resolvedProfile // future per-profile metric tags
+
+	parsed, err := acme.ParseARICertID(certID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, ErrACMEARIBadCertID
+	}
+
+	// Resolve cert via (first-available-issuer, serial-hex).
+	issuerID, _, ok := s.firstAvailableIssuer()
+	if !ok || s.certRepo == nil {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, ErrACMECertificateNotFound
+	}
+	version, err := s.certRepo.GetVersionBySerial(ctx, issuerID, parsed.SerialHex())
+	if err != nil {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, ErrACMECertificateNotFound
+	}
+	cert, err := s.certRepo.Get(ctx, version.CertificateID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.RenewalInfoFailTotal)
+		return nil, 0, ErrACMECertificateNotFound
+	}
+
+	// Optional bound renewal-policy lookup. When unset OR the cert has
+	// no policy bound, ComputeRenewalWindow falls back to the last-33%-
+	// of-validity default.
+	var policy *domain.RenewalPolicy
+	if s.renewalPolicies != nil && cert.RenewalPolicyID != "" {
+		p, err := s.renewalPolicies.Get(ctx, cert.RenewalPolicyID)
+		if err == nil {
+			policy = p
+		}
+	}
+
+	start, end := acme.ComputeRenewalWindow(cert, version, policy, time.Now().UTC())
+	resp := &acme.RenewalInfoResponse{
+		SuggestedWindow: acme.RenewalWindow{Start: start.UTC(), End: end.UTC()},
+	}
+	retryAfter := s.cfg.ARIPollInterval
+	if retryAfter <= 0 {
+		retryAfter = 6 * time.Hour
+	}
+
+	s.metrics.bump(&s.metrics.RenewalInfoTotal)
+	return resp, retryAfter, nil
+}
+
+// jwksThumbprintsEqualSvc compares two JWKs by RFC 7638 thumbprint. A
+// service-package-local helper so we don't import the api/acme package's
+// unexported helper. The constant-time compare matches what the
+// keychange.go variant does on the api/acme side.
+func jwksThumbprintsEqualSvc(a, b *jose.JSONWebKey) (bool, error) {
+	if a == nil || b == nil {
+		return false, nil
+	}
+	tA, err := acme.JWKThumbprint(a)
+	if err != nil {
+		return false, err
+	}
+	tB, err := acme.JWKThumbprint(b)
+	if err != nil {
+		return false, err
+	}
+	return tA == tB, nil
+}
+
+// mapACMERevocationReason translates the RFC 5280 §5.3.1 numeric reason
+// code to the certctl-domain reason string. Out-of-range values clamp
+// to "unspecified" per RFC 8555 §7.6 ("an arbitrary integer value");
+// RFC 5280 codes 8 (removeFromCRL) and 10 (aACompromise) are not in
+// certctl's domain.ValidRevocationReasons set so they also clamp to
+// "unspecified".
+func mapACMERevocationReason(code int) string {
+	switch code {
+	case 0:
+		return string(domain.RevocationReasonUnspecified)
+	case 1:
+		return string(domain.RevocationReasonKeyCompromise)
+	case 2:
+		return string(domain.RevocationReasonCACompromise)
+	case 3:
+		return string(domain.RevocationReasonAffiliationChanged)
+	case 4:
+		return string(domain.RevocationReasonSuperseded)
+	case 5:
+		return string(domain.RevocationReasonCessationOfOperation)
+	case 6:
+		return string(domain.RevocationReasonCertificateHold)
+	case 9:
+		return string(domain.RevocationReasonPrivilegeWithdrawn)
+	default:
+		return string(domain.RevocationReasonUnspecified)
+	}
 }

@@ -42,6 +42,10 @@ type mockACMEService struct {
 	LookupCertificateFn func(ctx context.Context, certID, accountID string) (string, error)
 	// Phase 3.
 	RespondToChallengeFn func(ctx context.Context, accountID, challengeID string, accountJWK *jose.JSONWebKey) (*domain.ACMEChallenge, error)
+	// Phase 4.
+	RotateAccountKeyFn func(ctx context.Context, oldAccount *domain.ACMEAccount, newJWK *jose.JSONWebKey) (*domain.ACMEAccount, error)
+	RevokeCertFn       func(ctx context.Context, verified *acme.VerifiedRequest, certDER []byte, reasonCode int) error
+	RenewalInfoFn      func(ctx context.Context, profileID, certID string) (*acme.RenewalInfoResponse, time.Duration, error)
 }
 
 func (m *mockACMEService) BuildDirectory(ctx context.Context, profileID, baseURL string) (*acme.Directory, error) {
@@ -140,6 +144,27 @@ func (m *mockACMEService) RespondToChallenge(ctx context.Context, accountID, cha
 		return m.RespondToChallengeFn(ctx, accountID, challengeID, accountJWK)
 	}
 	return nil, errors.New("RespondToChallenge not stubbed")
+}
+
+func (m *mockACMEService) RotateAccountKey(ctx context.Context, oldAccount *domain.ACMEAccount, newJWK *jose.JSONWebKey) (*domain.ACMEAccount, error) {
+	if m.RotateAccountKeyFn != nil {
+		return m.RotateAccountKeyFn(ctx, oldAccount, newJWK)
+	}
+	return nil, errors.New("RotateAccountKey not stubbed")
+}
+
+func (m *mockACMEService) RevokeCert(ctx context.Context, verified *acme.VerifiedRequest, certDER []byte, reasonCode int) error {
+	if m.RevokeCertFn != nil {
+		return m.RevokeCertFn(ctx, verified, certDER, reasonCode)
+	}
+	return errors.New("RevokeCert not stubbed")
+}
+
+func (m *mockACMEService) RenewalInfo(ctx context.Context, profileID, certID string) (*acme.RenewalInfoResponse, time.Duration, error) {
+	if m.RenewalInfoFn != nil {
+		return m.RenewalInfoFn(ctx, profileID, certID)
+	}
+	return nil, 0, errors.New("RenewalInfo not stubbed")
 }
 
 // newACMETestServer wires the ACMEHandler against the mock + a stdlib

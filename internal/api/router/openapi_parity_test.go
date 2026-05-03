@@ -85,6 +85,13 @@ var SpecParityExceptions = map[string]string{
 	"POST /acme/authz/{authz_id}":                     "Phase 2 default-profile shorthand for authz POST-as-GET.",
 	"POST /acme/challenge/{chall_id}":                 "Phase 3 default-profile shorthand for challenge response.",
 	"POST /acme/cert/{cert_id}":                       "Phase 2 default-profile shorthand for cert download.",
+	// Phase 4 — key rollover + revocation + ARI.
+	"POST /acme/profile/{id}/key-change":              "RFC 8555 §7.3.5 doubly-signed key rollover; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/revoke-cert":             "RFC 8555 §7.6 revoke-cert (kid OR cert-key auth); documented in docs/acme-server.md",
+	"GET /acme/profile/{id}/renewal-info/{cert_id}":   "RFC 9773 ACME Renewal Information (unauthenticated GET); documented in docs/acme-server.md",
+	"POST /acme/key-change":                           "Phase 4 default-profile shorthand for key rollover.",
+	"POST /acme/revoke-cert":                          "Phase 4 default-profile shorthand for revoke-cert.",
+	"GET /acme/renewal-info/{cert_id}":                "Phase 4 default-profile shorthand for ARI.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

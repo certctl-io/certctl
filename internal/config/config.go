@@ -726,6 +726,24 @@ type ACMEServerConfig struct {
 	// Default: 10. Setting: CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY.
 	TLSALPN01ConcurrencyMax int
 
+	// ARIEnabled toggles RFC 9773 ACME Renewal Information surface
+	// (the `renewalInfo` directory entry + GET
+	// /acme/profile/<id>/renewal-info/<cert-id>). Default: true.
+	// Operators wanting Phase-1a-style "directory + nonce + accounts +
+	// orders + finalize + challenges only" can flip this off; doing so
+	// drops the renewalInfo URL from the directory document so ACME
+	// clients fall back to their static renewal scheduler. Phase 4 wires.
+	// Setting: CERTCTL_ACME_SERVER_ARI_ENABLED.
+	ARIEnabled bool
+
+	// ARIPollInterval is the value the server returns in the Retry-After
+	// response header on a 200 ARI response — i.e., the suggested gap
+	// between successive ARI polls a client should respect. RFC 9773 §4.2
+	// leaves this server-policy. Default: 6h. Tighter intervals (e.g. 1h)
+	// suit short-lived certs; looser intervals (24h) suit standard 90-day
+	// certs. Setting: CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL.
+	ARIPollInterval time.Duration
+
 	// DirectoryMeta is the optional metadata advertised in the directory
 	// document per RFC 8555 §7.1.1.
 	DirectoryMeta ACMEServerDirectoryMeta
@@ -1771,6 +1789,8 @@ func Load() (*Config, error) {
 			DNS01Resolver:           getEnv("CERTCTL_ACME_SERVER_DNS01_RESOLVER", "8.8.8.8:53"),
 			DNS01ConcurrencyMax:     getEnvInt("CERTCTL_ACME_SERVER_DNS01_CONCURRENCY", 10),
 			TLSALPN01ConcurrencyMax: getEnvInt("CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY", 10),
+			ARIEnabled:              getEnvBool("CERTCTL_ACME_SERVER_ARI_ENABLED", true),
+			ARIPollInterval:         getEnvDuration("CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL", 6*time.Hour),
 			DirectoryMeta: ACMEServerDirectoryMeta{
 				TermsOfService:          getEnv("CERTCTL_ACME_SERVER_TOS_URL", ""),
 				Website:                 getEnv("CERTCTL_ACME_SERVER_WEBSITE", ""),

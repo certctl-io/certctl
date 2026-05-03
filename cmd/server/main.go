@@ -778,6 +778,13 @@ func main() {
 		DNS01Resolver:   cfg.ACMEServer.DNS01Resolver,
 	})
 	acmeService.SetValidatorPool(acmeValidatorPool)
+	// Phase 4 — revocation pipeline + renewal-policy lookup. The same
+	// revocationSvc instance shared across the rest of the platform
+	// covers ACME revoke-cert; the renewalPolicyRepo backs ARI window
+	// math (when present, ComputeRenewalWindow uses RenewalWindowDays;
+	// when absent, falls back to last-33%-of-validity).
+	acmeService.SetRevocationDelegate(revocationSvc)
+	acmeService.SetRenewalPolicyLookup(renewalPolicyRepo)
 	acmeHandler := handler.NewACMEHandler(acmeService)
 
 	// Build the API router with all handlers

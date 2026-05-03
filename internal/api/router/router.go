@@ -423,6 +423,11 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /acme/profile/{id}/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
 	r.Register("POST /acme/profile/{id}/challenge/{chall_id}", http.HandlerFunc(reg.ACME.Challenge))
 	r.Register("POST /acme/profile/{id}/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
+	r.Register("POST /acme/profile/{id}/key-change", http.HandlerFunc(reg.ACME.KeyChange))
+	r.Register("POST /acme/profile/{id}/revoke-cert", http.HandlerFunc(reg.ACME.RevokeCert))
+	// RFC 9773 ARI: GET-only + unauthenticated (cert-manager-shaped
+	// clients fetch this without a JWS).
+	r.Register("GET /acme/profile/{id}/renewal-info/{cert_id}", http.HandlerFunc(reg.ACME.RenewalInfo))
 	// Default-profile shorthand. The handler's profile-resolution path
 	// returns userActionRequired (RFC 7807 + RFC 8555 §6.7) when
 	// CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is unset; when set it
@@ -438,6 +443,9 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /acme/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
 	r.Register("POST /acme/challenge/{chall_id}", http.HandlerFunc(reg.ACME.Challenge))
 	r.Register("POST /acme/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
+	r.Register("POST /acme/key-change", http.HandlerFunc(reg.ACME.KeyChange))
+	r.Register("POST /acme/revoke-cert", http.HandlerFunc(reg.ACME.RevokeCert))
+	r.Register("GET /acme/renewal-info/{cert_id}", http.HandlerFunc(reg.ACME.RenewalInfo))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under
