@@ -431,7 +431,9 @@ The connector is registered in the issuer registry under `iss-vault`. Vault issu
 
 **MaxTTL enforcement (M11c):** When a certificate profile defines a maximum TTL, the Vault connector overrides the TTL string in the signing request to ensure the issued certificate does not exceed the profile limit. This is applied before Vault's own role-level max TTL.
 
-Location: `internal/connector/issuer/vault/vault.go`
+**Token TTL + automatic renewal (Top-10 fix #5, 2026-05-03 audit):** certctl-server periodically calls `POST /v1/auth/token/renew-self` at half the token's TTL to keep the integration alive without manual rotation; the cadence is read from a one-shot `lookup-self` at startup and re-derived on every successful renewal so a short bootstrap token that gets renewed up to a longer Max TTL shifts to the longer cadence automatically. The renewal loop emits the `certctl_vault_token_renewals_total{result="success"|"failure"|"not_renewable"}` Prometheus counter so operators see expiry trouble in Grafana before issuance breaks. When Vault returns `renewable: false` (configured Max TTL reached), the loop logs a WARN, increments `{result="not_renewable"}`, and exits — the operator must rotate the Vault token and restart certctl-server (or use the GUI/MCP issuer-update path to swap the token in place; the registry's Rebuild path re-Starts the lifecycle on the new connector). Per-tick failures (e.g. transient 5xx, brief network blips) bump `{result="failure"}` and the loop keeps ticking; only the explicit `renewable: false` case stops it.
+
+Location: `internal/connector/issuer/vault/vault.go` + `internal/connector/issuer/vault/vault_renew.go`
 
 ### Built-in: DigiCert CertCentral
 

@@ -29,6 +29,7 @@ import (
 	"log/slog"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
@@ -72,6 +73,32 @@ type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	httpClient *http.Client
+
+	// Token-renewal loop fields. Top-10 fix #5 of the 2026-05-03
+	// issuer-coverage audit. Long-lived certctl-server deploys hit
+	// Vault token expiry; the loop calls /v1/auth/token/renew-self at
+	// TTL/2 cadence so the integration stays alive up to Vault's
+	// configured Max TTL. See vault_renew.go for Start / Stop /
+	// renewSelf / lookupSelf.
+	//
+	// renewMu guards startedOnce + cancel + done. The ticker runs in a
+	// goroutine that owns its own copy of these channels.
+	renewMu       sync.Mutex
+	renewStarted  bool            // true after Start spawned the goroutine
+	renewCancel   func()          // cancels the goroutine's ctx
+	renewDone     chan struct{}   // closed when goroutine exits
+	renewRecorder RenewalRecorder // optional metric sink (defaults to no-op)
+
+	// renewTickerFactory lets tests substitute a deterministic ticker
+	// implementation for cadence assertions. Production callers leave
+	// this nil and the loop uses time.NewTicker.
+	renewTickerFactory func(d time.Duration) renewTicker
+
+	// renewClient is the HTTP client used for renew-self / lookup-self.
+	// Defaults to httpClient; a separate seam lets tests inject an
+	// httptest.Server-bound client without disturbing the issuance
+	// path's client.
+	renewClient *http.Client
 }
 
 // New creates a new Vault PKI connector with the given configuration and logger.
@@ -85,13 +112,36 @@ func New(config *Config, logger *slog.Logger) *Connector {
 		}
 	}
 
-	return &Connector{
-		config: config,
-		logger: logger,
-		httpClient: &http.Client{
-			Timeout: 30 * time.Second,
-		},
+	httpClient := &http.Client{
+		Timeout: 30 * time.Second,
 	}
+	return &Connector{
+		config:        config,
+		logger:        logger,
+		httpClient:    httpClient,
+		renewClient:   httpClient,
+		renewRecorder: noopRenewalRecorder{},
+	}
+}
+
+// SetRenewalRecorder wires a metric sink for the renew-self loop. The
+// recorder's RecordRenewal(result string) is called with one of the
+// enum values "success", "failure", or "not_renewable" on every tick.
+// Pass nil to disable recording. Safe to call before Start; calling
+// after Start has no effect on already-emitted increments.
+//
+// The interface lives in this package (not internal/service) to avoid
+// an import cycle: vault is a connector package that the service-layer
+// IssuerRegistry imports. The service-layer concrete type
+// (*service.VaultRenewalMetrics) satisfies this interface and is wired
+// in cmd/server/main.go.
+func (c *Connector) SetRenewalRecorder(r RenewalRecorder) {
+	if r == nil {
+		r = noopRenewalRecorder{}
+	}
+	c.renewMu.Lock()
+	defer c.renewMu.Unlock()
+	c.renewRecorder = r
 }
 
 // vaultResponse is the standard Vault API response wrapper.

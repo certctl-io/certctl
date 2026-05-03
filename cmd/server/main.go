@@ -228,6 +228,16 @@ func main() {
 	issuanceMetrics := service.NewIssuanceMetrics(service.DefaultIssuanceBucketBoundaries)
 	issuerRegistry.SetIssuanceMetrics(issuanceMetrics)
 
+	// Top-10 fix #5 (2026-05-03 audit): Vault PKI token-renewal
+	// metrics. Same instance is wired into the registry (so each
+	// *vault.Connector built by Rebuild gets a recorder) AND into
+	// the metrics handler (so the Prometheus exposer emits
+	// certctl_vault_token_renewals_total). The renewal goroutine
+	// itself is kicked off below by issuerRegistry.StartLifecycles
+	// after Rebuild has populated the registry.
+	vaultRenewalMetrics := service.NewVaultRenewalMetrics()
+	issuerRegistry.SetVaultRenewalMetrics(vaultRenewalMetrics)
+
 	// Audit fix #7: wire the cert-version lookup so ACME connectors
 	// built by Rebuild can recover the leaf-cert DER from a serial-
 	// only revoke request. The postgres CertificateRepository
@@ -403,6 +413,16 @@ func main() {
 		logger.Error("failed to build issuer registry from database", "error", err)
 	}
 	logger.Info("issuer registry loaded", "issuers", issuerRegistry.Len())
+
+	// Top-10 fix #5 (2026-05-03 audit): kick off any optional
+	// long-running background work bound to issuer connectors. Today
+	// only Vault PKI implements issuer.Lifecycle (renew-self loop);
+	// other connectors are silently skipped. Per-connector Start
+	// failures are logged, not fatal — a misconfigured Vault doesn't
+	// block server startup. Stop is wired to the deferred shutdown
+	// path below so the goroutines exit cleanly on signal.
+	issuerRegistry.StartLifecycles(context.Background())
+	defer issuerRegistry.StopLifecycles()
 	targetService := service.NewTargetService(targetRepo, auditService, agentRepo, encryptionKey, logger)
 	profileService := service.NewProfileService(profileRepo, auditService)
 	teamService := service.NewTeamService(teamRepo, auditService)
@@ -572,6 +592,9 @@ func main() {
 	// Audit fix #4: wire the per-issuer-type issuance metrics so the
 	// /api/v1/metrics/prometheus exposer emits the new series.
 	metricsHandler.SetIssuanceCounters(issuanceMetrics)
+	// Top-10 fix #5 (2026-05-03 audit): Vault PKI token-renewal counter.
+	// Same instance the registry uses to record per-tick results.
+	metricsHandler.SetVaultRenewals(vaultRenewalMetrics)
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)

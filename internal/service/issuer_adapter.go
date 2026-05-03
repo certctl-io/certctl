@@ -40,6 +40,18 @@ func (a *IssuerConnectorAdapter) SetMetrics(issuerType string, metrics *Issuance
 	a.metrics = metrics
 }
 
+// Underlying returns the wrapped issuer.Connector so registry-level
+// machinery (StartLifecycles / StopLifecycles, Bundle G audit-row
+// pairing, future feature-detect interfaces) can reach the concrete
+// connector behind the adapter without duplicating the wiring at
+// every call site. Returns interface{} rather than issuer.Connector
+// so callers do their own type assertion against optional extension
+// interfaces (issuer.Lifecycle, etc.) without an import dependency
+// fan-out from this package.
+func (a *IssuerConnectorAdapter) Underlying() interface{} {
+	return a.connector
+}
+
 // recordIssuance is the metrics-recording side effect at the adapter
 // boundary. Bumps the issuance counter (success/failure) and the
 // duration histogram; on failure also bumps the failure-by-error-class

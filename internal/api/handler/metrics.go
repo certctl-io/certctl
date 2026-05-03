@@ -60,6 +60,28 @@ type DeployCounterSnapshotter interface {
 // reverse import would create a cycle. The exposer below takes the
 // types via the interface defined in service.
 
+// VaultRenewalSnapshotter is the surface MetricsHandler consumes
+// to emit the certctl_vault_token_renewals_total{result=...}
+// counter. *service.VaultRenewalMetrics satisfies this; cmd/server
+// passes the same instance into IssuerRegistry.SetVaultRenewalMetrics
+// (so Vault connectors record results) AND into
+// MetricsHandler.SetVaultRenewals (so the Prometheus exposer reads
+// the counters).
+//
+// Returns three counter values directly (rather than a shared struct
+// type) so service can satisfy this without an import cycle —
+// handler already imports service for IssuanceMetricsSnapshotter,
+// but service does not import handler. A method that returns
+// (uint64, uint64, uint64) needs no shared type.
+//
+// Top-10 fix #5 of the 2026-05-03 issuer-coverage audit.
+type VaultRenewalSnapshotter interface {
+	// SnapshotVaultRenewals returns success, failure, and
+	// not_renewable counters as point-in-time reads. Order is fixed
+	// for the exposer — matches the Prometheus label order.
+	SnapshotVaultRenewals() (success, failure, notRenewable uint64)
+}
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
@@ -79,6 +101,10 @@ type MetricsHandler struct {
 	// imports service for admin_est.go etc., so service can't import
 	// handler back).
 	issuanceCounters service.IssuanceMetricsSnapshotter
+	// Vault PKI token-renewal counters. Top-10 fix #5 of the
+	// 2026-05-03 issuer-coverage audit. nil disables emission of
+	// certctl_vault_token_renewals_total{result=...}.
+	vaultRenewals VaultRenewalSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -110,6 +136,13 @@ func (h *MetricsHandler) SetDeployCounters(c DeployCounterSnapshotter) {
 // audit (per-issuer-type metrics).
 func (h *MetricsHandler) SetIssuanceCounters(c service.IssuanceMetricsSnapshotter) {
 	h.issuanceCounters = c
+}
+
+// SetVaultRenewals wires the Vault PKI token-renewal counter table
+// for the Prometheus exposition. nil disables the block. Closes
+// Top-10 fix #5 of the 2026-05-03 issuer-coverage audit.
+func (h *MetricsHandler) SetVaultRenewals(c VaultRenewalSnapshotter) {
+	h.vaultRenewals = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -423,6 +456,20 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 		for _, f := range failures {
 			fmt.Fprintf(w, "certctl_issuance_failures_total{issuer_type=%q,error_class=%q} %d\n", f.IssuerType, f.ErrorClass, f.Count)
 		}
+	}
+
+	// Vault PKI token-renewal counters. Top-10 fix #5 of the
+	// 2026-05-03 issuer-coverage audit. Operators alert on
+	// certctl_vault_token_renewals_total{result="failure"} > 0 or
+	// {result="not_renewable"} > 0 to catch token expiry before
+	// issuance breaks. Closed enum: 3 series.
+	if h.vaultRenewals != nil {
+		success, failure, notRenewable := h.vaultRenewals.SnapshotVaultRenewals()
+		fmt.Fprintf(w, "\n# HELP certctl_vault_token_renewals_total Vault PKI token renew-self results. result is a closed enum: success, failure, not_renewable.\n")
+		fmt.Fprintf(w, "# TYPE certctl_vault_token_renewals_total counter\n")
+		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "success", success)
+		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "failure", failure)
+		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "not_renewable", notRenewable)
 	}
 }
 

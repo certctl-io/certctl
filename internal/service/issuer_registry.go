@@ -8,8 +8,10 @@ import (
 	"sync"
 	"time"
 
+	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/acme"
 	"github.com/shankar0123/certctl/internal/connector/issuer/local"
+	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
 	"github.com/shankar0123/certctl/internal/connector/issuerfactory"
 	"github.com/shankar0123/certctl/internal/crypto"
 	"github.com/shankar0123/certctl/internal/crypto/signer"
@@ -47,6 +49,14 @@ type IssuerRegistry struct {
 	// Nil leaves the legacy "ACME revocation by serial requires
 	// CertificateLookup wiring" error in place for old wiring paths.
 	acmeCertLookup acme.CertificateLookupRepo
+
+	// vaultRenewalMetrics — when set, every freshly-constructed
+	// *vault.Connector is wired with SetRenewalRecorder so the
+	// renew-self loop bumps the certctl_vault_token_renewals_total
+	// counter. Closes Top-10 fix #5 of the 2026-05-03 audit. Nil
+	// leaves the no-op recorder in place (no metric emission, but
+	// the loop still runs).
+	vaultRenewalMetrics *VaultRenewalMetrics
 }
 
 // LocalIssuerDeps groups the optional dependencies that the local
@@ -90,6 +100,23 @@ func (r *IssuerRegistry) SetIssuanceMetrics(m *IssuanceMetrics) {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.metrics = m
+}
+
+// SetVaultRenewalMetrics wires the per-(result) counter table for
+// the Vault PKI renew-self loop. Every *vault.Connector constructed
+// by Rebuild after this call records its renewal results into the
+// supplied metrics. Closes Top-10 fix #5 of the 2026-05-03
+// issuer-coverage audit.
+//
+// The same instance must also be registered with the metrics
+// handler via MetricsHandler.SetVaultRenewals so the Prometheus
+// exposer emits certctl_vault_token_renewals_total{result=...}.
+// cmd/server/main.go owns both wiring sides; tests usually skip
+// the Prometheus side and just assert against the snapshot.
+func (r *IssuerRegistry) SetVaultRenewalMetrics(m *VaultRenewalMetrics) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.vaultRenewalMetrics = m
 }
 
 // SetACMECertLookup wires the cert-version lookup repo for every
@@ -228,6 +255,19 @@ func (r *IssuerRegistry) Rebuild(ctx context.Context, configs []*domain.Issuer, 
 				"id", cfg.ID)
 		}
 
+		// Top-10 fix #5 (2026-05-03 audit): wire the renew-self
+		// metric recorder into every freshly-constructed
+		// *vault.Connector so its background renewal loop bumps the
+		// certctl_vault_token_renewals_total counter. Lifecycle
+		// startup itself is gated by StartLifecycles below — Rebuild
+		// only does the metric wire here so the recorder is in place
+		// when StartLifecycles fires.
+		if vaultConn, ok := connector.(*vault.Connector); ok && r.vaultRenewalMetrics != nil {
+			vaultConn.SetRenewalRecorder(r.vaultRenewalMetrics)
+			r.logger.Info("Vault PKI issuer wired with renew-self metric recorder",
+				"id", cfg.ID)
+		}
+
 		adapter := NewIssuerConnectorAdapter(connector)
 		// Wire per-issuer-type metrics (audit fix #4) when SetIssuanceMetrics
 		// was called. The adapter is the IssuerConnector interface; type-
@@ -272,4 +312,94 @@ func (r *IssuerRegistry) Rebuild(ctx context.Context, configs []*domain.Issuer, 
 	}
 
 	return nil
+}
+
+// StartLifecycles iterates the registry and calls Start(ctx) on every
+// connector that implements the optional issuer.Lifecycle extension
+// interface. Connectors without lifecycle work (almost all of them)
+// are silently skipped.
+//
+// Top-10 fix #5 of the 2026-05-03 issuer-coverage audit. Today only
+// VaultPKI implements Lifecycle (for its renew-self loop). New
+// lifecycle-bearing connectors plug in by implementing the
+// interface — this method picks them up automatically.
+//
+// Per-connector Start failures are LOGGED, not returned, so a single
+// misconfigured Vault doesn't block server startup. Operators see
+// the failure in the slog stream and via the
+// certctl_vault_token_renewals_total{result="not_renewable"} or
+// {result="failure"} counter.
+//
+// The IssuerConnectorAdapter wraps the raw connector; we type-assert
+// against IssuerConnectorWithUnderlying to reach the underlying
+// connector. If the adapter shape changes, this assertion silently
+// no-ops and lifecycle wiring stops working — covered by
+// TestRegistry_StartLifecycles_VaultStarted.
+func (r *IssuerRegistry) StartLifecycles(ctx context.Context) {
+	r.mu.RLock()
+	conns := make(map[string]IssuerConnector, len(r.issuers))
+	for id, c := range r.issuers {
+		conns[id] = c
+	}
+	r.mu.RUnlock()
+
+	for id, c := range conns {
+		raw := unwrapAdapter(c)
+		if raw == nil {
+			continue
+		}
+		lc, ok := raw.(issuer.Lifecycle)
+		if !ok {
+			continue
+		}
+		if err := lc.Start(ctx); err != nil {
+			r.logger.Warn("issuer lifecycle Start failed",
+				"id", id,
+				"error", err,
+			)
+			continue
+		}
+		r.logger.Info("issuer lifecycle Start succeeded", "id", id)
+	}
+}
+
+// StopLifecycles iterates the registry and calls Stop() on every
+// connector that implements the optional issuer.Lifecycle extension
+// interface. Each Stop blocks until the connector's background work
+// has fully exited; the loop is sequential rather than parallel so
+// shutdown ordering is deterministic in operator logs.
+//
+// Idempotent. Safe to call after StartLifecycles failed or wasn't
+// called.
+func (r *IssuerRegistry) StopLifecycles() {
+	r.mu.RLock()
+	conns := make([]IssuerConnector, 0, len(r.issuers))
+	for _, c := range r.issuers {
+		conns = append(conns, c)
+	}
+	r.mu.RUnlock()
+
+	for _, c := range conns {
+		raw := unwrapAdapter(c)
+		if raw == nil {
+			continue
+		}
+		if lc, ok := raw.(issuer.Lifecycle); ok {
+			lc.Stop()
+		}
+	}
+}
+
+// unwrapAdapter returns the underlying issuer.Connector held by an
+// IssuerConnectorAdapter. If the registry held a raw connector
+// directly (test wiring), returns it as-is. Returns nil if neither
+// case matches — defensive against future adapter-shape changes.
+func unwrapAdapter(c IssuerConnector) interface{} {
+	if a, ok := c.(*IssuerConnectorAdapter); ok {
+		return a.Underlying()
+	}
+	if u, ok := c.(interface{ Underlying() interface{} }); ok {
+		return u.Underlying()
+	}
+	return c
 }
