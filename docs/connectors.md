@@ -19,7 +19,8 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Revocation Across Issuers](#revocation-across-issuers)
    - [EST Integration (GetCACertPEM)](#est-integration-getcacertpem)
    - [Building a Custom Issuer](#building-a-custom-issuer)
-3. [Target Connector](#target-connector)
+3. [ACME Server (Built-in)](#acme-server-built-in)
+4. [Target Connector](#target-connector)
    - [Interface](#interface-1)
    - [Built-in: NGINX](#built-in-nginx)
    - [Built-in: Apache httpd](#built-in-apache-httpd)
@@ -34,28 +35,28 @@ Connectors extend certctl to integrate with external systems for certificate iss
    - [Windows Certificate Store](#windows-certificate-store)
    - [Java Keystore (JKS / PKCS#12)](#java-keystore-jks--pkcs12)
    - [Kubernetes Secrets](#kubernetes-secrets)
-4. [Notifier Connector](#notifier-connector)
+5. [Notifier Connector](#notifier-connector)
    - [Interface](#interface-2)
-5. [Registering a Connector](#registering-a-connector)
+6. [Registering a Connector](#registering-a-connector)
    - [IssuerConnectorAdapter](#issuerconnectoradapter)
    - [Notifier Registration](#notifier-registration)
-6. [Testing Connectors](#testing-connectors)
+7. [Testing Connectors](#testing-connectors)
    - [Unit Tests](#unit-tests)
    - [Integration Tests](#integration-tests)
-7. [Best Practices](#best-practices)
-8. [Agent Discovery Scanner](#agent-discovery-scanner)
+8. [Best Practices](#best-practices)
+9. [Agent Discovery Scanner](#agent-discovery-scanner)
    - [Configuration](#configuration)
    - [How It Works](#how-it-works)
    - [API Endpoints](#api-endpoints)
    - [Use Cases](#use-cases)
-9. [Network Certificate Scanner (M21)](#network-certificate-scanner-m21)
-   - [Configuration](#configuration-1)
-   - [Creating Scan Targets](#creating-scan-targets)
-   - [How It Works](#how-it-works-1)
-   - [API Endpoints](#api-endpoints-1)
-   - [Scheduler Integration](#scheduler-integration)
-   - [Use Cases](#use-cases-1)
-10. [What's Next](#whats-next)
+10. [Network Certificate Scanner (M21)](#network-certificate-scanner-m21)
+    - [Configuration](#configuration-1)
+    - [Creating Scan Targets](#creating-scan-targets)
+    - [How It Works](#how-it-works-1)
+    - [API Endpoints](#api-endpoints-1)
+    - [Scheduler Integration](#scheduler-integration)
+    - [Use Cases](#use-cases-1)
+11. [What's Next](#whats-next)
 
 ## Overview
 
@@ -711,6 +712,56 @@ func (v *VaultIssuer) IssueCertificate(ctx context.Context, req issuer.IssuanceR
 
 // ... implement RenewCertificate, RevokeCertificate, GetOrderStatus
 ```
+
+## ACME Server (Built-in)
+
+certctl ships a built-in RFC 8555 + RFC 9773 ARI ACME **server**
+endpoint at `/acme/profile/<profile-id>/*`. Any RFC 8555 client
+(cert-manager 1.15+, Caddy, Traefik, win-acme, certbot, Posh-ACME)
+integrates with certctl as an ACME issuer with no certctl-side
+modification — closing the "deploy a certctl agent on every K8s node"
+friction that costs deals to external PKI vendors.
+
+This is **distinct** from the [ACME consumer
+connector](#built-in-acme-v2-lets-encrypt-sectigo-zerossl) above. The
+consumer side is `certctl → external CA over ACME`; the server side
+is `external client → certctl over ACME`. Operators deploying both
+should namespace env vars carefully: consumer uses `CERTCTL_ACME_*`
+(`DIRECTORY_URL`, `EMAIL`, `CHALLENGE_TYPE`); server uses
+`CERTCTL_ACME_SERVER_*` (`ENABLED`, `DEFAULT_PROFILE_ID`, `NONCE_TTL`,
+…).
+
+Two auth modes per profile (`certificate_profiles.acme_auth_mode`):
+
+- **`trust_authenticated`** (default for internal PKI). The JWS-
+  authenticated ACME account is trusted to issue for any identifier
+  the profile policy permits; no out-of-band ownership proof. The
+  most common certctl use case — internal-PKI fleets where the
+  network itself is the trust boundary.
+- **`challenge`**. Full HTTP-01 + DNS-01 + TLS-ALPN-01 validation per
+  RFC 8555 §8 + RFC 8737. Required for public-trust-style PKI where
+  account-key compromise must not cost issuance authority.
+
+Routes through `service.CertificateService.Create` so policy + audit
++ metrics + bulk-revocation + cloud-discovery all apply uniformly to
+ACME-issued certs (just as they do to API-issued, agent-issued, EST-
+issued, SCEP-issued certs).
+
+See:
+
+- [ACME Server Reference](./acme-server.md) — env-var reference,
+  endpoints, auth-mode decision tree, RFC 8555 conformance statement,
+  troubleshooting, FAQ.
+- [cert-manager Walkthrough](./acme-cert-manager-walkthrough.md) — kind
+  → cert-manager → certctl-server → Certificate flow.
+- [Caddy Walkthrough](./acme-caddy-walkthrough.md) — Caddyfile `acme_ca`
+  + trust configuration.
+- [Traefik Walkthrough](./acme-traefik-walkthrough.md) — `certificatesResolvers`
+  + `serversTransport.rootCAs`.
+- [Threat Model](./acme-server-threat-model.md) — JWS forgery
+  resistance, nonce store integrity, HTTP-01 SSRF, DNS-01 cache
+  posture, TLS-ALPN-01 chain-not-validated rationale, rate-limit
+  tuning, audit trail.
 
 ## Target Connector
 

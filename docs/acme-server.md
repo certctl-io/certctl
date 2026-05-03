@@ -7,15 +7,16 @@ as an ACME issuer with no certctl-side modification — closing the
 "deploy a certctl agent on every K8s node" friction that costs deals to
 external PKI vendors today.
 
-> **Phase status (2026-05-03):** Phase 5 — production hardening +
-> cert-manager integration test. Per-account rate limits applied at
-> 3 entry points (orders/hour, key-change/hour, challenge-respond/hour)
-> + a per-account concurrent-orders cap; a 1-minute scheduler loop
-> sweeps expired nonces / authzs / orders. A kind-driven cert-manager
-> integration test (gated by `KIND_AVAILABLE`) verifies the full
-> happy-path against a real cert-manager 1.15+ deployment. RFC
-> conformance is verified via lego against the same stack. Track
-> shipped phases via `git log --grep='acme-server:'`.
+> **Phase status (2026-05-03):** Phase 6 — full operator-facing
+> reference. The functional surface is complete (Phases 1a-5); this
+> doc is the canonical procurement-readability reference. New: client-
+> walkthrough docs for [cert-manager](./acme-cert-manager-walkthrough.md),
+> [Caddy](./acme-caddy-walkthrough.md), and
+> [Traefik](./acme-traefik-walkthrough.md); a dedicated
+> [threat model](./acme-server-threat-model.md); a section-by-section
+> RFC 8555 + RFC 9773 conformance statement; a 5-failure-mode
+> troubleshooting playbook; a tested-clients version pinning table.
+> Track shipped phases via `git log --grep='acme-server:'`.
 
 ## Configuration
 
@@ -105,6 +106,41 @@ the `caBundle` requirement is flagged here in Phase 1a's docs because
 operators hit it the moment they try to point a real ACME client at
 certctl.
 
+## Auth-mode decision tree
+
+Use `trust_authenticated` when:
+
+- The certctl deployment serves **internal-only PKI** (intranet certs,
+  service-mesh certs, IoT bootstrap). Identifiers in your CSRs are
+  controlled by your infrastructure, not by the public Internet.
+- You don't have HTTP/DNS reachability **from certctl-server back to
+  the ACME client's solver** (e.g., the client lives in an isolated
+  network segment certctl-server can't reach).
+- You want the simplest cert-manager integration: cert-manager submits
+  a CSR, certctl issues; no out-of-band ownership proof.
+- You're issuing under your own root CA whose trust is operator-managed
+  (NOT WebPKI). Public CAs cannot use this mode — RFC 8555 §8 ownership
+  proof is non-negotiable for public-trust roots.
+
+Use `challenge` when:
+
+- The deployment is **public-trust-style PKI** — even if your root is
+  privately operated, you want CA/Browser Forum-style ownership-proof
+  semantics so a stolen account key can't be used to issue for arbitrary
+  identifiers.
+- You have HTTP-01 / DNS-01 / TLS-ALPN-01 reachability from the
+  certctl-server to the ACME client's solver. (HTTP-01 needs port 80
+  ingress to the client; DNS-01 needs DNS recursion; TLS-ALPN-01 needs
+  port 443 ingress.)
+- You want defense-in-depth: an account-key compromise costs the
+  attacker nothing without also compromising the solver-side
+  infrastructure.
+
+A single certctl-server can run both modes simultaneously — the auth
+mode is a per-profile column on `certificate_profiles.acme_auth_mode`,
+read at request time. Operators flip a profile's mode via SQL or the
+profile API, and the next order picks up the new mode without restart.
+
 ## Endpoints
 
 Routes registered in `internal/api/router/router.go::RegisterHandlers`:
@@ -142,6 +178,49 @@ Routes registered in `internal/api/router/router.go::RegisterHandlers`:
 After Phase 4, the full RFC 8555 + RFC 9773 surface is live. RFC 8739
 (short-lived certs) and EAB enforcement remain follow-up work; cert-
 manager + boulder-tested clients work today against the surface above.
+
+## RFC 8555 + RFC 9773 conformance statement
+
+Honest disclosure of what's implemented, where, and what's not. Procurement
+engineers running gap analyses against cert-manager + Let's Encrypt's
+conformance posture should read this section before anything else.
+
+### Implemented
+
+| Section | Surface | Phase | First commit |
+|---------|---------|-------|--------------|
+| RFC 8555 §6.2  | JWS auth + RS256/ES256/EdDSA allow-list | 1b | `27bd660` |
+| RFC 8555 §6.3  | POST-as-GET                            | 1b | `27bd660` |
+| RFC 8555 §6.4  | URL-header binding to request URL      | 1b | `27bd660` |
+| RFC 8555 §6.5  | Replay-Nonce + DB-backed nonce store   | 1a | `e146b00` |
+| RFC 8555 §6.7  | RFC 7807 problem documents             | 1a | `e146b00` |
+| RFC 8555 §7.1  | Directory                              | 1a | `e146b00` |
+| RFC 8555 §7.2  | new-nonce HEAD + GET                   | 1a | `e146b00` |
+| RFC 8555 §7.3  | new-account + idempotent re-registration | 1b | `27bd660` |
+| RFC 8555 §7.3.2 + §7.3.6 | account update + deactivation | 1b | `27bd660` |
+| RFC 8555 §7.3.5 | doubly-signed key rollover            | 4 | `0299e4a` |
+| RFC 8555 §7.4  | new-order + finalize + cert download   | 2 | `4ee486e` |
+| RFC 8555 §7.5  | authz POST-as-GET                      | 2 | `4ee486e` |
+| RFC 8555 §7.5.1 | challenge response                    | 3 | `7e22204` |
+| RFC 8555 §7.6  | revoke-cert (kid + jwk paths)          | 4 | `0299e4a` |
+| RFC 8555 §8.3  | HTTP-01 challenge validator            | 3 | `7e22204` |
+| RFC 8555 §8.4  | DNS-01 challenge validator             | 3 | `7e22204` |
+| RFC 8737       | TLS-ALPN-01 challenge validator        | 3 | `7e22204` |
+| RFC 9773       | ACME Renewal Information (ARI)         | 4 | `0299e4a` |
+
+### Not implemented (procurement-honest)
+
+| Spec area | Status | Notes |
+|-----------|--------|-------|
+| RFC 8555 §7.3.4 — External Account Binding (EAB) | **Not implemented.** | Advertised in directory `meta.externalAccountRequired` but enforcement is a follow-up. Operators relying on EAB for account-creation gating should layer an upstream WAF. |
+| RFC 8555 §8.4 + §7.4 — Wildcard with `*.` prefix > 1 level | **Not implemented.** | Single-level wildcards (e.g. `*.example.com`) work end-to-end. Multi-level wildcards (`*.*.example.com`) are RFC-spec-ambiguous and rejected at the identifier-validation layer. |
+| RFC 8738 — Short-lived certs | **Not implemented.** | Operators wanting <7-day validity tune the bound issuer's TTL directly via `CertificateProfile.MaxTTLSeconds`; the ACME wire shape doesn't expose a separate notion. |
+| Cross-CA proxying | **Not implemented.** | Each profile binds to one issuer. Multi-CA federation (one ACME account → multi-CA selection per identifier) is roadmap. |
+| RFC 8555 §6.7 — `accountDoesNotExist` problem with hint URL | Partial. | Sentinel returns `accountDoesNotExist`; the optional hint URL embedding the `kid` is not emitted. cert-manager doesn't consume it. |
+
+If a procurement-side gap analysis turns up something not in either
+table above, the answer is "we don't know yet" — operator-side issues
+welcome.
 
 ## Finalize routing through `CertificateService.Create` (Phase 2 architecture)
 
@@ -214,7 +293,7 @@ at `internal/service/certificate.go:131`).
 | 3     | live        | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation (challenge mode end-to-end) |
 | 4     | live        | key rollover (RFC 8555 §7.3.5) + revoke-cert (§7.6) + ARI (RFC 9773) |
 | 5     | live        | rate limits + GC sweeper + kind-driven cert-manager integration test + lego conformance harness + k6 ACME-flow scenario |
-| 6     | not yet     | full operator-facing reference + walkthroughs + threat model |
+| 6     | live        | full operator-facing reference + walkthroughs (cert-manager / Caddy / Traefik) + threat model + RFC-8555 conformance statement + troubleshooting + version pinning |
 
 Track shipped phases via `git log --grep='acme-server:' --oneline`.
 
@@ -386,3 +465,182 @@ surface (directory + new-nonce + ARI) at 100 VUs × 5m. JWS-signed
 flows are out of scope for k6 (no JWS support); they're covered by
 the lego conformance harness above. Baseline numbers + thresholds in
 `deploy/test/loadtest/README.md`.
+
+## Troubleshooting
+
+The five failure modes operators hit most often + the canonical fix
+for each.
+
+### `cert-manager logs: 400 Bad Request: badNonce`
+
+**Cause:** Either a nonce was replayed (a buggy client retries the
+same JWS), the cert-manager + certctl-server clocks differ by more
+than `CERTCTL_ACME_SERVER_NONCE_TTL` (default 5 min), or the
+nonce-store row was reaped between issuance and use.
+
+**Fix:** First check NTP on both sides. If clocks are healthy,
+lengthen `CERTCTL_ACME_SERVER_NONCE_TTL` to 10m or 15m. If the
+problem persists, check for a multi-replica certctl-server fleet
+without sticky session affinity — the nonce DB row lives on one
+replica; if the JWS POST hits a different replica before replication
+catches up, you observe spurious `badNonce`. Solution: pin client
+sessions to a single replica via load-balancer cookie / `kid`-hash
+routing, OR shorten replication lag if your DB is the bottleneck.
+
+### `cert-manager logs: x509: certificate signed by unknown authority`
+
+**Cause:** cert-manager refuses to talk to the directory URL because
+its TLS chain doesn't terminate at a root in cert-manager's trust
+store. certctl-server's bootstrap cert (Phase 1a, `deploy/test/certs/server.crt`)
+is self-signed.
+
+**Fix:** Add the `caBundle` field to your `ClusterIssuer.spec.acme` —
+see the [TLS trust bootstrap](#tls-trust-bootstrap-read-this-before-configuring-cert-manager)
+section above for the 3-step recipe. This is **the** single biggest
+first-time-deploy footgun on the cert-manager integration path.
+
+### HTTP-01 validator returns `connection refused`
+
+**Cause:** The HTTP-01 solver's Ingress / Service is not reachable
+from certctl-server's network. Common subcases: (a) the cert-manager
+http-solver pod is on a private network certctl-server can't reach;
+(b) a firewall blocks port 80 inbound to the solver's address; (c)
+the Ingress class annotation doesn't match an installed ingress
+controller; (d) your DNS still points at an old IP.
+
+**Fix:** From the certctl-server pod, `curl -v
+http://<identifier>/.well-known/acme-challenge/<token>` and read the
+network error. If the curl fails the same way, the network path is
+the issue. If curl works but the validator fails, check the validator
+log lines — the SSRF guard rejects reserved IPs (RFC1918, link-local,
+cloud-metadata 169.254.169.254). Public-trust style profiles that
+need to reach RFC1918 solvers must be moved to `trust_authenticated`
+mode OR the solver must be exposed on a routable address.
+
+### DNS-01 validator returns `NXDOMAIN`
+
+**Cause:** DNS provider hasn't propagated the `_acme-challenge.<domain>`
+TXT record yet. Most providers have a 30s-2m propagation lag. cert-manager
+retries by default, but Phase-5 rate limits (default 60/hour per
+challenge-id) can truncate the retry budget.
+
+**Fix:** Verify TXT propagation with `dig +short TXT _acme-challenge.<domain>
+@<your-resolver>`. If the answer is empty, the issue is upstream. If
+it's populated but certctl reports NXDOMAIN, check
+`CERTCTL_ACME_SERVER_DNS01_RESOLVER` (default `8.8.8.8:53`) is
+reachable from certctl-server's network egress. Operators on isolated
+networks need a private resolver; configure accordingly + own the
+cache-poisoning posture (see [threat
+model](./acme-server-threat-model.md)).
+
+### Certificate Ready=False with `rejectedIdentifier`
+
+**Cause:** The CSR includes an identifier (CommonName or SAN) that the
+bound certificate profile's policy rejects. certctl runs syntactic +
+profile-policy validation **before** order creation; the order never
+reaches the database.
+
+**Fix:** The reject reason is in the `subproblems` array of the RFC
+8555 §6.7 problem document. Decode the JSON, look at `subproblems[].detail`,
+and adjust either the CSR or the profile policy. Common causes:
+SAN-not-in-`AllowedIdentifierWildcards`, EKU-not-in-`AllowedEKUs`,
+TTL-exceeds-`MaxTTLSeconds`. Validation logic lives in
+`internal/api/acme/identifier.go::ValidateIdentifiers` +
+`internal/domain/profile.go` — read those if the profile-policy rule
+isn't obvious.
+
+## Version pinning + tested clients
+
+certctl's ACME server is tested against the following client versions.
+Other versions probably work; these are the ones the integration suite
+exercises end-to-end.
+
+| Client | Tested version | Where it's pinned |
+|--------|----------------|-------------------|
+| cert-manager | 1.15.0 | `deploy/test/acme-integration/cert-manager-install.sh::CERT_MANAGER_VERSION` |
+| lego (RFC 8555 conformance harness) | v4.x latest | `deploy/test/acme-integration/conformance-lego.sh` (operator installs via `go install github.com/go-acme/lego/v4/cmd/lego@latest`) |
+| kind (cluster bootstrap) | v0.20+ | `deploy/test/acme-integration/kind-config.yaml` schema requirement |
+| Caddy | 2.7.x | Phase 6 walkthrough (`docs/acme-caddy-walkthrough.md`) |
+| Traefik | 3.0+ | Phase 6 walkthrough (`docs/acme-traefik-walkthrough.md`) |
+
+Operators reporting issues with untested-version clients should include
+the client version + the precise wire-level error (curl-captured request
++ response body) so we can pin a regression test if applicable.
+
+## FAQ
+
+### Why two auth modes? Isn't `challenge` strictly more secure?
+
+`challenge` is strictly more secure for **public-trust** PKI — RFC 8555
+§8 ownership proof is the entire point of cert-manager + Let's Encrypt.
+For **internal PKI**, the threat model is different: the network itself
+is the security boundary (mTLS service mesh, firewalled VPC, identifier-
+namespace controlled by the operator). Forcing every internal cert to
+go through a solver round-trip adds operational toil with no security
+gain. `trust_authenticated` is the certctl-specific mode that
+acknowledges this — the ACME account is the proof, not the solver.
+
+### How does this differ from `cert-manager → Let's Encrypt with certctl as a separate step`?
+
+Two integrations vs one. With certctl as the ACME endpoint, cert-manager
+does its native flow (Certificate → Order → CSR → Secret) and certctl
+mints the cert directly, recording it under its own
+`managed_certificates` table with full audit + renewal-policy + bulk-
+revocation surface. With Let's Encrypt as the ACME endpoint, you have
+to run a separate cert-manager-uploads-to-certctl webhook OR maintain
+two parallel cert tracks. The native-ACME-server path is operationally
+simpler.
+
+### Can I use ACME endpoints from outside the K8s cluster?
+
+Yes. The endpoints are HTTPS over the certctl-server's listener (port
+8443 by default). Caddy on a VM, win-acme on a Windows server, or
+Posh-ACME on a Mac all integrate against
+`https://<certctl-server>:8443/acme/profile/<profile-id>/directory`.
+The TLS-trust-bootstrap requirement applies the same way — see the
+[Caddy walkthrough](./acme-caddy-walkthrough.md) for the OS-trust-store
+recipe.
+
+### How do I migrate manually-issued certs to ACME-issued ones?
+
+Not yet automatic. Operators migrating: keep the old `managed_certificates`
+rows; create new ones via the ACME flow; flip targets one by one. A
+dedicated bulk-migration tool is on the roadmap (post-2.1.0). Track
+via the master prompt's roadmap section in
+`cowork/acme-server-endpoint-prompt.md`.
+
+### What audit-log events fire on each ACME operation?
+
+Every state mutation writes an `audit_events` row. Actor strings:
+`acme:<account-id>` for kid-path requests; `acme-cert-key:<serial>`
+for jwk-path revoke; `acme-system:gc` for scheduler-driven sweeps.
+Event-name catalog:
+
+| Event name | Fired by | Resource type |
+|------------|----------|---------------|
+| `acme_account_created` | new-account | `acme_account` |
+| `acme_account_contact_updated` | account update | `acme_account` |
+| `acme_account_deactivated` | account deactivate | `acme_account` |
+| `acme_account_key_rolled` | key-change | `acme_account` |
+| `acme_order_created` | new-order | `acme_order` |
+| `acme_order_finalized` | finalize | `acme_order` |
+| `acme_challenge_processing` | challenge-respond (dispatch) | `acme_challenge` |
+| `acme_challenge_completed` | validator callback | `acme_challenge` |
+| `certificate_revoked` | revoke-cert (routes through `RevocationSvc`) | `certificate` |
+
+Querying by actor prefix (`actor LIKE 'acme:%'`) reconstructs the full
+history of any ACME-issued cert.
+
+### Is there a threat model document?
+
+Yes — [`docs/acme-server-threat-model.md`](./acme-server-threat-model.md).
+Read before writing a security review.
+
+## See also
+
+- [cert-manager integration walkthrough](./acme-cert-manager-walkthrough.md)
+- [Caddy integration walkthrough](./acme-caddy-walkthrough.md)
+- [Traefik integration walkthrough](./acme-traefik-walkthrough.md)
+- [Threat model](./acme-server-threat-model.md)
+- [TLS trust bootstrap reference](./tls.md)
+- [Architecture (control-plane)](./architecture.md)
