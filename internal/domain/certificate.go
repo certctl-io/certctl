@@ -109,6 +109,37 @@ type RenewalPolicy struct {
 	CertificateProfileID string    `json:"certificate_profile_id,omitempty"`
 	CreatedAt            time.Time `json:"created_at"`
 	UpdatedAt            time.Time `json:"updated_at"`
+
+	// AlertChannels is the per-policy channel-matrix that maps each
+	// severity tier ("informational" / "warning" / "critical") to the
+	// set of NotificationChannel values that receive expiry alerts at
+	// that tier. Values are slices of channel-name strings matching
+	// the NotificationChannel constants ("Email", "Slack", "Teams",
+	// "PagerDuty", "OpsGenie", "Webhook"). nil or empty falls back to
+	// DefaultAlertChannels (Email-only across all tiers, the pre-2026-05-03
+	// behaviour preserved as the safe default for operators who have
+	// not yet opted into multi-channel routing).
+	//
+	// Off-enum severity keys or channel values are silently dropped at
+	// the dispatch site (closed-enum discipline; we do NOT dynamically
+	// grow Prometheus cardinality on a typo).
+	//
+	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
+	// (cowork/infisical-deep-research-results.md Part 5).
+	AlertChannels map[string][]string `json:"alert_channels,omitempty"`
+
+	// AlertSeverityMap maps each threshold-day value to its severity
+	// tier. Off-map thresholds default to "informational". Operators
+	// with non-default AlertThresholdsDays values supply their own
+	// severity mapping; operators on the canonical 30/14/7/0 thresholds
+	// can leave this empty to inherit DefaultAlertSeverityMap which
+	// maps:
+	//
+	//   30 → informational
+	//   14 → warning
+	//    7 → warning
+	//    0 → critical
+	AlertSeverityMap map[int]string `json:"alert_severity_map,omitempty"`
 }
 
 // DefaultAlertThresholds returns the standard alert thresholds when none are configured.
@@ -122,4 +153,94 @@ func (p *RenewalPolicy) EffectiveAlertThresholds() []int {
 		return p.AlertThresholdsDays
 	}
 	return DefaultAlertThresholds()
+}
+
+// Severity-tier names for the channel matrix. Closed-enum to keep
+// Prometheus cardinality bounded and operator typos surfaceable in
+// audit logs (off-enum tier values are dropped at dispatch).
+const (
+	AlertSeverityInformational = "informational"
+	AlertSeverityWarning       = "warning"
+	AlertSeverityCritical      = "critical"
+)
+
+// DefaultAlertChannels returns the back-compat default channel matrix
+// — Email only at every tier. This preserves the pre-2026-05-03
+// behaviour for operators who have not yet opted into multi-channel
+// routing. Nil or empty AlertChannels on a RenewalPolicy is read as
+// "use this default."
+func DefaultAlertChannels() map[string][]string {
+	return map[string][]string{
+		AlertSeverityInformational: {string(NotificationChannelEmail)},
+		AlertSeverityWarning:       {string(NotificationChannelEmail)},
+		AlertSeverityCritical:      {string(NotificationChannelEmail)},
+	}
+}
+
+// DefaultAlertSeverityMap returns the canonical threshold-to-tier
+// mapping for the standard 30/14/7/0 thresholds. Operators with
+// custom thresholds supply their own mapping.
+func DefaultAlertSeverityMap() map[int]string {
+	return map[int]string{
+		30: AlertSeverityInformational,
+		14: AlertSeverityWarning,
+		7:  AlertSeverityWarning,
+		0:  AlertSeverityCritical,
+	}
+}
+
+// EffectiveAlertChannels returns the configured channel matrix on
+// the policy, or the default if unset. Used by the dispatch site in
+// RenewalService.sendThresholdAlerts to resolve the channel set for
+// a given tier.
+//
+// A returned map is safe to mutate by the caller — the default-path
+// branch returns a fresh map; the configured-path branch returns the
+// caller-supplied map (which the caller already owns).
+func (p *RenewalPolicy) EffectiveAlertChannels() map[string][]string {
+	if p == nil || len(p.AlertChannels) == 0 {
+		return DefaultAlertChannels()
+	}
+	return p.AlertChannels
+}
+
+// EffectiveAlertSeverity returns the severity tier for a given
+// threshold. Off-map thresholds resolve to "informational" so a
+// custom-thresholds policy without an explicit severity map still
+// gets dispatch (just at the lowest tier).
+func (p *RenewalPolicy) EffectiveAlertSeverity(threshold int) string {
+	if p != nil {
+		if tier, ok := p.AlertSeverityMap[threshold]; ok {
+			return tier
+		}
+	}
+	if tier, ok := DefaultAlertSeverityMap()[threshold]; ok {
+		return tier
+	}
+	return AlertSeverityInformational
+}
+
+// IsValidAlertSeverityTier reports whether tier is one of the closed-enum
+// severity values. Used by the policy validation path in
+// service.RenewalPolicyService to reject typos at write time.
+func IsValidAlertSeverityTier(tier string) bool {
+	switch tier {
+	case AlertSeverityInformational, AlertSeverityWarning, AlertSeverityCritical:
+		return true
+	}
+	return false
+}
+
+// IsValidNotificationChannel reports whether channel is one of the
+// closed-enum NotificationChannel values. Used by the policy
+// validation path to reject typos at write time AND by the dispatch
+// site to defensively drop off-enum values that survived a migration.
+func IsValidNotificationChannel(channel string) bool {
+	switch NotificationChannel(channel) {
+	case NotificationChannelEmail, NotificationChannelWebhook,
+		NotificationChannelSlack, NotificationChannelTeams,
+		NotificationChannelPagerDuty, NotificationChannelOpsGenie:
+		return true
+	}
+	return false
 }

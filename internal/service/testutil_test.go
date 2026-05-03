@@ -5,6 +5,7 @@ import (
 	"database/sql"
 	"errors"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -504,7 +505,43 @@ func (m *mockNotifRepo) List(ctx context.Context, filter *repository.Notificatio
 	if m.ListErr != nil {
 		return nil, m.ListErr
 	}
-	return m.Notifications, nil
+	if filter == nil {
+		out := make([]*domain.NotificationEvent, len(m.Notifications))
+		copy(out, m.Notifications)
+		return out, nil
+	}
+	// Apply each non-zero filter field. Mirror the postgres notification
+	// repo's WHERE-clause shape (CertificateID, Type, Status, Channel,
+	// MessageLike) so the multi-channel expiry-alert tests
+	// (renewal_expiry_alerts_test.go, Rank 4 of the 2026-05-03 Infisical
+	// deep-research deliverable) get the same per-(cert, threshold,
+	// channel) dedup behaviour they'd see in production. Pre-Rank 4 the
+	// mock returned all rows regardless of filter; legacy callers
+	// happened to work because their assertions were "any notification
+	// fired" rather than "this specific (cert,threshold,channel) one".
+	out := make([]*domain.NotificationEvent, 0, len(m.Notifications))
+	msgSubstring := strings.Trim(filter.MessageLike, "%")
+	for _, n := range m.Notifications {
+		if filter.CertificateID != "" {
+			if n.CertificateID == nil || *n.CertificateID != filter.CertificateID {
+				continue
+			}
+		}
+		if filter.Type != "" && string(n.Type) != filter.Type {
+			continue
+		}
+		if filter.Status != "" && n.Status != filter.Status {
+			continue
+		}
+		if filter.Channel != "" && string(n.Channel) != filter.Channel {
+			continue
+		}
+		if msgSubstring != "" && !strings.Contains(n.Message, msgSubstring) {
+			continue
+		}
+		out = append(out, n)
+	}
+	return out, nil
 }
 
 func (m *mockNotifRepo) UpdateStatus(ctx context.Context, id string, status string, sentAt time.Time) error {

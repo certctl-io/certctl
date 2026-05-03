@@ -200,8 +200,16 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		// Update certificate status based on expiry
 		s.updateCertExpiryStatus(ctx, cert, daysUntil)
 
-		// Send threshold-based alerts with deduplication
-		s.sendThresholdAlerts(ctx, cert, int(daysUntil), thresholds)
+		// Send threshold-based alerts with per-channel deduplication. The
+		// policy pointer (nil-safe) drives the per-(threshold) channel
+		// matrix; nil policy or empty AlertChannels falls through to the
+		// back-compat Email-only default. Rank 4 of the 2026-05-03
+		// Infisical deep-research deliverable.
+		var policyPtr *domain.RenewalPolicy
+		if cert.RenewalPolicyID != "" {
+			policyPtr = policyCache[cert.RenewalPolicyID]
+		}
+		s.sendThresholdAlerts(ctx, cert, int(daysUntil), thresholds, policyPtr)
 
 		// Only create renewal job if an issuer connector is registered for this cert's issuer
 		connector, hasIssuer := s.issuerRegistry.Get(cert.IssuerID)
@@ -289,40 +297,138 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 	return nil
 }
 
-// sendThresholdAlerts sends deduplicated expiration notifications based on configured thresholds.
-// For each threshold that the certificate has crossed (e.g., ≤30 days, ≤14 days), it checks
-// whether a notification for that threshold was already sent. Only new threshold crossings
-// trigger notifications.
-func (s *RenewalService) sendThresholdAlerts(ctx context.Context, cert *domain.ManagedCertificate, daysUntil int, thresholds []int) {
+// sendThresholdAlerts sends deduplicated expiration notifications based on
+// configured thresholds AND the per-policy channel matrix. For each
+// threshold that the certificate has crossed (e.g., ≤30 days, ≤14 days),
+// the dispatch loop:
+//
+//  1. Resolves the threshold's severity tier from the policy's
+//     AlertSeverityMap (or DefaultAlertSeverityMap if unset / off-map).
+//  2. Looks up the channel set for that tier in the policy's AlertChannels
+//     (or DefaultAlertChannels — Email-only — if unset / empty).
+//  3. For each resolved channel, defensively re-validates against the
+//     closed-enum NotificationChannel set (off-enum values silently drop
+//     with an audit row so an operator can grep + fix the typo without
+//     us silently dynamic-cardinality-growing the Prometheus counter).
+//  4. Per-(cert, threshold, channel) dedup via
+//     HasThresholdNotificationOnChannel — a successful PagerDuty page
+//     yesterday won't fire again today, but a transient PagerDuty 5xx
+//     today does NOT suppress today's Slack and tomorrow's PagerDuty
+//     retry will still fire (the failed row stays "failed" in the DB,
+//     not "sent").
+//  5. SendThresholdAlertOnChannel persists the notification row (channel
+//     column populated), reports the metric, and dispatches.
+//  6. Per-channel audit row so an operator can SQL-grep
+//     audit_events WHERE event_type='expiration_alert_sent'
+//     AND metadata->>'channel' = 'PagerDuty' to answer "did the on-call
+//     team get paged?".
+//
+// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
+// (cowork/infisical-deep-research-results.md Part 5). The policy
+// argument is nil-safe — a cert with no RenewalPolicy attached gets the
+// back-compat Email-only default matrix.
+func (s *RenewalService) sendThresholdAlerts(
+	ctx context.Context, cert *domain.ManagedCertificate, daysUntil int,
+	thresholds []int, policy *domain.RenewalPolicy,
+) {
+	channelMatrix := domain.DefaultAlertChannels()
+	if policy != nil {
+		channelMatrix = policy.EffectiveAlertChannels()
+	}
+
 	for _, threshold := range thresholds {
 		// Only alert if the cert has crossed this threshold (days remaining ≤ threshold)
 		if daysUntil > threshold {
 			continue
 		}
 
-		// Check if we already sent a notification for this threshold (deduplication)
-		alreadySent, err := s.notificationSvc.HasThresholdNotification(ctx, cert.ID, threshold)
-		if err != nil {
-			slog.Error("failed to check notification dedup", "cert_id", cert.ID, "threshold", threshold, "error", err)
-			continue
+		tier := domain.AlertSeverityInformational
+		if policy != nil {
+			tier = policy.EffectiveAlertSeverity(threshold)
+		} else if t, ok := domain.DefaultAlertSeverityMap()[threshold]; ok {
+			tier = t
 		}
-		if alreadySent {
+
+		// Defensive: an unknown tier (operator typo that survived
+		// validation, or a future tier name added in a later schema)
+		// drops to "informational" so we still alert on SOMETHING
+		// rather than silently swallowing the threshold.
+		if !domain.IsValidAlertSeverityTier(tier) {
+			tier = domain.AlertSeverityInformational
+		}
+
+		channels := channelMatrix[tier]
+		if len(channels) == 0 {
+			// Operator opted out of this tier (or matrix has no entry
+			// for the tier). Skip silently — record-empty audit row to
+			// surface the opt-out in the audit log.
+			_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+				"expiration_alert_skipped_no_channels", "certificate", cert.ID,
+				map[string]interface{}{
+					"threshold_days":    threshold,
+					"days_until_expiry": daysUntil,
+					"severity_tier":     tier,
+				})
 			continue
 		}
 
-		// Send the threshold alert
-		if err := s.notificationSvc.SendThresholdAlert(ctx, cert, daysUntil, threshold); err != nil {
-			slog.Error("failed to send threshold alert for cert", "cert_id", cert.ID, "threshold", threshold, "error", err)
-		}
+		for _, ch := range channels {
+			// Defensive validation: the policy validation path rejects
+			// off-enum values at write time, but a stored row could
+			// drift across a schema change. Drop off-enum values here
+			// rather than letting them through to a dispatch site that
+			// would either fail the Send call or grow Prometheus
+			// cardinality. Audit the drop so operators see the typo.
+			if !domain.IsValidNotificationChannel(ch) {
+				_ = s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
+					"expiration_alert_skipped_invalid_channel", "certificate", cert.ID,
+					map[string]interface{}{
+						"threshold_days":    threshold,
+						"days_until_expiry": daysUntil,
+						"severity_tier":     tier,
+						"invalid_channel":   ch,
+					})
+				continue
+			}
 
-		// Record audit event for the alert
-		if auditErr := s.auditService.RecordEvent(ctx, "system", domain.ActorTypeSystem,
-			"expiration_alert_sent", "certificate", cert.ID,
-			map[string]interface{}{
-				"threshold_days":    threshold,
-				"days_until_expiry": daysUntil,
-			}); auditErr != nil {
-			slog.Error("failed to record audit event", "error", auditErr)
+			channel := domain.NotificationChannel(ch)
+			alreadySent, err := s.notificationSvc.HasThresholdNotificationOnChannel(
+				ctx, cert.ID, threshold, channel,
+			)
+			if err != nil {
+				slog.Error("failed to check notification dedup",
+					"cert_id", cert.ID, "threshold", threshold,
+					"channel", ch, "error", err)
+				continue
+			}
+			if alreadySent {
+				s.notificationSvc.RecordExpiryAlertDeduped(ch, threshold)
+				continue
+			}
+
+			if err := s.notificationSvc.SendThresholdAlertOnChannel(
+				ctx, cert, daysUntil, threshold, channel,
+			); err != nil {
+				slog.Error("failed to send threshold alert",
+					"cert_id", cert.ID, "threshold", threshold,
+					"channel", ch, "error", err)
+				// continue — other channels still fire
+			}
+
+			// Per-(cert, threshold, channel) audit row. Operators alert
+			// on the channel-labelled row to confirm a specific pager
+			// went out.
+			if auditErr := s.auditService.RecordEvent(ctx, "system",
+				domain.ActorTypeSystem, "expiration_alert_sent",
+				"certificate", cert.ID,
+				map[string]interface{}{
+					"threshold_days":    threshold,
+					"days_until_expiry": daysUntil,
+					"channel":           ch,
+					"severity_tier":     tier,
+				}); auditErr != nil {
+				slog.Error("failed to record audit event", "error", auditErr)
+			}
 		}
 	}
 }

@@ -34,24 +34,43 @@ func NewRenewalPolicyRepository(db *sql.DB) *RenewalPolicyRepository {
 // pre-existing drift is out of G-1's minimum-viable-delta and is tracked in
 // the design doc §8. Introducing them would change struct shapes / JSON tags
 // and require domain-layer churn we're not taking on in this change.
+//
+// alert_channels / alert_severity_map (migration 000026) ARE read here —
+// they're the per-policy channel matrix that drives multi-channel expiry
+// alert routing (Rank 4 of the 2026-05-03 Infisical deep-research
+// deliverable). Both default to '{}' at the DB level; scanRenewalPolicy
+// unmarshals an empty map into nil so domain.EffectiveAlertChannels /
+// EffectiveAlertSeverityMap fall through to the back-compat defaults.
 const renewalPolicyColumns = `
 	id, name, renewal_window_days, auto_renew, max_retries,
-	retry_interval_seconds, alert_thresholds_days, created_at, updated_at
+	retry_interval_seconds, alert_thresholds_days,
+	alert_channels, alert_severity_map,
+	created_at, updated_at
 `
 
 // scanRenewalPolicy decodes one renewal_policies row from a Row or Rows
 // scanner, unmarshaling alert_thresholds_days JSONB into the domain slice.
 // Malformed JSONB silently falls back to DefaultAlertThresholds() — same
 // behavior as the pre-G-1 code so we don't change observable semantics.
+//
+// alert_channels + alert_severity_map (migration 000026) follow the same
+// "malformed → fall through to default" rule. The default-fallthrough
+// happens at read time in domain.EffectiveAlertChannels /
+// EffectiveAlertSeverity, so populating these fields with nil on parse
+// failure is the correct shape — the runtime still gets the back-compat
+// Email-only matrix.
 func scanRenewalPolicy(scanner interface {
 	Scan(dest ...any) error
 }) (*domain.RenewalPolicy, error) {
 	var policy domain.RenewalPolicy
 	var thresholdsJSON []byte
+	var channelsJSON []byte
+	var severityJSON []byte
 
 	if err := scanner.Scan(
 		&policy.ID, &policy.Name, &policy.RenewalWindowDays, &policy.AutoRenew,
 		&policy.MaxRetries, &policy.RetryInterval, &thresholdsJSON,
+		&channelsJSON, &severityJSON,
 		&policy.CreatedAt, &policy.UpdatedAt,
 	); err != nil {
 		return nil, err
@@ -63,7 +82,54 @@ func scanRenewalPolicy(scanner interface {
 		}
 	}
 
+	if len(channelsJSON) > 0 && string(channelsJSON) != "{}" {
+		if err := json.Unmarshal(channelsJSON, &policy.AlertChannels); err != nil {
+			policy.AlertChannels = nil // EffectiveAlertChannels falls through to default
+		}
+	}
+
+	if len(severityJSON) > 0 && string(severityJSON) != "{}" {
+		// JSONB stores int keys as string; unmarshal via a string-keyed map
+		// then convert. JSON does not support non-string object keys, so
+		// the wire representation is e.g. {"30":"informational"}.
+		stringKeyed := map[string]string{}
+		if err := json.Unmarshal(severityJSON, &stringKeyed); err == nil {
+			converted := make(map[int]string, len(stringKeyed))
+			for k, v := range stringKeyed {
+				var threshold int
+				if _, scanErr := fmt.Sscanf(k, "%d", &threshold); scanErr == nil {
+					converted[threshold] = v
+				}
+			}
+			policy.AlertSeverityMap = converted
+		}
+	}
+
 	return &policy, nil
+}
+
+// marshalSeverityMap converts the domain's int-keyed map into the
+// string-keyed form Postgres JSONB stores. Mirror of the inverse
+// conversion in scanRenewalPolicy. Returns "{}" for nil/empty maps so
+// the DB never sees null where NOT NULL is required.
+func marshalSeverityMap(m map[int]string) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+	stringKeyed := make(map[string]string, len(m))
+	for k, v := range m {
+		stringKeyed[fmt.Sprintf("%d", k)] = v
+	}
+	return json.Marshal(stringKeyed)
+}
+
+// marshalAlertChannels marshals the channel matrix as JSONB. nil/empty
+// returns "{}" so the DB NOT NULL constraint is satisfied.
+func marshalAlertChannels(m map[string][]string) ([]byte, error) {
+	if len(m) == 0 {
+		return []byte("{}"), nil
+	}
+	return json.Marshal(m)
 }
 
 // Get retrieves a renewal policy by ID.
@@ -158,6 +224,16 @@ func (r *RenewalPolicyRepository) Create(ctx context.Context, policy *domain.Ren
 		return fmt.Errorf("failed to marshal alert thresholds: %w", err)
 	}
 
+	channelsJSON, err := marshalAlertChannels(policy.AlertChannels)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert channels: %w", err)
+	}
+
+	severityJSON, err := marshalSeverityMap(policy.AlertSeverityMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert severity map: %w", err)
+	}
+
 	// ID auto-generation with collision retry. We attempt up to 10 suffix
 	// variants (rp-foo, rp-foo-2, ..., rp-foo-10) before giving up — the
 	// 23505 error the caller gets back past that point is on Name (their
@@ -170,8 +246,10 @@ func (r *RenewalPolicyRepository) Create(ctx context.Context, policy *domain.Ren
 	insertSQL := `
 		INSERT INTO renewal_policies (
 			id, name, renewal_window_days, auto_renew, max_retries,
-			retry_interval_seconds, alert_thresholds_days, created_at, updated_at
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+			retry_interval_seconds, alert_thresholds_days,
+			alert_channels, alert_severity_map,
+			created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
 		RETURNING ` + renewalPolicyColumns
 
 	maxAttempts := 10
@@ -189,6 +267,7 @@ func (r *RenewalPolicyRepository) Create(ctx context.Context, policy *domain.Ren
 		row := r.db.QueryRowContext(ctx, insertSQL,
 			candidateID, policy.Name, policy.RenewalWindowDays, policy.AutoRenew,
 			policy.MaxRetries, policy.RetryInterval, thresholdsJSON,
+			channelsJSON, severityJSON,
 		)
 
 		inserted, scanErr := scanRenewalPolicy(row)
@@ -234,6 +313,16 @@ func (r *RenewalPolicyRepository) Update(ctx context.Context, id string, policy 
 		return fmt.Errorf("failed to marshal alert thresholds: %w", err)
 	}
 
+	channelsJSON, err := marshalAlertChannels(policy.AlertChannels)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert channels: %w", err)
+	}
+
+	severityJSON, err := marshalSeverityMap(policy.AlertSeverityMap)
+	if err != nil {
+		return fmt.Errorf("failed to marshal alert severity map: %w", err)
+	}
+
 	row := r.db.QueryRowContext(ctx, `
 		UPDATE renewal_policies SET
 			name = $2,
@@ -242,11 +331,14 @@ func (r *RenewalPolicyRepository) Update(ctx context.Context, id string, policy 
 			max_retries = $5,
 			retry_interval_seconds = $6,
 			alert_thresholds_days = $7,
+			alert_channels = $8,
+			alert_severity_map = $9,
 			updated_at = NOW()
 		WHERE id = $1
 		RETURNING `+renewalPolicyColumns,
 		id, policy.Name, policy.RenewalWindowDays, policy.AutoRenew,
 		policy.MaxRetries, policy.RetryInterval, thresholdsJSON,
+		channelsJSON, severityJSON,
 	)
 
 	updated, err := scanRenewalPolicy(row)

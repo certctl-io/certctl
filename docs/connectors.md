@@ -1440,6 +1440,54 @@ type Connector interface {
 
 Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incoming webhook), **Microsoft Teams** (MessageCard webhook), **PagerDuty** (Events API v2), and **OpsGenie** (Alert API v2).
 
+### Routing expiry alerts across channels
+
+certctl-server runs a daily renewal-check loop that scans for managed certificates approaching expiry. For each cert that has crossed a configured threshold (default `[30, 14, 7, 0]` days), an `ExpirationWarning` notification is dispatched. **Pre-2026-05-03**, dispatch went exclusively via the `Email` channel — operators with PagerDuty / Slack / Teams / OpsGenie wired up received nothing at any threshold unless SMTP was also configured. Rank 4 of the 2026-05-03 Infisical deep-research deliverable closed that gap with a per-policy channel-matrix.
+
+**The matrix lives on `RenewalPolicy`:**
+
+```json
+{
+  "id": "rp-production",
+  "name": "Production CDN renewal policy",
+  "renewal_window_days": 30,
+  "alert_thresholds_days": [30, 14, 7, 0],
+  "alert_channels": {
+    "informational": ["Slack"],
+    "warning":       ["Slack", "Email"],
+    "critical":      ["PagerDuty", "OpsGenie", "Email"]
+  },
+  "alert_severity_map": {
+    "30": "informational",
+    "14": "warning",
+    "7":  "warning",
+    "0":  "critical"
+  }
+}
+```
+
+The runtime resolves the threshold's severity tier (via `alert_severity_map`, falling back to the default `30→informational, 14→warning, 7→warning, 0→critical` when unset), then dispatches one notification per channel listed under that tier in `alert_channels`. Each (cert, threshold, channel) triple is independently deduplicated via the `notification_events` table — a transient PagerDuty 5xx today does NOT suppress today's Slack alert, and tomorrow's renewal-loop tick will re-attempt the failed PagerDuty page.
+
+**Backwards compatibility.** A policy with `alert_channels` unset (or empty) falls through to `DefaultAlertChannels` which routes every tier to `["Email"]`. Operators who haven't touched their renewal-policy configs see exactly the pre-2026-05-03 behaviour, and SMTP-only deployments keep working as before.
+
+**Validation.** Off-enum severity tiers (anything other than `informational` / `warning` / `critical`) and off-enum channels (anything other than `Email` / `Webhook` / `Slack` / `Teams` / `PagerDuty` / `OpsGenie`) are silently dropped at the dispatch site — but the drop is recorded in the audit log as `expiration_alert_skipped_invalid_channel` so an operator can grep for typos. The `RenewalPolicyService.Create`/`Update` paths reject these at write time as well, so a fresh policy with bad values never persists.
+
+**Procurement playbook: "I want PagerDuty when a cert is 24h from expiry."** Configure your renewal policy with `alert_severity_map.0 = "critical"` (already the default) and `alert_channels.critical = ["PagerDuty", "Email"]`. Set the `CERTCTL_PAGERDUTY_ROUTING_KEY` env var on the server. Restart. The next renewal-loop tick that finds a cert at ≤0 days will create a PagerDuty incident via the Events API v2 AND email the cert owner. Confirm with `curl /api/v1/metrics/prometheus | grep certctl_expiry_alerts_total` — you'll see one `{channel="PagerDuty",threshold="0",result="success"}` series increment per critical-tier dispatch.
+
+**Operator runbook for "did the on-call team get paged?"** Run:
+
+```sql
+SELECT created_at, metadata->>'channel' AS channel, metadata->>'threshold_days' AS threshold
+FROM audit_events
+WHERE event_type = 'expiration_alert_sent'
+  AND resource_id = '<cert-id>'
+ORDER BY created_at DESC;
+```
+
+Each row corresponds to one fired alert. The `channel` metadata field tells you which notifier ran. Combined with the Prometheus `certctl_expiry_alerts_total{result="failure"}` counter, you have full forensic visibility on every dispatch attempt.
+
+**V3-Pro forward path.** Per-owner / per-team channel routing (route the Production-CDN cert's alerts to its dedicated owner's PagerDuty service, the Internal-API cert's alerts to a different one), calendar-aware suppression (no T-30 informational alerts on weekends for non-on-call teams), and escalation chains (T-1 unanswered for 30m → escalate to manager) are tracked on `cowork/WORKSPACE-ROADMAP.md` under "Adapter hardening" → "Multi-channel expiry alerts: per-owner routing".
+
 ### Email (SMTP) Notifier
 
 The Email notifier sends transactional alerts and scheduled digests via SMTP. It bridges the connector-layer SMTP connector to the service-layer `Notifier` interface via the `NotifierAdapter`. Supports both plain text and HTML emails.

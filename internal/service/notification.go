@@ -49,6 +49,53 @@ type NotificationService struct {
 	notifRepo        repository.NotificationRepository
 	ownerRepo        repository.OwnerRepository
 	notifierRegistry map[string]Notifier
+
+	// expiryAlertMetrics — when set via SetExpiryAlertMetrics, every call
+	// to SendThresholdAlertOnChannel reports its outcome (success / failure)
+	// to the metric sink so the Prometheus exposer surfaces
+	// certctl_expiry_alerts_total{channel,threshold,result}. Rank 4 of the
+	// 2026-05-03 Infisical deep-research deliverable. Nil leaves the
+	// dispatch path unchanged (no metric emission, but alerts still fire).
+	expiryAlertMetrics ExpiryAlertRecorder
+}
+
+// ExpiryAlertRecorder is the metric-sink surface SendThresholdAlertOnChannel
+// uses. result is one of: "success", "failure", "deduped". Implementations
+// MUST be goroutine-safe — RecordExpiryAlert is called from the renewal
+// loop's own goroutine on every threshold-channel tick.
+//
+// service.ExpiryAlertMetrics satisfies this interface. cmd/server wires
+// the same instance into the service (recording side) and into
+// MetricsHandler (exposing side, for the Prometheus emitter).
+type ExpiryAlertRecorder interface {
+	RecordExpiryAlert(channel string, threshold int, result string)
+}
+
+// SetExpiryAlertMetrics wires the per-(channel, threshold, result) counter
+// table for expiry-alert dispatch. Pass nil to disable recording. Safe to
+// call before any SendThresholdAlertOnChannel call; calling later just
+// means earlier calls didn't increment the counters.
+func (s *NotificationService) SetExpiryAlertMetrics(r ExpiryAlertRecorder) {
+	s.expiryAlertMetrics = r
+}
+
+// recordExpiryAlert is the internal hook used by SendThresholdAlertOnChannel
+// to report per-(channel, threshold, result) counts. Nil-safe.
+func (s *NotificationService) recordExpiryAlert(channel string, threshold int, result string) {
+	if s == nil || s.expiryAlertMetrics == nil {
+		return
+	}
+	s.expiryAlertMetrics.RecordExpiryAlert(channel, threshold, result)
+}
+
+// RecordExpiryAlertDeduped is the public hook RenewalService uses to report
+// (channel, threshold, "deduped") — dedup happens before
+// SendThresholdAlertOnChannel runs, so the call site is in the caller, not
+// the dispatch helper. Kept on NotificationService rather than exposed on
+// the recorder directly so callers don't need to know whether the recorder
+// is wired.
+func (s *NotificationService) RecordExpiryAlertDeduped(channel string, threshold int) {
+	s.recordExpiryAlert(channel, threshold, "deduped")
 }
 
 // Notifier defines the interface for notification channels (email, Slack, webhooks, etc.).
@@ -94,9 +141,48 @@ func (s *NotificationService) SendExpirationWarning(ctx context.Context, cert *d
 	return s.SendThresholdAlert(ctx, cert, daysUntilExpiry, daysUntilExpiry)
 }
 
-// SendThresholdAlert sends an expiration alert for a specific threshold (e.g., 30-day, 14-day, expired).
-// The threshold parameter indicates which configured threshold triggered the alert.
+// SendThresholdAlert sends an expiration alert for a specific threshold via
+// the Email channel. Preserved for backwards-compat with non-policy callers
+// (admin "send test alert" surfaces in the GUI, etc.); equivalent to
+// SendThresholdAlertOnChannel(ctx, cert, days, threshold,
+// domain.NotificationChannelEmail).
+//
+// Policy-driven dispatch in RenewalService.sendThresholdAlerts uses
+// SendThresholdAlertOnChannel directly with the channel resolved from the
+// per-policy AlertChannels matrix. Rank 4 of the 2026-05-03 Infisical
+// deep-research deliverable.
 func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *domain.ManagedCertificate, daysUntilExpiry int, threshold int) error {
+	return s.SendThresholdAlertOnChannel(ctx, cert, daysUntilExpiry, threshold, domain.NotificationChannelEmail)
+}
+
+// SendThresholdAlertOnChannel sends an expiration alert for a specific
+// (cert, threshold, channel) triple. The channel must be one of the
+// closed-enum NotificationChannel values; off-enum channels surface as a
+// failure metric increment + ERROR log + a wrapped error so the caller can
+// react (typically: log and continue with the next channel in the
+// policy's tier list — see RenewalService.sendThresholdAlerts).
+//
+// The notification record is persisted with the channel field set to the
+// requested value, and the message body carries the [threshold:N] tag for
+// dedup at HasThresholdNotification's substring filter. Combined with the
+// repository.NotificationFilter.Channel field, this gives us per-(cert,
+// threshold, channel) dedup so a transient PagerDuty 5xx today does NOT
+// suppress today's Slack delivery and tomorrow's PagerDuty retry will
+// still fire.
+//
+// Result is reported to expiryAlertMetrics (when wired): "success" on
+// successful send, "failure" on send error or persistence error.
+// "deduped" results are reported by the caller (sendThresholdAlerts) since
+// dedup happens before this method runs.
+func (s *NotificationService) SendThresholdAlertOnChannel(
+	ctx context.Context, cert *domain.ManagedCertificate, daysUntilExpiry int,
+	threshold int, channel domain.NotificationChannel,
+) error {
+	if !domain.IsValidNotificationChannel(string(channel)) {
+		s.recordExpiryAlert(string(channel), threshold, "failure")
+		return fmt.Errorf("invalid notification channel %q for threshold %d", channel, threshold)
+	}
+
 	var body string
 	if threshold <= 0 {
 		body = fmt.Sprintf(
@@ -110,12 +196,11 @@ func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *doma
 		)
 	}
 
-	// Create notification record — resolve owner email if possible
 	notif := &domain.NotificationEvent{
 		ID:            generateID("notif"),
 		CertificateID: &cert.ID,
 		Type:          domain.NotificationTypeExpirationWarning,
-		Channel:       domain.NotificationChannelEmail,
+		Channel:       channel,
 		Recipient:     s.resolveRecipient(ctx, cert.OwnerID),
 		Message:       body,
 		Status:        "pending",
@@ -123,20 +208,52 @@ func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *doma
 	}
 
 	if err := s.notifRepo.Create(ctx, notif); err != nil {
+		s.recordExpiryAlert(string(channel), threshold, "failure")
 		return fmt.Errorf("failed to create notification: %w", err)
 	}
 
-	// Attempt immediate send
-	return s.sendNotification(ctx, notif)
+	if err := s.sendNotification(ctx, notif); err != nil {
+		s.recordExpiryAlert(string(channel), threshold, "failure")
+		return err
+	}
+	s.recordExpiryAlert(string(channel), threshold, "success")
+	return nil
 }
 
-// HasThresholdNotification checks whether an expiration warning has already been sent
-// for a specific certificate and threshold combination. Used for deduplication.
+// HasThresholdNotification checks whether an expiration warning has already
+// been sent for a specific (cert, threshold) pair via the Email channel.
+// Preserved for backwards-compat. Equivalent to
+// HasThresholdNotificationOnChannel(ctx, certID, threshold, "Email").
+//
+// New callers driven by the per-policy channel matrix should use
+// HasThresholdNotificationOnChannel directly with the explicit channel —
+// see RenewalService.sendThresholdAlerts.
 func (s *NotificationService) HasThresholdNotification(ctx context.Context, certID string, threshold int) (bool, error) {
+	return s.HasThresholdNotificationOnChannel(ctx, certID, threshold, domain.NotificationChannelEmail)
+}
+
+// HasThresholdNotificationOnChannel reports whether an ExpirationWarning
+// notification has already been persisted for a specific (cert, threshold,
+// channel) triple. Used to dedupe per-channel fan-out so a successful
+// PagerDuty page today doesn't fire again tomorrow when the renewal loop
+// re-checks the same threshold (and so a transient PagerDuty 5xx today
+// doesn't suppress tomorrow's successful retry).
+//
+// The match is on the substring "[threshold:N]" in the stored message body
+// (the same dedup pattern used by HasThresholdNotification pre-2026-05-03)
+// AND the channel column. Both filters apply; a match requires both.
+//
+// channel == "" preserves the legacy (cert, threshold) dedup for the same
+// reason HasThresholdNotification kept its old shape — admin-surface
+// callers still need that behaviour.
+func (s *NotificationService) HasThresholdNotificationOnChannel(
+	ctx context.Context, certID string, threshold int, channel domain.NotificationChannel,
+) (bool, error) {
 	filter := &repository.NotificationFilter{
 		CertificateID: certID,
 		Type:          string(domain.NotificationTypeExpirationWarning),
 		MessageLike:   fmt.Sprintf("%%[threshold:%d]%%", threshold),
+		Channel:       string(channel),
 		PerPage:       1,
 	}
 

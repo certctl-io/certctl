@@ -325,6 +325,18 @@ func main() {
 	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
 	notificationService.SetOwnerRepo(ownerRepo)
 
+	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
+	// (cowork/infisical-deep-research-results.md Part 5). Per-policy
+	// multi-channel expiry-alert metrics. Same instance is wired into
+	// the notification service (recording side, every
+	// SendThresholdAlertOnChannel call reports its outcome) AND into
+	// the metrics handler below (exposing side, Prometheus emitter
+	// reads the counters). Mirrors the VaultRenewalMetrics wiring
+	// pattern from the 2026-05-03 audit fix #5 — single instance,
+	// shared between recorder and exposer.
+	expiryAlertMetrics := service.NewExpiryAlertMetrics()
+	notificationService.SetExpiryAlertMetrics(expiryAlertMetrics)
+
 	// Create RevocationSvc with its dependencies
 	revocationSvc := service.NewRevocationSvc(certificateRepo, revocationRepo, auditService)
 	revocationSvc.SetTransactor(transactor)
@@ -595,6 +607,11 @@ func main() {
 	// Top-10 fix #5 (2026-05-03 audit): Vault PKI token-renewal counter.
 	// Same instance the registry uses to record per-tick results.
 	metricsHandler.SetVaultRenewals(vaultRenewalMetrics)
+	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable:
+	// per-policy multi-channel expiry-alert counter. Same instance the
+	// notification service uses to record per-(channel, threshold,
+	// result) outcomes.
+	metricsHandler.SetExpiryAlerts(expiryAlertMetrics)
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)

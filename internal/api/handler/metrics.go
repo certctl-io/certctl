@@ -82,6 +82,23 @@ type VaultRenewalSnapshotter interface {
 	SnapshotVaultRenewals() (success, failure, notRenewable uint64)
 }
 
+// ExpiryAlertSnapshotter is the surface MetricsHandler consumes to
+// emit certctl_expiry_alerts_total{channel, threshold, result}.
+// *service.ExpiryAlertMetrics satisfies this. Same wiring shape as
+// VaultRenewalSnapshotter — one instance shared between recording
+// (via NotificationService.SetExpiryAlertMetrics) and exposing
+// (here).
+//
+// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
+// (cowork/infisical-deep-research-results.md Part 5).
+type ExpiryAlertSnapshotter interface {
+	// SnapshotExpiryAlerts returns one entry per non-zero counter,
+	// pre-sorted by (channel, threshold, result) so the Prometheus
+	// exposition is byte-stable across requests. The handler does
+	// not re-sort.
+	SnapshotExpiryAlerts() []service.ExpiryAlertSnapshotEntry
+}
+
 // MetricsHandler handles HTTP requests for metrics.
 // Supports both JSON format (GET /api/v1/metrics) and Prometheus exposition format
 // (GET /api/v1/metrics/prometheus) for integration with Prometheus, Grafana, Datadog, etc.
@@ -105,6 +122,10 @@ type MetricsHandler struct {
 	// 2026-05-03 issuer-coverage audit. nil disables emission of
 	// certctl_vault_token_renewals_total{result=...}.
 	vaultRenewals VaultRenewalSnapshotter
+	// Per-policy multi-channel expiry alert counters. Rank 4 of the
+	// 2026-05-03 Infisical deep-research deliverable. nil disables
+	// emission of certctl_expiry_alerts_total{channel,threshold,result}.
+	expiryAlerts ExpiryAlertSnapshotter
 }
 
 // NewMetricsHandler creates a new MetricsHandler with a service dependency.
@@ -143,6 +164,14 @@ func (h *MetricsHandler) SetIssuanceCounters(c service.IssuanceMetricsSnapshotte
 // Top-10 fix #5 of the 2026-05-03 issuer-coverage audit.
 func (h *MetricsHandler) SetVaultRenewals(c VaultRenewalSnapshotter) {
 	h.vaultRenewals = c
+}
+
+// SetExpiryAlerts wires the per-policy multi-channel expiry-alert
+// counter table for the Prometheus exposition. nil disables the
+// block. Closes Rank 4 of the 2026-05-03 Infisical deep-research
+// deliverable.
+func (h *MetricsHandler) SetExpiryAlerts(c ExpiryAlertSnapshotter) {
+	h.expiryAlerts = c
 }
 
 // MetricsResponse represents the JSON metrics response for V2.
@@ -470,6 +499,26 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "success", success)
 		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "failure", failure)
 		fmt.Fprintf(w, "certctl_vault_token_renewals_total{result=%q} %d\n", "not_renewable", notRenewable)
+	}
+
+	// Per-policy multi-channel expiry-alert counters. Rank 4 of the
+	// 2026-05-03 Infisical deep-research deliverable. Operators alert
+	// on certctl_expiry_alerts_total{result="failure"} > 0 to catch
+	// when a notifier connector (PagerDuty / Slack / etc.) is
+	// rejecting our sends. Cardinality: 6 channels × N thresholds × 3
+	// results — production deploys with the standard 4 thresholds top
+	// out at 72 series. Snapshot is pre-sorted by the recorder so the
+	// emission order is byte-stable across requests.
+	if h.expiryAlerts != nil {
+		entries := h.expiryAlerts.SnapshotExpiryAlerts()
+		if len(entries) > 0 {
+			fmt.Fprintf(w, "\n# HELP certctl_expiry_alerts_total Certificate-expiry alerts dispatched per (channel, threshold, result). result is a closed enum: success, failure, deduped.\n")
+			fmt.Fprintf(w, "# TYPE certctl_expiry_alerts_total counter\n")
+			for _, e := range entries {
+				fmt.Fprintf(w, "certctl_expiry_alerts_total{channel=%q,threshold=%q,result=%q} %d\n",
+					e.Channel, strconv.Itoa(e.Threshold), e.Result, e.Count)
+			}
+		}
 	}
 }
 
