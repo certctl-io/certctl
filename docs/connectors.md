@@ -316,6 +316,49 @@ Script-based issuer connector for organizations with existing CA tooling. Delega
 
 The sign script receives the CSR PEM on stdin and should output the signed certificate PEM on stdout. The connector parses the certificate to extract serial number, validity dates, and chain information. Before shell execution, serial numbers are validated as hex-only (`^[0-9a-fA-F]+$`) and revocation reason codes are validated against the RFC 5280 specification to prevent command injection.
 
+#### Operator playbook: OpenSSL shell-out threat model
+
+certctl's OpenSSL adapter `exec`s an operator-supplied script for every certificate lifecycle operation (issue / renew / revoke / CRL generation). The script runs as the certctl-server user with that user's full filesystem and network access. **This is by design** — the OpenSSL adapter exists precisely to support operators integrating with arbitrary CLI-driven CAs that don't have a Go SDK. The cost is a wider attack surface than any other issuer in the catalog. This subsection enumerates the threat model + mitigations so an operator (or an acquirer's security reviewer) can decide whether the adapter is appropriate for their environment. Top-10 fix #6 of the 2026-05-03 issuer-coverage audit.
+
+**Why the adapter accepts a shell-out at all:**
+
+- Many enterprise PKI operators run their own CLI-driven CA (BoringSSL, custom OpenSSL wrappers, hardware-CA controllers, internal CAs with no published SDK). A Go SDK doesn't exist; a shell-out is the only integration path short of building a full Go-native adapter per CA.
+- Mirrors the same posture the SSH connector applies (`InsecureIgnoreHostKey` on operator-controlled networks): certctl trusts the operator to configure the integration sensibly.
+- Avoids forking the project per-CA — one OpenSSL adapter can cover dozens of CLI-driven CAs.
+
+**Threat model the adapter accepts:**
+
+- A trusted operator pointing at a trusted script that lives in a trusted filesystem location (`/usr/local/bin/`, `/opt/<vendor>/bin/`, etc.) with appropriate ownership (root-owned, mode 0755) and a clear audit trail (filesystem-monitored, version-controlled).
+- Env-var inheritance from the certctl-server process. Operators must NOT export sensitive credentials (Vault tokens, API keys for OTHER systems) into certctl-server's environment — or, if they must, must accept that those credentials are visible to the issuance script. The connector does not whitelist or strip env vars before fork.
+- The hex-only serial-number filter (`^[0-9a-fA-F]+$`) and the RFC 5280 reason-code allow-list at `internal/validation/command.go` are defenses against argv-injection. They are NOT defenses against a malicious script — an operator who deploys a malicious script is outside this threat model entirely.
+
+**Threat model the adapter does NOT accept:**
+
+- A script path under operator-writable filesystem (`/tmp`, `/var/tmp`, `~`) where a non-root user can swap the binary mid-flight. **Symlink attack:** a non-root user with write access to the directory replaces the script with a symlink to `/etc/shadow` or `/root/.ssh/authorized_keys`; certctl-server reads (or in the worst case writes via a malicious script) those files.
+- Untrusted script content. The script can do anything the certctl-server user can — modify state outside `/etc/certctl/`, exfiltrate data, write SSH keys to enable persistence. Operators MUST review every script line before deploying.
+- A multi-tenant host where multiple operators deploy scripts under the same certctl-server. Process-level isolation isn't enforced; one operator's script can read another's working files (the temp CSR/cert files the connector writes to `os.TempDir()` are mode 0600 but are visible by name to anyone who can list the directory).
+
+**Mitigations operators can layer on:**
+
+- **Run certctl-server under a dedicated unprivileged user** (e.g. `certctl:certctl`). Limits the blast radius of a misbehaving script. The systemd unit ships with `User=certctl` by default — keep it that way.
+- **Pin the script path to a root-owned mode-0755 binary** (`/usr/local/bin/issue-cert.sh`, root:root, 0755). Add a filesystem audit rule (`auditctl -w /usr/local/bin/issue-cert.sh -p wa -k certctl-script`) so any write attempt to the script is logged.
+- **Set a per-call timeout via `CERTCTL_OPENSSL_TIMEOUT_SECONDS`** (env-mapped to `Config.TimeoutSeconds`, default 30s). The connector wires this through `exec.CommandContext` so a hung script is killed at the wall-clock budget. Production operators should set it to the upper bound of legitimate issuance time — anything longer is a runaway.
+- **Sanitise the certctl-server environment.** systemd's `Environment=` directive lets operators allow-list which env vars certctl-server (and therefore the script) sees. Default-deny is the safe posture; the connector itself does NOT scrub envs before fork.
+- **Use a chroot or container.** systemd's `RootDirectory=` or running certctl-server in a container limits the filesystem the script can touch. Trade-off: complicates operator debugging.
+- **Audit the script's behaviour.** A wrapper script that logs every invocation's argv + env-snapshot + exit code to a separate audit log gives operators a forensic trail. The wrapper is the operator's responsibility — certctl logs the cmd start/end at INFO level, which is enough for "did it run?" but not for "what did it do?"
+- **Per-call concurrency bound.** The renewal scheduler's `CERTCTL_RENEWAL_CONCURRENCY` (Bundle L closure) bounds scheduled traffic; ad-hoc `POST /api/v1/certificates` traffic isn't bounded. For high-volume environments, layer a reverse-proxy rate limit (nginx, HAProxy) in front of the API.
+
+**When you should NOT use the OpenSSL adapter:**
+
+- Compliance environments (PCI-DSS Level 1, FedRAMP High, HIPAA-regulated PHI handling) where shell-out attack surfaces are formally disallowed by your security policy.
+- Multi-tenant certctl-server deployments where tenant-A's script can affect tenant-B's certificates.
+- Environments without operator review of every script line — trust-on-first-use is the wrong posture for a shell-out.
+- For these cases, switch to a Go-native issuer adapter (Vault, DigiCert, Sectigo, ACME, AWSACMPCA, GoogleCAS, EJBCA, Entrust, GlobalSign, step-ca) or commission a custom Go-native adapter for your CA (the issuer connector interface in `internal/connector/issuer/interface.go` is small — `IssueCertificate` + `RevokeCertificate` + `GetCACertPEM` + a few stubs).
+
+**V3-Pro forward path:**
+
+The hardened OpenSSL adapter (chroot/container by default, env-var allow-list at the adapter layer, signed-script-binary verification, audit-log-on-every-invocation, per-call concurrency bound shared with the API surface) is V3-Pro work. Tracking: `cowork/WORKSPACE-ROADMAP.md` (search "OpenSSL hardened mode").
+
 ### Revocation Across Issuers
 
 All issuer connectors implement `RevokeCertificate(ctx, serial, reason)`. When a certificate is revoked via `POST /api/v1/certificates/{id}/revoke`, certctl notifies the issuing CA on a best-effort basis — the revocation succeeds in certctl's inventory even if the CA notification fails (e.g., CA is temporarily unreachable). This ensures revocation is never blocked by external dependencies.

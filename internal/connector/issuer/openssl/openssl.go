@@ -443,13 +443,26 @@ func (c *Connector) writeTempFile(data []byte, prefix string) (string, error) {
 
 // callSignScript calls the sign script with CSR and cert output file paths.
 // Returns the script's error message if execution fails.
+//
+// Threat model: the OpenSSL adapter execs an operator-supplied
+// script for every certificate lifecycle operation. The script
+// runs as the certctl-server user with full filesystem and
+// network access. See "Operator playbook: OpenSSL shell-out
+// threat model" in docs/connectors.md (OpenSSL section) for the
+// threat model accepted, threat model rejected, mitigations
+// operators can layer (dedicated user, root-owned 0755 binary,
+// audit rules, per-call timeout via CERTCTL_OPENSSL_TIMEOUT_SECONDS,
+// env sanitisation, chroot/container), and when not to use this
+// adapter (compliance environments, multi-tenant servers,
+// no-script-review environments). Top-10 fix #6 of the 2026-05-03
+// issuer-coverage audit.
 func (c *Connector) callSignScript(ctx context.Context, csrFile, certFile string) error {
 	ctx, cancel := context.WithTimeout(ctx, c.timeout)
 	defer cancel()
 
 	// Call sign script: <sign_script> <csr_file> <cert_output_file>
 	cmd := exec.CommandContext(ctx, c.config.SignScript, csrFile, certFile)
-	cmd.Env = os.Environ() // Inherit environment
+	cmd.Env = os.Environ() // Inherit environment — see threat-model doc above.
 
 	output, err := cmd.CombinedOutput()
 	if err != nil {
