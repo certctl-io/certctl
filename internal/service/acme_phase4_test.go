@@ -168,22 +168,10 @@ func (s *stubCertRepo) Get(ctx context.Context, id string) (*domain.ManagedCerti
 	return nil, errors.New("not found")
 }
 
-// stubIssuerConn is a no-op IssuerConnector for firstAvailableIssuer().
-// We don't need the connector itself to do anything; just that
-// firstAvailableIssuer returns ok=true.
-
-// stubRenewalPolicies is a minimal RenewalPolicyLookup.
-type stubRenewalPolicies struct {
-	pol *domain.RenewalPolicy
-}
-
-func (s *stubRenewalPolicies) Get(ctx context.Context, id string) (*domain.RenewalPolicy, error) {
-	if s.pol != nil && s.pol.ID == id {
-		return s.pol, nil
-	}
-	return nil, errors.New("not found")
-}
-
+// generateRevocationFixture builds a self-signed leaf cert + the
+// matching managed-certificate + version domain rows the RevokeCert
+// tests below feed into the stubCertRepo. The cert is signed under its
+// own key so the jwk-path tests can present a verifying JWK.
 func generateRevocationFixture(t *testing.T) (cert *domain.ManagedCertificate, version *domain.CertificateVersion, der []byte, certPriv *ecdsa.PrivateKey) {
 	t.Helper()
 	priv, err := ecdsa.GenerateKey(elliptic.P256(), rand.Reader)
