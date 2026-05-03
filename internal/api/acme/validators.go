@@ -191,8 +191,9 @@ func (p *Pool) Drain(ctx context.Context) error {
 	}
 }
 
-// Snapshot returns the current per-type in-flight + peak counts. Used
-// by chaos tests to verify the configured weights were never exceeded.
+// PoolSnapshot is the per-type in-flight + peak observation set used by
+// chaos / concurrency tests to verify the configured weights were never
+// exceeded.
 type PoolSnapshot struct {
 	HTTP01InFlight    int64
 	HTTP01Peak        int64
@@ -202,6 +203,7 @@ type PoolSnapshot struct {
 	TLSALPN01Peak     int64
 }
 
+// Snapshot returns the current per-type in-flight + peak counts.
 func (p *Pool) Snapshot() PoolSnapshot {
 	return PoolSnapshot{
 		HTTP01InFlight:    p.http01InFlight.Load(),

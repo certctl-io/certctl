@@ -1235,10 +1235,11 @@ func (s *ACMEService) RespondToChallenge(
 	}
 
 	// Submit to the pool. The onComplete callback persists the final
-	// challenge status + cascades the parent authz status. We use a
-	// fresh background context here so the callback's WithinTx isn't
-	// canceled when the originating HTTP request returns.
-	bgctx := context.Background()
+	// challenge status + cascades the parent authz status. We detach
+	// from the request context via context.WithoutCancel so the
+	// callback's WithinTx survives the HTTP handler returning, while
+	// preserving inherited values (logger, trace IDs, audit actor).
+	bgctx := context.WithoutCancel(ctx)
 	chSnapshot := *ch
 	authzSnapshot := *authz
 	identifier := authz.Identifier.Value
