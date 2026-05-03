@@ -12,7 +12,7 @@ server:
   replicas: 3
 
   image:
-    repository: ghcr.io/shankar0123/certctl
+    repository: ghcr.io/certctl-io/certctl
     tag: "2.1.0"
     pullPolicy: IfNotPresent
 
@@ -84,7 +84,7 @@ agent:
   kind: DaemonSet
 
   image:
-    repository: ghcr.io/shankar0123/certctl-agent
+    repository: ghcr.io/certctl-io/certctl-agent
     tag: "2.1.0"
     pullPolicy: IfNotPresent
 

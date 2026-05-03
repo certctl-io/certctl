@@ -46,7 +46,7 @@ services:
 
   # certctl server (control plane + ACME orchestration)
   certctl-server:
-    image: ghcr.io/shankar0123/certctl-server:latest
+    image: ghcr.io/certctl-io/certctl-server:latest
     container_name: certctl-server-dns01
     environment:
       # Database
@@ -124,7 +124,7 @@ services:
   # In production, run agents on each host that needs certificates.
   # For demo, we include one agent in this compose.
   certctl-agent:
-    image: ghcr.io/shankar0123/certctl-agent:latest
+    image: ghcr.io/certctl-io/certctl-agent:latest
     container_name: certctl-agent-dns01
     environment:
       # Control plane connection

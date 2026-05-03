@@ -77,7 +77,7 @@ services:
 
   # certctl server (control plane)
   certctl-server:
-    image: ghcr.io/shankar0123/certctl-server:latest
+    image: ghcr.io/certctl-io/certctl-server:latest
     container_name: certctl-server-stepca-haproxy
     environment:
       # Database
@@ -127,7 +127,7 @@ services:
 
   # certctl agent (runs on the target machine with HAProxy)
   certctl-agent:
-    image: ghcr.io/shankar0123/certctl-agent:latest
+    image: ghcr.io/certctl-io/certctl-agent:latest
     container_name: certctl-agent-stepca-haproxy
     environment:
       # Control plane connection

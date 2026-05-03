@@ -702,7 +702,7 @@ import (
     "fmt"
 
     vaultapi "github.com/hashicorp/vault/api"
-    "github.com/shankar0123/certctl/internal/connector/issuer"
+    "github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 type Config struct {
@@ -1774,7 +1774,7 @@ The adapter (`internal/service/issuer_adapter.go`) translates between the two in
 
 ```go
 // Wrap your connector implementation with the adapter
-import "github.com/shankar0123/certctl/internal/service"
+import "github.com/certctl-io/certctl/internal/service"
 
 myIssuer := myissuer.New(config)
 adapted := service.NewIssuerConnectorAdapter(myIssuer)

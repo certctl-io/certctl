@@ -22,7 +22,7 @@ services:
 
   # certctl server (control plane)
   certctl-server:
-    image: ghcr.io/shankar0123/certctl-server:latest
+    image: ghcr.io/certctl-io/certctl-server:latest
     container_name: certctl-server-acme-nginx
     environment:
       # Database
@@ -71,7 +71,7 @@ services:
   # In this example, the agent is in the same compose file for simplicity.
   # In production, the agent runs on each server that needs certificates.
   certctl-agent:
-    image: ghcr.io/shankar0123/certctl-agent:latest
+    image: ghcr.io/certctl-io/certctl-agent:latest
     container_name: certctl-agent-acme-nginx
     environment:
       # Control plane connection

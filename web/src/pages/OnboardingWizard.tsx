@@ -304,7 +304,7 @@ function AgentStep({ onNext, onSkip }: { onNext: () => void; onSkip: () => void 
     linux: {
       label: 'Install via shell script (systemd service)',
       code: `# Non-interactive install (recommended for curl | bash):
-curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh \\
+curl -sSL https://raw.githubusercontent.com/certctl-io/certctl/master/install-agent.sh \\
   | sudo bash -s -- \\
       --server-url ${serverUrl} \\
       --api-key ${apiKey}
@@ -316,7 +316,7 @@ curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-a
     macos: {
       label: 'Install via shell script (launchd service)',
       code: `# Non-interactive install (recommended for curl | bash):
-curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh \\
+curl -sSL https://raw.githubusercontent.com/certctl-io/certctl/master/install-agent.sh \\
   | bash -s -- \\
       --server-url ${serverUrl} \\
       --api-key ${apiKey}
@@ -330,7 +330,7 @@ curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-a
       code: `docker run -d --name certctl-agent \\
   -e CERTCTL_SERVER_URL=${serverUrl} \\
   -e CERTCTL_API_KEY=${apiKey} \\
-  ghcr.io/shankar0123/certctl-agent:latest`,
+  ghcr.io/certctl-io/certctl-agent:latest`,
     },
   };
 
@@ -956,9 +956,9 @@ function CompleteStep({ onFinish, issuerName, certName }: {
       </button>
 
       <div className="flex justify-center gap-6 text-xs">
-        <a href="https://github.com/shankar0123/certctl/blob/master/docs/quickstart.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Quickstart Guide</a>
-        <a href="https://github.com/shankar0123/certctl/blob/master/docs/architecture.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Architecture</a>
-        <a href="https://github.com/shankar0123/certctl/blob/master/docs/connectors.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Connectors</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/quickstart.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Quickstart Guide</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/architecture.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Architecture</a>
+        <a href="https://github.com/certctl-io/certctl/blob/master/docs/connectors.md" target="_blank" rel="noopener noreferrer" className="text-accent hover:text-accent-bright">Connectors</a>
       </div>
     </div>
   );

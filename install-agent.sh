@@ -12,7 +12,7 @@ YELLOW='\033[1;33m'
 NC='\033[0m' # No Color
 
 # Configuration
-GITHUB_REPO="shankar0123/certctl"
+GITHUB_REPO="certctl-io/certctl"
 RELEASE_URL="https://github.com/${GITHUB_REPO}/releases/latest/download"
 INSTALL_DIR="/usr/local/bin"
 SERVICE_NAME="certctl-agent"
@@ -447,7 +447,7 @@ setup_systemd_service() {
     cat > "$service_file" <<'EOF'
 [Unit]
 Description=certctl Agent - Certificate Lifecycle Management
-Documentation=https://github.com/shankar0123/certctl
+Documentation=https://github.com/certctl-io/certctl
 After=network-online.target
 Wants=network-online.target
 

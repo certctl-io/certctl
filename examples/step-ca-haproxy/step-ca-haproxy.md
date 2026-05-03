@@ -19,8 +19,8 @@ This is the natural choice if you're already invested in step-ca and want to con
 | Service | Image | Purpose |
 |---------|-------|---------|
 | **step-ca** | `smallstep/step-ca:latest` | Private internal CA |
-| **certctl-server** | `ghcr.io/shankar0123/certctl-server:latest` | Certificate management control plane |
-| **certctl-agent** | `ghcr.io/shankar0123/certctl-agent:latest` | Agent running on HAProxy server |
+| **certctl-server** | `ghcr.io/certctl-io/certctl-server:latest` | Certificate management control plane |
+| **certctl-agent** | `ghcr.io/certctl-io/certctl-agent:latest` | Agent running on HAProxy server |
 | **haproxy** | `haproxy:2.9-alpine` | Reverse proxy / load balancer |
 | **postgres** | `postgres:16-alpine` | certctl audit trail + config storage |
 

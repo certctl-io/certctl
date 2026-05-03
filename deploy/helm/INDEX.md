@@ -216,7 +216,7 @@ kubectl logs -l app.kubernetes.io/component=server -f
 
 ## Support
 
-- **GitHub**: https://github.com/shankar0123/certctl
+- **GitHub**: https://github.com/certctl-io/certctl
 - **Issues**: Report on GitHub issues
 - **Documentation**: All docs are in `deploy/helm/`
 

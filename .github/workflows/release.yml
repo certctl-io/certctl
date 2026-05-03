@@ -9,7 +9,7 @@ env:
   REGISTRY: ghcr.io
   # Keep in lock-step with .github/workflows/ci.yml (M-3).
   GO_VERSION: '1.25.9'
-  IMAGE_NAMESPACE: shankar0123
+  IMAGE_NAMESPACE: certctl-io
 
 jobs:
   # ----------------------------------------------------------------------
@@ -348,7 +348,7 @@ jobs:
         with:
           generate_release_notes: true
           body: |
-            > **Install / upgrade:** see the [Quick Start section in the README](https://github.com/shankar0123/certctl/blob/master/README.md#quick-start) for Docker Compose, agent install, Helm, and binary download instructions.
+            > **Install / upgrade:** see the [Quick Start section in the README](https://github.com/certctl-io/certctl/blob/master/README.md#quick-start) for Docker Compose, agent install, Helm, and binary download instructions.
 
             ## Verifying this release
 
@@ -369,7 +369,7 @@ jobs:
             ```bash
             cosign verify-blob \
               --bundle checksums.txt.sigstore.json \
-              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+              --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/\.github/workflows/release\.yml@refs/tags/' \
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               checksums.txt
             ```
@@ -383,7 +383,7 @@ jobs:
             ```bash
             slsa-verifier verify-artifact \
               --provenance-path multiple.intoto.jsonl \
-              --source-uri github.com/shankar0123/certctl \
+              --source-uri github.com/certctl-io/certctl \
               --source-tag ${{ steps.version.outputs.VERSION }} \
               certctl-agent-linux-amd64
             ```
@@ -391,21 +391,21 @@ jobs:
             **4. Verify container image signature and attestations:**
 
             ```bash
-            IMAGE=ghcr.io/shankar0123/certctl-server:${{ steps.version.outputs.VERSION }}
+            IMAGE=ghcr.io/certctl-io/certctl-server:${{ steps.version.outputs.VERSION }}
             cosign verify \
-              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+              --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/\.github/workflows/release\.yml@refs/tags/' \
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               "$IMAGE"
 
             # SBOM attestation (SPDX-JSON) emitted by docker/build-push-action
             cosign verify-attestation --type spdxjson \
-              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+              --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/' \
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               "$IMAGE"
 
             # SLSA provenance attestation (mode=max)
             cosign verify-attestation --type slsaprovenance \
-              --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+              --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/' \
               --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
               "$IMAGE"
             ```

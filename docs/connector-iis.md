@@ -158,7 +158,7 @@ The real IIS connector validation lives in:
 
 ```powershell
 # Clone + checkout
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl
 git fetch --tags
 git checkout v2.X.0  # whichever release is being validated

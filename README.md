@@ -5,9 +5,9 @@
 # certctl — Self-Hosted Certificate Lifecycle Platform
 
 [![License](https://img.shields.io/badge/license-BSL%201.1-blue.svg)](LICENSE)
-[![Go Report Card](https://goreportcard.com/badge/github.com/shankar0123/certctl)](https://goreportcard.com/report/github.com/shankar0123/certctl)
-[![GitHub Release](https://img.shields.io/github/v/release/shankar0123/certctl)](https://github.com/shankar0123/certctl/releases)
-[![GitHub Stars](https://img.shields.io/github/stars/shankar0123/certctl?style=flat&logo=github)](https://github.com/shankar0123/certctl/stargazers)
+[![Go Report Card](https://goreportcard.com/badge/github.com/certctl-io/certctl)](https://goreportcard.com/report/github.com/certctl-io/certctl)
+[![GitHub Release](https://img.shields.io/github/v/release/certctl-io/certctl)](https://github.com/certctl-io/certctl/releases)
+[![GitHub Stars](https://img.shields.io/github/stars/certctl-io/certctl?style=flat&logo=github)](https://github.com/certctl-io/certctl/stargazers)
 
 TLS certificate lifespans are shrinking fast. The CA/Browser Forum passed [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) unanimously in April 2025, setting a phased reduction: **200 days** by March 2026, **100 days** by March 2027, and **47 days** by March 2029. Organizations managing dozens or hundreds of certificates can no longer rely on spreadsheets, calendar reminders, or manual renewal workflows. The math doesn't work — at 47-day lifespans, a team managing 100 certificates is processing 7+ renewals per week, every week, forever.
 
@@ -33,7 +33,7 @@ gantt
         47 days                :crit, 2020-01-01, 47d
 ```
 
-> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/shankar0123/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
+> **Actively maintained — shipping weekly.** Found something? [Open a GitHub issue](https://github.com/certctl-io/certctl/issues) — issues get triaged same-day. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
 
 **Ready to try it?** Jump to the [Quick Start](#quick-start) — you'll have a running dashboard in under 5 minutes.
 
@@ -198,7 +198,7 @@ For the complete capability breakdown, see the [Feature Inventory](docs/features
 ### Docker Compose (Recommended)
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
@@ -223,7 +223,7 @@ The control plane is HTTPS-only (TLS 1.3, no plaintext listener). See [`docs/tls
 ### Agent Install (One-Liner)
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
+curl -sSL https://raw.githubusercontent.com/certctl-io/certctl/master/install-agent.sh | bash
 ```
 
 Detects your OS and architecture, downloads the binary, configures systemd (Linux) or launchd (macOS), and starts the agent. See [install-agent.sh](install-agent.sh) for details.
@@ -251,7 +251,7 @@ Every `v*` tag publishes signed, attested release artefacts. Binaries
 (`certctl-agent`, `certctl-server`, `certctl-cli`, `certctl-mcp-server` for
 `linux|darwin × amd64|arm64`) ship alongside a `checksums.txt`, per-binary
 SPDX-JSON SBOMs, Cosign signatures, and SLSA Level 3 provenance. Container
-images on `ghcr.io/shankar0123/certctl-{server,agent}` are built with
+images on `ghcr.io/certctl-io/certctl-{server,agent}` are built with
 `docker/build-push-action` `provenance: mode=max` + `sbom: true` and are
 additionally signed with Cosign at the image digest.
 
@@ -269,7 +269,7 @@ sha256sum -c checksums.txt
 ```bash
 cosign verify-blob \
   --bundle checksums.txt.sigstore.json \
-  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/\.github/workflows/release\.yml@refs/tags/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   checksums.txt
 ```
@@ -285,7 +285,7 @@ directly.
 ```bash
 slsa-verifier verify-artifact \
   --provenance-path multiple.intoto.jsonl \
-  --source-uri github.com/shankar0123/certctl \
+  --source-uri github.com/certctl-io/certctl \
   --source-tag v2.1.0 \
   certctl-agent-linux-amd64
 ```
@@ -293,22 +293,22 @@ slsa-verifier verify-artifact \
 **4. Verify a container image signature and its SBOM / provenance attestations:**
 
 ```bash
-IMAGE=ghcr.io/shankar0123/certctl-server:v2.1.0
+IMAGE=ghcr.io/certctl-io/certctl-server:v2.1.0
 
 cosign verify \
-  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/\.github/workflows/release\.yml@refs/tags/' \
+  --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/\.github/workflows/release\.yml@refs/tags/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   "$IMAGE"
 
 # SBOM attestation (SPDX-JSON, emitted by docker/build-push-action)
 cosign verify-attestation --type spdxjson \
-  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+  --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   "$IMAGE"
 
 # SLSA provenance attestation (docker/build-push-action `provenance: mode=max`)
 cosign verify-attestation --type slsaprovenance \
-  --certificate-identity-regexp '^https://github\.com/shankar0123/certctl/' \
+  --certificate-identity-regexp '^https://github\.com/certctl-io/certctl/' \
   --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
   "$IMAGE"
 ```
@@ -331,7 +331,7 @@ Each directory contains a `docker-compose.yml` and a `README.md` explaining the 
 
 ```bash
 # Install
-go install github.com/shankar0123/certctl/cmd/cli@latest
+go install github.com/certctl-io/certctl/cmd/cli@latest
 
 # Configure
 export CERTCTL_SERVER_URL=https://localhost:8443
@@ -355,7 +355,7 @@ certctl ships a standalone MCP (Model Context Protocol) server that exposes all 
 
 ```bash
 # Install and run
-go install github.com/shankar0123/certctl/cmd/mcp-server@latest
+go install github.com/certctl-io/certctl/cmd/mcp-server@latest
 export CERTCTL_SERVER_URL=https://localhost:8443
 export CERTCTL_API_KEY=your-api-key
 export CERTCTL_SERVER_CA_BUNDLE_PATH=/path/to/ca.crt   # required for self-signed bootstrap
@@ -426,4 +426,4 @@ The release-time SBOM is published as a syft-produced cyclonedx file alongside e
 
 ---
 
-If certctl solves a problem you have, [star the repo](https://github.com/shankar0123/certctl) to help others find it. Questions, bugs, or feature requests — [open an issue](https://github.com/shankar0123/certctl/issues).
+If certctl solves a problem you have, [star the repo](https://github.com/certctl-io/certctl) to help others find it. Questions, bugs, or feature requests — [open an issue](https://github.com/certctl-io/certctl/issues).

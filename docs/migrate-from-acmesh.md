@@ -29,7 +29,7 @@ certctl adds a control plane that sees all your certificates, deploys with verif
 Start with Docker Compose (5 minutes):
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl/deploy
 docker compose up -d
 ```
@@ -41,7 +41,7 @@ Access the dashboard at `https://localhost:8443` with the API key from `.env`. T
 On each server running acme.sh certs, install the certctl agent:
 
 ```bash
-curl -sSL https://raw.githubusercontent.com/shankar0123/certctl/master/install-agent.sh | bash
+curl -sSL https://raw.githubusercontent.com/certctl-io/certctl/master/install-agent.sh | bash
 # Prompted for server URL and API key
 ```
 
@@ -49,7 +49,7 @@ Or manually:
 
 ```bash
 # Download and install agent binary
-wget https://github.com/shankar0123/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64
+wget https://github.com/certctl-io/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64
 chmod +x certctl-agent-linux-amd64
 sudo mv certctl-agent-linux-amd64 /usr/local/bin/certctl-agent
 

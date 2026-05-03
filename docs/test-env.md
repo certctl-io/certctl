@@ -70,7 +70,7 @@ If this says "command not found", you have an old Docker version. Update Docker 
 You need the certctl source code on your machine. If you haven't cloned it yet:
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl
 ```
 

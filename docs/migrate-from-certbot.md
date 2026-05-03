@@ -38,7 +38,7 @@ On each of your 10 servers running Certbot:
 
 ```bash
 # Linux amd64 (adjust for your architecture)
-curl -sSL https://github.com/shankar0123/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64 \
+curl -sSL https://github.com/certctl-io/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64 \
   -o /usr/local/bin/certctl-agent
 chmod +x /usr/local/bin/certctl-agent
 

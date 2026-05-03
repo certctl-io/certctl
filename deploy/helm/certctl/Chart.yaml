@@ -14,7 +14,7 @@ keywords:
   - kubernetes
 maintainers:
   - name: certctl
-home: https://github.com/shankar0123/certctl
+home: https://github.com/certctl-io/certctl
 sources:
-  - https://github.com/shankar0123/certctl
+  - https://github.com/certctl-io/certctl
 license: BSL-1.1

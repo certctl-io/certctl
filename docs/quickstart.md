@@ -46,7 +46,7 @@ On Linux, follow the official Docker install guide for your distribution.
 ### Docker Compose (Quick Start)
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl
 docker compose -f deploy/docker-compose.yml up -d --build
 ```

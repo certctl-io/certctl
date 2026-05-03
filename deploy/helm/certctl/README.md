@@ -1,6 +1,6 @@
 # certctl Helm Chart
 
-Production-ready Helm chart for deploying [certctl](https://github.com/shankar0123/certctl) on Kubernetes. Wires up the certctl server (Deployment), PostgreSQL (StatefulSet with PVC), and the agent (DaemonSet — one per node) on a private cluster, with health probes, security contexts, and optional Ingress.
+Production-ready Helm chart for deploying [certctl](https://github.com/certctl-io/certctl) on Kubernetes. Wires up the certctl server (Deployment), PostgreSQL (StatefulSet with PVC), and the agent (DaemonSet — one per node) on a private cluster, with health probes, security contexts, and optional Ingress.
 
 ## Quick install
 

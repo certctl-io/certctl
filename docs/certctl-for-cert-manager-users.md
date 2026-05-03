@@ -53,7 +53,7 @@ helm install certctl deploy/helm/certctl/ \
 On each VM, bare-metal server, or appliance (via proxy agent):
 ```bash
 # Linux amd64
-curl -sSL https://github.com/shankar0123/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64 \
+curl -sSL https://github.com/certctl-io/certctl/releases/download/v2.1.0/certctl-agent-linux-amd64 \
   -o /usr/local/bin/certctl-agent
 chmod +x /usr/local/bin/certctl-agent
 

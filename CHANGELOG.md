@@ -5,7 +5,7 @@ notes are auto-generated from commit messages between consecutive tags.
 
 **Where to find what changed in a given release:**
 
-- **[GitHub Releases](https://github.com/shankar0123/certctl/releases)** — every
+- **[GitHub Releases](https://github.com/certctl-io/certctl/releases)** — every
   tag has an auto-generated "What's Changed" section pulled from the commits
   between that tag and the previous one, plus per-release supply-chain
   verification instructions (Cosign / SLSA / SBOM).
@@ -27,5 +27,5 @@ without depending on the author to manually update a separate file.
 
 **For the historical record:** earlier versions (pre-v2.2.0 and the [2.2.0]
 tag itself) had a hand-edited CHANGELOG. That content is preserved in
-[git history](https://github.com/shankar0123/certctl/blob/v2.2.0/CHANGELOG.md)
+[git history](https://github.com/certctl-io/certctl/blob/v2.2.0/CHANGELOG.md)
 at the v2.2.0 tag.

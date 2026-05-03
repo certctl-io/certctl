@@ -77,7 +77,7 @@ Three services on a private bridge network:
 ### Starting it
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl
 docker compose -f deploy/docker-compose.yml up -d --build
 ```

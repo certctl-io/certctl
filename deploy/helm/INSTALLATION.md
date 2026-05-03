@@ -94,4 +94,4 @@ helm install certctl certctl/ --dry-run --debug
 
 - Full documentation in `README.md`
 - Troubleshooting in `DEPLOYMENT_GUIDE.md`
-- Issues: https://github.com/shankar0123/certctl
+- Issues: https://github.com/certctl-io/certctl

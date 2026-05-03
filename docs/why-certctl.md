@@ -105,7 +105,7 @@ certctl isn't the right tool for everyone:
 The demo seeds certificates across multiple issuers, agents, and deployment targets with 180 days of realistic history — jobs, audit events, discovery scans, approval workflows — so you can explore every feature immediately.
 
 ```bash
-git clone https://github.com/shankar0123/certctl.git
+git clone https://github.com/certctl-io/certctl.git
 cd certctl/deploy && docker compose up -d
 # Dashboard at https://localhost:8443 (self-signed cert — pin deploy/test/certs/ca.crt)
 ```

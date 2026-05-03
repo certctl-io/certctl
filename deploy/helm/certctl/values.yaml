@@ -20,7 +20,7 @@ server:
 
   # Image configuration
   image:
-    repository: ghcr.io/shankar0123/certctl
+    repository: ghcr.io/certctl-io/certctl
     tag: "" # defaults to Chart.appVersion
     pullPolicy: IfNotPresent
 
@@ -410,7 +410,7 @@ agent:
 
   # Image configuration
   image:
-    repository: ghcr.io/shankar0123/certctl-agent
+    repository: ghcr.io/certctl-io/certctl-agent
     tag: ""  # defaults to Chart.appVersion
     pullPolicy: IfNotPresent
 

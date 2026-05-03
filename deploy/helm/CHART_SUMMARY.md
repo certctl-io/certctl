@@ -452,8 +452,8 @@ monitoring:
 ## Support
 
 For issues, questions, or contributions:
-- GitHub: https://github.com/shankar0123/certctl
-- Documentation: https://github.com/shankar0123/certctl/tree/main/docs
+- GitHub: https://github.com/certctl-io/certctl
+- Documentation: https://github.com/certctl-io/certctl/tree/main/docs
 
 ## License
 

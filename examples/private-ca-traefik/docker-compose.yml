@@ -22,7 +22,7 @@ services:
 
   # certctl server (control plane) with Local CA in sub-CA mode
   certctl-server:
-    image: ghcr.io/shankar0123/certctl-server:latest
+    image: ghcr.io/certctl-io/certctl-server:latest
     container_name: certctl-server-private-ca
     environment:
       # Database
@@ -85,7 +85,7 @@ services:
 
   # certctl agent (deploys certs to Traefik)
   certctl-agent:
-    image: ghcr.io/shankar0123/certctl-agent:latest
+    image: ghcr.io/certctl-io/certctl-agent:latest
     container_name: certctl-agent-private-ca
     environment:
       # Control plane connection

@@ -23,7 +23,7 @@ services:
   # certctl server (control plane)
   # Configured with BOTH ACME (Let's Encrypt) and Local CA issuers
   certctl-server:
-    image: ghcr.io/shankar0123/certctl-server:latest
+    image: ghcr.io/certctl-io/certctl-server:latest
     container_name: certctl-server-multi-issuer
     environment:
       # Database
@@ -72,7 +72,7 @@ services:
 
   # certctl agent (manages certificates on NGINX and application servers)
   certctl-agent:
-    image: ghcr.io/shankar0123/certctl-agent:latest
+    image: ghcr.io/certctl-io/certctl-agent:latest
     container_name: certctl-agent-multi-issuer
     environment:
       # Control plane connection
