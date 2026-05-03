@@ -687,7 +687,7 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 
 	// Deploy to the target using the appropriate connector
 	if job.TargetType != "" {
-		connector, err := a.createTargetConnector(job.TargetType, job.TargetConfig)
+		connector, err := a.createTargetConnector(ctx, job.TargetType, job.TargetConfig)
 		if err != nil {
 			a.logger.Error("failed to create target connector",
 				"job_id", job.ID,
@@ -768,7 +768,11 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 }
 
 // createTargetConnector instantiates the appropriate target connector based on type.
-func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMessage) (target.Connector, error) {
+// ctx is threaded into SDK-driven connectors (AWSACM, AzureKeyVault) so credential
+// resolution honors caller cancellation / deadlines instead of using a fresh
+// context.Background() (the contextcheck linter enforces this — the original Rank 5
+// implementation used Background() and tripped CI on commit 502823d).
+func (a *Agent) createTargetConnector(ctx context.Context, targetType string, configJSON json.RawMessage) (target.Connector, error) {
 	switch targetType {
 	case "NGINX":
 		var cfg nginx.Config
@@ -914,7 +918,7 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 				return nil, fmt.Errorf("invalid AWSACM config: %w", err)
 			}
 		}
-		return awsacm.New(context.Background(), &cfg, a.logger)
+		return awsacm.New(ctx, &cfg, a.logger)
 
 	case "AzureKeyVault":
 		// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
@@ -929,7 +933,7 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 				return nil, fmt.Errorf("invalid AzureKeyVault config: %w", err)
 			}
 		}
-		return azurekv.New(context.Background(), &cfg, a.logger)
+		return azurekv.New(ctx, &cfg, a.logger)
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

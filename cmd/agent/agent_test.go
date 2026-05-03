@@ -478,7 +478,7 @@ func TestCreateTargetConnector_NGINX(t *testing.T) {
 	agent, _ := NewAgent(cfg, logger)
 
 	configJSON := json.RawMessage(`{"cert_path":"/etc/nginx/cert.pem"}`)
-	connector, err := agent.createTargetConnector("NGINX", configJSON)
+	connector, err := agent.createTargetConnector(context.Background(), "NGINX", configJSON)
 
 	if err != nil {
 		t.Errorf("unexpected error: %v", err)
@@ -499,7 +499,7 @@ func TestCreateTargetConnector_Unsupported(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agent, _ := NewAgent(cfg, logger)
 
-	_, err := agent.createTargetConnector("UnsupportedType", nil)
+	_, err := agent.createTargetConnector(context.Background(), "UnsupportedType", nil)
 
 	if err == nil {
 		t.Error("expected error for unsupported target type")
@@ -987,7 +987,7 @@ func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 				t.Fatalf("failed to marshal config: %v", err)
 			}
 
-			connector, err := agent.createTargetConnector(tt.typeName, configJSON)
+			connector, err := agent.createTargetConnector(context.Background(), tt.typeName, configJSON)
 
 			// Some connectors (like WinCertStore, IIS) may error on non-Windows platforms
 			// or with insufficient validation. We accept either a valid connector or an error
@@ -1039,7 +1039,7 @@ func TestCreateTargetConnector_InvalidJSON(t *testing.T) {
 
 	for _, typeName := range tests {
 		t.Run(typeName, func(t *testing.T) {
-			_, err := agent.createTargetConnector(typeName, invalidJSON)
+			_, err := agent.createTargetConnector(context.Background(), typeName, invalidJSON)
 
 			if err == nil {
 				t.Errorf("expected error for invalid JSON with type %s", typeName)
@@ -1059,7 +1059,7 @@ func TestCreateTargetConnector_UnknownType(t *testing.T) {
 	logger := slog.New(slog.NewTextHandler(io.Discard, nil))
 	agent, _ := NewAgent(cfg, logger)
 
-	_, err := agent.createTargetConnector("MagicBox", nil)
+	_, err := agent.createTargetConnector(context.Background(), "MagicBox", nil)
 
 	if err == nil {
 		t.Error("expected error for unsupported target type")
@@ -1092,7 +1092,7 @@ func TestCreateTargetConnector_EmptyConfig(t *testing.T) {
 	for _, typeName := range tests {
 		t.Run(typeName, func(t *testing.T) {
 			// Empty config should be handled gracefully (defaults applied)
-			connector, err := agent.createTargetConnector(typeName, nil)
+			connector, err := agent.createTargetConnector(context.Background(), typeName, nil)
 
 			// Should not error on nil/empty config (defaults are applied)
 			if err != nil {
