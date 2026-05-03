@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer/digicert"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: digicert failure-mode round-out (81.0% → ≥85%).
@@ -23,7 +24,7 @@ func buildDigicertConnector(t *testing.T, baseURL string) *digicert.Connector {
 	// status returns within ~1s instead of the 10-minute production
 	// default. Tests that exercise issued/failed/parse-error paths
 	// don't block on the wait.
-	cfg := digicert.Config{APIKey: "k", OrgID: "1", ProductType: "ssl_basic", BaseURL: baseURL, PollMaxWaitSeconds: 1}
+	cfg := digicert.Config{APIKey: secret.NewRefFromString("k"), OrgID: "1", ProductType: "ssl_basic", BaseURL: baseURL, PollMaxWaitSeconds: 1}
 	raw, _ := json.Marshal(cfg)
 	if err := c.ValidateConfig(context.Background(), raw); err != nil {
 		t.Fatalf("ValidateConfig: %v", err)

@@ -11,6 +11,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: failure-mode round-out for Vault PKI connector.
@@ -139,7 +140,7 @@ func TestVault_GetCACertPEM_Non200_ReturnsError(t *testing.T) {
 func buildVaultConnector(t *testing.T, url string) *vault.Connector {
 	t.Helper()
 	c := vault.New(nil, slog.Default())
-	cfg := vault.Config{Addr: url, Token: "tok", Mount: "pki", Role: "web", TTL: "1h"}
+	cfg := vault.Config{Addr: url, Token: secret.NewRefFromString("tok"), Mount: "pki", Role: "web", TTL: "1h"}
 	raw, _ := json.Marshal(cfg)
 	if err := c.ValidateConfig(context.Background(), raw); err != nil {
 		t.Fatalf("ValidateConfig: %v", err)

@@ -19,6 +19,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 func TestVaultConnector(t *testing.T) {
@@ -38,7 +39,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token-12345",
+			Token: secret.NewRefFromString("s.test-token-12345"),
 			Mount: "pki",
 			Role:  "web-certs",
 			TTL:   "8760h",
@@ -54,7 +55,7 @@ func TestVaultConnector(t *testing.T) {
 
 	t.Run("ValidateConfig_MissingAddr", func(t *testing.T) {
 		config := vault.Config{
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Role:  "web-certs",
 		}
 
@@ -89,7 +90,7 @@ func TestVaultConnector(t *testing.T) {
 	t.Run("ValidateConfig_MissingRole", func(t *testing.T) {
 		config := vault.Config{
 			Addr:  "https://vault.example.com:8200",
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 		}
 
 		connector := vault.New(nil, logger)
@@ -106,7 +107,7 @@ func TestVaultConnector(t *testing.T) {
 	t.Run("ValidateConfig_UnreachableVault", func(t *testing.T) {
 		config := vault.Config{
 			Addr:  "http://localhost:19999",
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Role:  "web-certs",
 		}
 
@@ -153,7 +154,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 			TTL:   "8760h",
@@ -208,7 +209,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -245,7 +246,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.bad-token",
+			Token: secret.NewRefFromString("s.bad-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -293,7 +294,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -336,7 +337,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -370,7 +371,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -402,7 +403,7 @@ func TestVaultConnector(t *testing.T) {
 
 		config := &vault.Config{
 			Addr:  srv.URL,
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -421,7 +422,7 @@ func TestVaultConnector(t *testing.T) {
 	t.Run("GetOrderStatus_Synchronous", func(t *testing.T) {
 		config := &vault.Config{
 			Addr:  "https://vault.example.com:8200",
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}
@@ -443,7 +444,7 @@ func TestVaultConnector(t *testing.T) {
 	t.Run("GetRenewalInfo_ReturnsNil", func(t *testing.T) {
 		config := &vault.Config{
 			Addr:  "https://vault.example.com:8200",
-			Token: "s.test-token",
+			Token: secret.NewRefFromString("s.test-token"),
 			Mount: "pki",
 			Role:  "web-certs",
 		}

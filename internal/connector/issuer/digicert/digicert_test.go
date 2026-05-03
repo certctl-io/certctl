@@ -19,6 +19,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/digicert"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 func TestDigiCertConnector(t *testing.T) {
@@ -41,15 +42,16 @@ func TestDigiCertConnector(t *testing.T) {
 		}))
 		defer srv.Close()
 
-		config := digicert.Config{
-			APIKey:      "dc-test-api-key",
-			OrgID:       "12345",
-			ProductType: "ssl_basic",
-			BaseURL:     srv.URL,
-		}
+		// Build rawConfig as a JSON literal so the secrets round-trip
+		// intact via UnmarshalJSON (json.Marshal redacts *secret.Ref →
+		// "[redacted]" by design; it MUST NOT be used to construct a
+		// rawConfig that ValidateConfig will then header-write back).
+		rawConfig := []byte(fmt.Sprintf(
+			`{"api_key":"dc-test-api-key","org_id":"12345","product_type":"ssl_basic","base_url":%q}`,
+			srv.URL,
+		))
 
 		connector := digicert.New(nil, logger)
-		rawConfig, _ := json.Marshal(config)
 		err := connector.ValidateConfig(ctx, rawConfig)
 		if err != nil {
 			t.Fatalf("ValidateConfig failed: %v", err)
@@ -74,7 +76,7 @@ func TestDigiCertConnector(t *testing.T) {
 
 	t.Run("ValidateConfig_MissingOrgID", func(t *testing.T) {
 		config := digicert.Config{
-			APIKey: "dc-test-key",
+			APIKey: secret.NewRefFromString("dc-test-key"),
 		}
 
 		connector := digicert.New(nil, logger)
@@ -100,7 +102,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := digicert.Config{
-			APIKey:  "dc-bad-key",
+			APIKey:  secret.NewRefFromString("dc-bad-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -136,7 +138,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:      "dc-test-key",
+			APIKey:      secret.NewRefFromString("dc-test-key"),
 			OrgID:       "12345",
 			ProductType: "ssl_basic",
 			BaseURL:     srv.URL,
@@ -180,7 +182,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:      "dc-test-key",
+			APIKey:      secret.NewRefFromString("dc-test-key"),
 			OrgID:       "12345",
 			ProductType: "ssl_ev_basic",
 			BaseURL:     srv.URL,
@@ -217,7 +219,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:      "dc-test-key",
+			APIKey:      secret.NewRefFromString("dc-test-key"),
 			OrgID:       "12345",
 			ProductType: "ssl_basic",
 			BaseURL:     srv.URL,
@@ -255,7 +257,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -289,7 +291,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:             "dc-test-key",
+			APIKey:             secret.NewRefFromString("dc-test-key"),
 			OrgID:              "12345",
 			BaseURL:            srv.URL,
 			PollMaxWaitSeconds: 1, // keep async-pending tests fast
@@ -321,7 +323,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -350,7 +352,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:      "dc-test-key",
+			APIKey:      secret.NewRefFromString("dc-test-key"),
 			OrgID:       "12345",
 			ProductType: "ssl_basic",
 			BaseURL:     srv.URL,
@@ -388,7 +390,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -414,7 +416,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -446,7 +448,7 @@ func TestDigiCertConnector(t *testing.T) {
 		defer srv.Close()
 
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: srv.URL,
 		}
@@ -463,7 +465,7 @@ func TestDigiCertConnector(t *testing.T) {
 
 	t.Run("GetRenewalInfo_ReturnsNil", func(t *testing.T) {
 		config := &digicert.Config{
-			APIKey:  "dc-test-key",
+			APIKey:  secret.NewRefFromString("dc-test-key"),
 			OrgID:   "12345",
 			BaseURL: "https://api.digicert.com",
 		}
@@ -480,7 +482,7 @@ func TestDigiCertConnector(t *testing.T) {
 
 	t.Run("DefaultProductType", func(t *testing.T) {
 		config := &digicert.Config{
-			APIKey: "dc-test-key",
+			APIKey: secret.NewRefFromString("dc-test-key"),
 			OrgID:  "12345",
 			// ProductType intentionally left empty
 		}

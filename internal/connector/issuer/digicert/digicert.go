@@ -39,13 +39,23 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
 	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Config represents the DigiCert CertCentral issuer connector configuration.
 type Config struct {
 	// APIKey is the CertCentral API key for authentication.
 	// Required. Set via CERTCTL_DIGICERT_API_KEY environment variable.
-	APIKey string `json:"api_key"`
+	//
+	// Type: *secret.Ref (audit fix #6 Phase 3 — Bundle I close).
+	// Wrapping the API key in a Ref means: it never stringifies (Config
+	// marshals as "[redacted]"), the bytes are zeroed after each
+	// Use/WriteTo invocation (defeats heap-dump extraction), and
+	// outbound X-DC-DEVKEY header writes go through Ref.Use so the
+	// staging buffer is short-lived. JSON unmarshal of a string value
+	// populates the Ref via NewRefFromString — operator config files
+	// are unchanged.
+	APIKey *secret.Ref `json:"api_key"`
 
 	// OrgID is the DigiCert organization ID for certificate orders.
 	// Required. Set via CERTCTL_DIGICERT_ORG_ID environment variable.
@@ -149,7 +159,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("invalid DigiCert config: %w", err)
 	}
 
-	if cfg.APIKey == "" {
+	if cfg.APIKey.IsEmpty() {
 		return fmt.Errorf("DigiCert api_key is required")
 	}
 
@@ -170,7 +180,12 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 	if err != nil {
 		return fmt.Errorf("failed to create API test request: %w", err)
 	}
-	req.Header.Set("X-DC-DEVKEY", cfg.APIKey)
+	if err := cfg.APIKey.Use(func(buf []byte) error {
+		req.Header.Set("X-DC-DEVKEY", string(buf))
+		return nil
+	}); err != nil {
+		return fmt.Errorf("digicert apikey use: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -226,7 +241,12 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	if err != nil {
 		return nil, fmt.Errorf("failed to create order request: %w", err)
 	}
-	req.Header.Set("X-DC-DEVKEY", c.config.APIKey)
+	if err := c.config.APIKey.Use(func(buf []byte) error {
+		req.Header.Set("X-DC-DEVKEY", string(buf))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("digicert apikey use: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -329,7 +349,12 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	if err != nil {
 		return fmt.Errorf("failed to create revoke request: %w", err)
 	}
-	req.Header.Set("X-DC-DEVKEY", c.config.APIKey)
+	if err := c.config.APIKey.Use(func(buf []byte) error {
+		req.Header.Set("X-DC-DEVKEY", string(buf))
+		return nil
+	}); err != nil {
+		return fmt.Errorf("digicert apikey use: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -415,7 +440,12 @@ func (c *Connector) pollOrderOnce(ctx context.Context, orderID string) (*issuer.
 	if err != nil {
 		return nil, asyncpoll.Failed, fmt.Errorf("failed to create status request: %w", err)
 	}
-	req.Header.Set("X-DC-DEVKEY", c.config.APIKey)
+	if err := c.config.APIKey.Use(func(buf []byte) error {
+		req.Header.Set("X-DC-DEVKEY", string(buf))
+		return nil
+	}); err != nil {
+		return nil, asyncpoll.Failed, fmt.Errorf("digicert apikey use: %w", err)
+	}
 	req.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(req)
@@ -518,7 +548,13 @@ func (c *Connector) downloadCertificate(ctx context.Context, certificateID int) 
 		err = fmt.Errorf("failed to create download request: %w", reqErr)
 		return
 	}
-	req.Header.Set("X-DC-DEVKEY", c.config.APIKey)
+	if useErr := c.config.APIKey.Use(func(buf []byte) error {
+		req.Header.Set("X-DC-DEVKEY", string(buf))
+		return nil
+	}); useErr != nil {
+		err = fmt.Errorf("digicert apikey use: %w", useErr)
+		return
+	}
 
 	resp, doErr := c.httpClient.Do(req)
 	if doErr != nil {

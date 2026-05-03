@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/secret"
 )
 
 // Config represents the Vault PKI issuer connector configuration.
@@ -42,7 +43,16 @@ type Config struct {
 
 	// Token is the Vault token for authentication.
 	// Required. Set via CERTCTL_VAULT_TOKEN environment variable.
-	Token string `json:"token"`
+	//
+	// Type: *secret.Ref (audit fix #6 Phase 3 — Bundle I close).
+	// Wrapping the token in a Ref means: it never stringifies (Config
+	// marshals as "[redacted]"), the bytes are zeroed after each
+	// Use/WriteTo invocation (defeats heap-dump extraction), and
+	// outbound X-Vault-Token header writes go through Ref.Use so the
+	// staging buffer is short-lived. JSON unmarshal of a string value
+	// populates the Ref via NewRefFromString — operator config files
+	// are unchanged.
+	Token *secret.Ref `json:"token"`
 
 	// Mount is the PKI secrets engine mount path.
 	// Default: "pki". Set via CERTCTL_VAULT_MOUNT environment variable.
@@ -111,7 +121,7 @@ func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessag
 		return fmt.Errorf("Vault addr is required")
 	}
 
-	if cfg.Token == "" {
+	if cfg.Token.IsEmpty() {
 		return fmt.Errorf("Vault token is required")
 	}
 
@@ -189,7 +199,12 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("failed to create sign request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Vault-Token", c.config.Token)
+	if err := c.config.Token.Use(func(buf []byte) error {
+		req.Header.Set("X-Vault-Token", string(buf))
+		return nil
+	}); err != nil {
+		return nil, fmt.Errorf("vault token use: %w", err)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -300,7 +315,12 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 		return fmt.Errorf("failed to create revoke request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("X-Vault-Token", c.config.Token)
+	if err := c.config.Token.Use(func(buf []byte) error {
+		req.Header.Set("X-Vault-Token", string(buf))
+		return nil
+	}); err != nil {
+		return fmt.Errorf("vault token use: %w", err)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
@@ -344,7 +364,12 @@ func (c *Connector) GetCACertPEM(ctx context.Context) (string, error) {
 	if err != nil {
 		return "", fmt.Errorf("failed to create CA cert request: %w", err)
 	}
-	req.Header.Set("X-Vault-Token", c.config.Token)
+	if err := c.config.Token.Use(func(buf []byte) error {
+		req.Header.Set("X-Vault-Token", string(buf))
+		return nil
+	}); err != nil {
+		return "", fmt.Errorf("vault token use: %w", err)
+	}
 
 	resp, err := c.httpClient.Do(req)
 	if err != nil {
