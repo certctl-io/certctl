@@ -417,6 +417,11 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /acme/profile/{id}/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
 	r.Register("POST /acme/profile/{id}/new-account", http.HandlerFunc(reg.ACME.NewAccount))
 	r.Register("POST /acme/profile/{id}/account/{acc_id}", http.HandlerFunc(reg.ACME.Account))
+	r.Register("POST /acme/profile/{id}/new-order", http.HandlerFunc(reg.ACME.NewOrder))
+	r.Register("POST /acme/profile/{id}/order/{ord_id}", http.HandlerFunc(reg.ACME.Order))
+	r.Register("POST /acme/profile/{id}/order/{ord_id}/finalize", http.HandlerFunc(reg.ACME.OrderFinalize))
+	r.Register("POST /acme/profile/{id}/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
+	r.Register("POST /acme/profile/{id}/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
 	// Default-profile shorthand. The handler's profile-resolution path
 	// returns userActionRequired (RFC 7807 + RFC 8555 §6.7) when
 	// CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is unset; when set it
@@ -426,6 +431,11 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /acme/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
 	r.Register("POST /acme/new-account", http.HandlerFunc(reg.ACME.NewAccount))
 	r.Register("POST /acme/account/{acc_id}", http.HandlerFunc(reg.ACME.Account))
+	r.Register("POST /acme/new-order", http.HandlerFunc(reg.ACME.NewOrder))
+	r.Register("POST /acme/order/{ord_id}", http.HandlerFunc(reg.ACME.Order))
+	r.Register("POST /acme/order/{ord_id}/finalize", http.HandlerFunc(reg.ACME.OrderFinalize))
+	r.Register("POST /acme/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
+	r.Register("POST /acme/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under

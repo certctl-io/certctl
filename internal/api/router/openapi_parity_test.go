@@ -71,6 +71,18 @@ var SpecParityExceptions = map[string]string{
 	"GET /acme/new-nonce":                      "RFC 8555 §7.2 new-nonce GET (default-profile shorthand); documented in docs/acme-server.md",
 	"POST /acme/new-account":                   "RFC 8555 §7.3 new-account (default-profile shorthand); documented in docs/acme-server.md",
 	"POST /acme/account/{acc_id}":              "RFC 8555 §7.3.2 + §7.3.6 (default-profile shorthand); documented in docs/acme-server.md",
+
+	// Phase 2 — orders + finalize + authz + cert.
+	"POST /acme/profile/{id}/new-order":               "RFC 8555 §7.4 new-order; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/order/{ord_id}":          "RFC 8555 §7.4 order POST-as-GET; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/order/{ord_id}/finalize": "RFC 8555 §7.4 finalize; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/authz/{authz_id}":        "RFC 8555 §7.5 authz POST-as-GET; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/cert/{cert_id}":          "RFC 8555 §7.4.2 cert download; documented in docs/acme-server.md",
+	"POST /acme/new-order":                            "Phase 2 default-profile shorthand for new-order.",
+	"POST /acme/order/{ord_id}":                       "Phase 2 default-profile shorthand for order POST-as-GET.",
+	"POST /acme/order/{ord_id}/finalize":              "Phase 2 default-profile shorthand for finalize.",
+	"POST /acme/authz/{authz_id}":                     "Phase 2 default-profile shorthand for authz POST-as-GET.",
+	"POST /acme/cert/{cert_id}":                       "Phase 2 default-profile shorthand for cert download.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

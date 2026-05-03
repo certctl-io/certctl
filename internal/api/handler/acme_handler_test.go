@@ -6,12 +6,14 @@ package handler
 import (
 	"bytes"
 	"context"
+	"crypto/x509"
 	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 
@@ -31,6 +33,13 @@ type mockACMEService struct {
 	LookupAccountFn     func(ctx context.Context, accountID string) (*domain.ACMEAccount, error)
 	UpdateAccountFn     func(ctx context.Context, accountID string, contact []string) (*domain.ACMEAccount, error)
 	DeactivateAccountFn func(ctx context.Context, accountID string) (*domain.ACMEAccount, error)
+	// Phase 2.
+	CreateOrderFn       func(ctx context.Context, accountID, profileID string, identifiers []domain.ACMEIdentifier, notBefore, notAfter *time.Time) (*domain.ACMEOrder, error)
+	LookupOrderFn       func(ctx context.Context, orderID, accountID string) (*domain.ACMEOrder, error)
+	LookupAuthzFn       func(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error)
+	ListAuthzsByOrderFn func(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error)
+	FinalizeOrderFn     func(ctx context.Context, accountID, orderID, profileID string, csr *x509.CertificateRequest, csrPEM string) (*service.FinalizeOrderResult, error)
+	LookupCertificateFn func(ctx context.Context, certID, accountID string) (string, error)
 }
 
 func (m *mockACMEService) BuildDirectory(ctx context.Context, profileID, baseURL string) (*acme.Directory, error) {
@@ -82,6 +91,48 @@ func (m *mockACMEService) DeactivateAccount(ctx context.Context, accountID strin
 	return nil, errors.New("DeactivateAccount not stubbed")
 }
 
+func (m *mockACMEService) CreateOrder(ctx context.Context, accountID, profileID string, identifiers []domain.ACMEIdentifier, notBefore, notAfter *time.Time) (*domain.ACMEOrder, error) {
+	if m.CreateOrderFn != nil {
+		return m.CreateOrderFn(ctx, accountID, profileID, identifiers, notBefore, notAfter)
+	}
+	return nil, errors.New("CreateOrder not stubbed")
+}
+
+func (m *mockACMEService) LookupOrder(ctx context.Context, orderID, accountID string) (*domain.ACMEOrder, error) {
+	if m.LookupOrderFn != nil {
+		return m.LookupOrderFn(ctx, orderID, accountID)
+	}
+	return nil, errors.New("LookupOrder not stubbed")
+}
+
+func (m *mockACMEService) LookupAuthz(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error) {
+	if m.LookupAuthzFn != nil {
+		return m.LookupAuthzFn(ctx, authzID)
+	}
+	return nil, errors.New("LookupAuthz not stubbed")
+}
+
+func (m *mockACMEService) ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error) {
+	if m.ListAuthzsByOrderFn != nil {
+		return m.ListAuthzsByOrderFn(ctx, orderID)
+	}
+	return nil, nil
+}
+
+func (m *mockACMEService) FinalizeOrder(ctx context.Context, accountID, orderID, profileID string, csr *x509.CertificateRequest, csrPEM string) (*service.FinalizeOrderResult, error) {
+	if m.FinalizeOrderFn != nil {
+		return m.FinalizeOrderFn(ctx, accountID, orderID, profileID, csr, csrPEM)
+	}
+	return nil, errors.New("FinalizeOrder not stubbed")
+}
+
+func (m *mockACMEService) LookupCertificate(ctx context.Context, certID, accountID string) (string, error) {
+	if m.LookupCertificateFn != nil {
+		return m.LookupCertificateFn(ctx, certID, accountID)
+	}
+	return "", errors.New("LookupCertificate not stubbed")
+}
+
 // newACMETestServer wires the ACMEHandler against the mock + a stdlib
 // ServeMux configured exactly the way internal/api/router/router.go
 // does it in production. Routes:
@@ -101,6 +152,11 @@ func newACMETestServer(t *testing.T, mock *mockACMEService) *httptest.Server {
 	mux.HandleFunc("GET /acme/profile/{id}/new-nonce", h.NewNonce)
 	mux.HandleFunc("POST /acme/profile/{id}/new-account", h.NewAccount)
 	mux.HandleFunc("POST /acme/profile/{id}/account/{acc_id}", h.Account)
+	mux.HandleFunc("POST /acme/profile/{id}/new-order", h.NewOrder)
+	mux.HandleFunc("POST /acme/profile/{id}/order/{ord_id}", h.Order)
+	mux.HandleFunc("POST /acme/profile/{id}/order/{ord_id}/finalize", h.OrderFinalize)
+	mux.HandleFunc("POST /acme/profile/{id}/authz/{authz_id}", h.Authz)
+	mux.HandleFunc("POST /acme/profile/{id}/cert/{cert_id}", h.Cert)
 	mux.HandleFunc("GET /acme/directory", h.Directory)
 	mux.HandleFunc("HEAD /acme/new-nonce", h.NewNonce)
 	mux.HandleFunc("GET /acme/new-nonce", h.NewNonce)
@@ -537,5 +593,150 @@ func TestACMEHandler_Account_PostAsGet(t *testing.T) {
 
 	if resp.StatusCode != http.StatusOK {
 		t.Errorf("status = %d, want 200 (POST-as-GET)", resp.StatusCode)
+	}
+}
+
+// --- Phase 2 — orders + finalize handler smoke -------------------------
+
+func TestACMEHandler_NewOrder_HappyPath(t *testing.T) {
+	mock := &mockACMEService{
+		VerifyJWSFn: stubVerifiedReq(
+			acme.NewOrderRequest{Identifiers: []acme.IdentifierJSON{{Type: "dns", Value: "example.com"}}},
+			&domain.ACMEAccount{AccountID: "acme-acc-X", Status: domain.ACMEAccountStatusValid, ProfileID: "prof-corp"},
+			nil,
+		),
+		CreateOrderFn: func(ctx context.Context, accountID, profileID string, identifiers []domain.ACMEIdentifier, notBefore, notAfter *time.Time) (*domain.ACMEOrder, error) {
+			return &domain.ACMEOrder{
+				OrderID:     "acme-ord-001",
+				AccountID:   accountID,
+				Identifiers: identifiers,
+				Status:      domain.ACMEOrderStatusReady,
+				ExpiresAt:   time.Now().Add(24 * time.Hour),
+			}, nil
+		},
+		ListAuthzsByOrderFn: func(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error) {
+			return []*domain.ACMEAuthorization{
+				{AuthzID: "acme-authz-001", OrderID: orderID, Status: domain.ACMEAuthzStatusValid},
+			}, nil
+		},
+	}
+	srv := newACMETestServer(t, mock)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/acme/profile/prof-corp/new-order", "application/jose+json", bytes.NewReader([]byte("ignored-by-mock")))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusCreated {
+		t.Errorf("status = %d, want 201", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Location"); !strings.Contains(got, "/order/acme-ord-001") {
+		t.Errorf("Location = %q", got)
+	}
+	var body acme.OrderResponseJSON
+	if err := json.NewDecoder(resp.Body).Decode(&body); err != nil {
+		t.Fatalf("Decode: %v", err)
+	}
+	if body.Status != "ready" {
+		t.Errorf("status = %q (trust_authenticated should auto-ready)", body.Status)
+	}
+	if len(body.Authorizations) != 1 || !strings.Contains(body.Authorizations[0], "/authz/acme-authz-001") {
+		t.Errorf("authorizations = %v", body.Authorizations)
+	}
+	if !strings.HasSuffix(body.Finalize, "/order/acme-ord-001/finalize") {
+		t.Errorf("finalize = %q", body.Finalize)
+	}
+}
+
+func TestACMEHandler_NewOrder_RejectedIdentifier(t *testing.T) {
+	mock := &mockACMEService{
+		VerifyJWSFn: stubVerifiedReq(
+			acme.NewOrderRequest{Identifiers: []acme.IdentifierJSON{{Type: "ip", Value: "10.0.0.1"}}},
+			&domain.ACMEAccount{AccountID: "acme-acc-X", Status: domain.ACMEAccountStatusValid, ProfileID: "prof-corp"},
+			nil,
+		),
+	}
+	srv := newACMETestServer(t, mock)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/acme/profile/prof-corp/new-order", "application/jose+json", bytes.NewReader([]byte("x")))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400 (rejected identifier)", resp.StatusCode)
+	}
+	var p acme.Problem
+	_ = json.NewDecoder(resp.Body).Decode(&p)
+	if p.Type != "urn:ietf:params:acme:error:rejectedIdentifier" {
+		t.Errorf("Problem.Type = %q", p.Type)
+	}
+	if len(p.Subproblems) == 0 {
+		t.Error("expected subproblems for per-identifier rejection")
+	}
+}
+
+func TestACMEHandler_OrderFinalize_BadCSR(t *testing.T) {
+	mock := &mockACMEService{
+		VerifyJWSFn: stubVerifiedReq(
+			acme.FinalizeRequest{CSR: "not-base64!!!"},
+			&domain.ACMEAccount{AccountID: "acme-acc-X", Status: domain.ACMEAccountStatusValid, ProfileID: "prof-corp"},
+			nil,
+		),
+	}
+	srv := newACMETestServer(t, mock)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/acme/profile/prof-corp/order/acme-ord-001/finalize", "application/jose+json", bytes.NewReader([]byte("x")))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusBadRequest {
+		t.Errorf("status = %d, want 400", resp.StatusCode)
+	}
+	var p acme.Problem
+	_ = json.NewDecoder(resp.Body).Decode(&p)
+	if p.Type != "urn:ietf:params:acme:error:badCSR" {
+		t.Errorf("Problem.Type = %q", p.Type)
+	}
+}
+
+func TestACMEHandler_Cert_HappyPath(t *testing.T) {
+	pemChain := "-----BEGIN CERTIFICATE-----\nMIIBhjCCAQ==\n-----END CERTIFICATE-----\n"
+	mock := &mockACMEService{
+		VerifyJWSFn: stubVerifiedReq(
+			struct{}{},
+			&domain.ACMEAccount{AccountID: "acme-acc-X", Status: domain.ACMEAccountStatusValid, ProfileID: "prof-corp"},
+			nil,
+		),
+		LookupCertificateFn: func(ctx context.Context, certID, accountID string) (string, error) {
+			return pemChain, nil
+		},
+	}
+	srv := newACMETestServer(t, mock)
+	defer srv.Close()
+
+	resp, err := http.Post(srv.URL+"/acme/profile/prof-corp/cert/mc-acme-001", "application/jose+json", bytes.NewReader([]byte("x")))
+	if err != nil {
+		t.Fatalf("Post: %v", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		t.Errorf("status = %d, want 200", resp.StatusCode)
+	}
+	if got := resp.Header.Get("Content-Type"); got != "application/pem-certificate-chain" {
+		t.Errorf("content-type = %q", got)
+	}
+	body := bytes.NewBuffer(nil)
+	_, _ = body.ReadFrom(resp.Body)
+	if !strings.Contains(body.String(), "BEGIN CERTIFICATE") {
+		t.Errorf("body did not contain PEM cert: %q", body.String())
 	}
 }

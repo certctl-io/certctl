@@ -7,11 +7,14 @@ as an ACME issuer with no certctl-side modification — closing the
 "deploy a certctl agent on every K8s node" friction that costs deals to
 external PKI vendors today.
 
-> **Phase status (2026-05-03):** Phase 1b — directory + new-nonce +
-> new-account + account/{id} update + JWS verifier (RFC 7515 + go-jose
-> v4). An ACME client can now run new-account end-to-end and register
-> against a profile. Orders + challenges + key rollover + revocation +
-> ARI land in subsequent phases. Track shipped phases via
+> **Phase status (2026-05-03):** Phase 2 — directory + new-nonce +
+> new-account + account/{id} + new-order + order/{id} + finalize +
+> authz/{id} + cert/{id}. An ACME client running against a profile
+> with `acme_auth_mode='trust_authenticated'` end-to-end-issues a real
+> cert: `lego --server https://certctl/acme/profile/<id>/directory ...
+> run` succeeds. Profiles in `challenge` mode get all the same code
+> path with authz/challenge rows in `pending` state until Phase 3's
+> validators wire up. Track shipped phases via
 > `git log --grep='acme-server:'`.
 
 ## Configuration
@@ -95,29 +98,70 @@ the `caBundle` requirement is flagged here in Phase 1a's docs because
 operators hit it the moment they try to point a real ACME client at
 certctl.
 
-## Endpoints (Phase 1b)
+## Endpoints (Phase 2)
 
 Routes registered in `internal/api/router/router.go::RegisterHandlers`:
 
-| Method | Path                                       | RFC ref         | Auth     | Description |
-|--------|--------------------------------------------|-----------------|----------|-------------|
-| GET    | `/acme/profile/{id}/directory`             | RFC 8555 §7.1.1 | unauth   | Per-profile directory document. |
-| HEAD   | `/acme/profile/{id}/new-nonce`             | RFC 8555 §7.2   | unauth   | Returns 200 + Replay-Nonce header. |
-| GET    | `/acme/profile/{id}/new-nonce`             | RFC 8555 §7.2   | unauth   | Returns 204 + Replay-Nonce header. |
-| POST   | `/acme/profile/{id}/new-account`           | RFC 8555 §7.3   | JWS jwk  | Register a new account; idempotent re-registration of an existing JWK returns the existing row. |
-| POST   | `/acme/profile/{id}/account/{acc_id}`      | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Update contact list, deactivate, or POST-as-GET (RFC 8555 §6.3) to fetch the account. |
-| GET    | `/acme/directory`                          | RFC 8555 §7.1.1 | unauth   | Shorthand path; mirrors per-profile when `CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID` is set. |
-| HEAD   | `/acme/new-nonce`                          | RFC 8555 §7.2   | unauth   | Shorthand. |
-| GET    | `/acme/new-nonce`                          | RFC 8555 §7.2   | unauth   | Shorthand. |
-| POST   | `/acme/new-account`                        | RFC 8555 §7.3   | JWS jwk  | Shorthand. |
-| POST   | `/acme/account/{acc_id}`                   | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Shorthand. |
+| Method | Path                                                  | RFC ref         | Auth     | Description |
+|--------|-------------------------------------------------------|-----------------|----------|-------------|
+| GET    | `/acme/profile/{id}/directory`                        | RFC 8555 §7.1.1 | unauth   | Per-profile directory document. |
+| HEAD   | `/acme/profile/{id}/new-nonce`                        | RFC 8555 §7.2   | unauth   | Returns 200 + Replay-Nonce header. |
+| GET    | `/acme/profile/{id}/new-nonce`                        | RFC 8555 §7.2   | unauth   | Returns 204 + Replay-Nonce header. |
+| POST   | `/acme/profile/{id}/new-account`                      | RFC 8555 §7.3   | JWS jwk  | Register a new account; idempotent re-registration of an existing JWK returns the existing row. |
+| POST   | `/acme/profile/{id}/account/{acc_id}`                 | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Update contact list, deactivate, or POST-as-GET (RFC 8555 §6.3) to fetch the account. |
+| POST   | `/acme/profile/{id}/new-order`                        | RFC 8555 §7.4   | JWS kid | Submit an order; identifier validation runs before order creation. |
+| POST   | `/acme/profile/{id}/order/{ord_id}`                   | RFC 8555 §7.4   | JWS kid | POST-as-GET fetch of an order's current state. |
+| POST   | `/acme/profile/{id}/order/{ord_id}/finalize`          | RFC 8555 §7.4   | JWS kid | Submit the CSR + finalize. Issues + persists managed cert row + version. |
+| POST   | `/acme/profile/{id}/authz/{authz_id}`                 | RFC 8555 §7.5   | JWS kid | POST-as-GET fetch of an authorization. |
+| POST   | `/acme/profile/{id}/cert/{cert_id}`                   | RFC 8555 §7.4.2 | JWS kid | POST-as-GET cert chain download (PEM). |
+| GET    | `/acme/directory`                                     | RFC 8555 §7.1.1 | unauth   | Shorthand path; mirrors per-profile when `CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID` is set. |
+| HEAD   | `/acme/new-nonce`                                     | RFC 8555 §7.2   | unauth   | Shorthand. |
+| GET    | `/acme/new-nonce`                                     | RFC 8555 §7.2   | unauth   | Shorthand. |
+| POST   | `/acme/new-account`                                   | RFC 8555 §7.3   | JWS jwk  | Shorthand. |
+| POST   | `/acme/account/{acc_id}`                              | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Shorthand. |
+| POST   | `/acme/new-order`                                     | RFC 8555 §7.4   | JWS kid | Shorthand. |
+| POST   | `/acme/order/{ord_id}`                                | RFC 8555 §7.4   | JWS kid | Shorthand. |
+| POST   | `/acme/order/{ord_id}/finalize`                       | RFC 8555 §7.4   | JWS kid | Shorthand. |
+| POST   | `/acme/authz/{authz_id}`                              | RFC 8555 §7.5   | JWS kid | Shorthand. |
+| POST   | `/acme/cert/{cert_id}`                                | RFC 8555 §7.4.2 | JWS kid | Shorthand. |
 
-The remaining RFC 8555 endpoints (`new-order`, `order/{id}`,
-`order/{id}/finalize`, `authz/{id}`, `challenge/{id}`, `cert/{id}`,
-`key-change`, `revoke-cert`, `renewal-info`) are advertised in the
-directory document but not yet served — clients hitting them get a 404
-until subsequent phases land. The directory document includes their
-URLs because RFC 8555 doesn't permit a partial directory.
+The remaining RFC 8555 endpoints (`challenge/{id}`, `key-change`,
+`revoke-cert`, `renewal-info`) are advertised in the directory document
+but not yet served — clients hitting them get a 404 until subsequent
+phases land. The directory document includes their URLs because RFC 8555
+doesn't permit a partial directory.
+
+## Finalize routing through `CertificateService.Create` (Phase 2 architecture)
+
+The finalize path mirrors how every other certctl issuance surface
+(EST, SCEP, agent, REST API) routes through the canonical pipeline:
+
+1. JWS-verify the request (`internal/api/acme/jws.go`).
+2. Validate the CSR's DNS-name set equals the order's identifier set
+   exactly (case-folded). Mismatches return RFC 8555
+   `urn:ietf:params:acme:error:badCSR`.
+3. Update the order row to `status=processing` (`s.tx.WithinTx` +
+   `auditService.RecordEventWithTx` — atomic with audit row).
+4. Issue the cert via the bound profile's `IssuerConnector` adapter
+   (same `IssueCertificate(ctx, commonName, sans, csrPEM, ekus,
+   maxTTLSeconds, mustStaple)` call EST/SCEP/agent take).
+5. Insert the `managed_certificates` row via
+   `service.CertificateService.Create(ctx, *ManagedCertificate, actor)`.
+   Source is stamped `domain.CertificateSourceACME` so operators can
+   bulk-revoke ACME-issued certs by filtering on `Source=ACME`.
+6. Insert the `certificate_versions` row +
+   transition the order to `status=valid` with `certificate_id` set
+   (one final `WithinTx` covering both writes + the audit row).
+
+This means RenewalPolicy, CertificateProfile, per-issuer-type
+Prometheus metrics, audit rows, and revocation-pipeline integration
+all apply uniformly to ACME-issued certs via the same code path that
+already serves EST/SCEP/agent/REST issuance.
+
+The atomicity boundary: there is a brief window between step 5 (cert
+exists) and step 6 (order shows valid) where the order row still says
+`processing`. Phase 5's GC scheduler reconciles. The actor string on
+audit rows is `acme:<account-id>`.
 
 ## JWS verification (Phase 1b)
 
@@ -154,7 +198,7 @@ at `internal/service/certificate.go:131`).
 |-------|-------------|---------|
 | 1a    | live        | directory + new-nonce + per-profile routing |
 | 1b    | live        | new-account + account/{id} + JWS verifier (RFC 7515 + go-jose v4) |
-| 2     | not yet     | orders + authzs + finalize + cert download (trust_authenticated mode end-to-end) |
+| 2     | live        | orders + authzs + finalize + cert download (trust_authenticated mode end-to-end) |
 | 3     | not yet     | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation |
 | 4     | not yet     | key rollover + revocation + ARI (RFC 9773) |
 | 5     | not yet     | cert-manager integration test + production hardening |

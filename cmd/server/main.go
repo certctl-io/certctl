@@ -758,6 +758,12 @@ func main() {
 	acmeService := service.NewACMEService(acmeRepo, profileRepo, cfg.ACMEServer)
 	acmeService.SetTransactor(transactor)
 	acmeService.SetAuditService(auditService)
+	// Phase 2 — finalize plumbing. The finalize handler routes
+	// through CertificateService.Create + certRepo.CreateVersionWithTx
+	// + IssuerRegistry.Get for the bound profile's issuer. Same
+	// pipeline EST/SCEP/agent/renewal use, so policy + audit + per-
+	// issuer-type metrics apply uniformly to ACME-issued certs.
+	acmeService.SetIssuancePipeline(certificateService, certificateRepo, issuerRegistry)
 	acmeHandler := handler.NewACMEHandler(acmeService)
 
 	// Build the API router with all handlers

@@ -59,6 +59,13 @@ const (
 	CertificateSourceSCEP  CertificateSource = "SCEP"
 	CertificateSourceAPI   CertificateSource = "API"
 	CertificateSourceAgent CertificateSource = "Agent"
+	// CertificateSourceACME stamps every cert issued through the
+	// built-in ACME server endpoint (RFC 8555 finalize → cert
+	// download). The ACME service (internal/service/acme.go)
+	// pins this on every managed_certificates row it inserts at
+	// finalize time. Operators bulk-revoke ACME-issued certs by
+	// filtering on Source=ACME.
+	CertificateSourceACME CertificateSource = "ACME"
 )
 
 // CertificateVersion represents a specific version of a certificate.

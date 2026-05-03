@@ -5,10 +5,14 @@ package handler
 
 import (
 	"context"
+	"crypto/x509"
+	"encoding/base64"
 	"encoding/json"
+	"encoding/pem"
 	"errors"
 	"io"
 	"net/http"
+	"time"
 
 	jose "github.com/go-jose/go-jose/v4"
 
@@ -38,6 +42,13 @@ type ACMEService interface {
 	LookupAccount(ctx context.Context, accountID string) (*domain.ACMEAccount, error)
 	UpdateAccount(ctx context.Context, accountID string, contact []string) (*domain.ACMEAccount, error)
 	DeactivateAccount(ctx context.Context, accountID string) (*domain.ACMEAccount, error)
+	// Phase 2 — orders + finalize + authz + cert download.
+	CreateOrder(ctx context.Context, accountID, profileID string, identifiers []domain.ACMEIdentifier, notBefore, notAfter *time.Time) (*domain.ACMEOrder, error)
+	LookupOrder(ctx context.Context, orderID, accountID string) (*domain.ACMEOrder, error)
+	LookupAuthz(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error)
+	ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error)
+	FinalizeOrder(ctx context.Context, accountID, orderID, profileID string, csr *x509.CertificateRequest, csrPEM string) (*service.FinalizeOrderResult, error)
+	LookupCertificate(ctx context.Context, certID, accountID string) (string, error)
 }
 
 // ACMEHandler exposes the ACME server's RFC 8555 endpoints under the
@@ -182,6 +193,26 @@ func writeServiceError(w http.ResponseWriter, err error) {
 	case errors.Is(err, service.ErrACMEAccountDoesNotExist):
 		acme.WriteProblem(w, acme.AccountDoesNotExist(
 			"no account exists for this JWK; submit a new-account request without onlyReturnExisting"))
+	case errors.Is(err, service.ErrACMEOrderNotFound), errors.Is(err, service.ErrACMEAuthzNotFound), errors.Is(err, service.ErrACMECertificateNotFound):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:malformed",
+			Detail: "resource not found",
+			Status: http.StatusNotFound,
+		})
+	case errors.Is(err, service.ErrACMEOrderUnauthorized):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:unauthorized",
+			Detail: "account does not own this resource",
+			Status: http.StatusUnauthorized,
+		})
+	case errors.Is(err, service.ErrACMEOrderNotReady):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:orderNotReady",
+			Detail: "order is not in the `ready` state; complete authorizations first",
+			Status: http.StatusForbidden,
+		})
+	case errors.Is(err, service.ErrACMEUnsupportedAuthMode), errors.Is(err, service.ErrACMEFinalizeUnconfigured):
+		acme.WriteProblem(w, acme.ServerInternal("ACME server is not fully configured; contact the operator"))
 	default:
 		// Avoid leaking internal error text per master-prompt
 		// criterion #10 (operator-actionable errors with no info
@@ -409,4 +440,356 @@ func trimBody(b []byte) []byte {
 		b = b[:len(b)-1]
 	}
 	return b
+}
+
+// --- Phase 2 — orders + finalize + authz + cert handlers ---------------
+
+// NewOrder handles POST /acme/profile/{id}/new-order (RFC 8555 §7.4).
+// JWS path: kid (registered account).
+func (h ACMEHandler) NewOrder(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false /*expectNewAccount*/, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	var req acme.NewOrderRequest
+	if err := json.Unmarshal(verified.Payload, &req); err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not parse new-order payload"))
+		return
+	}
+	// Identifier validation runs BEFORE order creation. Rejected
+	// identifiers do NOT create an acme_orders row.
+	if probs := acme.ValidateIdentifiers(req.Identifiers); len(probs) > 0 {
+		// Multi-rejection → wrap in subproblems.
+		w.Header().Set("Content-Type", acme.ProblemContentType)
+		w.WriteHeader(http.StatusBadRequest)
+		_ = json.NewEncoder(w).Encode(acme.Problem{
+			Type:        "urn:ietf:params:acme:error:rejectedIdentifier",
+			Detail:      "one or more identifiers were rejected",
+			Status:      http.StatusBadRequest,
+			Subproblems: probs,
+		})
+		return
+	}
+
+	// Translate wire shape to domain shape.
+	domainIDs := make([]domain.ACMEIdentifier, 0, len(req.Identifiers))
+	for _, id := range req.Identifiers {
+		domainIDs = append(domainIDs, domain.ACMEIdentifier{Type: id.Type, Value: id.Value})
+	}
+	notBefore := parseOptionalTime(req.NotBefore)
+	notAfter := parseOptionalTime(req.NotAfter)
+
+	order, err := h.svc.CreateOrder(r.Context(), verified.Account.AccountID, profileID, domainIDs, notBefore, notAfter)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Location", h.orderURL(r, profileID, order.OrderID))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(h.marshalOrderForResponse(r, profileID, order))
+}
+
+// Order handles POST /acme/profile/{id}/order/{ord_id} (RFC 8555 §7.4
+// POST-as-GET — empty payload returns the current order state).
+func (h ACMEHandler) Order(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	orderID := r.PathValue("ord_id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	order, err := h.svc.LookupOrder(r.Context(), orderID, verified.Account.AccountID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(h.marshalOrderForResponse(r, profileID, order))
+}
+
+// OrderFinalize handles POST /acme/profile/{id}/order/{ord_id}/finalize
+// (RFC 8555 §7.4). Payload carries the base64url-DER CSR.
+func (h ACMEHandler) OrderFinalize(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	orderID := r.PathValue("ord_id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	var req acme.FinalizeRequest
+	if err := json.Unmarshal(verified.Payload, &req); err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not parse finalize payload"))
+		return
+	}
+	csrDER, err := base64.RawURLEncoding.DecodeString(req.CSR)
+	if err != nil {
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:badCSR",
+			Detail: "csr field is not valid base64url",
+			Status: http.StatusBadRequest,
+		})
+		return
+	}
+	csr, err := x509.ParseCertificateRequest(csrDER)
+	if err != nil {
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:badCSR",
+			Detail: "csr did not parse as a valid PKCS#10",
+			Status: http.StatusBadRequest,
+		})
+		return
+	}
+	csrPEM := string(pem.EncodeToMemory(&pem.Block{Type: "CERTIFICATE REQUEST", Bytes: csrDER}))
+
+	result, err := h.svc.FinalizeOrder(r.Context(), verified.Account.AccountID, orderID, profileID, csr, csrPEM)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Location", h.orderURL(r, profileID, result.Order.OrderID))
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(h.marshalOrderForResponse(r, profileID, result.Order))
+}
+
+// Authz handles POST /acme/profile/{id}/authz/{authz_id} (RFC 8555
+// §7.5 POST-as-GET).
+func (h ACMEHandler) Authz(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	authzID := r.PathValue("authz_id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	authz, err := h.svc.LookupAuthz(r.Context(), authzID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(acme.MarshalAuthorization(authz, h.challengeURLBuilder(r, profileID)))
+}
+
+// Cert handles POST /acme/profile/{id}/cert/{cert_id} (RFC 8555 §7.4.2
+// POST-as-GET cert download). Returns the PEM chain.
+func (h ACMEHandler) Cert(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	certID := r.PathValue("cert_id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	pemChain, err := h.svc.LookupCertificate(r.Context(), certID, verified.Account.AccountID)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Content-Type", "application/pem-certificate-chain")
+	w.WriteHeader(http.StatusOK)
+	_, _ = w.Write([]byte(pemChain))
+}
+
+// orderURL composes the per-order URL for Location headers and the
+// finalize URL embedded in the order JSON.
+func (h ACMEHandler) orderURL(r *http.Request, profileID, orderID string) string {
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
+	}
+	prefix := scheme + "://" + r.Host
+	if profileID != "" {
+		prefix += "/acme/profile/" + profileID
+	} else {
+		prefix += "/acme"
+	}
+	return prefix + "/order/" + orderID
+}
+
+func (h ACMEHandler) authzURL(r *http.Request, profileID, authzID string) string {
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
+	}
+	prefix := scheme + "://" + r.Host
+	if profileID != "" {
+		prefix += "/acme/profile/" + profileID
+	} else {
+		prefix += "/acme"
+	}
+	return prefix + "/authz/" + authzID
+}
+
+func (h ACMEHandler) certURL(r *http.Request, profileID, certID string) string {
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
+	}
+	prefix := scheme + "://" + r.Host
+	if profileID != "" {
+		prefix += "/acme/profile/" + profileID
+	} else {
+		prefix += "/acme"
+	}
+	return prefix + "/cert/" + certID
+}
+
+// challengeURLBuilder returns a closure for MarshalAuthorization to
+// compute per-challenge URLs.
+func (h ACMEHandler) challengeURLBuilder(r *http.Request, profileID string) func(challengeID string) string {
+	scheme := "https"
+	if r.TLS == nil {
+		scheme = "http"
+	}
+	prefix := scheme + "://" + r.Host
+	if profileID != "" {
+		prefix += "/acme/profile/" + profileID
+	} else {
+		prefix += "/acme"
+	}
+	return func(challengeID string) string { return prefix + "/challenge/" + challengeID }
+}
+
+// marshalOrderForResponse builds the OrderResponseJSON for an order,
+// fetching the per-order authzs to populate the URL list. The cert URL
+// is populated only when status=valid + certificate_id is set.
+func (h ACMEHandler) marshalOrderForResponse(r *http.Request, profileID string, order *domain.ACMEOrder) acme.OrderResponseJSON {
+	authzs, _ := h.svc.ListAuthzsByOrder(r.Context(), order.OrderID)
+	authzURLs := make([]string, 0, len(authzs))
+	for _, a := range authzs {
+		authzURLs = append(authzURLs, h.authzURL(r, profileID, a.AuthzID))
+	}
+	finalize := h.orderURL(r, profileID, order.OrderID) + "/finalize"
+	certURL := ""
+	if order.CertificateID != "" {
+		certURL = h.certURL(r, profileID, order.CertificateID)
+	}
+	return acme.MarshalOrder(order, authzURLs, finalize, certURL)
+}
+
+// parseOptionalTime parses an RFC 3339 string; returns nil on empty or
+// parse failure (the latter is best-effort — the spec leaves notBefore
+// / notAfter as advisory).
+func parseOptionalTime(s string) *time.Time {
+	if s == "" {
+		return nil
+	}
+	t, err := time.Parse(time.RFC3339, s)
+	if err != nil {
+		return nil
+	}
+	return &t
 }

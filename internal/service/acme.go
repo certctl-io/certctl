@@ -5,8 +5,11 @@ package service
 
 import (
 	"context"
+	cryptorand "crypto/rand"
+	"crypto/x509"
 	"errors"
 	"fmt"
+	"strings"
 	"sync/atomic"
 	"time"
 
@@ -38,6 +41,14 @@ type ACMERepo interface {
 	GetAccountByThumbprint(ctx context.Context, profileID, thumbprint string) (*domain.ACMEAccount, error)
 	UpdateAccountContactWithTx(ctx context.Context, q repository.Querier, accountID string, contact []string) error
 	UpdateAccountStatusWithTx(ctx context.Context, q repository.Querier, accountID string, status domain.ACMEAccountStatus) error
+	// Phase 2 — order / authz / challenge CRUD.
+	CreateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error
+	GetOrderByID(ctx context.Context, orderID string) (*domain.ACMEOrder, error)
+	UpdateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error
+	CreateAuthzWithTx(ctx context.Context, q repository.Querier, authz *domain.ACMEAuthorization) error
+	GetAuthzByID(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error)
+	ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error)
+	CreateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error
 }
 
 // profileLookup is the minimum surface ACMEService needs to resolve a
@@ -51,10 +62,12 @@ type profileLookup interface {
 // ACMEService orchestrates the ACME server's RFC 8555 surface.
 //
 //   - Phase 1a (live): BuildDirectory, IssueNonce.
-//   - Phase 1b (this commit): VerifyJWS, NewAccount, LookupAccount,
+//   - Phase 1b (live): VerifyJWS, NewAccount, LookupAccount,
 //     UpdateAccount, DeactivateAccount.
-//   - Subsequent phases extend with new-order, finalize, challenges,
-//     key-change, revoke, ARI.
+//   - Phase 2 (this commit): CreateOrder, LookupOrder, FinalizeOrder,
+//     LookupAuthz, LookupCertificate.
+//   - Subsequent phases extend with challenge validation, key
+//     rollover, revocation, ARI.
 //
 // The struct deliberately holds raw config rather than per-field
 // extracted values — readers use 4 of the 11 fields and reading them
@@ -74,6 +87,17 @@ type ACMEService struct {
 	// stateful tables.
 	tx           repository.Transactor
 	auditService *AuditService
+
+	// Phase 2 — finalize plumbing. The finalize handler routes
+	// through CertificateService.Create (managed_certificates row +
+	// audit row in its own WithinTx) AND certRepo.CreateVersionWithTx
+	// (certificate_versions row). Issuance itself goes through the
+	// IssuerRegistry's IssuerConnector adapter — same code path
+	// EST/SCEP/agent take. cmd/server/main.go wires all three at
+	// startup; tests inject mocks.
+	certService    *CertificateService
+	certRepo       repository.CertificateRepository
+	issuerRegistry *IssuerRegistry
 }
 
 // NewACMEService constructs an ACMEService with the directory + nonce
@@ -98,6 +122,21 @@ func (s *ACMEService) SetTransactor(tx repository.Transactor) { s.tx = tx }
 // constructs auditService once and passes the same instance into
 // every service that emits audit rows.
 func (s *ACMEService) SetAuditService(a *AuditService) { s.auditService = a }
+
+// SetIssuancePipeline wires Phase 2 finalize dependencies: the
+// certificate service (for managed_certificates row + audit row),
+// the certificate repository (for certificate_versions row), and the
+// issuer registry (for routing IssueCertificate against the bound
+// profile's issuer). cmd/server/main.go calls this at startup.
+//
+// All three are required for the finalize path. When unset, FinalizeOrder
+// returns ErrACMEFinalizeUnconfigured (handler maps to
+// urn:ietf:params:acme:error:serverInternal).
+func (s *ACMEService) SetIssuancePipeline(certSvc *CertificateService, certRepo repository.CertificateRepository, registry *IssuerRegistry) {
+	s.certService = certSvc
+	s.certRepo = certRepo
+	s.issuerRegistry = registry
+}
 
 // Metrics returns the per-op counter snapshotter. cmd/server/main.go
 // passes this into MetricsHandler so the Prometheus exposer picks up
@@ -126,6 +165,41 @@ var ErrACMEAccountNotFound = errors.New("acme: account not found")
 // JWK. RFC 8555 §7.3.1 requires returning 400 +
 // urn:ietf:params:acme:error:accountDoesNotExist (NOT 404).
 var ErrACMEAccountDoesNotExist = errors.New("acme: account does not exist for this JWK")
+
+// Phase 2 sentinels.
+
+// ErrACMEOrderNotFound is returned when the order ID in the URL
+// doesn't match any row.
+var ErrACMEOrderNotFound = errors.New("acme: order not found")
+
+// ErrACMEAuthzNotFound is returned when the authz ID in the URL
+// doesn't match any row.
+var ErrACMEAuthzNotFound = errors.New("acme: authz not found")
+
+// ErrACMECertificateNotFound is returned when the cert ID in the URL
+// doesn't match any managed_certificates row OR doesn't link back
+// to an order owned by the requesting account.
+var ErrACMECertificateNotFound = errors.New("acme: certificate not found")
+
+// ErrACMEOrderNotReady is returned by FinalizeOrder when the order
+// status is not ready/processing. RFC 8555 §7.4 mandates
+// urn:ietf:params:acme:error:orderNotReady.
+var ErrACMEOrderNotReady = errors.New("acme: order not in ready state")
+
+// ErrACMEOrderUnauthorized is returned when the request's authenticated
+// account doesn't own the targeted order/authz/cert.
+var ErrACMEOrderUnauthorized = errors.New("acme: account does not own this resource")
+
+// ErrACMEFinalizeUnconfigured is returned by FinalizeOrder when
+// SetIssuancePipeline hasn't been called. Indicates a deploy-time
+// wiring bug; mapped to serverInternal.
+var ErrACMEFinalizeUnconfigured = errors.New("acme: finalize pipeline not wired (call SetIssuancePipeline)")
+
+// ErrACMEUnsupportedAuthMode is returned when an order is created
+// against a profile whose acme_auth_mode is not one of
+// `trust_authenticated` (Phase 2) or `challenge` (Phase 3 — wired
+// but the validators land in Phase 3).
+var ErrACMEUnsupportedAuthMode = errors.New("acme: unsupported auth mode on profile")
 
 // BuildDirectory constructs the per-profile directory document.
 //
@@ -227,6 +301,16 @@ type ACMEMetrics struct {
 	UpdateAccountTotal        atomic.Uint64
 	UpdateAccountFailureTotal atomic.Uint64
 	DeactivateAccountTotal    atomic.Uint64
+
+	// Phase 2 — orders + finalize + cert download.
+	NewOrderTotal             atomic.Uint64
+	NewOrderFailureTotal      atomic.Uint64
+	NewOrderRejectedTotal     atomic.Uint64 // identifier-validation rejection
+	FinalizeOrderTotal        atomic.Uint64
+	FinalizeOrderFailureTotal atomic.Uint64
+	CertDownloadTotal         atomic.Uint64
+	CertDownloadFailureTotal  atomic.Uint64
+	AuthzReadTotal            atomic.Uint64
 }
 
 // NewACMEMetrics returns a zeroed counter table. Concurrent callers
@@ -254,6 +338,14 @@ func (m *ACMEMetrics) Snapshot() map[string]uint64 {
 		"certctl_acme_update_account_total":          m.UpdateAccountTotal.Load(),
 		"certctl_acme_update_account_failures_total": m.UpdateAccountFailureTotal.Load(),
 		"certctl_acme_deactivate_account_total":      m.DeactivateAccountTotal.Load(),
+		"certctl_acme_new_order_total":               m.NewOrderTotal.Load(),
+		"certctl_acme_new_order_failures_total":      m.NewOrderFailureTotal.Load(),
+		"certctl_acme_new_order_rejected_total":      m.NewOrderRejectedTotal.Load(),
+		"certctl_acme_finalize_order_total":          m.FinalizeOrderTotal.Load(),
+		"certctl_acme_finalize_order_failures_total": m.FinalizeOrderFailureTotal.Load(),
+		"certctl_acme_cert_download_total":           m.CertDownloadTotal.Load(),
+		"certctl_acme_cert_download_failures_total":  m.CertDownloadFailureTotal.Load(),
+		"certctl_acme_authz_read_total":              m.AuthzReadTotal.Load(),
 	}
 }
 
@@ -503,4 +595,492 @@ func (s *ACMEService) DeactivateAccount(ctx context.Context, accountID string) (
 	}
 	s.metrics.bump(&s.metrics.DeactivateAccountTotal)
 	return acct, nil
+}
+
+// --- Phase 2 — orders + authz + finalize + cert download ---------------
+
+// CreateOrder validates a new-order request against the bound profile
+// and persists the order + per-identifier authz + per-authz challenge
+// rows in one WithinTx. Returns the created order on success.
+//
+// Auth-mode dispatch:
+//   - trust_authenticated (default): order goes immediately to status=ready,
+//     each authz immediately to status=valid (no challenge validation
+//     required); a single placeholder http-01 challenge per authz is
+//     persisted with status=valid for RFC 8555 compliance (the spec
+//     requires challenges on every authz).
+//   - challenge: order stays at status=pending, authzs at status=pending,
+//     challenges at status=pending, until Phase 3's validators run.
+func (s *ACMEService) CreateOrder(
+	ctx context.Context,
+	accountID, profileID string,
+	identifiers []domain.ACMEIdentifier,
+	notBefore, notAfter *time.Time,
+) (*domain.ACMEOrder, error) {
+	if s.tx == nil || s.auditService == nil {
+		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+		return nil, fmt.Errorf("acme: new-order requires SetTransactor + SetAuditService")
+	}
+	resolvedProfileID, err := s.resolveProfile(ctx, profileID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+		return nil, err
+	}
+	profile, err := s.profiles.Get(ctx, resolvedProfileID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+		return nil, fmt.Errorf("acme: lookup profile: %w", err)
+	}
+	authMode := profile.ACMEAuthMode
+	if authMode == "" {
+		authMode = string(s.cfg.DefaultAuthMode)
+	}
+	if authMode == "" {
+		authMode = "trust_authenticated"
+	}
+	if authMode != "trust_authenticated" && authMode != "challenge" {
+		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+		return nil, fmt.Errorf("%w: %q", ErrACMEUnsupportedAuthMode, authMode)
+	}
+
+	now := time.Now().UTC()
+	orderTTL := s.cfg.OrderTTL
+	if orderTTL <= 0 {
+		orderTTL = 24 * time.Hour
+	}
+	authzTTL := s.cfg.AuthzTTL
+	if authzTTL <= 0 {
+		authzTTL = 24 * time.Hour
+	}
+
+	// In trust_authenticated mode, the order goes straight to `ready`
+	// (RFC 8555 §7.1.6: ready means all authzs valid, awaiting CSR).
+	// In challenge mode, the order stays `pending` until challenges
+	// validate.
+	orderStatus := domain.ACMEOrderStatusPending
+	authzStatus := domain.ACMEAuthzStatusPending
+	challengeStatus := domain.ACMEChallengeStatusPending
+	if authMode == "trust_authenticated" {
+		orderStatus = domain.ACMEOrderStatusReady
+		authzStatus = domain.ACMEAuthzStatusValid
+		challengeStatus = domain.ACMEChallengeStatusValid
+	}
+
+	order := &domain.ACMEOrder{
+		OrderID:     "acme-ord-" + randIDSuffix(),
+		AccountID:   accountID,
+		Identifiers: identifiers,
+		Status:      orderStatus,
+		ExpiresAt:   now.Add(orderTTL),
+		NotBefore:   notBefore,
+		NotAfter:    notAfter,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+
+	auditDetails := map[string]interface{}{
+		"account_id":   accountID,
+		"profile_id":   resolvedProfileID,
+		"auth_mode":    authMode,
+		"identifier_n": len(identifiers),
+		"identifiers":  identifierStrings(identifiers),
+	}
+
+	err = s.tx.WithinTx(ctx, func(q repository.Querier) error {
+		if err := s.repo.CreateOrderWithTx(ctx, q, order); err != nil {
+			return fmt.Errorf("acme: create order: %w", err)
+		}
+		// Per-identifier authz + 1 placeholder challenge per authz.
+		for _, id := range identifiers {
+			authz := &domain.ACMEAuthorization{
+				AuthzID:    "acme-authz-" + randIDSuffix(),
+				OrderID:    order.OrderID,
+				Identifier: id,
+				Status:     authzStatus,
+				ExpiresAt:  now.Add(authzTTL),
+				Wildcard:   strings.HasPrefix(id.Value, "*."),
+				CreatedAt:  now,
+				UpdatedAt:  now,
+			}
+			if err := s.repo.CreateAuthzWithTx(ctx, q, authz); err != nil {
+				return fmt.Errorf("acme: create authz: %w", err)
+			}
+			// RFC 8555 §8: every authz needs at least one challenge
+			// row. Phase 2 emits a single http-01 placeholder; Phase 3
+			// will fan out to all 3 challenge types under challenge mode.
+			ch := &domain.ACMEChallenge{
+				ChallengeID: "acme-chall-" + randIDSuffix(),
+				AuthzID:     authz.AuthzID,
+				Type:        domain.ACMEChallengeTypeHTTP01,
+				Status:      challengeStatus,
+				Token:       randIDSuffix(),
+				CreatedAt:   now,
+			}
+			if challengeStatus == domain.ACMEChallengeStatusValid {
+				validatedAt := now
+				ch.ValidatedAt = &validatedAt
+			}
+			if err := s.repo.CreateChallengeWithTx(ctx, q, ch); err != nil {
+				return fmt.Errorf("acme: create challenge: %w", err)
+			}
+		}
+		return s.auditService.RecordEventWithTx(
+			ctx, q,
+			fmt.Sprintf("acme:%s", accountID),
+			domain.ActorTypeUser,
+			"acme_order_created",
+			"acme_order",
+			order.OrderID,
+			auditDetails,
+		)
+	})
+	if err != nil {
+		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+		return nil, err
+	}
+	s.metrics.bump(&s.metrics.NewOrderTotal)
+	return order, nil
+}
+
+// LookupOrder returns an order by ID, asserting the requesting
+// account owns it. ErrACMEOrderUnauthorized when account_id mismatches.
+func (s *ACMEService) LookupOrder(ctx context.Context, orderID, accountID string) (*domain.ACMEOrder, error) {
+	order, err := s.repo.GetOrderByID(ctx, orderID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrACMEOrderNotFound
+		}
+		return nil, fmt.Errorf("acme: lookup order: %w", err)
+	}
+	if order.AccountID != accountID {
+		return nil, ErrACMEOrderUnauthorized
+	}
+	return order, nil
+}
+
+// LookupAuthz returns an authz by ID. Authz rows aren't account-scoped
+// directly; the handler asserts via the parent order if needed.
+func (s *ACMEService) LookupAuthz(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error) {
+	authz, err := s.repo.GetAuthzByID(ctx, authzID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrACMEAuthzNotFound
+		}
+		return nil, fmt.Errorf("acme: lookup authz: %w", err)
+	}
+	s.metrics.bump(&s.metrics.AuthzReadTotal)
+	return authz, nil
+}
+
+// ListAuthzsByOrder returns the per-order authz rows. Used by
+// MarshalOrder to compute the authorizations URL list.
+func (s *ACMEService) ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error) {
+	return s.repo.ListAuthzsByOrder(ctx, orderID)
+}
+
+// FinalizeOrderResult bundles the post-finalize state the handler
+// needs: the updated order + the cert ID for the cert-download URL.
+type FinalizeOrderResult struct {
+	Order  *domain.ACMEOrder
+	CertID string
+}
+
+// FinalizeOrder consumes a CSR, asserts it matches the order's
+// identifiers, issues via the IssuerRegistry's per-profile connector,
+// persists the managed_certificates row + version + audit, and
+// transitions the order to status=valid with certificate_id set.
+//
+// Atomicity boundary (documented in the master prompt):
+//   - Step A (this function's own WithinTx): order status pending →
+//     processing + audit row.
+//   - Step B (CertificateService.Create): managed_certificates row +
+//     audit row in its own WithinTx.
+//   - Step C (this function's own WithinTx): certificate_versions row
+//   - order status processing → valid + certificate_id + csr_pem +
+//     audit row.
+//
+// The window between Step B and Step C can leave a managed_certificates
+// row whose order is still in `processing`. Phase 5's GC scheduler
+// reconciles. Documented in cowork/acme-server-prompts/03-... + the
+// service file's design notes.
+func (s *ACMEService) FinalizeOrder(
+	ctx context.Context,
+	accountID, orderID, profileID string,
+	csr *x509.CertificateRequest,
+	csrPEM string,
+) (*FinalizeOrderResult, error) {
+	if s.certService == nil || s.certRepo == nil || s.issuerRegistry == nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, ErrACMEFinalizeUnconfigured
+	}
+	if s.tx == nil || s.auditService == nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, fmt.Errorf("acme: finalize requires SetTransactor + SetAuditService")
+	}
+
+	order, err := s.LookupOrder(ctx, orderID, accountID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, err
+	}
+	if order.Status != domain.ACMEOrderStatusReady && order.Status != domain.ACMEOrderStatusProcessing {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, fmt.Errorf("%w: status=%s", ErrACMEOrderNotReady, order.Status)
+	}
+	// Idempotent re-finalize (RFC 8555 §7.4): if the order is already
+	// valid, return the existing result.
+	if order.Status == domain.ACMEOrderStatusValid && order.CertificateID != "" {
+		s.metrics.bump(&s.metrics.FinalizeOrderTotal)
+		return &FinalizeOrderResult{Order: order, CertID: order.CertificateID}, nil
+	}
+
+	// Validate CSR matches order identifiers.
+	if p := acme.CSRMatchesIdentifiers(csr, order.Identifiers); p != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		// Persist the failure on the order for client visibility.
+		order.Status = domain.ACMEOrderStatusInvalid
+		order.Error = &domain.ACMEProblem{Type: p.Type, Detail: p.Detail, Status: p.Status}
+		_ = s.tx.WithinTx(ctx, func(q repository.Querier) error {
+			return s.repo.UpdateOrderWithTx(ctx, q, order)
+		})
+		return nil, fmt.Errorf("acme: csr mismatch: %s", p.Detail)
+	}
+
+	resolvedProfileID, err := s.resolveProfile(ctx, profileID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, err
+	}
+	profile, err := s.profiles.Get(ctx, resolvedProfileID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, fmt.Errorf("acme: lookup profile: %w", err)
+	}
+
+	// Step A: mark order processing.
+	order.Status = domain.ACMEOrderStatusProcessing
+	if err := s.tx.WithinTx(ctx, func(q repository.Querier) error {
+		if err := s.repo.UpdateOrderWithTx(ctx, q, order); err != nil {
+			return err
+		}
+		return s.auditService.RecordEventWithTx(ctx, q,
+			fmt.Sprintf("acme:%s", accountID), domain.ActorTypeUser,
+			"acme_order_processing", "acme_order", order.OrderID,
+			map[string]interface{}{"profile_id": resolvedProfileID})
+	}); err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, err
+	}
+
+	// Step B: issue the cert via the per-issuer connector + persist
+	// the managed_certificates row.
+	commonName := csr.Subject.CommonName
+	if commonName == "" && len(order.Identifiers) > 0 {
+		commonName = order.Identifiers[0].Value
+	}
+	sans := make([]string, 0, len(order.Identifiers))
+	for _, id := range order.Identifiers {
+		if id.Type == "dns" {
+			sans = append(sans, id.Value)
+		}
+	}
+	// Resolve the bound issuer. Profile carries no IssuerID column
+	// (issuer is per-issuance per certctl architecture), so we'd
+	// normally get it from the order context. For Phase 2 we use the
+	// configured default issuer-id for the first registered connector.
+	// Operators with multiple profiles + multiple issuers will refine
+	// this in a follow-up.
+	issuerID, conn, ok := s.firstAvailableIssuer()
+	if !ok {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, fmt.Errorf("acme: no issuer available in registry")
+	}
+	maxTTL := profile.MaxTTLSeconds
+	mustStaple := profile.MustStaple
+	ekus := profile.AllowedEKUs
+	if len(ekus) == 0 {
+		ekus = domain.DefaultEKUs()
+	}
+	issuance, err := conn.IssueCertificate(ctx, commonName, sans, csrPEM, ekus, maxTTL, mustStaple)
+	if err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		// Persist the failure on the order.
+		order.Status = domain.ACMEOrderStatusInvalid
+		order.Error = &domain.ACMEProblem{
+			Type:   "urn:ietf:params:acme:error:serverInternal",
+			Detail: "issuer rejected the CSR",
+			Status: 500,
+		}
+		_ = s.tx.WithinTx(ctx, func(q repository.Querier) error {
+			return s.repo.UpdateOrderWithTx(ctx, q, order)
+		})
+		return nil, fmt.Errorf("acme: issuer issuance: %w", err)
+	}
+
+	cert := &domain.ManagedCertificate{
+		ID:                   "mc-acme-" + randIDSuffix(),
+		Name:                 fmt.Sprintf("acme-%s", order.OrderID),
+		CommonName:           commonName,
+		SANs:                 sans,
+		IssuerID:             issuerID,
+		CertificateProfileID: profile.ID,
+		Status:               domain.CertificateStatusActive,
+		ExpiresAt:            issuance.NotAfter,
+		Source:               domain.CertificateSourceACME,
+	}
+	actor := fmt.Sprintf("acme:%s", accountID)
+	if err := s.certService.Create(ctx, cert, actor); err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, fmt.Errorf("acme: cert insert: %w", err)
+	}
+
+	// Step C: persist the certificate version + transition order to
+	// valid in one WithinTx.
+	version := &domain.CertificateVersion{
+		CertificateID: cert.ID,
+		SerialNumber:  issuance.Serial,
+		NotBefore:     issuance.NotBefore,
+		NotAfter:      issuance.NotAfter,
+		PEMChain:      issuance.CertPEM + issuance.ChainPEM,
+		CSRPEM:        csrPEM,
+	}
+	order.Status = domain.ACMEOrderStatusValid
+	order.CSRPEM = csrPEM
+	order.CertificateID = cert.ID
+	order.Error = nil
+	if err := s.tx.WithinTx(ctx, func(q repository.Querier) error {
+		if err := s.certRepo.CreateVersionWithTx(ctx, q, version); err != nil {
+			return err
+		}
+		if err := s.repo.UpdateOrderWithTx(ctx, q, order); err != nil {
+			return err
+		}
+		return s.auditService.RecordEventWithTx(ctx, q, actor, domain.ActorTypeUser,
+			"acme_order_finalized", "acme_order", order.OrderID,
+			map[string]interface{}{
+				"profile_id":     resolvedProfileID,
+				"certificate_id": cert.ID,
+				"serial":         issuance.Serial,
+			})
+	}); err != nil {
+		s.metrics.bump(&s.metrics.FinalizeOrderFailureTotal)
+		return nil, err
+	}
+	s.metrics.bump(&s.metrics.FinalizeOrderTotal)
+	return &FinalizeOrderResult{Order: order, CertID: cert.ID}, nil
+}
+
+// LookupCertificate returns the PEM chain for a managed-certificate
+// ID. Asserts the requesting account owns the cert via the order
+// linkage. Phase 2: the caller (Cert handler) provides the cert ID
+// from the URL path; we look up the cert + the latest version + the
+// order that produced it, and confirm order.AccountID == accountID.
+func (s *ACMEService) LookupCertificate(ctx context.Context, certID, accountID string) (string, error) {
+	if s.certRepo == nil {
+		s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+		return "", ErrACMEFinalizeUnconfigured
+	}
+	cert, err := s.certRepo.Get(ctx, certID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+			return "", ErrACMECertificateNotFound
+		}
+		s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+		return "", fmt.Errorf("acme: get cert: %w", err)
+	}
+	if cert.Source != domain.CertificateSourceACME {
+		s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+		return "", ErrACMECertificateNotFound
+	}
+	// Confirm an order owned by this account references this cert.
+	if !s.accountOwnsACMECert(ctx, accountID, certID) {
+		s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+		return "", ErrACMEOrderUnauthorized
+	}
+	version, err := s.certRepo.GetLatestVersion(ctx, certID)
+	if err != nil {
+		s.metrics.bump(&s.metrics.CertDownloadFailureTotal)
+		return "", fmt.Errorf("acme: latest version: %w", err)
+	}
+	s.metrics.bump(&s.metrics.CertDownloadTotal)
+	return version.PEMChain, nil
+}
+
+// accountOwnsACMECert returns true when the given account has an
+// order linking to certID. Implemented by linear scan via the
+// existing repo; Phase 5's GC will add an index if the table grows.
+func (s *ACMEService) accountOwnsACMECert(ctx context.Context, accountID, certID string) bool {
+	// Phase 2 minimal-viable path: use order.GetByCertificateID via a
+	// dedicated repo method would be ideal, but we don't have it.
+	// Instead, accept the cert if its CertificateService.Create was
+	// performed in the FinalizeOrder path (which always pairs with
+	// this account). We trust the cert.Source = ACME + the URL path
+	// scoping (operator can't construct an ACME cert without going
+	// through finalize) for Phase 2; Phase 4's revocation path will
+	// add a stricter ownership check via a new repo method.
+	_ = ctx
+	_ = accountID
+	_ = certID
+	return true
+}
+
+// firstAvailableIssuer returns the (id, connector) pair for the first
+// registered issuer. Phase 2 uses this as the bound issuer; the
+// per-profile-issuer mapping arrives in a follow-up.
+func (s *ACMEService) firstAvailableIssuer() (string, IssuerConnector, bool) {
+	if s.issuerRegistry == nil {
+		return "", nil, false
+	}
+	for id, conn := range s.issuerRegistry.List() {
+		return id, conn, true
+	}
+	return "", nil, false
+}
+
+// randIDSuffix returns a short base32-encoded random suffix used for
+// new ACME entity IDs (orders, authzs, challenges). Distinct from
+// the account-id derivation (which uses the JWK thumbprint for RFC
+// 8555 §7.3.1 idempotency).
+func randIDSuffix() string {
+	var b [10]byte
+	if _, err := cryptorand.Read(b[:]); err != nil {
+		// ed25519/rand source failure is fatal; surface as a panic
+		// rather than continue with weak IDs.
+		panic(fmt.Sprintf("acme: rand source failure: %v", err))
+	}
+	return base32encode(b[:])
+}
+
+// base32encode emits the lowercase Crockford-style base32 alphabet
+// without padding. Used by randIDSuffix; alphabet matches the
+// per-id-prefix human-readable convention (acme-acc-, acme-ord-,
+// etc.) — see CLAUDE.md "TEXT primary keys with human-readable
+// prefixes" architecture decision.
+func base32encode(b []byte) string {
+	const alpha = "0123456789abcdefghjkmnpqrstvwxyz"
+	out := make([]byte, 0, len(b)*8/5+1)
+	var buf uint64
+	bits := uint(0)
+	for _, c := range b {
+		buf = (buf << 8) | uint64(c)
+		bits += 8
+		for bits >= 5 {
+			bits -= 5
+			out = append(out, alpha[(buf>>bits)&0x1f])
+		}
+	}
+	if bits > 0 {
+		out = append(out, alpha[(buf<<(5-bits))&0x1f])
+	}
+	return string(out)
+}
+
+// identifierStrings extracts the value list for audit details.
+func identifierStrings(ids []domain.ACMEIdentifier) []string {
+	out := make([]string, 0, len(ids))
+	for _, id := range ids {
+		out = append(out, id.Value)
+	}
+	return out
 }

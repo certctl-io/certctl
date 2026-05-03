@@ -112,6 +112,32 @@ func (f *fakeACMERepo) UpdateAccountStatusWithTx(ctx context.Context, q reposito
 	return nil
 }
 
+// Phase 2 — order / authz / challenge state. Phase 1b tests don't use
+// these; the no-op stubs keep the *fakeACMERepo type satisfying the
+// extended ACMERepo interface. Phase 2's tests overwrite these as
+// needed.
+func (f *fakeACMERepo) CreateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error {
+	return nil
+}
+func (f *fakeACMERepo) GetOrderByID(ctx context.Context, orderID string) (*domain.ACMEOrder, error) {
+	return nil, repository.ErrNotFound
+}
+func (f *fakeACMERepo) UpdateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error {
+	return nil
+}
+func (f *fakeACMERepo) CreateAuthzWithTx(ctx context.Context, q repository.Querier, authz *domain.ACMEAuthorization) error {
+	return nil
+}
+func (f *fakeACMERepo) GetAuthzByID(ctx context.Context, authzID string) (*domain.ACMEAuthorization, error) {
+	return nil, repository.ErrNotFound
+}
+func (f *fakeACMERepo) ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error) {
+	return nil, nil
+}
+func (f *fakeACMERepo) CreateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error {
+	return nil
+}
+
 // fakeTransactor is the repository.Transactor stand-in: runs fn
 // against the supplied querier (we just pass nil — fakes ignore it).
 // Mirrors how production transactor works without an actual DB.
@@ -480,5 +506,132 @@ func TestNewAccount_RequiresTransactor(t *testing.T) {
 	_, _, err := svc.NewAccount(context.Background(), "prof-corp", jwk, nil, false, false)
 	if err == nil {
 		t.Fatal("expected error when transactor is unset")
+	}
+}
+
+// --- Phase 2 — order creation in trust_authenticated mode -------------
+
+// orderTrackingRepo wraps fakeACMERepo so CreateOrder + CreateAuthz +
+// CreateChallenge persistence is observable in tests. The fakeACMERepo's
+// stubs no-op; this overrides them.
+type orderTrackingRepo struct {
+	*fakeACMERepo
+	orders     map[string]*domain.ACMEOrder
+	authzs     map[string][]*domain.ACMEAuthorization // orderID → authzs
+	challenges map[string][]domain.ACMEChallenge      // authzID → challenges
+}
+
+func newOrderTrackingRepo() *orderTrackingRepo {
+	return &orderTrackingRepo{
+		fakeACMERepo: newFakeACMERepo(),
+		orders:       map[string]*domain.ACMEOrder{},
+		authzs:       map[string][]*domain.ACMEAuthorization{},
+		challenges:   map[string][]domain.ACMEChallenge{},
+	}
+}
+
+func (r *orderTrackingRepo) CreateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error {
+	cp := *order
+	r.orders[order.OrderID] = &cp
+	return nil
+}
+func (r *orderTrackingRepo) GetOrderByID(ctx context.Context, orderID string) (*domain.ACMEOrder, error) {
+	o, ok := r.orders[orderID]
+	if !ok {
+		return nil, repository.ErrNotFound
+	}
+	cp := *o
+	return &cp, nil
+}
+func (r *orderTrackingRepo) UpdateOrderWithTx(ctx context.Context, q repository.Querier, order *domain.ACMEOrder) error {
+	cp := *order
+	r.orders[order.OrderID] = &cp
+	return nil
+}
+func (r *orderTrackingRepo) CreateAuthzWithTx(ctx context.Context, q repository.Querier, authz *domain.ACMEAuthorization) error {
+	cp := *authz
+	r.authzs[authz.OrderID] = append(r.authzs[authz.OrderID], &cp)
+	return nil
+}
+func (r *orderTrackingRepo) ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error) {
+	return r.authzs[orderID], nil
+}
+func (r *orderTrackingRepo) CreateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error {
+	r.challenges[ch.AuthzID] = append(r.challenges[ch.AuthzID], *ch)
+	return nil
+}
+
+func TestCreateOrder_TrustAuthenticated_AutoReady(t *testing.T) {
+	cfg := config.ACMEServerConfig{NonceTTL: 5 * time.Minute, OrderTTL: 24 * time.Hour, AuthzTTL: 24 * time.Hour}
+	repo := newOrderTrackingRepo()
+	pl := &fakeProfileLookup{profiles: map[string]*domain.CertificateProfile{
+		"prof-corp": {ID: "prof-corp", Name: "corp", ACMEAuthMode: "trust_authenticated"},
+	}}
+	auditRepo := &fakeAuditRepo{}
+	auditSvc := NewAuditService(auditRepo)
+	svc := NewACMEService(repo, pl, cfg)
+	svc.SetTransactor(&fakeTransactor{})
+	svc.SetAuditService(auditSvc)
+
+	order, err := svc.CreateOrder(context.Background(), "acme-acc-X", "prof-corp",
+		[]domain.ACMEIdentifier{{Type: "dns", Value: "example.com"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	if order.Status != domain.ACMEOrderStatusReady {
+		t.Errorf("order status = %q, want ready (trust_authenticated)", order.Status)
+	}
+	authzs := repo.authzs[order.OrderID]
+	if len(authzs) != 1 {
+		t.Fatalf("authzs = %d, want 1", len(authzs))
+	}
+	if authzs[0].Status != domain.ACMEAuthzStatusValid {
+		t.Errorf("authz status = %q, want valid (trust_authenticated)", authzs[0].Status)
+	}
+	chs := repo.challenges[authzs[0].AuthzID]
+	if len(chs) != 1 {
+		t.Fatalf("challenges = %d, want 1", len(chs))
+	}
+	if chs[0].Status != domain.ACMEChallengeStatusValid {
+		t.Errorf("challenge status = %q, want valid (trust_authenticated)", chs[0].Status)
+	}
+	// Audit row written.
+	if got := len(auditRepo.events); got != 1 {
+		t.Errorf("audit events = %d, want 1", got)
+	}
+	if auditRepo.events[0].Action != "acme_order_created" {
+		t.Errorf("audit action = %q", auditRepo.events[0].Action)
+	}
+	if got := svc.Metrics().NewOrderTotal.Load(); got != 1 {
+		t.Errorf("NewOrderTotal = %d, want 1", got)
+	}
+}
+
+func TestCreateOrder_ChallengeMode_StaysPending(t *testing.T) {
+	cfg := config.ACMEServerConfig{NonceTTL: 5 * time.Minute, OrderTTL: 24 * time.Hour, AuthzTTL: 24 * time.Hour}
+	repo := newOrderTrackingRepo()
+	pl := &fakeProfileLookup{profiles: map[string]*domain.CertificateProfile{
+		"prof-corp": {ID: "prof-corp", Name: "corp", ACMEAuthMode: "challenge"},
+	}}
+	auditSvc := NewAuditService(&fakeAuditRepo{})
+	svc := NewACMEService(repo, pl, cfg)
+	svc.SetTransactor(&fakeTransactor{})
+	svc.SetAuditService(auditSvc)
+
+	order, err := svc.CreateOrder(context.Background(), "acme-acc-X", "prof-corp",
+		[]domain.ACMEIdentifier{{Type: "dns", Value: "example.com"}}, nil, nil)
+	if err != nil {
+		t.Fatalf("CreateOrder: %v", err)
+	}
+	if order.Status != domain.ACMEOrderStatusPending {
+		t.Errorf("order status = %q, want pending (challenge mode)", order.Status)
+	}
+	authzs := repo.authzs[order.OrderID]
+	if authzs[0].Status != domain.ACMEAuthzStatusPending {
+		t.Errorf("authz status = %q, want pending (challenge mode)", authzs[0].Status)
+	}
+	chs := repo.challenges[authzs[0].AuthzID]
+	if chs[0].Status != domain.ACMEChallengeStatusPending {
+		t.Errorf("challenge status = %q, want pending (challenge mode)", chs[0].Status)
 	}
 }

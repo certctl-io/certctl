@@ -58,6 +58,20 @@ type CertificateProfile struct {
 	// EST RFC 7030 hardening master bundle Phase 6.
 	RequiredCSRAttributes []string `json:"required_csr_attributes,omitempty"`
 
+	// ACMEAuthMode picks the per-profile ACME server auth posture.
+	// "trust_authenticated" (default): JWS-authenticated client is
+	// trusted to issue for any identifier the profile policy allows
+	// (no out-of-band identifier proof). "challenge": full HTTP-01 +
+	// DNS-01 + TLS-ALPN-01 validation per RFC 8555 §8 (Phase 3).
+	// One certctl-server can serve both modes simultaneously by
+	// having multiple profiles with different values; the column is
+	// read at request time, not cached at server start.
+	//
+	// Backed by certificate_profiles.acme_auth_mode added in
+	// migration 000025_acme_server. Empty string in Go ≡ DB default
+	// "trust_authenticated".
+	ACMEAuthMode string `json:"acme_auth_mode,omitempty"`
+
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

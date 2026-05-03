@@ -28,6 +28,7 @@ func (r *ProfileRepository) List(ctx context.Context) ([]*domain.CertificateProf
 		SELECT id, name, description, allowed_key_algorithms, max_ttl_seconds,
 		       allowed_ekus, required_san_patterns, spiffe_uri_pattern,
 		       allow_short_lived, must_staple, required_csr_attributes,
+		       COALESCE(acme_auth_mode, 'trust_authenticated'),
 		       enabled, created_at, updated_at
 		FROM certificate_profiles
 		ORDER BY created_at DESC
@@ -59,6 +60,7 @@ func (r *ProfileRepository) Get(ctx context.Context, id string) (*domain.Certifi
 		SELECT id, name, description, allowed_key_algorithms, max_ttl_seconds,
 		       allowed_ekus, required_san_patterns, spiffe_uri_pattern,
 		       allow_short_lived, must_staple, required_csr_attributes,
+		       COALESCE(acme_auth_mode, 'trust_authenticated'),
 		       enabled, created_at, updated_at
 		FROM certificate_profiles
 		WHERE id = $1
@@ -213,6 +215,7 @@ func scanProfile(scanner interface {
 		&p.ID, &p.Name, &p.Description, &algJSON, &p.MaxTTLSeconds,
 		&ekuJSON, &sanJSON, &p.SPIFFEURIPattern,
 		&p.AllowShortLived, &p.MustStaple, &csrAttrsJSON,
+		&p.ACMEAuthMode,
 		&p.Enabled, &p.CreatedAt, &p.UpdatedAt,
 	)
 	if err != nil {
