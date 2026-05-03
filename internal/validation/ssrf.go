@@ -58,11 +58,22 @@ func IsReservedIP(ip net.IP) bool {
 	return false
 }
 
-// isReservedIPForDial applies IsReservedIP plus additional ranges that are
+// IsReservedIPForDial applies IsReservedIP plus additional ranges that are
 // meaningful for outbound HTTP egress but were not part of the original
 // network-scanner filter: the unspecified address (0.0.0.0 / ::) and IPv6
-// link-local / multicast ranges. Kept private so IsReservedIP stays
-// byte-identical with the previous scanner behaviour.
+// link-local / multicast ranges. The Phase 3 ACME HTTP-01 validator
+// (internal/api/acme/validators.go) reuses this same gate so HTTP-01
+// fetches can't be turned into an SSRF primitive against private-IP
+// space.
+func IsReservedIPForDial(ip net.IP) bool {
+	return isReservedIPForDial(ip)
+}
+
+// isReservedIPForDial is kept as the package-private implementation so
+// every existing call site (the network scanner + ValidateSafeURL +
+// the SafeHTTPDial-test helpers) stays byte-identical. The exported
+// wrapper IsReservedIPForDial above is the one new callers (Phase 3
+// ACME HTTP-01 validator) take.
 func isReservedIPForDial(ip net.IP) bool {
 	if ip == nil {
 		return true

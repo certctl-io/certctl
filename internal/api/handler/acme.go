@@ -49,6 +49,8 @@ type ACMEService interface {
 	ListAuthzsByOrder(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error)
 	FinalizeOrder(ctx context.Context, accountID, orderID, profileID string, csr *x509.CertificateRequest, csrPEM string) (*service.FinalizeOrderResult, error)
 	LookupCertificate(ctx context.Context, certID, accountID string) (string, error)
+	// Phase 3 — challenge validation.
+	RespondToChallenge(ctx context.Context, accountID, challengeID string, accountJWK *jose.JSONWebKey) (*domain.ACMEChallenge, error)
 }
 
 // ACMEHandler exposes the ACME server's RFC 8555 endpoints under the
@@ -211,8 +213,20 @@ func writeServiceError(w http.ResponseWriter, err error) {
 			Detail: "order is not in the `ready` state; complete authorizations first",
 			Status: http.StatusForbidden,
 		})
-	case errors.Is(err, service.ErrACMEUnsupportedAuthMode), errors.Is(err, service.ErrACMEFinalizeUnconfigured):
+	case errors.Is(err, service.ErrACMEUnsupportedAuthMode), errors.Is(err, service.ErrACMEFinalizeUnconfigured), errors.Is(err, service.ErrACMEChallengePoolUnconfigured):
 		acme.WriteProblem(w, acme.ServerInternal("ACME server is not fully configured; contact the operator"))
+	case errors.Is(err, service.ErrACMEChallengeNotFound):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:malformed",
+			Detail: "challenge not found",
+			Status: http.StatusNotFound,
+		})
+	case errors.Is(err, service.ErrACMEChallengeWrongState):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:malformed",
+			Detail: "challenge is no longer in pending state",
+			Status: http.StatusBadRequest,
+		})
 	default:
 		// Avoid leaking internal error text per master-prompt
 		// criterion #10 (operator-actionable errors with no info
@@ -792,4 +806,82 @@ func parseOptionalTime(s string) *time.Time {
 		return nil
 	}
 	return &t
+}
+
+// Challenge handles POST /acme/profile/{id}/challenge/{chall_id}
+// (RFC 8555 §7.5.1). The client posts an empty body (modern ACME) or
+// a `{}` payload to indicate "I'm ready for you to validate this
+// challenge." The handler dispatches the validator-pool work + returns
+// the challenge in its current (processing) state. Clients poll authz
+// or challenge for the eventual outcome.
+//
+// Phase 3: account JWK is needed to compute the key authorization. The
+// JWS verifier returns the registered account's stored JWKPEM in the
+// VerifiedRequest.Account; we round-trip that PEM through ParseJWKFromPEM
+// to get the *jose.JSONWebKey the validator pool needs.
+func (h ACMEHandler) Challenge(w http.ResponseWriter, r *http.Request) {
+	profileID := r.PathValue("id")
+	challengeID := r.PathValue("chall_id")
+	requestURL := h.requestURL(r)
+
+	body, err := io.ReadAll(io.LimitReader(r.Body, MaxJWSBodyBytes+1))
+	if err != nil {
+		acme.WriteProblem(w, acme.Malformed("could not read request body"))
+		return
+	}
+	if len(body) > MaxJWSBodyBytes {
+		acme.WriteProblem(w, acme.Malformed("request body too large"))
+		return
+	}
+
+	verified, err := h.svc.VerifyJWS(r.Context(), body, requestURL, false /*expectNewAccount*/, h.accountKID(r, profileID))
+	if err != nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(err))
+		return
+	}
+	if verified.Account == nil {
+		acme.WriteProblem(w, acme.MapJWSErrorToProblem(acme.ErrJWSAccountNotFound))
+		return
+	}
+
+	// Reconstruct the account's public JWK from its stored PEM. This
+	// is what the validator pool needs to compute key authorizations.
+	jwk, err := acme.ParseJWKFromPEM(verified.Account.JWKPEM)
+	if err != nil {
+		acme.WriteProblem(w, acme.ServerInternal("could not parse stored account JWK"))
+		return
+	}
+
+	ch, err := h.svc.RespondToChallenge(r.Context(), verified.Account.AccountID, challengeID, jwk)
+	if err != nil {
+		writeServiceError(w, err)
+		return
+	}
+
+	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
+		w.Header().Set("Replay-Nonce", nonce)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(marshalChallengeResponse(ch, h.challengeURLBuilder(r, profileID)))
+}
+
+// marshalChallengeResponse renders a single ACMEChallenge in the
+// RFC 8555 §8 wire shape. Distinct from MarshalAuthorization (which
+// embeds challenges in an authz wrapper); the challenge endpoint
+// returns one challenge directly per RFC 8555 §7.5.1.
+func marshalChallengeResponse(ch *domain.ACMEChallenge, urlBuilder func(string) string) acme.ChallengeResponseJSON {
+	out := acme.ChallengeResponseJSON{
+		Type:   string(ch.Type),
+		URL:    urlBuilder(ch.ChallengeID),
+		Status: string(ch.Status),
+		Token:  ch.Token,
+	}
+	if ch.ValidatedAt != nil {
+		out.Validated = ch.ValidatedAt.UTC().Format(time.RFC3339)
+	}
+	if ch.Error != nil {
+		out.Error = &acme.Problem{Type: ch.Error.Type, Detail: ch.Error.Detail, Status: ch.Error.Status}
+	}
+	return out
 }

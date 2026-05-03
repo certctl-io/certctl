@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	acmepkg "github.com/shankar0123/certctl/internal/api/acme"
 	"github.com/shankar0123/certctl/internal/api/handler"
 	"github.com/shankar0123/certctl/internal/api/middleware"
 	"github.com/shankar0123/certctl/internal/api/router"
@@ -764,6 +765,19 @@ func main() {
 	// pipeline EST/SCEP/agent/renewal use, so policy + audit + per-
 	// issuer-type metrics apply uniformly to ACME-issued certs.
 	acmeService.SetIssuancePipeline(certificateService, certificateRepo, issuerRegistry)
+	// Phase 3 — challenge validator pool. The 3 per-type semaphores
+	// (HTTP-01 / DNS-01 / TLS-ALPN-01) bound concurrent validations
+	// so a flood of pending authorizations can't fan out unboundedly.
+	// Defaults: 10 weight per type, 30s per-challenge timeout,
+	// 8.8.8.8:53 DNS resolver. Operators tune via
+	// CERTCTL_ACME_SERVER_*_CONCURRENCY + DNS01_RESOLVER.
+	acmeValidatorPool := acmepkg.NewPool(acmepkg.PoolConfig{
+		HTTP01Weight:    int64(cfg.ACMEServer.HTTP01ConcurrencyMax),
+		DNS01Weight:     int64(cfg.ACMEServer.DNS01ConcurrencyMax),
+		TLSALPN01Weight: int64(cfg.ACMEServer.TLSALPN01ConcurrencyMax),
+		DNS01Resolver:   cfg.ACMEServer.DNS01Resolver,
+	})
+	acmeService.SetValidatorPool(acmeValidatorPool)
 	acmeHandler := handler.NewACMEHandler(acmeService)
 
 	// Build the API router with all handlers

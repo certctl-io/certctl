@@ -7,15 +7,14 @@ as an ACME issuer with no certctl-side modification — closing the
 "deploy a certctl agent on every K8s node" friction that costs deals to
 external PKI vendors today.
 
-> **Phase status (2026-05-03):** Phase 2 — directory + new-nonce +
-> new-account + account/{id} + new-order + order/{id} + finalize +
-> authz/{id} + cert/{id}. An ACME client running against a profile
-> with `acme_auth_mode='trust_authenticated'` end-to-end-issues a real
-> cert: `lego --server https://certctl/acme/profile/<id>/directory ...
-> run` succeeds. Profiles in `challenge` mode get all the same code
-> path with authz/challenge rows in `pending` state until Phase 3's
-> validators wire up. Track shipped phases via
-> `git log --grep='acme-server:'`.
+> **Phase status (2026-05-03):** Phase 3 — Phase 2's surface plus
+> challenge validation: HTTP-01 (RFC 8555 §8.3), DNS-01 (§8.4), and
+> TLS-ALPN-01 (RFC 8737). Profiles in `challenge` mode now resolve
+> end-to-end: client POSTs to `/challenge/<id>`, the server dispatches
+> a bounded-concurrency worker pool to fetch the proof out-of-band,
+> the validator updates the challenge → authz → order status chain
+> on completion. Profiles in `trust_authenticated` mode are unchanged.
+> Track shipped phases via `git log --grep='acme-server:'`.
 
 ## Configuration
 
@@ -113,6 +112,7 @@ Routes registered in `internal/api/router/router.go::RegisterHandlers`:
 | POST   | `/acme/profile/{id}/order/{ord_id}`                   | RFC 8555 §7.4   | JWS kid | POST-as-GET fetch of an order's current state. |
 | POST   | `/acme/profile/{id}/order/{ord_id}/finalize`          | RFC 8555 §7.4   | JWS kid | Submit the CSR + finalize. Issues + persists managed cert row + version. |
 | POST   | `/acme/profile/{id}/authz/{authz_id}`                 | RFC 8555 §7.5   | JWS kid | POST-as-GET fetch of an authorization. |
+| POST   | `/acme/profile/{id}/challenge/{chall_id}`             | RFC 8555 §7.5.1 | JWS kid | Submit a challenge for validation. Dispatches to a bounded-concurrency worker pool; clients poll authz for the eventual result. |
 | POST   | `/acme/profile/{id}/cert/{cert_id}`                   | RFC 8555 §7.4.2 | JWS kid | POST-as-GET cert chain download (PEM). |
 | GET    | `/acme/directory`                                     | RFC 8555 §7.1.1 | unauth   | Shorthand path; mirrors per-profile when `CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID` is set. |
 | HEAD   | `/acme/new-nonce`                                     | RFC 8555 §7.2   | unauth   | Shorthand. |
@@ -199,7 +199,7 @@ at `internal/service/certificate.go:131`).
 | 1a    | live        | directory + new-nonce + per-profile routing |
 | 1b    | live        | new-account + account/{id} + JWS verifier (RFC 7515 + go-jose v4) |
 | 2     | live        | orders + authzs + finalize + cert download (trust_authenticated mode end-to-end) |
-| 3     | not yet     | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation |
+| 3     | live        | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation (challenge mode end-to-end) |
 | 4     | not yet     | key rollover + revocation + ARI (RFC 9773) |
 | 5     | not yet     | cert-manager integration test + production hardening |
 | 6     | not yet     | full operator-facing reference + walkthroughs + threat model |

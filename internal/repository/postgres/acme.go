@@ -471,6 +471,73 @@ func (r *ACMERepository) ListChallengesByAuthz(ctx context.Context, authzID stri
 	return out, rows.Err()
 }
 
+// GetChallengeByID retrieves a challenge row by ID.
+func (r *ACMERepository) GetChallengeByID(ctx context.Context, challengeID string) (*domain.ACMEChallenge, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT challenge_id, authz_id, type, status, token, validated_at, error, created_at
+		FROM acme_challenges WHERE challenge_id = $1
+	`, challengeID)
+	return scanACMEChallenge(row)
+}
+
+// UpdateChallengeWithTx persists changes to a challenge's mutable
+// fields (status, validated_at, error). Used by the Phase 3 validator
+// callback after a challenge attempt completes.
+func (r *ACMERepository) UpdateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error {
+	var (
+		validatedAt interface{}
+		errBlob     interface{}
+	)
+	if ch.ValidatedAt != nil {
+		validatedAt = *ch.ValidatedAt
+	}
+	if ch.Error != nil {
+		b, err := jsonMarshalACME(ch.Error)
+		if err != nil {
+			return fmt.Errorf("acme: marshal challenge error: %w", err)
+		}
+		errBlob = b
+	}
+	res, err := q.ExecContext(ctx, `
+		UPDATE acme_challenges
+		SET status = $2, validated_at = $3, error = $4
+		WHERE challenge_id = $1
+	`, ch.ChallengeID, string(ch.Status), validatedAt, errBlob)
+	if err != nil {
+		return fmt.Errorf("acme: update challenge: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("acme: update challenge rows: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("challenge not found: %w", repository.ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateAuthzStatusWithTx persists an authz status transition. Used
+// by the Phase 3 validator callback to flip an authz to valid or
+// invalid based on the challenge outcome.
+func (r *ACMERepository) UpdateAuthzStatusWithTx(ctx context.Context, q repository.Querier, authzID string, status domain.ACMEAuthzStatus) error {
+	res, err := q.ExecContext(ctx, `
+		UPDATE acme_authorizations
+		SET status = $2, updated_at = NOW()
+		WHERE authz_id = $1
+	`, authzID, string(status))
+	if err != nil {
+		return fmt.Errorf("acme: update authz status: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("acme: update authz status rows: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("authz not found: %w", repository.ErrNotFound)
+	}
+	return nil
+}
+
 // scanACMEOrder parses an acme_orders row.
 func scanACMEOrder(row interface{ Scan(...interface{}) error }) (*domain.ACMEOrder, error) {
 	var (

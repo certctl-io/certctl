@@ -40,6 +40,8 @@ type mockACMEService struct {
 	ListAuthzsByOrderFn func(ctx context.Context, orderID string) ([]*domain.ACMEAuthorization, error)
 	FinalizeOrderFn     func(ctx context.Context, accountID, orderID, profileID string, csr *x509.CertificateRequest, csrPEM string) (*service.FinalizeOrderResult, error)
 	LookupCertificateFn func(ctx context.Context, certID, accountID string) (string, error)
+	// Phase 3.
+	RespondToChallengeFn func(ctx context.Context, accountID, challengeID string, accountJWK *jose.JSONWebKey) (*domain.ACMEChallenge, error)
 }
 
 func (m *mockACMEService) BuildDirectory(ctx context.Context, profileID, baseURL string) (*acme.Directory, error) {
@@ -133,6 +135,13 @@ func (m *mockACMEService) LookupCertificate(ctx context.Context, certID, account
 	return "", errors.New("LookupCertificate not stubbed")
 }
 
+func (m *mockACMEService) RespondToChallenge(ctx context.Context, accountID, challengeID string, accountJWK *jose.JSONWebKey) (*domain.ACMEChallenge, error) {
+	if m.RespondToChallengeFn != nil {
+		return m.RespondToChallengeFn(ctx, accountID, challengeID, accountJWK)
+	}
+	return nil, errors.New("RespondToChallenge not stubbed")
+}
+
 // newACMETestServer wires the ACMEHandler against the mock + a stdlib
 // ServeMux configured exactly the way internal/api/router/router.go
 // does it in production. Routes:
@@ -156,6 +165,7 @@ func newACMETestServer(t *testing.T, mock *mockACMEService) *httptest.Server {
 	mux.HandleFunc("POST /acme/profile/{id}/order/{ord_id}", h.Order)
 	mux.HandleFunc("POST /acme/profile/{id}/order/{ord_id}/finalize", h.OrderFinalize)
 	mux.HandleFunc("POST /acme/profile/{id}/authz/{authz_id}", h.Authz)
+	mux.HandleFunc("POST /acme/profile/{id}/challenge/{chall_id}", h.Challenge)
 	mux.HandleFunc("POST /acme/profile/{id}/cert/{cert_id}", h.Cert)
 	mux.HandleFunc("GET /acme/directory", h.Directory)
 	mux.HandleFunc("HEAD /acme/new-nonce", h.NewNonce)

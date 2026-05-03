@@ -421,6 +421,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /acme/profile/{id}/order/{ord_id}", http.HandlerFunc(reg.ACME.Order))
 	r.Register("POST /acme/profile/{id}/order/{ord_id}/finalize", http.HandlerFunc(reg.ACME.OrderFinalize))
 	r.Register("POST /acme/profile/{id}/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
+	r.Register("POST /acme/profile/{id}/challenge/{chall_id}", http.HandlerFunc(reg.ACME.Challenge))
 	r.Register("POST /acme/profile/{id}/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
 	// Default-profile shorthand. The handler's profile-resolution path
 	// returns userActionRequired (RFC 7807 + RFC 8555 §6.7) when
@@ -435,6 +436,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /acme/order/{ord_id}", http.HandlerFunc(reg.ACME.Order))
 	r.Register("POST /acme/order/{ord_id}/finalize", http.HandlerFunc(reg.ACME.OrderFinalize))
 	r.Register("POST /acme/authz/{authz_id}", http.HandlerFunc(reg.ACME.Authz))
+	r.Register("POST /acme/challenge/{chall_id}", http.HandlerFunc(reg.ACME.Challenge))
 	r.Register("POST /acme/cert/{cert_id}", http.HandlerFunc(reg.ACME.Cert))
 }
 

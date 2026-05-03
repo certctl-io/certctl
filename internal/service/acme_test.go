@@ -137,6 +137,15 @@ func (f *fakeACMERepo) ListAuthzsByOrder(ctx context.Context, orderID string) ([
 func (f *fakeACMERepo) CreateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error {
 	return nil
 }
+func (f *fakeACMERepo) GetChallengeByID(ctx context.Context, challengeID string) (*domain.ACMEChallenge, error) {
+	return nil, repository.ErrNotFound
+}
+func (f *fakeACMERepo) UpdateChallengeWithTx(ctx context.Context, q repository.Querier, ch *domain.ACMEChallenge) error {
+	return nil
+}
+func (f *fakeACMERepo) UpdateAuthzStatusWithTx(ctx context.Context, q repository.Querier, authzID string, status domain.ACMEAuthzStatus) error {
+	return nil
+}
 
 // fakeTransactor is the repository.Transactor stand-in: runs fn
 // against the supplied querier (we just pass nil — fakes ignore it).

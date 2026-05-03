@@ -77,11 +77,13 @@ var SpecParityExceptions = map[string]string{
 	"POST /acme/profile/{id}/order/{ord_id}":          "RFC 8555 §7.4 order POST-as-GET; documented in docs/acme-server.md",
 	"POST /acme/profile/{id}/order/{ord_id}/finalize": "RFC 8555 §7.4 finalize; documented in docs/acme-server.md",
 	"POST /acme/profile/{id}/authz/{authz_id}":        "RFC 8555 §7.5 authz POST-as-GET; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/challenge/{chall_id}":    "RFC 8555 §7.5.1 challenge response POST; Phase 3 dispatches to validator pool.",
 	"POST /acme/profile/{id}/cert/{cert_id}":          "RFC 8555 §7.4.2 cert download; documented in docs/acme-server.md",
 	"POST /acme/new-order":                            "Phase 2 default-profile shorthand for new-order.",
 	"POST /acme/order/{ord_id}":                       "Phase 2 default-profile shorthand for order POST-as-GET.",
 	"POST /acme/order/{ord_id}/finalize":              "Phase 2 default-profile shorthand for finalize.",
 	"POST /acme/authz/{authz_id}":                     "Phase 2 default-profile shorthand for authz POST-as-GET.",
+	"POST /acme/challenge/{chall_id}":                 "Phase 3 default-profile shorthand for challenge response.",
 	"POST /acme/cert/{cert_id}":                       "Phase 2 default-profile shorthand for cert download.",
 }
 
