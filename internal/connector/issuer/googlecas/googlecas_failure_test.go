@@ -186,8 +186,12 @@ func TestGoogleCAS_Issue_OAuth2TokenRefreshFailure_DistinguishedFromCAError(t *t
 	credPath := createTestCredentialsFile(t)
 
 	srv := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		switch {
-		case r.URL.Path == "/token":
+		// Tagged switch on r.URL.Path keeps staticcheck QF1002 happy
+		// (only equality cases against a single field). The other
+		// failure tests use mixed equality + strings.Contains so they
+		// stay on `switch { case ... }`.
+		switch r.URL.Path {
+		case "/token":
 			w.Header().Set("Content-Type", "application/json")
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write([]byte(`{"error":"invalid_grant","error_description":"Invalid JWT Signature."}`))
