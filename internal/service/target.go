@@ -37,6 +37,7 @@ var validTargetTypes = map[domain.TargetType]bool{
 	domain.TargetTypeJavaKeystore:      true,
 	domain.TargetTypeKubernetesSecrets: true,
 	domain.TargetTypeAWSACM:            true,
+	domain.TargetTypeAzureKeyVault:     true,
 }
 
 // isValidTargetType checks if a type string is a known target type.

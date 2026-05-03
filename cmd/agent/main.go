@@ -33,6 +33,7 @@ import (
 	"github.com/shankar0123/certctl/internal/connector/target"
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
 	"github.com/shankar0123/certctl/internal/connector/target/awsacm"
+	"github.com/shankar0123/certctl/internal/connector/target/azurekv"
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
@@ -914,6 +915,21 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return awsacm.New(context.Background(), &cfg, a.logger)
+
+	case "AzureKeyVault":
+		// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
+		// Azure Key Vault target — SDK-driven (no file I/O).
+		// DefaultAzureCredential handles the standard Azure credential
+		// chain (managed identity / workload identity / env vars / az
+		// CLI fallback). Long-lived service-principal secrets are
+		// supported but discouraged via the credential_mode config.
+		var cfg azurekv.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid AzureKeyVault config: %w", err)
+			}
+		}
+		return azurekv.New(context.Background(), &cfg, a.logger)
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

@@ -831,7 +831,7 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// TestCreateTargetConnector_AllSupportedTypes tests connector creation for all 15 supported target types.
+// TestCreateTargetConnector_AllSupportedTypes tests connector creation for all 16 supported target types.
 func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -958,6 +958,17 @@ func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 				"region": "us-east-1",
 			},
 		},
+		{
+			// Rank 5 (Azure half). Vault URL + cert name; the SDK client
+			// lazy-loads via DefaultAzureCredential which doesn't require
+			// live creds at construction time.
+			name:     "AzureKeyVault",
+			typeName: "AzureKeyVault",
+			config: map[string]string{
+				"vault_url":        "https://test-vault.vault.azure.net",
+				"certificate_name": "demo-cert",
+			},
+		},
 	}
 
 	cfg := &AgentConfig{
@@ -1012,6 +1023,7 @@ func TestCreateTargetConnector_InvalidJSON(t *testing.T) {
 		"JavaKeystore",
 		"KubernetesSecrets",
 		"AWSACM",
+		"AzureKeyVault",
 	}
 
 	cfg := &AgentConfig{
