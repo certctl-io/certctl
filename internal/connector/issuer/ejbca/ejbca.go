@@ -20,7 +20,6 @@ package ejbca
 import (
 	"bytes"
 	"context"
-	"crypto/tls"
 	"crypto/x509"
 	"encoding/base64"
 	"encoding/json"
@@ -33,6 +32,7 @@ import (
 	"time"
 
 	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/shankar0123/certctl/internal/connector/issuer/mtlscache"
 	"github.com/shankar0123/certctl/internal/secret"
 )
 
@@ -84,16 +84,32 @@ type Connector struct {
 	config     *Config
 	logger     *slog.Logger
 	httpClient *http.Client
+
+	// mtls caches the parsed client keypair + a precomputed
+	// *http.Transport so steady-state API calls don't re-parse
+	// the keypair on every request, AND picks up rotated certs
+	// on the next call without a process restart. nil on the
+	// OAuth2 path (auth_mode=oauth2) and on the test path
+	// (NewWithHTTPClient). Closes Top-10 fix #1 of the
+	// 2026-05-03 issuer-coverage audit.
+	mtls *mtlscache.Cache
 }
 
 // New creates a new EJBCA connector with the given configuration and logger.
 //
 // When config.AuthMode is "mtls" (or empty — mtls is the default), New
-// loads config.ClientCertPath + config.ClientKeyPath via tls.LoadX509KeyPair
-// and configures *http.Transport.TLSClientConfig so the client presents the
-// cert on every request. When AuthMode is "oauth2", New returns a client
-// with no transport customization (the OAuth2 Bearer header path is wired
-// in setAuthHeaders). Any other AuthMode value returns (nil, error).
+// builds an mtlscache.Cache from config.ClientCertPath + config.ClientKeyPath.
+// The cache parses the keypair once and configures
+// *http.Transport.TLSClientConfig so the client presents the cert on every
+// request. Subsequent calls go through getHTTPClient, which calls
+// RefreshIfStale on the cache — operators rotating the cert+key on disk
+// (e.g. quarterly per security policy) get the new keypair on the next
+// API call without a server restart. Closes Top-10 fix #1 of the
+// 2026-05-03 issuer-coverage audit.
+//
+// When AuthMode is "oauth2", New returns a client with no transport
+// customization (the OAuth2 Bearer header path is wired in
+// setAuthHeaders). Any other AuthMode value returns (nil, error).
 //
 // Returns an error if mTLS cert/key load fails (missing file, malformed
 // PEM, mismatched cert/key) so misconfigured operators get an immediate
@@ -110,30 +126,24 @@ func New(config *Config, logger *slog.Logger) (*Connector, error) {
 
 	switch authMode {
 	case "mtls":
-		// Build a fresh *http.Transport (do NOT clone http.DefaultTransport
-		// — mutation would leak across the package boundary). Set
-		// MinVersion: TLS 1.2 as a compatibility floor for on-prem EJBCA
-		// installs that may predate TLS 1.3.
 		if config == nil || config.ClientCertPath == "" || config.ClientKeyPath == "" {
 			return nil, fmt.Errorf("EJBCA mTLS requires client_cert_path and client_key_path")
 		}
-		cert, err := tls.LoadX509KeyPair(config.ClientCertPath, config.ClientKeyPath)
+		// Build the cache up-front so misconfigured operators fail fast
+		// at construction rather than discover a broken cert path on
+		// the first issuance call. mtlscache enforces TLS 1.2 floor
+		// (compat with on-prem EJBCA installs that predate TLS 1.3).
+		cache, err := mtlscache.New(config.ClientCertPath, config.ClientKeyPath, mtlscache.Options{
+			HTTPTimeout: 30 * time.Second,
+		})
 		if err != nil {
-			return nil, fmt.Errorf("EJBCA mTLS cert load: %w", err)
-		}
-		transport := &http.Transport{
-			TLSClientConfig: &tls.Config{
-				Certificates: []tls.Certificate{cert},
-				MinVersion:   tls.VersionTLS12,
-			},
+			return nil, fmt.Errorf("EJBCA mTLS cache build: %w", err)
 		}
 		return &Connector{
-			config: config,
-			logger: logger,
-			httpClient: &http.Client{
-				Timeout:   30 * time.Second,
-				Transport: transport,
-			},
+			config:     config,
+			logger:     logger,
+			httpClient: cache.Client(),
+			mtls:       cache,
 		}, nil
 	case "oauth2":
 		// OAuth2 path uses default transport; setAuthHeaders adds the
@@ -157,6 +167,25 @@ func NewWithHTTPClient(config *Config, logger *slog.Logger, client *http.Client)
 		logger:     logger,
 		httpClient: client,
 	}
+}
+
+// getHTTPClient returns the HTTP client to use for an EJBCA API call.
+// On the mTLS path (auth_mode=mtls), it calls RefreshIfStale on the
+// mtlscache so a rotated keypair on disk is picked up before the next
+// request — operators rotating their EJBCA client cert quarterly no
+// longer need a server restart. On the OAuth2 path (auth_mode=oauth2)
+// or the test path (NewWithHTTPClient), it returns c.httpClient as-is
+// because there's no keypair to refresh. Closes Top-10 fix #1 of the
+// 2026-05-03 issuer-coverage audit. Mirrors the Entrust/GlobalSign
+// pattern from Bundle M of the 2026-05-01 audit.
+func (c *Connector) getHTTPClient() (*http.Client, error) {
+	if c.mtls == nil {
+		return c.httpClient, nil
+	}
+	if err := c.mtls.RefreshIfStale(); err != nil {
+		return nil, fmt.Errorf("EJBCA mTLS cache refresh: %w", err)
+	}
+	return c.mtls.Client(), nil
 }
 
 // enrollResponse represents the EJBCA /certificate/pkcs10enroll response.
@@ -250,7 +279,11 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 	c.setAuthHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("EJBCA enroll request failed: %w", err)
 	}
@@ -392,7 +425,11 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 	c.setAuthHeaders(req)
 	req.Header.Set("Content-Type", "application/json")
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient()
+	if err != nil {
+		return err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return fmt.Errorf("EJBCA revoke request failed: %w", err)
 	}
@@ -438,7 +475,11 @@ func (c *Connector) GetOrderStatus(ctx context.Context, orderID string) (*issuer
 
 	c.setAuthHeaders(req)
 
-	resp, err := c.httpClient.Do(req)
+	client, err := c.getHTTPClient()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return nil, fmt.Errorf("EJBCA cert get request failed: %w", err)
 	}

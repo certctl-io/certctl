@@ -12,3 +12,12 @@ import "net/http"
 func HTTPClientForTest(c *Connector) *http.Client {
 	return c.httpClient
 }
+
+// GetHTTPClientForTest exposes the per-call hot-path getHTTPClient
+// helper so the rotation test can drive the production code path
+// (which calls RefreshIfStale on the mtls cache before returning
+// the client). Production callers reach this same path implicitly
+// via IssueCertificate / RevokeCertificate / GetOrderStatus.
+func GetHTTPClientForTest(c *Connector) (*http.Client, error) {
+	return c.getHTTPClient()
+}
