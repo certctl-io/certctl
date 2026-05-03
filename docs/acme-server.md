@@ -7,11 +7,11 @@ as an ACME issuer with no certctl-side modification — closing the
 "deploy a certctl agent on every K8s node" friction that costs deals to
 external PKI vendors today.
 
-> **Phase status (2026-05-03):** Phase 1a (foundation — directory +
-> new-nonce + per-profile routing). The directory document is live and
-> ACME clients can fetch nonces. Account creation, JWS verification,
-> orders, challenges, key rollover, revocation, and ARI all land in
-> subsequent phases. Track shipped phases via
+> **Phase status (2026-05-03):** Phase 1b — directory + new-nonce +
+> new-account + account/{id} update + JWS verifier (RFC 7515 + go-jose
+> v4). An ACME client can now run new-account end-to-end and register
+> against a profile. Orders + challenges + key rollover + revocation +
+> ARI land in subsequent phases. Track shipped phases via
 > `git log --grep='acme-server:'`.
 
 ## Configuration
@@ -95,33 +95,65 @@ the `caBundle` requirement is flagged here in Phase 1a's docs because
 operators hit it the moment they try to point a real ACME client at
 certctl.
 
-## Endpoints (Phase 1a)
+## Endpoints (Phase 1b)
 
 Routes registered in `internal/api/router/router.go::RegisterHandlers`:
 
-| Method | Path                                      | RFC ref         | Auth      | Description |
-|--------|-------------------------------------------|-----------------|-----------|-------------|
-| GET    | `/acme/profile/{id}/directory`            | RFC 8555 §7.1.1 | unauth    | Per-profile directory document. |
-| HEAD   | `/acme/profile/{id}/new-nonce`            | RFC 8555 §7.2   | unauth    | Returns 200 + Replay-Nonce header. |
-| GET    | `/acme/profile/{id}/new-nonce`            | RFC 8555 §7.2   | unauth    | Returns 204 + Replay-Nonce header. |
-| GET    | `/acme/directory`                         | RFC 8555 §7.1.1 | unauth    | Shorthand path; mirrors per-profile when `CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID` is set. |
-| HEAD   | `/acme/new-nonce`                         | RFC 8555 §7.2   | unauth    | Shorthand. |
-| GET    | `/acme/new-nonce`                         | RFC 8555 §7.2   | unauth    | Shorthand. |
+| Method | Path                                       | RFC ref         | Auth     | Description |
+|--------|--------------------------------------------|-----------------|----------|-------------|
+| GET    | `/acme/profile/{id}/directory`             | RFC 8555 §7.1.1 | unauth   | Per-profile directory document. |
+| HEAD   | `/acme/profile/{id}/new-nonce`             | RFC 8555 §7.2   | unauth   | Returns 200 + Replay-Nonce header. |
+| GET    | `/acme/profile/{id}/new-nonce`             | RFC 8555 §7.2   | unauth   | Returns 204 + Replay-Nonce header. |
+| POST   | `/acme/profile/{id}/new-account`           | RFC 8555 §7.3   | JWS jwk  | Register a new account; idempotent re-registration of an existing JWK returns the existing row. |
+| POST   | `/acme/profile/{id}/account/{acc_id}`      | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Update contact list, deactivate, or POST-as-GET (RFC 8555 §6.3) to fetch the account. |
+| GET    | `/acme/directory`                          | RFC 8555 §7.1.1 | unauth   | Shorthand path; mirrors per-profile when `CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID` is set. |
+| HEAD   | `/acme/new-nonce`                          | RFC 8555 §7.2   | unauth   | Shorthand. |
+| GET    | `/acme/new-nonce`                          | RFC 8555 §7.2   | unauth   | Shorthand. |
+| POST   | `/acme/new-account`                        | RFC 8555 §7.3   | JWS jwk  | Shorthand. |
+| POST   | `/acme/account/{acc_id}`                   | RFC 8555 §7.3.2 + §7.3.6 | JWS kid | Shorthand. |
 
-The remaining RFC 8555 endpoints (`new-account`, `account/{id}`,
-`new-order`, `order/{id}`, `order/{id}/finalize`, `authz/{id}`,
-`challenge/{id}`, `cert/{id}`, `key-change`, `revoke-cert`,
-`renewal-info`) are advertised in the directory document but not yet
-served — clients hitting them get a 404 until subsequent phases land.
-The directory document includes their URLs because RFC 8555 doesn't
-permit a partial directory.
+The remaining RFC 8555 endpoints (`new-order`, `order/{id}`,
+`order/{id}/finalize`, `authz/{id}`, `challenge/{id}`, `cert/{id}`,
+`key-change`, `revoke-cert`, `renewal-info`) are advertised in the
+directory document but not yet served — clients hitting them get a 404
+until subsequent phases land. The directory document includes their
+URLs because RFC 8555 doesn't permit a partial directory.
+
+## JWS verification (Phase 1b)
+
+Every JWS-authenticated POST runs through the verifier at
+`internal/api/acme/jws.go::VerifyJWS`. The verifier enforces:
+
+1. The JWS parses as a flattened single-signature object (multi-sig is
+   rejected per RFC 8555 §6.2).
+2. The signature algorithm is in the closed allow-list `{RS256, ES256,
+   EdDSA}` per RFC 8555 §6.2 — `none`, `HS256`, and every other alg
+   are refused at parse time.
+3. The protected header carries exactly one of `kid` (registered
+   account) or `jwk` (new-account flow); endpoints declare which they
+   require.
+4. The protected header `url` matches the inbound request URL exactly.
+5. The protected header `nonce` is consumed against the
+   `acme_nonces` store; missing / replayed / expired nonces return
+   `urn:ietf:params:acme:error:badNonce` per RFC 8555 §6.5.1.
+6. On the `kid` path: the kid URL round-trips against the canonical
+   per-profile shape, the referenced account exists, and its status
+   is `valid`. Deactivated / revoked accounts cannot authenticate.
+7. The signature verifies against the resolved key (registered
+   account's stored JWK on the kid path; embedded jwk on the jwk path).
+
+Every state-mutating account operation (create, contact update,
+deactivate) writes its `acme_accounts` row and an `audit_events` row
+inside one `repository.Transactor.WithinTx` call — the canonical
+certctl atomicity contract (matches `service.CertificateService.Create`
+at `internal/service/certificate.go:131`).
 
 ## Phases (cross-reference)
 
 | Phase | Status      | Surface |
 |-------|-------------|---------|
 | 1a    | live        | directory + new-nonce + per-profile routing |
-| 1b    | not yet     | new-account + JWS verifier (RFC 7515) |
+| 1b    | live        | new-account + account/{id} + JWS verifier (RFC 7515 + go-jose v4) |
 | 2     | not yet     | orders + authzs + finalize + cert download (trust_authenticated mode end-to-end) |
 | 3     | not yet     | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation |
 | 4     | not yet     | key rollover + revocation + ARI (RFC 9773) |

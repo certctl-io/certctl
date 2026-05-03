@@ -61,12 +61,16 @@ var SpecParityExceptions = map[string]string{
 	// new-order, finalize, authz, challenge, cert, key-change,
 	// revoke-cert, renewal-info — each gets its own exception entry
 	// in the same commit that lands the route.
-	"GET /acme/profile/{id}/directory":  "RFC 8555 §7.1.1 directory; documented in docs/acme-server.md",
-	"HEAD /acme/profile/{id}/new-nonce": "RFC 8555 §7.2 new-nonce; documented in docs/acme-server.md",
-	"GET /acme/profile/{id}/new-nonce":  "RFC 8555 §7.2 new-nonce (GET form); documented in docs/acme-server.md",
-	"GET /acme/directory":               "RFC 8555 §7.1.1 directory (default-profile shorthand); documented in docs/acme-server.md",
-	"HEAD /acme/new-nonce":              "RFC 8555 §7.2 new-nonce (default-profile shorthand); documented in docs/acme-server.md",
-	"GET /acme/new-nonce":               "RFC 8555 §7.2 new-nonce GET (default-profile shorthand); documented in docs/acme-server.md",
+	"GET /acme/profile/{id}/directory":         "RFC 8555 §7.1.1 directory; documented in docs/acme-server.md",
+	"HEAD /acme/profile/{id}/new-nonce":        "RFC 8555 §7.2 new-nonce; documented in docs/acme-server.md",
+	"GET /acme/profile/{id}/new-nonce":         "RFC 8555 §7.2 new-nonce (GET form); documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/new-account":      "RFC 8555 §7.3 new-account; documented in docs/acme-server.md",
+	"POST /acme/profile/{id}/account/{acc_id}": "RFC 8555 §7.3.2 account update + §7.3.6 deactivation; documented in docs/acme-server.md",
+	"GET /acme/directory":                      "RFC 8555 §7.1.1 directory (default-profile shorthand); documented in docs/acme-server.md",
+	"HEAD /acme/new-nonce":                     "RFC 8555 §7.2 new-nonce (default-profile shorthand); documented in docs/acme-server.md",
+	"GET /acme/new-nonce":                      "RFC 8555 §7.2 new-nonce GET (default-profile shorthand); documented in docs/acme-server.md",
+	"POST /acme/new-account":                   "RFC 8555 §7.3 new-account (default-profile shorthand); documented in docs/acme-server.md",
+	"POST /acme/account/{acc_id}":              "RFC 8555 §7.3.2 + §7.3.6 (default-profile shorthand); documented in docs/acme-server.md",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

@@ -748,12 +748,16 @@ func main() {
 	// by PathID; the AdminEST handler reads it at request time.
 	estServices := map[string]*service.ESTService{}
 
-	// ACME server (RFC 8555 + RFC 9773 ARI) — Phase 1a foundation.
-	// Wires the directory + new-nonce surface against acmeRepo + the
-	// existing profileRepo (per-profile path resolution). Phases 1b-4
-	// extend with the JWS-authenticated POST surface — the constructor
-	// signature stays stable; later phases call setters.
+	// ACME server (RFC 8555 + RFC 9773 ARI). Phase 1a wired the
+	// directory + new-nonce surface against acmeRepo + profileRepo;
+	// Phase 1b adds the JWS-authenticated POST surface (new-account +
+	// account/<id>), which requires the transactor + audit service
+	// for per-op atomic-audit rows. SetTransactor mirrors the
+	// CertificateService.SetTransactor wiring at line 254 — same
+	// transactor instance shared across services.
 	acmeService := service.NewACMEService(acmeRepo, profileRepo, cfg.ACMEServer)
+	acmeService.SetTransactor(transactor)
+	acmeService.SetAuditService(auditService)
 	acmeHandler := handler.NewACMEHandler(acmeService)
 
 	// Build the API router with all handlers

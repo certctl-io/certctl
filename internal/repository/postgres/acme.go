@@ -6,8 +6,13 @@ package postgres
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"fmt"
 	"time"
+
+	"github.com/lib/pq"
+	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // ACMERepository implements the ACME server's persistence layer
@@ -83,4 +88,171 @@ func (r *ACMERepository) ConsumeNonce(ctx context.Context, nonce string) error {
 		return sql.ErrNoRows
 	}
 	return nil
+}
+
+// ErrACMEAccountDuplicateThumbprint is the sentinel returned by
+// CreateAccount[WithTx] when the (profile_id, jwk_thumbprint) UNIQUE
+// constraint fires. Callers (the new-account flow) translate this
+// into "an account already exists for this JWK" — RFC 8555 §7.3.1
+// idempotent-semantics path.
+var ErrACMEAccountDuplicateThumbprint = errors.New("acme: account already exists for this profile + JWK thumbprint")
+
+// CreateAccount inserts a new acme_accounts row. Use CreateAccountWithTx
+// when the insert must be atomic with an audit row.
+func (r *ACMERepository) CreateAccount(ctx context.Context, acct *domain.ACMEAccount) error {
+	return r.CreateAccountWithTx(ctx, r.db, acct)
+}
+
+// CreateAccountWithTx inserts using the supplied Querier (typically
+// *sql.Tx from postgres.WithinTx). Returns
+// ErrACMEAccountDuplicateThumbprint on the (profile_id, jwk_thumbprint)
+// UNIQUE collision per migration 000025.
+func (r *ACMERepository) CreateAccountWithTx(ctx context.Context, q repository.Querier, acct *domain.ACMEAccount) error {
+	if acct.AccountID == "" || acct.JWKThumbprint == "" || acct.JWKPEM == "" || acct.ProfileID == "" {
+		return fmt.Errorf("acme: create account: missing required field")
+	}
+	if acct.Status == "" {
+		acct.Status = domain.ACMEAccountStatusValid
+	}
+	now := time.Now().UTC()
+	if acct.CreatedAt.IsZero() {
+		acct.CreatedAt = now
+	}
+	acct.UpdatedAt = now
+
+	contact := pq.Array(acct.Contact)
+	var ownerID interface{}
+	if acct.OwnerID != "" {
+		ownerID = acct.OwnerID
+	}
+	_, err := q.ExecContext(ctx, `
+		INSERT INTO acme_accounts (
+			account_id, jwk_thumbprint, jwk_pem, contact, status,
+			profile_id, owner_id, created_at, updated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
+	`,
+		acct.AccountID, acct.JWKThumbprint, acct.JWKPEM, contact,
+		string(acct.Status), acct.ProfileID, ownerID,
+		acct.CreatedAt, acct.UpdatedAt,
+	)
+	if err != nil {
+		// Postgres SQLSTATE 23505 = unique_violation. lib/pq wraps the
+		// raw error in *pq.Error; decode and translate to the
+		// repository sentinel.
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			return ErrACMEAccountDuplicateThumbprint
+		}
+		return fmt.Errorf("acme: insert account: %w", err)
+	}
+	return nil
+}
+
+// GetAccountByID returns the account row for an account ID.
+// Returns sql.ErrNoRows wrapped via repository.ErrNotFound when
+// no row matches (callers branch on errors.Is(err, repository.ErrNotFound)).
+func (r *ACMERepository) GetAccountByID(ctx context.Context, accountID string) (*domain.ACMEAccount, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT account_id, jwk_thumbprint, jwk_pem, contact, status,
+		       profile_id, COALESCE(owner_id, ''), created_at, updated_at
+		FROM acme_accounts
+		WHERE account_id = $1
+	`, accountID)
+	return scanACMEAccount(row)
+}
+
+// GetAccountByThumbprint returns the account row for a (profile_id,
+// jwk_thumbprint) pair. Same sentinel semantics as GetAccountByID.
+// The new-account idempotency path queries by thumbprint to detect a
+// re-registration of an existing JWK (RFC 8555 §7.3.1).
+func (r *ACMERepository) GetAccountByThumbprint(ctx context.Context, profileID, thumbprint string) (*domain.ACMEAccount, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT account_id, jwk_thumbprint, jwk_pem, contact, status,
+		       profile_id, COALESCE(owner_id, ''), created_at, updated_at
+		FROM acme_accounts
+		WHERE profile_id = $1 AND jwk_thumbprint = $2
+	`, profileID, thumbprint)
+	return scanACMEAccount(row)
+}
+
+// UpdateAccountContact replaces the account's contact list. Use the
+// WithTx variant when the update must be atomic with an audit row.
+func (r *ACMERepository) UpdateAccountContact(ctx context.Context, accountID string, contact []string) error {
+	return r.UpdateAccountContactWithTx(ctx, r.db, accountID, contact)
+}
+
+// UpdateAccountContactWithTx writes the new contact list using the
+// supplied Querier. Returns sql.ErrNoRows-wrapped repository.ErrNotFound
+// on missing account.
+func (r *ACMERepository) UpdateAccountContactWithTx(ctx context.Context, q repository.Querier, accountID string, contact []string) error {
+	res, err := q.ExecContext(ctx, `
+		UPDATE acme_accounts
+		SET contact = $2, updated_at = NOW()
+		WHERE account_id = $1
+	`, accountID, pq.Array(contact))
+	if err != nil {
+		return fmt.Errorf("acme: update account contact: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("acme: update account contact rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("account not found: %w", repository.ErrNotFound)
+	}
+	return nil
+}
+
+// UpdateAccountStatus is the persistence path for account
+// deactivation. Phase 1b accepts only the "valid" → "deactivated"
+// transition (RFC 8555 §7.3.6); operator-initiated revocation is a
+// future phase.
+func (r *ACMERepository) UpdateAccountStatus(ctx context.Context, accountID string, status domain.ACMEAccountStatus) error {
+	return r.UpdateAccountStatusWithTx(ctx, r.db, accountID, status)
+}
+
+// UpdateAccountStatusWithTx writes the status transition using the
+// supplied Querier. Same sentinel semantics as UpdateAccountContactWithTx.
+func (r *ACMERepository) UpdateAccountStatusWithTx(ctx context.Context, q repository.Querier, accountID string, status domain.ACMEAccountStatus) error {
+	res, err := q.ExecContext(ctx, `
+		UPDATE acme_accounts
+		SET status = $2, updated_at = NOW()
+		WHERE account_id = $1
+	`, accountID, string(status))
+	if err != nil {
+		return fmt.Errorf("acme: update account status: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return fmt.Errorf("acme: update account status rows affected: %w", err)
+	}
+	if n == 0 {
+		return fmt.Errorf("account not found: %w", repository.ErrNotFound)
+	}
+	return nil
+}
+
+// scanACMEAccount is the shared shape for the SELECT-by-X account
+// queries above. Returns sql.ErrNoRows-wrapped repository.ErrNotFound
+// on miss; any other scan failure surfaces verbatim.
+func scanACMEAccount(row interface{ Scan(...interface{}) error }) (*domain.ACMEAccount, error) {
+	var (
+		acct      domain.ACMEAccount
+		contact   pq.StringArray
+		statusStr string
+	)
+	err := row.Scan(
+		&acct.AccountID, &acct.JWKThumbprint, &acct.JWKPEM, &contact,
+		&statusStr, &acct.ProfileID, &acct.OwnerID,
+		&acct.CreatedAt, &acct.UpdatedAt,
+	)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, fmt.Errorf("account not found: %w", repository.ErrNotFound)
+		}
+		return nil, fmt.Errorf("acme: scan account: %w", err)
+	}
+	acct.Contact = []string(contact)
+	acct.Status = domain.ACMEAccountStatus(statusStr)
+	return &acct, nil
 }

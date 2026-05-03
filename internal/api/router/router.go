@@ -415,6 +415,8 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /acme/profile/{id}/directory", http.HandlerFunc(reg.ACME.Directory))
 	r.Register("HEAD /acme/profile/{id}/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
 	r.Register("GET /acme/profile/{id}/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
+	r.Register("POST /acme/profile/{id}/new-account", http.HandlerFunc(reg.ACME.NewAccount))
+	r.Register("POST /acme/profile/{id}/account/{acc_id}", http.HandlerFunc(reg.ACME.Account))
 	// Default-profile shorthand. The handler's profile-resolution path
 	// returns userActionRequired (RFC 7807 + RFC 8555 §6.7) when
 	// CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is unset; when set it
@@ -422,6 +424,8 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /acme/directory", http.HandlerFunc(reg.ACME.Directory))
 	r.Register("HEAD /acme/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
 	r.Register("GET /acme/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
+	r.Register("POST /acme/new-account", http.HandlerFunc(reg.ACME.NewAccount))
+	r.Register("POST /acme/account/{acc_id}", http.HandlerFunc(reg.ACME.Account))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under
