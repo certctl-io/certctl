@@ -50,6 +50,23 @@ var SpecParityExceptions = map[string]string{
 	// operator-facing description.
 	"GET /scep-mtls":  "Phase 6.5 mTLS sibling route — same wire format as /scep with cert-required gate; documented in docs/legacy-est-scep.md",
 	"POST /scep-mtls": "Phase 6.5 mTLS sibling route — same wire format as /scep with cert-required gate; documented in docs/legacy-est-scep.md",
+
+	// ACME server (RFC 8555 + RFC 9773 ARI) — Phase 1a foundation.
+	// Like SCEP/EST, ACME is a wire-protocol surface (JWS-signed JSON
+	// over HTTPS per RFC 7515) whose semantics are dictated by the RFC
+	// rather than by an OpenAPI document. Documenting every endpoint
+	// in openapi.yaml would duplicate RFC 8555 §7.1 + §7.2 with no
+	// information gain. The canonical reference is docs/acme-server.md.
+	// Subsequent phases will extend this list with new-account,
+	// new-order, finalize, authz, challenge, cert, key-change,
+	// revoke-cert, renewal-info — each gets its own exception entry
+	// in the same commit that lands the route.
+	"GET /acme/profile/{id}/directory":  "RFC 8555 §7.1.1 directory; documented in docs/acme-server.md",
+	"HEAD /acme/profile/{id}/new-nonce": "RFC 8555 §7.2 new-nonce; documented in docs/acme-server.md",
+	"GET /acme/profile/{id}/new-nonce":  "RFC 8555 §7.2 new-nonce (GET form); documented in docs/acme-server.md",
+	"GET /acme/directory":               "RFC 8555 §7.1.1 directory (default-profile shorthand); documented in docs/acme-server.md",
+	"HEAD /acme/new-nonce":              "RFC 8555 §7.2 new-nonce (default-profile shorthand); documented in docs/acme-server.md",
+	"GET /acme/new-nonce":               "RFC 8555 §7.2 new-nonce GET (default-profile shorthand); documented in docs/acme-server.md",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

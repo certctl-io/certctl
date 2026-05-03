@@ -143,6 +143,19 @@ type HandlerRegistry struct {
 	// Both endpoints are admin-gated (M-008 pin updated to include
 	// admin_est.go).
 	AdminEST handler.AdminESTHandler
+	// ACME handles RFC 8555 ACME server endpoints under
+	// /acme/profile/<id>/* and the optional /acme/* shorthand.
+	// Phase 1a wires:
+	//   GET  /acme/profile/{id}/directory
+	//   HEAD /acme/profile/{id}/new-nonce
+	//   GET  /acme/profile/{id}/new-nonce
+	//   GET  /acme/directory     (shorthand)
+	//   HEAD /acme/new-nonce     (shorthand)
+	//   GET  /acme/new-nonce     (shorthand)
+	// Subsequent phases add new-account + account/<id>, orders,
+	// authzs, challenges, key-change, revoke-cert, ARI. See
+	// docs/acme-server.md for the configuration reference.
+	ACME handler.ACMEHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -389,6 +402,26 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("DELETE /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.DeleteHealthCheck))
 	r.Register("GET /api/v1/health-checks/{id}/history", http.HandlerFunc(reg.HealthChecks.GetHealthCheckHistory))
 	r.Register("POST /api/v1/health-checks/{id}/acknowledge", http.HandlerFunc(reg.HealthChecks.AcknowledgeHealthCheck))
+
+	// ACME (RFC 8555 + RFC 9773 ARI) server endpoints. Phase 1a wires
+	// directory + new-nonce only; Phases 1b-4 extend with the JWS-
+	// authenticated POST surface (new-account, new-order, finalize,
+	// challenges, revoke, ARI). Routes go through r.Register so the
+	// standard middleware chain (CORS, body-limit, audit) applies —
+	// ACME's own per-op metrics + RFC 8555 §6.5 Replay-Nonce headers
+	// are added by the handler.
+	//
+	// Per-profile path family (canonical):
+	r.Register("GET /acme/profile/{id}/directory", http.HandlerFunc(reg.ACME.Directory))
+	r.Register("HEAD /acme/profile/{id}/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
+	r.Register("GET /acme/profile/{id}/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
+	// Default-profile shorthand. The handler's profile-resolution path
+	// returns userActionRequired (RFC 7807 + RFC 8555 §6.7) when
+	// CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is unset; when set it
+	// dispatches to the same handler as the per-profile path.
+	r.Register("GET /acme/directory", http.HandlerFunc(reg.ACME.Directory))
+	r.Register("HEAD /acme/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
+	r.Register("GET /acme/new-nonce", http.HandlerFunc(reg.ACME.NewNonce))
 }
 
 // RegisterESTHandlers sets up EST (RFC 7030) routes under

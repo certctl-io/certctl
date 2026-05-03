@@ -155,6 +155,10 @@ func main() {
 	profileRepo := postgres.NewProfileRepository(db)
 	teamRepo := postgres.NewTeamRepository(db)
 	ownerRepo := postgres.NewOwnerRepository(db)
+	// ACME server (RFC 8555 + RFC 9773 ARI) — Phase 1a foundation.
+	// Repo wires nonce ops only; Phases 1b-4 extend with account /
+	// order / authz / challenge CRUD.
+	acmeRepo := postgres.NewACMERepository(db)
 	logger.Info("initialized all repositories")
 
 	// Initialize dynamic issuer registry.
@@ -744,6 +748,14 @@ func main() {
 	// by PathID; the AdminEST handler reads it at request time.
 	estServices := map[string]*service.ESTService{}
 
+	// ACME server (RFC 8555 + RFC 9773 ARI) — Phase 1a foundation.
+	// Wires the directory + new-nonce surface against acmeRepo + the
+	// existing profileRepo (per-profile path resolution). Phases 1b-4
+	// extend with the JWS-authenticated POST surface — the constructor
+	// signature stays stable; later phases call setters.
+	acmeService := service.NewACMEService(acmeRepo, profileRepo, cfg.ACMEServer)
+	acmeHandler := handler.NewACMEHandler(acmeService)
+
 	// Build the API router with all handlers
 	apiRouter := router.New()
 	apiRouter.RegisterHandlers(router.HandlerRegistry{
@@ -799,6 +811,12 @@ func main() {
 		AdminEST: handler.NewAdminESTHandler(
 			handler.NewAdminESTServiceImpl(estServices),
 		),
+		// ACME server (RFC 8555 + RFC 9773 ARI) — Phase 1a foundation.
+		// Phase 1a wires directory + new-nonce; subsequent phases extend
+		// with the JWS-authenticated POST surface (new-account,
+		// new-order, finalize, challenges, revoke, ARI). See
+		// docs/acme-server.md for the operator-facing reference.
+		ACME: acmeHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//

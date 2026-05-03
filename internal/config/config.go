@@ -13,21 +13,27 @@ import (
 // Config represents the complete application configuration.
 // All configuration values are read from environment variables with CERTCTL_ prefix.
 type Config struct {
-	Server         ServerConfig
-	Database       DatabaseConfig
-	Scheduler      SchedulerConfig
-	Log            LogConfig
-	Auth           AuthConfig
-	RateLimit      RateLimitConfig
-	CORS           CORSConfig
-	Keygen         KeygenConfig
-	CA             CAConfig
-	Notifiers      NotifierConfig
-	NetworkScan    NetworkScanConfig
-	EST            ESTConfig
-	SCEP           SCEPConfig
-	Verification   VerificationConfig
-	ACME           ACMEConfig
+	Server       ServerConfig
+	Database     DatabaseConfig
+	Scheduler    SchedulerConfig
+	Log          LogConfig
+	Auth         AuthConfig
+	RateLimit    RateLimitConfig
+	CORS         CORSConfig
+	Keygen       KeygenConfig
+	CA           CAConfig
+	Notifiers    NotifierConfig
+	NetworkScan  NetworkScanConfig
+	EST          ESTConfig
+	SCEP         SCEPConfig
+	Verification VerificationConfig
+	ACME         ACMEConfig
+	// ACMEServer is the SERVER-side ACME (RFC 8555 + RFC 9773 ARI)
+	// configuration. Distinct from ACME above (which is the consumer-
+	// side issuer connector that talks UP to Let's Encrypt / pebble).
+	// Server uses CERTCTL_ACME_SERVER_* prefix throughout so the two
+	// namespaces stay unambiguous in operator docs and shell env.
+	ACMEServer     ACMEServerConfig
 	Vault          VaultConfig
 	DigiCert       DigiCertConfig
 	Sectigo        SectigoConfig
@@ -643,6 +649,108 @@ type ACMEConfig struct {
 	// Only use for testing with self-signed ACME servers like Pebble. Never in production.
 	// Setting: CERTCTL_ACME_INSECURE environment variable.
 	Insecure bool
+}
+
+// ACMEServerConfig is the SERVER-side ACME (RFC 8555 + RFC 9773 ARI)
+// configuration. Distinct from ACMEConfig (the consumer-side issuer
+// connector that talks UP to Let's Encrypt / pebble). Server uses
+// CERTCTL_ACME_SERVER_* prefix throughout to avoid colliding with
+// the existing CERTCTL_ACME_* consumer namespace (DIRECTORY_URL /
+// PROFILE / CHALLENGE_TYPE / etc.).
+//
+// Phase 1a wires Enabled / DefaultAuthMode / DefaultProfileID /
+// NonceTTL / DirectoryMeta. Order/Authz TTLs + the per-challenge-type
+// concurrency caps + DNS01 resolver are reserved fields populated for
+// Phases 2/3 — exposing them now keeps the env-var surface stable
+// from day one (operators can set CERTCTL_ACME_SERVER_HTTP01_CONCURRENCY
+// today; it's a no-op until Phase 3 reads it).
+type ACMEServerConfig struct {
+	// Enabled is the master toggle. When false, the ACME handler is
+	// constructed (so the registry-shape stays stable) but no routes
+	// are registered. Operators flip this on after configuring the
+	// per-profile auth_mode column on certificate_profiles.
+	// Setting: CERTCTL_ACME_SERVER_ENABLED.
+	Enabled bool
+
+	// DefaultAuthMode sets the default value of certificate_profiles.acme_auth_mode
+	// for NEWLY-created profiles (e.g. via API). Existing profile rows
+	// retain whatever value they were created with — per-profile
+	// values, once set, override this default. Architecture decision:
+	// auth mode is per-profile, not server-wide.
+	// Valid: "trust_authenticated" (default) or "challenge".
+	// Setting: CERTCTL_ACME_SERVER_DEFAULT_AUTH_MODE.
+	DefaultAuthMode string
+
+	// DefaultProfileID, when set, activates the /acme/* shorthand
+	// path family — /acme/directory mirrors
+	// /acme/profile/<DefaultProfileID>/directory etc. When empty,
+	// requests to the shorthand return RFC 7807
+	// userActionRequired with a hint pointing at the per-profile
+	// path. Single-profile deployments can set this for ergonomic
+	// client config; multi-profile deployments leave it empty.
+	// Setting: CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID.
+	DefaultProfileID string
+
+	// NonceTTL is how long an issued ACME nonce remains valid before
+	// the server rejects it as expired. RFC 8555 §6.5.1 allows the
+	// server to set any TTL; 5 minutes is the operator-friendly
+	// default (clock-skew tolerant without enabling long-replay
+	// attacks). Setting: CERTCTL_ACME_SERVER_NONCE_TTL.
+	NonceTTL time.Duration
+
+	// OrderTTL is the lifetime of an unfulfilled ACME order. Phase 2
+	// reads; Phase 1a reserves the field. Default: 24h.
+	// Setting: CERTCTL_ACME_SERVER_ORDER_TTL.
+	OrderTTL time.Duration
+
+	// AuthzTTL is the lifetime of an unfulfilled authorization. Phase 2
+	// reads; Phase 1a reserves. Default: 24h.
+	// Setting: CERTCTL_ACME_SERVER_AUTHZ_TTL.
+	AuthzTTL time.Duration
+
+	// HTTP01ConcurrencyMax is the bound on concurrent HTTP-01 validators
+	// (semaphore weight). Phase 3 reads; Phase 1a reserves. Default: 10.
+	// Setting: CERTCTL_ACME_SERVER_HTTP01_CONCURRENCY.
+	HTTP01ConcurrencyMax int
+
+	// DNS01Resolver is the resolver address used by the DNS-01 validator.
+	// Phase 3 reads; Phase 1a reserves. Default: "8.8.8.8:53".
+	// Setting: CERTCTL_ACME_SERVER_DNS01_RESOLVER.
+	DNS01Resolver string
+
+	// DNS01ConcurrencyMax bounds concurrent DNS-01 validators. Default: 10.
+	// Setting: CERTCTL_ACME_SERVER_DNS01_CONCURRENCY.
+	DNS01ConcurrencyMax int
+
+	// TLSALPN01ConcurrencyMax bounds concurrent TLS-ALPN-01 validators.
+	// Default: 10. Setting: CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY.
+	TLSALPN01ConcurrencyMax int
+
+	// DirectoryMeta is the optional metadata advertised in the directory
+	// document per RFC 8555 §7.1.1.
+	DirectoryMeta ACMEServerDirectoryMeta
+}
+
+// ACMEServerDirectoryMeta holds the optional fields of the directory
+// `meta` block. Each is populated from a CERTCTL_ACME_SERVER_*
+// env var; an all-empty struct produces an omitempty-suppressed JSON
+// `meta` field on the directory.
+type ACMEServerDirectoryMeta struct {
+	// TermsOfService is a URL pointing to the operator's ToS document.
+	// Setting: CERTCTL_ACME_SERVER_TOS_URL.
+	TermsOfService string
+	// Website is a URL pointing to the operator's homepage.
+	// Setting: CERTCTL_ACME_SERVER_WEBSITE.
+	Website string
+	// CAAIdentities is the list of CAA-record domain values clients
+	// should authorize for this server. Setting:
+	// CERTCTL_ACME_SERVER_CAA_IDENTITIES (comma-separated).
+	CAAIdentities []string
+	// ExternalAccountRequired, when true, signals to clients that
+	// new-account requires an EAB token (RFC 8555 §7.3.4). Phase 1a
+	// advertises but does not enforce; EAB enforcement is a follow-up.
+	// Setting: CERTCTL_ACME_SERVER_EAB_REQUIRED.
+	ExternalAccountRequired bool
 }
 
 // OpenSSLConfig contains OpenSSL/Custom CA issuer connector configuration.
@@ -1645,6 +1753,30 @@ func Load() (*Config, error) {
 			Profile:                getEnv("CERTCTL_ACME_PROFILE", ""),
 			ARIEnabled:             getEnvBool("CERTCTL_ACME_ARI_ENABLED", false),
 			Insecure:               getEnvBool("CERTCTL_ACME_INSECURE", false),
+		},
+		// ACME server (RFC 8555 + RFC 9773 ARI) — distinct from the
+		// consumer-side ACME issuer connector above. Server uses
+		// CERTCTL_ACME_SERVER_* prefix throughout (audit fix #11).
+		// Phase 1a wires Enabled / DefaultAuthMode / DefaultProfileID /
+		// NonceTTL + DirectoryMeta. Order/Authz TTLs + concurrency
+		// caps + DNS01 resolver are reserved (Phases 2/3 read).
+		ACMEServer: ACMEServerConfig{
+			Enabled:                 getEnvBool("CERTCTL_ACME_SERVER_ENABLED", false),
+			DefaultAuthMode:         getEnv("CERTCTL_ACME_SERVER_DEFAULT_AUTH_MODE", "trust_authenticated"),
+			DefaultProfileID:        getEnv("CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID", ""),
+			NonceTTL:                getEnvDuration("CERTCTL_ACME_SERVER_NONCE_TTL", 5*time.Minute),
+			OrderTTL:                getEnvDuration("CERTCTL_ACME_SERVER_ORDER_TTL", 24*time.Hour),
+			AuthzTTL:                getEnvDuration("CERTCTL_ACME_SERVER_AUTHZ_TTL", 24*time.Hour),
+			HTTP01ConcurrencyMax:    getEnvInt("CERTCTL_ACME_SERVER_HTTP01_CONCURRENCY", 10),
+			DNS01Resolver:           getEnv("CERTCTL_ACME_SERVER_DNS01_RESOLVER", "8.8.8.8:53"),
+			DNS01ConcurrencyMax:     getEnvInt("CERTCTL_ACME_SERVER_DNS01_CONCURRENCY", 10),
+			TLSALPN01ConcurrencyMax: getEnvInt("CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY", 10),
+			DirectoryMeta: ACMEServerDirectoryMeta{
+				TermsOfService:          getEnv("CERTCTL_ACME_SERVER_TOS_URL", ""),
+				Website:                 getEnv("CERTCTL_ACME_SERVER_WEBSITE", ""),
+				CAAIdentities:           getEnvList("CERTCTL_ACME_SERVER_CAA_IDENTITIES", nil),
+				ExternalAccountRequired: getEnvBool("CERTCTL_ACME_SERVER_EAB_REQUIRED", false),
+			},
 		},
 		Digest: DigestConfig{
 			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),
