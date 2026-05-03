@@ -390,14 +390,10 @@ func (h ACMEHandler) Account(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var (
-		updated  *domain.ACMEAccount
-		readOnly bool
-	)
+	var updated *domain.ACMEAccount
 	// Empty body or empty JSON object → POST-as-GET (§6.3).
 	trimmed := trimBody(verified.Payload)
 	if len(trimmed) == 0 || string(trimmed) == "{}" {
-		readOnly = true
 		updated = verified.Account
 	} else {
 		var req acme.AccountUpdateRequest
@@ -433,18 +429,19 @@ func (h ACMEHandler) Account(w http.ResponseWriter, r *http.Request) {
 		if updated == nil {
 			// Empty status + nil contact → no-op; treat as POST-as-GET.
 			updated = verified.Account
-			readOnly = true
 		}
 	}
 
 	if nonce, err := h.svc.IssueNonce(r.Context()); err == nil {
 		w.Header().Set("Replay-Nonce", nonce)
 	}
-	if readOnly {
-		w.Header().Set("Content-Type", "application/json")
-	} else {
-		w.Header().Set("Content-Type", "application/json")
-	}
+	// RFC 8555 §6.3 (POST-as-GET) and §7.3.2 / §7.3.6 (account update +
+	// deactivation) both return the same account JSON shape, so a single
+	// unconditional Content-Type header covers both paths. Earlier code
+	// kept this behind an if/readOnly switch as a placeholder for
+	// differentiated headers (Cache-Control etc.) that never landed;
+	// CodeQL flagged the duplicate branches as quality issue #25.
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(
 		acme.MarshalAccount(updated, h.accountOrdersURL(r, profileID, updated.AccountID)),
