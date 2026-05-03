@@ -32,6 +32,7 @@ import (
 
 	"github.com/shankar0123/certctl/internal/connector/target"
 	"github.com/shankar0123/certctl/internal/connector/target/apache"
+	"github.com/shankar0123/certctl/internal/connector/target/awsacm"
 	"github.com/shankar0123/certctl/internal/connector/target/caddy"
 	"github.com/shankar0123/certctl/internal/connector/target/envoy"
 	"github.com/shankar0123/certctl/internal/connector/target/f5"
@@ -899,6 +900,20 @@ func (a *Agent) createTargetConnector(targetType string, configJSON json.RawMess
 			}
 		}
 		return k8s.New(&cfg, a.logger)
+
+	case "AWSACM":
+		// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
+		// AWS Certificate Manager target — SDK-driven (no file I/O).
+		// LoadDefaultConfig handles the standard AWS credential chain
+		// (IRSA / EC2 instance profile / SSO / env vars) without any
+		// long-lived creds in connector Config.
+		var cfg awsacm.Config
+		if len(configJSON) > 0 {
+			if err := json.Unmarshal(configJSON, &cfg); err != nil {
+				return nil, fmt.Errorf("invalid AWSACM config: %w", err)
+			}
+		}
+		return awsacm.New(context.Background(), &cfg, a.logger)
 
 	default:
 		return nil, fmt.Errorf("unsupported target type: %s", targetType)

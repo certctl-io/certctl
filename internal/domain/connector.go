@@ -212,4 +212,13 @@ const (
 	TargetTypeWinCertStore      TargetType = "WinCertStore"
 	TargetTypeJavaKeystore      TargetType = "JavaKeystore"
 	TargetTypeKubernetesSecrets TargetType = "KubernetesSecrets"
+	// TargetTypeAWSACM deploys certificates to AWS Certificate Manager
+	// (ACM) — the public AWS service that ALB / CloudFront / API
+	// Gateway / App Runner consume by ARN. Rank 5 of the 2026-05-03
+	// Infisical deep-research deliverable
+	// (cowork/infisical-deep-research-results.md Part 5). See
+	// docs/connectors.md "AWS Certificate Manager" section for the
+	// operator playbook including minimum IAM policy + atomic-rollback
+	// contract.
+	TargetTypeAWSACM TargetType = "AWSACM"
 )

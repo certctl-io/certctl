@@ -831,7 +831,7 @@ func strPtr(s string) *string {
 	return &s
 }
 
-// TestCreateTargetConnector_AllSupportedTypes tests connector creation for all 14 supported target types.
+// TestCreateTargetConnector_AllSupportedTypes tests connector creation for all 15 supported target types.
 func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 	tmpDir := t.TempDir()
 
@@ -946,6 +946,18 @@ func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 				"secret_name": "tls-secret",
 			},
 		},
+		{
+			// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
+			// Region must be a valid AWS region; the connector lazy-loads
+			// the SDK client during ValidateConfig but New() with a populated
+			// region should succeed against the SDK credential chain
+			// (LoadDefaultConfig doesn't require live creds).
+			name:     "AWSACM",
+			typeName: "AWSACM",
+			config: map[string]string{
+				"region": "us-east-1",
+			},
+		},
 	}
 
 	cfg := &AgentConfig{
@@ -999,6 +1011,7 @@ func TestCreateTargetConnector_InvalidJSON(t *testing.T) {
 		"WinCertStore",
 		"JavaKeystore",
 		"KubernetesSecrets",
+		"AWSACM",
 	}
 
 	cfg := &AgentConfig{
