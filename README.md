@@ -400,11 +400,8 @@ Core lifecycle management — Local CA + ACME v2 issuers, NGINX target connector
 ### V2: Operational Maturity — Shipped
 30+ milestones shipping enterprise-grade features for free. Sub-CA mode, ACME DNS-01/DNS-PERSIST-01/EAB/ARI (RFC 9773)/profile selection, step-ca, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM PCA, Entrust, GlobalSign, EJBCA, OpenSSL/Custom CA issuers. NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (WinRM), F5 BIG-IP, SSH, Windows Certificate Store, Java Keystore, Kubernetes Secrets targets. EST server (RFC 7030) and SCEP server (RFC 8894) enrollment protocols. RFC 5280 revocation with DER CRL + embedded OCSP responder. Certificate profiles, ownership tracking, team assignment, agent groups, interactive approval workflows. Filesystem, network, and cloud secret manager (AWS SM, Azure KV, GCP SM) certificate discovery with triage GUI. Dynamic issuer/target configuration via GUI with AES-256-GCM encrypted storage. First-run onboarding wizard. Post-deployment TLS verification. Certificate export (PEM/PKCS#12). S/MIME support. Prometheus metrics. Scheduled certificate digest emails. Slack, Teams, PagerDuty, OpsGenie, SMTP notifications. MCP server (80 tools), CLI (12 commands), Helm chart. Compliance mapping (SOC 2, PCI-DSS 4.0, NIST SP 800-57). 5 turnkey deployment examples. Agent install script. Migration guides from certbot, acme.sh, and cert-manager. See the [Feature Inventory](docs/features.md) for details.
 
-### V3: certctl Pro
-Enterprise capabilities for larger deployments are available in the commercial tier.
-
-### V4+: Cloud & Scale
-Kubernetes cert-manager external issuer, cloud infrastructure targets, extended CA support, and platform-scale features.
+### Forward-looking work — all free, all self-hostable
+Everything ships free under BSL 1.1. No paid tier, no V3 / V4 gating, no enterprise edition. Future revenue path is a managed-service hosting offering — operate certctl-server as a hosted service while customers self-install only the agent.
 
 ## License
 
