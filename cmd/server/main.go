@@ -785,6 +785,25 @@ func main() {
 	// when absent, falls back to last-33%-of-validity).
 	acmeService.SetRevocationDelegate(revocationSvc)
 	acmeService.SetRenewalPolicyLookup(renewalPolicyRepo)
+	// Phase 5 — per-account rate limiter. In-memory token-buckets,
+	// shared across all entry points (CreateOrder / RotateAccountKey /
+	// RespondToChallenge). Restart wipes counters; orders/hour caps are
+	// eventual-consistency anyway. Persistent rate limiting is a
+	// follow-up if production telemetry shows abuse patterns we can't
+	// catch in a single restart cycle.
+	acmeRateLimiter := acmepkg.NewRateLimiter()
+	acmeService.SetRateLimiter(acmeRateLimiter)
+	// Phase 5 — ACME GC sweeper. Disabled when GCInterval <= 0; the
+	// scheduler.SetACMEGarbageCollector(nil) leg short-circuits in
+	// scheduler.Start (the loopCount + go-routine launch are gated on
+	// non-nil acmeGC). Wired here (not earlier with the other scheduler
+	// loops) because the GC service needs a fully-constructed acmeService.
+	if cfg.ACMEServer.Enabled && cfg.ACMEServer.GCInterval > 0 {
+		sched.SetACMEGarbageCollector(acmeService)
+		sched.SetACMEGCInterval(cfg.ACMEServer.GCInterval)
+		logger.Info("ACME GC scheduler enabled",
+			"interval", cfg.ACMEServer.GCInterval.String())
+	}
 	acmeHandler := handler.NewACMEHandler(acmeService)
 
 	// Build the API router with all handlers

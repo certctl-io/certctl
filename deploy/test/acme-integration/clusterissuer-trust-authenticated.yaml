@@ -1,0 +1,42 @@
+# Phase 5 — sample ClusterIssuer for the certctl trust_authenticated
+# auth mode (RFC 8555 §6 + certctl auth_mode=trust_authenticated, where
+# the JWS-authenticated ACME account is trusted to issue any identifier
+# the profile policy permits — no per-identifier ownership challenges).
+#
+# Use this as the starting template for any internal-PKI rollout.
+# Replace the caBundle placeholder with the base64-encoded PEM of the
+# certctl-server's self-signed bootstrap root, then `kubectl apply`.
+#
+# Generate the caBundle via:
+#   cat deploy/test/certs/ca.crt | base64 -w0
+# (See certctl/docs/acme-server.md "TLS trust bootstrap" section for the
+# end-to-end walkthrough — this is the single biggest first-time-deploy
+# footgun on cert-manager, captured as audit fix #9.)
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: certctl-test-trust
+spec:
+  acme:
+    email: test@example.com
+    # Replace 'certctl-test' with your release name + adjust the
+    # profile path segment. Default profile path:
+    #   https://<service>.<namespace>.svc.cluster.local:8443/acme/profile/<profile-id>/directory
+    server: https://certctl-test.default.svc.cluster.local:8443/acme/profile/prof-test/directory
+    # caBundle: Audit fix #9. cert-manager validates the ACME server's
+    # TLS chain before submitting any account/order/finalize. With a
+    # self-signed bootstrap root, the ClusterIssuer MUST carry the root
+    # explicitly via this field.
+    caBundle: |
+      LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi4uLgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    privateKeySecretRef:
+      name: certctl-test-trust-account-key
+    solvers:
+      # In trust_authenticated mode the solver is unused at the
+      # validation step but cert-manager still requires at least one
+      # solver in the spec. http01-via-ingress-nginx is the cheapest
+      # placeholder shape that round-trips correctly through cert-
+      # manager's validation webhooks.
+      - http01:
+          ingress:
+            class: nginx

@@ -1,0 +1,20 @@
+# Phase 5 — Certificate resource the integration test applies and
+# waits for. The certctl-test-trust ClusterIssuer (trust_authenticated
+# mode) issues the cert without any solver round-trip; the resulting
+# Secret 'test-com-tls' is asserted to carry tls.crt + tls.key.
+apiVersion: cert-manager.io/v1
+kind: Certificate
+metadata:
+  name: test-com
+  namespace: default
+spec:
+  secretName: test-com-tls
+  commonName: test.example.com
+  dnsNames:
+    - test.example.com
+    - www.test.example.com
+  issuerRef:
+    name: certctl-test-trust
+    kind: ClusterIssuer
+  duration: 720h     # 30d
+  renewBefore: 240h  # 10d

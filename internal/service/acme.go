@@ -56,6 +56,20 @@ type ACMERepo interface {
 	// Phase 4 — key rollover + revocation auth.
 	UpdateAccountJWKWithTx(ctx context.Context, q repository.Querier, accountID, expectedOldThumbprint, newThumbprint, newJWKPEM string) error
 	AccountOwnsCertificate(ctx context.Context, accountID, certificateID string) (bool, error)
+	// Phase 5 — per-account concurrent-order count + GC sweeps.
+	// CountActiveOrdersByAccount returns the number of orders in
+	// pending/ready/processing for the given account.
+	CountActiveOrdersByAccount(ctx context.Context, accountID string) (int, error)
+	// GCExpiredNonces deletes nonces whose expires_at < now() OR
+	// used = true. Returns rows-affected count for telemetry.
+	GCExpiredNonces(ctx context.Context) (int64, error)
+	// GCExpireAuthorizations transitions authzs in `pending` whose
+	// expires_at < now() to `expired`. Returns rows-affected count.
+	GCExpireAuthorizations(ctx context.Context) (int64, error)
+	// GCInvalidateExpiredOrders transitions orders in
+	// pending/ready/processing whose expires_at < now() to `invalid`
+	// with a server-internal error. Returns rows-affected count.
+	GCInvalidateExpiredOrders(ctx context.Context) (int64, error)
 }
 
 // CertificateRevoker is the minimum surface ACMEService needs to route
@@ -142,6 +156,12 @@ type ACMEService struct {
 	// and RenewalInfo returns the no-policy default window.
 	revoker         CertificateRevoker
 	renewalPolicies RenewalPolicyLookup
+
+	// Phase 5 — per-account rate limiter. cmd/server/main.go constructs
+	// an *acme.RateLimiter and wires it via SetRateLimiter. When unset
+	// (tests, legacy bootstrap) the limiter calls short-circuit to
+	// "always allow" — same shape as the validatorPool unset case.
+	rateLimiter *acme.RateLimiter
 }
 
 // NewACMEService constructs an ACMEService with the directory + nonce
@@ -195,6 +215,16 @@ func (s *ACMEService) SetRevocationDelegate(r CertificateRevoker) { s.revoker = 
 // the "last 33% of validity" default window; the renewal-info handler
 // still returns 200.
 func (s *ACMEService) SetRenewalPolicyLookup(r RenewalPolicyLookup) { s.renewalPolicies = r }
+
+// SetRateLimiter wires Phase 5's per-account rate limiter. Optional —
+// when nil, the per-action rate-limit checks short-circuit to
+// "always allow" so the legacy code path stays unchanged for bootstrap
+// + tests that don't care about throttling.
+func (s *ACMEService) SetRateLimiter(r *acme.RateLimiter) { s.rateLimiter = r }
+
+// RateLimiter returns the wired limiter so the handler can compute
+// Retry-After durations on rate-limited responses without re-checking.
+func (s *ACMEService) RateLimiter() *acme.RateLimiter { return s.rateLimiter }
 
 // SetValidatorPool wires Phase 3's challenge validator pool.
 // cmd/server/main.go constructs an *acme.Pool at startup with the
@@ -334,6 +364,19 @@ var ErrACMEARIDisabled = errors.New("acme: ARI is disabled on this server")
 // not RFC 9773 §4.1 shape. Handler maps to 400 + malformed.
 var ErrACMEARIBadCertID = errors.New("acme: ARI cert-id is malformed")
 
+// Phase 5 sentinels.
+
+// ErrACMERateLimited is returned when the per-action rate limit fires.
+// Handler maps to RFC 7807 + RFC 8555 §6.7
+// `urn:ietf:params:acme:error:rateLimited` with a Retry-After header.
+var ErrACMERateLimited = errors.New("acme: rate limit exceeded")
+
+// ErrACMEConcurrentOrdersExceeded is returned by CreateOrder when the
+// account already has cfg.RateLimitConcurrentOrders orders in
+// pending/ready/processing. Handler maps to rateLimited (RFC 8555 §6.7
+// shape; the certctl-side cause is concurrency rather than per-hour).
+var ErrACMEConcurrentOrdersExceeded = errors.New("acme: concurrent orders limit exceeded")
+
 // BuildDirectory constructs the per-profile directory document.
 //
 // profileID resolution:
@@ -463,6 +506,13 @@ type ACMEMetrics struct {
 	RevokeCertFailTotal  atomic.Uint64 // rejected revocation (4xx)
 	RenewalInfoTotal     atomic.Uint64 // ARI 200
 	RenewalInfoFailTotal atomic.Uint64 // ARI 4xx
+
+	// Phase 5 — GC sweep counts (per-tick rows-affected, summed).
+	GCNoncesReapedTotal      atomic.Uint64
+	GCAuthzsExpiredTotal     atomic.Uint64
+	GCOrdersInvalidatedTotal atomic.Uint64
+	GCRunsTotal              atomic.Uint64
+	GCRunFailuresTotal       atomic.Uint64
 }
 
 // NewACMEMetrics returns a zeroed counter table. Concurrent callers
@@ -508,6 +558,11 @@ func (m *ACMEMetrics) Snapshot() map[string]uint64 {
 		"certctl_acme_revoke_cert_failures_total":       m.RevokeCertFailTotal.Load(),
 		"certctl_acme_renewal_info_total":               m.RenewalInfoTotal.Load(),
 		"certctl_acme_renewal_info_failures_total":      m.RenewalInfoFailTotal.Load(),
+		"certctl_acme_gc_nonces_reaped_total":           m.GCNoncesReapedTotal.Load(),
+		"certctl_acme_gc_authzs_expired_total":          m.GCAuthzsExpiredTotal.Load(),
+		"certctl_acme_gc_orders_invalidated_total":      m.GCOrdersInvalidatedTotal.Load(),
+		"certctl_acme_gc_runs_total":                    m.GCRunsTotal.Load(),
+		"certctl_acme_gc_run_failures_total":            m.GCRunFailuresTotal.Load(),
 	}
 }
 
@@ -782,6 +837,27 @@ func (s *ACMEService) CreateOrder(
 	if s.tx == nil || s.auditService == nil {
 		s.metrics.bump(&s.metrics.NewOrderFailureTotal)
 		return nil, fmt.Errorf("acme: new-order requires SetTransactor + SetAuditService")
+	}
+	// Phase 5 — per-account orders/hour cap. Hits return rateLimited
+	// (RFC 8555 §6.7) before any DB work. Counter is in-memory; restart
+	// wipes (eventual-consistency caps are acceptable).
+	if s.rateLimiter != nil && s.cfg.RateLimitOrdersPerHour > 0 {
+		if !s.rateLimiter.Allow(acme.ActionNewOrder, accountID, s.cfg.RateLimitOrdersPerHour) {
+			s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+			return nil, ErrACMERateLimited
+		}
+	}
+	// Phase 5 — concurrent-orders cap. We count
+	// pending/ready/processing orders for this account; if at-or-over
+	// the cap, reject. This is a DB read (no FOR UPDATE), so two
+	// requests racing under the threshold can both succeed and push
+	// the account one over — accepted as eventual-consistency.
+	if s.cfg.RateLimitConcurrentOrders > 0 {
+		count, cerr := s.repo.CountActiveOrdersByAccount(ctx, accountID)
+		if cerr == nil && count >= s.cfg.RateLimitConcurrentOrders {
+			s.metrics.bump(&s.metrics.NewOrderFailureTotal)
+			return nil, ErrACMEConcurrentOrdersExceeded
+		}
 	}
 	resolvedProfileID, err := s.resolveProfile(ctx, profileID)
 	if err != nil {
@@ -1285,6 +1361,16 @@ func (s *ACMEService) RespondToChallenge(
 		s.metrics.bump(&s.metrics.ChallengeRespondFailTotal)
 		return nil, ErrACMEChallengePoolUnconfigured
 	}
+	// Phase 5 — per-challenge respond rate limit. Defends against retry
+	// storms from a misbehaving client. Keyed by challengeID (not
+	// accountID) so a flood against one challenge doesn't drain the
+	// account's whole budget.
+	if s.rateLimiter != nil && s.cfg.RateLimitChallengeRespondsPerHour > 0 {
+		if !s.rateLimiter.Allow(acme.ActionChallengeRespond, challengeID, s.cfg.RateLimitChallengeRespondsPerHour) {
+			s.metrics.bump(&s.metrics.ChallengeRespondFailTotal)
+			return nil, ErrACMERateLimited
+		}
+	}
 
 	ch, err := s.repo.GetChallengeByID(ctx, challengeID)
 	if err != nil {
@@ -1507,6 +1593,14 @@ func (s *ACMEService) RotateAccountKey(
 	if oldAccount == nil || newJWK == nil {
 		s.metrics.bump(&s.metrics.KeyChangeFailTotal)
 		return nil, ErrACMEKeyRolloverInvalid
+	}
+	// Phase 5 — rollovers/hour cap. Defaults to 5/hour: a flood is an
+	// attack signal (key rotation should be rare). Keyed by accountID.
+	if s.rateLimiter != nil && s.cfg.RateLimitKeyChangePerHour > 0 {
+		if !s.rateLimiter.Allow(acme.ActionKeyChange, oldAccount.AccountID, s.cfg.RateLimitKeyChangePerHour) {
+			s.metrics.bump(&s.metrics.KeyChangeFailTotal)
+			return nil, ErrACMERateLimited
+		}
 	}
 
 	newThumbprint, err := acme.JWKThumbprint(newJWK)
@@ -1816,3 +1910,56 @@ func mapACMERevocationReason(code int) string {
 		return string(domain.RevocationReasonUnspecified)
 	}
 }
+
+// GarbageCollect runs a single ACME GC sweep. Phase 5 — the scheduler
+// invokes this every cfg.GCInterval. Three independent sweeps:
+//
+//  1. Delete used / expired nonces.
+//  2. Transition expired pending authzs to `expired`.
+//  3. Transition expired pending/ready/processing orders to `invalid`.
+//
+// Each sweep is a single SQL statement (no per-row transactions) so a
+// large reap is one atomic write per sweep. Per-sweep errors are
+// logged-and-continued: a failing nonces sweep doesn't block the
+// authzs sweep. Returns the first error encountered (for caller
+// telemetry); per-sweep counts are recorded on metrics regardless.
+//
+// Idempotent — repeated runs are safe; the second run finds 0 rows.
+func (s *ACMEService) GarbageCollect(ctx context.Context) error {
+	s.metrics.bump(&s.metrics.GCRunsTotal)
+	var firstErr error
+
+	if n, err := s.repo.GCExpiredNonces(ctx); err != nil {
+		s.metrics.bump(&s.metrics.GCRunFailuresTotal)
+		if firstErr == nil {
+			firstErr = fmt.Errorf("acme gc: nonces: %w", err)
+		}
+	} else if n > 0 {
+		atomicAddUint64(&s.metrics.GCNoncesReapedTotal, uint64(n))
+	}
+
+	if n, err := s.repo.GCExpireAuthorizations(ctx); err != nil {
+		s.metrics.bump(&s.metrics.GCRunFailuresTotal)
+		if firstErr == nil {
+			firstErr = fmt.Errorf("acme gc: authzs: %w", err)
+		}
+	} else if n > 0 {
+		atomicAddUint64(&s.metrics.GCAuthzsExpiredTotal, uint64(n))
+	}
+
+	if n, err := s.repo.GCInvalidateExpiredOrders(ctx); err != nil {
+		s.metrics.bump(&s.metrics.GCRunFailuresTotal)
+		if firstErr == nil {
+			firstErr = fmt.Errorf("acme gc: orders: %w", err)
+		}
+	} else if n > 0 {
+		atomicAddUint64(&s.metrics.GCOrdersInvalidatedTotal, uint64(n))
+	}
+
+	return firstErr
+}
+
+// atomicAddUint64 adds delta to the counter. The metrics struct exposes
+// only `bump` (add 1) by default; this helper covers the
+// rows-affected-N case the GC needs.
+func atomicAddUint64(c *atomic.Uint64, delta uint64) { c.Add(delta) }

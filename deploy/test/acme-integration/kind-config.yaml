@@ -1,0 +1,34 @@
+# Phase 5 — kind-cluster shape for the cert-manager integration test.
+#
+# Single control-plane + single worker. Port 8443 (certctl ACME server)
+# and 80/443 (ingress-nginx for HTTP-01 solver) are extra-mapped onto
+# the host so the in-test workflow can curl the in-cluster services.
+#
+# Used by: deploy/test/acme-integration/certmanager_test.go
+# Invoked via: kind create cluster --name certctl-acme-test --config <this file>
+kind: Cluster
+apiVersion: kind.x-k8s.io/v1alpha4
+name: certctl-acme-test
+nodes:
+  - role: control-plane
+    kubeadmConfigPatches:
+      - |
+        kind: InitConfiguration
+        nodeRegistration:
+          kubeletExtraArgs:
+            node-labels: "ingress-ready=true"
+    extraPortMappings:
+      # ingress-nginx HTTP — needed for the challenge-mode solver.
+      - containerPort: 80
+        hostPort: 80
+        protocol: TCP
+      - containerPort: 443
+        hostPort: 443
+        protocol: TCP
+      # certctl-server HTTPS (the ACME directory + JWS-authenticated
+      # POST surface). Only required for out-of-cluster smoke tests; the
+      # in-cluster ClusterIssuer talks via Service DNS.
+      - containerPort: 30843
+        hostPort: 8443
+        protocol: TCP
+  - role: worker

@@ -744,6 +744,42 @@ type ACMEServerConfig struct {
 	// certs. Setting: CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL.
 	ARIPollInterval time.Duration
 
+	// RateLimitOrdersPerHour caps new-order requests per ACME account per
+	// rolling hour. 0 disables (no limit). Default: 100. Hits return RFC
+	// 7807 + RFC 8555 §6.7 `urn:ietf:params:acme:error:rateLimited` with
+	// a Retry-After header. In-memory token-bucket — restart wipes the
+	// counter, which is acceptable for orders/hour caps (eventual-
+	// consistency anyway). Setting:
+	// CERTCTL_ACME_SERVER_RATE_LIMIT_ORDERS_PER_HOUR.
+	RateLimitOrdersPerHour int
+
+	// RateLimitConcurrentOrders caps the number of orders an ACME account
+	// can have in pending/ready/processing state simultaneously. 0
+	// disables. Default: 5. Same Problem shape as the per-hour limit.
+	// Setting: CERTCTL_ACME_SERVER_RATE_LIMIT_CONCURRENT_ORDERS.
+	RateLimitConcurrentOrders int
+
+	// RateLimitKeyChangePerHour caps account-key rollovers per account
+	// per rolling hour. 0 disables. Default: 5 (rollovers should be rare;
+	// a flood is an attack signal). Setting:
+	// CERTCTL_ACME_SERVER_RATE_LIMIT_KEY_CHANGE_PER_HOUR.
+	RateLimitKeyChangePerHour int
+
+	// RateLimitChallengeRespondsPerHour caps challenge-respond requests
+	// per challenge per rolling hour. 0 disables. Default: 60 (defends
+	// against retry storms from a misbehaving client). Setting:
+	// CERTCTL_ACME_SERVER_RATE_LIMIT_CHALLENGE_RESPONDS_PER_HOUR.
+	RateLimitChallengeRespondsPerHour int
+
+	// GCInterval is the tick interval for the ACME GC scheduler loop.
+	// On each tick the loop sweeps expired nonces, transitions expired
+	// pending authzs to `expired`, transitions expired
+	// pending/ready/processing orders to `invalid`, and reaps Phase-2
+	// atomicity-window orphans (orders without a linked cert when one
+	// should exist). 0 disables the loop entirely. Default: 1m. Setting:
+	// CERTCTL_ACME_SERVER_GC_INTERVAL.
+	GCInterval time.Duration
+
 	// DirectoryMeta is the optional metadata advertised in the directory
 	// document per RFC 8555 §7.1.1.
 	DirectoryMeta ACMEServerDirectoryMeta
@@ -1779,18 +1815,23 @@ func Load() (*Config, error) {
 		// NonceTTL + DirectoryMeta. Order/Authz TTLs + concurrency
 		// caps + DNS01 resolver are reserved (Phases 2/3 read).
 		ACMEServer: ACMEServerConfig{
-			Enabled:                 getEnvBool("CERTCTL_ACME_SERVER_ENABLED", false),
-			DefaultAuthMode:         getEnv("CERTCTL_ACME_SERVER_DEFAULT_AUTH_MODE", "trust_authenticated"),
-			DefaultProfileID:        getEnv("CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID", ""),
-			NonceTTL:                getEnvDuration("CERTCTL_ACME_SERVER_NONCE_TTL", 5*time.Minute),
-			OrderTTL:                getEnvDuration("CERTCTL_ACME_SERVER_ORDER_TTL", 24*time.Hour),
-			AuthzTTL:                getEnvDuration("CERTCTL_ACME_SERVER_AUTHZ_TTL", 24*time.Hour),
-			HTTP01ConcurrencyMax:    getEnvInt("CERTCTL_ACME_SERVER_HTTP01_CONCURRENCY", 10),
-			DNS01Resolver:           getEnv("CERTCTL_ACME_SERVER_DNS01_RESOLVER", "8.8.8.8:53"),
-			DNS01ConcurrencyMax:     getEnvInt("CERTCTL_ACME_SERVER_DNS01_CONCURRENCY", 10),
-			TLSALPN01ConcurrencyMax: getEnvInt("CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY", 10),
-			ARIEnabled:              getEnvBool("CERTCTL_ACME_SERVER_ARI_ENABLED", true),
-			ARIPollInterval:         getEnvDuration("CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL", 6*time.Hour),
+			Enabled:                           getEnvBool("CERTCTL_ACME_SERVER_ENABLED", false),
+			DefaultAuthMode:                   getEnv("CERTCTL_ACME_SERVER_DEFAULT_AUTH_MODE", "trust_authenticated"),
+			DefaultProfileID:                  getEnv("CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID", ""),
+			NonceTTL:                          getEnvDuration("CERTCTL_ACME_SERVER_NONCE_TTL", 5*time.Minute),
+			OrderTTL:                          getEnvDuration("CERTCTL_ACME_SERVER_ORDER_TTL", 24*time.Hour),
+			AuthzTTL:                          getEnvDuration("CERTCTL_ACME_SERVER_AUTHZ_TTL", 24*time.Hour),
+			HTTP01ConcurrencyMax:              getEnvInt("CERTCTL_ACME_SERVER_HTTP01_CONCURRENCY", 10),
+			DNS01Resolver:                     getEnv("CERTCTL_ACME_SERVER_DNS01_RESOLVER", "8.8.8.8:53"),
+			DNS01ConcurrencyMax:               getEnvInt("CERTCTL_ACME_SERVER_DNS01_CONCURRENCY", 10),
+			TLSALPN01ConcurrencyMax:           getEnvInt("CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY", 10),
+			ARIEnabled:                        getEnvBool("CERTCTL_ACME_SERVER_ARI_ENABLED", true),
+			ARIPollInterval:                   getEnvDuration("CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL", 6*time.Hour),
+			RateLimitOrdersPerHour:            getEnvInt("CERTCTL_ACME_SERVER_RATE_LIMIT_ORDERS_PER_HOUR", 100),
+			RateLimitConcurrentOrders:         getEnvInt("CERTCTL_ACME_SERVER_RATE_LIMIT_CONCURRENT_ORDERS", 5),
+			RateLimitKeyChangePerHour:         getEnvInt("CERTCTL_ACME_SERVER_RATE_LIMIT_KEY_CHANGE_PER_HOUR", 5),
+			RateLimitChallengeRespondsPerHour: getEnvInt("CERTCTL_ACME_SERVER_RATE_LIMIT_CHALLENGE_RESPONDS_PER_HOUR", 60),
+			GCInterval:                        getEnvDuration("CERTCTL_ACME_SERVER_GC_INTERVAL", time.Minute),
 			DirectoryMeta: ACMEServerDirectoryMeta{
 				TermsOfService:          getEnv("CERTCTL_ACME_SERVER_TOS_URL", ""),
 				Website:                 getEnv("CERTCTL_ACME_SERVER_WEBSITE", ""),

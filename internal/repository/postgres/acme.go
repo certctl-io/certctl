@@ -751,6 +751,85 @@ func (r *ACMERepository) AccountOwnsCertificate(ctx context.Context, accountID, 
 	return count > 0, nil
 }
 
+// --- Phase 5 — concurrent-orders count + GC sweeps ---------------------
+
+// CountActiveOrdersByAccount returns the number of acme_orders rows
+// with the given account_id where status is in
+// {pending, ready, processing}. Used by the per-account
+// concurrent-orders rate limit.
+func (r *ACMERepository) CountActiveOrdersByAccount(ctx context.Context, accountID string) (int, error) {
+	var count int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(1)
+		FROM acme_orders
+		WHERE account_id = $1
+		  AND status IN ('pending', 'ready', 'processing')
+	`, accountID).Scan(&count)
+	if err != nil {
+		return 0, fmt.Errorf("acme: count active orders: %w", err)
+	}
+	return count, nil
+}
+
+// GCExpiredNonces deletes nonce rows that have been used or have
+// passed their expires_at. Returns rows-affected count for telemetry.
+// Phase 5 — called every GCInterval from the scheduler.
+func (r *ACMERepository) GCExpiredNonces(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		DELETE FROM acme_nonces
+		WHERE used = TRUE OR expires_at < NOW()
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc expired nonces: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc expired nonces rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// GCExpireAuthorizations transitions authzs in `pending` whose
+// expires_at < NOW() to `expired`. Authzs in valid/invalid are left
+// alone (they're already terminal). Returns rows-affected count.
+func (r *ACMERepository) GCExpireAuthorizations(ctx context.Context) (int64, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE acme_authorizations
+		SET status = 'expired', updated_at = NOW()
+		WHERE status = 'pending' AND expires_at < NOW()
+	`)
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc expire authorizations: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc expire authorizations rows affected: %w", err)
+	}
+	return n, nil
+}
+
+// GCInvalidateExpiredOrders transitions orders in
+// pending/ready/processing whose expires_at < NOW() to `invalid` with
+// a server-internal error. Orders in valid/invalid are terminal and
+// untouched.
+func (r *ACMERepository) GCInvalidateExpiredOrders(ctx context.Context) (int64, error) {
+	const errBlob = `{"type":"urn:ietf:params:acme:error:serverInternal","detail":"order expired before issuance","status":500}`
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE acme_orders
+		SET status = 'invalid', error = $1::jsonb, updated_at = NOW()
+		WHERE status IN ('pending', 'ready', 'processing')
+		  AND expires_at < NOW()
+	`, errBlob)
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc invalidate expired orders: %w", err)
+	}
+	n, err := res.RowsAffected()
+	if err != nil {
+		return 0, fmt.Errorf("acme: gc invalidate expired orders rows affected: %w", err)
+	}
+	return n, nil
+}
+
 // scanACMEAccount is the shared shape for the SELECT-by-X account
 // queries above. Returns sql.ErrNoRows-wrapped repository.ErrNotFound
 // on miss; any other scan failure surfaces verbatim.

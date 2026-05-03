@@ -274,6 +274,23 @@ func writeServiceError(w http.ResponseWriter, err error) {
 		})
 	case errors.Is(err, service.ErrACMEARIBadCertID):
 		acme.WriteProblem(w, acme.Malformed("ARI cert-id is malformed"))
+	case errors.Is(err, service.ErrACMERateLimited):
+		// RFC 8555 §6.7 + RFC 7807. The handler doesn't have the
+		// (action, key) tuple here so we can't emit a precise
+		// Retry-After; the entry-point handlers (NewOrder etc.) emit
+		// their own Retry-After header before delegating to the
+		// service, leaving this catchall for completeness.
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:rateLimited",
+			Detail: "request rate limit exceeded; retry later",
+			Status: http.StatusTooManyRequests,
+		})
+	case errors.Is(err, service.ErrACMEConcurrentOrdersExceeded):
+		acme.WriteProblem(w, acme.Problem{
+			Type:   "urn:ietf:params:acme:error:rateLimited",
+			Detail: "too many concurrent orders for this account; finish or cancel pending orders before submitting more",
+			Status: http.StatusTooManyRequests,
+		})
 	default:
 		// Avoid leaking internal error text per master-prompt
 		// criterion #10 (operator-actionable errors with no info

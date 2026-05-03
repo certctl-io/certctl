@@ -164,6 +164,23 @@ func (f *fakeACMERepo) UpdateAccountJWKWithTx(ctx context.Context, q repository.
 func (f *fakeACMERepo) AccountOwnsCertificate(ctx context.Context, accountID, certificateID string) (bool, error) {
 	return false, nil
 }
+func (f *fakeACMERepo) CountActiveOrdersByAccount(ctx context.Context, accountID string) (int, error) {
+	return 0, nil
+}
+func (f *fakeACMERepo) GCExpiredNonces(ctx context.Context) (int64, error) {
+	n := int64(0)
+	for nonce, exp := range f.issued {
+		if time.Now().After(exp) {
+			delete(f.issued, nonce)
+			n++
+		}
+	}
+	return n, nil
+}
+func (f *fakeACMERepo) GCExpireAuthorizations(ctx context.Context) (int64, error) { return 0, nil }
+func (f *fakeACMERepo) GCInvalidateExpiredOrders(ctx context.Context) (int64, error) {
+	return 0, nil
+}
 
 // fakeTransactor is the repository.Transactor stand-in: runs fn
 // against the supplied querier (we just pass nil — fakes ignore it).

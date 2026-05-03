@@ -1,0 +1,31 @@
+# Phase 5 — sample ClusterIssuer for the certctl challenge auth mode
+# (RFC 8555 §8 HTTP-01 / DNS-01 / TLS-ALPN-01). Use this for public-
+# trust-style deployments where per-identifier ownership proof is
+# required.
+#
+# Same bootstrap-root caBundle requirement as the trust_authenticated
+# variant — see clusterissuer-trust-authenticated.yaml comments.
+apiVersion: cert-manager.io/v1
+kind: ClusterIssuer
+metadata:
+  name: certctl-test-challenge
+spec:
+  acme:
+    email: test@example.com
+    # Point at a profile whose certificate_profiles.acme_auth_mode is
+    # set to 'challenge'. The certctl operator manages this column
+    # per-profile; see certctl/docs/acme-server.md "Per-profile auth
+    # mode" section.
+    server: https://certctl-test.default.svc.cluster.local:8443/acme/profile/prof-challenge/directory
+    caBundle: |
+      LS0tLS1CRUdJTiBDRVJUSUZJQ0FURS0tLS0tCi4uLgotLS0tLUVORCBDRVJUSUZJQ0FURS0tLS0tCg==
+    privateKeySecretRef:
+      name: certctl-test-challenge-account-key
+    solvers:
+      # HTTP-01 via the in-cluster ingress-nginx. The cert-manager
+      # http-solver pod publishes the key authorization at
+      # http://<identifier>/.well-known/acme-challenge/<token>; the
+      # certctl HTTP01Validator (Phase 3) fetches it.
+      - http01:
+          ingress:
+            class: nginx

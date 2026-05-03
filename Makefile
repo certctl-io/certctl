@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-docs verify-deploy loadtest clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -167,6 +167,35 @@ loadtest:
 	@echo ""
 	@echo "==> results landed in deploy/test/loadtest/results/"
 	@if [ -f deploy/test/loadtest/results/summary.txt ]; then cat deploy/test/loadtest/results/summary.txt; fi
+
+# Phase 5 — kind-driven cert-manager integration test. Requires
+# `kind`, `kubectl`, `helm`, and a local Docker daemon. Sets
+# KIND_AVAILABLE=1 so the test runs (it skips cleanly when unset, which
+# is the CI default — kind is too heavy for per-PR CI). The test
+# brings up a fresh cluster, installs cert-manager 1.15, helm-installs
+# certctl-test, applies a ClusterIssuer + Certificate, and asserts the
+# Secret lands.
+acme-cert-manager-test:
+	@echo "==> running cert-manager integration test (requires kind/kubectl/helm)"
+	@KIND_AVAILABLE=1 go test -tags=integration -count=1 -timeout=15m \
+	  ./deploy/test/acme-integration/...
+
+# Phase 5 — RFC 8555 conformance against `lego` driving the certctl
+# server. Hermetic: brings up a single certctl-server via docker
+# compose, points lego at it, runs the conformance scenarios. Skips
+# when the operator hasn't built the test image (`make docker-build`
+# first).
+acme-rfc-conformance-test:
+	@echo "==> running RFC 8555 conformance via lego"
+	@if ! command -v lego >/dev/null 2>&1; then \
+	  echo "lego not installed — go install github.com/go-acme/lego/v4/cmd/lego@latest"; \
+	  exit 1; \
+	fi
+	@cd deploy/test/loadtest && docker compose up -d certctl postgres
+	@sleep 8
+	@CERTCTL_ACME_DIR=https://localhost:8443/acme/profile/prof-test/directory \
+	  bash deploy/test/acme-integration/conformance-lego.sh
+	@cd deploy/test/loadtest && docker compose down
 
 # Database targets (requires migrate tool)
 migrate-up:

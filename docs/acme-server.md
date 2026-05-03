@@ -7,13 +7,15 @@ as an ACME issuer with no certctl-side modification — closing the
 "deploy a certctl agent on every K8s node" friction that costs deals to
 external PKI vendors today.
 
-> **Phase status (2026-05-03):** Phase 4 — closes the RFC 8555 surface
-> beyond the issuance happy-path: doubly-signed key rollover (§7.3.5),
-> revoke-cert via either account-key or cert-key (§7.6), and RFC 9773
-> ACME Renewal Information. ACME clients can now rotate their account
-> keys, revoke certs through the ACME surface (rather than only the
-> certctl GUI/API), and fetch ARI for proactive renewal scheduling.
-> Track shipped phases via `git log --grep='acme-server:'`.
+> **Phase status (2026-05-03):** Phase 5 — production hardening +
+> cert-manager integration test. Per-account rate limits applied at
+> 3 entry points (orders/hour, key-change/hour, challenge-respond/hour)
+> + a per-account concurrent-orders cap; a 1-minute scheduler loop
+> sweeps expired nonces / authzs / orders. A kind-driven cert-manager
+> integration test (gated by `KIND_AVAILABLE`) verifies the full
+> happy-path against a real cert-manager 1.15+ deployment. RFC
+> conformance is verified via lego against the same stack. Track
+> shipped phases via `git log --grep='acme-server:'`.
 
 ## Configuration
 
@@ -40,6 +42,11 @@ issuer connector). The struct definition lives in
 | `CERTCTL_ACME_SERVER_TLSALPN01_CONCURRENCY`      | `10`                   | 3     | Reserved. |
 | `CERTCTL_ACME_SERVER_ARI_ENABLED`                | `true`                 | 4     | Toggles the RFC 9773 ARI surface — both the `renewalInfo` URL in the directory document and the GET `/renewal-info/<cert-id>` handler. Set to `false` to drop ARI from the directory; ACME clients fall back to static renewal scheduling. |
 | `CERTCTL_ACME_SERVER_ARI_POLL_INTERVAL`          | `6h`                   | 4     | Server-policy `Retry-After` value the ARI handler emits on a 200 response. RFC 9773 §4.2 leaves this server-policy. Tighten to `1h` for short-lived certs; loosen to `24h` for standard 90-day certs. |
+| `CERTCTL_ACME_SERVER_RATE_LIMIT_ORDERS_PER_HOUR` | `100`                  | 5     | Per-account orders/hour cap. `0` disables. Hits return RFC 7807 + RFC 8555 §6.7 `urn:ietf:params:acme:error:rateLimited` with `Retry-After`. In-memory token-bucket; restart wipes the counter (eventual-consistency caps are acceptable). |
+| `CERTCTL_ACME_SERVER_RATE_LIMIT_CONCURRENT_ORDERS` | `5`                  | 5     | Per-account cap on simultaneously-active orders (status in pending/ready/processing). `0` disables. Same RFC 7807 + RFC 8555 §6.7 problem shape as the per-hour cap. |
+| `CERTCTL_ACME_SERVER_RATE_LIMIT_KEY_CHANGE_PER_HOUR` | `5`                | 5     | Per-account key-rollover cap. `0` disables. Default 5/hour: rollovers should be rare; a flood is an attack signal. |
+| `CERTCTL_ACME_SERVER_RATE_LIMIT_CHALLENGE_RESPONDS_PER_HOUR` | `60`       | 5     | Per-challenge-id respond cap. `0` disables. Defends against retry storms from a misbehaving client. Keyed by challenge-id (not account-id) so a flood against one challenge doesn't drain the account's whole budget. |
+| `CERTCTL_ACME_SERVER_GC_INTERVAL`                | `1m`                   | 5     | Tick interval for the ACME GC scheduler loop. On each tick: (1) DELETE used / expired nonces; (2) UPDATE pending authzs whose `expires_at < NOW()` to `expired`; (3) UPDATE pending/ready/processing orders whose `expires_at < NOW()` to `invalid`. Each sweep is a single SQL statement; the loop is idempotent + bounded by a 1m per-sweep timeout. `0` disables the loop. |
 
 ## Per-profile auth mode
 
@@ -206,7 +213,7 @@ at `internal/service/certificate.go:131`).
 | 2     | live        | orders + authzs + finalize + cert download (trust_authenticated mode end-to-end) |
 | 3     | live        | HTTP-01 + DNS-01 + TLS-ALPN-01 challenge validation (challenge mode end-to-end) |
 | 4     | live        | key rollover (RFC 8555 §7.3.5) + revoke-cert (§7.6) + ARI (RFC 9773) |
-| 5     | not yet     | cert-manager integration test + production hardening |
+| 5     | live        | rate limits + GC sweeper + kind-driven cert-manager integration test + lego conformance harness + k6 ACME-flow scenario |
 | 6     | not yet     | full operator-facing reference + walkthroughs + threat model |
 
 Track shipped phases via `git log --grep='acme-server:' --oneline`.
@@ -306,3 +313,76 @@ Window math:
 Disable ARI globally with `CERTCTL_ACME_SERVER_ARI_ENABLED=false`. The
 URL drops out of the directory; the route is still registered but
 returns 404 — clients fall back to static renewal scheduling.
+
+## Phase 5 — operational guidance
+
+### Rate limiting
+
+Production deployments serving multiple ACME profiles or fleets should
+keep the default rate limits in place. The four caps:
+
+- `RATE_LIMIT_ORDERS_PER_HOUR` (100) — per-account new-order cap. A
+  cert-manager Certificate that auto-renews at the 1/3 mark of its
+  validity (90-day cert → ~30-day renewal) consumes ~12 orders/year
+  per managed Certificate. 100/hour is generous for any plausible
+  fleet.
+- `RATE_LIMIT_CONCURRENT_ORDERS` (5) — per-account cap on
+  pending/ready/processing orders. Stops a runaway client from
+  starving DB-row throughput. Tune up only if you observe legitimate
+  bursts.
+- `RATE_LIMIT_KEY_CHANGE_PER_HOUR` (5) — rollovers are rare; a flood
+  is an attack signal. Tune down to 1/hour if your operator
+  procedure mandates manual rollovers only.
+- `RATE_LIMIT_CHALLENGE_RESPONDS_PER_HOUR` (60) — per-challenge cap,
+  defends against retry storms.
+
+Hits return RFC 8555 §6.7 `rateLimited` Problem with a `Retry-After`
+header. cert-manager 1.15+ honors the header; lego too. Older clients
+may not — that's the client's problem, not certctl's.
+
+The buckets are **in-memory + per-replica**. A 3-replica certctl-
+server fleet behind a load balancer effectively has 3× the configured
+throughput (each replica's bucket fills independently). For
+deployments where this matters operationally, the right answer is a
+shared rate-limit store — that's a follow-up; not blocking for the
+current threat model where same-account requests typically pin to
+the same replica via session affinity.
+
+### GC sweeper
+
+The scheduler runs the GC sweep every `GC_INTERVAL` (default 1m). Each
+sweep is three independent SQL statements:
+
+1. `DELETE FROM acme_nonces WHERE used = TRUE OR expires_at < NOW()`.
+2. `UPDATE acme_authorizations SET status='expired' WHERE status='pending' AND expires_at < NOW()`.
+3. `UPDATE acme_orders SET status='invalid', error=... WHERE status IN ('pending','ready','processing') AND expires_at < NOW()`.
+
+Each statement is bounded by a 1-minute per-sweep timeout. A failing
+sweep is logged + retried on the next tick; a tick that overruns its
+budget is skipped (the existing-tick atomic-Bool guard prevents
+overlap). Counts are exposed via `certctl_acme_gc_*` Prometheus
+metrics.
+
+### cert-manager integration test
+
+`make acme-cert-manager-test` brings up a kind cluster, installs
+cert-manager 1.15.0, helm-deploys certctl-server with
+`acmeServer.enabled=true`, and verifies a Certificate resource issues
+end-to-end. Skipped in CI by default (kind is too heavy for per-PR);
+operators run locally on workstation. See
+`deploy/test/acme-integration/` for the YAML + Go test harness.
+
+### lego RFC conformance harness
+
+`make acme-rfc-conformance-test` drives lego v4 against a hermetic
+certctl-server stack, exercising register → new-order → finalize.
+Operators run this when shipping behavior changes to the ACME surface
+to confirm a real third-party client still works.
+
+### k6 ACME flows scenario
+
+`deploy/test/loadtest/k6/acme_flow.js` exercises the unauthenticated
+surface (directory + new-nonce + ARI) at 100 VUs × 5m. JWS-signed
+flows are out of scope for k6 (no JWS support); they're covered by
+the lego conformance harness above. Baseline numbers + thresholds in
+`deploy/test/loadtest/README.md`.

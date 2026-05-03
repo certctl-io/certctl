@@ -313,7 +313,47 @@ deploy/test/loadtest/
 └── results/          (gitignored — k6 writes summary.{json,txt} here)
 ```
 
+## ACME flows (Phase 5)
+
+The `deploy/test/loadtest/k6/acme_flow.js` scenario hammers the
+unauthenticated ACME surface (directory + new-nonce + ARI synthetic
+lookups) at constant 100 VUs for 5 minutes. JWS-signed paths
+(new-account / new-order / finalize) are intentionally out of scope:
+k6 doesn't ship JWS, and bundling lego inside k6 would obscure the
+underlying-server p95 we're trying to measure. Instead, the
+`make acme-rfc-conformance-test` target drives lego against the same
+stack for the full happy-path conformance gate.
+
+Run it:
+
+```
+cd deploy/test/loadtest
+docker compose up -d certctl postgres
+k6 run --env CERTCTL_ACME_DIRECTORY=https://localhost:8443/acme/profile/prof-test/directory \
+       k6/acme_flow.js
+```
+
+### Baseline (ACME flows, 100 VUs × 5m)
+
+The baseline is operator-captured on a workstation-class machine with
+a single certctl-server container + a single postgres container.
+Re-capture after schema migrations or transport changes; commit the
+new numbers so regressions are visible in code review.
+
+| Metric                                     | Threshold | Last captured | Notes |
+|--------------------------------------------|-----------|---------------|-------|
+| `directory_duration` p95                   | < 500 ms  | _operator_    | Unauth GET; cache-friendly. |
+| `new_nonce_duration` p95                   | < 300 ms  | _operator_    | Single Postgres INSERT under the hood. |
+| `renewal_info_duration` p95 (synthetic id) | < 800 ms  | _operator_    | Synthetic cert-id → 4xx fast path. |
+| `http_req_failed` rate                     | < 1%      | _operator_    | Should be ~0 — failures here mean transport issues. |
+
+Capture command: `make loadtest` after pointing the compose stack at
+the ACME flow scenario. Operators with kind / cert-manager available
+should pair this with `make acme-cert-manager-test` for end-to-end
+verification.
+
 ## Audit references
 
 - API tier:       `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` fix #8.
 - Connector tier: `cowork/deployment-target-audit-2026-05-02/RESULTS.md` Bundle 10.
+- ACME flows:     Phase 5 master prompt (`cowork/acme-server-prompts/06-phase-5-certmanager-hardening-prompt.md`).
