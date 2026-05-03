@@ -13,6 +13,7 @@ require (
 	github.com/aws/aws-sdk-go-v2 v1.41.7
 	github.com/aws/aws-sdk-go-v2/config v1.32.17
 	github.com/aws/aws-sdk-go-v2/service/acmpca v1.46.14
+	github.com/go-jose/go-jose/v4 v4.0.4
 	github.com/leanovate/gopter v0.2.11
 	github.com/masterzen/winrm v0.0.0-20250927112105-5f8e6c707321
 	github.com/pkg/sftp v1.13.10

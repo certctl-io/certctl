@@ -25,3 +25,32 @@ documented_exceptions:
     why: "SCEP-mTLS sibling endpoint, trailing-slash variant."
   - route: "POST /scep-mtls/"
     why: "SCEP-mTLS sibling endpoint, trailing-slash POST variant."
+
+  # ACME server (RFC 8555 + RFC 9773 ARI) — wire-protocol surface.
+  # Like SCEP/EST, ACME is a JWS-signed-JSON wire protocol whose
+  # semantics are dictated by the RFC, not by an OpenAPI schema.
+  # Documenting every endpoint in openapi.yaml would duplicate
+  # RFC 8555 §7.1 + §7.2 + §7.3 with no information gain. The
+  # canonical operator-facing reference is docs/acme-server.md.
+  # Phases 2-4 will extend this list as new-order, finalize, authz,
+  # challenge, cert, key-change, revoke-cert, renewal-info routes land.
+  - route: "GET /acme/profile/{id}/directory"
+    why: "ACME server RFC 8555 §7.1.1 directory; documented in docs/acme-server.md."
+  - route: "HEAD /acme/profile/{id}/new-nonce"
+    why: "ACME server RFC 8555 §7.2 new-nonce; documented in docs/acme-server.md."
+  - route: "GET /acme/profile/{id}/new-nonce"
+    why: "ACME server RFC 8555 §7.2 new-nonce GET form; documented in docs/acme-server.md."
+  - route: "POST /acme/profile/{id}/new-account"
+    why: "ACME server RFC 8555 §7.3 new-account (JWS jwk); documented in docs/acme-server.md."
+  - route: "POST /acme/profile/{id}/account/{acc_id}"
+    why: "ACME server RFC 8555 §7.3.2 + §7.3.6 (JWS kid) account update + deactivation; documented in docs/acme-server.md."
+  - route: "GET /acme/directory"
+    why: "ACME server default-profile shorthand; mirrors per-profile when CERTCTL_ACME_SERVER_DEFAULT_PROFILE_ID is set."
+  - route: "HEAD /acme/new-nonce"
+    why: "ACME server default-profile shorthand for new-nonce HEAD."
+  - route: "GET /acme/new-nonce"
+    why: "ACME server default-profile shorthand for new-nonce GET."
+  - route: "POST /acme/new-account"
+    why: "ACME server default-profile shorthand for new-account."
+  - route: "POST /acme/account/{acc_id}"
+    why: "ACME server default-profile shorthand for account update + deactivation."

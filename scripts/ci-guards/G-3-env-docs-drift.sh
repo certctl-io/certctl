@@ -61,7 +61,9 @@ CERTCTL_TLS_INSECURE_SKIP_VERIFY|
 CERTCTL_SCEP_|
 CERTCTL_SERVER_CA_BUNDLE_PATH|
 CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY|
-CERTCTL_QA_[A-Z_]+
+CERTCTL_QA_[A-Z_]+|
+CERTCTL_ACME_|
+CERTCTL_ACME_SERVER_
 )$'
 # ^ The CERTCTL_OPENSSL_* / CERTCTL_STEPCA_* / CERTCTL_WEBHOOK_* /
 # CERTCTL_ACME_EAB_* / CERTCTL_ACME_DNS_PROPAGATION_WAIT /
@@ -70,6 +72,16 @@ CERTCTL_QA_[A-Z_]+
 # (script invocations, per-issuer config-blob field names,
 # per-notifier config-blob field names, demo-stack overrides,
 # test fixtures) — not server-side env vars in config.go.
+#
+# CERTCTL_ACME_ + CERTCTL_ACME_SERVER_ are bare-prefix forms
+# operator docs use to describe namespace separation between the
+# consumer-side ACMEConfig (full names like CERTCTL_ACME_DIRECTORY_URL
+# defined in config.go) and the ACME server's CERTCTL_ACME_SERVER_*
+# prefix (full names like CERTCTL_ACME_SERVER_ENABLED defined in
+# config.go::ACMEServerConfig). The bare prefixes themselves are
+# never read by config.go — they're only doc prose — so they
+# allowlist alongside the existing CERTCTL_SCEP_ + CERTCTL_TLS_
+# bare-prefix entries.
 # The audit's "37 docs-only" count over-flagged these; the
 # closure narrows the gate to the specific drift sites
 # (renewal-interval rename + 6 config-only) and allowlists
