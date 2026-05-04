@@ -1,5 +1,13 @@
 # Changelog
 
+## v2.0.68 — Image registry path changed ⚠️
+
+> **Image registry path changed.** Starting this release, container images publish to `ghcr.io/certctl-io/certctl-server` and `ghcr.io/certctl-io/certctl-agent`. Existing pulls from `ghcr.io/shankar0123/certctl-{server,agent}:<tag>` continue to work for previously-published tags (the registry never deletes images), but the `:latest` tag at the old path stops moving forward at this release. Update your `docker pull` paths, `docker-compose.yml` `image:` keys, or Helm `image.repository` values to receive future updates. Old `git clone` / `git push` / install-script / API URLs continue to redirect forever — only the container-registry path changed.
+
+This is the only operator-action-required change in v2.0.68. Other changes in this release are cosmetic URL refreshes after the GitHub-org transfer from `shankar0123/certctl` to `certctl-io/certctl` (HTTP redirects mean no other operator action is required) plus an internal contextcheck lint fix in the agent. Full commit list is on the [GitHub release page](https://github.com/certctl-io/certctl/releases/tag/v2.0.68).
+
+---
+
 certctl no longer maintains a hand-edited per-version changelog. Per-release
 notes are auto-generated from commit messages between consecutive tags.
 
