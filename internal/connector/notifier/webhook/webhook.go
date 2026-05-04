@@ -13,8 +13,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/notifier"
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/connector/notifier"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // webhookClientTimeout bounds every outbound webhook request and its

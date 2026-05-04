@@ -14,12 +14,12 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/cms"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
-	"github.com/shankar0123/certctl/internal/ratelimit"
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/cms"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // ESTService defines the service interface for EST enrollment operations.

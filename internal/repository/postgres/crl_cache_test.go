@@ -5,8 +5,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository/postgres"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository/postgres"
 )
 
 // CRL cache repository tests run against the shared testcontainers

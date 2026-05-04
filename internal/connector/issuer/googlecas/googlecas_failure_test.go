@@ -42,8 +42,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/googlecas"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/googlecas"
 )
 
 // failureTestLogger returns a debug-level slog logger writing to

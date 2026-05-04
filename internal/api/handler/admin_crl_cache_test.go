@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/middleware"
 )
 
 // fakeAdminCRLCacheService is the test stub for the

@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 5.2: ChromeOS-shape integration

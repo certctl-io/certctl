@@ -27,8 +27,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // buildListRequest constructs a GET /api/v1/certificates request with the

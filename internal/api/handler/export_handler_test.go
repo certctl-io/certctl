@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // Add context import was already there — verify import is present above

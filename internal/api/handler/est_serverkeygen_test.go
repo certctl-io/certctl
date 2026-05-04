@@ -18,8 +18,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
 )
 
 // EST RFC 7030 hardening master bundle Phase 5.3 — serverkeygen tests.

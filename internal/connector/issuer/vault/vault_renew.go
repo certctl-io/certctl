@@ -29,7 +29,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // minRenewInterval guards against degenerate fast cadence when a

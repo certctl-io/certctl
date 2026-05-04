@@ -3,7 +3,7 @@ package intune
 import (
 	"time"
 
-	"github.com/shankar0123/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/ratelimit"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 8.6.

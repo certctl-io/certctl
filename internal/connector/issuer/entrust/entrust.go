@@ -33,9 +33,9 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
-	"github.com/shankar0123/certctl/internal/connector/issuer/mtlscache"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/certctl-io/certctl/internal/connector/issuer/mtlscache"
 )
 
 // Config represents the Entrust Certificate Services issuer connector configuration.

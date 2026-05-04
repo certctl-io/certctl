@@ -51,7 +51,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/acmpca"
 	acmpcatypes "github.com/aws/aws-sdk-go-v2/service/acmpca/types"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // defaultWaiterTimeout is how long sdkClient.IssueCertificate will wait for

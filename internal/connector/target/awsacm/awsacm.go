@@ -49,7 +49,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/acm"
 	acmtypes "github.com/aws/aws-sdk-go-v2/service/acm/types"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // arnRegex pins the ACM cert-ARN shape ACM hands back from Import /

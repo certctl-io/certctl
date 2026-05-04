@@ -16,11 +16,11 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/ratelimit"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // CertificateService defines the service interface for certificate operations.

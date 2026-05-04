@@ -28,7 +28,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/notifier"
+	"github.com/certctl-io/certctl/internal/connector/notifier"
 )
 
 // quietEmailLogger returns a slog.Logger writing to io.Discard at error level.

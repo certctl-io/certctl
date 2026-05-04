@@ -15,8 +15,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // mockSMClient implements SMClient for testing.

@@ -18,7 +18,7 @@ import (
 // VersionInfo is populated from three sources, in priority order:
 //
 //  1. The Version field — typically supplied at build time via
-//     `-ldflags='-X github.com/shankar0123/certctl/internal/api/handler.Version=v2.0.50'`.
+//     `-ldflags='-X github.com/certctl-io/certctl/internal/api/handler.Version=v2.0.50'`.
 //     Production releases set this from the git tag (see release.yml).
 //
 //  2. runtime/debug.ReadBuildInfo() — populated by Go 1.18+ for any binary
@@ -42,7 +42,7 @@ type VersionHandler struct{}
 
 // Version is overridden at build time via:
 //
-//	-ldflags='-X github.com/shankar0123/certctl/internal/api/handler.Version=<tag>'
+//	-ldflags='-X github.com/certctl-io/certctl/internal/api/handler.Version=<tag>'
 //
 // release.yml does this for the server container and CLI/agent binaries.
 // The empty default (rather than "dev") lets the Handler fall back to the

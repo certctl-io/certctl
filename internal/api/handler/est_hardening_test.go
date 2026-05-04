@@ -21,10 +21,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/cms"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/ratelimit"
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/cms"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // EST RFC 7030 hardening master bundle Phases 2-4 tests.

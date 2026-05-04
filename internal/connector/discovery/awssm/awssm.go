@@ -39,8 +39,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Note: The actual AWS SDK import will be added once dependencies are available:

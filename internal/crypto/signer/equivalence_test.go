@@ -47,7 +47,7 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/shankar0123/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
 )
 
 // fixedTemplate returns an x509 cert template with deterministic fields

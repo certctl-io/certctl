@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // NOTE: generateTestCSR(t, keyType, keySize) is defined in crypto_validation_test.go

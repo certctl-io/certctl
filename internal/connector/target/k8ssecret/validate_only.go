@@ -4,7 +4,7 @@ import (
 	"context"
 	"fmt"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // ValidateOnly — Phase 9. K8s does NOT expose a meaningful dry-run

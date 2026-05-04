@@ -3,8 +3,8 @@ package router
 import (
 	"net/http"
 
-	"github.com/shankar0123/certctl/internal/api/handler"
-	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/handler"
+	"github.com/certctl-io/certctl/internal/api/middleware"
 )
 
 // Router wraps http.ServeMux and manages route registration with middleware.

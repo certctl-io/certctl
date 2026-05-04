@@ -9,9 +9,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/vault"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: failure-mode round-out for Vault PKI connector.

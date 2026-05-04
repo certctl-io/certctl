@@ -11,7 +11,7 @@ import (
 
 	gomcp "github.com/modelcontextprotocol/go-sdk/mcp"
 
-	"github.com/shankar0123/certctl/internal/mcp"
+	"github.com/certctl-io/certctl/internal/mcp"
 )
 
 // Version is set at build time via -ldflags.

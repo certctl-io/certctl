@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/notifier"
+	"github.com/certctl-io/certctl/internal/connector/notifier"
 )
 
 func newTestLogger() *slog.Logger {

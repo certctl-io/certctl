@@ -14,7 +14,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 5.6: must-staple per-profile

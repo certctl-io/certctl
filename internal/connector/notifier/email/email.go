@@ -12,8 +12,8 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/notifier"
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/connector/notifier"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // Config represents the email notifier configuration.

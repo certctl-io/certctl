@@ -22,7 +22,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // Bundle J-extended (C-001 closure): Pebble-style hermetic ACME mock.

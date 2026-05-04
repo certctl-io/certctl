@@ -5,7 +5,7 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // EST RFC 7030 hardening master bundle Phase 7.1.

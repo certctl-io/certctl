@@ -23,8 +23,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/caddy"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/caddy"
 )
 
 // generateTestCertAndKey creates a self-signed cert + ECDSA key for tests

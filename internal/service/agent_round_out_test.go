@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Bundle N.C-extended: agent service-layer round-out (target +5pp).

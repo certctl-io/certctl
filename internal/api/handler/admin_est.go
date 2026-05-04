@@ -7,8 +7,8 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // EST RFC 7030 hardening master bundle Phase 7.2 — admin observability

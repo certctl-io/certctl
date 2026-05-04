@@ -4,7 +4,7 @@
 package acme
 
 import (
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // AccountResponseJSON is the wire shape RFC 8555 §7.1.2 mandates for

@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/notifier"
+	"github.com/certctl-io/certctl/internal/connector/notifier"
 )
 
 func TestWebhook_ValidateConfig_ValidURL(t *testing.T) {

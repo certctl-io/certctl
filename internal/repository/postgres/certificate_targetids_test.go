@@ -16,8 +16,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository/postgres"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository/postgres"
 )
 
 // insertAgentAndTargetsRaw creates one agent and N deployment_targets, returns

@@ -16,10 +16,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // ESTService implements the EST (RFC 7030) enrollment protocol.

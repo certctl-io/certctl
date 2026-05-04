@@ -20,7 +20,7 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // ChallengeValidator is the surface a challenge-validation worker

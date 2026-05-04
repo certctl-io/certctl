@@ -12,8 +12,8 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/crypto/signer"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Bundle CRL/OCSP-Responder, Phase 2 — separate OCSP responder cert.

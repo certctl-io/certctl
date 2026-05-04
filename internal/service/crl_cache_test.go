@@ -9,11 +9,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	localissuer "github.com/shankar0123/certctl/internal/connector/issuer/local"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	localissuer "github.com/certctl-io/certctl/internal/connector/issuer/local"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // fakeCRLCacheRepo is an in-memory repository for CRLCacheService

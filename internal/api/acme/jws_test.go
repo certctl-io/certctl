@@ -16,7 +16,7 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // --- test fixtures + helpers --------------------------------------------

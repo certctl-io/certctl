@@ -27,7 +27,7 @@ package intune
 // timeline; the cost of the two-line shim is trivial).
 
 import (
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // TrustAnchorHolder is the SIGHUP-reloadable wrapper around a per-profile

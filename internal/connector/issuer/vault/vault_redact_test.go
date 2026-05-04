@@ -11,8 +11,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer/vault"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 func TestVault_Config_TokenMarshalsAsRedacted(t *testing.T) {

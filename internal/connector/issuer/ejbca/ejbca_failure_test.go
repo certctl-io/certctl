@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/ejbca"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: ejbca failure-mode round-out (76.5% → ≥85%).

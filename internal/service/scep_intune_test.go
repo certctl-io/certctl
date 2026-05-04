@@ -20,7 +20,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/scep/intune"
+	"github.com/certctl-io/certctl/internal/scep/intune"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 8.9 — service-layer dispatcher

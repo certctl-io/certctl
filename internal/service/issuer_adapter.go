@@ -4,7 +4,7 @@ import (
 	"context"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // IssuerConnectorAdapter bridges the connector-layer issuer.Connector interface with the

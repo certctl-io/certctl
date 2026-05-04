@@ -18,9 +18,9 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // MockCertificateService is a mock implementation of CertificateService interface.

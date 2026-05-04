@@ -5,7 +5,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/api/handler"
+	"github.com/certctl-io/certctl/internal/api/handler"
 )
 
 // TestNew_ReturnsValidRouter tests that New() returns a properly initialized router.

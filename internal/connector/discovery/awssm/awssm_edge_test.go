@@ -15,7 +15,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/config"
 )
 
 // Bundle Q (L-002 closure): edge-case coverage for awssm to push above 80%.

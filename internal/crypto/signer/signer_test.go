@@ -17,7 +17,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
 )
 
 // ---------------------------------------------------------------------------

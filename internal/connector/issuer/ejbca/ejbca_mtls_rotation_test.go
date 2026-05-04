@@ -32,7 +32,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
+	"github.com/certctl-io/certctl/internal/connector/issuer/ejbca"
 )
 
 // TestEJBCA_MTLSKeypairRotation_PicksUpNewCertWithoutRestart verifies

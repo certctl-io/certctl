@@ -7,7 +7,7 @@ import (
 	"os"
 	"strings"
 
-	"github.com/shankar0123/certctl/internal/cli"
+	"github.com/certctl-io/certctl/internal/cli"
 )
 
 func main() {

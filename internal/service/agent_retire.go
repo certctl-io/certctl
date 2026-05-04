@@ -7,7 +7,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // I-004 coverage-gap closure: the agent retirement surface.

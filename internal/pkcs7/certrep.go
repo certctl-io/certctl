@@ -74,7 +74,7 @@ import (
 	"fmt"
 	"math/big"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // BuildCertRepPKIMessage constructs the SCEP CertRep response PKIMessage.

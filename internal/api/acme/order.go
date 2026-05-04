@@ -10,7 +10,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // OrderResponseJSON is the wire shape RFC 8555 §7.1.3 mandates for the

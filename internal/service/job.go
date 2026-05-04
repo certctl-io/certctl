@@ -12,8 +12,8 @@ import (
 
 	"golang.org/x/sync/semaphore"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // ErrSelfApproval is returned by ApproveJob when the actor attempting to

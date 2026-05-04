@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/middleware"
 )
 
 // resolveActor extracts the authenticated named-key identity from the request

@@ -16,7 +16,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // fakeBegin is a minimal *sql.DB substitute that lets tx_test exercise

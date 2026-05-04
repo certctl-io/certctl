@@ -14,10 +14,10 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/local"
-	"github.com/shankar0123/certctl/internal/crypto/signer"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/local"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // fakeResponderRepo is an in-memory repository.OCSPResponderRepository

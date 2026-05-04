@@ -12,7 +12,7 @@ import (
 	"log/slog"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 5.6 follow-up: end-to-end

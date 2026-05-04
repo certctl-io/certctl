@@ -33,7 +33,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // fakeTicker is the deterministic ticker the tests inject via

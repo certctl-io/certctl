@@ -10,7 +10,7 @@ import (
 	"encoding/pem"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // generateTestCSR creates a valid CSR PEM for testing purposes.

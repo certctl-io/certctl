@@ -27,7 +27,7 @@ package intune
 import (
 	"crypto/x509"
 
-	"github.com/shankar0123/certctl/internal/trustanchor"
+	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
 // LoadTrustAnchor reads a PEM bundle of one or more Intune Connector

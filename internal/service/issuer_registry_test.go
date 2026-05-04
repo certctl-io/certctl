@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/crypto"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/crypto"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 func registryTestLogger() *slog.Logger {

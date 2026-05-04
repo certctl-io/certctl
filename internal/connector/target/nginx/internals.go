@@ -6,7 +6,7 @@ import (
 	"os/user"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/tlsprobe"
+	"github.com/certctl-io/certctl/internal/tlsprobe"
 )
 
 // b64Decode is the base64 decoder used by firstPEMBlock. Wrapping

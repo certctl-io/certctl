@@ -9,8 +9,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/haproxy"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/haproxy"
 )
 
 func TestHAProxyConnector_ValidateConfig(t *testing.T) {

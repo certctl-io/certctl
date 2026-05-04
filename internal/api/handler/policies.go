@@ -7,8 +7,8 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // PolicyService defines the service interface for policy rule operations.

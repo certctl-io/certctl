@@ -27,8 +27,8 @@ import (
 	acmtypes "github.com/aws/aws-sdk-go-v2/service/acm/types"
 	smithy "github.com/aws/smithy-go"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/awsacm"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/awsacm"
 )
 
 // TestAWSACM_Issue_AccessDenied_OperatorActionableError pins the

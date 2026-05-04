@@ -18,8 +18,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
 )
 
 // mockESTService implements ESTService for testing.

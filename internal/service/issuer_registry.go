@@ -8,15 +8,15 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/acme"
-	"github.com/shankar0123/certctl/internal/connector/issuer/local"
-	"github.com/shankar0123/certctl/internal/connector/issuer/vault"
-	"github.com/shankar0123/certctl/internal/connector/issuerfactory"
-	"github.com/shankar0123/certctl/internal/crypto"
-	"github.com/shankar0123/certctl/internal/crypto/signer"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/acme"
+	"github.com/certctl-io/certctl/internal/connector/issuer/local"
+	"github.com/certctl-io/certctl/internal/connector/issuer/vault"
+	"github.com/certctl-io/certctl/internal/connector/issuerfactory"
+	"github.com/certctl-io/certctl/internal/crypto"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // IssuerRegistry is a thread-safe registry of issuer connectors.

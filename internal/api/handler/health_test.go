@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/api/middleware"
 	_ "github.com/lib/pq" // Bundle-5 / H-006: postgres driver for /ready DB-probe regression test
-	"github.com/shankar0123/certctl/internal/api/middleware"
 )
 
 func TestHealth_ReturnsOK(t *testing.T) {

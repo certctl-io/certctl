@@ -14,9 +14,9 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/deploy"
-	"github.com/shankar0123/certctl/internal/tlsprobe"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/deploy"
+	"github.com/certctl-io/certctl/internal/tlsprobe"
 )
 
 // Config represents the Envoy deployment target configuration.

@@ -53,8 +53,8 @@ import (
 	acmpcatypes "github.com/aws/aws-sdk-go-v2/service/acmpca/types"
 	smithy "github.com/aws/smithy-go"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/awsacmpca"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/awsacmpca"
 )
 
 // failureTestLogger returns a debug-level slog logger writing to stdout.

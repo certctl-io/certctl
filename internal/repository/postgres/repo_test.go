@@ -15,9 +15,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/repository/postgres"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/repository/postgres"
 )
 
 // Shared test database — started once, reused across tests in this package.

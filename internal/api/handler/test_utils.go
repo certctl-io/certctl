@@ -3,7 +3,7 @@ package handler
 import (
 	"fmt"
 
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // Mock errors for testing.

@@ -16,7 +16,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // generateCSRPEM creates a valid ECDSA P-256 CSR for testing.

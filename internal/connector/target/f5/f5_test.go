@@ -9,7 +9,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // --- Mock F5Client ---

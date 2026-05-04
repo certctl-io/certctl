@@ -11,9 +11,9 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/lib/pq"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // ACMERepository implements the ACME server's persistence layer

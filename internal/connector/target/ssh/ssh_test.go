@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // stubFileInfo implements os.FileInfo for tests that need to return a

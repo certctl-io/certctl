@@ -7,7 +7,7 @@ import (
 	"path/filepath"
 	"testing"
 
-	acmeissuer "github.com/shankar0123/certctl/internal/connector/issuer/acme"
+	acmeissuer "github.com/certctl-io/certctl/internal/connector/issuer/acme"
 )
 
 func TestScriptDNSSolver(t *testing.T) {

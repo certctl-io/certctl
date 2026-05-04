@@ -20,10 +20,10 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 	// apache removed Phase 5 — real ValidateOnly implementation now in apache.go.
-	"github.com/shankar0123/certctl/internal/connector/target/caddy"
-	"github.com/shankar0123/certctl/internal/connector/target/envoy"
+	"github.com/certctl-io/certctl/internal/connector/target/caddy"
+	"github.com/certctl-io/certctl/internal/connector/target/envoy"
 	// f5 removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
 	// haproxy removed Phase 6 — real ValidateOnly implementation now in haproxy.go.
 	// iis removed Phase 8 — real ValidateOnly implementation now in validate_only.go.
@@ -32,7 +32,7 @@ import (
 	// nginx removed Phase 4 — real ValidateOnly implementation now in nginx.go.
 	// postfix removed Phase 7 — real ValidateOnly implementation now in postfix.go.
 	// ssh removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
-	"github.com/shankar0123/certctl/internal/connector/target/traefik"
+	"github.com/certctl-io/certctl/internal/connector/target/traefik"
 	// wincertstore removed Phase 9 — real ValidateOnly implementation now in validate_only.go.
 )
 

@@ -7,7 +7,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/cli"
+	"github.com/certctl-io/certctl/internal/cli"
 )
 
 // Bundle Q (L-001 closure): per-subcommand dispatch tests for cmd/cli/main.go.

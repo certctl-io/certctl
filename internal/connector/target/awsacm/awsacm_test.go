@@ -28,8 +28,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/awsacm"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/awsacm"
 )
 
 // mockACMClient is the unit-test fake for the ACMClient interface seam.

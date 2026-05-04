@@ -22,8 +22,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
 )
 
 // Bundle-9 / Audit H-010 + L-002 + L-003 + L-012 + M-028 regression suite.

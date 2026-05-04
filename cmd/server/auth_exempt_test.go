@@ -6,7 +6,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/api/router"
 )
 
 // Bundle B / Audit M-002 (CWE-862): pin the dispatch-layer auth-exempt

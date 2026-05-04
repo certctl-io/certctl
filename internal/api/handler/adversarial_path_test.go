@@ -34,7 +34,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // adversarialPathInputs is the attack catalog shared by Tier 1A cases. Each

@@ -5,7 +5,7 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // mockProfileRepo is a test implementation of CertificateProfileRepository

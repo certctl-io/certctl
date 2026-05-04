@@ -15,8 +15,8 @@ import (
 
 	"golang.org/x/crypto/acme"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // fakeCertLookup implements CertificateLookupRepo for tests. The two

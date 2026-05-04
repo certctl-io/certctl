@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // TestStatsAndMetricsEndpoints exercises the M14 observability endpoints end-to-end.

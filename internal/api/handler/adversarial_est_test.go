@@ -30,7 +30,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // adversarialCSRInputs exercises the EST CSR parsing surface. None of these

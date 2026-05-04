@@ -13,11 +13,11 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/handler"
-	"github.com/shankar0123/certctl/internal/api/router"
-	"github.com/shankar0123/certctl/internal/connector/issuer/local"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/handler"
+	"github.com/certctl-io/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/connector/issuer/local"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // setupTestServer creates a fully-wired test server for negative path testing.

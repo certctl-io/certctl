@@ -68,10 +68,10 @@ import (
 
 	"golang.org/x/crypto/ocsp"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/crypto/signer"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/crypto/signer"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // Config represents the local CA issuer connector configuration.

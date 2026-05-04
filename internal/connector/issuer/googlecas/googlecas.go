@@ -37,7 +37,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // Config represents the Google CAS issuer connector configuration.

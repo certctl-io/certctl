@@ -29,8 +29,8 @@ import (
 	"errors"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // TestCertificateService_Create_AtomicWithTx asserts the issuance path

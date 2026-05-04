@@ -8,9 +8,9 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/crypto"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/crypto"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // ErrAgentNotFound is returned by [TargetService.CreateTarget] when the caller

@@ -9,8 +9,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // mockAuditService implements AuditService for testing.

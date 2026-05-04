@@ -9,8 +9,8 @@ import (
 	"strconv"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // MetricsService defines the service interface for metrics collection.

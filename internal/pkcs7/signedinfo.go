@@ -50,7 +50,7 @@ import (
 	"math/big"
 	"strconv"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // SCEP authenticated-attribute OIDs (RFC 8894 §3.2.1.4).

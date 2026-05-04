@@ -16,9 +16,9 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
-	"github.com/shankar0123/certctl/internal/api/acme"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/acme"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // MaxJWSBodyBytes caps the per-request JWS payload at 64 KiB. RFC 8555

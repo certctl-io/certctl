@@ -40,7 +40,7 @@ import (
 
 	"golang.org/x/crypto/pbkdf2"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // quietLogger returns a slog.Logger writing to io.Discard at error level.

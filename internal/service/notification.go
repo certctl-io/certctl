@@ -6,8 +6,8 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // I-005 retry + DLQ knobs. These pin the operator-approved retry budget and

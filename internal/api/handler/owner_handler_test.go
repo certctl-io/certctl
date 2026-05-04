@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // MockOwnerService is a mock implementation of OwnerService interface.

@@ -10,8 +10,8 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer/globalsign"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer/globalsign"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // Bundle N.A/B-extended: globalsign failure-mode round-out (78.2% → ≥85%).

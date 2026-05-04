@@ -3,7 +3,7 @@ package envoy
 import (
 	"context"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // ValidateOnly is the default Phase 3 stub for the deploy-hardening

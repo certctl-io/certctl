@@ -13,9 +13,9 @@ import (
 	"path/filepath"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/certutil"
-	"github.com/shankar0123/certctl/internal/deploy"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/certutil"
+	"github.com/certctl-io/certctl/internal/deploy"
 )
 
 // Config represents the Caddy deployment target configuration.

@@ -38,10 +38,10 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/asyncpoll"
-	"github.com/shankar0123/certctl/internal/connector/issuer/mtlscache"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/asyncpoll"
+	"github.com/certctl-io/certctl/internal/connector/issuer/mtlscache"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // Config represents the GlobalSign Atlas HVCA issuer connector configuration.

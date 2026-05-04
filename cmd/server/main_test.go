@@ -10,10 +10,10 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/api/router"
-	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // TestMain_HealthEndpointBypassesAuth verifies that health check endpoints

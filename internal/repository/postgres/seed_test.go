@@ -23,7 +23,7 @@ import (
 	"database/sql"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/repository/postgres"
+	"github.com/certctl-io/certctl/internal/repository/postgres"
 )
 
 // TestRunSeed_AppliesIdempotently verifies the U-3 contract that RunSeed

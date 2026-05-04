@@ -12,7 +12,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // GetRenewalInfo retrieves ACME Renewal Information (ARI) per RFC 9773 for a certificate.

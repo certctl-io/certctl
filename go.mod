@@ -1,4 +1,4 @@
-module github.com/shankar0123/certctl
+module github.com/certctl-io/certctl
 
 go 1.25.9
 

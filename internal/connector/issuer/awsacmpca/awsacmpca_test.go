@@ -17,8 +17,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/awsacmpca"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/awsacmpca"
 )
 
 // mockACMPCAClient implements the ACMPCAClient interface for testing.

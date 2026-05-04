@@ -5,11 +5,11 @@ import (
 	"database/sql"
 	"encoding/json"
 	"fmt"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/repository"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/google/uuid"
-	"github.com/shankar0123/certctl/internal/domain"
 )
 
 // ProfileRepository implements repository.CertificateProfileRepository

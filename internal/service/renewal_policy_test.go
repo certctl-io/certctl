@@ -7,7 +7,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // G-1 red tests: lock in the behavior of RenewalPolicyService before

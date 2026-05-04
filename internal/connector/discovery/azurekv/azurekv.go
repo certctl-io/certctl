@@ -36,7 +36,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Config represents the Azure Key Vault discovery configuration.

@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/middleware"
 )
 
 // StatsService defines the service interface for statistics operations.

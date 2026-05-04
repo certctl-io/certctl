@@ -25,9 +25,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/ejbca"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/ejbca"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 // mustNewForValidateConfig returns an EJBCA connector wired in OAuth2 mode

@@ -8,8 +8,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // OCSPResponseCacheService is the read-through + scheduler-driven

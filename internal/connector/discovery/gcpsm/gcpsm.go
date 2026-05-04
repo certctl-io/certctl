@@ -48,8 +48,8 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // serviceAccountKey represents the relevant fields from a Google service account JSON file.

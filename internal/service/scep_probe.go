@@ -14,10 +14,10 @@ import (
 	"strings"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/validation"
 	"github.com/google/uuid"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
-	"github.com/shankar0123/certctl/internal/validation"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe.

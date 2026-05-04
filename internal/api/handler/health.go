@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/api/middleware"
 )
 
 // HealthHandler handles health and readiness check endpoints.

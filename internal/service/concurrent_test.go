@@ -8,8 +8,8 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // TestConcurrentCertificateList tests that 10 goroutines can safely list certificates simultaneously

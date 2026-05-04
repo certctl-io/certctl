@@ -11,9 +11,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
-	"github.com/shankar0123/certctl/internal/connector/target/caddy"
-	"github.com/shankar0123/certctl/internal/deploy"
+	"github.com/certctl-io/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target/caddy"
+	"github.com/certctl-io/certctl/internal/deploy"
 )
 
 // Phase 7 of the deploy-hardening I master bundle: atomic-write +

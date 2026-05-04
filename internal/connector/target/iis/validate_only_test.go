@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // Phase 8 of the deploy-hardening I master bundle: IIS ValidateOnly

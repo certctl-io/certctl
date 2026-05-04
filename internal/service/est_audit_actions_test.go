@@ -8,7 +8,7 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // EST RFC 7030 hardening master bundle Phase 11.4 — audit-code assertions.

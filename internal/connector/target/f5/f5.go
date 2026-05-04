@@ -14,7 +14,7 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/target"
+	"github.com/certctl-io/certctl/internal/connector/target"
 )
 
 // Config represents the F5 BIG-IP deployment target configuration.

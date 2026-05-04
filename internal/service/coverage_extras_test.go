@@ -10,7 +10,7 @@ import (
 	"math/big"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // detailsMapFromAuditEvent unmarshals the json.RawMessage Details

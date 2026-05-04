@@ -6,9 +6,9 @@ import (
 	"fmt"
 	"strings"
 
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/google/uuid"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
 )
 
 // AuditRepository implements repository.AuditRepository

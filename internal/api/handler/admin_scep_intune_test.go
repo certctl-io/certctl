@@ -10,8 +10,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/api/middleware"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // fakeAdminSCEPIntuneService is the test stub for AdminSCEPIntuneService.

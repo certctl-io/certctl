@@ -14,7 +14,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Phase 4 — RFC 9773 ACME Renewal Information.

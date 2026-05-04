@@ -12,10 +12,10 @@ import (
 	"sync"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
-	"github.com/shankar0123/certctl/internal/tlsprobe"
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/tlsprobe"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // SentinelAgentID is the agent ID used for network-discovered certificates.

@@ -7,7 +7,7 @@ import (
 	"os/exec"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/validation"
+	"github.com/certctl-io/certctl/internal/validation"
 )
 
 // DNSSolver defines the interface for DNS-01 challenge provisioning.

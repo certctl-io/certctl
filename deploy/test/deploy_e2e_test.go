@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/deploy"
+	"github.com/certctl-io/certctl/internal/deploy"
 )
 
 // TestDeploy_Atomicity_FileIsAlwaysOldOrNew pins the load-bearing

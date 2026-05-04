@@ -8,7 +8,7 @@ import (
 	"log/slog"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // DigestService generates and sends periodic certificate digest emails.

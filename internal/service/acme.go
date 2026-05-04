@@ -15,10 +15,10 @@ import (
 
 	jose "github.com/go-jose/go-jose/v4"
 
-	"github.com/shankar0123/certctl/internal/api/acme"
-	"github.com/shankar0123/certctl/internal/config"
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/api/acme"
+	"github.com/certctl-io/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // ACMERepo is the persistence-layer surface ACMEService consumes for

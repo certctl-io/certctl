@@ -5,7 +5,7 @@ import (
 	"errors"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // Repository-level sentinel errors. Repositories (primarily the postgres

@@ -17,9 +17,9 @@ import (
 	"strings"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
-	"github.com/shankar0123/certctl/internal/connector/issuer/digicert"
-	"github.com/shankar0123/certctl/internal/secret"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer/digicert"
+	"github.com/certctl-io/certctl/internal/secret"
 )
 
 func TestDigiCertConnector(t *testing.T) {

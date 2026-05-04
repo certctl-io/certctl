@@ -6,8 +6,8 @@ import (
 	"net/http/httptest"
 	"testing"
 
-	"github.com/shankar0123/certctl/internal/api/handler"
-	"github.com/shankar0123/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/api/handler"
+	"github.com/certctl-io/certctl/internal/domain"
 )
 
 // SCEP RFC 8894 + Intune master bundle Phase 1.5: per-issuer profiles router

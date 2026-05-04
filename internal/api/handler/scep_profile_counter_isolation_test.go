@@ -15,10 +15,10 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/domain"
-	"github.com/shankar0123/certctl/internal/pkcs7"
-	"github.com/shankar0123/certctl/internal/scep/intune"
-	"github.com/shankar0123/certctl/internal/service"
+	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/pkcs7"
+	"github.com/certctl-io/certctl/internal/scep/intune"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // SCEP RFC 8894 + Intune master prompt §13 line 1851 acceptance —

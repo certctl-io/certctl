@@ -28,7 +28,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/config"
+	"github.com/certctl-io/certctl/internal/config"
 )
 
 // rewritingTransport rewrites every request to the test server while

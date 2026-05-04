@@ -39,7 +39,7 @@ import (
 	"os"
 	"time"
 
-	"github.com/shankar0123/certctl/internal/connector/issuer"
+	"github.com/certctl-io/certctl/internal/connector/issuer"
 )
 
 // Config represents the step-ca issuer connector configuration.
