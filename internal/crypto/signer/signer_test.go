@@ -777,3 +777,129 @@ func TestSigner_AlgorithmMatchesKey(t *testing.T) {
 		}
 	}
 }
+
+// TestFileDriver_Load_RejectsParentTraversal pins the CWE-22 defense
+// for FileDriver.Load — a relative path that escapes its origin via
+// `..` segments (and stays unresolved after Clean) is rejected. Closes
+// CodeQL #27 on the read side.
+//
+// Note: filepath.Clean("/abs/.../etc/passwd") collapses to
+// "/etc/passwd" — a perfectly clean absolute path with no surviving
+// `..`. The relative-`..`-escape test below catches the case Clean
+// CAN'T resolve; the SafeRoot tests below catch the absolute-path
+// containment case.
+func TestFileDriver_Load_RejectsParentTraversal(t *testing.T) {
+	d := &signer.FileDriver{}
+	_, err := d.Load(context.Background(), "../../etc/passwd")
+	if err == nil {
+		t.Fatal("Load with relative .. escape should be rejected")
+	}
+	if !strings.Contains(err.Error(), "parent-directory") {
+		t.Fatalf("error should mention parent-directory, got %q", err.Error())
+	}
+}
+
+// TestFileDriver_Load_RejectsEmptyPath pins the empty-path rejection
+// (was inline before validateSafePath; now lives in the validator).
+func TestFileDriver_Load_RejectsEmptyPath(t *testing.T) {
+	d := &signer.FileDriver{}
+	_, err := d.Load(context.Background(), "")
+	if err == nil {
+		t.Fatal("Load with empty path should error")
+	}
+	if !strings.Contains(err.Error(), "empty") {
+		t.Fatalf("error should mention empty path, got %q", err.Error())
+	}
+}
+
+// TestFileDriver_Generate_RejectsParentTraversal pins the CWE-22 defense
+// for FileDriver.Generate — a relative path that escapes its origin
+// via `..` (and stays unresolved after Clean) is rejected before any
+// keygen happens. Closes CodeQL #27 on the write side.
+func TestFileDriver_Generate_RejectsParentTraversal(t *testing.T) {
+	d := &signer.FileDriver{
+		DirHardener: func(_ string) error { return nil },
+		GenerateOutPath: func(_ signer.Algorithm) (string, error) {
+			return "../../etc/passwd", nil
+		},
+	}
+	_, _, err := d.Generate(context.Background(), signer.AlgorithmECDSAP256)
+	if err == nil {
+		t.Fatal("Generate with relative .. escape should be rejected")
+	}
+	if !strings.Contains(err.Error(), "parent-directory") {
+		t.Fatalf("error should mention parent-directory, got %q", err.Error())
+	}
+}
+
+// TestFileDriver_SafeRoot_AcceptsContainedPath pins the SafeRoot
+// containment positive case — a path under SafeRoot succeeds.
+func TestFileDriver_SafeRoot_AcceptsContainedPath(t *testing.T) {
+	dir := t.TempDir()
+	d := &signer.FileDriver{
+		SafeRoot:    dir,
+		DirHardener: func(_ string) error { return nil },
+		GenerateOutPath: func(_ signer.Algorithm) (string, error) {
+			return filepath.Join(dir, "ok.key"), nil
+		},
+	}
+	_, path, err := d.Generate(context.Background(), signer.AlgorithmECDSAP256)
+	if err != nil {
+		t.Fatalf("Generate under SafeRoot should succeed: %v", err)
+	}
+	if !strings.HasPrefix(path, dir) {
+		t.Fatalf("returned path %q should be under SafeRoot %q", path, dir)
+	}
+}
+
+// TestFileDriver_SafeRoot_RejectsEscape pins the SafeRoot containment
+// negative case — a path outside SafeRoot is rejected. Without this
+// pin, an admin-compromised CAKeyPath of `/etc/passwd` would write
+// system files.
+func TestFileDriver_SafeRoot_RejectsEscape(t *testing.T) {
+	dir := t.TempDir()
+	d := &signer.FileDriver{
+		SafeRoot:    dir,
+		DirHardener: func(_ string) error { return nil },
+		GenerateOutPath: func(_ signer.Algorithm) (string, error) {
+			// Absolute path outside the SafeRoot directory.
+			return "/tmp/escaped-keys/key.pem", nil
+		},
+	}
+	_, _, err := d.Generate(context.Background(), signer.AlgorithmECDSAP256)
+	if err == nil {
+		t.Fatal("Generate outside SafeRoot should be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside SafeRoot") {
+		t.Fatalf("error should mention SafeRoot, got %q", err.Error())
+	}
+}
+
+// TestFileDriver_SafeRoot_RejectsSiblingPrefix pins the load-bearing
+// detail: a SafeRoot of "/var/lib/foo" must NOT accept "/var/lib/foobar".
+// The naive strings.HasPrefix(abs, safeRoot) check fails this case;
+// the validator appends a path separator to prevent the bug.
+func TestFileDriver_SafeRoot_RejectsSiblingPrefix(t *testing.T) {
+	root := t.TempDir() // e.g. /tmp/TestSafeRootSibling12345/001
+	// sibling has the same prefix but is NOT a descendant of root.
+	sibling := root + "-sibling"
+	if err := os.MkdirAll(sibling, 0o700); err != nil {
+		t.Fatalf("mkdir sibling: %v", err)
+	}
+	t.Cleanup(func() { _ = os.RemoveAll(sibling) })
+
+	d := &signer.FileDriver{
+		SafeRoot:    root,
+		DirHardener: func(_ string) error { return nil },
+		GenerateOutPath: func(_ signer.Algorithm) (string, error) {
+			return filepath.Join(sibling, "key.pem"), nil
+		},
+	}
+	_, _, err := d.Generate(context.Background(), signer.AlgorithmECDSAP256)
+	if err == nil {
+		t.Fatal("Generate into sibling-prefix path should be rejected")
+	}
+	if !strings.Contains(err.Error(), "outside SafeRoot") {
+		t.Fatalf("error should mention SafeRoot, got %q", err.Error())
+	}
+}

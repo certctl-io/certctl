@@ -13,6 +13,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 )
 
 // FileDriver materializes a Signer from a PEM-encoded private key on
@@ -64,10 +65,96 @@ type FileDriver struct {
 	// production. The local package's NewConnector wires this to
 	// return the configured CAKeyPath.
 	GenerateOutPath func(alg Algorithm) (string, error)
+
+	// SafeRoot, if non-empty, restricts every Load + Generate path to
+	// the absolute filesystem subtree rooted at SafeRoot. Closes CodeQL
+	// go/path-injection (CWE-22 / CWE-23 / CWE-36): even though the
+	// driver's path inputs flow from operator-authenticated config
+	// (admin-only API surface), an admin compromise could otherwise
+	// write `/etc/passwd` or read `/root/.ssh/id_rsa` via the driver.
+	// SafeRoot bounds the blast radius.
+	//
+	// Validation semantics (validateSafePath):
+	//
+	//   1. The supplied path is cleaned (filepath.Clean) to collapse
+	//      ./ and ../ sequences in their literal form.
+	//   2. If the cleaned path is relative, it's resolved against the
+	//      current working directory via filepath.Abs.
+	//   3. If SafeRoot is set, the absolute path MUST be SafeRoot or
+	//      a descendant. We use filepath.Rel + strings.HasPrefix on
+	//      the cleaned absolute paths so symlink games (../ disguised
+	//      as a symlink target) inside SafeRoot are bounded by
+	//      SafeRoot's parent permissions, not by the validator.
+	//
+	// When SafeRoot is empty, the path is still cleaned + checked for
+	// the literal ".." element as a baseline defense-in-depth measure;
+	// callers that don't constrain to a root still get path-traversal
+	// rejection.
+	//
+	// Production wiring SHOULD set SafeRoot. The local-issuer config
+	// surface accepts CAKeyPath as an absolute path; cmd/server/main.go
+	// can derive SafeRoot from CERTCTL_CA_KEY_DIR (operator-trusted env
+	// var, never user-supplied) or from the parent of the configured
+	// path at issuer-registration time.
+	SafeRoot string
 }
 
 // Name implements Driver.
 func (d *FileDriver) Name() string { return "file" }
+
+// validateSafePath enforces the CWE-22 / CWE-23 / CWE-36 path-traversal
+// defense documented on FileDriver.SafeRoot. Returns the cleaned
+// absolute path on success; an explicit error on rejection. Rejects:
+//
+//   - empty paths
+//   - paths whose cleaned form contains a literal ".." segment (defense
+//     against attacker-controlled fragments concatenated upstream — the
+//     filepath.Clean() before this check collapses any "..", so a
+//     remaining ".." is structural)
+//   - when SafeRoot is non-empty: any path whose cleaned absolute form
+//     is not SafeRoot or a descendant
+//
+// Apply in every Load + Generate path before any os.ReadFile /
+// os.WriteFile call. CodeQL's taint tracker recognizes the validator
+// in the same function as the sink and closes the alert.
+func (d *FileDriver) validateSafePath(path string) (string, error) {
+	if path == "" {
+		return "", errors.New("path is empty")
+	}
+	cleaned := filepath.Clean(path)
+	// Reject any path whose cleaned form still contains a `..` element.
+	// filepath.Clean collapses `./` and `../` sequences relative to the
+	// path's structure, so a remaining `..` after Clean means the path
+	// is rooted (or attempts to escape) above whatever the caller
+	// intended.
+	for _, segment := range strings.Split(filepath.ToSlash(cleaned), "/") {
+		if segment == ".." {
+			return "", fmt.Errorf("path %q contains parent-directory segment", path)
+		}
+	}
+	abs, err := filepath.Abs(cleaned)
+	if err != nil {
+		return "", fmt.Errorf("resolve absolute path %q: %w", path, err)
+	}
+	if d.SafeRoot != "" {
+		safeRoot, err := filepath.Abs(filepath.Clean(d.SafeRoot))
+		if err != nil {
+			return "", fmt.Errorf("resolve SafeRoot %q: %w", d.SafeRoot, err)
+		}
+		// Require the cleaned absolute path to be safeRoot itself or a
+		// strict descendant. The += string.Separator on safeRoot is
+		// load-bearing — without it a SafeRoot of "/var/lib/foo" would
+		// erroneously accept "/var/lib/foobar" as a prefix match.
+		safeRootSlash := safeRoot
+		if !strings.HasSuffix(safeRootSlash, string(filepath.Separator)) {
+			safeRootSlash += string(filepath.Separator)
+		}
+		if abs != safeRoot && !strings.HasPrefix(abs, safeRootSlash) {
+			return "", fmt.Errorf("path %q resolves outside SafeRoot %q", path, d.SafeRoot)
+		}
+	}
+	return abs, nil
+}
 
 // Load implements Driver. It reads the PEM file at path, decodes the
 // first PEM block, parses it via the package's parsePrivateKey
@@ -78,28 +165,33 @@ func (d *FileDriver) Name() string { return "file" }
 // No key bytes are logged — only the path and (on success) the
 // inferred Algorithm.
 func (d *FileDriver) Load(ctx context.Context, path string) (Signer, error) {
-	if path == "" {
-		return nil, errors.New("signer.FileDriver.Load: empty path")
-	}
 	if err := ctx.Err(); err != nil {
 		return nil, fmt.Errorf("signer.FileDriver.Load: %w", err)
 	}
-
-	pemBytes, err := os.ReadFile(path)
+	// CWE-22 path-traversal defense — reject paths that escape SafeRoot
+	// (when set) OR contain literal ".." segments. The validator is in
+	// the same function as the os.ReadFile sink so CodeQL recognizes
+	// the sanitizer in-scope.
+	safePath, err := d.validateSafePath(path)
 	if err != nil {
-		return nil, fmt.Errorf("signer.FileDriver.Load: read %q: %w", path, err)
+		return nil, fmt.Errorf("signer.FileDriver.Load: %w", err)
+	}
+
+	pemBytes, err := os.ReadFile(safePath)
+	if err != nil {
+		return nil, fmt.Errorf("signer.FileDriver.Load: read %q: %w", safePath, err)
 	}
 	block, _ := pem.Decode(pemBytes)
 	if block == nil {
-		return nil, fmt.Errorf("signer.FileDriver.Load: %q is not PEM", path)
+		return nil, fmt.Errorf("signer.FileDriver.Load: %q is not PEM", safePath)
 	}
 	key, err := parsePrivateKey(block)
 	if err != nil {
-		return nil, fmt.Errorf("signer.FileDriver.Load: parse %q: %w", path, err)
+		return nil, fmt.Errorf("signer.FileDriver.Load: parse %q: %w", safePath, err)
 	}
 	wrapped, err := Wrap(key)
 	if err != nil {
-		return nil, fmt.Errorf("signer.FileDriver.Load: wrap %q: %w", path, err)
+		return nil, fmt.Errorf("signer.FileDriver.Load: wrap %q: %w", safePath, err)
 	}
 	return wrapped, nil
 }
@@ -133,10 +225,19 @@ func (d *FileDriver) Generate(ctx context.Context, alg Algorithm) (Signer, strin
 		return nil, "", fmt.Errorf("signer.FileDriver.Generate: resolve out path: %w", err)
 	}
 
+	// CWE-22 path-traversal defense — reject paths that escape SafeRoot
+	// (when set) OR contain literal ".." segments. The validator is in
+	// the same function as the os.WriteFile sink below so CodeQL
+	// recognizes the sanitizer in-scope.
+	safeOut, err := d.validateSafePath(outPath)
+	if err != nil {
+		return nil, "", fmt.Errorf("signer.FileDriver.Generate: %w", err)
+	}
+
 	// Harden the destination directory BEFORE generating the key. If
 	// the directory check fails we bail without touching cryptography.
-	if err := d.DirHardener(filepath.Dir(outPath)); err != nil {
-		return nil, "", fmt.Errorf("signer.FileDriver.Generate: harden dir for %q: %w", outPath, err)
+	if err := d.DirHardener(filepath.Dir(safeOut)); err != nil {
+		return nil, "", fmt.Errorf("signer.FileDriver.Generate: harden dir for %q: %w", safeOut, err)
 	}
 
 	// Generate the key for the requested algorithm.
@@ -191,15 +292,15 @@ func (d *FileDriver) Generate(ctx context.Context, alg Algorithm) (Signer, strin
 	// Write 0o600 — owner-read-write only. Any read by group/other is
 	// a configuration regression; the dir 0700 above prevents
 	// enumeration of the file's existence.
-	if err := os.WriteFile(outPath, pemBytes, 0o600); err != nil {
-		return nil, "", fmt.Errorf("signer.FileDriver.Generate: write %q: %w", outPath, err)
+	if err := os.WriteFile(safeOut, pemBytes, 0o600); err != nil {
+		return nil, "", fmt.Errorf("signer.FileDriver.Generate: write %q: %w", safeOut, err)
 	}
 
 	wrapped, err := Wrap(signerKey)
 	if err != nil {
 		return nil, "", fmt.Errorf("signer.FileDriver.Generate: wrap: %w", err)
 	}
-	return wrapped, outPath, nil
+	return wrapped, safeOut, nil
 }
 
 func rsaBitsFor(a Algorithm) int {
