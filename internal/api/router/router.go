@@ -156,6 +156,19 @@ type HandlerRegistry struct {
 	// authzs, challenges, key-change, revoke-cert, ARI. See
 	// docs/acme-server.md for the configuration reference.
 	ACME handler.ACMEHandler
+
+	// Approvals handles the issuance approval-workflow endpoints under
+	// /api/v1/approvals/*. Rank 7 of the 2026-05-03 Infisical deep-
+	// research deliverable — closes the two-person integrity / four-eyes
+	// principle procurement gap. Routes:
+	//   GET  /api/v1/approvals
+	//   GET  /api/v1/approvals/{id}
+	//   POST /api/v1/approvals/{id}/approve
+	//   POST /api/v1/approvals/{id}/reject
+	// Same-actor RBAC enforced at the service layer; the handler
+	// surfaces ErrApproveBySameActor as HTTP 403. See
+	// docs/approval-workflow.md for the operator playbook.
+	Approvals handler.ApprovalHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -349,6 +362,16 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// picks it up again. Go 1.22 ServeMux resolves the literal /requeue segment
 	// before falling back to the {id} path-variable route above.
 	r.Register("POST /api/v1/notifications/{id}/requeue", http.HandlerFunc(reg.Notifications.RequeueNotification))
+
+	// Approvals routes: /api/v1/approvals (Rank 7).
+	// Same Go 1.22 ServeMux precedence as the notifications block — literal
+	// /approve and /reject segments resolve before the {id} pattern-var
+	// route. Same-actor RBAC enforced at the service layer; the handler
+	// surfaces ErrApproveBySameActor as HTTP 403.
+	r.Register("GET /api/v1/approvals", http.HandlerFunc(reg.Approvals.ListApprovals))
+	r.Register("GET /api/v1/approvals/{id}", http.HandlerFunc(reg.Approvals.GetApproval))
+	r.Register("POST /api/v1/approvals/{id}/approve", http.HandlerFunc(reg.Approvals.Approve))
+	r.Register("POST /api/v1/approvals/{id}/reject", http.HandlerFunc(reg.Approvals.Reject))
 
 	// Stats routes: /api/v1/stats
 	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(reg.Stats.GetDashboardSummary))
