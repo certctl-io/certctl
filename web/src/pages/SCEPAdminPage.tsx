@@ -581,11 +581,6 @@ function RecentEventsTable({ events, testID, emptyMessage }: RecentEventsTablePr
 // Top-level page.
 // =============================================================================
 
-function pickTabFromQuery(value: string | null): TabId {
-  if (value === 'intune' || value === 'activity') return value;
-  return 'profiles';
-}
-
 // pickInitialTab honors three signals (precedence high → low):
 //   1. ?tab=intune|activity in the query string (deep link)
 //   2. Pathname ending in /scep/intune (legacy route alias from
