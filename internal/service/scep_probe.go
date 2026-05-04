@@ -223,8 +223,47 @@ func (s *NetworkScanService) scepGetCACert(ctx context.Context, client *http.Cli
 // scepHTTPGet issues a single GET with the probe's user agent + the
 // SSRF-defended HTTP client. Reads the body up to 1MB to defend against
 // a huge-response DoS from a misbehaving target.
-func (s *NetworkScanService) scepHTTPGet(ctx context.Context, client *http.Client, url string) ([]byte, error) {
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
+//
+// Defense in depth (CodeQL #23 / CWE-918 SSRF):
+//
+//   - The HTTP client's transport is built with validation.SafeHTTPDialContext
+//     (see scepProbeClient below). Every dial — including any dial along a
+//     redirect chain — re-resolves the host and rejects connections to
+//     reserved IP ranges (loopback, RFC 1918, link-local, multicast,
+//     CGNAT, IPv6 ULAs, etc.). This is the authoritative SSRF + DNS-
+//     rebinding guard; even if an attacker bypassed the upstream URL
+//     validator, the dial would still fail.
+//
+//   - In addition to the dial-time guard, this function re-runs
+//     validation.ValidateSafeURL on the URL right before the request
+//     is built. The validator is already invoked at ProbeSCEP entry,
+//     but re-running it here:
+//     (a) Closes CodeQL go/request-forgery — the analyzer's taint
+//     tracker now sees the sanitizer in the same function as the
+//     sink (client.Do).
+//     (b) Catches any future call site that wires a URL into
+//     scepHTTPGet without going through ProbeSCEP. If anyone adds
+//     such a path the validator catches the regression at the
+//     sink — fail-closed by default.
+//     (c) Is cheap (a single parse + reserved-IP lookup; the URL is
+//     already parsed once upstream so the OS DNS cache likely
+//     still has the answer).
+//
+//   - When the service is configured with a permissive validator
+//     (scepValidateURL — set by tests targeting httptest loopback
+//     servers), the same permissive validator applies here. Production
+//     callers leave scepValidateURL nil so validation.ValidateSafeURL
+//     is the active gate.
+func (s *NetworkScanService) scepHTTPGet(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
+	validateURL := s.scepValidateURL
+	if validateURL == nil {
+		validateURL = validation.ValidateSafeURL
+	}
+	if err := validateURL(rawURL); err != nil {
+		return nil, fmt.Errorf("validate url: %w", err)
+	}
+
+	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
 	if err != nil {
 		return nil, fmt.Errorf("build request: %w", err)
 	}
