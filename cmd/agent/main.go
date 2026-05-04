@@ -907,7 +907,7 @@ func (a *Agent) createTargetConnector(ctx context.Context, targetType string, co
 		return k8s.New(&cfg, a.logger)
 
 	case "AWSACM":
-		// Rank 5 of the 2026-05-03 deep-research deliverable.
+		// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
 		// AWS Certificate Manager target — SDK-driven (no file I/O).
 		// LoadDefaultConfig handles the standard AWS credential chain
 		// (IRSA / EC2 instance profile / SSO / env vars) without any
@@ -921,7 +921,7 @@ func (a *Agent) createTargetConnector(ctx context.Context, targetType string, co
 		return awsacm.New(ctx, &cfg, a.logger)
 
 	case "AzureKeyVault":
-		// Rank 5 of the 2026-05-03 deep-research deliverable.
+		// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
 		// Azure Key Vault target — SDK-driven (no file I/O).
 		// DefaultAzureCredential handles the standard Azure credential
 		// chain (managed identity / workload identity / env vars / az

@@ -11,7 +11,7 @@ import (
 )
 
 // ApprovalService manages the issuance approval-workflow primitive.
-// Rank 7 of the 2026-05-03 deep-research deliverable.
+// Rank 7 of the 2026-05-03 Infisical deep-research deliverable.
 //
 // Lifecycle: a profile with RequiresApproval=true causes the renewal
 // entry points (TriggerRenewal + CheckExpiringCertificates) to call

@@ -8,7 +8,7 @@ import (
 )
 
 // ApprovalMetrics is a thread-safe counter table for the issuance
-// approval-workflow dispatch path. Rank 7 of the 2026-05-03 deep-research
+// approval-workflow dispatch path. Rank 7 of the 2026-05-03 Infisical
 // deep-research deliverable. Mirrors the ExpiryAlertMetrics +
 // VaultRenewalMetrics shape: cmd/server/main.go constructs ONE instance,
 // passes it to ApprovalService (recording side) AND metricsHandler

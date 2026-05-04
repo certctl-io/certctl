@@ -87,7 +87,7 @@ type CertificateProfile struct {
 	//
 	// Backed by certificate_profiles.requires_approval added in
 	// migration 000027_approval_workflow. Rank 7 of the 2026-05-03
-	// deep-research deliverable.
+	// Infisical deep-research deliverable.
 	RequiresApproval bool `json:"requires_approval,omitempty"`
 
 	Enabled   bool      `json:"enabled"`

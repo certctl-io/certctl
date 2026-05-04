@@ -1,7 +1,7 @@
 package awsacm_test
 
-// Rank 5 of the 2026-05-03 deep-research deliverable
-// (cowork/deep-research-results-2026-05-03.md Part 5). Per-error-class
+// Rank 5 of the 2026-05-03 Infisical deep-research deliverable
+// (cowork/infisical-deep-research-results.md Part 5). Per-error-class
 // failure tests for the AWS ACM target connector — mirrors the
 // awsacmpca_failure_test.go shape (commit 60dce0b) on the issuer side.
 //

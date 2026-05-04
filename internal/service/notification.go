@@ -54,7 +54,7 @@ type NotificationService struct {
 	// to SendThresholdAlertOnChannel reports its outcome (success / failure)
 	// to the metric sink so the Prometheus exposer surfaces
 	// certctl_expiry_alerts_total{channel,threshold,result}. Rank 4 of the
-	// 2026-05-03 deep-research deliverable. Nil leaves the
+	// 2026-05-03 Infisical deep-research deliverable. Nil leaves the
 	// dispatch path unchanged (no metric emission, but alerts still fire).
 	expiryAlertMetrics ExpiryAlertRecorder
 }
@@ -149,7 +149,7 @@ func (s *NotificationService) SendExpirationWarning(ctx context.Context, cert *d
 //
 // Policy-driven dispatch in RenewalService.sendThresholdAlerts uses
 // SendThresholdAlertOnChannel directly with the channel resolved from the
-// per-policy AlertChannels matrix. Rank 4 of the 2026-05-03 deep-research
+// per-policy AlertChannels matrix. Rank 4 of the 2026-05-03 Infisical
 // deep-research deliverable.
 func (s *NotificationService) SendThresholdAlert(ctx context.Context, cert *domain.ManagedCertificate, daysUntilExpiry int, threshold int) error {
 	return s.SendThresholdAlertOnChannel(ctx, cert, daysUntilExpiry, threshold, domain.NotificationChannelEmail)

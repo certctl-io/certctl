@@ -15,8 +15,8 @@
 // on mismatch (or any post-verify failure) the connector re-imports the
 // snapshot bytes to restore the previous cert. Mirrors the Bundle 5+
 // pre-deploy-snapshot + on-failure-restore pattern from IIS / WinCertStore /
-// JavaKeystore. Rank 5 of the 2026-05-03 deep-research
-// deliverable (cowork/deep-research-results-2026-05-03.md Part 5).
+// JavaKeystore. Rank 5 of the 2026-05-03 Infisical deep-research
+// deliverable (cowork/infisical-deep-research-results.md Part 5).
 //
 // IAM permissions required:
 //

@@ -1,5 +1,5 @@
--- Rank 4 of the 2026-05-03 deep-research deliverable
--- (cowork/deep-research-results-2026-05-03.md Part 5). Adds the
+-- Rank 4 of the 2026-05-03 Infisical deep-research deliverable
+-- (cowork/infisical-deep-research-results.md Part 5). Adds the
 -- per-policy channel matrix that the multi-channel expiry-alert
 -- routing reads from. Two JSONB columns:
 --

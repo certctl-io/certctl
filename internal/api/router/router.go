@@ -158,7 +158,8 @@ type HandlerRegistry struct {
 	ACME handler.ACMEHandler
 
 	// Approvals handles the issuance approval-workflow endpoints under
-	// /api/v1/approvals/*. Rank 7 of the 2026-05-03 deep-research deliverable — closes the two-person integrity / four-eyes
+	// /api/v1/approvals/*. Rank 7 of the 2026-05-03 Infisical deep-
+	// research deliverable — closes the two-person integrity / four-eyes
 	// principle procurement gap. Routes:
 	//   GET  /api/v1/approvals
 	//   GET  /api/v1/approvals/{id}

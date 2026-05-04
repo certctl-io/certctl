@@ -39,7 +39,7 @@ type CertificateService struct {
 	// a parallel ApprovalRequest row is created via approvalSvc. The
 	// scheduler does NOT dispatch until ApprovalService.Approve
 	// transitions the job to Pending. Rank 7 of the 2026-05-03
-	// deep-research deliverable. Both setters are optional —
+	// Infisical deep-research deliverable. Both setters are optional —
 	// when either is nil, gating is skipped and TriggerRenewal falls
 	// back to the historical unattended path.
 	approvalSvc *ApprovalService
@@ -107,7 +107,7 @@ func (s *CertificateService) SetKeygenMode(mode string) {
 
 // SetApprovalService wires the approval-workflow service. When both this
 // and SetProfileRepo are wired, TriggerRenewal gates on
-// CertificateProfile.RequiresApproval. Rank 7 of the 2026-05-03 deep-research
+// CertificateProfile.RequiresApproval. Rank 7 of the 2026-05-03 Infisical
 // deep-research deliverable.
 func (s *CertificateService) SetApprovalService(svc *ApprovalService) {
 	s.approvalSvc = svc

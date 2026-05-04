@@ -947,7 +947,7 @@ func TestCreateTargetConnector_AllSupportedTypes(t *testing.T) {
 			},
 		},
 		{
-			// Rank 5 of the 2026-05-03 deep-research deliverable.
+			// Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
 			// Region must be a valid AWS region; the connector lazy-loads
 			// the SDK client during ValidateConfig but New() with a populated
 			// region should succeed against the SDK credential chain

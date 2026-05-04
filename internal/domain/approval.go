@@ -16,8 +16,8 @@ import "time"
 // Once terminal, the row is immutable; the audit_events table is the
 // durable record of who approved + why.
 //
-// Rank 7 of the 2026-05-03 deep-research deliverable
-// (cowork/deep-research-results-2026-05-03.md Part 5). Closes the
+// Rank 7 of the 2026-05-03 Infisical deep-research deliverable
+// (cowork/infisical-deep-research-results.md Part 5). Closes the
 // "two-person integrity / four-eyes principle" procurement gap for
 // PCI-DSS Level 1, FedRAMP Moderate / High, and SOC 2 Type II
 // customers.

@@ -1411,7 +1411,7 @@ Location: `internal/connector/target/k8ssecret/k8ssecret.go`
 
 ### AWS Certificate Manager (ACM)
 
-The AWS ACM target connector deploys certificates into AWS Certificate Manager — the public AWS service that ALB / CloudFront / API Gateway / App Runner consume by ARN. Closes the "we terminate TLS at AWS, how do we get certctl-issued certs to ALB?" question for cloud-first deployments. Rank 5 of the 2026-05-03 deep-research deliverable.
+The AWS ACM target connector deploys certificates into AWS Certificate Manager — the public AWS service that ALB / CloudFront / API Gateway / App Runner consume by ARN. Closes the "we terminate TLS at AWS, how do we get certctl-issued certs to ALB?" question for cloud-first deployments. Rank 5 of the 2026-05-03 Infisical deep-research deliverable.
 
 ```json
 {
@@ -1506,7 +1506,7 @@ Location: `internal/connector/target/awsacm/awsacm.go` + `internal/connector/tar
 
 ### Azure Key Vault
 
-The Azure Key Vault target connector deploys certificates into Azure Key Vault — the Azure-managed cert/secret store that Application Gateway / Front Door / App Service / Container Apps consume by KID URI. Rank 5 (Azure half) of the 2026-05-03 deep-research deliverable.
+The Azure Key Vault target connector deploys certificates into Azure Key Vault — the Azure-managed cert/secret store that Application Gateway / Front Door / App Service / Container Apps consume by KID URI. Rank 5 (Azure half) of the 2026-05-03 Infisical deep-research deliverable.
 
 ```json
 {
@@ -1619,7 +1619,7 @@ Built-in notifiers: **Email** (SMTP), **Webhook** (HTTP POST), **Slack** (incomi
 
 ### Routing expiry alerts across channels
 
-certctl-server runs a daily renewal-check loop that scans for managed certificates approaching expiry. For each cert that has crossed a configured threshold (default `[30, 14, 7, 0]` days), an `ExpirationWarning` notification is dispatched. **Pre-2026-05-03**, dispatch went exclusively via the `Email` channel — operators with PagerDuty / Slack / Teams / OpsGenie wired up received nothing at any threshold unless SMTP was also configured. Rank 4 of the 2026-05-03 deep-research deliverable closed that gap with a per-policy channel-matrix.
+certctl-server runs a daily renewal-check loop that scans for managed certificates approaching expiry. For each cert that has crossed a configured threshold (default `[30, 14, 7, 0]` days), an `ExpirationWarning` notification is dispatched. **Pre-2026-05-03**, dispatch went exclusively via the `Email` channel — operators with PagerDuty / Slack / Teams / OpsGenie wired up received nothing at any threshold unless SMTP was also configured. Rank 4 of the 2026-05-03 Infisical deep-research deliverable closed that gap with a per-policy channel-matrix.
 
 **The matrix lives on `RenewalPolicy`:**
 

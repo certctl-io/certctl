@@ -513,7 +513,7 @@ func (m *mockNotifRepo) List(ctx context.Context, filter *repository.Notificatio
 	// Apply each non-zero filter field. Mirror the postgres notification
 	// repo's WHERE-clause shape (CertificateID, Type, Status, Channel,
 	// MessageLike) so the multi-channel expiry-alert tests
-	// (renewal_expiry_alerts_test.go, Rank 4 of the 2026-05-03 deep-research
+	// (renewal_expiry_alerts_test.go, Rank 4 of the 2026-05-03 Infisical
 	// deep-research deliverable) get the same per-(cert, threshold,
 	// channel) dedup behaviour they'd see in production. Pre-Rank 4 the
 	// mock returned all rows regardless of filter; legacy callers

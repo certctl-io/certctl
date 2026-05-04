@@ -8,8 +8,8 @@ import (
 
 // ExpiryAlertMetrics is a thread-safe counter table for the per-policy
 // multi-channel expiry-alert dispatch path. Rank 4 of the 2026-05-03
-// deep-research deliverable
-// (cowork/deep-research-results-2026-05-03.md Part 5). Closes the
+// Infisical deep-research deliverable
+// (cowork/infisical-deep-research-results.md Part 5). Closes the
 // procurement-checklist gap where a customer who configured PagerDuty
 // for cert-expiry pages got silent nothing — ExpirationWarning shipped
 // only to Email pre-fix.

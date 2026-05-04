@@ -29,7 +29,7 @@ type Config struct {
 	Verification VerificationConfig
 	ACME         ACMEConfig
 	// Approval is the issuance approval-workflow primitive's runtime
-	// config. Rank 7 of the 2026-05-03 deep-research
+	// config. Rank 7 of the 2026-05-03 Infisical deep-research
 	// deliverable. The single field — BypassEnabled — short-circuits
 	// the workflow for dev/CI; production deploys MUST leave it false.
 	Approval ApprovalConfig
@@ -1431,7 +1431,7 @@ type SchedulerConfig struct {
 }
 
 // ApprovalConfig contains issuance approval-workflow runtime configuration.
-// Rank 7 of the 2026-05-03 deep-research deliverable.
+// Rank 7 of the 2026-05-03 Infisical deep-research deliverable.
 type ApprovalConfig struct {
 	// BypassEnabled short-circuits the approval workflow — every
 	// RequestApproval call auto-approves with decidedBy="system-bypass"
