@@ -28,7 +28,6 @@ import {
   markNotificationRead,
   getAuditEvents,
   getPolicies,
-  createPolicy,
   updatePolicy,
   deletePolicy,
   getPolicyViolations,
@@ -99,10 +98,6 @@ import {
   listHealthChecks,
   getHealthCheck,
   createHealthCheck,
-  updateHealthCheck,
-  deleteHealthCheck,
-  getHealthCheckHistory,
-  acknowledgeHealthCheck,
   getHealthCheckSummary,
 } from './client';
 

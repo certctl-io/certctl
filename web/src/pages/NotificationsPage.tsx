@@ -5,7 +5,7 @@ import { getNotifications, markNotificationRead, requeueNotification } from '../
 import PageHeader from '../components/PageHeader';
 import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
-import { formatDateTime, timeAgo } from '../api/utils';
+import { timeAgo } from '../api/utils';
 import type { Notification } from '../api/types';
 
 type ViewMode = 'list' | 'grouped';
