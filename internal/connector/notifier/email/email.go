@@ -356,6 +356,21 @@ func (c *Connector) formatHTMLEmailMessage(from, to, subject, htmlBody string) (
 }
 
 // formatAlertBody formats an alert notification as email body text.
+//
+// CodeQL go/email-injection (CWE-640 / OWASP Content Spoofing) defense:
+// every field interpolated into the body that may carry attacker-
+// controlled content (alert.Subject, alert.Message, alert.Metadata
+// values, alert.ID / Type / Severity which originate from the API
+// surface) is routed through validation.SanitizeEmailBodyValue before
+// formatting. The sanitizer strips NUL bytes (RFC 5321 §4.5.2 violation),
+// bare CR/LF within a single field (forged header-boundary attempts),
+// bidi-override Unicode (visually-spoofable URLs), zero-width / invisible
+// codepoints, and C0/C1 control chars. CreatedAt is a time.Time —
+// formatted via RFC3339; not user-controllable so unsanitized.
+//
+// Header values (From, To, Subject) are protected separately by
+// validation.ValidateHeaderValue at sendEmail entry (CWE-113 SMTP header
+// injection — see commit 9e957c3).
 func (c *Connector) formatAlertBody(alert notifier.Alert) string {
 	body := fmt.Sprintf(`
 Certificate Alert Notification
@@ -372,16 +387,29 @@ Message:
 %s
 
 %s
-`, alert.ID, alert.Type, alert.Severity, alert.CreatedAt.Format(time.RFC3339), alert.Subject, alert.Message, c.formatMetadata(alert.Metadata))
+`,
+		validation.SanitizeEmailBodyValue(alert.ID),
+		validation.SanitizeEmailBodyValue(alert.Type),
+		validation.SanitizeEmailBodyValue(alert.Severity),
+		alert.CreatedAt.Format(time.RFC3339),
+		validation.SanitizeEmailBodyValue(alert.Subject),
+		validation.SanitizeEmailBodyValue(alert.Message),
+		c.formatMetadata(alert.Metadata),
+	)
 
 	return body
 }
 
 // formatEventBody formats an event notification as email body text.
+//
+// Same CodeQL go/email-injection mitigation as formatAlertBody — every
+// user-controllable interpolated field routes through
+// validation.SanitizeEmailBodyValue. CreatedAt is unsanitized (time.Time
+// → RFC3339 is structural, not user-controllable).
 func (c *Connector) formatEventBody(event notifier.Event) string {
 	certInfo := ""
 	if event.CertificateID != nil {
-		certInfo = fmt.Sprintf("Certificate ID: %s\n", *event.CertificateID)
+		certInfo = fmt.Sprintf("Certificate ID: %s\n", validation.SanitizeEmailBodyValue(*event.CertificateID))
 	}
 
 	body := fmt.Sprintf(`
@@ -398,12 +426,27 @@ Body:
 %s
 
 %s
-`, event.ID, event.Type, event.CreatedAt.Format(time.RFC3339), certInfo, event.Subject, event.Body, c.formatMetadata(event.Metadata))
+`,
+		validation.SanitizeEmailBodyValue(event.ID),
+		validation.SanitizeEmailBodyValue(event.Type),
+		event.CreatedAt.Format(time.RFC3339),
+		certInfo,
+		validation.SanitizeEmailBodyValue(event.Subject),
+		validation.SanitizeEmailBodyValue(event.Body),
+		c.formatMetadata(event.Metadata),
+	)
 
 	return body
 }
 
 // formatMetadata formats metadata as a readable string.
+//
+// Both keys and values can carry attacker-controlled content (cert
+// subject DN fragments, discovered cert metadata, owner/team labels —
+// all originate from API surfaces an attacker may influence). Both are
+// routed through validation.SanitizeEmailBodyValue. Closes the
+// CodeQL go/email-injection finding alongside formatAlertBody +
+// formatEventBody.
 func (c *Connector) formatMetadata(metadata map[string]string) string {
 	if len(metadata) == 0 {
 		return ""
@@ -411,7 +454,10 @@ func (c *Connector) formatMetadata(metadata map[string]string) string {
 
 	metadataStr := "\nMetadata:\n"
 	for key, value := range metadata {
-		metadataStr += fmt.Sprintf("  %s: %s\n", key, value)
+		metadataStr += fmt.Sprintf("  %s: %s\n",
+			validation.SanitizeEmailBodyValue(key),
+			validation.SanitizeEmailBodyValue(value),
+		)
 	}
 
 	return metadataStr
