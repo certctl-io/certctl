@@ -150,19 +150,19 @@ func TestSanitizeEmailBodyValue_StripsBidiOverride(t *testing.T) {
 		input string
 	}{
 		// U+202E = Right-to-left override
-		{"RTL override", "Click ‮www.evil.com‬ to verify"},
+		{"RTL override", "Click \u202Ewww.evil.com\u202C to verify"},
 		// U+202D = Left-to-right override
-		{"LRO override", "Click ‭www.evil.com‬ to verify"},
+		{"LRO override", "Click \u202Dwww.evil.com\u202C to verify"},
 		// U+2066 = Left-to-right isolate
-		{"LRI isolate", "Click ⁦www.evil.com⁩ to verify"},
+		{"LRI isolate", "Click \u2066www.evil.com\u2069 to verify"},
 		// U+200B = Zero-width space
-		{"zero-width space", "evil​.example.com"},
+		{"zero-width space", "evil\u200B.example.com"},
 		// U+200C = ZWNJ
-		{"zero-width non-joiner", "ad‌min@example.com"},
+		{"zero-width non-joiner", "ad\u200Cmin@example.com"},
 		// U+FEFF = byte-order mark / zero-width no-break space
 		{"BOM", "x\uFEFFy"},
 		// U+180E = Mongolian Vowel Separator
-		{"MVS", "a᠎b"},
+		{"MVS", "a\u180Eb"},
 	}
 	for _, tc := range tests {
 		t.Run(tc.name, func(t *testing.T) {
