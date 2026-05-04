@@ -350,8 +350,20 @@ func verifyChallengeSignature(alg string, signingInput, signature []byte, trust 
 // signature against each trust anchor's public key. Constant-time: the
 // stdlib's rsa.VerifyPKCS1v15 returns nil on success and an error on
 // failure without timing-leak surface area on the hash compare path.
+//
+// SHA-256 is the spec-mandated digest for RS256 — RFC 7518 §3.3
+// defines RS256 as "RSASSA-PKCS1-v1_5 using SHA-256". This is JWS
+// signature verification over a public, well-known message (the
+// JWS protected header + payload, base64url-encoded). It is NOT
+// password hashing — the input has full 256-bit entropy contributed
+// by the signer's nonce + timestamp + device-claim payload, and
+// the output is checked against an asymmetric signature, not a
+// pre-computed hash digest. CodeQL go/weak-sensitive-data-hashing
+// triggers on the proximity of *x509.Certificate; the certificate
+// here is a verification key, not an input to the hash. Suppressing
+// the alert at the call site below.
 func verifyRS256(signingInput, signature []byte, trust []*x509.Certificate) error {
-	h := sha256.Sum256(signingInput)
+	h := sha256.Sum256(signingInput) //nolint:gosec // RFC 7518 §3.3 RS256 mandates SHA-256; not password hashing
 	for _, cert := range trust {
 		pub, ok := cert.PublicKey.(*rsa.PublicKey)
 		if !ok {
@@ -376,8 +388,20 @@ func verifyRS256(signingInput, signature []byte, trust []*x509.Certificate) erro
 // Try fixed-width first (the spec-blessed format); fall back to ASN.1.
 // crypto/ecdsa.VerifyASN1 + ecdsa.Verify both return bool — no timing
 // leak on the success path.
+//
+// SHA-256 is the spec-mandated digest for ES256 — RFC 7518 §3.4 defines
+// ES256 as "ECDSA using P-256 and SHA-256". This is JWS signature
+// verification over a public, well-known message (the JWS protected
+// header + payload, base64url-encoded). It is NOT password hashing.
+// The signing input is the JWS encoded payload; full 256-bit-entropy
+// content from the signer's claim. The output is checked against an
+// asymmetric signature, not a pre-computed digest. CodeQL
+// go/weak-sensitive-data-hashing triggers on the proximity of
+// *x509.Certificate; the certificate here is a verification key, not
+// an input to the hash. Suppressing the alert at the call site below
+// (CodeQL alert #21).
 func verifyES256(signingInput, signature []byte, trust []*x509.Certificate) error {
-	h := sha256.Sum256(signingInput)
+	h := sha256.Sum256(signingInput) //nolint:gosec // RFC 7518 §3.4 ES256 mandates SHA-256; not password hashing
 	for _, cert := range trust {
 		pub, ok := cert.PublicKey.(*ecdsa.PublicKey)
 		if !ok {
