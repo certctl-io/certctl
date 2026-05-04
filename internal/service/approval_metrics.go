@@ -94,15 +94,19 @@ func (m *ApprovalMetrics) ObservePendingAge(seconds float64) {
 	m.pendingAgeHist.observe(seconds)
 }
 
-// SnapshotApprovalDecisions returns the current decision counter table
-// as a sorted slice for deterministic Prometheus exposition. Sort key
-// is (outcome, profile_id).
+// ApprovalDecisionEntry is a single row of the SnapshotApprovalDecisions
+// output — the (outcome, profile_id) tuple plus the cumulative count.
+// Used by the Prometheus exposer to emit
+// certctl_approval_decisions_total{outcome,profile_id} samples.
 type ApprovalDecisionEntry struct {
 	Outcome   string
 	ProfileID string
 	Count     uint64
 }
 
+// SnapshotApprovalDecisions returns the current decision counter table
+// as a sorted slice for deterministic Prometheus exposition. Sort key
+// is (outcome, profile_id).
 func (m *ApprovalMetrics) SnapshotApprovalDecisions() []ApprovalDecisionEntry {
 	if m == nil {
 		return nil
@@ -127,9 +131,10 @@ func (m *ApprovalMetrics) SnapshotApprovalDecisions() []ApprovalDecisionEntry {
 	return out
 }
 
-// SnapshotApprovalPendingAgeHistogram returns the current bucket counts
-// + sum + total count for the pending-age histogram. Format suits the
-// Prometheus histogram exposition (le buckets + _sum + _count).
+// ApprovalPendingAgeSnapshot is the snapshot output of
+// SnapshotApprovalPendingAgeHistogram — bucket bounds + cumulative
+// counts + sum + total count. Format suits the Prometheus histogram
+// exposition (le buckets + _sum + _count).
 type ApprovalPendingAgeSnapshot struct {
 	BucketBounds []float64 // [60, 300, 1800, 3600, 21600, 86400] — exclusive of +Inf
 	BucketCounts []uint64  // cumulative counts per bucket; len = len(BucketBounds) + 1 (last is +Inf)

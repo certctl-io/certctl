@@ -2751,6 +2751,165 @@ paths:
           $ref: "#/components/responses/InternalError"
 
   # ─── Notifications ──────────────────────────────────────────────────
+  /api/v1/approvals:
+    get:
+      tags: [Approvals]
+      summary: List approval requests
+      description: |
+        Rank 7 issuance approval-workflow primitive. Returns paginated approval
+        requests, optionally filtered by ?state= (pending/approved/rejected/expired),
+        ?certificate_id=, or ?requested_by=. Empty filters return the unfiltered
+        list (default page=1, per_page=50).
+      operationId: listApprovalRequests
+      parameters:
+        - $ref: "#/components/parameters/page"
+        - $ref: "#/components/parameters/per_page"
+        - name: state
+          in: query
+          required: false
+          schema:
+            type: string
+            enum: [pending, approved, rejected, expired]
+        - name: certificate_id
+          in: query
+          required: false
+          schema:
+            type: string
+        - name: requested_by
+          in: query
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          description: Paginated list of approval requests
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/ApprovalRequest"
+                  page:
+                    type: integer
+                  per_page:
+                    type: integer
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/approvals/{id}:
+    get:
+      tags: [Approvals]
+      summary: Get approval request
+      description: Returns a single approval request by ID.
+      operationId: getApprovalRequest
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Approval request details
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ApprovalRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/approvals/{id}/approve:
+    post:
+      tags: [Approvals]
+      summary: Approve a pending approval request
+      description: |
+        Transitions a pending request to approved AND transitions the linked
+        Job from AwaitingApproval to Pending so the scheduler picks it up.
+        RBAC: the authenticated actor extracted via the auth middleware MUST
+        differ from the request's requested_by — a same-actor self-approval
+        returns HTTP 403 with the substring `two-person integrity` in the
+        body. This is the load-bearing two-person integrity contract;
+        compliance auditors (PCI-DSS 6.4.5, NIST 800-53 SA-15, SOC 2 CC6.1)
+        pattern-match against this code path.
+      operationId: approveApprovalRequest
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  description: Optional reason text for the audit trail.
+      responses:
+        "200":
+          description: Approval recorded; linked Job transitioned to Pending
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  decided_by: { type: string }
+                  action: { type: string, enum: [approved] }
+        "401":
+          description: Authentication required
+        "403":
+          description: Same-actor self-approval blocked by two-person integrity contract
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request already decided (terminal state)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/approvals/{id}/reject:
+    post:
+      tags: [Approvals]
+      summary: Reject a pending approval request
+      description: |
+        Transitions a pending request to rejected AND cancels the linked
+        Job. Same-actor RBAC contract as approve. The job's error_message
+        is populated with the supplied note for audit continuity.
+      operationId: rejectApprovalRequest
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note:
+                  type: string
+                  description: Optional reason text for the audit trail.
+      responses:
+        "200":
+          description: Rejection recorded; linked Job transitioned to Cancelled
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  id: { type: string }
+                  decided_by: { type: string }
+                  action: { type: string, enum: [rejected] }
+        "401":
+          description: Authentication required
+        "403":
+          description: Same-actor self-rejection blocked by two-person integrity contract
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: Request already decided (terminal state)
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/notifications:
     get:
       tags: [Notifications]
@@ -4057,6 +4216,63 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    # ─── Approvals ───────────────────────────────────────────────────
+    ApprovalRequest:
+      type: object
+      description: |
+        Rank 7 issuance approval-workflow primitive. One row per (CertificateID,
+        JobID) pair; the JobID points at the blocked Job whose Status is
+        AwaitingApproval. Lifecycle: pending → approved | rejected | expired.
+        Once terminal, the row is immutable; the audit_events table is the
+        durable record of who decided + why.
+      required:
+        - id
+        - certificate_id
+        - job_id
+        - profile_id
+        - requested_by
+        - state
+        - created_at
+        - updated_at
+      properties:
+        id:
+          type: string
+          description: Approval request ID (ar-<slug>).
+        certificate_id:
+          type: string
+        job_id:
+          type: string
+        profile_id:
+          type: string
+        requested_by:
+          type: string
+          description: Actor that triggered the renewal.
+        state:
+          type: string
+          enum: [pending, approved, rejected, expired]
+        decided_by:
+          type: string
+          nullable: true
+          description: Approver identity; null while state=pending.
+        decided_at:
+          type: string
+          format: date-time
+          nullable: true
+        decision_note:
+          type: string
+          nullable: true
+        metadata:
+          type: object
+          additionalProperties:
+            type: string
+          description: Free-form key/value (common_name, sans, issuer_id, severity_tier).
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
     # ─── Common ──────────────────────────────────────────────────────
     ErrorResponse:
       type: object
