@@ -169,6 +169,20 @@ type HandlerRegistry struct {
 	// surfaces ErrApproveBySameActor as HTTP 403. See
 	// docs/approval-workflow.md for the operator playbook.
 	Approvals handler.ApprovalHandler
+
+	// IntermediateCAs handles the admin-gated CA-hierarchy management
+	// surface under /api/v1/issuers/{id}/intermediates and
+	// /api/v1/intermediates/{id}. Rank 8 of the 2026-05-03 deep-
+	// research deliverable — closes the multi-level CA hierarchy gap
+	// for FedRAMP boundary-CA, financial-services policy-CA, and OT
+	// network-CA deployments. Routes:
+	//   POST /api/v1/issuers/{id}/intermediates
+	//   GET  /api/v1/issuers/{id}/intermediates
+	//   GET  /api/v1/intermediates/{id}
+	//   POST /api/v1/intermediates/{id}/retire
+	// Admin-gated at the handler layer (M-003 pattern). See
+	// docs/intermediate-ca-hierarchy.md for the operator playbook.
+	IntermediateCAs handler.IntermediateCAHandler
 }
 
 // RegisterHandlers sets up all API routes with their handlers.
@@ -372,6 +386,16 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/approvals/{id}", http.HandlerFunc(reg.Approvals.GetApproval))
 	r.Register("POST /api/v1/approvals/{id}/approve", http.HandlerFunc(reg.Approvals.Approve))
 	r.Register("POST /api/v1/approvals/{id}/reject", http.HandlerFunc(reg.Approvals.Reject))
+
+	// IntermediateCA hierarchy routes (Rank 8). Admin-gated inside the
+	// handler (M-003 pattern); non-admin Bearer callers get 403. The
+	// /retire literal segment resolves before the {id} pattern-var
+	// route under Go 1.22 ServeMux precedence — the ordering below
+	// matches the notifications + approvals blocks above.
+	r.Register("POST /api/v1/issuers/{id}/intermediates", http.HandlerFunc(reg.IntermediateCAs.Create))
+	r.Register("GET /api/v1/issuers/{id}/intermediates", http.HandlerFunc(reg.IntermediateCAs.List))
+	r.Register("POST /api/v1/intermediates/{id}/retire", http.HandlerFunc(reg.IntermediateCAs.Retire))
+	r.Register("GET /api/v1/intermediates/{id}", http.HandlerFunc(reg.IntermediateCAs.Get))
 
 	// Stats routes: /api/v1/stats
 	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(reg.Stats.GetDashboardSummary))

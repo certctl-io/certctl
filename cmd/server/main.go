@@ -286,6 +286,24 @@ func main() {
 	certificateService.SetProfileRepo(profileRepo)
 	approvalHandler := handler.NewApprovalHandler(approvalService)
 
+	// Rank 8 of the 2026-05-03 deep-research deliverable — first-class
+	// CA hierarchy management (intermediate_cas table + admin-gated
+	// hierarchy endpoints). The service receives the issuerRepo so
+	// future surface area (issuer-row hierarchy_mode validation) can
+	// query the issuer config; for the commit-4 wiring it carries
+	// only the fields used today. The signer.FileDriver shared with
+	// the OCSP responder bootstrap path is reused here — operators
+	// can plug in PKCS#11 / cloud-KMS drivers via the same Driver
+	// interface without touching the service. See
+	// docs/intermediate-ca-hierarchy.md.
+	intermediateCARepo := postgres.NewIntermediateCARepository(db)
+	intermediateCAMetrics := service.NewIntermediateCAMetrics()
+	// Defer wiring the service + handler — signerDriver is constructed
+	// further down in this function alongside the OCSP responder
+	// bootstrap path. The service holds a reference to issuerRepo for
+	// future hierarchy_mode validation surface area.
+	_ = intermediateCAMetrics // service constructed below alongside signerDriver
+
 	notifierRegistry := make(map[string]service.Notifier)
 
 	// Wire notifier connectors from config
@@ -390,6 +408,15 @@ func main() {
 		RotationGrace:     cfg.OCSPResponder.RotationGrace,
 		Validity:          cfg.OCSPResponder.Validity,
 	})
+
+	// Rank 8 service + handler — wired here so signerDriver is in
+	// scope. The same FileDriver instance feeds both the OCSP
+	// responder bootstrap path and the intermediate-CA hierarchy.
+	// Operators that swap to PKCS#11 / cloud-KMS drivers reuse the
+	// single Driver instance across both surfaces.
+	intermediateCAService := service.NewIntermediateCAService(
+		intermediateCARepo, issuerRepo, signerDriver, auditService, intermediateCAMetrics)
+	intermediateCAHandler := handler.NewIntermediateCAHandler(intermediateCAService)
 	crlCacheService := service.NewCRLCacheService(crlCacheRepo, caOperationsSvc, issuerRegistry, logger)
 
 	// Production hardening II Phase 2: OCSP response cache. Mirrors the
@@ -930,6 +957,10 @@ func main() {
 		// the 2026-05-03 Infisical deep-research deliverable. See
 		// docs/approval-workflow.md.
 		Approvals: approvalHandler,
+		// IntermediateCAs — first-class CA hierarchy management.
+		// Rank 8 of the 2026-05-03 deep-research deliverable. See
+		// docs/intermediate-ca-hierarchy.md.
+		IntermediateCAs: intermediateCAHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//

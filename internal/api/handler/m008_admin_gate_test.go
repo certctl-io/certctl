@@ -39,6 +39,7 @@ var AdminGatedHandlers = map[string]string{
 	"admin_crl_cache.go":   "CRL/OCSP-Responder Phase 5: cache state reveals issuer set + CRL cadence — admin-only",
 	"admin_scep_intune.go": "SCEP RFC 8894 + Intune master bundle Phase 9.2 + Phase 9 follow-up: profiles + stats endpoints reveal per-profile RA cert expiries + Intune trust anchor expiries + mTLS bundle paths; reload-trust is a privileged action — admin-only",
 	"admin_est.go":         "EST RFC 7030 hardening master bundle Phase 7.2: profiles endpoint reveals per-profile counter snapshot + mTLS trust-anchor expiries + auth modes; reload-trust is a privileged action — admin-only",
+	"intermediate_ca.go":   "Rank 8: CA hierarchy management mints sub-CA certs that become trust roots for every downstream leaf — admin-only fleet-scale destructive surface",
 }
 
 // InformationalIsAdminCallers is the documented allowlist of files that

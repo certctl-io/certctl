@@ -2910,6 +2910,151 @@ paths:
         "500":
           $ref: "#/components/responses/InternalError"
 
+  /api/v1/issuers/{id}/intermediates:
+    post:
+      tags: [IntermediateCAs]
+      summary: Create a root or child intermediate CA under the issuer
+      description: |
+        Admin-gated. Discriminator on body shape: when parent_ca_id is
+        empty AND root_cert_pem + key_driver_id are present, the
+        endpoint registers an operator-supplied root CA. Otherwise it
+        signs a child sub-CA cert under the named parent (RFC 5280
+        §4.2.1.9 path-length tightening + §4.2.1.10 NameConstraints
+        subset semantics enforced at the service layer).
+      operationId: createIntermediateCA
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                parent_ca_id:
+                  type: string
+                  description: Empty for root registration; non-empty for child signing
+                root_cert_pem:
+                  type: string
+                  description: Operator-supplied root cert PEM (root path only)
+                key_driver_id:
+                  type: string
+                  description: signer.Driver reference for the root key (root path only)
+                subject:
+                  type: object
+                  description: Distinguished name for child CA (child path only)
+                algorithm:
+                  type: string
+                  description: Signing algorithm for child key (default ECDSA-P256)
+                ttl_days:
+                  type: integer
+                path_len_constraint:
+                  type: integer
+                  nullable: true
+                name_constraints:
+                  type: array
+                  items: { type: object }
+                ocsp_responder_url:
+                  type: string
+                metadata:
+                  type: object
+      responses:
+        "201":
+          description: IntermediateCA row created
+        "400":
+          description: Validation failed (RFC 5280 violations, malformed cert PEM, missing root bundle)
+        "401":
+          description: Authentication required
+        "403":
+          description: Admin role required
+        "409":
+          description: Parent CA not in active state
+        "404":
+          description: Parent CA not found
+        "500":
+          $ref: "#/components/responses/InternalError"
+    get:
+      tags: [IntermediateCAs]
+      summary: List the CA hierarchy for an issuer
+      description: |
+        Admin-gated. Returns the flat list of every IntermediateCA row
+        for the issuer, ordered by created_at. The caller renders the
+        tree from each row's parent_ca_id (nil = root).
+      operationId: listIntermediateCAs
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: Flat list of CA rows
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  data:
+                    type: array
+                    items: { type: object }
+        "401":
+          description: Authentication required
+        "403":
+          description: Admin role required
+
+  /api/v1/intermediates/{id}:
+    get:
+      tags: [IntermediateCAs]
+      summary: Get a single intermediate CA by ID
+      operationId: getIntermediateCA
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      responses:
+        "200":
+          description: IntermediateCA row
+        "401":
+          description: Authentication required
+        "403":
+          description: Admin role required
+        "404":
+          $ref: "#/components/responses/NotFound"
+
+  /api/v1/intermediates/{id}/retire:
+    post:
+      tags: [IntermediateCAs]
+      summary: Retire an intermediate CA (two-phase drain)
+      description: |
+        Admin-gated. Two-phase: first call (confirm=false) transitions
+        active to retiring (the CA stops issuing new children but
+        existing children continue). Second call (confirm=true)
+        transitions retiring to retired (terminal). Refuses the
+        terminal transition if the CA still has active children —
+        drain-first semantics.
+      operationId: retireIntermediateCA
+      parameters:
+        - $ref: "#/components/parameters/resourceId"
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                note: { type: string }
+                confirm: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Retire transition recorded
+        "401":
+          description: Authentication required
+        "403":
+          description: Admin role required
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "409":
+          description: CA still has active children; drain them first
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/notifications:
     get:
       tags: [Notifications]
