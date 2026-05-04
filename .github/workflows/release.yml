@@ -1,5 +1,12 @@
 name: Release
 
+# Override the auto-generated run name (which would otherwise default to
+# the most recent commit subject + a #NN run number) so the Actions tab
+# shows "Release v2.0.69" instead of "chore: rename Go module path... #73".
+# `github.ref_name` resolves to the tag name (e.g., `v2.0.69`) for tag-triggered
+# workflows, which is the only trigger we set below.
+run-name: Release ${{ github.ref_name }}
+
 on:
   push:
     tags:
@@ -346,6 +353,11 @@ jobs:
         # noise that gives operators no signal about what actually changed.
         uses: softprops/action-gh-release@v2
         with:
+          # Pin the release title to the tag name. softprops/action-gh-release@v2
+          # falls back to the most recent commit subject when `name:` is omitted,
+          # which produces ugly titles like "chore: rename Go module path..." on
+          # the Releases page. `github.ref_name` evaluates to the tag (`v2.0.69`).
+          name: ${{ github.ref_name }}
           generate_release_notes: true
           body: |
             > **Install / upgrade:** see the [Quick Start section in the README](https://github.com/certctl-io/certctl/blob/master/README.md#quick-start) for Docker Compose, agent install, Helm, and binary download instructions.
