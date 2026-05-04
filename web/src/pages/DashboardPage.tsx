@@ -7,7 +7,7 @@ import {
   XAxis, YAxis, CartesianGrid, Tooltip, ResponsiveContainer, Legend,
 } from 'recharts';
 import {
-  getCertificates, getAgents, getJobs, getNotifications, getHealth,
+  getCertificates, getJobs, getHealth,
   getDashboardSummary, getCertificatesByStatus, getExpirationTimeline,
   getJobTrends, getIssuanceRate, previewDigest, sendDigest, getIssuers,
 } from '../api/client';

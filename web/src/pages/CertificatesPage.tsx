@@ -3,7 +3,7 @@ import { useQuery, useQueryClient } from '@tanstack/react-query';
 import { useTrackedMutation } from '../hooks/useTrackedMutation';
 import { useListParams } from '../hooks/useListParams';
 import { useNavigate } from 'react-router-dom';
-import { getCertificates, createCertificate, revokeCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates, bulkRenewCertificates, bulkReassignCertificates } from '../api/client';
+import { getCertificates, createCertificate, getOwners, getTeams, getRenewalPolicies, getProfiles, getIssuers, bulkRevokeCertificates, bulkRenewCertificates, bulkReassignCertificates } from '../api/client';
 import { useAuth } from '../components/AuthProvider';
 import { REVOCATION_REASONS } from '../api/types';
 import PageHeader from '../components/PageHeader';

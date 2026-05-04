@@ -12,7 +12,6 @@ import {
 import PageHeader from '../components/PageHeader';
 import DataTable from '../components/DataTable';
 import type { Column } from '../components/DataTable';
-import StatusBadge from '../components/StatusBadge';
 import ErrorState from '../components/ErrorState';
 import { formatDateTime } from '../api/utils';
 import type { DiscoveredCertificate, DiscoveryScan } from '../api/types';
