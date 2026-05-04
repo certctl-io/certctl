@@ -577,7 +577,6 @@ func extractCSRFields(csrDER []byte) ([]byte, string, string, error) {
 	}
 
 	challengePassword := ""
-	transactionID := ""
 
 	// OID for challengePassword: 1.2.840.113549.1.9.7
 	oidChallengePassword := asn1.ObjectIdentifier{1, 2, 840, 113549, 1, 9, 7}
@@ -608,10 +607,20 @@ func extractCSRFields(csrDER []byte) ([]byte, string, string, error) {
 		}
 	}
 
-	// Use CN as fallback transaction ID if not found in attributes
-	if transactionID == "" && csr.Subject.CommonName != "" {
-		transactionID = csr.Subject.CommonName
-	}
+	// transactionID falls back to the CSR's CN. The MVP path (this
+	// function) never extracts the SCEP transaction-ID attribute (OID
+	// 2.16.840.1.113733.1.9.7) from CSR.Attributes — that's a known
+	// gap; the RFC 8894 path (tryParseRFC8894 above) extracts it
+	// properly from the PKCS#7 SignedData authenticatedAttributes,
+	// which is where conformant clients put it anyway. CodeQL #18
+	// flagged the pre-existing `if transactionID == ""` dead
+	// conditional (transactionID was initialized to "" three lines
+	// above and never reassigned); cleaned up here. The MVP path
+	// stays usable for lightweight legacy clients that send the CSR
+	// directly with no PKCS#7 wrapping — they get CN-as-transaction-ID
+	// which is sufficient for matching against pollers in the existing
+	// test suite.
+	transactionID := csr.Subject.CommonName
 
 	return csrDER, challengePassword, transactionID, nil
 }

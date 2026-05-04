@@ -404,18 +404,27 @@ func (c *Connector) RevokeCertificate(ctx context.Context, request issuer.Revoca
 		return fmt.Errorf("failed to marshal revoke request: %w", err)
 	}
 
-	// Use the serial directly or extract from OrderID if present (as fallback)
+	// EJBCA's REST API has two revoke endpoints:
+	//   /certificate/{issuer_dn}/{serial}/revoke   — DN-qualified (more
+	//                                                 robust when EJBCA
+	//                                                 has multiple CAs
+	//                                                 with overlapping
+	//                                                 serial spaces)
+	//   /certificate/{serial}/revoke               — serial-only (this
+	//                                                 connector's
+	//                                                 contract today)
+	//
+	// We currently use the serial-only endpoint; the issuer DN isn't
+	// preserved in IssuanceResult.OrderID and the cert isn't re-fetched
+	// on revoke. EJBCA installations with serial-uniqueness across all
+	// configured CAs (the typical certctl deployment shape — one EJBCA
+	// CA per certctl issuer config) work fine. CodeQL #19 flagged the
+	// pre-existing `if issuerDN == ""` dead-conditional where issuerDN
+	// was always empty; cleaned up here. Future enhancement (when /if
+	// a multi-CA EJBCA deployment surfaces): parse issuer DN from
+	// IssuanceResult metadata + use the DN-qualified endpoint.
 	serial := request.Serial
-	issuerDN := ""
-
-	// If we have time and access to issuer DN, we could parse it from OrderID
-	// For now, we attempt to use serial as-is, and fall back to issuer DN lookup if needed.
-
-	revokeURL := fmt.Sprintf("%s/certificate/%s/%s/revoke", c.config.APIUrl, issuerDN, serial)
-	if issuerDN == "" {
-		// If no issuer DN, just use serial alone (may fail if EJBCA requires issuer_dn)
-		revokeURL = fmt.Sprintf("%s/certificate/%s/revoke", c.config.APIUrl, serial)
-	}
+	revokeURL := fmt.Sprintf("%s/certificate/%s/revoke", c.config.APIUrl, serial)
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPut, revokeURL, bytes.NewReader(body))
 	if err != nil {
