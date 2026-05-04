@@ -6,42 +6,25 @@ Closes the procurement-checklist question "How do you enforce two-person integri
 
 ## End-to-end flow
 
-```
-Operator A (or scheduler)        Operator B
-        │                              │
-        ▼                              │
-POST /api/v1/certificates/             │
-  {id}/renew                           │
-  (or renewal-loop tick)               │
-        │                              │
-        ▼                              │
-CertificateService.TriggerRenewal      │
-  ├── reads profile.RequiresApproval   │
-  ├── creates Job at                   │
-  │     JobStatusAwaitingApproval      │
-  └── creates parallel                 │
-        ApprovalRequest row            │
-        (state=pending,                │
-         requested_by=Operator A)      │
-        │                              │
-        │ scheduler skips —            │
-        │ AwaitingApproval is          │
-        │ NOT a dispatchable status    │
-        │                              │
-        │     GET /api/v1/approvals?state=pending
-        │                              ▼
-        │            POST /api/v1/approvals/{id}/approve
-        │                              │
-        ▼                              ▼
-ApprovalService.Approve(decided_by=Operator B, note=...)
-  ├── RBAC: rejects if Operator B == Operator A → ErrApproveBySameActor (HTTP 403)
-  ├── transitions ApprovalRequest to state=approved
-  ├── transitions Job from AwaitingApproval → Pending
-  ├── records audit row (action=approval_approved, actor=Operator B)
-  └── increments certctl_approval_decisions_total{outcome=approved,profile_id=...}
-        │
-        ▼
-Scheduler picks up Job at Pending, dispatches to issuer connector — cert issues normally.
+```mermaid
+sequenceDiagram
+    autonumber
+    participant A as Operator A<br/>(or scheduler)
+    participant SVC as CertificateService<br/>.TriggerRenewal
+    participant JOB as Job + ApprovalRequest
+    participant B as Operator B
+    participant APR as ApprovalService.Approve
+    participant SCH as Scheduler
+
+    A->>SVC: POST /api/v1/certificates/{id}/renew<br/>(or renewal-loop tick)
+    SVC->>JOB: read profile.RequiresApproval;<br/>create Job @ JobStatusAwaitingApproval;<br/>create ApprovalRequest<br/>(state=pending, requested_by=Operator A)
+    Note over JOB,SCH: Scheduler skips —<br/>AwaitingApproval is NOT a dispatchable status
+    B->>JOB: GET /api/v1/approvals?state=pending
+    B->>APR: POST /api/v1/approvals/{id}/approve<br/>(decided_by=Operator B, note=...)
+    APR->>APR: RBAC: reject if Operator B == Operator A<br/>→ ErrApproveBySameActor (HTTP 403)
+    APR->>JOB: ApprovalRequest → state=approved;<br/>Job AwaitingApproval → Pending;<br/>audit row (action=approval_approved,<br/>actor=Operator B);<br/>certctl_approval_decisions_total<br/>{outcome=approved,profile_id=...}++
+    SCH->>JOB: pick up Pending → dispatch to issuer connector
+    JOB-->>A: cert issues normally
 ```
 
 ## Configuration

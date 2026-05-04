@@ -14,36 +14,37 @@ walkthrough of how to install certctl — that lives in the README.
 
 ## End-to-end flow
 
-```
-                          daily ticker (renewalCheckLoop)
-                                        │
-                                        ▼
-                       RenewalService.CheckExpiringCertificates
-                                        │
-                       ┌────────────────┴────────────────┐
-                       │  for cert in expiring (≤30 days):│
-                       │    1. Resolve RenewalPolicy      │
-                       │    2. Compute daysUntil          │
-                       │    3. updateCertExpiryStatus     │
-                       │    4. sendThresholdAlerts ──────►│  per threshold:
-                       │    5. Create renewal job (if     │    a. resolve severity tier
-                       │       issuer registered + ARI    │       via AlertSeverityMap
-                       │       allows)                    │    b. resolve channel set
-                       └──────────────────────────────────┘       via AlertChannels[tier]
-                                                                  c. for each channel:
-                                                                     i.  dedup via
-                                                                         notification_events
-                                                                         (cert,threshold,channel)
-                                                                     ii. SendThresholdAlertOnChannel
-                                                                         → notifierRegistry[channel]
-                                                                         → Send(recipient,subj,body)
-                                                                     iii. record audit row
-                                                                          (event_type=expiration_alert_sent,
-                                                                           metadata.channel,
-                                                                           metadata.severity_tier)
-                                                                     iv.  bump Prometheus counter
-                                                                          certctl_expiry_alerts_total
-                                                                          {channel,threshold,result}
+```mermaid
+flowchart TD
+    Tick["daily ticker (renewalCheckLoop)"]
+    Check["RenewalService.CheckExpiringCertificates"]
+
+    Tick --> Check --> Loop
+
+    subgraph Loop["for cert in expiring (≤30 days)"]
+        L1["1. Resolve RenewalPolicy"]
+        L2["2. Compute daysUntil"]
+        L3["3. updateCertExpiryStatus"]
+        L4["4. sendThresholdAlerts"]
+        L5["5. Create renewal job<br/>(if issuer registered +<br/>ARI allows)"]
+        L1 --> L2 --> L3 --> L4 --> L5
+    end
+
+    L4 --> Threshold
+
+    subgraph Threshold["per threshold"]
+        T1["a. resolve severity tier<br/>via AlertSeverityMap"]
+        T2["b. resolve channel set<br/>via AlertChannels[tier]"]
+        T1 --> T2 --> Channel
+    end
+
+    subgraph Channel["for each channel (fault-isolating)"]
+        C1["i. dedup via notification_events<br/>(cert, threshold, channel)"]
+        C2["ii. SendThresholdAlertOnChannel<br/>→ notifierRegistry[channel]<br/>→ Send(recipient, subj, body)"]
+        C3["iii. record audit row<br/>event_type=expiration_alert_sent<br/>metadata.channel, metadata.severity_tier"]
+        C4["iv. bump Prometheus counter<br/>certctl_expiry_alerts_total<br/>{channel, threshold, result}"]
+        C1 --> C2 --> C3 --> C4
+    end
 ```
 
 The dispatch loop's per-channel error handling is

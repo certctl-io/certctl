@@ -15,42 +15,39 @@ install certctl.
 
 ## End-to-end flow (cloud targets)
 
-```
-                  cert renewed → renewal job created
-                                          │
-                                          ▼
-            agent picks up DeployCertificate work item
-                                          │
-                                          ▼
-        target.Connector.DeployCertificate(ctx, request)
-                                          │
-                       ┌──────────────────┴──────────────────┐
-                       │                                     │
-                       ▼                                     ▼
-                  AWS ACM path                       Azure Key Vault path
-                       │                                     │
-                       ▼                                     ▼
-       1. (rotate-in-place only)            1. GetCertificate(name, "" /* latest */)
-          DescribeCertificate(arn)             — capture snapshot CER bytes
-       2. GetCertificate(arn) — capture     2. Build PFX from cert+chain+key
-          snapshot bytes for rollback          (PKCS#12 via go-pkcs12)
-       3. ImportCertificate(arn, new_bytes)  3. ImportCertificate(name, PFX, tags)
-          — fresh ARN OR rotate-in-place       — ALWAYS creates a new version
-       4. AddTagsToCertificate(arn,         4. (Tags carried forward
-          provenance) — ACM strips on          automatically)
-          re-import; we re-apply
-       5. DescribeCertificate(arn) — verify 5. GetCertificate(name, "" /* latest */)
-          serial matches expected              — verify serial matches expected
-       6. ON MISMATCH: rollback ←──── (same shape) ────→ 6. ON MISMATCH: rollback
-          ImportCertificate(arn,                            ImportCertificate(name,
-          snapshot_bytes)                                   snapshot_PFX) — new version
-                                          │
-                                          ▼
-       7. Audit row + Prometheus counter
-          certctl_deploy_attempts_total{target_type="AWSACM"|"AzureKeyVault",
-                                        result="success"|"failure"}
-          certctl_deploy_rollback_total{target_type=...,
-                                        outcome="restored"|"also_failed"}
+```mermaid
+flowchart TD
+    Renew["cert renewed → renewal job created"]
+    Pick["agent picks up DeployCertificate work item"]
+    Dispatch["target.Connector.DeployCertificate(ctx, request)"]
+
+    Renew --> Pick --> Dispatch
+    Dispatch --> AWS
+    Dispatch --> AZ
+
+    subgraph AWS["AWS ACM path"]
+        A1["1. rotate-in-place only:<br/>DescribeCertificate(arn)"]
+        A2["2. GetCertificate(arn) —<br/>capture snapshot bytes for rollback"]
+        A3["3. ImportCertificate(arn, new_bytes) —<br/>fresh ARN OR rotate-in-place"]
+        A4["4. AddTagsToCertificate(arn, provenance) —<br/>ACM strips on re-import; we re-apply"]
+        A5["5. DescribeCertificate(arn) —<br/>verify serial matches expected"]
+        A6["6. ON MISMATCH: rollback<br/>ImportCertificate(arn, snapshot_bytes)"]
+        A1 --> A2 --> A3 --> A4 --> A5 --> A6
+    end
+
+    subgraph AZ["Azure Key Vault path"]
+        Z1["1. GetCertificate(name, '' = latest) —<br/>capture snapshot CER bytes"]
+        Z2["2. Build PFX from cert+chain+key<br/>(PKCS#12 via go-pkcs12)"]
+        Z3["3. ImportCertificate(name, PFX, tags) —<br/>ALWAYS creates a new version"]
+        Z4["4. Tags carried forward automatically"]
+        Z5["5. GetCertificate(name, '' = latest) —<br/>verify serial matches expected"]
+        Z6["6. ON MISMATCH: rollback<br/>ImportCertificate(name, snapshot_PFX) —<br/>new version"]
+        Z1 --> Z2 --> Z3 --> Z4 --> Z5 --> Z6
+    end
+
+    A6 --> Audit
+    Z6 --> Audit
+    Audit["7. Audit row + Prometheus counters<br/>certctl_deploy_attempts_total{target_type, result}<br/>certctl_deploy_rollback_total{target_type, outcome}"]
 ```
 
 ---

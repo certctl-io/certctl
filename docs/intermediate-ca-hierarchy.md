@@ -43,19 +43,13 @@ reference can leak.
 
 ## Lifecycle states
 
-```
-created (CreateRoot or CreateChild)
-   │
-   ▼
-active (issuing certs)
-   │
-   ▼
-retiring  (drain — children still active; this CA stops issuing
-           NEW children but existing children continue)
-   │
-   ▼
-retired   (terminal — no issuance, OCSP responder keeps responding
-           for already-issued leaves until expiry)
+```mermaid
+stateDiagram-v2
+    [*] --> created : CreateRoot / CreateChild
+    created --> active : registration completes
+    active --> retiring : Retire(confirm=false) —<br/>drain start; this CA stops issuing<br/>NEW children but existing children continue
+    retiring --> retired : Retire(confirm=true) —<br/>terminal; refused if active children remain<br/>(ErrCAStillHasActiveChildren → HTTP 409)
+    retired --> [*] : no issuance;<br/>OCSP keeps responding for<br/>already-issued leaves until expiry
 ```
 
 Drain-first semantics: a CA in `retiring` state cannot terminalize to
@@ -67,11 +61,13 @@ the children first.
 
 ### Pattern A — 4-level FedRAMP boundary CA
 
-```
-Acme Root CA          (path_len=3, offline air-gapped)
-  └── Acme Policy CA  (path_len=2, FedRAMP-Moderate boundary)
-        └── Acme Issuing A   (path_len=0, prod workload leaves)
-              └── Acme Issuing B (path_len=0, ephemeral pod identity)
+```mermaid
+flowchart TD
+    Root["Acme Root CA<br/>path_len=3<br/>offline air-gapped"]
+    Policy["Acme Policy CA<br/>path_len=2<br/>FedRAMP-Moderate boundary"]
+    IssA["Acme Issuing A<br/>path_len=0<br/>prod workload leaves"]
+    IssB["Acme Issuing B<br/>path_len=0<br/>ephemeral pod identity"]
+    Root --> Policy --> IssA --> IssB
 ```
 
 Operator workflow:
@@ -98,10 +94,12 @@ Operator workflow:
 
 ### Pattern B — 3-level financial-services policy CA
 
-```
-FinCo Root CA       (path_len=2)
-  └── FinCo Trading Policy CA   (path_len=1; permitted DNS = trading.finco.example)
-        └── FinCo Trading Issuing CA (path_len=0)
+```mermaid
+flowchart TD
+    Root["FinCo Root CA<br/>path_len=2"]
+    Pol["FinCo Trading Policy CA<br/>path_len=1<br/>permitted DNS = trading.finco.example"]
+    Iss["FinCo Trading Issuing CA<br/>path_len=0"]
+    Root --> Pol --> Iss
 ```
 
 Per business-unit name constraints: each policy CA carries a
@@ -113,9 +111,11 @@ excluded subtree. Operators submit `name_constraints` on the
 
 ### Pattern C — 2-level internal PKI
 
-```
-Internal Root CA  (path_len=0)
-  └── Internal Issuing CA (path_len=0; issues leaves directly)
+```mermaid
+flowchart TD
+    Root["Internal Root CA<br/>path_len=0"]
+    Iss["Internal Issuing CA<br/>path_len=0<br/>issues leaves directly"]
+    Root --> Iss
 ```
 
 The simplest tree-mode deployment. Roughly equivalent to single mode
