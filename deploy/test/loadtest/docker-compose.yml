@@ -290,7 +290,15 @@ services:
   # /healthz endpoint.
   # ---------------------------------------------------------------------------
   f5-mock-target:
-    build: ../f5-mock-icontrol
+    # Long-form build to match docker-compose.test.yml: the Dockerfile
+    # has `COPY deploy/test/f5-mock-icontrol/ ./` which assumes the
+    # build context is the REPO ROOT. The previous shorthand form
+    # `build: ../f5-mock-icontrol` set the context to the
+    # f5-mock-icontrol directory itself, breaking the COPY at CI build
+    # time (run #25305811340: "deploy/test/f5-mock-icontrol: not found").
+    build:
+      context: ../../..
+      dockerfile: deploy/test/f5-mock-icontrol/Dockerfile
     container_name: certctl-loadtest-f5-mock
     healthcheck:
       test: ["CMD-SHELL", "wget -q -O- http://localhost:8080/healthz || exit 1"]
