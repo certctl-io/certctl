@@ -44,6 +44,13 @@ func RequestID(next http.Handler) http.Handler {
 
 // Logging middleware logs request details including method, path, status, and duration.
 // Deprecated: Use NewLogging for structured logging with slog.
+//
+// CWE-117 log-injection defense: r.Method and r.URL.Path are
+// attacker-controllable (request-line bytes — Go's net/http leaves
+// percent-decoded path segments in r.URL.Path, which can include CR/LF
+// in the decoded form even though the raw HTTP request line cannot).
+// strings.ReplaceAll on CR/LF/NUL strips the forgery vector before the
+// log line is emitted. Closes CodeQL #17 (go/log-injection).
 func Logging(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		start := time.Now()
@@ -55,8 +62,29 @@ func Logging(next http.Handler) http.Handler {
 
 		duration := time.Since(start)
 		requestID := getRequestID(r.Context())
-		log.Printf("[%s] %s %s %d %v", requestID, r.Method, r.URL.Path, wrapped.statusCode, duration)
+		log.Printf("[%s] %s %s %d %v",
+			requestID,
+			scrubLogValue(r.Method),
+			scrubLogValue(r.URL.Path),
+			wrapped.statusCode,
+			duration,
+		)
 	})
+}
+
+// scrubLogValue strips control characters that an attacker could use to
+// forge log entries (CWE-117). The replacement is structural, not
+// destructive: we collapse CR/LF/NUL to a single space rather than
+// dropping them, so an operator scanning the log can still see that the
+// field was present (just neutralized). Defense in depth: the
+// production middleware should prefer NewLogging (slog with structured
+// fields) where the logger handles escape on its own.
+func scrubLogValue(v string) string {
+	if !strings.ContainsAny(v, "\r\n\x00") {
+		return v
+	}
+	r := strings.NewReplacer("\r", " ", "\n", " ", "\x00", " ")
+	return r.Replace(v)
 }
 
 // NewLogging creates a structured logging middleware using slog.

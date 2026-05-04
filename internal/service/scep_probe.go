@@ -75,20 +75,21 @@ func (s *NetworkScanService) ProbeSCEP(ctx context.Context, rawURL string) (*dom
 	}
 
 	// Step 1: cheap up-front URL validation (SSRF early diagnostic).
-	// Defaults to validation.ValidateSafeURL; tests inject a permissive
-	// validator via service-level field so they can hit httptest
-	// loopback servers (which the production validator correctly
-	// rejects). Mirrors the webhook notifier's `newForTest` pattern.
-	validateURL := s.scepValidateURL
-	if validateURL == nil {
-		validateURL = validation.ValidateSafeURL
-	}
-	if err := validateURL(rawURL); err != nil {
-		result.Reachable = false
-		result.Error = "url validation: " + err.Error()
-		result.ProbeDurationMs = time.Since(started).Milliseconds()
-		s.persistProbeResult(ctx, result)
-		return result, fmt.Errorf("scep probe: validate url: %w", err)
+	// Direct literal call to validation.ValidateSafeURL so CodeQL
+	// go/request-forgery sees the sanitizer in-scope of every
+	// downstream HTTP call. Tests that need to hit httptest loopback
+	// servers grant an exemption via s.scepValidateURL (mirrors the
+	// webhook notifier's `newForTest` pattern). Production callers
+	// leave scepValidateURL nil so any production-validator
+	// rejection wins.
+	if err := validation.ValidateSafeURL(rawURL); err != nil {
+		if s.scepValidateURL == nil || s.scepValidateURL(rawURL) != nil {
+			result.Reachable = false
+			result.Error = "url validation: " + err.Error()
+			result.ProbeDurationMs = time.Since(started).Milliseconds()
+			s.persistProbeResult(ctx, result)
+			return result, fmt.Errorf("scep probe: validate url: %w", err)
+		}
 	}
 
 	// Normalize the base URL — strip any trailing query string so we
@@ -255,12 +256,22 @@ func (s *NetworkScanService) scepGetCACert(ctx context.Context, client *http.Cli
 //     callers leave scepValidateURL nil so validation.ValidateSafeURL
 //     is the active gate.
 func (s *NetworkScanService) scepHTTPGet(ctx context.Context, client *http.Client, rawURL string) ([]byte, error) {
-	validateURL := s.scepValidateURL
-	if validateURL == nil {
-		validateURL = validation.ValidateSafeURL
-	}
-	if err := validateURL(rawURL); err != nil {
-		return nil, fmt.Errorf("validate url: %w", err)
+	// Production-grade SSRF validator — direct literal call so CodeQL
+	// go/request-forgery recognizes it as a sanitizer in-scope of the
+	// client.Do sink below. Tests that need to hit httptest loopback
+	// servers grant an exemption via s.scepValidateURL (returning nil
+	// for the test URL); when no exemption applies, the production
+	// validator's rejection wins. Production callers leave
+	// scepValidateURL nil so the production validator is the only gate.
+	if err := validation.ValidateSafeURL(rawURL); err != nil {
+		// Test-only exemption hook. The override returns nil for URLs
+		// the test wants to allow despite the production validator's
+		// rejection (loopback / link-local in httptest scenarios).
+		// In production scepValidateURL is nil, so any production
+		// validator rejection bubbles up unconditionally.
+		if s.scepValidateURL == nil || s.scepValidateURL(rawURL) != nil {
+			return nil, fmt.Errorf("validate url: %w", err)
+		}
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, rawURL, nil)
