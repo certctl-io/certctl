@@ -268,7 +268,7 @@ func main() {
 	transactor := postgres.NewTransactor(db)
 	certificateService.SetTransactor(transactor)
 
-	// Rank 7 of the 2026-05-03 Infisical deep-research deliverable —
+	// Rank 7 of the 2026-05-03 deep-research deliverable —
 	// issuance approval-workflow primitive. ApprovalRepository +
 	// ApprovalMetrics + ApprovalService construct here; the gate is
 	// activated on CertificateService via SetApprovalService +
@@ -344,8 +344,8 @@ func main() {
 	notificationService := service.NewNotificationService(notificationRepo, notifierRegistry)
 	notificationService.SetOwnerRepo(ownerRepo)
 
-	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5). Per-policy
+	// Rank 4 of the 2026-05-03 deep-research deliverable
+	// (cowork/deep-research-results-2026-05-03.md Part 5). Per-policy
 	// multi-channel expiry-alert metrics. Same instance is wired into
 	// the notification service (recording side, every
 	// SendThresholdAlertOnChannel call reports its outcome) AND into
@@ -626,7 +626,7 @@ func main() {
 	// Top-10 fix #5 (2026-05-03 audit): Vault PKI token-renewal counter.
 	// Same instance the registry uses to record per-tick results.
 	metricsHandler.SetVaultRenewals(vaultRenewalMetrics)
-	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable:
+	// Rank 4 of the 2026-05-03 deep-research deliverable:
 	// per-policy multi-channel expiry-alert counter. Same instance the
 	// notification service uses to record per-(channel, threshold,
 	// result) outcomes.
@@ -927,7 +927,7 @@ func main() {
 		// docs/acme-server.md for the operator-facing reference.
 		ACME: acmeHandler,
 		// Approvals — issuance approval-workflow primitive. Rank 7 of
-		// the 2026-05-03 Infisical deep-research deliverable. See
+		// the 2026-05-03 deep-research deliverable. See
 		// docs/approval-workflow.md.
 		Approvals: approvalHandler,
 	})

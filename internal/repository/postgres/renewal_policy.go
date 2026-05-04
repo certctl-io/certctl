@@ -37,7 +37,7 @@ func NewRenewalPolicyRepository(db *sql.DB) *RenewalPolicyRepository {
 //
 // alert_channels / alert_severity_map (migration 000026) ARE read here —
 // they're the per-policy channel matrix that drives multi-channel expiry
-// alert routing (Rank 4 of the 2026-05-03 Infisical deep-research
+// alert routing (Rank 4 of the 2026-05-03 deep-research
 // deliverable). Both default to '{}' at the DB level; scanRenewalPolicy
 // unmarshals an empty map into nil so domain.EffectiveAlertChannels /
 // EffectiveAlertSeverityMap fall through to the back-compat defaults.

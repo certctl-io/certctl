@@ -215,8 +215,8 @@ const (
 	// TargetTypeAWSACM deploys certificates to AWS Certificate Manager
 	// (ACM) — the public AWS service that ALB / CloudFront / API
 	// Gateway / App Runner consume by ARN. Rank 5 of the 2026-05-03
-	// Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5). See
+	// deep-research deliverable
+	// (cowork/deep-research-results-2026-05-03.md Part 5). See
 	// docs/connectors.md "AWS Certificate Manager" section for the
 	// operator playbook including minimum IAM policy + atomic-rollback
 	// contract.
@@ -224,7 +224,7 @@ const (
 	// TargetTypeAzureKeyVault deploys certificates to Azure Key Vault —
 	// the Azure-managed cert store that Application Gateway / Front
 	// Door / App Service / Container Apps consume by KID URI. Rank 5
-	// of the 2026-05-03 Infisical deep-research deliverable. See
+	// of the 2026-05-03 deep-research deliverable. See
 	// docs/connectors.md "Azure Key Vault" for the operator playbook
 	// including minimum RBAC role + atomic-rollback + Azure-version
 	// semantics.

@@ -1,6 +1,6 @@
 -- 000027_approval_workflow.up.sql
--- Rank 7 of the 2026-05-03 Infisical deep-research deliverable
--- (cowork/infisical-deep-research-results.md Part 5). Two-person
+-- Rank 7 of the 2026-05-03 deep-research deliverable
+-- (cowork/deep-research-results-2026-05-03.md Part 5). Two-person
 -- integrity / four-eyes principle for compliance-tier certificate
 -- issuance. CertificateProfile.RequiresApproval gates the renewal-
 -- loop entry; issuance_approval_requests captures the per-job

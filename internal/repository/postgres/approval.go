@@ -16,7 +16,7 @@ import (
 )
 
 // ApprovalRepository is the postgres implementation of
-// repository.ApprovalRepository. Rank 7 of the 2026-05-03 Infisical
+// repository.ApprovalRepository. Rank 7 of the 2026-05-03 deep-research
 // deep-research deliverable.
 type ApprovalRepository struct {
 	db *sql.DB

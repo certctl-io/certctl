@@ -92,7 +92,7 @@ INSERT INTO deployment_targets (id, name, type, agent_id, config, enabled, creat
   ('tgt-traefik-prod',  'Traefik Production',   'Traefik',  'ag-k8s-prod',   '{"watch_dir": "/etc/traefik/dynamic/certs"}', true, NOW() - INTERVAL '30 days', NOW()),
   ('tgt-caddy-prod',    'Caddy Production',     'Caddy',    'ag-edge-01',    '{"mode": "api", "admin_url": "http://localhost:2019"}', true, NOW() - INTERVAL '45 days', NOW()),
   ('tgt-nginx-data',    'NGINX Data Services',  'NGINX',    'ag-data-prod',  '{"cert_path": "/etc/nginx/ssl/cert.pem", "key_path": "/etc/nginx/ssl/key.pem", "reload_command": "nginx -s reload"}', true,  NOW() - INTERVAL '90 days', NOW()),
-  -- Rank 5 cloud target seed rows (2026-05-03 Infisical deep-research deliverable).
+  -- Rank 5 cloud target seed rows (2026-05-03 deep-research deliverable).
   -- AWS ACM and Azure Key Vault demo targets so QA can exercise the wiring
   -- end-to-end without standing up a real cloud account.
   ('tgt-aws-acm-prod',  'AWS ACM Production',    'AWSACM',         'ag-server',      '{"region": "us-east-1", "tags": {"env": "production", "app": "api-gateway"}}', true, NOW() - INTERVAL '7 days', NOW()),

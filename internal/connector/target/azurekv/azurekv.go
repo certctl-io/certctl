@@ -26,8 +26,8 @@
 // is the safe default — recovery requires acm:RecoverDeletedCertificate
 // permission which we deliberately keep off the minimum-RBAC surface.
 //
-// Rank 5 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5).
+// Rank 5 of the 2026-05-03 deep-research deliverable
+// (cowork/deep-research-results-2026-05-03.md Part 5).
 //
 // Required Azure RBAC (minimum):
 //

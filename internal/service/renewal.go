@@ -204,7 +204,7 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 		// policy pointer (nil-safe) drives the per-(threshold) channel
 		// matrix; nil policy or empty AlertChannels falls through to the
 		// back-compat Email-only default. Rank 4 of the 2026-05-03
-		// Infisical deep-research deliverable.
+		// deep-research deliverable.
 		var policyPtr *domain.RenewalPolicy
 		if cert.RenewalPolicyID != "" {
 			policyPtr = policyCache[cert.RenewalPolicyID]
@@ -323,8 +323,8 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 //     AND metadata->>'channel' = 'PagerDuty' to answer "did the on-call
 //     team get paged?".
 //
-// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5). The policy
+// Rank 4 of the 2026-05-03 deep-research deliverable
+// (cowork/deep-research-results-2026-05-03.md Part 5). The policy
 // argument is nil-safe — a cert with no RenewalPolicy attached gets the
 // back-compat Email-only default matrix.
 func (s *RenewalService) sendThresholdAlerts(

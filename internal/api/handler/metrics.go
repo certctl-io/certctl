@@ -89,8 +89,8 @@ type VaultRenewalSnapshotter interface {
 // (via NotificationService.SetExpiryAlertMetrics) and exposing
 // (here).
 //
-// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5).
+// Rank 4 of the 2026-05-03 deep-research deliverable
+// (cowork/deep-research-results-2026-05-03.md Part 5).
 type ExpiryAlertSnapshotter interface {
 	// SnapshotExpiryAlerts returns one entry per non-zero counter,
 	// pre-sorted by (channel, threshold, result) so the Prometheus
@@ -123,7 +123,7 @@ type MetricsHandler struct {
 	// certctl_vault_token_renewals_total{result=...}.
 	vaultRenewals VaultRenewalSnapshotter
 	// Per-policy multi-channel expiry alert counters. Rank 4 of the
-	// 2026-05-03 Infisical deep-research deliverable. nil disables
+	// 2026-05-03 deep-research deliverable. nil disables
 	// emission of certctl_expiry_alerts_total{channel,threshold,result}.
 	expiryAlerts ExpiryAlertSnapshotter
 }
@@ -168,7 +168,7 @@ func (h *MetricsHandler) SetVaultRenewals(c VaultRenewalSnapshotter) {
 
 // SetExpiryAlerts wires the per-policy multi-channel expiry-alert
 // counter table for the Prometheus exposition. nil disables the
-// block. Closes Rank 4 of the 2026-05-03 Infisical deep-research
+// block. Closes Rank 4 of the 2026-05-03 deep-research
 // deliverable.
 func (h *MetricsHandler) SetExpiryAlerts(c ExpiryAlertSnapshotter) {
 	h.expiryAlerts = c
@@ -502,7 +502,7 @@ func (h MetricsHandler) GetPrometheusMetrics(w http.ResponseWriter, r *http.Requ
 	}
 
 	// Per-policy multi-channel expiry-alert counters. Rank 4 of the
-	// 2026-05-03 Infisical deep-research deliverable. Operators alert
+	// 2026-05-03 deep-research deliverable. Operators alert
 	// on certctl_expiry_alerts_total{result="failure"} > 0 to catch
 	// when a notifier connector (PagerDuty / Slack / etc.) is
 	// rejecting our sends. Cardinality: 6 channels × N thresholds × 3

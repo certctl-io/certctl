@@ -124,8 +124,8 @@ type RenewalPolicy struct {
 	// the dispatch site (closed-enum discipline; we do NOT dynamically
 	// grow Prometheus cardinality on a typo).
 	//
-	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5).
+	// Rank 4 of the 2026-05-03 deep-research deliverable
+	// (cowork/deep-research-results-2026-05-03.md Part 5).
 	AlertChannels map[string][]string `json:"alert_channels,omitempty"`
 
 	// AlertSeverityMap maps each threshold-day value to its severity

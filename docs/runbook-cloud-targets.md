@@ -1,7 +1,7 @@
 # Runbook: cloud-target deployment connectors (AWS ACM + Azure Key Vault)
 
 This runbook covers the SDK-driven cloud target connectors that ship in
-certctl post-2026-05-03 (Rank 5 of the Infisical deep-research
+certctl post-2026-05-03 (Rank 5 of the deep-research
 deliverable). It complements the operator-facing
 [AWS Certificate Manager](connectors.md#aws-certificate-manager-acm) and
 [Azure Key Vault](connectors.md#azure-key-vault) sections in

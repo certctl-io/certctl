@@ -715,7 +715,7 @@ type HealthCheckFilter struct {
 }
 
 // ApprovalRepository defines operations for managing issuance approval requests.
-// Rank 7 of the 2026-05-03 Infisical deep-research deliverable — closes the
+// Rank 7 of the 2026-05-03 deep-research deliverable — closes the
 // two-person integrity / four-eyes principle procurement gap for PCI-DSS
 // Level 1, FedRAMP Moderate / High, SOC 2 Type II, HIPAA-regulated PHI.
 //

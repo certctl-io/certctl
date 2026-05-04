@@ -18,7 +18,7 @@ import (
 // inversion) so the handler stays decoupled from the concrete
 // *service.ApprovalService.
 //
-// Rank 7 of the 2026-05-03 Infisical deep-research deliverable, commit 3
+// Rank 7 of the 2026-05-03 deep-research deliverable, commit 3
 // of 4 — the API + RBAC layer.
 type ApprovalServicer interface {
 	Approve(ctx context.Context, requestID, decidedBy, note string) error
