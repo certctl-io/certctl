@@ -16,8 +16,20 @@ type Issuer struct {
 	LastTestedAt    *time.Time      `json:"last_tested_at,omitempty"`
 	TestStatus      string          `json:"test_status,omitempty"`
 	Source          string          `json:"source,omitempty"`
-	CreatedAt       time.Time       `json:"created_at"`
-	UpdatedAt       time.Time       `json:"updated_at"`
+
+	// HierarchyMode picks the per-issuer CA-hierarchy posture for the
+	// local issuer adapter. "single" (default, pre-Rank-8 historical)
+	// loads a pre-signed cert+key from disk via local.Config.CACertPath
+	// / local.Config.CAKeyPath. "tree" activates first-class N-level
+	// hierarchy management via the intermediate_cas table; chain
+	// assembly walks parent_ca_id from the issuing leaf-CA up to the
+	// root at issuance time. Empty string ≡ HierarchyModeSingle for
+	// back-compat byte-identical behavior on unmigrated rows. Backed
+	// by issuers.hierarchy_mode added in migration 000028.
+	HierarchyMode string `json:"hierarchy_mode,omitempty"`
+
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // DeploymentTarget represents a target system where certificates are deployed.

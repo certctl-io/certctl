@@ -770,3 +770,25 @@ type ApprovalFilter struct {
 	// PerPage is the number of results per page.
 	PerPage int
 }
+
+// IntermediateCARepository defines operations for managing first-class
+// CA hierarchies (Rank 8). Every non-root CA is a row, parent_ca_id
+// encodes the tree, WalkAncestry returns the leaf-to-root chain via
+// a recursive CTE.
+//
+// Defense in depth: NEVER persist CA private key bytes. The
+// implementation stores key_driver_id (a signer.Driver reference) only.
+type IntermediateCARepository interface {
+	Create(ctx context.Context, ca *domain.IntermediateCA) error
+	Get(ctx context.Context, id string) (*domain.IntermediateCA, error)
+	ListByIssuer(ctx context.Context, issuerID string) ([]*domain.IntermediateCA, error)
+	ListChildren(ctx context.Context, parentCAID string) ([]*domain.IntermediateCA, error)
+	UpdateState(ctx context.Context, id string, state domain.IntermediateCAState) error
+	GetActiveRoot(ctx context.Context, issuerID string) (*domain.IntermediateCA, error)
+	// WalkAncestry returns the chain from leafID up to (and including)
+	// the root via a postgres recursive CTE. The slice is ordered
+	// leaf-first; caller verifies the last element has parent_ca_id
+	// IS NULL (i.e., it's a root). Returns ErrNotFound if leafID does
+	// not exist.
+	WalkAncestry(ctx context.Context, leafID string) ([]*domain.IntermediateCA, error)
+}
