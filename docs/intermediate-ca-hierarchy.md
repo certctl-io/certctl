@@ -47,9 +47,22 @@ reference can leak.
 stateDiagram-v2
     [*] --> created : CreateRoot / CreateChild
     created --> active : registration completes
-    active --> retiring : Retire(confirm=false) —<br/>drain start; this CA stops issuing<br/>NEW children but existing children continue
-    retiring --> retired : Retire(confirm=true) —<br/>terminal; refused if active children remain<br/>(ErrCAStillHasActiveChildren → HTTP 409)
-    retired --> [*] : no issuance;<br/>OCSP keeps responding for<br/>already-issued leaves until expiry
+    active --> retiring : Retire(confirm=false)
+    retiring --> retired : Retire(confirm=true)
+    retired --> [*]
+
+    note right of retiring
+        Drain start. CA stops issuing
+        NEW children; existing children
+        keep issuing until they retire.
+    end note
+
+    note right of retired
+        Terminal. Refused if active children
+        remain (ErrCAStillHasActiveChildren
+        → HTTP 409). OCSP keeps responding
+        for already-issued leaves until expiry.
+    end note
 ```
 
 Drain-first semantics: a CA in `retiring` state cannot terminalize to
