@@ -27,6 +27,19 @@ import (
 // rather than substring-match.
 var ErrNotFound = errors.New("repository: row not found")
 
+// ErrAlreadyExists is the canonical sentinel for postgres unique-
+// constraint (SQLSTATE 23505) violations bubbling up from an INSERT
+// (or partial-unique INSERT, like Rank 7's idx_approval_pending_per_job
+// which enforces "at most one pending approval per job"). Handlers
+// that surface a 409 Conflict should
+// `errors.Is(err, repository.ErrAlreadyExists)`.
+//
+// The repo also reuses ErrAlreadyExists for "row is already terminal"
+// state-transition attempts (e.g., Approve called on an already-
+// approved request) — semantically the same "you're trying to create
+// a state that already exists" failure mode.
+var ErrAlreadyExists = errors.New("repository: row already exists")
+
 // ErrForeignKeyConstraint is the canonical sentinel for PostgreSQL
 // FK / RESTRICT violations bubbling up from a DELETE or UPDATE.
 // Handlers that surface a 409 Conflict should

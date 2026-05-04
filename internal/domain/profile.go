@@ -72,6 +72,24 @@ type CertificateProfile struct {
 	// "trust_authenticated".
 	ACMEAuthMode string `json:"acme_auth_mode,omitempty"`
 
+	// RequiresApproval, when true, gates issuance + renewal of any
+	// certificate bound to this profile on a parallel ApprovalRequest
+	// row. The renewal-loop tick creates the job at
+	// JobStatusAwaitingApproval; the scheduler does NOT dispatch
+	// until ApprovalService.Approve transitions the request to
+	// approved. Compliance customers (PCI-DSS Level 1, FedRAMP
+	// Moderate / High, SOC 2 Type II, HIPAA) configure this on
+	// production-tier profiles to satisfy the two-person integrity
+	// procurement question.
+	//
+	// Defaults to false for back-compat — the unattended renewal
+	// path remains the default for non-compliance customers.
+	//
+	// Backed by certificate_profiles.requires_approval added in
+	// migration 000027_approval_workflow. Rank 7 of the 2026-05-03
+	// Infisical deep-research deliverable.
+	RequiresApproval bool `json:"requires_approval,omitempty"`
+
 	Enabled   bool      `json:"enabled"`
 	CreatedAt time.Time `json:"created_at"`
 	UpdatedAt time.Time `json:"updated_at"`

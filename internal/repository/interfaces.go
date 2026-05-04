@@ -713,3 +713,60 @@ type HealthCheckFilter struct {
 	// PerPage is the number of results per page.
 	PerPage int
 }
+
+// ApprovalRepository defines operations for managing issuance approval requests.
+// Rank 7 of the 2026-05-03 Infisical deep-research deliverable — closes the
+// two-person integrity / four-eyes principle procurement gap for PCI-DSS
+// Level 1, FedRAMP Moderate / High, SOC 2 Type II, HIPAA-regulated PHI.
+//
+// Lifecycle: Create inserts a row at state=pending; UpdateState transitions
+// to one of (approved, rejected, expired) with the decider identity +
+// timestamp + optional note; ExpireStale is the bulk reaper called from
+// the scheduler. Once terminal, rows are immutable via the
+// approval_decision_consistency CHECK constraint at the schema layer.
+type ApprovalRepository interface {
+	// Create inserts a new ApprovalRequest at state=pending. Returns
+	// ErrAlreadyExists if a pending request already exists for the
+	// job_id (the partial-unique index enforces at most one pending
+	// per job).
+	Create(ctx context.Context, req *domain.ApprovalRequest) error
+
+	// Get returns the request by ID or ErrNotFound.
+	Get(ctx context.Context, id string) (*domain.ApprovalRequest, error)
+
+	// GetByJobID returns the most-recently-created request for the
+	// given job_id, regardless of state. Used by the renewal entry
+	// point to detect "is there already a pending approval for this
+	// job?" and avoid creating a duplicate.
+	GetByJobID(ctx context.Context, jobID string) (*domain.ApprovalRequest, error)
+
+	// List returns approval requests filtered by ApprovalFilter.
+	// Supports paginated dashboard queries.
+	List(ctx context.Context, filter *ApprovalFilter) ([]*domain.ApprovalRequest, error)
+
+	// UpdateState transitions a row from state=pending to one of
+	// (approved, rejected, expired). Returns ErrNotFound if the ID
+	// does not exist; returns the schema's CHECK-violation as a
+	// repository error if the row is already terminal.
+	UpdateState(ctx context.Context, id string, state domain.ApprovalState,
+		decidedBy string, decidedAt time.Time, note string) error
+
+	// ExpireStale transitions every row with state=pending and
+	// created_at <= before to state=expired. Returns the number of
+	// rows transitioned. Called from the scheduler reaper loop.
+	ExpireStale(ctx context.Context, before time.Time) (int, error)
+}
+
+// ApprovalFilter filters approval-request queries.
+type ApprovalFilter struct {
+	// State filters by lifecycle state (pending, approved, rejected, expired).
+	State string
+	// CertificateID filters by managed certificate ID.
+	CertificateID string
+	// RequestedBy filters to requests created by the given actor.
+	RequestedBy string
+	// Page is the page number (1-indexed).
+	Page int
+	// PerPage is the number of results per page.
+	PerPage int
+}
