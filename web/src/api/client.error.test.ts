@@ -36,23 +36,14 @@ import {
 const mockFetch = vi.fn();
 globalThis.fetch = mockFetch;
 
-function mockJsonResponse(data: unknown, status = 200) {
-  return Promise.resolve({
-    ok: status >= 200 && status < 300,
-    status,
-    json: () => Promise.resolve(data),
-    statusText: 'OK',
-  } as Response);
-}
-
-function mockBlobResponse(status = 200) {
-  return Promise.resolve({
-    ok: status >= 200 && status < 300,
-    status,
-    blob: () => Promise.resolve(new Blob(['test data'])),
-    statusText: 'OK',
-  } as Response);
-}
+// This file is the error-path companion to client.test.ts; every test
+// uses mockErrorResponse (defined below) to drive a non-2xx response
+// through the client function under test. The success-path
+// (mockJsonResponse / mockBlobResponse) helpers were drafted alongside
+// this scaffolding but never used — CodeQL alert #3 caught the
+// mockJsonResponse leftover. Both helpers were removed for consistency
+// with the file's error-only scope; success-path coverage lives in
+// client.test.ts.
 
 function mockErrorResponse(status: number, body: { message?: string; error?: string } = {}) {
   return Promise.resolve({
