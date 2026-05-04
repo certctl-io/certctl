@@ -28,6 +28,11 @@ type Config struct {
 	SCEP         SCEPConfig
 	Verification VerificationConfig
 	ACME         ACMEConfig
+	// Approval is the issuance approval-workflow primitive's runtime
+	// config. Rank 7 of the 2026-05-03 Infisical deep-research
+	// deliverable. The single field — BypassEnabled — short-circuits
+	// the workflow for dev/CI; production deploys MUST leave it false.
+	Approval ApprovalConfig
 	// ACMEServer is the SERVER-side ACME (RFC 8555 + RFC 9773 ARI)
 	// configuration. Distinct from ACME above (which is the consumer-
 	// side issuer connector that talks UP to Let's Encrypt / pebble).
@@ -1425,6 +1430,29 @@ type SchedulerConfig struct {
 	K8sDeployKubeletSyncTimeout time.Duration
 }
 
+// ApprovalConfig contains issuance approval-workflow runtime configuration.
+// Rank 7 of the 2026-05-03 Infisical deep-research deliverable.
+type ApprovalConfig struct {
+	// BypassEnabled short-circuits the approval workflow — every
+	// RequestApproval call auto-approves with decidedBy="system-bypass"
+	// (see domain.ApprovalActorSystemBypass) and emits an audit row with
+	// ActorType=System. Used by dev / CI to keep renewal-scheduler tests
+	// fast without standing up an approver.
+	//
+	// **PRODUCTION DEPLOYS MUST LEAVE THIS FALSE.** A simple SQL query
+	// detects misuse:
+	//
+	//   SELECT count(*) FROM audit_events WHERE actor = 'system-bypass';
+	//
+	// returns zero in production and a high count in dev. The bypass
+	// also emits a typed audit event (action=approval_bypassed) so
+	// compliance auditors can pattern-match without scanning JSON
+	// metadata.
+	//
+	// Setting: CERTCTL_APPROVAL_BYPASS environment variable. Default: false.
+	BypassEnabled bool
+}
+
 // LogConfig contains logging configuration.
 type LogConfig struct {
 	// Level sets the minimum log level for output.
@@ -1838,6 +1866,14 @@ func Load() (*Config, error) {
 				CAAIdentities:           getEnvList("CERTCTL_ACME_SERVER_CAA_IDENTITIES", nil),
 				ExternalAccountRequired: getEnvBool("CERTCTL_ACME_SERVER_EAB_REQUIRED", false),
 			},
+		},
+		Approval: ApprovalConfig{
+			// Rank 7. Default: false. Production deploys must leave it false;
+			// the bypass emits a typed audit row (action=approval_bypassed,
+			// actor=system-bypass) so compliance auditors detect misuse via
+			// SELECT count(*) FROM audit_events WHERE actor='system-bypass'
+			// returning > 0.
+			BypassEnabled: getEnvBool("CERTCTL_APPROVAL_BYPASS", false),
 		},
 		Digest: DigestConfig{
 			Enabled:    getEnvBool("CERTCTL_DIGEST_ENABLED", false),

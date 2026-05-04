@@ -32,6 +32,18 @@ type CertificateService struct {
 	// falls back to the historical on-demand path via caSvc.
 	crlCacheSvc *CRLCacheService
 	keygenMode  string
+
+	// approvalSvc + profileRepo, when both set, gate TriggerRenewal on
+	// CertificateProfile.RequiresApproval. The job is created at
+	// JobStatusAwaitingApproval (rather than Pending / AwaitingCSR) and
+	// a parallel ApprovalRequest row is created via approvalSvc. The
+	// scheduler does NOT dispatch until ApprovalService.Approve
+	// transitions the job to Pending. Rank 7 of the 2026-05-03
+	// Infisical deep-research deliverable. Both setters are optional —
+	// when either is nil, gating is skipped and TriggerRenewal falls
+	// back to the historical unattended path.
+	approvalSvc *ApprovalService
+	profileRepo repository.CertificateProfileRepository
 }
 
 // NewCertificateService creates a new certificate service.
@@ -91,6 +103,21 @@ func (s *CertificateService) SetJobRepo(repo repository.JobRepository) {
 // SetKeygenMode sets the key generation mode (agent or server).
 func (s *CertificateService) SetKeygenMode(mode string) {
 	s.keygenMode = mode
+}
+
+// SetApprovalService wires the approval-workflow service. When both this
+// and SetProfileRepo are wired, TriggerRenewal gates on
+// CertificateProfile.RequiresApproval. Rank 7 of the 2026-05-03 Infisical
+// deep-research deliverable.
+func (s *CertificateService) SetApprovalService(svc *ApprovalService) {
+	s.approvalSvc = svc
+}
+
+// SetProfileRepo wires the certificate-profile repository for the
+// approval-workflow gate. Without it, TriggerRenewal cannot read the
+// per-profile RequiresApproval flag and gating is skipped.
+func (s *CertificateService) SetProfileRepo(repo repository.CertificateProfileRepository) {
+	s.profileRepo = repo
 }
 
 // List returns a paginated list of certificates matching the filter.
@@ -288,9 +315,35 @@ func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, 
 	// Create a renewal job so the job processor can pick it up.
 	// In agent keygen mode, the job starts as AwaitingCSR so the agent
 	// generates the key pair and submits a CSR. In server mode, it starts as Pending.
+	//
+	// Rank 7: if the cert's profile has RequiresApproval=true and the
+	// approval service + profile repo are wired, the job is created at
+	// JobStatusAwaitingApproval (overriding the keygen-mode default) and
+	// a parallel ApprovalRequest row is created. The scheduler does NOT
+	// dispatch until ApprovalService.Approve transitions the job to
+	// Pending. Profile lookup failures fall back to the historical
+	// unattended path so a transient profile-repo error never silently
+	// blocks renewal — the gate is fail-open from the operator's
+	// perspective + fail-loud via the slog warning.
 	if s.jobRepo != nil {
+		needsApproval := false
+		var approvalProfileID string
+		if s.approvalSvc != nil && s.profileRepo != nil && cert.CertificateProfileID != "" {
+			profile, profileErr := s.profileRepo.Get(ctx, cert.CertificateProfileID)
+			if profileErr != nil {
+				slog.Warn("approval gate: profile lookup failed; falling back to unattended path",
+					"cert_id", cert.ID, "profile_id", cert.CertificateProfileID, "error", profileErr)
+			} else if profile != nil && profile.RequiresApproval {
+				needsApproval = true
+				approvalProfileID = profile.ID
+			}
+		}
+
 		jobStatus := domain.JobStatusPending
-		if s.keygenMode == "agent" {
+		switch {
+		case needsApproval:
+			jobStatus = domain.JobStatusAwaitingApproval
+		case s.keygenMode == "agent":
 			jobStatus = domain.JobStatusAwaitingCSR
 		}
 
@@ -314,6 +367,29 @@ func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, 
 		if err := s.jobRepo.Create(ctx, job); err != nil {
 			slog.Error("failed to create renewal job", "cert_id", cert.ID, "error", err)
 			return fmt.Errorf("failed to create renewal job: %w", err)
+		}
+
+		// Create the parallel ApprovalRequest row. If RequestApproval fails,
+		// transition the job to Cancelled so the scheduler doesn't dispatch
+		// a half-gated request (defense in depth — without this, a partial
+		// failure would leave the job at AwaitingApproval forever, blocking
+		// renewal until the operator manually intervenes).
+		if needsApproval {
+			metadata := map[string]string{
+				"common_name": cert.CommonName,
+			}
+			if _, apErr := s.approvalSvc.RequestApproval(ctx, cert, job.ID, approvalProfileID, actor, metadata); apErr != nil {
+				slog.Error("approval gate: failed to create ApprovalRequest row; cancelling gated job",
+					"cert_id", cert.ID, "job_id", job.ID, "error", apErr)
+				if cancelErr := s.jobRepo.UpdateStatus(ctx, job.ID, domain.JobStatusCancelled,
+					"approval request creation failed: "+apErr.Error()); cancelErr != nil {
+					slog.Error("approval gate: also failed to cancel orphan job",
+						"cert_id", cert.ID, "job_id", job.ID, "error", cancelErr)
+				}
+				return fmt.Errorf("failed to create approval request: %w", apErr)
+			}
+			slog.Info("approval gate fired", "cert_id", cert.ID, "job_id", job.ID,
+				"profile_id", approvalProfileID, "requested_by", actor)
 		}
 
 		slog.Info("created renewal job via API trigger",

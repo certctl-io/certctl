@@ -267,6 +267,25 @@ func main() {
 	// same *sql.DB handle.
 	transactor := postgres.NewTransactor(db)
 	certificateService.SetTransactor(transactor)
+
+	// Rank 7 of the 2026-05-03 Infisical deep-research deliverable —
+	// issuance approval-workflow primitive. ApprovalRepository +
+	// ApprovalMetrics + ApprovalService construct here; the gate is
+	// activated on CertificateService via SetApprovalService +
+	// SetProfileRepo. Inactive when CertificateProfile.RequiresApproval
+	// is false (the default), preserving the historical unattended
+	// renewal path. See docs/approval-workflow.md.
+	approvalRepo := postgres.NewApprovalRepository(db)
+	approvalMetrics := service.NewApprovalMetrics()
+	approvalService := service.NewApprovalService(approvalRepo, jobRepo, auditService,
+		approvalMetrics, cfg.Approval.BypassEnabled)
+	if cfg.Approval.BypassEnabled {
+		logger.Warn("CERTCTL_APPROVAL_BYPASS=true — every approval auto-approves with actor=system-bypass; production deploys must leave this unset")
+	}
+	certificateService.SetApprovalService(approvalService)
+	certificateService.SetProfileRepo(profileRepo)
+	approvalHandler := handler.NewApprovalHandler(approvalService)
+
 	notifierRegistry := make(map[string]service.Notifier)
 
 	// Wire notifier connectors from config
@@ -907,6 +926,10 @@ func main() {
 		// new-order, finalize, challenges, revoke, ARI). See
 		// docs/acme-server.md for the operator-facing reference.
 		ACME: acmeHandler,
+		// Approvals — issuance approval-workflow primitive. Rank 7 of
+		// the 2026-05-03 Infisical deep-research deliverable. See
+		// docs/approval-workflow.md.
+		Approvals: approvalHandler,
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//
