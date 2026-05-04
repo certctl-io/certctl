@@ -110,9 +110,20 @@ type Config struct {
 	CRLDistributionPointURLs []string `json:"crl_distribution_point_urls,omitempty"`
 }
 
+// ChainAssembler assembles the leaf-to-root PEM chain for a given
+// IntermediateCA ID. The local connector calls this in tree mode at
+// IssueCertificate time to populate IssuanceResult.ChainPEM. Defining
+// the seam as a one-method interface inside the connector package
+// avoids the import cycle that would arise from importing
+// internal/service directly. *service.IntermediateCAService satisfies
+// this implicitly.
+type ChainAssembler interface {
+	AssembleChain(ctx context.Context, leafCAID string) (string, error)
+}
+
 // Connector implements the issuer.Connector interface for local certificate generation.
 //
-// It supports two modes:
+// It supports three modes (Rank 8 added the third):
 //
 // Self-signed mode (default):
 //   - Generates an ephemeral self-signed CA root on first use
@@ -124,6 +135,20 @@ type Config struct {
 //   - The CA cert should be signed by an upstream CA (e.g., ADCS, enterprise root)
 //   - All issued certificates chain to the upstream root
 //   - Suitable for production when the upstream CA is trusted
+//
+// Tree mode (when HierarchyMode is "tree" + SetChainAssembler + SetTreeIssuingCAID
+// have been wired):
+//   - Operator-managed N-level CA hierarchy backed by the
+//     intermediate_cas table.
+//   - Cert signing still uses c.caCert + c.caSigner (the operator
+//     pre-positions the issuing-leaf CA cert+key on disk via the same
+//     CACertPath/CAKeyPath that sub-CA mode uses).
+//   - Only the chain assembled into IssuanceResult.ChainPEM differs:
+//     instead of the static c.caCertPEM, the connector calls
+//     chainAssembler.AssembleChain(treeIssuingCAID), which walks the
+//     parent_ca_id ancestry up to the registered root.
+//   - byte-identical to single-sub-CA mode for any 1-level tree (the
+//     Rank 8 backwards-compat pin).
 //
 // Features:
 //   - Instant certificate issuance (no external CA required)
@@ -142,6 +167,20 @@ type Connector struct {
 	caCertPEM  string
 	subCA      bool            // true when loaded from disk (sub-CA mode)
 	revokedMap map[string]bool // serial -> revoked status
+
+	// Rank 8 — first-class CA hierarchy. Optional; when unset the
+	// connector behaves byte-identically to the pre-Rank-8 single-sub-CA
+	// flow. When set:
+	//   - hierarchyMode == "tree" activates the tree-mode chain
+	//     assembly (AssembleChain over the intermediate_cas table).
+	//   - chainAssembler is the seam to *service.IntermediateCAService.
+	//   - treeIssuingCAID is the leaf CA in the tree under which leaves
+	//     are issued. Cert signing still uses c.caCert + c.caSigner; the
+	//     operator pre-positions the matching cert+key on disk for the
+	//     issuing-leaf CA via Config.CACertPath / Config.CAKeyPath.
+	hierarchyMode   string
+	chainAssembler  ChainAssembler
+	treeIssuingCAID string
 
 	// Optional dependencies — set after construction via the
 	// Set*-style helpers below. The Connector functions correctly with
@@ -255,6 +294,38 @@ func (c *Connector) SetOCSPResponderKeyDir(dir string) {
 	c.ocspResponderKeyDir = dir
 }
 
+// SetHierarchyMode wires the per-issuer CA-hierarchy posture (Rank 8).
+// The empty string and "single" preserve the historical single-sub-CA
+// flow byte-for-byte; "tree" activates the intermediate_cas-backed
+// chain assembly. Callers that pass "tree" MUST also call
+// SetChainAssembler + SetTreeIssuingCAID before issuing certs;
+// otherwise the connector falls back to single-mode chain assembly.
+func (c *Connector) SetHierarchyMode(mode string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.hierarchyMode = mode
+}
+
+// SetChainAssembler wires the leaf-to-root chain assembler used in
+// tree mode. *service.IntermediateCAService satisfies the interface
+// implicitly. Unset = falls back to single-mode chain assembly.
+func (c *Connector) SetChainAssembler(a ChainAssembler) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.chainAssembler = a
+}
+
+// SetTreeIssuingCAID records the IntermediateCA ID under which leaves
+// are issued in tree mode. Used as the AssembleChain leafCAID input.
+// Cert signing still uses the file-on-disk CA cert+key wired via
+// Config.CACertPath / Config.CAKeyPath; this ID is purely for chain
+// assembly.
+func (c *Connector) SetTreeIssuingCAID(id string) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.treeIssuingCAID = id
+}
+
 // ValidateConfig validates the local CA configuration.
 func (c *Connector) ValidateConfig(ctx context.Context, rawConfig json.RawMessage) error {
 	var cfg Config
@@ -353,12 +424,18 @@ func (c *Connector) IssueCertificate(ctx context.Context, request issuer.Issuanc
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
 	}
 
+	chainPEM, err := c.resolveChainPEM(ctx)
+	if err != nil {
+		c.logger.Error("failed to assemble chain", "error", err)
+		return nil, fmt.Errorf("chain assembly failed: %w", err)
+	}
+
 	// Create order ID (use serial as order ID for simplicity)
 	orderID := fmt.Sprintf("local-%s", serial)
 
 	result := &issuer.IssuanceResult{
 		CertPEM:   certPEM,
-		ChainPEM:  c.caCertPEM,
+		ChainPEM:  chainPEM,
 		Serial:    serial,
 		NotBefore: cert.NotBefore,
 		NotAfter:  cert.NotAfter,
@@ -417,6 +494,12 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		return nil, fmt.Errorf("certificate generation failed: %w", err)
 	}
 
+	chainPEM, err := c.resolveChainPEM(ctx)
+	if err != nil {
+		c.logger.Error("failed to assemble chain", "error", err)
+		return nil, fmt.Errorf("chain assembly failed: %w", err)
+	}
+
 	// Create order ID
 	orderID := fmt.Sprintf("local-%s", serial)
 	if request.OrderID != nil {
@@ -425,7 +508,7 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 
 	result := &issuer.IssuanceResult{
 		CertPEM:   certPEM,
-		ChainPEM:  c.caCertPEM,
+		ChainPEM:  chainPEM,
 		Serial:    serial,
 		NotBefore: cert.NotBefore,
 		NotAfter:  cert.NotAfter,
@@ -438,6 +521,30 @@ func (c *Connector) RenewCertificate(ctx context.Context, request issuer.Renewal
 		"not_after", cert.NotAfter)
 
 	return result, nil
+}
+
+// resolveChainPEM returns the chain bytes the local connector attaches
+// to IssuanceResult. In single-sub-CA mode (or when tree-mode wiring
+// is incomplete) it returns the historical c.caCertPEM byte-for-byte
+// — the Rank 8 backwards-compat pin. In tree mode it delegates to
+// the registered ChainAssembler, which walks the parent_ca_id ancestry
+// over the intermediate_cas table.
+func (c *Connector) resolveChainPEM(ctx context.Context) (string, error) {
+	c.mu.RLock()
+	mode := c.hierarchyMode
+	asm := c.chainAssembler
+	leaf := c.treeIssuingCAID
+	fallback := c.caCertPEM
+	c.mu.RUnlock()
+
+	if mode == "tree" && asm != nil && leaf != "" {
+		chain, err := asm.AssembleChain(ctx, leaf)
+		if err != nil {
+			return "", err
+		}
+		return chain, nil
+	}
+	return fallback, nil
 }
 
 // RevokeCertificate revokes a certificate by marking it in the in-memory revocation map.
