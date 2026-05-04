@@ -813,3 +813,39 @@ export const acknowledgeHealthCheck = (id: string) =>
 
 export const getHealthCheckSummary = () =>
   fetchJSON<HealthCheckSummary>(`${BASE}/health-checks/summary`);
+
+// IntermediateCA hierarchy (Rank 8 of the 2026-05-03 deep-research
+// deliverable). Admin-gated at the handler layer; non-admin Bearer
+// callers get 403. Operators drive the hierarchy from
+// IssuerHierarchyPage; the recursive tree render is built from the
+// flat list returned here by walking each row's parent_ca_id.
+export interface IntermediateCA {
+  id: string;
+  owning_issuer_id: string;
+  parent_ca_id?: string | null;
+  name: string;
+  subject: string;
+  state: 'active' | 'retiring' | 'retired';
+  cert_pem: string;
+  key_driver_id: string;
+  not_before: string;
+  not_after: string;
+  path_len_constraint?: number | null;
+  name_constraints?: { permitted?: string[]; excluded?: string[] }[];
+  ocsp_responder_url?: string;
+  metadata?: Record<string, string>;
+  created_at: string;
+  updated_at: string;
+}
+
+export const listIntermediateCAs = (issuerID: string) =>
+  fetchJSON<{ data: IntermediateCA[] }>(`${BASE}/issuers/${issuerID}/intermediates`);
+
+export const getIntermediateCA = (id: string) =>
+  fetchJSON<IntermediateCA>(`${BASE}/intermediates/${id}`);
+
+export const retireIntermediateCA = (id: string, note: string, confirm: boolean) =>
+  fetchJSON<{ id: string; decided_by: string; confirmed: boolean }>(
+    `${BASE}/intermediates/${id}/retire`,
+    { method: 'POST', body: JSON.stringify({ note, confirm }) },
+  );

@@ -26,13 +26,18 @@
 #   - ProfilesPage:        CRUD form; mirrors PoliciesPage shape (covered)
 #   - CertificateDetailPage: drill-down view; covered transitively via CertificatesPage
 #   - IssuerDetailPage:    drill-down view; covered transitively via IssuersPage
+#   - IssuerHierarchyPage: Rank 8 admin-gated hierarchy render; admin gate +
+#                          recursive build tested at the API + service layers
+#                          (intermediate_ca_test.go + intermediate_ca_test.go
+#                          handler triplet); defer Vitest until the next
+#                          feature change touches the page
 #   - TargetDetailPage:    drill-down view; covered transitively via TargetsPage
 #
 # See coverage-gap-audit-2026-04-24-v5/unified-audit.md
 # cat-s2-c24a548076c6 for closure rationale.
 
 set -e
-ALLOW='^(LoginPage|AuditPage|ShortLivedPage|DigestPage|ObservabilityPage|HealthMonitorPage|NetworkScanPage|JobsPage|JobDetailPage|AgentFleetPage|ProfilesPage|CertificateDetailPage|IssuerDetailPage|TargetDetailPage)$'
+ALLOW='^(LoginPage|AuditPage|ShortLivedPage|DigestPage|ObservabilityPage|HealthMonitorPage|NetworkScanPage|JobsPage|JobDetailPage|AgentFleetPage|ProfilesPage|CertificateDetailPage|IssuerDetailPage|IssuerHierarchyPage|TargetDetailPage)$'
 UNTESTED=""
 for f in web/src/pages/*.tsx; do
   base=$(basename "$f" .tsx)

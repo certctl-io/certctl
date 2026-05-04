@@ -31,6 +31,7 @@ import DigestPage from './pages/DigestPage';
 import ObservabilityPage from './pages/ObservabilityPage';
 import JobDetailPage from './pages/JobDetailPage';
 import IssuerDetailPage from './pages/IssuerDetailPage';
+import IssuerHierarchyPage from './pages/IssuerHierarchyPage';
 import TargetDetailPage from './pages/TargetDetailPage';
 import SCEPAdminPage from './pages/SCEPAdminPage';
 import ESTAdminPage from './pages/ESTAdminPage';
@@ -69,6 +70,11 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="profiles" element={<ProfilesPage />} />
                   <Route path="issuers" element={<IssuersPage />} />
                   <Route path="issuers/:id" element={<IssuerDetailPage />} />
+                  {/* Rank 8 — operator-managed multi-level CA hierarchy.
+                      Admin-gated at the API; the page renders the
+                      backend's 403 as ErrorState for non-admin
+                      callers. See docs/intermediate-ca-hierarchy.md. */}
+                  <Route path="issuers/:id/hierarchy" element={<IssuerHierarchyPage />} />
                   <Route path="targets" element={<TargetsPage />} />
                   <Route path="targets/:id" element={<TargetDetailPage />} />
                   <Route path="owners" element={<OwnersPage />} />
