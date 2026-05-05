@@ -33,15 +33,20 @@ Issuer connectors:
 Target connectors:
 
 - [Apache](apache.md) — Apache httpd, separate-file deploy + `apachectl configtest`
+- [AWS Certificate Manager](aws-acm.md) — deploy into ACM for ALB / CloudFront / API Gateway
+- [Azure Key Vault](azure-kv.md) — deploy into Key Vault for App Gateway / Front Door / App Service
 - [Caddy](caddy.md) — admin-API hot reload or file-watcher fallback
 - [Envoy](envoy.md) — file SDS hot reload, optional `sds.json`
 - [F5 BIG-IP](f5.md) — proxy-agent pattern + transactional iControl REST
 - [HAProxy](haproxy.md) — combined-PEM deploy + `haproxy -c` validate
 - [IIS](iis.md) — Microsoft IIS, local PowerShell + WinRM modes
+- [Java Keystore](jks.md) — JKS / PKCS#12 via `keytool` with atomic snapshot rollback
 - [Kubernetes Secrets](k8s.md) — k8s.io/tls Secrets atomic update
 - [NGINX](nginx.md) — separate-file deploy + `nginx -t` validate
 - [Postfix / Dovecot](postfix.md) — dual-mode mail-server TLS connector
+- [SSH (agentless)](ssh.md) — agentless deploy over SSH/SFTP for Linux/Unix targets
 - [Traefik](traefik.md) — file-provider zero-reload deploy
+- [Windows Certificate Store](wincertstore.md) — non-IIS Windows services (Exchange, RDP, SQL, ADFS)
 
 ## Contents
 
