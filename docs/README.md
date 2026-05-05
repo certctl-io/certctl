@@ -37,14 +37,11 @@ You're operating certctl in production or building integrations and need authori
 
 ### Connectors
 
-| Doc | What it covers |
-|---|---|
-| [Connector index](reference/connectors/index.md) | Issuer/target/notifier interface contracts, registry, scanners |
-| [Apache](reference/connectors/apache.md) | Apache httpd connector deep dive |
-| [F5 BIG-IP](reference/connectors/f5.md) | F5 connector — proxy agent + transactional iControl REST |
-| [IIS](reference/connectors/iis.md) | Microsoft IIS — local PowerShell + WinRM modes |
-| [Kubernetes Secrets](reference/connectors/k8s.md) | Kubernetes Secrets connector |
-| [NGINX](reference/connectors/nginx.md) | NGINX connector — deploy contract + quirks |
+The [connector index](reference/connectors/index.md) is the canonical catalog (interfaces, registry, scanners, plus an inline reference per built-in). Per-connector deep-dive siblings cover operator-grade material — vendor edges, troubleshooting, rotation playbooks, when-to-use vs alternatives.
+
+**Issuers** (13 deep-dives): [ACME](reference/connectors/acme.md) · [ADCS](reference/connectors/adcs.md) · [AWS ACM Private CA](reference/connectors/aws-acm-pca.md) · [DigiCert](reference/connectors/digicert.md) · [EJBCA / Keyfactor](reference/connectors/ejbca.md) · [Entrust](reference/connectors/entrust.md) · [GlobalSign Atlas HVCA](reference/connectors/globalsign.md) · [Google CAS](reference/connectors/google-cas.md) · [Local CA](reference/connectors/local-ca.md) · [OpenSSL / Custom CA](reference/connectors/openssl.md) · [Sectigo SCM](reference/connectors/sectigo.md) · [step-ca / Smallstep](reference/connectors/step-ca.md) · [Vault PKI](reference/connectors/vault.md)
+
+**Targets** (15 deep-dives): [Apache](reference/connectors/apache.md) · [AWS Certificate Manager](reference/connectors/aws-acm.md) · [Azure Key Vault](reference/connectors/azure-kv.md) · [Caddy](reference/connectors/caddy.md) · [Envoy](reference/connectors/envoy.md) · [F5 BIG-IP](reference/connectors/f5.md) · [HAProxy](reference/connectors/haproxy.md) · [IIS](reference/connectors/iis.md) · [Java Keystore](reference/connectors/jks.md) · [Kubernetes Secrets](reference/connectors/k8s.md) · [NGINX](reference/connectors/nginx.md) · [Postfix / Dovecot](reference/connectors/postfix.md) · [SSH (agentless)](reference/connectors/ssh.md) · [Traefik](reference/connectors/traefik.md) · [Windows Certificate Store](reference/connectors/wincertstore.md)
 
 ### Protocols
 
