@@ -16,10 +16,18 @@ Connectors extend certctl to integrate with external systems for certificate iss
 
 Issuer connectors:
 
+- [ACME](acme.md) — RFC 8555 v2 client (Let's Encrypt, ZeroSSL, Sectigo, Buypass, GTS, SSL.com)
 - [ADCS integration](adcs.md) — Active Directory Certificate Services as enterprise root via Local CA sub-CA mode
 - [AWS ACM Private CA](aws-acm-pca.md) — managed private CA on AWS, IAM-authenticated
 - [DigiCert CertCentral](digicert.md) — commercial public CA (DV / OV / EV)
 - [EJBCA (Keyfactor)](ejbca.md) — self-hosted open-source / Keyfactor enterprise CA
+- [Entrust Certificate Services](entrust.md) — Entrust CA Gateway with mTLS auth
+- [GlobalSign Atlas HVCA](globalsign.md) — Atlas HVCA with dual mTLS + API key/secret auth
+- [Google CAS](google-cas.md) — managed private CA on GCP, OAuth2 service-account auth
+- [Local CA](local-ca.md) — Go `crypto/x509`-backed signer (self-signed, sub-CA, tree mode)
+- [OpenSSL / Custom CA](openssl.md) — script-based shell-out for arbitrary CLI-driven CAs
+- [Sectigo SCM](sectigo.md) — Sectigo Certificate Manager REST API
+- [step-ca (Smallstep)](step-ca.md) — JWK-provisioner authenticated synchronous internal CA
 - [Vault PKI](vault.md) — HashiCorp Vault PKI engine, synchronous issuance
 
 Target connectors:
