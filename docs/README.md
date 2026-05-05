@@ -28,7 +28,9 @@ You're operating certctl in production or building integrations and need authori
 |---|---|
 | [Architecture](reference/architecture.md) | System design, data flow, security model, deployment topologies |
 | [API](reference/api.md) | OpenAPI 3.1 spec, integration patterns, client SDK generation |
+| [CLI](reference/cli.md) | certctl-cli command reference and CI/CD integration patterns |
 | [MCP server](reference/mcp.md) | Model Context Protocol integration for AI assistants |
+| [Release verification](reference/release-verification.md) | Cosign / SLSA / SBOM verification procedure |
 | [Intermediate CA hierarchy](reference/intermediate-ca-hierarchy.md) | Multi-level CA tree management — RFC 5280 §3.2/§4.2.1.9/§4.2.1.10 enforcement |
 | [Deployment model](reference/deployment-model.md) | Atomic write, post-deploy verify, rollback semantics across all targets |
 | [Vendor matrix](reference/vendor-matrix.md) | Tested vendor versions per target connector |
@@ -66,6 +68,8 @@ You're running certctl in production and need operational guidance.
 | [Control plane TLS](operator/tls.md) | Self-signed bootstrap, operator-supplied Secret, cert-manager Certificate CR |
 | [Database TLS](operator/database-tls.md) | PostgreSQL transport encryption |
 | [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance |
+| [Helm deployment](operator/helm-deployment.md) | Kubernetes installation via the bundled chart |
+| [Performance baselines](operator/performance-baselines.md) | Operator-runnable benchmarks for regression spot checks |
 | [Legacy clients (TLS 1.2)](operator/legacy-clients-tls-1.2.md) | Reverse-proxy runbook for embedded EST/SCEP clients on TLS 1.2 |
 
 ### Runbooks
@@ -108,7 +112,10 @@ You're contributing to certctl, running tests locally, or trying to understand t
 |---|---|
 | [Testing strategy](contributor/testing-strategy.md) | What we test and why; per-PR fast gates vs daily deep-scan |
 | [Test environment](contributor/test-environment.md) | Local environment with real CAs (Pebble, step-ca, etc.) |
+| [QA prerequisites](contributor/qa-prerequisites.md) | Before running QA: stack boot, demo data baseline, env vars |
 | [QA test suite](contributor/qa-test-suite.md) | qa_test.go reference for release QA |
+| [GUI QA checklist](contributor/gui-qa-checklist.md) | Manual GUI verification pass for release |
+| [Release sign-off](contributor/release-sign-off.md) | Release-day checklist — code state, automated gates, manual QA, artefact verification |
 | [CI pipeline](contributor/ci-pipeline.md) | CI shape, regression guards, adding new checks |
 
 ## Archive
