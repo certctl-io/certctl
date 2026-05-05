@@ -28,7 +28,7 @@ performance / contention tuning.
 | `CERTCTL_SCHEDULER_NOTIFICATION_PROCESS_INTERVAL` | `1m` | How often the notification-dispatcher loop fans out queued alerts to channels. |
 | `CERTCTL_SHORT_LIVED_EXPIRY_CHECK_INTERVAL` | `5m` | How often the short-lived-expiry loop watches certs whose TTL is less than 1h for imminent expiry. |
 
-For the full scheduler topology (12 loops, 8 always-on + 4 opt-in)
+For the full scheduler topology (14 loops, 9 always-on + 5 opt-in)
 see [`architecture.md`](architecture.md) "Scheduler topology".
 
 ## Job lifecycle

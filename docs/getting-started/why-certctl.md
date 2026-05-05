@@ -34,17 +34,22 @@ This isn't a premium feature. It's the default behavior, free. Most alternatives
 
 ### 2. CA-Agnostic Issuer Architecture
 
-certctl works with any certificate authority, not just ACME providers. Nine issuer connectors ship today, all free:
+certctl works with any certificate authority, not just ACME providers. Twelve issuer connectors ship today, all free:
 
 - **ACME v2** (Let's Encrypt, ZeroSSL, Google Trust Services, Buypass) — HTTP-01, DNS-01, DNS-PERSIST-01 challenges, External Account Binding, ACME Renewal Information (RFC 9773), certificate profile selection
 - **HashiCorp Vault PKI** — `/v1/{mount}/sign/{role}` API, token auth
 - **DigiCert CertCentral** — async order model, OV/EV support
 - **Sectigo SCM** — async order model, DV/OV/EV support, 3-header auth
 - **Google Cloud CAS** — Certificate Authority Service, OAuth2 service account auth, CA pool selection
+- **AWS ACM Private CA** — managed private CA on AWS, IAM-authenticated, SDK-waiter for issuance
+- **Entrust Certificate Services** — Entrust CA Gateway with mTLS auth, approval-pending support
+- **GlobalSign Atlas HVCA** — region-pinned commercial CA with dual mTLS + API key/secret auth
+- **EJBCA / Keyfactor** — self-hosted open-source / Keyfactor enterprise CA, mTLS or OAuth2
 - **step-ca** (Smallstep) — native /sign API with JWK provisioner auth
-- **Local CA** — self-signed or sub-CA mode (chain to ADCS or any enterprise root)
+- **Local CA** — self-signed or sub-CA mode (chain to ADCS or any enterprise root); supports multi-level CA tree mode
 - **OpenSSL / Custom CA** — delegate signing to any shell script
-- **EST enrollment** (RFC 7030) — device certs for WiFi/802.1X, MDM, IoT
+
+EST (RFC 7030) and SCEP (RFC 8894) are protocol surfaces, not separate issuers — they dispatch to whichever issuer above is configured for the EST/SCEP profile.
 
 Every connector implements the same interface. Running multiple CAs in parallel — Let's Encrypt for public certs, Vault for internal services, your enterprise CA for legacy systems — is configuration, not code.
 
@@ -58,7 +63,7 @@ A reload command can exit 0 while the certificate doesn't take effect — wrong 
 
 The three differentiators above get the headlines, but the feature surface is wider than most paid platforms:
 
-**13 deployment targets** — NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell + remote WinRM), F5 BIG-IP (proxy agent + iControl REST), Postfix, Dovecot, SSH (agentless), Windows Certificate Store, and Java Keystore. All use a pluggable connector model. The control plane never initiates outbound connections — agents poll for work, meaning certctl works behind firewalls, across network zones, and in air-gapped environments.
+**15 deployment targets** — NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell + remote WinRM), F5 BIG-IP (proxy agent + iControl REST), Postfix/Dovecot (dual-mode), SSH (agentless), Windows Certificate Store, Java Keystore, Kubernetes Secrets, AWS Certificate Manager, and Azure Key Vault. All use a pluggable connector model. The control plane never initiates outbound connections — agents poll for work, meaning certctl works behind firewalls, across network zones, and in air-gapped environments.
 
 **Network certificate discovery** — active TLS scanning of CIDR ranges finds certificates you didn't know existed. Agents also scan local filesystems for PEM/DER files. Everything feeds into a triage workflow where you claim, dismiss, or import discovered certs into management.
 
@@ -84,7 +89,7 @@ ACME clients solve one slice of the problem — issuance and renewal from ACME C
 
 ### vs. Agent-Based SaaS
 
-The closest architectural competitors use the same agent model — local key generation, CSR submission, push-based deployment. Where certctl differs: it supports 9 issuer types (not just ACME), provides CRL/OCSP/revocation infrastructure (not just issuance), includes a policy engine and network discovery, and is source-available with no certificate limit. SaaS alternatives are typically proprietary, priced per certificate ($2+/cert/month), and cap their free tiers at 3-5 certificates. certctl is free for any number of certificates, forever.
+The closest architectural competitors use the same agent model — local key generation, CSR submission, push-based deployment. Where certctl differs: it supports 12 issuer types (not just ACME), provides CRL/OCSP/revocation infrastructure (not just issuance), includes a policy engine and network discovery, and is source-available with no certificate limit. SaaS alternatives are typically proprietary, priced per certificate ($2+/cert/month), and cap their free tiers at 3-5 certificates. certctl is free for any number of certificates, forever.
 
 ### vs. Commercial PKI Platforms
 

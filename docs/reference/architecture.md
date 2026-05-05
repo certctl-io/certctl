@@ -63,7 +63,7 @@ flowchart TB
         API["REST API\n(Go net/http, :8443)"]
         SVC["Service Layer"]
         REPO["Repository Layer\n(database/sql + lib/pq)"]
-        SCHED["Background Scheduler\n8 always-on + 4 optional loops"]
+        SCHED["Background Scheduler\n9 always-on + 5 opt-in loops"]
         DASH["Web Dashboard\n(React SPA)"]
     end
 
@@ -499,7 +499,7 @@ For incident-response events requiring fleet-wide revocation (key compromise, CA
 
 ### 4. Automatic Renewal
 
-The control plane runs a scheduler with 8 always-on loops plus up to 4 optional loops (enabled by configuration). `internal/scheduler/scheduler.go:262-265` is the authoritative count.
+The control plane runs a scheduler with 9 always-on loops plus up to 5 opt-in loops (enabled by configuration). Re-derive the count via `grep -cE '^func \(s \*Scheduler\) [a-zA-Z]+Loop' internal/scheduler/scheduler.go`; the opt-in gating lives in `cmd/server/main.go` startup wiring (`cfg.NetworkScan.Enabled`, `digestService != nil`, `healthCheckService != nil`, `cloudDiscoveryService != nil`, `cfg.ACMEServer.Enabled && cfg.ACMEServer.GCInterval > 0`).
 
 ```mermaid
 flowchart LR
@@ -1044,7 +1044,7 @@ For deployments that need JWT/OIDC/mTLS, the standard pattern is to put an authe
 
 ### Concurrency Safety
 
-The background scheduler uses `sync/atomic.Bool` idempotency guards on every loop (8 always-on plus up to 4 optional) — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
+The background scheduler uses `sync/atomic.Bool` idempotency guards on every loop (9 always-on plus up to 5 opt-in) — if a tick fires while the previous iteration is still running, it skips. A `sync.WaitGroup` tracks all in-flight goroutines. `WaitForCompletion(timeout)` blocks during shutdown until all work finishes or the timeout expires, preventing state corruption from mid-flight database operations during process exit.
 
 The job-processor tick fans the per-job work out across up to `CERTCTL_RENEWAL_CONCURRENCY` goroutines (default 25), gated by `golang.org/x/sync/semaphore.Weighted`. The cap is the operator's lever for "how many concurrent CA calls per scheduler tick" — operators with permissive upstream limits and large fleets (>10k certs) can bump to 100; operators with strict limits or async-CA-heavy fleets should stay at 25 or lower. Values ≤ 0 normalise to 1 (sequential). The Acquire is ctx-aware so a shutdown-driven ctx cancel interrupts the dispatch loop promptly; in-flight goroutines drain via Wait before the tick returns. Closes the #9 acquisition-readiness blocker from the 2026-05-01 issuer coverage audit (pre-fix the fan-out had no cap, so a 5,000-cert sweep tripped DigiCert / Entrust / Sectigo rate limits and the next tick re-fanned-out the same calls).
 
@@ -1250,7 +1250,7 @@ flowchart TB
 
 1. **Pluggable sources** — Each cloud provider implements the `DiscoverySource` interface (Name, Type, Discover, ValidateConfig). Three built-in sources: AWS Secrets Manager, Azure Key Vault, GCP Secret Manager
 2. **CloudDiscoveryService orchestrator** — Iterates registered sources, calls `Discover()` on each, feeds reports into `ProcessDiscoveryReport()`. Errors from one source don't prevent other sources from running
-3. **Scheduler integration** — opt-in cloud discovery scheduler loop (6h default; see `docs/architecture.md` 12-loop topology), runs immediately on startup, `atomic.Bool` idempotency guard
+3. **Scheduler integration** — opt-in cloud discovery scheduler loop (6h default; one of the 14 loops in the scheduler topology — see the Background Scheduler section above), runs immediately on startup, `atomic.Bool` idempotency guard
 4. **Sentinel agents** — Each source uses its own sentinel agent ID (`cloud-aws-sm`, `cloud-azure-kv`, `cloud-gcp-sm`) for dedup and triage filtering
 5. **Source path format** — `aws-sm://{region}/{secret}`, `azure-kv://{cert-name}/{version}`, `gcp-sm://{project}/{secret}`
 6. **No new schema** — Reuses existing `discovered_certificates` and `discovery_scans` tables. Sentinel agent IDs leverage existing `(fingerprint_sha256, agent_id, source_path)` dedup constraint

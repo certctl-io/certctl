@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-05
 
-certctl ships with a complete OpenAPI 3.1 specification at `api/openapi.yaml`. This spec documents all 78 API operations currently specified, every request/response schema, pagination conventions, authentication requirements, and error formats. It's the single source of truth for the documented REST API. (Note: The spec will be updated to include 7 additional certificate discovery endpoints from M18b.)
+certctl ships with a complete OpenAPI 3.1 specification at `api/openapi.yaml`. The spec documents every operation (re-derive count via `grep -cE '^\s+operationId:' api/openapi.yaml`), every request/response schema, pagination conventions, authentication requirements, and error formats. It's the single source of truth for the documented REST API.
 
 This guide covers how to use the spec for API exploration, client SDK generation, and integration testing.
 
@@ -14,9 +14,8 @@ The spec lives at `api/openapi.yaml` in the repository root. It's versioned alon
 # View the spec
 cat api/openapi.yaml
 
-# Count operations
-grep "operationId:" api/openapi.yaml | wc -l
-# 78 (includes health + ready, 7 discovery endpoints pending spec update)
+# Count operations (includes health + ready)
+grep -cE '^\s+operationId:' api/openapi.yaml
 ```
 
 ## Viewing with Swagger UI
@@ -153,7 +152,7 @@ npx @apidevtools/swagger-cli validate api/openapi.yaml
 Import the spec directly into Postman:
 
 1. Open Postman → Import → File → select `api/openapi.yaml`
-2. Postman creates a collection with all 78 documented operations organized by tag
+2. Postman creates a collection with every documented operation organized by tag
 3. Set the `baseUrl` variable to `https://localhost:8443` (HTTPS-only as of v2.2)
 4. Add an `Authorization: Bearer your-api-key` header to the collection
 5. Import the demo stack CA bundle (`deploy/test/certs/ca.crt`) into Postman's Settings → Certificates → CA Certificates, or disable certificate verification for the `localhost` host (Settings → General → SSL certificate verification)
@@ -193,6 +192,6 @@ This sends randomized valid requests to every endpoint and verifies the response
 ## What's Next
 
 - [MCP Server Guide](mcp.md) — AI-native access to the certctl API
-- [Quick Start](quickstart.md) — Get certctl running locally
-- [Connector Guide](connectors.md) — Build custom issuer and target connectors
+- [Quick Start](../getting-started/quickstart.md) — Get certctl running locally
+- [Connector Guide](connectors/index.md) — Build custom issuer and target connectors
 - [Architecture](architecture.md) — System design deep dive

@@ -132,7 +132,7 @@ Open **https://localhost:8443** in your browser. Your browser will warn about th
 >
 > **Key rotation:** `CERTCTL_AUTH_SECRET` accepts comma-separated keys (e.g., `CERTCTL_AUTH_SECRET=new-key,old-key`). Both keys are valid simultaneously, enabling zero-downtime rotation: add the new key, roll clients over, then remove the old key.
 
-The dashboard comes pre-loaded with 35 demo certificates across 5 issuers, 8 agents, and 90 days of job history — expiring certs, expired certs, active certs, failed renewals, revocations, discovery scans, and approval workflows. A realistic snapshot of what certificate management looks like in a real organization.
+The dashboard comes pre-loaded with demo data covering certificates across multiple issuers, agents, and 90 days of job history — expiring certs, expired certs, active certs, failed renewals, revocations, discovery scans, and approval workflows. A realistic snapshot of what certificate management looks like in a real organization. (Re-derive exact counts via `grep -oE 'mc-[a-z0-9_-]+' migrations/seed_demo.sql | sort -u | wc -l`.)
 
 ### What you're looking at
 
@@ -449,7 +449,7 @@ Exposes the full REST API via MCP over stdio transport. Ask Claude: "What certif
 | Issuers | 5 | Local Dev CA, Let's Encrypt Staging, step-ca Internal, ZeroSSL (EAB), Custom OpenSSL CA |
 | Agents | 9 | 8 real agents (linux/darwin/windows, amd64/arm64) + server-scanner (network discovery) |
 | Targets | 8 | NGINX prod, NGINX staging, NGINX data, HAProxy, Apache, IIS, Traefik, Caddy |
-| Certificates | 35 | Active, Expiring, Expired, Failed, Revoked, RenewalInProgress, Wildcard, S/MIME |
+| Certificates | 32 | Active, Expiring, Expired, Failed, Revoked, RenewalInProgress, Wildcard, S/MIME |
 | Jobs | 50+ | 90 days of issuance, renewal, deployment jobs + 2 AwaitingApproval |
 | Discovered Certs | 12 | Unmanaged (filesystem + network), Managed (linked), Dismissed |
 | Discovery Scans | 8 | Historical + recent agent filesystem scans + network TLS scans |

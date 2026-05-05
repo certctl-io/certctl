@@ -8,7 +8,7 @@ This guide covers setup, configuration, and usage with Claude, Cursor, and other
 
 ## What Is MCP?
 
-MCP is an open protocol that connects AI assistants to external tools and data sources. Instead of copying and pasting API responses into a chat window, MCP lets the AI call your tools directly. The certctl MCP server exposes all 78 API endpoints as MCP tools — the AI sees typed schemas describing what each tool does, what parameters it accepts, and what it returns.
+MCP is an open protocol that connects AI assistants to external tools and data sources. Instead of copying and pasting API responses into a chat window, MCP lets the AI call your tools directly. The certctl MCP server exposes the certctl API as MCP tools (re-derive count via `grep -cE 'mcp\.AddTool\(' internal/mcp/tools.go`) — the AI sees typed schemas describing what each tool does, what parameters it accepts, and what it returns.
 
 The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via stdio transport. It's a stateless HTTP proxy: every MCP tool call becomes an HTTP request to the certctl REST API. No new state, no new database tables, no new attack surface beyond what the API already exposes.
 
@@ -16,7 +16,7 @@ The MCP server is a separate binary (`cmd/mcp-server/`) that communicates via st
 
 You need:
 
-1. A running certctl server (see [Quick Start](quickstart.md))
+1. A running certctl server (see [Quick Start](../getting-started/quickstart.md))
 2. The MCP server binary — either built from source or from a Docker image
 3. An MCP-compatible AI client (Claude Desktop, Cursor, VS Code with Copilot, etc.)
 
@@ -62,7 +62,7 @@ Add this to your Claude Desktop MCP configuration file (`~/Library/Application S
 }
 ```
 
-Restart Claude Desktop. You should see "certctl" appear in the MCP tools list with 78 available tools.
+Restart Claude Desktop. You should see "certctl" appear in the MCP tools list (the available-tools count varies by certctl version; the exact set is enumerated in `internal/mcp/tools.go`).
 
 ## Setting Up with Cursor
 

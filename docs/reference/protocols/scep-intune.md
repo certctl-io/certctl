@@ -374,10 +374,9 @@ the golden-file fixtures in `internal/scep/intune/testdata/`.
 
 ## Related docs
 
-- [`legacy-est-scep.md`](legacy-est-scep.md) — the per-profile SCEP
-  setup guide + RFC 8894 reference + mTLS sibling route. Read this
-  first if you're not already running certctl SCEP for non-Intune
-  fleets.
+- [`scep-server.md`](scep-server.md) — the per-profile SCEP setup
+  guide + RFC 8894 reference + mTLS sibling route. Read this first
+  if you're not already running certctl SCEP for non-Intune fleets.
 - [`architecture.md`](architecture.md) — overall control-plane
   architecture; Security Model section calls out the Intune trust
   anchor as a sensitive operator-configured surface.

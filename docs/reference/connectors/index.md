@@ -108,8 +108,8 @@ Target connectors:
 
 Three types of connectors:
 
-1. **Issuer Connector** — Obtains certificates from CAs. 9 built-in: Local CA (self-signed + sub-CA), ACME v2 (HTTP-01, DNS-01, DNS-PERSIST-01, ARI, EAB, profile selection), step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM Private CA
-2. **Target Connector** — Deploys certificates to infrastructure. 14 built-in: NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix, Dovecot, IIS (local + WinRM), F5 BIG-IP (proxy agent), SSH (agentless), Windows Certificate Store, Java Keystore, Kubernetes Secrets
+1. **Issuer Connector** — Obtains certificates from CAs. 12 built-in: Local CA (self-signed + sub-CA + tree mode; ADCS sub-CA mode is documented separately), ACME v2 (HTTP-01, DNS-01, DNS-PERSIST-01, ARI, EAB, profile selection), step-ca, OpenSSL/Custom CA, Vault PKI, DigiCert CertCentral, Sectigo SCM, Google CAS, AWS ACM Private CA, Entrust Certificate Services, GlobalSign Atlas HVCA, EJBCA (Keyfactor)
+2. **Target Connector** — Deploys certificates to infrastructure. 15 built-in: NGINX, Apache httpd, HAProxy, Traefik, Caddy, Envoy, Postfix/Dovecot (dual-mode), IIS (local PowerShell + WinRM proxy), F5 BIG-IP (proxy agent), SSH (agentless), Windows Certificate Store, Java Keystore (JKS / PKCS#12), Kubernetes Secrets, AWS Certificate Manager, Azure Key Vault
 3. **Notifier Connector** — Sends alerts about certificate events (Email, Webhooks, Slack, Microsoft Teams, PagerDuty, OpsGenie implemented)
 
 All connectors accept JSON configuration at initialization, support config validation, and are registered in the service layer. Issuer connectors run on the control plane; target connectors run on agents. For network appliances where agents can't be installed, a **proxy agent** in the same network zone handles deployment — the server never initiates outbound connections.
