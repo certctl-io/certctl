@@ -66,26 +66,35 @@ After saving, restart your MCP client. You should see "certctl" appear in its to
 
 ## Available Tools
 
-The MCP server exposes the full REST API organized across 16 resource domains:
+The MCP server exposes the full REST API organized across 22 resource domains. Re-derive the live count via `grep -cE 'gomcp\.AddTool\(' internal/mcp/tools.go internal/mcp/tools_est.go` (the per-domain numbers below decay between releases — treat them as approximate at point of writing):
 
 | Domain | Tools | Examples |
 |--------|-------|---------|
-| Certificates | 9 | List, get, create, update, archive, versions, renew, deploy, revoke |
-| CRL & OCSP | 3 | Get JSON CRL, get DER CRL by issuer, check OCSP status |
+| Certificates | 14 | List, get, create, update, archive, versions, renew, deploy, revoke, bulk-revoke / -renew / -reassign, claim/dismiss discovered |
+| CRL & OCSP | 2 | Get DER CRL by issuer, check OCSP status |
 | Issuers | 6 | List, get, create, update, delete, test connection |
 | Targets | 5 | List, get, create, update, delete |
-| Agents | 8 | List, get, register, heartbeat, CSR submit, certificate pickup, get work, report job status |
-| Jobs | 5 | List, get, cancel, approve, reject |
+| Agents | 9 | List, list retired, get, register, retire, heartbeat, get work, submit CSR, report job status |
+| Jobs | 5 | List, get, approve, reject, cancel |
 | Policies | 6 | List, get, create, update, delete, list violations |
 | Profiles | 5 | List, get, create, update, delete |
 | Teams | 5 | List, get, create, update, delete |
 | Owners | 5 | List, get, create, update, delete |
 | Agent Groups | 6 | List, get, create, update, delete, list members |
 | Audit | 2 | List events (with filters), get event by ID |
-| Notifications | 3 | List, get, mark as read |
+| Notifications | 4 | List, get, mark as read, requeue dead-letter |
 | Stats | 5 | Summary, certs by status, expiration timeline, job trends, issuance rate |
 | Metrics | 1 | System metrics (gauges, counters, uptime) |
+| Digest | 2 | Preview digest, send digest |
 | Health | 4 | Health check, readiness probe, auth info, auth check |
+| Approvals | 4 | List, get, approve, reject (issuance approval workflow) |
+| Health Checks | 8 | List, summary, get, create, update, delete, history, acknowledge |
+| Renewal Policies | 5 | List, get, create, update, delete |
+| Network Scan Targets | 6 | List, get, create, update, delete, trigger scan |
+| Discovery | 4 | List discovered certs, get, list scans, summary |
+| Intermediate CAs | 4 | List, create, get, retire (admin-gated) |
+| Verification | 3 | List cert deployments, verify job, get job verification |
+| EST | 6 | List/admin profiles, get cacerts, csrattrs, simpleenroll, simplereenroll |
 
 Every tool has typed input parameters with `jsonschema` descriptions, so the AI knows exactly what arguments to provide and what each field means.
 
@@ -125,7 +134,7 @@ flowchart LR
     AI <-->|"stdio"| MCP
     MCP -->|"HTTP + Bearer token"| SERVER
 
-    MCP ~~~ TOOLS["REST API via MCP · 16 domains\nTyped input structs"]
+    MCP ~~~ TOOLS["REST API via MCP · 22 domains\nTyped input structs"]
 ```
 
 The MCP server is intentionally thin:

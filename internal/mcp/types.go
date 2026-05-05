@@ -346,6 +346,209 @@ type DismissDiscoveredCertificateInput struct {
 	ID string `json:"id" jsonschema:"Discovered certificate ID (dc-*)"`
 }
 
+// ── Approvals (P1-28..P1-31, MCP coverage expansion) ───────────────
+
+// ListApprovalsInput is the MCP tool input for listing approval requests
+// (GET /api/v1/approvals). State filter accepts pending|approved|rejected|expired.
+// CertificateID and RequestedBy are optional pre-filters that narrow the
+// returned set; pagination matches the standard envelope.
+type ListApprovalsInput struct {
+	ListParams
+	State         string `json:"state,omitempty" jsonschema:"Filter by state: pending, approved, rejected, expired"`
+	CertificateID string `json:"certificate_id,omitempty" jsonschema:"Filter by certificate ID"`
+	RequestedBy   string `json:"requested_by,omitempty" jsonschema:"Filter by requesting actor (API-key name)"`
+}
+
+// ApprovalDecisionInput is the MCP tool input for approve / reject endpoints.
+// The decided_by actor is derived server-side from the authenticated API-key
+// name (middleware.UserKey) — NOT from this body. The two-person-integrity
+// contract (ErrApproveBySameActor) is enforced regardless of who pushes the
+// decision through MCP, so as long as the MCP server's API key identity is
+// distinct from the requesting actor, the contract holds.
+type ApprovalDecisionInput struct {
+	ID   string `json:"id" jsonschema:"Approval request ID"`
+	Note string `json:"note,omitempty" jsonschema:"Optional decision note (e.g. 'approved per ticket SECOPS-12345')"`
+}
+
+// ── Health Checks (P1-20..P1-27, MCP coverage expansion) ───────────
+
+// ListHealthChecksInput pages + filters /api/v1/health-checks.
+// Status accepts healthy|degraded|down|cert_mismatch|unknown.
+type ListHealthChecksInput struct {
+	ListParams
+	Status              string `json:"status,omitempty" jsonschema:"Filter by health status: healthy, degraded, down, cert_mismatch, unknown"`
+	CertificateID       string `json:"certificate_id,omitempty" jsonschema:"Filter by linked certificate ID"`
+	NetworkScanTargetID string `json:"network_scan_target_id,omitempty" jsonschema:"Filter by linked network-scan target ID"`
+	Enabled             string `json:"enabled,omitempty" jsonschema:"Filter by enabled state: 'true' or 'false' (omit for all)"`
+}
+
+// CreateHealthCheckInput maps to the POST /api/v1/health-checks body
+// (domain.EndpointHealthCheck JSON shape). Only `endpoint` is enforced
+// at the handler layer; defaults are applied server-side for thresholds.
+type CreateHealthCheckInput struct {
+	Endpoint            string `json:"endpoint" jsonschema:"TLS endpoint to monitor (host:port)"`
+	CertificateID       string `json:"certificate_id,omitempty" jsonschema:"Optional managed-certificate ID to bind"`
+	NetworkScanTargetID string `json:"network_scan_target_id,omitempty" jsonschema:"Optional network-scan target ID to bind"`
+	ExpectedFingerprint string `json:"expected_fingerprint,omitempty" jsonschema:"Expected SHA-256 fingerprint for cert-pin alerts"`
+	CheckIntervalSecs   int    `json:"check_interval_seconds,omitempty" jsonschema:"Probe interval in seconds (default 300)"`
+	DegradedThreshold   int    `json:"degraded_threshold,omitempty" jsonschema:"Consecutive failures before degraded (default 2)"`
+	DownThreshold       int    `json:"down_threshold,omitempty" jsonschema:"Consecutive failures before down (default 5)"`
+	Enabled             bool   `json:"enabled,omitempty" jsonschema:"Whether the check is active"`
+}
+
+// UpdateHealthCheckInput maps to PUT /api/v1/health-checks/{id}. The handler
+// performs a merge update: non-zero fields overwrite, zero fields preserve.
+type UpdateHealthCheckInput struct {
+	ID                  string `json:"id" jsonschema:"Health-check ID to update"`
+	Endpoint            string `json:"endpoint,omitempty" jsonschema:"TLS endpoint to monitor"`
+	ExpectedFingerprint string `json:"expected_fingerprint,omitempty" jsonschema:"Expected SHA-256 fingerprint"`
+	CheckIntervalSecs   int    `json:"check_interval_seconds,omitempty" jsonschema:"Probe interval in seconds"`
+	DegradedThreshold   int    `json:"degraded_threshold,omitempty" jsonschema:"Consecutive failures before degraded"`
+	DownThreshold       int    `json:"down_threshold,omitempty" jsonschema:"Consecutive failures before down"`
+	Enabled             bool   `json:"enabled,omitempty" jsonschema:"Whether the check is active"`
+}
+
+// HealthCheckHistoryInput maps to GET /api/v1/health-checks/{id}/history.
+// Limit is clamped server-side to 1000.
+type HealthCheckHistoryInput struct {
+	ID    string `json:"id" jsonschema:"Health-check ID"`
+	Limit int    `json:"limit,omitempty" jsonschema:"Max history entries to return (default 100, max 1000)"`
+}
+
+// AcknowledgeHealthCheckInput maps to POST /api/v1/health-checks/{id}/acknowledge.
+// Actor is sent in the body for the audit trail; the handler accepts an empty
+// actor and falls back to "unknown".
+type AcknowledgeHealthCheckInput struct {
+	ID    string `json:"id" jsonschema:"Health-check ID to acknowledge"`
+	Actor string `json:"actor,omitempty" jsonschema:"Actor recording the acknowledgement (defaults to 'unknown')"`
+}
+
+// ── Renewal Policies (P1-1..P1-5, MCP coverage expansion) ──────────
+
+// CreateRenewalPolicyInput maps to POST /api/v1/renewal-policies. Required:
+// name. The remaining fields drive the renewal-window, retry, and alert
+// behavior; reasonable defaults exist server-side.
+type CreateRenewalPolicyInput struct {
+	ID                   string         `json:"id,omitempty" jsonschema:"Policy ID (auto-generated if empty)"`
+	Name                 string         `json:"name" jsonschema:"Policy display name (required)"`
+	RenewalWindowDays    int            `json:"renewal_window_days,omitempty" jsonschema:"Days before expiry to start renewal (e.g. 30)"`
+	AutoRenew            bool           `json:"auto_renew,omitempty" jsonschema:"Whether the scheduler renews automatically"`
+	MaxRetries           int            `json:"max_retries,omitempty" jsonschema:"Maximum renewal retry attempts on failure"`
+	RetryInterval        int            `json:"retry_interval_seconds,omitempty" jsonschema:"Seconds between renewal retry attempts"`
+	AlertThresholdsDays  []int          `json:"alert_thresholds_days,omitempty" jsonschema:"Days-before-expiry at which to fire alerts (e.g. [30,14,7,0])"`
+	CertificateProfileID string         `json:"certificate_profile_id,omitempty" jsonschema:"Optional certificate-profile binding"`
+	AlertChannels        map[string]any `json:"alert_channels,omitempty" jsonschema:"Per-severity channel matrix (informational/warning/critical → channel list)"`
+	AlertSeverityMap     map[string]any `json:"alert_severity_map,omitempty" jsonschema:"Threshold-day → severity tier map (off-map defaults to informational)"`
+}
+
+// UpdateRenewalPolicyInput maps to PUT /api/v1/renewal-policies/{id}.
+// Replace-style update — the handler decodes into a fresh domain.RenewalPolicy
+// and forwards it to the service layer.
+type UpdateRenewalPolicyInput struct {
+	ID                   string         `json:"id" jsonschema:"Policy ID to update"`
+	Name                 string         `json:"name,omitempty" jsonschema:"Policy display name"`
+	RenewalWindowDays    int            `json:"renewal_window_days,omitempty" jsonschema:"Days before expiry to start renewal"`
+	AutoRenew            bool           `json:"auto_renew,omitempty" jsonschema:"Whether the scheduler renews automatically"`
+	MaxRetries           int            `json:"max_retries,omitempty" jsonschema:"Maximum renewal retry attempts on failure"`
+	RetryInterval        int            `json:"retry_interval_seconds,omitempty" jsonschema:"Seconds between renewal retry attempts"`
+	AlertThresholdsDays  []int          `json:"alert_thresholds_days,omitempty" jsonschema:"Days-before-expiry at which to fire alerts"`
+	CertificateProfileID string         `json:"certificate_profile_id,omitempty" jsonschema:"Optional certificate-profile binding"`
+	AlertChannels        map[string]any `json:"alert_channels,omitempty" jsonschema:"Per-severity channel matrix"`
+	AlertSeverityMap     map[string]any `json:"alert_severity_map,omitempty" jsonschema:"Threshold-day → severity tier map"`
+}
+
+// ── Network-Scan Targets (P1-14..P1-19, MCP coverage expansion) ────
+
+// CreateNetworkScanTargetInput maps to POST /api/v1/network-scan-targets.
+// CIDRs / Ports are required for a scan to do anything; the handler
+// itself only enforces JSON parse, so the operator gets a downstream
+// error for empty CIDR / Port slices.
+type CreateNetworkScanTargetInput struct {
+	ID                string   `json:"id,omitempty" jsonschema:"Target ID (auto-generated if empty)"`
+	Name              string   `json:"name" jsonschema:"Target display name"`
+	CIDRs             []string `json:"cidrs,omitempty" jsonschema:"CIDR ranges to scan (e.g. ['10.0.0.0/24'])"`
+	Ports             []int    `json:"ports,omitempty" jsonschema:"TCP ports to probe (e.g. [443, 8443])"`
+	Enabled           bool     `json:"enabled,omitempty" jsonschema:"Whether the target is active"`
+	ScanIntervalHours int      `json:"scan_interval_hours,omitempty" jsonschema:"Scan interval in hours (default 24)"`
+	TimeoutMs         int      `json:"timeout_ms,omitempty" jsonschema:"Per-endpoint TLS handshake timeout in milliseconds"`
+}
+
+// UpdateNetworkScanTargetInput maps to PUT /api/v1/network-scan-targets/{id}.
+type UpdateNetworkScanTargetInput struct {
+	ID                string   `json:"id" jsonschema:"Target ID to update"`
+	Name              string   `json:"name,omitempty" jsonschema:"Target display name"`
+	CIDRs             []string `json:"cidrs,omitempty" jsonschema:"CIDR ranges to scan"`
+	Ports             []int    `json:"ports,omitempty" jsonschema:"TCP ports to probe"`
+	Enabled           bool     `json:"enabled,omitempty" jsonschema:"Whether the target is active"`
+	ScanIntervalHours int      `json:"scan_interval_hours,omitempty" jsonschema:"Scan interval in hours"`
+	TimeoutMs         int      `json:"timeout_ms,omitempty" jsonschema:"Per-endpoint TLS handshake timeout in milliseconds"`
+}
+
+// ── Discovery (P1-10..P1-13, MCP coverage expansion) ───────────────
+
+// ListDiscoveredCertificatesInput maps to GET /api/v1/discovered-certificates.
+// Status filter accepts the enum from domain.DiscoveryStatus
+// (Unmanaged|Managed|Dismissed|...).
+type ListDiscoveredCertificatesInput struct {
+	ListParams
+	AgentID string `json:"agent_id,omitempty" jsonschema:"Filter by reporting agent ID"`
+	Status  string `json:"status,omitempty" jsonschema:"Filter by discovery status (Unmanaged, Managed, Dismissed)"`
+}
+
+// ListDiscoveryScansInput maps to GET /api/v1/discovery-scans.
+type ListDiscoveryScansInput struct {
+	ListParams
+	AgentID string `json:"agent_id,omitempty" jsonschema:"Filter by reporting agent ID"`
+}
+
+// ── Intermediate CAs (P1-6..P1-9, MCP coverage expansion) ──────────
+
+// CreateIntermediateCAInput maps to POST /api/v1/issuers/{id}/intermediates.
+// Admin-gated route. Discriminator on body shape: when ParentCAID is empty
+// AND RootCertPEM + KeyDriverID are set, the call registers an operator-
+// supplied root; otherwise it signs a child under the named parent.
+type CreateIntermediateCAInput struct {
+	IssuerID          string            `json:"issuer_id" jsonschema:"Parent issuer ID (path param)"`
+	Name              string            `json:"name" jsonschema:"Intermediate CA display name"`
+	ParentCAID        string            `json:"parent_ca_id,omitempty" jsonschema:"Parent CA ID (empty for root registration)"`
+	RootCertPEM       string            `json:"root_cert_pem,omitempty" jsonschema:"PEM-encoded root cert (root path only)"`
+	KeyDriverID       string            `json:"key_driver_id,omitempty" jsonschema:"Signer-driver ID (root path only)"`
+	Subject           map[string]any    `json:"subject,omitempty" jsonschema:"X.509 subject (common_name, organization[], country[], ...)"`
+	Algorithm         string            `json:"algorithm,omitempty" jsonschema:"Key algorithm: ECDSA-P256, RSA-3072, ..."`
+	TTLDays           int               `json:"ttl_days,omitempty" jsonschema:"Validity period in days"`
+	PathLenConstraint *int              `json:"path_len_constraint,omitempty" jsonschema:"X.509 BasicConstraints pathLen"`
+	NameConstraints   []map[string]any  `json:"name_constraints,omitempty" jsonschema:"X.509 NameConstraints (RFC 5280 §4.2.1.10)"`
+	OCSPResponderURL  string            `json:"ocsp_responder_url,omitempty" jsonschema:"OCSP responder URL embedded as AIA extension"`
+	Metadata          map[string]string `json:"metadata,omitempty" jsonschema:"Free-form metadata"`
+}
+
+// ListIntermediateCAsInput maps to GET /api/v1/issuers/{id}/intermediates.
+type ListIntermediateCAsInput struct {
+	IssuerID string `json:"issuer_id" jsonschema:"Parent issuer ID"`
+}
+
+// RetireIntermediateCAInput maps to POST /api/v1/intermediates/{id}/retire.
+// Two-phase: first call (Confirm=false) transitions active→retiring; second
+// call (Confirm=true) transitions retiring→retired.
+type RetireIntermediateCAInput struct {
+	ID      string `json:"id" jsonschema:"Intermediate CA ID to retire"`
+	Note    string `json:"note,omitempty" jsonschema:"Audit-trail note"`
+	Confirm bool   `json:"confirm,omitempty" jsonschema:"Set true on the second call to transition to fully retired"`
+}
+
+// ── Misc (P1-32..P1-35, MCP coverage expansion) ────────────────────
+
+// VerifyJobInput maps to POST /api/v1/jobs/{id}/verify. All four body fields
+// after target_id are required at the handler layer (manual emptiness checks).
+type VerifyJobInput struct {
+	ID                  string `json:"id" jsonschema:"Job ID to record verification against"`
+	TargetID            string `json:"target_id" jsonschema:"Deployment target ID (required)"`
+	ExpectedFingerprint string `json:"expected_fingerprint" jsonschema:"Expected SHA-256 fingerprint (required)"`
+	ActualFingerprint   string `json:"actual_fingerprint" jsonschema:"Probed SHA-256 fingerprint (required)"`
+	Verified            bool   `json:"verified" jsonschema:"Whether the verification probe matched"`
+	Error               string `json:"error,omitempty" jsonschema:"Optional probe error message"`
+}
+
 // ── Empty ───────────────────────────────────────────────────────────
 
 type EmptyInput struct{}

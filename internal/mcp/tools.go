@@ -30,6 +30,20 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	registerDigestTools(s, client)
 	registerHealthTools(s, client)
 	registerESTTools(s, client)
+	// 2026-05-05 CLI/API/MCP↔GUI parity audit closure (35 P1 findings).
+	// Each register function below maps to one phase of
+	// cowork/mcp-coverage-expansion-prompt.md.
+	registerApprovalTools(s, client)       // Phase A — P1-28..P1-31
+	registerHealthCheckTools(s, client)    // Phase B — P1-20..P1-27
+	registerRenewalPolicyTools(s, client)  // Phase C — P1-1..P1-5
+	registerNetworkScanTools(s, client)    // Phase D — P1-14..P1-19
+	registerDiscoveryReadTools(s, client)  // Phase E — P1-10..P1-13
+	registerIntermediateCATools(s, client) // Phase F — P1-6..P1-9
+	registerVerificationTools(s, client)   // Phase G — P1-32, P1-34, P1-35
+	// Phase G P1-33 (POST /api/v1/agents/{id}/discoveries) is
+	// intentionally NOT exposed via MCP — it is a machine-to-machine
+	// channel for agents to push filesystem-scan reports, not an
+	// operator-driven flow. See registerAgentTools for context.
 }
 
 // ── Helpers ─────────────────────────────────────────────────────────
@@ -1283,6 +1297,547 @@ func registerHealthTools(s *gomcp.Server, c *Client) {
 		Description: "Dismiss a discovered certificate (POST /api/v1/discovered-certificates/{id}/dismiss). Use this to mark a discovery as not-of-interest (e.g. expired self-signed test certs found by a network scan) — the row stops appearing in the unmanaged-list view but is preserved in the DB for audit history.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input DismissDiscoveredCertificateInput) (*gomcp.CallToolResult, any, error) {
 		data, err := c.Post("/api/v1/discovered-certificates/"+input.ID+"/dismiss", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Approvals (Phase A — P1-28..P1-31) ──────────────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. Operators using AI
+// assistants for cert-renewal in regulated environments need natural-language
+// approve/reject. The service layer enforces ErrApproveBySameActor (the
+// requesting actor cannot self-approve) and the handler extracts the
+// decided_by actor from middleware.UserKey — so the MCP server's API key
+// identity becomes the audit-trail actor automatically. Two-person integrity
+// is preserved as long as the MCP server's key is distinct from the
+// requesting actor's; the tool inputs deliberately omit any actor_id field
+// to prevent client-side spoofing.
+
+func registerApprovalTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_approvals",
+		Description: "List issuance approval requests (GET /api/v1/approvals). Optional state/certificate_id/requested_by filters narrow the returned set. Use state=pending to surface the operator-action queue.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListApprovalsInput) (*gomcp.CallToolResult, any, error) {
+		q := paginationQuery(input.Page, input.PerPage)
+		if input.State != "" {
+			q.Set("state", input.State)
+		}
+		if input.CertificateID != "" {
+			q.Set("certificate_id", input.CertificateID)
+		}
+		if input.RequestedBy != "" {
+			q.Set("requested_by", input.RequestedBy)
+		}
+		data, err := c.Get("/api/v1/approvals", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_approval",
+		Description: "Get a single approval request (GET /api/v1/approvals/{id}). Returns the full ApprovalRequest row — state, requesting actor, linked job, linked certificate.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/approvals/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_approve_request",
+		Description: "Approve an issuance request (POST /api/v1/approvals/{id}/approve). The decided_by actor is derived server-side from the authenticated API-key name; the two-person-integrity contract (ErrApproveBySameActor → HTTP 403) is enforced unconditionally. Optional `note` is captured in the audit row.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ApprovalDecisionInput) (*gomcp.CallToolResult, any, error) {
+		body := approvalDecisionPayload{Note: input.Note}
+		data, err := c.Post("/api/v1/approvals/"+input.ID+"/approve", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_reject_request",
+		Description: "Reject an issuance request (POST /api/v1/approvals/{id}/reject). Same RBAC contract as approve. Optional `note` is captured in the audit row.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ApprovalDecisionInput) (*gomcp.CallToolResult, any, error) {
+		body := approvalDecisionPayload{Note: input.Note}
+		data, err := c.Post("/api/v1/approvals/"+input.ID+"/reject", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// approvalDecisionPayload mirrors the handler-side approvalDecisionBody.
+type approvalDecisionPayload struct {
+	Note string `json:"note,omitempty"`
+}
+
+// ── Health Checks (Phase B — P1-20..P1-27) ──────────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. AI-assistant queries like
+// "are any health checks failing?" / "ack the prod nginx incident" had no
+// MCP path — operators had to drop to curl. Mirrors the existing target
+// resource shape (CRUD + history + summary + acknowledge).
+
+func registerHealthCheckTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_health_checks",
+		Description: "List monitored TLS endpoint health checks (GET /api/v1/health-checks). Optional filters: status, certificate_id, network_scan_target_id, enabled.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListHealthChecksInput) (*gomcp.CallToolResult, any, error) {
+		q := paginationQuery(input.Page, input.PerPage)
+		if input.Status != "" {
+			q.Set("status", input.Status)
+		}
+		if input.CertificateID != "" {
+			q.Set("certificate_id", input.CertificateID)
+		}
+		if input.NetworkScanTargetID != "" {
+			q.Set("network_scan_target_id", input.NetworkScanTargetID)
+		}
+		if input.Enabled != "" {
+			q.Set("enabled", input.Enabled)
+		}
+		data, err := c.Get("/api/v1/health-checks", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_health_check_summary",
+		Description: "Return aggregate counts of TLS health-check states (GET /api/v1/health-checks/summary). Useful for dashboard-style queries about endpoint posture.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/health-checks/summary", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_health_check",
+		Description: "Get a single TLS endpoint health check (GET /api/v1/health-checks/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/health-checks/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_create_health_check",
+		Description: "Create a TLS endpoint health check (POST /api/v1/health-checks). Required: endpoint (host:port). Server-side defaults: check_interval_seconds=300, degraded_threshold=2, down_threshold=5.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreateHealthCheckInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/health-checks", input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_update_health_check",
+		Description: "Update a TLS endpoint health check (PUT /api/v1/health-checks/{id}). The handler performs a merge update: non-zero numeric fields and non-empty strings overwrite, zero values preserve existing.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input UpdateHealthCheckInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Put("/api/v1/health-checks/"+input.ID, input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_delete_health_check",
+		Description: "Delete a TLS endpoint health check (DELETE /api/v1/health-checks/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Delete("/api/v1/health-checks/" + input.ID)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_health_check_history",
+		Description: "Get probe history for a TLS endpoint health check (GET /api/v1/health-checks/{id}/history). Default limit 100; max 1000 (clamped server-side).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input HealthCheckHistoryInput) (*gomcp.CallToolResult, any, error) {
+		q := url.Values{}
+		if input.Limit > 0 {
+			q.Set("limit", strconv.Itoa(input.Limit))
+		}
+		data, err := c.Get("/api/v1/health-checks/"+input.ID+"/history", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_acknowledge_health_check",
+		Description: "Acknowledge a TLS health-check incident (POST /api/v1/health-checks/{id}/acknowledge). Marks the check Acknowledged=true; the handler records the actor (defaults to 'unknown' if absent) for the audit trail.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input AcknowledgeHealthCheckInput) (*gomcp.CallToolResult, any, error) {
+		body := struct {
+			Actor string `json:"actor,omitempty"`
+		}{Actor: input.Actor}
+		data, err := c.Post("/api/v1/health-checks/"+input.ID+"/acknowledge", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Renewal Policies (Phase C — P1-1..P1-5) ─────────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. The G-1 milestone shipped
+// renewal_policies as a separate resource from the policy engine; the GUI
+// has the page and the API has full CRUD, but MCP previously had zero
+// coverage. Note: the MCP "policy" tools registered by registerPolicyTools
+// already point at /api/v1/renewal-policies (legacy alias) — these new tools
+// expose the renewal-policy domain directly with explicit naming.
+
+func registerRenewalPolicyTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_renewal_policies",
+		Description: "List renewal policies (GET /api/v1/renewal-policies). Each policy controls renewal-window, retry, and alert-threshold/severity matrix for managed certificates.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListParams) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/renewal-policies", paginationQuery(input.Page, input.PerPage))
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_renewal_policy",
+		Description: "Get a single renewal policy (GET /api/v1/renewal-policies/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/renewal-policies/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_create_renewal_policy",
+		Description: "Create a renewal policy (POST /api/v1/renewal-policies). Required: name. Reasonable defaults exist server-side for renewal_window_days, retries, and alert thresholds.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreateRenewalPolicyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/renewal-policies", input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_update_renewal_policy",
+		Description: "Update a renewal policy (PUT /api/v1/renewal-policies/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input UpdateRenewalPolicyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Put("/api/v1/renewal-policies/"+input.ID, input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_delete_renewal_policy",
+		Description: "Delete a renewal policy (DELETE /api/v1/renewal-policies/{id}). Returns HTTP 409 if any managed_certificates still reference the policy (FK-RESTRICT via ErrRenewalPolicyInUse).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Delete("/api/v1/renewal-policies/" + input.ID)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Network-Scan Targets (Phase D — P1-14..P1-19) ───────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. AI-assistant queries like
+// "what new certs did the scanner find on my fleet?" or "trigger a scan of
+// the DC1 web tier" had no MCP path. trigger_network_scan returns the
+// scan-row body so the AI can subsequently call list_discovered_certificates.
+
+func registerNetworkScanTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_network_scan_targets",
+		Description: "List network-scan targets (GET /api/v1/network-scan-targets). Each target is a (CIDR, ports) tuple the scheduler probes for TLS certificates.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/network-scan-targets", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_network_scan_target",
+		Description: "Get a single network-scan target (GET /api/v1/network-scan-targets/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/network-scan-targets/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_create_network_scan_target",
+		Description: "Create a network-scan target (POST /api/v1/network-scan-targets). Provide cidrs and ports for the scanner to probe (e.g. cidrs=['10.0.0.0/24'], ports=[443,8443]).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreateNetworkScanTargetInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/network-scan-targets", input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_update_network_scan_target",
+		Description: "Update a network-scan target (PUT /api/v1/network-scan-targets/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input UpdateNetworkScanTargetInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Put("/api/v1/network-scan-targets/"+input.ID, input)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_delete_network_scan_target",
+		Description: "Delete a network-scan target (DELETE /api/v1/network-scan-targets/{id}).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Delete("/api/v1/network-scan-targets/" + input.ID)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_trigger_network_scan",
+		Description: "Trigger an immediate network scan of a target (POST /api/v1/network-scan-targets/{id}/scan). Returns the discovery-scan body when certs are found; the AI can then call certctl_list_discovered_certificates filtered by agent_id to view results.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Post("/api/v1/network-scan-targets/"+input.ID+"/scan", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Discovery read-side (Phase E — P1-10..P1-13) ────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. The MCP server already
+// has certctl_claim_discovered_certificate + certctl_dismiss_discovered_certificate
+// (registered by registerHealthTools — historical placement; see I-2 closure).
+// This phase adds the read-side so operators can ask "what's in the triage
+// queue?" and "what did the scanner pick up overnight?".
+
+func registerDiscoveryReadTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_discovered_certificates",
+		Description: "List discovered certificates (GET /api/v1/discovered-certificates). These are TLS certs found by agent filesystem scans + network scans that are not yet under management. Filter by agent_id and/or status (Unmanaged, Managed, Dismissed).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListDiscoveredCertificatesInput) (*gomcp.CallToolResult, any, error) {
+		q := paginationQuery(input.Page, input.PerPage)
+		if input.AgentID != "" {
+			q.Set("agent_id", input.AgentID)
+		}
+		if input.Status != "" {
+			q.Set("status", input.Status)
+		}
+		data, err := c.Get("/api/v1/discovered-certificates", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_discovered_certificate",
+		Description: "Get a single discovered certificate (GET /api/v1/discovered-certificates/{id}). Returns the dc-* row including subject DN, SANs, fingerprint, observed-at endpoint, and managed_certificate_id (set if claimed).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/discovered-certificates/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_discovery_scans",
+		Description: "List discovery-scan rows (GET /api/v1/discovery-scans). Each row records one agent filesystem scan or network scan run with timing + cert-count.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListDiscoveryScansInput) (*gomcp.CallToolResult, any, error) {
+		q := paginationQuery(input.Page, input.PerPage)
+		if input.AgentID != "" {
+			q.Set("agent_id", input.AgentID)
+		}
+		data, err := c.Get("/api/v1/discovery-scans", q)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_discovery_summary",
+		Description: "Return aggregate counts of discovered-certificate states (GET /api/v1/discovery-summary). Useful for triage-queue dashboard queries.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input EmptyInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/discovery-summary", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Intermediate CAs (Phase F — P1-6..P1-9) ─────────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. Rank 8 primitive
+// (multi-level CA hierarchy management). The handlers are admin-gated via
+// middleware.IsAdmin — non-admin callers see HTTP 403 regardless of MCP
+// surface. We expose the full management API rather than carving it off
+// because the operator ran the original Rank 8 deliverable to make this
+// a first-class managed primitive; gating by API key role at the handler
+// layer is the correct least-privilege boundary, not by transport.
+
+func registerIntermediateCATools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_intermediate_cas",
+		Description: "List the intermediate-CA hierarchy under a parent issuer (GET /api/v1/issuers/{id}/intermediates). Admin-gated route. Returns flat rows; callers render the tree from each row's parent_ca_id.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input ListIntermediateCAsInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/issuers/"+input.IssuerID+"/intermediates", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_create_intermediate_ca",
+		Description: "Create an intermediate CA under a parent issuer (POST /api/v1/issuers/{id}/intermediates). Admin-gated. Discriminator: when parent_ca_id is empty AND root_cert_pem + key_driver_id are present, registers an operator-supplied root CA; otherwise signs a child under the named parent.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input CreateIntermediateCAInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]any{"name": input.Name}
+		if input.ParentCAID != "" {
+			body["parent_ca_id"] = input.ParentCAID
+		}
+		if input.RootCertPEM != "" {
+			body["root_cert_pem"] = input.RootCertPEM
+		}
+		if input.KeyDriverID != "" {
+			body["key_driver_id"] = input.KeyDriverID
+		}
+		if len(input.Subject) > 0 {
+			body["subject"] = input.Subject
+		}
+		if input.Algorithm != "" {
+			body["algorithm"] = input.Algorithm
+		}
+		if input.TTLDays > 0 {
+			body["ttl_days"] = input.TTLDays
+		}
+		if input.PathLenConstraint != nil {
+			body["path_len_constraint"] = *input.PathLenConstraint
+		}
+		if len(input.NameConstraints) > 0 {
+			body["name_constraints"] = input.NameConstraints
+		}
+		if input.OCSPResponderURL != "" {
+			body["ocsp_responder_url"] = input.OCSPResponderURL
+		}
+		if len(input.Metadata) > 0 {
+			body["metadata"] = input.Metadata
+		}
+		data, err := c.Post("/api/v1/issuers/"+input.IssuerID+"/intermediates", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_intermediate_ca",
+		Description: "Get a single intermediate CA (GET /api/v1/intermediates/{id}). Admin-gated.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/intermediates/"+input.ID, nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_retire_intermediate_ca",
+		Description: "Retire an intermediate CA (POST /api/v1/intermediates/{id}/retire). Admin-gated. Two-phase: first call (confirm=false) transitions active→retiring; second call (confirm=true) transitions retiring→retired. Refuses retired transition while active children remain (drain-first semantics).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input RetireIntermediateCAInput) (*gomcp.CallToolResult, any, error) {
+		body := struct {
+			Note    string `json:"note,omitempty"`
+			Confirm bool   `json:"confirm,omitempty"`
+		}{Note: input.Note, Confirm: input.Confirm}
+		data, err := c.Post("/api/v1/intermediates/"+input.ID+"/retire", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+}
+
+// ── Verification (Phase G — P1-32, P1-34, P1-35) ────────────────────
+//
+// 2026-05-05 CLI/API/MCP↔GUI parity audit closure. P1-33 (POST
+// /api/v1/agents/{id}/discoveries) is intentionally excluded — it is a
+// machine-to-machine push channel for agents reporting filesystem-scan
+// results, not an operator-driven flow. The remaining three round out
+// MCP coverage of certificate-deployment and job-verification surfaces.
+
+func registerVerificationTools(s *gomcp.Server, c *Client) {
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_list_certificate_deployments",
+		Description: "List deployments for a managed certificate (GET /api/v1/certificates/{id}/deployments). Returns the per-target deployment status rows for the named cert.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/certificates/"+input.ID+"/deployments", nil)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_verify_job",
+		Description: "Record post-deployment verification for a job (POST /api/v1/jobs/{id}/verify). Required: target_id, expected_fingerprint, actual_fingerprint. Typically called by agents after probing the live TLS endpoint, but exposed here for operator-driven manual verification.",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input VerifyJobInput) (*gomcp.CallToolResult, any, error) {
+		body := map[string]any{
+			"target_id":            input.TargetID,
+			"expected_fingerprint": input.ExpectedFingerprint,
+			"actual_fingerprint":   input.ActualFingerprint,
+			"verified":             input.Verified,
+		}
+		if input.Error != "" {
+			body["error"] = input.Error
+		}
+		data, err := c.Post("/api/v1/jobs/"+input.ID+"/verify", body)
+		if err != nil {
+			return errorResult(err)
+		}
+		return textResult(data)
+	})
+
+	gomcp.AddTool(s, &gomcp.Tool{
+		Name:        "certctl_get_job_verification",
+		Description: "Get the recorded verification status for a job (GET /api/v1/jobs/{id}/verification). Returns the latest VerificationResult row (expected/actual fingerprint, verified bool, timestamp).",
+	}, func(ctx context.Context, req *gomcp.CallToolRequest, input GetByIDInput) (*gomcp.CallToolResult, any, error) {
+		data, err := c.Get("/api/v1/jobs/"+input.ID+"/verification", nil)
 		if err != nil {
 			return errorResult(err)
 		}

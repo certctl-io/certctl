@@ -367,6 +367,56 @@ var allHappyPathCases = []toolCase{
 	{"est_get_csrattrs", map[string]any{"profile": "corp"}, http.MethodGet, "/.well-known/est/corp/csrattrs"},
 	{"est_enroll", map[string]any{"profile": "corp", "csr": "-----BEGIN CERTIFICATE REQUEST-----\nXXX\n-----END CERTIFICATE REQUEST-----"}, http.MethodPost, "/.well-known/est/corp/simpleenroll"},
 	{"est_reenroll", map[string]any{"profile": "corp", "csr": "-----BEGIN CERTIFICATE REQUEST-----\nXXX\n-----END CERTIFICATE REQUEST-----"}, http.MethodPost, "/.well-known/est/corp/simplereenroll"},
+
+	// 2026-05-05 CLI/API/MCP↔GUI parity audit closure — 34 new tools across 7 phases.
+
+	// Phase A — Approvals (P1-28..P1-31)
+	{"certctl_list_approvals", map[string]any{}, http.MethodGet, "/api/v1/approvals"},
+	{"certctl_get_approval", map[string]any{"id": "ar-1"}, http.MethodGet, "/api/v1/approvals/ar-1"},
+	{"certctl_approve_request", map[string]any{"id": "ar-1"}, http.MethodPost, "/api/v1/approvals/ar-1/approve"},
+	{"certctl_reject_request", map[string]any{"id": "ar-1"}, http.MethodPost, "/api/v1/approvals/ar-1/reject"},
+
+	// Phase B — Health Checks (P1-20..P1-27)
+	{"certctl_list_health_checks", map[string]any{}, http.MethodGet, "/api/v1/health-checks"},
+	{"certctl_health_check_summary", map[string]any{}, http.MethodGet, "/api/v1/health-checks/summary"},
+	{"certctl_get_health_check", map[string]any{"id": "hc-1"}, http.MethodGet, "/api/v1/health-checks/hc-1"},
+	{"certctl_create_health_check", map[string]any{"endpoint": "api.example.com:443"}, http.MethodPost, "/api/v1/health-checks"},
+	{"certctl_update_health_check", map[string]any{"id": "hc-1", "endpoint": "api.example.com:443"}, http.MethodPut, "/api/v1/health-checks/hc-1"},
+	{"certctl_delete_health_check", map[string]any{"id": "hc-1"}, http.MethodDelete, "/api/v1/health-checks/hc-1"},
+	{"certctl_health_check_history", map[string]any{"id": "hc-1"}, http.MethodGet, "/api/v1/health-checks/hc-1/history"},
+	{"certctl_acknowledge_health_check", map[string]any{"id": "hc-1"}, http.MethodPost, "/api/v1/health-checks/hc-1/acknowledge"},
+
+	// Phase C — Renewal Policies (P1-1..P1-5)
+	{"certctl_list_renewal_policies", map[string]any{}, http.MethodGet, "/api/v1/renewal-policies"},
+	{"certctl_get_renewal_policy", map[string]any{"id": "rp-1"}, http.MethodGet, "/api/v1/renewal-policies/rp-1"},
+	{"certctl_create_renewal_policy", map[string]any{"name": "weekly-rotate"}, http.MethodPost, "/api/v1/renewal-policies"},
+	{"certctl_update_renewal_policy", map[string]any{"id": "rp-1", "name": "renamed"}, http.MethodPut, "/api/v1/renewal-policies/rp-1"},
+	{"certctl_delete_renewal_policy", map[string]any{"id": "rp-1"}, http.MethodDelete, "/api/v1/renewal-policies/rp-1"},
+
+	// Phase D — Network Scan Targets (P1-14..P1-19)
+	{"certctl_list_network_scan_targets", map[string]any{}, http.MethodGet, "/api/v1/network-scan-targets"},
+	{"certctl_get_network_scan_target", map[string]any{"id": "ns-1"}, http.MethodGet, "/api/v1/network-scan-targets/ns-1"},
+	{"certctl_create_network_scan_target", map[string]any{"name": "dc1-web", "cidrs": []string{"10.0.0.0/24"}, "ports": []int{443}}, http.MethodPost, "/api/v1/network-scan-targets"},
+	{"certctl_update_network_scan_target", map[string]any{"id": "ns-1", "name": "renamed"}, http.MethodPut, "/api/v1/network-scan-targets/ns-1"},
+	{"certctl_delete_network_scan_target", map[string]any{"id": "ns-1"}, http.MethodDelete, "/api/v1/network-scan-targets/ns-1"},
+	{"certctl_trigger_network_scan", map[string]any{"id": "ns-1"}, http.MethodPost, "/api/v1/network-scan-targets/ns-1/scan"},
+
+	// Phase E — Discovery read-side (P1-10..P1-13)
+	{"certctl_list_discovered_certificates", map[string]any{}, http.MethodGet, "/api/v1/discovered-certificates"},
+	{"certctl_get_discovered_certificate", map[string]any{"id": "dc-1"}, http.MethodGet, "/api/v1/discovered-certificates/dc-1"},
+	{"certctl_list_discovery_scans", map[string]any{}, http.MethodGet, "/api/v1/discovery-scans"},
+	{"certctl_discovery_summary", map[string]any{}, http.MethodGet, "/api/v1/discovery-summary"},
+
+	// Phase F — Intermediate CAs (P1-6..P1-9)
+	{"certctl_list_intermediate_cas", map[string]any{"issuer_id": "iss-1"}, http.MethodGet, "/api/v1/issuers/iss-1/intermediates"},
+	{"certctl_create_intermediate_ca", map[string]any{"issuer_id": "iss-1", "name": "subca-1", "parent_ca_id": "ica-root"}, http.MethodPost, "/api/v1/issuers/iss-1/intermediates"},
+	{"certctl_get_intermediate_ca", map[string]any{"id": "ica-1"}, http.MethodGet, "/api/v1/intermediates/ica-1"},
+	{"certctl_retire_intermediate_ca", map[string]any{"id": "ica-1"}, http.MethodPost, "/api/v1/intermediates/ica-1/retire"},
+
+	// Phase G — Verification + deployments (P1-32, P1-34, P1-35)
+	{"certctl_list_certificate_deployments", map[string]any{"id": "mc-1"}, http.MethodGet, "/api/v1/certificates/mc-1/deployments"},
+	{"certctl_verify_job", map[string]any{"id": "j-1", "target_id": "t-1", "expected_fingerprint": "AA:BB", "actual_fingerprint": "AA:BB", "verified": true}, http.MethodPost, "/api/v1/jobs/j-1/verify"},
+	{"certctl_get_job_verification", map[string]any{"id": "j-1"}, http.MethodGet, "/api/v1/jobs/j-1/verification"},
 }
 
 // TestMCP_AllTools_HappyPath dispatches every tool against the mock API in
