@@ -2,16 +2,27 @@
 
 > Last reviewed: 2026-05-05
 >
-> This is the canonical connector reference. Per-connector deep-dive
-> pages exist for the targets that have unique operational quirks
-> (apache, f5, iis, k8s, nginx — see siblings in this directory). Other
-> connectors are documented inline in this file and will be extracted
-> to their own pages as operational depth grows. Cross-link from this
-> index to per-connector pages where they exist.
+> This is the canonical connector reference: interface contracts,
+> registry, deployment primitive, network scanner, cloud discovery.
+> Each built-in connector below has a sibling per-page that goes
+> deeper on operator-grade material (vendor edges, troubleshooting,
+> rotation playbooks, when-to-use vs alternatives). Use this index
+> to navigate; jump to the sibling pages for hands-on operator
+> material.
 
 Connectors extend certctl to integrate with external systems for certificate issuance, deployment, and notifications. This guide covers the connector interfaces, built-in implementations, and how to build your own.
 
 **Per-connector deep-dive pages** (siblings in this directory):
+
+Issuer connectors:
+
+- [ADCS integration](adcs.md) — Active Directory Certificate Services as enterprise root via Local CA sub-CA mode
+- [AWS ACM Private CA](aws-acm-pca.md) — managed private CA on AWS, IAM-authenticated
+- [DigiCert CertCentral](digicert.md) — commercial public CA (DV / OV / EV)
+- [EJBCA (Keyfactor)](ejbca.md) — self-hosted open-source / Keyfactor enterprise CA
+- [Vault PKI](vault.md) — HashiCorp Vault PKI engine, synchronous issuance
+
+Target connectors:
 
 - [Apache](apache.md) — Apache httpd connector deep dive
 - [F5 BIG-IP](f5.md) — F5 connector deep dive (proxy agent + iControl REST)
