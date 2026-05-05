@@ -32,11 +32,16 @@ Issuer connectors:
 
 Target connectors:
 
-- [Apache](apache.md) — Apache httpd connector deep dive
-- [F5 BIG-IP](f5.md) — F5 connector deep dive (proxy agent + iControl REST)
-- [IIS](iis.md) — Microsoft IIS connector deep dive (local PowerShell + WinRM modes)
-- [Kubernetes Secrets](k8s.md) — k8s.io/tls Secrets connector deep dive
-- [NGINX](nginx.md) — NGINX connector deep dive (deploy contract + quirks)
+- [Apache](apache.md) — Apache httpd, separate-file deploy + `apachectl configtest`
+- [Caddy](caddy.md) — admin-API hot reload or file-watcher fallback
+- [Envoy](envoy.md) — file SDS hot reload, optional `sds.json`
+- [F5 BIG-IP](f5.md) — proxy-agent pattern + transactional iControl REST
+- [HAProxy](haproxy.md) — combined-PEM deploy + `haproxy -c` validate
+- [IIS](iis.md) — Microsoft IIS, local PowerShell + WinRM modes
+- [Kubernetes Secrets](k8s.md) — k8s.io/tls Secrets atomic update
+- [NGINX](nginx.md) — separate-file deploy + `nginx -t` validate
+- [Postfix / Dovecot](postfix.md) — dual-mode mail-server TLS connector
+- [Traefik](traefik.md) — file-provider zero-reload deploy
 
 ## Contents
 
