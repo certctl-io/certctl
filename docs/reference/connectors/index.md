@@ -427,7 +427,7 @@ The `GetCACertPEM()` method returns the PEM-encoded CA certificate chain, used b
 - **step-ca**: Returns error — step-ca serves its own `/root` endpoint for CA distribution.
 - **OpenSSL/Custom CA**: Returns error — custom script-based CAs have no CA cert access through certctl.
 
-Note: EST and SCEP are not connectors — they are protocol handlers (`internal/api/handler/est.go` and `internal/api/handler/scep.go`) that delegate certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID` or `CERTCTL_SCEP_ISSUER_ID` (or the per-profile `CERTCTL_EST_PROFILE_<NAME>_ISSUER_ID` / `CERTCTL_SCEP_PROFILE_<NAME>_ISSUER_ID` form for multi-endpoint dispatch). Both share a common `internal/pkcs7` package for PKCS#7 response encoding. See the [Architecture Guide](architecture.md#est-server-rfc-7030) for the V2-baseline server and [`Architecture Guide::EST Production Deployment`](architecture.md#est-server-rfc-7030--production-deployment) for the post-2026-04-29 hardening master bundle.
+Note: EST and SCEP are not connectors — they are protocol handlers (`internal/api/handler/est.go` and `internal/api/handler/scep.go`) that delegate certificate issuance to whichever issuer connector is configured via `CERTCTL_EST_ISSUER_ID` or `CERTCTL_SCEP_ISSUER_ID` (or the per-profile `CERTCTL_EST_PROFILE_<NAME>_ISSUER_ID` / `CERTCTL_SCEP_PROFILE_<NAME>_ISSUER_ID` form for multi-endpoint dispatch). Both share a common `internal/pkcs7` package for PKCS#7 response encoding. See the [Architecture Guide](../architecture.md#est-server-rfc-7030) for the V2-baseline server and [`Architecture Guide::EST Production Deployment`](../architecture.md#est-server-rfc-7030--production-deployment) for the post-2026-04-29 hardening master bundle.
 
 #### Multi-profile EST dispatch + production hardening
 
@@ -446,9 +446,9 @@ A single certctl deploy can publish multiple EST endpoints — one per fleet (la
 | `CERTCTL_EST_PROFILE_<NAME>_RATE_LIMIT_PER_PRINCIPAL_24H` | No | `0` (disabled) | Sliding-window cap on enrollments per `(CSR.Subject.CN, sourceIP)` pair in any rolling 24h window. Production deploys typically set `3`. |
 | `CERTCTL_EST_PROFILE_<NAME>_SERVERKEYGEN_ENABLED` | No | `false` | Publish `POST /.well-known/est/<pathID>/serverkeygen` per RFC 7030 §4.4 (server generates the keypair, returns multipart/mixed with cert + CMS-EnvelopedData-wrapped private key). |
 
-See [`docs/est.md`](est.md) for the full operator guide — multi-profile setup, WiFi/802.1X + FreeRADIUS recipe, IoT bootstrap recipe, troubleshooting matrix per typed audit-action code, and the threat-model carve-outs (server-keygen heap-residency window, source-IP limiter process-locality, mTLS cross-profile bleed defense).
+See [`est.md`](../protocols/est.md) for the full operator guide — multi-profile setup, WiFi/802.1X + FreeRADIUS recipe, IoT bootstrap recipe, troubleshooting matrix per typed audit-action code, and the threat-model carve-outs (server-keygen heap-residency window, source-IP limiter process-locality, mTLS cross-profile bleed defense).
 
-**SCEP RA cert + key (post-2026-04-29):** the SCEP server's RFC 8894 path requires an RA cert/key pair (`CERTCTL_SCEP_RA_CERT_PATH` + `CERTCTL_SCEP_RA_KEY_PATH`, mode 0600) — clients encrypt their CSR to the RA cert's public key per RFC 8894 §3.2.2. Multi-profile deployments configure per-profile pairs via `CERTCTL_SCEP_PROFILES=corp,iot` + `CERTCTL_SCEP_PROFILE_<NAME>_RA_*_PATH`. See [`legacy-est-scep.md`](legacy-est-scep.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the openssl recipe + ChromeOS Admin Console pointer + must-staple per-profile policy.
+**SCEP RA cert + key (post-2026-04-29):** the SCEP server's RFC 8894 path requires an RA cert/key pair (`CERTCTL_SCEP_RA_CERT_PATH` + `CERTCTL_SCEP_RA_KEY_PATH`, mode 0600) — clients encrypt their CSR to the RA cert's public key per RFC 8894 §3.2.2. Multi-profile deployments configure per-profile pairs via `CERTCTL_SCEP_PROFILES=corp,iot` + `CERTCTL_SCEP_PROFILE_<NAME>_RA_*_PATH`. See [`legacy-est-scep.md`](../protocols/scep-server.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the openssl recipe + ChromeOS Admin Console pointer + must-staple per-profile policy.
 
 #### Multi-profile SCEP dispatch
 
@@ -463,7 +463,7 @@ A single certctl deploy can publish multiple SCEP endpoints — one per fleet, o
 | `CERTCTL_SCEP_PROFILE_<NAME>_RA_CERT_PATH` | Yes | — | RA cert PEM path (mode 0600 enforced). |
 | `CERTCTL_SCEP_PROFILE_<NAME>_RA_KEY_PATH` | Yes | — | RA private key PEM path (mode 0600 enforced). |
 
-See [`legacy-est-scep.md`](legacy-est-scep.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the full per-profile env-var list and the mTLS / Intune extensions.
+See [`legacy-est-scep.md`](../protocols/scep-server.md#scep-rfc-8894-native-implementation-post-2026-04-29) for the full per-profile env-var list and the mTLS / Intune extensions.
 
 #### SCEP mTLS sibling route (opt-in)
 
@@ -474,7 +474,7 @@ For deploys that already have a previously-issued certctl client cert and want a
 | `CERTCTL_SCEP_PROFILE_<NAME>_MTLS_ENABLED` | No | `false` | Set `true` to publish `/scep-mtls/<pathID>` alongside `/scep/<pathID>`. |
 | `CERTCTL_SCEP_PROFILE_<NAME>_MTLS_CLIENT_CA_TRUST_BUNDLE_PATH` | When MTLS enabled | — | PEM bundle of CAs that may sign client certs. Preflight refuses a missing/empty bundle. |
 
-See [`legacy-est-scep.md`](legacy-est-scep.md#scep-mtls-sibling-route-phase-65) for the operator recipe + threat-model rationale.
+See [`legacy-est-scep.md`](../protocols/scep-server.md#scep-mtls-sibling-route-phase-65) for the operator recipe + threat-model rationale.
 
 #### Microsoft Intune Certificate Connector dispatcher
 
@@ -489,7 +489,7 @@ When a profile has `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true`, certctl va
 | `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_CLOCK_SKEW_TOLERANCE` | No | `60s` | ±tolerance on iat/exp checks. Raise on poorly-NTP-synced fleets, lower to enforce strict time. Refused at boot when ≥ `INTUNE_CHALLENGE_VALIDITY`. |
 | `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_PER_DEVICE_RATE_LIMIT_24H` | No | `3` | Max enrollments per `(claim.Subject, claim.Issuer)` in any rolling 24h window. Zero disables. |
 
-See [`scep-intune.md`](scep-intune.md) for the full deployment guide — NDES + EJBCA migration playbook, Intune SCEP profile field mapping, trust-anchor extraction recipe, monitoring + Prometheus alert thresholds, and the Microsoft Learn citations operators paste into procurement-team requests.
+See [`scep-intune.md`](../protocols/scep-intune.md) for the full deployment guide — NDES + EJBCA migration playbook, Intune SCEP profile field mapping, trust-anchor extraction recipe, monitoring + Prometheus alert thresholds, and the Microsoft Learn citations operators paste into procurement-team requests.
 
 #### SCEP probe in network scanner
 
@@ -538,9 +538,9 @@ The DigiCert connector integrates with DigiCert's CertCentral REST API for order
 | `CERTCTL_DIGICERT_ORG_ID` | — | DigiCert organization ID |
 | `CERTCTL_DIGICERT_PRODUCT_TYPE` | `ssl_basic` | Certificate product (e.g., `ssl_basic`, `ssl_plus`, `ssl_ev`) |
 | `CERTCTL_DIGICERT_BASE_URL` | `https://www.digicert.com/services/v2` | DigiCert API base URL |
-| `CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. See [docs/async-polling.md](async-polling.md). |
+| `CERTCTL_DIGICERT_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. See [docs/reference/protocols/async-ca-polling.md](../protocols/async-ca-polling.md). |
 
-The connector submits certificate orders to DigiCert's `/order/certificate/create` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by DigiCert) and poll-based completion. `GetOrderStatus` runs bounded internal polling (5s/15s/45s/2m/5m capped, ±20% jitter, default 10-minute deadline) — see [async-polling.md](async-polling.md).
+The connector submits certificate orders to DigiCert's `/order/certificate/create` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by DigiCert) and poll-based completion. `GetOrderStatus` runs bounded internal polling (5s/15s/45s/2m/5m capped, ±20% jitter, default 10-minute deadline) — see [async-polling.md](../protocols/async-ca-polling.md).
 
 **Authentication:** API key passed via `X-DC-DEVKEY` header, with organization ID in request body.
 
@@ -563,9 +563,9 @@ The Sectigo connector integrates with Sectigo Certificate Manager's REST API for
 | `CERTCTL_SECTIGO_CERT_TYPE` | — | Certificate type ID (integer, from `/ssl/v1/types`) |
 | `CERTCTL_SECTIGO_TERM` | `365` | Certificate validity in days |
 | `CERTCTL_SECTIGO_BASE_URL` | `https://cert-manager.com/api` | Sectigo API base URL |
-| `CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. The `collectNotReady` sentinel (cert approved but not yet retrievable) rides the same backoff schedule. See [docs/async-polling.md](async-polling.md). |
+| `CERTCTL_SECTIGO_POLL_MAX_WAIT_SECONDS` | `600` | Bounded-polling deadline for `GetOrderStatus`. The `collectNotReady` sentinel (cert approved but not yet retrievable) rides the same backoff schedule. See [docs/reference/protocols/async-ca-polling.md](../protocols/async-ca-polling.md). |
 
-The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by Sectigo) and poll-based completion. `GetOrderStatus` runs bounded internal polling — see [async-polling.md](async-polling.md).
+The connector submits certificate enrollments to Sectigo's `/ssl/v1/enroll` API. DV certificates may issue immediately; OV/EV certificates require validation (handled by Sectigo) and poll-based completion. `GetOrderStatus` runs bounded internal polling — see [async-polling.md](../protocols/async-ca-polling.md).
 
 **Authentication:** Three custom headers on every request — `customerUri`, `login`, and `password`.
 
@@ -670,7 +670,7 @@ Entrust CA Gateway REST API with mutual TLS (mTLS) client certificate authentica
 | `CERTCTL_ENTRUST_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
 | `CERTCTL_ENTRUST_CA_ID` | Yes | — | Certificate Authority ID (from `GET /certificate-authorities`) |
 | `CERTCTL_ENTRUST_PROFILE_ID` | No | — | Optional enrollment profile ID |
-| `CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. Approval-pending workflows where humans approve enrollments should bump to `86400` (24h) so a single tick can wait through the approval window. See [docs/async-polling.md](async-polling.md). |
+| `CERTCTL_ENTRUST_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. Approval-pending workflows where humans approve enrollments should bump to `86400` (24h) so a single tick can wait through the approval window. See [docs/reference/protocols/async-ca-polling.md](../protocols/async-ca-polling.md). |
 
 **Authentication:** Mutual TLS — the client certificate and key are loaded via `tls.LoadX509KeyPair()` and attached to the HTTP transport. No API key or token required.
 
@@ -694,7 +694,7 @@ GlobalSign Atlas High Volume CA REST API with dual authentication: mTLS for the 
 | `CERTCTL_GLOBALSIGN_CLIENT_CERT_PATH` | Yes | — | Path to mTLS client certificate PEM |
 | `CERTCTL_GLOBALSIGN_CLIENT_KEY_PATH` | Yes | — | Path to mTLS client private key PEM |
 | `CERTCTL_GLOBALSIGN_SERVER_CA_PATH` | No | system trust store | PEM bundle used to verify the Atlas API server certificate. Set this for private/lab Atlas deployments whose server TLS chain is not in the host's default trust bundle. |
-| `CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. GlobalSign tracks orders by serial number rather than order ID; the polling shape is identical. See [docs/async-polling.md](async-polling.md). |
+| `CERTCTL_GLOBALSIGN_POLL_MAX_WAIT_SECONDS` | No | `600` (10m) | Bounded-polling deadline for `GetOrderStatus`. GlobalSign tracks orders by serial number rather than order ID; the polling shape is identical. See [docs/reference/protocols/async-ca-polling.md](../protocols/async-ca-polling.md). |
 
 **Authentication:** Dual — mTLS client certificate for TLS handshake plus `X-API-Key` and `X-API-Secret` headers on every request.
 
@@ -1747,7 +1747,7 @@ The digest HTML template includes:
 - Expiring certificates table (color-coded by urgency: 7d, 14d, 30d)
 - Auto-refresh and responsive email layout
 
-**Scheduler Integration:** The opt-in digest scheduler loop runs on configurable interval (default 24 hours). It does NOT run on startup — waits for first scheduled tick. Operation timeout is 5 minutes. Each loop execution is guarded by `sync/atomic.Bool` idempotency. See `docs/architecture.md` for the full scheduler topology (12 loops, 8 always-on + 4 opt-in).
+**Scheduler Integration:** The opt-in digest scheduler loop runs on configurable interval (default 24 hours). It does NOT run on startup — waits for first scheduled tick. Operation timeout is 5 minutes. Each loop execution is guarded by `sync/atomic.Bool` idempotency. See `docs/reference/architecture.md` for the full scheduler topology (12 loops, 8 always-on + 4 opt-in).
 
 Configuration:
 
@@ -1775,7 +1775,7 @@ API Endpoints:
 >
 > Then pass `--cacert "$CA"` (or `-k` for one-off smoke tests, never in
 > production). The same pattern is documented in
-> [`quickstart.md`](quickstart.md). Pre-U-2 these examples used `http://`
+> [`quickstart.md`](../../getting-started/quickstart.md). Pre-U-2 these examples used `http://`
 > and silently failed against the HTTPS listener; post-U-2 they speak
 > HTTPS with the operator-managed CA bundle.
 
@@ -2027,7 +2027,7 @@ curl --cacert "$CA" -s -X DELETE https://localhost:8443/api/v1/network-scan-targ
 
 ### Scheduler Integration
 
-When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs the opt-in network scanner scheduler loop alongside the always-on loops (renewal, jobs, job retry, job timeout, agent health, notifications, notification retry, short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health. See `docs/architecture.md` for the full 12-loop scheduler topology.
+When `CERTCTL_NETWORK_SCAN_ENABLED=true`, the server runs the opt-in network scanner scheduler loop alongside the always-on loops (renewal, jobs, job retry, job timeout, agent health, notifications, notification retry, short-lived expiry). It scans all enabled targets at the configured interval (default 6h). Each target tracks `last_scan_at`, `last_scan_duration_ms`, and `last_scan_certs_found` for monitoring scan health. See `docs/reference/architecture.md` for the full 12-loop scheduler topology.
 
 ### Use Cases
 
@@ -2085,7 +2085,7 @@ Source path format: `gcp-sm://{project}/{secret-name}`. Sentinel agent: `cloud-g
 
 ### Cloud Discovery Scheduler
 
-All enabled cloud sources run on a shared opt-in cloud discovery scheduler loop (see `docs/architecture.md` for the full 12-loop scheduler topology). The interval is configurable:
+All enabled cloud sources run on a shared opt-in cloud discovery scheduler loop (see `docs/reference/architecture.md` for the full 12-loop scheduler topology). The interval is configurable:
 
 | Variable | Description | Default |
 |---|---|---|
@@ -2096,6 +2096,6 @@ The loop runs immediately on startup and then on each tick. Each source runs seq
 
 ## What's Next
 
-- [Architecture Guide](architecture.md) — Understanding the full system design
-- [Quick Start](quickstart.md) — Get certctl running locally
-- [Advanced Demo](demo-advanced.md) — See the full certificate lifecycle in action
+- [Architecture Guide](../architecture.md) — Understanding the full system design
+- [Quick Start](../../getting-started/quickstart.md) — Get certctl running locally
+- [Advanced Demo](../../getting-started/advanced-demo.md) — See the full certificate lifecycle in action

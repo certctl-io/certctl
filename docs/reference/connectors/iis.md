@@ -131,8 +131,8 @@ hostname.
 
 ## Related docs
 
-- [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
-- [Vendor compatibility matrix](deployment-vendor-matrix.md)
+- [Atomic deploy + post-verify + rollback](../deployment-model.md)
+- [Vendor compatibility matrix](../vendor-matrix.md)
 
 ## Operator validation playbook (Windows host)
 
@@ -189,7 +189,7 @@ docker compose --profile deploy-e2e-windows `
 ### Acceptance
 
 Per Bundle II frozen decision 0.14, the IIS / WinCertStore cells in
-`docs/deployment-vendor-matrix.md` flip from "CI" / "pending" → "✓"
+`docs/reference/vendor-matrix.md` flip from "CI" / "pending" → "✓"
 only when ALL of the following are true:
 
 - ≥1 happy-path e2e passes against the real Windows IIS sidecar

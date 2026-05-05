@@ -118,5 +118,5 @@ update, then re-apply if desired.
 
 ## Related docs
 
-- [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
-- [Vendor compatibility matrix](deployment-vendor-matrix.md)
+- [Atomic deploy + post-verify + rollback](../deployment-model.md)
+- [Vendor compatibility matrix](../vendor-matrix.md)

@@ -78,7 +78,7 @@ per-file ownership is preserved per Bundle I Phase 5.
 `TestVendorEdge_Apache_ReloadVsRestart_PreservesConnections_E2E`
 
 In-flight TLS sessions survive `apachectl graceful` worker
-swap. Documented in `docs/deployment-atomicity.md`.
+swap. Documented in `docs/reference/deployment-model.md`.
 
 ### SNI server_name binding
 
@@ -102,5 +102,5 @@ supplied ordering across rotation.
 
 ## Related docs
 
-- [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
-- [Vendor compatibility matrix](deployment-vendor-matrix.md)
+- [Atomic deploy + post-verify + rollback](../deployment-model.md)
+- [Vendor compatibility matrix](../vendor-matrix.md)

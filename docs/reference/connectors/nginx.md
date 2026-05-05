@@ -158,7 +158,7 @@ handshakes during a deploy succeed without 5xx errors.
 
 ## Related docs
 
-- [Atomic deploy + post-verify + rollback](deployment-atomicity.md)
+- [Atomic deploy + post-verify + rollback](../deployment-model.md)
   — the Bundle I primitive every connector consumes.
-- [Vendor compatibility matrix](deployment-vendor-matrix.md)
-- [Connectors reference](connectors.md)
+- [Vendor compatibility matrix](../vendor-matrix.md)
+- [Connectors reference](index.md)
