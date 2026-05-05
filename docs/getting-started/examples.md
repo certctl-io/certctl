@@ -1,5 +1,7 @@
 # Deployment Examples
 
+> Last reviewed: 2026-05-05
+
 Five turnkey docker-compose scenarios, each runnable in under 5 minutes. Pick the one closest to your setup.
 
 ## Which Example Should I Use?

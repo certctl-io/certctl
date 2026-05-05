@@ -1,5 +1,7 @@
 # certctl V2.1 Release QA Guide
 
+> Last reviewed: 2026-05-05
+
 Comprehensive manual testing playbook. Every test has a concrete command, an explanation of what it validates and why it matters, exact expected output, and an unambiguous pass/fail criterion.
 
 ## Contents

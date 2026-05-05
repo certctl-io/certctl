@@ -1,5 +1,7 @@
 # MCP Server Guide
 
+> Last reviewed: 2026-05-05
+
 certctl ships with an MCP (Model Context Protocol) server that lets AI assistants manage your certificate infrastructure through natural language. Ask Claude to "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?" and the MCP server translates that into API calls against your certctl instance.
 
 This guide covers setup, configuration, and usage with Claude, Cursor, and other MCP-compatible tools.

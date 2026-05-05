@@ -1,5 +1,7 @@
 # NIST SP 800-57 Key Management Alignment
 
+> Last reviewed: 2026-05-05
+
 NIST SP 800-57 Part 1 Rev 5 (May 2020) is the authoritative US government guidance on cryptographic key management. This document maps certctl's implementation to its recommendations. certctl follows NIST guidance where applicable; this guide documents the alignment and identifies gaps for future roadmap planning.
 
 ## Contents

@@ -1,5 +1,7 @@
 # Runbook: cloud-target deployment connectors (AWS ACM + Azure Key Vault)
 
+> Last reviewed: 2026-05-05
+
 This runbook covers the SDK-driven cloud target connectors that ship in
 certctl post-2026-05-03 (Rank 5 of the Infisical deep-research
 deliverable). It complements the operator-facing

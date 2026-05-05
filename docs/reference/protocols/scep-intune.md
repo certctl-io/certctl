@@ -1,5 +1,7 @@
 # Microsoft Intune SCEP enrollment via certctl
 
+> Last reviewed: 2026-05-05
+
 > **Status (this document):** Phase 11 of the SCEP RFC 8894 + Intune master
 > bundle. The behavior described here is shipped on `master` and exercised
 > end-to-end by `internal/api/handler/scep_intune_e2e_test.go`. The

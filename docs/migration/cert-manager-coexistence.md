@@ -1,5 +1,7 @@
 # certctl for cert-manager Users
 
+> Last reviewed: 2026-05-05
+
 You run cert-manager inside Kubernetes and it works well for in-cluster certificates. But you also have VMs, bare-metal servers, network appliances, and legacy systems outside the cluster. cert-manager can't reach those. This guide shows how certctl complements cert-manager to give you unified certificate visibility and automation across your entire infrastructure.
 
 ## Not a Replacement

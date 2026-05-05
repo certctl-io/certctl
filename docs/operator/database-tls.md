@@ -1,5 +1,7 @@
 # Database TLS — Postgres Transport Encryption
 
+> Last reviewed: 2026-05-05
+
 **Audit reference:** Bundle B / M-018. PCI-DSS v4.0 Req 4 §2.2.5; CWE-319.
 
 certctl talks to Postgres over a single connection-string URL controlled by the

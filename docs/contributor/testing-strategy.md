@@ -1,5 +1,7 @@
 # certctl Testing Strategy & Deep-Scan Operator Runbook
 
+> Last reviewed: 2026-05-05
+
 This doc covers the **testing topology** (per-PR fast gates vs. daily deep-scan
 gates), and the **operator runbook** for re-running each deep-scan tool locally
 when the CI receipt is ambiguous or when an operator wants to validate a fix

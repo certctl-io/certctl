@@ -1,5 +1,7 @@
 # certctl Security Posture & Operator Guidance
 
+> Last reviewed: 2026-05-05
+
 This document collects the operator-facing security guidance that the source
 code's per-finding comment blocks reference. Each section names the audit
 finding it closes, the threat model, and the operator action required (if

@@ -1,5 +1,7 @@
 # Deployment Atomicity, Post-Deploy Verification, and Rollback
 
+> Last reviewed: 2026-05-05
+
 > Deploy-hardening I master bundle (v2.X.0). Operator + integrator
 > reference for the atomic-write + post-deploy TLS verify +
 > rollback pipeline that closes the procurement-checklist gap with

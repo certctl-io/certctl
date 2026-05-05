@@ -1,5 +1,7 @@
 # Runbook: certificate-expiry alerts (multi-channel)
 
+> Last reviewed: 2026-05-05
+
 This runbook covers the per-policy multi-channel expiry-alert dispatch
 path that ships in certctl post-2026-05-03 (Rank 4 of the Infisical
 deep-research deliverable). It complements the operator-facing

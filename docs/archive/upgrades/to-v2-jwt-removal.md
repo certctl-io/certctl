@@ -1,5 +1,7 @@
 # Upgrading past G-1 — `CERTCTL_AUTH_TYPE=jwt` removal
 
+> Last reviewed: 2026-05-05
+
 > **Archived 2026-05-05.** This upgrade guide applies to operators
 > upgrading past the G-1 milestone (the `CERTCTL_AUTH_TYPE=jwt` removal).
 > Current operators on post-G-1 releases don't need this. For the

@@ -1,5 +1,7 @@
 # ACME Server — Threat Model
 
+> Last reviewed: 2026-05-05
+
 Security posture for the certctl ACME server endpoint
 (`/acme/profile/<id>/*`). Read this before opening a PR that changes
 the JWS verifier, the challenge validators, the rate limiter, or the

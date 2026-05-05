@@ -1,5 +1,7 @@
 # Advanced Demo: Certificate Lifecycle End-to-End
 
+> Last reviewed: 2026-05-05
+
 This demo goes beyond browsing pre-loaded data. You'll create a team, register an owner, set up an issuer, create a certificate, trigger renewal, and watch everything appear in the dashboard in real time. Each step includes a technical explanation of what's happening inside certctl and why the system is designed that way.
 
 **Time**: 15-20 minutes

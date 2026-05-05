@@ -1,5 +1,7 @@
 # certctl Testing Environment
 
+> Last reviewed: 2026-05-05
+
 A step-by-step guide to running certctl locally with real certificate authorities. Every command is spelled out. Every expected output is shown. If something goes wrong, the troubleshooting section tells you exactly what to check.
 
 ---

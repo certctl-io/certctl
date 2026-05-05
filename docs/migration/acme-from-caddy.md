@@ -1,5 +1,7 @@
 # Caddy Integration Walkthrough
 
+> Last reviewed: 2026-05-05
+
 > **Use this walkthrough when** you're already running Caddy 2.7+ and
 > want it to ACME-issue from certctl (your internal CA, your private
 > PKI, or a local sub-CA chained under an enterprise root) instead of

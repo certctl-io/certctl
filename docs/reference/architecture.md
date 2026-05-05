@@ -1,5 +1,7 @@
 # Architecture Guide
 
+> Last reviewed: 2026-05-05
+
 ## Contents
 
 1. [Overview](#overview)

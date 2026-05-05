@@ -1,5 +1,7 @@
 # Issuance approval workflow
 
+> Last reviewed: 2026-05-05
+
 certctl can gate certificate issuance + renewal on a per-profile, two-person-integrity check. Compliance customers (PCI-DSS Level 1, FedRAMP Moderate / High, SOC 2 Type II, HIPAA) configure this on production-tier `CertificateProfile` rows so every renewal-loop tick or manual `POST /api/v1/certificates/{id}/renew` blocks at `JobStatusAwaitingApproval` until a different actor approves.
 
 Closes the procurement-checklist question "How do you enforce two-person integrity on cert issuance?" — without this surface the answer is "we don't"; with `requires_approval=true` on the profile, the answer is "here's the RBAC contract + here's the audit query that proves bypass mode is off in production."

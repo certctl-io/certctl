@@ -1,5 +1,7 @@
 # Intermediate CA hierarchy — operator runbook
 
+> Last reviewed: 2026-05-05
+
 Rank 8 of the 2026-05-03 deep-research deliverable. This page is the
 canonical reference for operators running certctl as a multi-level
 internal PKI.

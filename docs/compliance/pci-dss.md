@@ -1,5 +1,7 @@
 # PCI-DSS 4.0 Compliance Mapping
 
+> Last reviewed: 2026-05-05
+
 This guide maps certctl's existing capabilities to PCI-DSS 4.0 requirements relevant to TLS certificate and cryptographic key management. It is **not a compliance attestation** — a qualified security assessor (QSA) must evaluate your organization's complete control environment. Rather, this document helps you understand which PCI-DSS control objectives certctl supports and where operator responsibility lies.
 
 Organizations subject to PCI-DSS typically need to demonstrate control over certificate issuance, renewal, rotation, revocation, and key management. Certctl automates the technical controls for certificate lifecycle; compliance depends on how you deploy, monitor, and audit it.

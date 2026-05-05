@@ -1,5 +1,7 @@
 # Understanding Certificates: A Beginner's Guide
 
+> Last reviewed: 2026-05-05
+
 If you've never worked with TLS certificates before, this guide will get you up to speed. By the end, you'll understand what certificates are, why they matter, and why the industry's move toward shorter certificate lifespans — down to 47 days by 2029 — makes automated lifecycle management essential.
 
 ## Contents

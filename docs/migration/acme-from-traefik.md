@@ -1,5 +1,7 @@
 # Traefik Integration Walkthrough
 
+> Last reviewed: 2026-05-05
+
 > **Use this walkthrough when** you're already running Traefik 3.0+
 > (Kubernetes or VM) and want it to ACME-issue from certctl (your
 > internal CA, your private PKI, or a local sub-CA chained under an

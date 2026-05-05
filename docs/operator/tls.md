@@ -1,5 +1,7 @@
 # TLS on the Control Plane
 
+> Last reviewed: 2026-05-05
+
 certctl's control plane is HTTPS-only as of v2.2. There is no plaintext `http://` listener, no `auto` mode, no dual-listener bridge, no TLS 1.2 escape hatch. The server refuses to start without a cert+key pair, the agent/CLI/MCP clients reject `http://` URLs at startup, and the Helm chart refuses to render without either an operator-supplied Secret or a cert-manager Certificate CR.
 
 This doc covers four cert provisioning patterns, SIGHUP-based cert rotation, and the client-side CA-trust configuration agents and the CLI need to talk to the server. If you are upgrading from a pre-HTTPS release and want the step-by-step cutover procedure, read [`upgrade-to-tls.md`](upgrade-to-tls.md) first and come back here for reference.

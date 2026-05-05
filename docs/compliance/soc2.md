@@ -1,5 +1,7 @@
 # SOC 2 Type II Compliance Mapping
 
+> Last reviewed: 2026-05-05
+
 This guide maps certctl's implemented features to AICPA SOC 2 Trust Service Criteria (TSC). It is **not a SOC 2 certification claim** — rather, it helps security engineers, auditors, and evaluators understand how certctl supports your organization's SOC 2 compliance posture. Use this as evidence input for your own control assessment during SOC 2 audits.
 
 ## How to Use This Guide

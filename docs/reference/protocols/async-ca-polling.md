@@ -1,5 +1,7 @@
 # Async-CA Polling — Operator Reference
 
+> Last reviewed: 2026-05-05
+
 Closes audit fix #5 from the 2026-05-01 issuer-coverage acquisition-readiness audit.
 
 ## What this is

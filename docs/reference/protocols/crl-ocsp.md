@@ -1,5 +1,7 @@
 # CRL & OCSP — Revocation Status for Relying Parties
 
+> Last reviewed: 2026-05-05
+
 This guide is the operator + relying-party reference for certctl's revocation
 status surfaces. It covers the wire format, endpoint URLs, configuration knobs,
 the OCSP responder cert lifecycle, and how to point common consumers

@@ -1,5 +1,7 @@
 # QA Test Suite Guide (`qa_test.go`)
 
+> Last reviewed: 2026-05-05
+
 > **Audience:** Anyone running release QA for certctl — whether you're a first-time contributor or the maintainer cutting a release tag.
 >
 > **Companion to:** `docs/testing-guide.md` (the *what* to test). This document explains the *how* — the automated test file, what it covers, what it skips, and how to fill the gaps manually.

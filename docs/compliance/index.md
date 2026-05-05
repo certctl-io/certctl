@@ -1,5 +1,7 @@
 # Compliance Mapping Guides
 
+> Last reviewed: 2026-05-05
+
 certctl is a certificate lifecycle management tool, not a compliance product. It doesn't make you compliant — your organization, policies, and processes do that. What certctl provides is tooling that supports the technical controls auditors and evaluators look for when assessing certificate and key management practices.
 
 These guides map certctl's features to three widely referenced compliance frameworks. They're designed for security engineers, IT auditors, and procurement teams evaluating certctl for environments with regulatory requirements.

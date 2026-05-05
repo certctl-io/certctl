@@ -1,5 +1,7 @@
 # CI Pipeline — Operator Guide
 
+> Last reviewed: 2026-05-05
+
 > Authoritative guide to certctl's CI pipeline shape.
 > Per `cowork/ci-pipeline-cleanup-prompt.md` Phase 12.
 

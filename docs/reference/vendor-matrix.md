@@ -1,5 +1,7 @@
 # Deployment Vendor Compatibility Matrix
 
+> Last reviewed: 2026-05-05
+
 > Deploy-hardening II master bundle deliverable. The procurement-team
 > headline doc — SOC 2 / PCI auditors paste this into evidence packs.
 > Per frozen decision 0.14: a (connector × vendor-version) cell is

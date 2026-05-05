@@ -1,5 +1,7 @@
 # EST (RFC 7030) — Operator Guide
 
+> Last reviewed: 2026-05-05
+
 > **Status (this document):** EST RFC 7030 hardening master bundle Phases
 > 1–11 shipped on `master`; this guide is the Phase-12 deliverable
 > against the bundle. Every behavior described here is exercised by the

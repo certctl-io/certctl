@@ -1,5 +1,7 @@
 # Quick Start Guide
 
+> Last reviewed: 2026-05-05
+
 Certificate lifespans are dropping to **47 days by 2029**. At that cadence, a team managing 100 certificates is processing 7+ renewals per week — every week, forever. Manual processes break. certctl automates the entire lifecycle: issuance, renewal, deployment, revocation, and audit — with zero human intervention.
 
 This guide gets you running in 5 minutes and walks you through everything certctl does.

@@ -1,5 +1,7 @@
 # Upgrading to HTTPS-Everywhere (v2.2)
 
+> Last reviewed: 2026-05-05
+
 > **Archived 2026-05-05.** This upgrade guide applies to certctl < v2.2.
 > Current operators on v2.2+ already have HTTPS-only control planes and
 > don't need this procedure. For the steady-state TLS reference, see

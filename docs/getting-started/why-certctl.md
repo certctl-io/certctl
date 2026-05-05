@@ -1,5 +1,7 @@
 # Why certctl?
 
+> Last reviewed: 2026-05-05
+
 Certificate management is broken at every scale between "one domain on Let's Encrypt" and "Fortune 500 budget for Venafi." certctl fills that gap: a self-hosted platform that automates the entire certificate lifecycle, works with any CA, deploys to any server, and keeps private keys on your infrastructure. It's free, source-available, and you own everything.
 
 ## The Math That Forces the Decision

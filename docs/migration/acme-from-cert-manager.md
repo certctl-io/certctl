@@ -1,5 +1,7 @@
 # cert-manager Integration Walkthrough
 
+> Last reviewed: 2026-05-05
+
 > **Use this walkthrough when** you're already running cert-manager
 > 1.15+ in Kubernetes and want it to issue certs from certctl (your
 > internal CA, your private PKI, or a local sub-CA chained under an

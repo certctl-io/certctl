@@ -1,5 +1,7 @@
 # Disaster recovery runbook
 
+> Last reviewed: 2026-05-05
+
 > **Status (this document):** Production hardening II Phase 10
 > deliverable. Codifies the fail-safe behaviors that already exist in
 > the codebase and the operator procedures for recovering from

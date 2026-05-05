@@ -1,5 +1,7 @@
 # Migrating from Certbot to certctl
 
+> Last reviewed: 2026-05-05
+
 You have 50 Let's Encrypt certificates across 10 servers, managed by a mix of Certbot cron jobs and manual renewals. Certbot handles issuance, but you lack inventory visibility, centralized alerting, and audit trails. This guide walks you through moving to certctl while keeping your existing certificates and ACME account.
 
 ## Why Migrate

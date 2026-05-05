@@ -1,5 +1,7 @@
 # certctl ACME Server (Built-in)
 
+> Last reviewed: 2026-05-05
+
 certctl ships an RFC 8555 + RFC 9773 ARI ACME server endpoint at
 `/acme/profile/<profile-id>/*`. Any RFC 8555 client (cert-manager 1.15+,
 Caddy, Traefik, win-acme, certbot, Posh-ACME) can integrate with certctl

@@ -1,5 +1,7 @@
 # Migrate from acme.sh to certctl
 
+> Last reviewed: 2026-05-05
+
 You use acme.sh to automate Let's Encrypt renewal across multiple servers. It works — but without centralized visibility, deployment verification, or policy enforcement.
 
 This guide walks through moving your acme.sh workload to certctl while keeping your existing DNS provider setup.

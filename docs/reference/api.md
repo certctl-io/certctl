@@ -1,5 +1,7 @@
 # OpenAPI Specification Guide
 
+> Last reviewed: 2026-05-05
+
 certctl ships with a complete OpenAPI 3.1 specification at `api/openapi.yaml`. This spec documents all 78 API operations currently specified, every request/response schema, pagination conventions, authentication requirements, and error formats. It's the single source of truth for the documented REST API. (Note: The spec will be updated to include 7 additional certificate discovery endpoints from M18b.)
 
 This guide covers how to use the spec for API exploration, client SDK generation, and integration testing.
