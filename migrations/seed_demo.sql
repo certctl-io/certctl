@@ -95,8 +95,18 @@ INSERT INTO deployment_targets (id, name, type, agent_id, config, enabled, creat
   -- Rank 5 cloud target seed rows (2026-05-03 Infisical deep-research deliverable).
   -- AWS ACM and Azure Key Vault demo targets so QA can exercise the wiring
   -- end-to-end without standing up a real cloud account.
-  ('tgt-aws-acm-prod',  'AWS ACM Production',    'AWSACM',         'ag-server',      '{"region": "us-east-1", "tags": {"env": "production", "app": "api-gateway"}}', true, NOW() - INTERVAL '7 days', NOW()),
-  ('tgt-azure-kv-prod', 'Azure KeyVault Prod',   'AzureKeyVault',  'ag-server',      '{"vault_url": "https://prod-vault.vault.azure.net", "certificate_name": "api-prod", "credential_mode": "managed_identity", "tags": {"env": "production"}}', true, NOW() - INTERVAL '7 days', NOW())
+  --
+  -- 2026-05-05 fresh-clone repair: pre-fix these rows pointed at a
+  -- non-existent `ag-server` agent_id and the demo seed crashed with
+  -- `pq: insert or update on table "deployment_targets" violates foreign
+  -- key constraint "deployment_targets_agent_id_fkey"` on every fresh
+  -- `docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up`.
+  -- Bound the AWS target to the existing cloud-aws-sm sentinel agent and
+  -- the Azure target to cloud-azure-kv (both inserted at lines 78-79
+  -- alongside cloud-gcp-sm). These cloud sentinels exist precisely for
+  -- agentless cloud targets — semantic match.
+  ('tgt-aws-acm-prod',  'AWS ACM Production',    'AWSACM',         'cloud-aws-sm',   '{"region": "us-east-1", "tags": {"env": "production", "app": "api-gateway"}}', true, NOW() - INTERVAL '7 days', NOW()),
+  ('tgt-azure-kv-prod', 'Azure KeyVault Prod',   'AzureKeyVault',  'cloud-azure-kv', '{"vault_url": "https://prod-vault.vault.azure.net", "certificate_name": "api-prod", "credential_mode": "managed_identity", "tags": {"env": "production"}}', true, NOW() - INTERVAL '7 days', NOW())
 ON CONFLICT (id) DO NOTHING;
 
 -- ============================================================
