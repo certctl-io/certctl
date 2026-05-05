@@ -32,7 +32,7 @@ docker compose up -d
 
 The full walkthrough — including how HTTP-01 challenges work, adding multiple domains, switching to staging for testing, and a production checklist — is in the [example README](../examples/acme-nginx/acme-nginx.md).
 
-**Migrating from Certbot?** certctl discovers your existing `/etc/letsencrypt/live/` certificates automatically. You keep your ACME account, disable the Certbot cron, and certctl takes over renewal with centralized visibility and deployment verification. The step-by-step process is in [Migrating from Certbot](migrate-from-certbot.md).
+**Migrating from Certbot?** certctl discovers your existing `/etc/letsencrypt/live/` certificates automatically. You keep your ACME account, disable the Certbot cron, and certctl takes over renewal with centralized visibility and deployment verification. The step-by-step process is in [Migrating from Certbot](../migration/from-certbot.md).
 
 ---
 
@@ -52,7 +52,7 @@ docker compose up -d
 
 The full walkthrough — including DNS-PERSIST-01 (set a TXT record once, never touch DNS again on renewals), adapting scripts for other providers, and propagation troubleshooting — is in the [example README](../examples/acme-wildcard-dns01/acme-wildcard-dns01.md).
 
-**Migrating from acme.sh?** Your existing `dns_*` hook scripts are compatible with certctl's DNS-01 — they use the same pattern (shell scripts creating TXT records). The migration guide covers script adaptation, discovery of existing acme.sh certificates, and phasing out the acme.sh cron. See [Migrating from acme.sh](migrate-from-acmesh.md).
+**Migrating from acme.sh?** Your existing `dns_*` hook scripts are compatible with certctl's DNS-01 — they use the same pattern (shell scripts creating TXT records). The migration guide covers script adaptation, discovery of existing acme.sh certificates, and phasing out the acme.sh cron. See [Migrating from acme.sh](../migration/from-acmesh.md).
 
 ---
 
@@ -105,7 +105,7 @@ docker compose up -d
 
 The full walkthrough — including profile-based issuer assignment, testing with ACME staging, Local CA enterprise sub-CA mode, and scaling beyond Docker Compose — is in the [example README](../examples/multi-issuer/multi-issuer.md).
 
-**Using cert-manager for Kubernetes?** certctl complements cert-manager — cert-manager handles in-cluster certs, certctl handles everything outside: VMs, bare metal, network appliances, Windows servers. They can share the same CA (ACME, step-ca, Vault PKI). See [certctl for cert-manager Users](certctl-for-cert-manager-users.md).
+**Using cert-manager for Kubernetes?** certctl complements cert-manager — cert-manager handles in-cluster certs, certctl handles everything outside: VMs, bare metal, network appliances, Windows servers. They can share the same CA (ACME, step-ca, Vault PKI). See [certctl for cert-manager Users](../migration/cert-manager-coexistence.md).
 
 ---
 
@@ -117,4 +117,4 @@ These 5 scenarios cover the most common deployment patterns, but certctl support
 
 **Targets:** NGINX, Apache, HAProxy, Traefik, Caddy, Envoy, IIS (local PowerShell or WinRM proxy), Postfix, Dovecot, F5 BIG-IP (coming soon).
 
-See [Connector Reference](connectors.md) for configuration details on every issuer and target.
+See [Connector Reference](../reference/connectors/index.md) for configuration details on every issuer and target.

@@ -120,7 +120,7 @@ curl --cacert "$CA" https://localhost:8443/health
 {"status":"healthy"}
 ```
 
-If you're bringing your own cert (internal CA, cert-manager, operator-supplied Secret), see [`docs/tls.md`](tls.md) for the full provisioning matrix. If you're cutting over an existing install, see [`docs/upgrade-to-tls.md`](upgrade-to-tls.md) for the failure modes (out-of-date `http://…` agents fail at the TLS handshake) and the one-step procedure.
+If you're bringing your own cert (internal CA, cert-manager, operator-supplied Secret), see [`docs/operator/tls.md`](../operator/tls.md) for the full provisioning matrix. If you're cutting over an existing install, see [`docs/archive/upgrades/to-tls-v2.2.md`](../archive/upgrades/to-tls-v2.2.md) for the failure modes (out-of-date `http://…` agents fail at the TLS handshake) and the one-step procedure.
 
 ## Open the Dashboard
 
@@ -496,7 +496,7 @@ The `-v` flag removes the PostgreSQL data volume for a clean slate.
 **Ready to deploy with your stack?** The [Deployment Examples](examples.md) page has 5 turnkey docker-compose scenarios — pick the one closest to your setup and have it running in minutes. It also covers migration paths from Certbot, acme.sh, and cert-manager.
 
 - **[Deployment Examples](examples.md)** — ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer
-- **[Advanced Demo](demo-advanced.md)** — Issue a real certificate via the Local CA end-to-end
-- **[Architecture](architecture.md)** — How the control plane, agents, and connectors work together
+- **[Advanced Demo](advanced-demo.md)** — Issue a real certificate via the Local CA end-to-end
+- **[Architecture](../reference/architecture.md)** — How the control plane, agents, and connectors work together
 - **[Connector Reference](connectors.md)** — Configuration for all 7 issuers and 10 targets
 - **[Concepts Guide](concepts.md)** — TLS certificates, CAs, and private keys explained from scratch

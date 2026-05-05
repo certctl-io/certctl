@@ -28,7 +28,7 @@ There is no schema migration tied to this release; the only at-rest state that c
 
 ## Procedure — docker-compose operators
 
-The shipped `deploy/docker-compose.yml` includes a `certctl-tls-init` init container that self-signs an ECDSA-P256 (SHA-256 signature) cert on first boot and drops `server.crt`, `server.key`, and `ca.crt` into a named volume mounted read-only at `/etc/certctl/tls/` on the server and agent containers. No manual cert provisioning is required for the default stack. (Pre-v2.0.48 this was an ed25519 cert; see [`tls.md`](tls.md) Pattern 1 for the rationale and the `down -v && up --build` migration note.)
+The shipped `deploy/docker-compose.yml` includes a `certctl-tls-init` init container that self-signs an ECDSA-P256 (SHA-256 signature) cert on first boot and drops `server.crt`, `server.key`, and `ca.crt` into a named volume mounted read-only at `/etc/certctl/tls/` on the server and agent containers. No manual cert provisioning is required for the default stack. (Pre-v2.0.48 this was an ed25519 cert; see [`tls.md`](../../operator/tls.md) Pattern 1 for the rationale and the `down -v && up --build` migration note.)
 
 1. **Pull the HTTPS-everywhere release.** From the repo root:
 
@@ -74,7 +74,7 @@ The shipped `deploy/docker-compose.yml` includes a `certctl-tls-init` init conta
 
 ## Procedure — Helm operators
 
-The Helm chart does not self-sign. It refuses to render (`helm template` exits non-zero) unless you configure one of two cert sources: an operator-supplied Secret, or a cert-manager `Certificate` CR. See [`tls.md`](tls.md) for the full pattern catalog.
+The Helm chart does not self-sign. It refuses to render (`helm template` exits non-zero) unless you configure one of two cert sources: an operator-supplied Secret, or a cert-manager `Certificate` CR. See [`tls.md`](../../operator/tls.md) for the full pattern catalog.
 
 1. **Provision cert material.** Pick one of:
 
@@ -188,13 +188,13 @@ Once every agent is `Online`, confirm a few invariants:
 - `curl -sS -o /dev/null -w "%{http_code}\n" http://localhost:8443/health` returns `000` with `Connection refused` (no HTTP listener). Plaintext is gone.
 - `openssl s_client -connect localhost:8443 -tls1_2 </dev/null` fails the handshake. TLS 1.2 is rejected.
 - `openssl s_client -connect localhost:8443 -tls1_3 </dev/null` succeeds and prints the server's SAN list. TLS 1.3 is live.
-- A cert rotation test: overwrite the server cert on disk, `kill -HUP` the server PID, confirm the new cert serves on the next `openssl s_client -connect … -showcerts` without a process restart. See the SIGHUP section in [`tls.md`](tls.md).
+- A cert rotation test: overwrite the server cert on disk, `kill -HUP` the server PID, confirm the new cert serves on the next `openssl s_client -connect … -showcerts` without a process restart. See the SIGHUP section in [`tls.md`](../../operator/tls.md).
 
 Update your runbooks. Every `http://certctl.example.com` URL in internal documentation, monitoring config, and on-call playbooks should become `https://certctl.example.com` plus a CA-trust note.
 
 ## Related docs
 
-- [`tls.md`](tls.md) — cert provisioning patterns, SIGHUP rotation, troubleshooting
-- [`quickstart.md`](quickstart.md) — docker-compose walkthrough (post-HTTPS)
-- [`test-env.md`](test-env.md) — integration test environment (HTTPS-only)
+- [`tls.md`](../../operator/tls.md) — cert provisioning patterns, SIGHUP rotation, troubleshooting
+- [`quickstart.md`](../../getting-started/quickstart.md) — docker-compose walkthrough (post-HTTPS)
+- [`test-env.md`](../../contributor/test-environment.md) — integration test environment (HTTPS-only)
 - Milestone spec: `prompts/https-everywhere-milestone.md`

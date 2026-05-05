@@ -817,9 +817,9 @@ Certctl v3 (Pro) adds paid features that strengthen PCI-DSS compliance posture:
 ## Questions?
 
 For additional guidance on certctl features and PCI-DSS mapping:
-- Review the [Architecture Guide](architecture.md) for system design.
-- Check [Connectors Documentation](connectors.md) for issuer/target/notifier capabilities.
-- Run the [Quick Start Guide](quickstart.md) to see features in action.
+- Review the [Architecture Guide](../reference/architecture.md) for system design.
+- Check [Connectors Documentation](../reference/connectors/index.md) for issuer/target/notifier capabilities.
+- Run the [Quick Start Guide](../getting-started/quickstart.md) to see features in action.
 - Consult your QSA for final compliance determination.
 
 **Last Updated**: March 24, 2026 (certctl v1.0 with M18b discovery and M19 audit logging)

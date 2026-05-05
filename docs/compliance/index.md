@@ -6,11 +6,11 @@ These guides map certctl's features to three widely referenced compliance framew
 
 ## What's Covered
 
-**[SOC 2 Type II](compliance-soc2.md)** — Maps certctl features to AICPA Trust Service Criteria. Covers logical access controls (CC6), system operations and monitoring (CC7), change management (CC8), and availability (A1). Most relevant for organizations undergoing SOC 2 audits where certificate management is in scope.
+**[SOC 2 Type II](soc2.md)** — Maps certctl features to AICPA Trust Service Criteria. Covers logical access controls (CC6), system operations and monitoring (CC7), change management (CC8), and availability (A1). Most relevant for organizations undergoing SOC 2 audits where certificate management is in scope.
 
-**[PCI-DSS 4.0](compliance-pci-dss.md)** — Maps certctl features to PCI Data Security Standard version 4.0 requirements. Covers data-in-transit protection (Req 4), cryptographic key management (Req 3), authentication (Req 8), audit logging (Req 10), secure development (Req 6), and access control (Req 7). Most relevant for organizations handling cardholder data where TLS certificates protect transmission channels.
+**[PCI-DSS 4.0](pci-dss.md)** — Maps certctl features to PCI Data Security Standard version 4.0 requirements. Covers data-in-transit protection (Req 4), cryptographic key management (Req 3), authentication (Req 8), audit logging (Req 10), secure development (Req 6), and access control (Req 7). Most relevant for organizations handling cardholder data where TLS certificates protect transmission channels.
 
-**[NIST SP 800-57](compliance-nist.md)** — Maps certctl's key management practices to NIST Special Publication 800-57 Part 1 Rev 5 (2020). Covers key generation, storage, cryptoperiods, key state lifecycle, algorithm selection, key transport, and revocation. Most relevant for organizations aligning with US federal cryptographic guidance or using NIST as a key management baseline.
+**[NIST SP 800-57](nist-sp-800-57.md)** — Maps certctl's key management practices to NIST Special Publication 800-57 Part 1 Rev 5 (2020). Covers key generation, storage, cryptoperiods, key state lifecycle, algorithm selection, key transport, and revocation. Most relevant for organizations aligning with US federal cryptographic guidance or using NIST as a key management baseline.
 
 ## What These Guides Are Not
 

@@ -105,7 +105,7 @@ services:
       # ... rest of the certctl env block unchanged
 ```
 
-Operators hit `https://<your-host>/`, get redirected through the OIDC provider, land back at oauth2-proxy with a session cookie, and oauth2-proxy proxies their request to certctl on the internal Docker network. certctl itself is HTTPS-only on `:8443` (TLS 1.3, see [`tls.md`](tls.md)) but operator browsers never see that hop directly. Bind certctl-server's `:8443` to the internal Docker network only — do NOT publish it to the host. The audit trail will record the actor as the gateway-forwarded identity if you also configure a small bearer-token-mapping shim at the gateway (most production deployments do this with a per-user api-key issued by the gateway after OIDC validation).
+Operators hit `https://<your-host>/`, get redirected through the OIDC provider, land back at oauth2-proxy with a session cookie, and oauth2-proxy proxies their request to certctl on the internal Docker network. certctl itself is HTTPS-only on `:8443` (TLS 1.3, see [`tls.md`](../../operator/tls.md)) but operator browsers never see that hop directly. Bind certctl-server's `:8443` to the internal Docker network only — do NOT publish it to the host. The audit trail will record the actor as the gateway-forwarded identity if you also configure a small bearer-token-mapping shim at the gateway (most production deployments do this with a per-user api-key issued by the gateway after OIDC validation).
 
 ### Traefik ForwardAuth pattern (Kubernetes)
 
@@ -154,8 +154,8 @@ There is no on-disk state that changes with this upgrade — no migrations to ro
 
 ## Cross-references
 
-- [`architecture.md`](architecture.md) — "Authenticating-gateway pattern (JWT, OIDC, mTLS)" section.
-- [`tls.md`](tls.md) — TLS provisioning patterns. The gateway proxying to certctl-server still needs to trust certctl's TLS cert; same patterns apply.
+- [`architecture.md`](../../reference/architecture.md) — "Authenticating-gateway pattern (JWT, OIDC, mTLS)" section.
+- [`tls.md`](../../operator/tls.md) — TLS provisioning patterns. The gateway proxying to certctl-server still needs to trust certctl's TLS cert; same patterns apply.
 - [`../deploy/helm/certctl/README.md`](../deploy/helm/certctl/README.md) — Helm-chart-flavored guidance.
 - `internal/config/config.go::ValidAuthTypes` — the single source of truth for what's accepted post-G-1.
 - `internal/repository/postgres/db.go::wrapPingError` — unrelated; pattern for runtime diagnostic of operator misconfiguration.
