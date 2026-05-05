@@ -48,9 +48,9 @@ For the connector reference (12 issuers, 15 targets, 6 notifiers) see [`docs/ref
 
 ## Why certctl
 
-Certificate lifecycle tooling has historically split into two camps. Enterprise platforms (Venafi, Keyfactor, AppViewX, the CyberArk/Venafi merged stack) charge six-figure annual licenses, take months to deploy, and bill professional-services hours at $250 to $400 per hour to write integration code that should ship with the product. Single-purpose tools (certbot, cert-manager, acme.sh) handle one slice of the problem and leave the operator to glue the rest together. certctl fills the gap — full lifecycle automation, self-hosted, free, CA-agnostic, target-agnostic. If you're stitching together certbot cron jobs across a fleet, manually renewing certs, or writing custom Adaptable scripts to bridge a commercial CLM platform to your actual infrastructure, certctl replaces all of that.
+Certificate lifecycle tooling has historically split into two camps. Enterprise platforms charge six-figure annual licenses, take months to deploy, and bill professional-services hours at $250 to $400 per hour to write integration code that should ship with the product. Single-purpose tools handle one slice of the problem and leave the operator to glue the rest together. certctl fills the gap — full lifecycle automation, self-hosted, free, CA-agnostic, target-agnostic. If you're stitching together cron jobs across a fleet, manually renewing certs, or writing custom integration scripts to bridge a commercial CLM platform to your actual infrastructure, certctl replaces all of that.
 
-Built for **platform engineering and DevOps teams** managing 10 to 500+ certificates, **security teams** who need audit trails and policy enforcement, and **small teams without enterprise budgets** who need Venafi-grade automation for a 50-server environment. For the detailed positioning argument and when not to use certctl, see [Why certctl?](docs/getting-started/why-certctl.md).
+Built for **platform engineering and DevOps teams** managing 10 to 500+ certificates, **security teams** who need audit trails and policy enforcement, and **small teams without enterprise budgets** who need enterprise-grade automation for a 50-server environment. For the detailed positioning argument and when not to use certctl, see [Why certctl?](docs/getting-started/why-certctl.md).
 
 ## What it does
 
