@@ -2,11 +2,11 @@
 # scripts/ci-guards/L-001-insecure-skip-verify.sh
 #
 # L-001 audited every production InsecureSkipVerify=true call site
-# and documented the justification per site in docs/tls.md. This
+# and documented the justification per site in docs/operator/tls.md. This
 # script grep-fails the build if any new `InsecureSkipVerify: true`
 # lands in a non-test Go file without a `//nolint:gosec` comment
 # carrying the justification. Test files (_test.go) are exempt.
-# Updating the documented surface goes through the docs/tls.md
+# Updating the documented surface goes through the docs/operator/tls.md
 # table — net-new sites must be reasoned about before merge.
 
 set -e
@@ -32,7 +32,7 @@ if [ -n "$BAD" ]; then
   echo -e "$BAD"
   echo ""
   echo "Add a //nolint:gosec comment with justification on the same"
-  echo "or preceding line, AND add a row to the docs/tls.md table."
+  echo "or preceding line, AND add a row to the docs/operator/tls.md table."
   exit 1
 fi
 echo "L-001 insecure-skip-verify: clean."

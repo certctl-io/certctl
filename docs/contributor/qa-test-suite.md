@@ -4,13 +4,13 @@
 
 > **Audience:** Anyone running release QA for certctl — whether you're a first-time contributor or the maintainer cutting a release tag.
 >
-> **Companion to:** `docs/testing-guide.md` (the *what* to test). This document explains the *how* — the automated test file, what it covers, what it skips, and how to fill the gaps manually.
+> **Self-contained.** Through 2026-05-04 this doc was a companion to a separate `docs/testing-guide.md` (the *what* to test) — that companion was pruned during the Phase 5 docs overhaul (its content dispersed across the audience-organized doc tree). The Part-by-Part Coverage Map below is now the canonical inventory of QA Parts.
 
 ---
 
 ## Test Suite Health (regenerate via `make qa-stats`)
 
-> Snapshot at HEAD. Re-run `make qa-stats` to refresh; CI's QA-doc drift guards (`.github/workflows/ci.yml`) catch out-of-date Part / cert / issuer counts on every PR. **Last regenerated: 2026-04-27 (Bundle P).**
+> Snapshot at HEAD. Re-run `make qa-stats` to refresh; the QA-doc seed-count drift guard (`.github/workflows/ci.yml::QA-doc seed-count drift guard`) catches out-of-date cert / issuer counts on every PR. The Part-count drift guard retired in the 2026-05-04 docs overhaul Phase 5 (testing-guide.md was pruned; Part counts are now tracked inside `qa_test.go` itself, not against an external doc). **Last regenerated: 2026-04-27 (Bundle P).**
 
 | Metric | Value | Target | Status |
 |---|---|---|---|
@@ -20,23 +20,22 @@
 | Frontend test files | 38 | n/a | ℹ |
 | Fuzz targets | 11 | ≥10 (one per hand-rolled parser) | ✓ |
 | `t.Skip` sites | 60 | each carries valid rationale (Bundle O audit) | ✓ |
-| `qa_test.go` Part_* subtests | 53 | tracks `testing-guide.md` Parts (3 `## Part 15-17` covered indirectly via Parts 42–46) | ✓ |
-| `testing-guide.md` Parts | 56 | n/a | ℹ |
+| `qa_test.go` Part_* subtests | 53 | covers 49 of 56 historical QA Parts directly + Parts 15–17 indirectly via Parts 42–46 | ✓ |
 | Existential cluster line cov (post-Bundle-J + L.B + Bundle 0.7) | acme 55.6%, stepca 90.4%, local-issuer ≥86%, crypto ≥85% | ≥95% | △ ACME below; tracked in `coverage-matrix.md` |
 | Mutation kill rate (Existential) | unmeasured (operator-runnable per Strengthening #5) | ≥90% | ⚠ |
 | Race detector clean (`-count=10`) | partial (`-count=3` clean per Phase 0) | 0 races | ⚠ |
 
 ## What Is This File?
 
-`deploy/test/qa_test.go` is a single Go test file (~1700 lines) that automates as much of `docs/testing-guide.md` as possible against a running certctl Docker Compose demo stack. It replaces the legacy `qa-smoke-test.sh` bash script.
+`deploy/test/qa_test.go` is a single Go test file (~1700 lines) that automates the historical QA Part inventory (preserved in the Part-by-Part Coverage Map below) against a running certctl Docker Compose demo stack. It replaces the legacy `qa-smoke-test.sh` bash script.
 
 It covers **49 of 56 Parts** of the testing guide as automation; the remaining 7 are
 either manual-only by design or pending QA-suite coverage:
 
 - **49 `Part_*` automation wrappers**, **~159 leaf subtests** — API calls, database queries, source file checks, performance benchmarks
 - **11 fully skipped Parts** — with documented reasons (external CAs, Windows, browser-only, etc.) — see "What This Test Does NOT Cover" below
-- **4 Parts NOT YET AUTOMATED** — Parts 23 (S/MIME & EKU), 24 (OCSP/CRL), 55 (Agent Soft-Retirement), 56 (Notification Retry & Dead-Letter) — must be tested manually per `docs/testing-guide.md` until QA-suite automation lands
-- **Manual-only flows** in addition: GUI flows, scheduler timing, Docker log inspection — must be done by a human following `docs/testing-guide.md`
+- **4 Parts NOT YET AUTOMATED** — Parts 23 (S/MIME & EKU), 24 (OCSP/CRL), 55 (Agent Soft-Retirement), 56 (Notification Retry & Dead-Letter) — must be tested manually until QA-suite automation lands; the Part-by-Part Coverage Map below describes the surface area each Part covers
+- **Manual-only flows** in addition: GUI flows, scheduler timing, Docker log inspection — must be done by a human (Coverage Map below describes each)
 
 ## Architecture
 
@@ -149,8 +148,8 @@ This table shows what each Part tests and what's left for manual verification.
 | 20 | Post-Deployment Verification | 1 | 404 on nonexistent job verification | TLS probing, fingerprint comparison |
 | 21 | EST Server | 2 | CACerts (200 + content-type), CSRAttrs (200/204) | simpleenroll with CSR, simplereenroll, PKCS#7 parsing |
 | 22 | Certificate Export | 3 | PEM export, PKCS#12 export, 404 on nonexistent | Download mode, file content validation |
-| 23 | S/MIME & EKU Support | 0 (NOT AUTOMATED) | — | S/MIME profile creation; EKU enforcement on issuance; SMIMECapabilities extension presence in issued cert; rejection of profile-violating EKU on CSR. Test manually per `docs/testing-guide.md::Part 23` |
-| 24 | OCSP Responder & DER CRL | 0 (NOT AUTOMATED) | — | OCSP request/response (RFC 6960), DER CRL generation, status (Good/Revoked/Unknown), Must-Staple coordination. Test manually per `docs/testing-guide.md::Part 24` |
+| 23 | S/MIME & EKU Support | 0 (NOT AUTOMATED) | — | S/MIME profile creation; EKU enforcement on issuance; SMIMECapabilities extension presence in issued cert; rejection of profile-violating EKU on CSR. Test manually — see the Coverage Map row |
+| 24 | OCSP Responder & DER CRL | 0 (NOT AUTOMATED) | — | OCSP request/response (RFC 6960), DER CRL generation, status (Good/Revoked/Unknown), Must-Staple coordination. Test manually — see the Coverage Map row |
 | 25 | Certificate Discovery | 5 | List discovered, summary, list scan targets, create target, invalid CIDR 400 | Agent filesystem scan, claim/dismiss workflow |
 | 26 | Enhanced Query API | 4 | Sort descending, cursor pagination, time-range filter, invalid sort field | Field projection correctness, cursor token cycling |
 | 27 | Request Body Size Limits | 1 | 2MB body rejected (413/400) | Exact limit boundary (1MB) |
@@ -180,12 +179,12 @@ This table shows what each Part tests and what's left for manual verification.
 | 52 | Helm Chart | 5 | Chart.yaml, values.yaml, 4 templates exist, securityContext, health probes | `helm template` rendering, `helm install` |
 | 53 | Kubernetes Secrets Target Connector (M47) | 18 | Config validation (namespace DNS-1123, secret name DNS subdomain, label keys, required fields), deployment (create/update Secret, chain concatenation, error propagation), validation (serial comparison, not-found, empty cert) | GUI target wizard KubernetesSecrets fields (namespace, secret_name, labels, kubeconfig_path), Helm RBAC toggle, TargetDetailPage type label |
 | 54 | AWS ACM Private CA Issuer Connector (M47) | 23 | Config validation (region, CA ARN regex, signing algorithm whitelist, validity_days, defaults), issuance (full flow, empty CSR, errors), renewal (reuses issuance), revocation (reason mapping, default, errors), GetOrderStatus completed, GetCACertPEM (success/chain/error), GetRenewalInfo nil | GUI issuer wizard AWSACMPCA fields (region, ca_arn, signing_algorithm, validity_days, template_arn), seed data visibility, create issuer flow |
-| 55 | Agent Soft-Retirement (I-004) | 0 (NOT AUTOMATED) | — | Soft-retire vs hard-retire; force flag; reason capture; foreign-key cascade behavior on retired-agent cert ownership; reactivation. Test manually per `docs/testing-guide.md::Part 55` |
-| 56 | Notification Retry & Dead-Letter Queue (I-005) | 0 (NOT AUTOMATED) | — | Retry loop with exponential backoff, dead-letter transition after N retries, requeue endpoint (`POST /api/v1/notifications/{id}/requeue`), idempotency on retry. Test manually per `docs/testing-guide.md::Part 56` |
+| 55 | Agent Soft-Retirement (I-004) | 0 (NOT AUTOMATED) | — | Soft-retire vs hard-retire; force flag; reason capture; foreign-key cascade behavior on retired-agent cert ownership; reactivation. Test manually — see the Coverage Map row |
+| 56 | Notification Retry & Dead-Letter Queue (I-005) | 0 (NOT AUTOMATED) | — | Retry loop with exponential backoff, dead-letter transition after N retries, requeue endpoint (`POST /api/v1/notifications/{id}/requeue`), idempotency on retry. Test manually — see the Coverage Map row |
 
 **Totals (verified 2026-04-27):** 49 `Part_*` automation wrappers, ~159 leaf subtests, 11 fully
 skipped Parts, 4 Parts not yet automated (23, 24, 55, 56), and an unspecified count of manual-only
-flows (GUI, scheduler timing, Docker log inspection). Run `grep -cE '^## Part [0-9]+:' docs/testing-guide.md`
+flows (GUI, scheduler timing, Docker log inspection). Run `grep -cE 't\.Run\("Part[0-9]+_' deploy/test/qa_test.go` to count Part_* automation wrappers
 and `grep -cE 't\.Run\("Part[0-9]+_' deploy/test/qa_test.go` to re-verify.
 
 ## Coverage by Risk Class
@@ -194,14 +193,14 @@ A buyer's QA lead reading this doc wants "where are the existential bugs caught?
 
 | Risk class | Description | Parts in scope | Automation status |
 |---|---|---|---|
-| **Existential** (Critical paths — bugs would compromise CA, leak keys, mis-issue, bypass revocation) | Crypto, PKCS#7, local-issuer, OCSP/CRL, agent keygen, CSR validation | 5 (Revocation), 21 (EST), 23 (S/MIME EKU), 24 (OCSP/CRL), 47 (Digest with cert content), 53 (K8s Secrets), 54 (AWS PCA) | 5/7 automated; Parts 23 + 24 pending (Bundle I Skip stubs in `qa_test.go`; manual playbook in `testing-guide.md`) |
+| **Existential** (Critical paths — bugs would compromise CA, leak keys, mis-issue, bypass revocation) | Crypto, PKCS#7, local-issuer, OCSP/CRL, agent keygen, CSR validation | 5 (Revocation), 21 (EST), 23 (S/MIME EKU), 24 (OCSP/CRL), 47 (Digest with cert content), 53 (K8s Secrets), 54 (AWS PCA) | 5/7 automated; Parts 23 + 24 pending (Bundle I Skip stubs in `qa_test.go`; manual playbook in the Coverage Map below) |
 | **High** (FSM corruption, credential leak, authn/z weakening) | Renewal, jobs, agents, issuers, deployment, scheduler | 4, 7, 8, 9, 18, 19, 20, 22, 25, 28, 29, 32, 33, 48, 49, 55, 56 | 14/17 automated; CLI / MCP / scheduler-loop are inherently SKIP (require compiled binaries / Docker logs); Parts 55 + 56 pending |
 | **Medium** (Operational pain or silent data drift) | Targets, notifiers, observability, error handling, performance, regression | 14, 15-17, 30, 31, 38, 39, 40, 41, 42, 43, 44, 45, 46 | 14/14 automated (15-17 indirect via Parts 42–46) |
 | **Low** (Hygiene) | Documentation, docs verification | 40 (Documentation), 50 (Onboarding) | 2/2 automated |
 | **Frontend** (XSS, render correctness, mutation contracts) | GUI testing | 35, 36-37 | 0/3 automated in this suite (Vitest covers separately under `web/`); this doc punts to manual + Vitest |
 | **Compliance** (PCI / SOC2 / HIPAA-relevant) | Audit trail, body-size limits, request limits, Helm chart deploy posture | 27, 32, 51, 52 | 4/4 automated |
 
-This is the table acquisition reviewers screenshot for their report. When a new Part lands in `testing-guide.md`, classify it here; the QA-doc Part-count drift guard (`.github/workflows/ci.yml::QA-doc Part-count drift guard`) catches the count mismatch.
+This is the table acquisition reviewers screenshot for their report. When a new Part_* subtest lands in `qa_test.go`, classify it here.
 
 ## Test Categories
 
@@ -233,11 +232,11 @@ Timed API requests with threshold assertions:
 
 ## What This Test Does NOT Cover
 
-These gaps must be filled by manual testing per `docs/testing-guide.md`:
+These gaps must be filled by manual testing — see each Coverage Map row for surface-area description:
 
 ### Not Yet Automated (Parts 23, 24, 55, 56)
 
-These Parts are documented in `docs/testing-guide.md` but have no `Part_*` automation
+These historical QA Parts are listed in the Coverage Map below but have no `Part_*` automation
 in `qa_test.go` yet. They are operator-runnable from the manual playbook; QA-suite
 automation should land before the next acquisition-grade release.
 
@@ -431,7 +430,7 @@ grep -oE 'mutation score is [0-9.]+' tool-output/mutation-crypto.txt | tail -1
 
 When a new feature ships:
 
-1. **Add a Part section** in `qa_test.go` following the numbering in `docs/testing-guide.md`
+1. **Add a Part section** in `qa_test.go` following the numbering convention in the Coverage Map below
 2. **API tests**: use `c.get()`, `c.post()`, `c.bodyStr()`, `c.getJSON()`, `c.timedGet()`
 3. **Source checks**: use `fileExists(t, "relative/path")` and `fileContains(t, "path", "substring")`
 4. **DB checks**: use `openQADB(t)` and `db.queryInt(t, "SELECT ...")`

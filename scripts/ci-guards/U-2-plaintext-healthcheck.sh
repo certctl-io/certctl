@@ -11,7 +11,7 @@
 # HEALTHCHECK that targets `http://` against the certctl server
 # port.
 #
-# Comment lines and the docs/upgrade-to-tls.md:182 expected-to-
+# Comment lines and the docs/archive/upgrades/to-tls-v2.2.md:182 expected-to-
 # fail invariant ("plaintext is gone, expect Connection refused")
 # are intentionally exempt — we DO want the upgrade-doc string
 # `http://localhost:8443/health` to remain there, since it

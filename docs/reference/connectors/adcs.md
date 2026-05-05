@@ -87,10 +87,11 @@ When the certctl sub-CA cert is approaching expiry:
 1. Generate a new keypair (re-keying is recommended at sub-CA
    rotation time).
 2. CSR + ADCS signing cycle as above.
-3. Stage the new cert and key at fresh paths
-   (`CERTCTL_CA_CERT_PATH_NEW` etc.) and follow the
+3. Stage the new cert and key at fresh on-disk paths and follow the
    [intermediate-CA hierarchy
-   runbook](../intermediate-ca-hierarchy.md) for the cutover. The
+   runbook](../intermediate-ca-hierarchy.md) for the cutover (rotate
+   `CERTCTL_CA_CERT_PATH` / `CERTCTL_CA_KEY_PATH` to the new files
+   when ready). The
    key concern is overlap: both the old and new sub-CA certs must
    chain to the ADCS root during the rollover so existing leaves
    keep validating.

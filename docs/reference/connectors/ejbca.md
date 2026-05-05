@@ -103,11 +103,10 @@ replaces the connector without restart. Prior issuance state
 ### Diagnosing approval-pending hangs
 
 If `GetOrderStatus` consistently times out, the operator approval
-queue in EJBCA is the most common cause. Bump
-`CERTCTL_EJBCA_POLL_MAX_WAIT_SECONDS` so a single tick can wait
-through the full approval window — see
+queue in EJBCA is the most common cause. The connector consumes
+the shared bounded-polling primitive — see
 [async-ca-polling.md](../protocols/async-ca-polling.md) for the
-schedule shape.
+schedule shape and tuning approach.
 
 ## Related docs
 

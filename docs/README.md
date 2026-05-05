@@ -29,6 +29,7 @@ You're operating certctl in production or building integrations and need authori
 | [Architecture](reference/architecture.md) | System design, data flow, security model, deployment topologies |
 | [API](reference/api.md) | OpenAPI 3.1 spec, integration patterns, client SDK generation |
 | [CLI](reference/cli.md) | certctl-cli command reference and CI/CD integration patterns |
+| [Configuration](reference/configuration.md) | `CERTCTL_*` environment variable reference (scheduler, rate limits, deploy verify, audit, agent) |
 | [MCP server](reference/mcp.md) | Model Context Protocol integration for AI assistants |
 | [Release verification](reference/release-verification.md) | Cosign / SLSA / SBOM verification procedure |
 | [Intermediate CA hierarchy](reference/intermediate-ca-hierarchy.md) | Multi-level CA tree management — RFC 5280 §3.2/§4.2.1.9/§4.2.1.10 enforcement |

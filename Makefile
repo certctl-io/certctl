@@ -119,15 +119,18 @@ verify:
 	@echo ""
 	@echo "verify: PASS — safe to commit"
 
-# verify-docs: pre-tag gate. Runs the QA-doc Part-count + seed-count
-# drift guards that ci-pipeline-cleanup Phase 11 / frozen decision 0.13
-# moved out of CI (was per-push blocking; now operator-runs pre-tag).
-# These guards protect docs/qa-test-guide.md headlines from drifting
-# vs the underlying source-of-truth (testing-guide Part count, seed
-# row count). Operator-facing docs only — not product-affecting.
+# verify-docs: pre-tag gate. Runs the QA-doc seed-count drift guard
+# that ci-pipeline-cleanup Phase 11 / frozen decision 0.13 moved out
+# of CI (was per-push blocking; now operator-runs pre-tag). Protects
+# docs/contributor/qa-test-suite.md::Seed Data Reference from
+# drifting vs migrations/seed_demo.sql. Operator-facing docs only —
+# not product-affecting.
+#
+# The QA-doc Part-count drift guard retired in the 2026-05-04 docs
+# overhaul Phase 5 when docs/testing-guide.md was pruned (its content
+# dispersed across the audience-organized doc tree); the Part-count
+# class no longer exists outside the qa_test.go file itself.
 verify-docs:
-	@echo "==> QA-doc Part-count drift"
-	@bash scripts/qa-doc-part-count.sh
 	@echo "==> QA-doc seed-count drift"
 	@bash scripts/qa-doc-seed-count.sh
 	@echo ""
@@ -263,9 +266,12 @@ frontend-build:
 	@echo "Frontend build complete"
 
 # QA Suite Stats — Bundle P / Strengthening #8.
-# Single source-of-truth for every count claim in docs/qa-test-guide.md +
-# docs/testing-guide.md. The Strengthening #6 CI drift guards consume the
-# same numbers, eliminating the doc-drift class structurally.
+# Single source-of-truth for every count claim in
+# docs/contributor/qa-test-suite.md. The Strengthening #6 CI drift guards
+# (now scoped to the seed-count class only — the Part-count class retired
+# in the 2026-05-04 docs overhaul Phase 5 when testing-guide.md was
+# pruned) consume the same numbers, eliminating the doc-drift class
+# structurally.
 qa-stats:
 	@echo "=== certctl QA Suite Stats ==="
 	@echo "Date: $$(date +%Y-%m-%d)"
@@ -278,7 +284,6 @@ qa-stats:
 	@echo "Fuzz targets: $$(grep -rE 'func Fuzz[A-Z]' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ')"
 	@echo "t.Skip sites: $$(grep -rE 't\.Skip(Now|f)?\(' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ')"
 	@echo "qa_test.go Part_ subtests: $$(grep -cE 't\.Run\(\"Part[0-9]+_' deploy/test/qa_test.go 2>/dev/null || echo 0)"
-	@echo "testing-guide.md Parts: $$(grep -cE '^## Part [0-9]+:' docs/testing-guide.md 2>/dev/null || echo 0)"
 	@echo "Seed unique mc-* IDs:  $$(grep -oE "mc-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
 	@echo "Seed unique ag-* IDs:  $$(grep -oE "ag-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (incl. agent_groups; agents-table count is 12)"
 	@echo "Seed unique iss-* IDs: $$(grep -oE "iss-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (issuers table count is 13)"

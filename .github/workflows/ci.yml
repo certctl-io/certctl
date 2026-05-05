@@ -79,7 +79,7 @@ jobs:
         # does call, this step fails the build until either upstream
         # ships a fix OR we cut the dep. Deferred-call advisories that
         # legitimately can't be remediated yet should be added to the
-        # NIST SSDF deviation log in docs/security.md, not silenced here.
+        # NIST SSDF deviation log in docs/operator/security.md, not silenced here.
         run: govulncheck ./...
 
       - name: Install staticcheck (Bundle-7 / D-001)
@@ -135,48 +135,38 @@ jobs:
           GITHUB_REPOSITORY: ${{ github.repository }}
         run: bash scripts/coverage-pr-comment.sh
 
-      # Bundle P / Strengthening #6 — QA-doc drift guards. Forces every PR
-      # that adds a Part to docs/testing-guide.md OR a seed row to
-      # migrations/seed_demo.sql to keep docs/qa-test-guide.md in sync. This
-      # eliminates the doc-drift class structurally — the symptom Bundle I
-      # had to clean up by hand becomes a CI-time error going forward.
-      - name: QA-doc Part-count drift guard
-        run: |
-          set -e
-          DOC_PARTS=$(grep -oE '49 of [0-9]+ Parts' docs/qa-test-guide.md | grep -oE '[0-9]+' | tail -1)
-          GUIDE_PARTS=$(grep -cE '^## Part [0-9]+:' docs/testing-guide.md)
-          if [ -z "$DOC_PARTS" ]; then
-            echo "::error::Could not extract Part count from docs/qa-test-guide.md headline."
-            echo "  Expected pattern: '49 of <N> Parts'"
-            exit 1
-          fi
-          if [ "$DOC_PARTS" != "$GUIDE_PARTS" ]; then
-            echo "::error::DRIFT — qa-test-guide.md headline claims $DOC_PARTS Parts; testing-guide.md has $GUIDE_PARTS Parts."
-            echo "  Update docs/qa-test-guide.md to match. Bundle I patched this once;"
-            echo "  Bundle P added this guard so the drift cannot recur silently."
-            exit 1
-          fi
-          echo "QA-doc Part-count drift guard: clean ($DOC_PARTS == $GUIDE_PARTS)."
-
+      # Bundle P / Strengthening #6 — QA-doc seed-count drift guard. Forces
+      # every PR that adds a seed row to migrations/seed_demo.sql to keep
+      # docs/contributor/qa-test-suite.md::Seed Data Reference in sync.
+      #
+      # Phase 5 of the 2026-05-04 docs overhaul (commit c64777f) deleted
+      # docs/testing-guide.md (its content dispersed across the new
+      # audience-organized doc tree); the previous QA-doc Part-count drift
+      # guard tracked Part counts between testing-guide.md and the old
+      # qa-test-guide.md headline. With testing-guide.md gone, that guard's
+      # premise is dead and it has been removed. The seed-count drift class
+      # is still live: qa-test-suite.md::Seed Data Reference enumerates
+      # certs/issuers and seed_demo.sql is the source of truth.
       - name: QA-doc seed-count drift guard
         run: |
           set -e
+          DOC=docs/contributor/qa-test-suite.md
           # Seed-cert count: agnostic to documented header format. The current
           # documented count lives in `### Certificates (32 total in ...` —
           # extract the first integer in that header.
-          DOC_CERTS=$(grep -oE '### Certificates \([0-9]+' docs/qa-test-guide.md | grep -oE '[0-9]+' | head -1)
+          DOC_CERTS=$(grep -oE '### Certificates \([0-9]+' "$DOC" | grep -oE '[0-9]+' | head -1)
           # Authoritative count: unique mc-* IDs in seed_demo.sql.
           SEED_CERTS=$(grep -oE 'mc-[a-z0-9_-]+' migrations/seed_demo.sql | sort -u | wc -l | tr -d ' ')
           if [ -z "$DOC_CERTS" ]; then
-            echo "::warning::Could not extract documented cert count from docs/qa-test-guide.md."
+            echo "::warning::Could not extract documented cert count from $DOC."
             echo "  Skipping cert-count drift check (header format may have changed)."
           elif [ "$DOC_CERTS" != "$SEED_CERTS" ]; then
-            echo "::error::DRIFT — qa-test-guide.md says $DOC_CERTS certs; seed_demo.sql has $SEED_CERTS unique mc-* IDs."
-            echo "  Update docs/qa-test-guide.md::Seed Data Reference to match."
+            echo "::error::DRIFT — $DOC says $DOC_CERTS certs; seed_demo.sql has $SEED_CERTS unique mc-* IDs."
+            echo "  Update $DOC::Seed Data Reference to match."
             exit 1
           fi
           # Issuers: seed-table count vs doc claim.
-          DOC_ISS=$(grep -oE '### Issuers \([0-9]+' docs/qa-test-guide.md | grep -oE '[0-9]+' | head -1)
+          DOC_ISS=$(grep -oE '### Issuers \([0-9]+' "$DOC" | grep -oE '[0-9]+' | head -1)
           # Authoritative: unique iss-* IDs (close enough proxy; the issuers
           # table count IS the unique-ID count for this prefix).
           SEED_ISS=$(grep -oE 'iss-[a-z0-9_-]+' migrations/seed_demo.sql | sort -u | wc -l | tr -d ' ')
@@ -186,7 +176,7 @@ jobs:
             # Allow up to 5pp slack — iss-* IDs appear in audit_events and
             # other reference tables that aren't issuer-table rows. Drift
             # only flags when the spread grows large.
-            echo "::error::DRIFT — qa-test-guide.md says $DOC_ISS issuers; seed_demo.sql has $SEED_ISS unique iss-* IDs (spread > 5)."
+            echo "::error::DRIFT — $DOC says $DOC_ISS issuers; seed_demo.sql has $SEED_ISS unique iss-* IDs (spread > 5)."
             exit 1
           fi
           echo "QA-doc seed-count drift guard: clean."
@@ -209,7 +199,7 @@ jobs:
       # 167 legitimate tests for no observable behavior change. The
       # Test<Func>_<Scenario>_<ExpectedResult> form remains documented as
       # the recommended pattern for parameterized scenarios in
-      # docs/qa-test-guide.md, but is not gated.
+      # docs/contributor/qa-test-suite.md, but is not gated.
       - name: Regression guards (extracted to scripts/ci-guards/)
         # All named regression guards live at scripts/ci-guards/<id>.sh per
         # ci-pipeline-cleanup bundle Phase 1. Each guard is callable locally:
@@ -289,7 +279,7 @@ jobs:
       # HTTPS-Everywhere (v2.0.47): the chart fails render when no TLS source is
       # configured. Every lint/template invocation below must pick exactly one
       # provisioning mode — see deploy/helm/certctl/templates/_helpers.tpl
-      # (certctl.tls.required) and docs/tls.md.
+      # (certctl.tls.required) and docs/operator/tls.md.
       - name: Lint Helm Chart
         run: |
           helm lint deploy/helm/certctl/ \

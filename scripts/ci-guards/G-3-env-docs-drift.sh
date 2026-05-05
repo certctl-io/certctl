@@ -101,7 +101,7 @@ if [ -n "$CONFIG_ONLY" ]; then
   echo "::error::G-3 regression: env var(s) defined in Go source but never documented:"
   echo "$CONFIG_ONLY"
   echo ""
-  echo "Add an entry to docs/features.md (or another canonical doc) so operators can find it."
+  echo "Add an entry to the canonical config doc (docs/reference/architecture.md or the per-connector pages under docs/reference/connectors/) (or another canonical doc) so operators can find it."
   exit 1
 fi
 echo "G-3 env-docs-drift: clean."
