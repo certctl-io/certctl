@@ -4,7 +4,7 @@
 
 certctl's control plane is HTTPS-only as of v2.2. There is no plaintext `http://` listener, no `auto` mode, no dual-listener bridge, no TLS 1.2 escape hatch. The server refuses to start without a cert+key pair, the agent/CLI/MCP clients reject `http://` URLs at startup, and the Helm chart refuses to render without either an operator-supplied Secret or a cert-manager Certificate CR.
 
-This doc covers four cert provisioning patterns, SIGHUP-based cert rotation, and the client-side CA-trust configuration agents and the CLI need to talk to the server. If you are upgrading from a pre-HTTPS release and want the step-by-step cutover procedure, read [`upgrade-to-tls.md`](upgrade-to-tls.md) first and come back here for reference.
+This doc covers four cert provisioning patterns, SIGHUP-based cert rotation, and the client-side CA-trust configuration agents and the CLI need to talk to the server. If you are upgrading from a pre-HTTPS release and want the step-by-step cutover procedure, read [`upgrade-to-tls.md`](../archive/upgrades/to-tls-v2.2.md) first and come back here for reference.
 
 ## What you get
 
@@ -175,7 +175,7 @@ Both files exist but `tls.LoadX509KeyPair` refused them. Typical causes: the pri
 The client did not trust the CA that signed the server cert. Either mount the CA bundle via `CERTCTL_SERVER_CA_BUNDLE_PATH`, add the CA to the system trust store on the client host, or (dev only) set `CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true`.
 
 **Client side: `tls: first record does not look like a TLS handshake`**
-The client is speaking plaintext HTTP to an HTTPS server (or vice-versa). Check that `CERTCTL_SERVER_URL` starts with `https://`. If you are upgrading from a pre-v2.2 release and your agents are old, they will surface this error until you roll the DaemonSet — see [`upgrade-to-tls.md`](upgrade-to-tls.md).
+The client is speaking plaintext HTTP to an HTTPS server (or vice-versa). Check that `CERTCTL_SERVER_URL` starts with `https://`. If you are upgrading from a pre-v2.2 release and your agents are old, they will surface this error until you roll the DaemonSet — see [`upgrade-to-tls.md`](../archive/upgrades/to-tls-v2.2.md).
 
 ## InsecureSkipVerify justifications (Audit L-001)
 
@@ -210,8 +210,8 @@ ignores `_test.go`.
 
 ## Related docs
 
-- [`upgrade-to-tls.md`](upgrade-to-tls.md) — one-step cutover from pre-HTTPS releases
-- [`quickstart.md`](quickstart.md) — docker-compose walkthrough with HTTPS examples
-- [`test-env.md`](test-env.md) — integration test environment (also HTTPS-only)
+- [`upgrade-to-tls.md`](../archive/upgrades/to-tls-v2.2.md) — one-step cutover from pre-HTTPS releases
+- [`quickstart.md`](../getting-started/quickstart.md) — docker-compose walkthrough with HTTPS examples
+- [`test-env.md`](../contributor/test-environment.md) — integration test environment (also HTTPS-only)
 - [`security.md`](security.md) — overall security posture, OCSP Must-Staple guidance, encryption-at-rest spec
 - Milestone spec: `prompts/https-everywhere-milestone.md` (authoritative source for locked decisions)

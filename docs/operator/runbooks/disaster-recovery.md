@@ -342,9 +342,9 @@ Print this. Pin it near your on-call rotation.
 
 ## Related docs
 
-- [`crl-ocsp.md`](crl-ocsp.md) — CRL/OCSP responder operator guide.
-- [`tls.md`](tls.md) — control-plane TLS bootstrap.
-- [`security.md`](security.md) — production-grade security posture.
-- [`scep-intune.md`](scep-intune.md) — SCEP/Intune trust-anchor
+- [`crl-ocsp.md`](../../reference/protocols/crl-ocsp.md) — CRL/OCSP responder operator guide.
+- [`tls.md`](../../operator/tls.md) — control-plane TLS bootstrap.
+- [`security.md`](../../operator/security.md) — production-grade security posture.
+- [`scep-intune.md`](../../reference/protocols/scep-intune.md) — SCEP/Intune trust-anchor
   rotation specifics.
-- [`est.md`](est.md) — EST mTLS trust-bundle rotation specifics.
+- [`est.md`](../../reference/protocols/est.md) — EST mTLS trust-bundle rotation specifics.

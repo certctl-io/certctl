@@ -19,7 +19,7 @@ Let's Encrypt.
 - A reachable certctl-server with `CERTCTL_ACME_SERVER_ENABLED=true`
   and at least one profile whose `acme_auth_mode` is set. Profile
   setup is identical to the cert-manager walkthrough — see
-  [`docs/acme-cert-manager-walkthrough.md`](./acme-cert-manager-walkthrough.md)
+  [`docs/acme-cert-manager-walkthrough.md`](./acme-from-cert-manager.md)
   Step 2.
 - Caddy 2.7.x or later. `caddy version` should show 2.7.0+.
 - Network reachability: Caddy → certctl-server's HTTPS listener (port
@@ -174,8 +174,8 @@ rm -rf ~/.local/share/caddy/certificates/certctl.example.com-*
 
 ## See also
 
-- [`docs/acme-server.md`](./acme-server.md) — canonical reference.
-- [`docs/acme-cert-manager-walkthrough.md`](./acme-cert-manager-walkthrough.md) —
+- [`docs/acme-server.md`](../reference/protocols/acme-server.md) — canonical reference.
+- [`docs/acme-cert-manager-walkthrough.md`](./acme-from-cert-manager.md) —
   K8s-native equivalent.
 - [Caddy upstream ACME docs](https://caddyserver.com/docs/automatic-https#acme-issuer)
   — verify behavior pinned here against Caddy 2.7.x semantics.

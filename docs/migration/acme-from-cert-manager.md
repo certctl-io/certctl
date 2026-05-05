@@ -254,12 +254,12 @@ helm uninstall certctl-test
 
 ## See also
 
-- [`docs/acme-server.md`](./acme-server.md) — canonical reference.
-- [`docs/acme-server-threat-model.md`](./acme-server-threat-model.md) —
+- [`docs/acme-server.md`](../reference/protocols/acme-server.md) — canonical reference.
+- [`docs/acme-server-threat-model.md`](../reference/protocols/acme-server-threat-model.md) —
   security posture.
-- [`docs/acme-caddy-walkthrough.md`](./acme-caddy-walkthrough.md) —
+- [`docs/acme-caddy-walkthrough.md`](./acme-from-caddy.md) —
   Caddy-side recipe.
-- [`docs/acme-traefik-walkthrough.md`](./acme-traefik-walkthrough.md) —
+- [`docs/acme-traefik-walkthrough.md`](./acme-from-traefik.md) —
   Traefik-side recipe.
 - [`deploy/test/acme-integration/`](../deploy/test/acme-integration/) —
   Phase 5 integration test (the same recipe, automated).

@@ -173,7 +173,7 @@ curl --cacert "$CA" -f https://localhost:8443/health
 
 Expect `{"status":"ok"}`. If `curl` errors with `SSL certificate problem: unable to get local issuer certificate`, the init container hasn't finished yet — wait a few seconds and retry. If the file doesn't exist at all, the bind mount didn't populate; `docker compose -f docker-compose.test.yml logs certctl-tls-init` should show the self-sign ran.
 
-For a full explanation of the cert provisioning patterns (self-signed bootstrap, operator-supplied, cert-manager), see [`tls.md`](tls.md). For the one-step cutover from the old plaintext test harness to HTTPS, see [`upgrade-to-tls.md`](upgrade-to-tls.md).
+For a full explanation of the cert provisioning patterns (self-signed bootstrap, operator-supplied, cert-manager), see [`tls.md`](../operator/tls.md). For the one-step cutover from the old plaintext test harness to HTTPS, see [`upgrade-to-tls.md`](../archive/upgrades/to-tls-v2.2.md).
 
 ---
 

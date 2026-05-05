@@ -7,8 +7,8 @@ gates), and the **operator runbook** for re-running each deep-scan tool locally
 when the CI receipt is ambiguous or when an operator wants to validate a fix
 before the next scheduled scan.
 
-For the manual end-to-end QA playbook, see [`testing-guide.md`](testing-guide.md).
-For the security posture / per-finding closure log, see [`security.md`](security.md).
+For the manual end-to-end QA playbook, see [`testing-guide.md`](../testing-guide.md).
+For the security posture / per-finding closure log, see [`security.md`](../operator/security.md).
 
 ## CI workflow split
 
@@ -193,8 +193,8 @@ Re-run any of the deep-scan tools locally when:
 
 ## Related docs
 
-- [`docs/security.md`](security.md) — security posture, per-finding closure log.
-- [`docs/testing-guide.md`](testing-guide.md) — manual end-to-end QA playbook.
+- [`docs/operator/security.md`](../operator/security.md) — security posture, per-finding closure log.
+- [`docs/testing-guide.md`](../testing-guide.md) — manual end-to-end QA playbook.
 - [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) — per-PR fast gates.
 - [`.github/workflows/security-deep-scan.yml`](../.github/workflows/security-deep-scan.yml) — daily deep-scan gates.
 - [`scripts/install-security-tools.sh`](../scripts/install-security-tools.sh) — Go-host-installed tools (the docker-based tools are not in this script).

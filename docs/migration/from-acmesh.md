@@ -272,6 +272,6 @@ certctl automatically falls back to DNS-01 if the CA doesn't support dns-persist
 ## Next Steps
 
 - Try the [Wildcard DNS-01 example](../examples/acme-wildcard-dns01/acme-wildcard-dns01.md) — a working docker-compose with Cloudflare hooks you can adapt for your DNS provider
-- See [Connector Reference](connectors.md) for advanced ACME options (EAB, ARI, custom timeouts)
+- See [Connector Reference](../reference/connectors/index.md) for advanced ACME options (EAB, ARI, custom timeouts)
 - See [Discovery Guide](concepts.md#certificate-discovery) for managing discovered certificates at scale
-- See all [Deployment Examples](./examples.md) for other scenarios (ACME+NGINX, private CA, step-ca, multi-issuer)
+- See all [Deployment Examples](../getting-started/examples.md) for other scenarios (ACME+NGINX, private CA, step-ca, multi-issuer)

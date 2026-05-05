@@ -500,5 +500,5 @@ The `-v` flag removes the PostgreSQL data volume for a clean slate.
 - **[Deployment Examples](examples.md)** — ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer
 - **[Advanced Demo](advanced-demo.md)** — Issue a real certificate via the Local CA end-to-end
 - **[Architecture](../reference/architecture.md)** — How the control plane, agents, and connectors work together
-- **[Connector Reference](connectors.md)** — Configuration for all 7 issuers and 10 targets
+- **[Connector Reference](../reference/connectors/index.md)** — Configuration for all 7 issuers and 10 targets
 - **[Concepts Guide](concepts.md)** — TLS certificates, CAs, and private keys explained from scratch

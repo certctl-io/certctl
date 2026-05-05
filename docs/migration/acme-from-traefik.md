@@ -19,7 +19,7 @@ of truth instead of Let's Encrypt.
 - A reachable certctl-server with `CERTCTL_ACME_SERVER_ENABLED=true`
   and at least one profile whose `acme_auth_mode` is set. Profile
   setup is identical to the cert-manager walkthrough — see
-  [`docs/acme-cert-manager-walkthrough.md`](./acme-cert-manager-walkthrough.md)
+  [`docs/acme-cert-manager-walkthrough.md`](./acme-from-cert-manager.md)
   Step 2.
 - Traefik 3.0+ (the v2 API surface for ACME is also supported but the
   `serversTransport.rootCAs` reference below is v3-shaped).
@@ -200,8 +200,8 @@ sudo rm /etc/traefik/acme-certctl.json
 
 ## See also
 
-- [`docs/acme-server.md`](./acme-server.md) — canonical reference.
-- [`docs/acme-cert-manager-walkthrough.md`](./acme-cert-manager-walkthrough.md) —
+- [`docs/acme-server.md`](../reference/protocols/acme-server.md) — canonical reference.
+- [`docs/acme-cert-manager-walkthrough.md`](./acme-from-cert-manager.md) —
   cert-manager equivalent.
 - [Traefik upstream ACME docs](https://doc.traefik.io/traefik/https/acme/#caserver) —
   verify behavior pinned here against Traefik 3.0+ semantics.
