@@ -813,17 +813,30 @@ All containers share a bridge network (`certctl-test`, subnet 10.30.50.0/24) wit
 
 ### Key Generation Flow (Agent-Side)
 
-```
-Server creates job (AwaitingCSR) → Agent polls, sees job →
-Agent generates ECDSA P-256 key pair locally →
-Agent creates CSR (public key + CN + SANs) →
-Agent POSTs CSR to server → Server signs via issuer →
-Server stores cert, creates Deployment job (Pending) →
-Agent polls, sees Deployment job →
-Agent fetches signed cert from server →
-Agent reads local private key from /var/lib/certctl/keys/ →
-Agent writes cert + key + chain to /nginx-certs/ (shared volume) →
-Job marked Completed
+```mermaid
+sequenceDiagram
+    autonumber
+    participant Srv as certctl-server
+    participant Iss as Issuer connector
+    participant Agt as certctl-agent
+    participant FS as /var/lib/certctl/keys/<br/>(local agent FS)
+    participant Vol as /nginx-certs/<br/>(shared volume)
+
+    Srv->>Srv: create Job (AwaitingCSR)
+    Agt->>Srv: poll for jobs
+    Srv-->>Agt: Job(AwaitingCSR)
+    Agt->>FS: generate ECDSA P-256 keypair
+    Agt->>Agt: build CSR (pubkey + CN + SANs)
+    Agt->>Srv: POST CSR
+    Srv->>Iss: sign CSR
+    Iss-->>Srv: signed cert
+    Srv->>Srv: store cert; create Deployment Job (Pending)
+    Agt->>Srv: poll for jobs
+    Srv-->>Agt: Job(Deployment)
+    Agt->>Srv: GET signed cert
+    Agt->>FS: read private key
+    Agt->>Vol: write cert + key + chain
+    Agt->>Srv: mark Job(Completed)
 ```
 
 ### Shared Volume Architecture
