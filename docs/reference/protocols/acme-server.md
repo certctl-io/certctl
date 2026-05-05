@@ -75,7 +75,7 @@ profile rows retain whatever value they were created with.
 
 When certctl-server uses a self-signed TLS bootstrap cert
 (`deploy/test/certs/server.crt` is the demo default; see
-[`docs/tls.md`](./tls.md)), cert-manager 1.15+ will refuse to talk to
+[`docs/tls.md`](../../operator/tls.md)), cert-manager 1.15+ will refuse to talk to
 the directory URL unless the certctl root is trusted. The fix lives in
 `ClusterIssuer.spec.acme.caBundle`:
 
@@ -644,5 +644,5 @@ Read before writing a security review.
 - [Caddy integration walkthrough](../../migration/acme-from-caddy.md)
 - [Traefik integration walkthrough](../../migration/acme-from-traefik.md)
 - [Threat model](./acme-server-threat-model.md)
-- [TLS trust bootstrap reference](./tls.md)
-- [Architecture (control-plane)](./architecture.md)
+- [TLS trust bootstrap reference](../../operator/tls.md)
+- [Architecture (control-plane)](../architecture.md)

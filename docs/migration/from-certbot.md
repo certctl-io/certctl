@@ -171,5 +171,5 @@ certctl will stop renewing that cert when the policy is disabled. Certbot resume
 
 - Try the [ACME + NGINX example](../examples/acme-nginx/acme-nginx.md) — a working docker-compose you can run locally before deploying to production
 - Review the [Concepts Guide](../getting-started/concepts.md) for terminology (profiles, policies, agents, jobs)
-- Explore [Network Discovery](./quickstart.md#network-discovery-agentless) to find certificates you didn't know about
+- Explore [Network Discovery](../getting-started/quickstart.md#network-discovery-agentless) to find certificates you didn't know about
 - See all [Deployment Examples](../getting-started/examples.md) for other scenarios (wildcard DNS-01, private CA, step-ca, multi-issuer)
