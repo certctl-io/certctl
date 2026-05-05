@@ -81,12 +81,12 @@ Security: API key auth enforced by default with SHA-256 hashing and constant-tim
 ```bash
 git clone https://github.com/certctl-io/certctl.git
 cd certctl
-docker compose -f deploy/docker-compose.demo.yml up -d --build
+docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
 ```
 
-Wait ~30 seconds, then open **https://localhost:8443** in your browser. The shipped demo override seeds 32 certificates across 10 issuers, 8 agents, and 180 days of realistic history. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
+Wait ~30 seconds, then open **https://localhost:8443** in your browser. The shipped demo overlay seeds 32 certificates across 10 issuers, 8 agents, and 180 days of realistic history. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
 
-For a clean install without demo data, drop the `-f deploy/docker-compose.demo.yml` flag. The four compose files (`docker-compose.yml` base, `docker-compose.demo.yml` overlay, `docker-compose.dev.yml` for PgAdmin + debug logging, `docker-compose.test.yml` for integration tests) are documented at [`deploy/ENVIRONMENTS.md`](deploy/ENVIRONMENTS.md).
+For a clean install without demo data, drop the `-f deploy/docker-compose.demo.yml` flag and run `docker compose -f deploy/docker-compose.yml up -d --build`. The four compose files (`docker-compose.yml` base, `docker-compose.demo.yml` overlay, `docker-compose.dev.yml` for PgAdmin + debug logging, `docker-compose.test.yml` for integration tests) are documented at [`deploy/ENVIRONMENTS.md`](deploy/ENVIRONMENTS.md).
 
 ```bash
 curl --cacert $(docker compose -f deploy/docker-compose.yml exec -T certctl-server cat /etc/certctl/tls/ca.crt) https://localhost:8443/health

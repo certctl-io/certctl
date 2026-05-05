@@ -198,7 +198,9 @@ docker compose -f deploy/docker-compose.yml down -v
 
 ### What it adds
 
-One line: mounts `seed_demo.sql` into PostgreSQL's init directory. This 667-line SQL file inserts 180 days of simulated operational history: teams, owners, certificates across multiple issuers, agents on different platforms, jobs with realistic timestamps, discovery scan results, audit events, policies, and profiles.
+One env var: `CERTCTL_DEMO_SEED=true` on the `certctl-server` service. The server applies `migrations/seed_demo.sql` at boot via `postgres.RunDemoSeed` AFTER the baseline migrations + `seed.sql` are in place. The demo seed file inserts 180 days of simulated operational history: teams, owners, certificates across multiple issuers, agents on different platforms, jobs with realistic timestamps, discovery scan results, audit events, policies, and profiles.
+
+Pre-U-3 the overlay used to mount `seed_demo.sql` into PostgreSQL's `/docker-entrypoint-initdb.d/` and rely on initdb-time application. That worked only because the production stack also mounted the migrations there, so the schema existed when initdb ran. Once U-3 dropped the production initdb mounts (single source of truth: server runs `RunMigrations` + `RunSeed` at boot), the demo seed could no longer be applied at initdb time — the tables it references wouldn't exist yet. Post-U-3 the overlay is a 27-line override file with no `image:` / `build:` of its own; it MUST be passed alongside the base, or compose errors with `service "certctl-server" has neither an image nor a build context specified`.
 
 ### Starting it
 

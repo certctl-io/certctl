@@ -13,10 +13,10 @@ Automated tests mock dependencies and run in isolation. Manual QA validates the 
 **Step 1: Start the full stack.**
 
 ```bash
-cd deploy && docker compose -f docker-compose.demo.yml up --build -d
+cd deploy && docker compose -f docker-compose.yml -f docker-compose.demo.yml up --build -d
 ```
 
-This builds three containers (postgres, certctl-server, certctl-agent) and runs them on a bridge network. The `--build` flag ensures you're testing the current code, not a stale image. The `demo` overlay seeds the database with realistic fixtures.
+This builds three containers (postgres, certctl-server, certctl-agent) and runs them on a bridge network. The `--build` flag ensures you're testing the current code, not a stale image. The `demo` overlay is an override file (no `image:` or `build:` of its own) that layers `CERTCTL_DEMO_SEED=true` onto the base — both files must be passed in that order or compose errors with `service "certctl-server" has neither an image nor a build context specified`. The seed populates the database with realistic fixtures.
 
 **Step 2: Wait for healthy state.**
 
