@@ -66,6 +66,7 @@ certctl handles the full certificate lifecycle in one self-hosted control plane:
 - **Discover** existing certs across your fleet via filesystem scanning on agents, network TLS probing across CIDR ranges, and cloud secret manager imports (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager). Triage workflow for claim / dismiss / investigate.
 - **Revoke** with full RFC 5280 reason codes, DER CRL generation per issuer (scheduler-pre-generated and ETag-cached), and an embedded RFC 6960 OCSP responder with dedicated per-issuer responder certs. Single + bulk revocation. See [`docs/reference/protocols/crl-ocsp.md`](docs/reference/protocols/crl-ocsp.md).
 - **Alert** via Slack, Microsoft Teams, PagerDuty, OpsGenie, email, webhooks. Per-policy multi-channel routing matrix with severity tiers and fault-isolating per-channel dispatch. See [`docs/operator/runbooks/expiry-alerts.md`](docs/operator/runbooks/expiry-alerts.md).
+- **Drive the platform from natural language** via the bundled MCP (Model Context Protocol) server. The full REST API is exposed as MCP tools — ask your AI client "show me all expiring certificates", "revoke the VPN cert, key compromised", or "what agents are offline?" and it translates to API calls. Stateless stdio-transport binary at `cmd/mcp-server/`; same auth as the REST API; no extra attack surface. See [`docs/reference/mcp.md`](docs/reference/mcp.md).
 
 ## Architecture and security
 
