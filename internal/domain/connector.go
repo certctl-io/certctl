@@ -228,7 +228,7 @@ const (
 	// (ACM) — the public AWS service that ALB / CloudFront / API
 	// Gateway / App Runner consume by ARN. Rank 5 of the 2026-05-03
 	// Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5). See
+	// (the project's deep-research deliverable, Part 5). See
 	// docs/connectors.md "AWS Certificate Manager" section for the
 	// operator playbook including minimum IAM policy + atomic-rollback
 	// contract.

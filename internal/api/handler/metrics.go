@@ -90,7 +90,7 @@ type VaultRenewalSnapshotter interface {
 // (here).
 //
 // Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5).
+// (the project's deep-research deliverable, Part 5).
 type ExpiryAlertSnapshotter interface {
 	// SnapshotExpiryAlerts returns one entry per non-zero counter,
 	// pre-sorted by (channel, threshold, result) so the Prometheus

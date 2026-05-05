@@ -614,7 +614,7 @@ func TestSCEPIntuneEnrollment_RateLimited_E2E(t *testing.T) {
 // race with t.Parallel(), and signal.Notify is global). The SIGHUP
 // goroutine's only job is to call Reload, so calling Reload directly is
 // the equivalent contract — and stable in tests. Phase B frozen
-// decision #3 in cowork/scep-bundle-gap-closure-prompt.md.
+// decision #3 in the project's SCEP gap-closure spec.
 func TestSCEPIntuneEnrollment_TrustAnchorSIGHUPReload_E2E(t *testing.T) {
 	fix := newIntuneE2EFixture(t)
 	now := time.Now()

@@ -989,7 +989,7 @@ export CERTCTL_API_KEY="test-key-123"
 
 ## Part 15: MCP Server for AI Integration (M18a)
 
-certctl exposes the full REST API via the Model Context Protocol (MCP), enabling seamless integration with Claude, Cursor, and other AI assistants:
+certctl exposes the full REST API via the Model Context Protocol (MCP), enabling seamless integration with any MCP-compatible AI client:
 
 ```bash
 # Build the MCP server
@@ -1010,19 +1010,19 @@ export CERTCTL_API_KEY="test-key-123"
 - **Binary support** — handles DER-encoded CRL and OCSP responses without mangling
 - **Error translation** — converts HTTP errors to user-readable messages
 
-**Example usage from Claude:**
+**Example usage:**
 
 ```
 User: What certificates are expiring in the next 30 days?
 
-Claude uses the MCP tools to:
+The AI client uses the MCP tools to:
   1. Call tools.listCertificates with filters: {status: "Expiring"}
   2. Parse the response
   3. Display: "mc-api-prod expires in 12 days. mc-cdn-prod expires in 8 days..."
 
 User: Revoke mc-payments due to key compromise
 
-Claude uses the MCP tools to:
+The AI client uses the MCP tools to:
   1. Call tools.revokeCertificate with id="mc-payments" reason="keyCompromise"
   2. Return the audit trail entry showing revocation recorded
 ```

@@ -324,7 +324,7 @@ func (s *RenewalService) CheckExpiringCertificates(ctx context.Context) error {
 //     team get paged?".
 //
 // Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5). The policy
+// (the project's deep-research deliverable, Part 5). The policy
 // argument is nil-safe — a cert with no RenewalPolicy attached gets the
 // back-compat Email-only default matrix.
 func (s *RenewalService) sendThresholdAlerts(

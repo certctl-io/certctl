@@ -318,7 +318,7 @@ az monitor activity-log list \
 
 ## V3-Pro forward path
 
-Tracked at `cowork/WORKSPACE-ROADMAP.md` under "Adapter hardening":
+Tracked under "Adapter hardening" on the project roadmap:
 
 - **AWS CloudFront direct-attach** — UpdateDistribution after an ACM
   ImportCertificate so the CloudFront edge picks up the new cert

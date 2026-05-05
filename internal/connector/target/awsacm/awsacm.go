@@ -16,7 +16,7 @@
 // snapshot bytes to restore the previous cert. Mirrors the Bundle 5+
 // pre-deploy-snapshot + on-failure-restore pattern from IIS / WinCertStore /
 // JavaKeystore. Rank 5 of the 2026-05-03 Infisical deep-research
-// deliverable (cowork/infisical-deep-research-results.md Part 5).
+// deliverable (the project's deep-research deliverable, Part 5).
 //
 // IAM permissions required:
 //

@@ -1,6 +1,6 @@
 # Load-test workflow — closes the #8 acquisition-readiness blocker from
 # the 2026-05-01 issuer coverage audit (see
-# cowork/issuer-coverage-audit-2026-05-01/RESULTS.md).
+# the 2026-05-01 issuer coverage audit).
 #
 # CADENCE: workflow_dispatch + weekly cron, NOT per-push. Load tests
 # are minutes long and don't provide useful per-PR signal — per-push

@@ -27,7 +27,7 @@
 // permission which we deliberately keep off the minimum-RBAC surface.
 //
 // Rank 5 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5).
+// (the project's deep-research deliverable, Part 5).
 //
 // Required Azure RBAC (minimum):
 //

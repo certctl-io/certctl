@@ -55,7 +55,7 @@ the bug the mutant introduced).
 
 **Acceptance threshold:** ≥80% mutation kill ratio per package. Surviving
 mutants below that threshold get triaged in
-`cowork/comprehensive-audit-2026-04-25/d003-mutation-results.md` — either
+the project's 2026-04-25 mutation-results notes — either
 ship a targeted unit test that kills the mutant, or document an
 equivalent-mutation justification.
 

@@ -363,7 +363,7 @@ func main() {
 	notificationService.SetOwnerRepo(ownerRepo)
 
 	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5). Per-policy
+	// (per the project's deep-research deliverable, Part 5). Per-policy
 	// multi-channel expiry-alert metrics. Same instance is wired into
 	// the notification service (recording side, every
 	// SendThresholdAlertOnChannel call reports its outcome) AND into

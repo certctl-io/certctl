@@ -309,7 +309,7 @@ func TestGoogleCAS_Issue_RegionalAPIUnavailable_RetryableSurface(t *testing.T) {
 // (We deliberately do NOT exercise the service-layer audit-row
 // rollback here — that's an integration test owned by
 // internal/service/revocation_svc_test.go. Mixing concerns would
-// re-introduce the exact "lying field" footgun CLAUDE.md warns
+// re-introduce the exact "lying field" footgun the project guidelines warn
 // against. The adapter contract is the single thing under test.)
 func TestGoogleCAS_Revoke_PermissionDenied_DoesNotSilentlySwallow(t *testing.T) {
 	ctx := context.Background()

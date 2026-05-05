@@ -85,7 +85,7 @@ Current helpers:
 - **`QA-doc Part-count drift`** + **`QA-doc seed-count drift`** — these
   protect docs-the-operator-reads, not anything the product depends on.
   Moved to `make verify-docs` (operator runs pre-tag, not on every push).
-  See `cowork/ci-pipeline-cleanup-prompt.md` Phase 11.
+  See the ci-pipeline-cleanup spec, Phase 11.
 
 ## Running the full set locally
 

@@ -6,7 +6,7 @@ import "testing"
 //
 // SCEP RFC 8894 + Intune master bundle Phase 2.5: every parser certctl
 // adds gets a Fuzz target in the same package (the fuzz-target-ownership
-// rule from cowork/CLAUDE.md::Operating Rules). The point isn't to find
+// per the project's operating rules). The point isn't to find
 // vulnerabilities (the parser uses stdlib encoding/asn1 which is itself
 // fuzzed upstream) — it's to prove that arbitrary attacker-controlled
 // bytes cannot panic the SCEP server. Any panic = an availability bug.

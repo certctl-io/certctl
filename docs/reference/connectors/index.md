@@ -316,7 +316,7 @@ The cert version must exist in the local store: this means the cert was issued t
 
 Reason codes follow RFC 5280 §5.3.1: nil reason maps to `unspecified` (0), and the connector accepts the canonical camelCase form (`keyCompromise`, `cACompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aACompromise`) plus underscore_lower and ALL_CAPS_UNDERSCORE variants. An unknown reason returns an error rather than silently demoting to `unspecified` — operators rely on the reason for audit reporting.
 
-Audit reference: `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` Top-10 fix #7.
+Audit reference: 2026-05-01 issuer coverage audit Top-10 fix #7.
 
 Location: `internal/connector/issuer/acme/acme.go`, `internal/connector/issuer/acme/dns.go`
 
@@ -405,7 +405,7 @@ certctl's OpenSSL adapter `exec`s an operator-supplied script for every certific
 
 **V3-Pro forward path:**
 
-The hardened OpenSSL adapter (chroot/container by default, env-var allow-list at the adapter layer, signed-script-binary verification, audit-log-on-every-invocation, per-call concurrency bound shared with the API surface) is V3-Pro work. Tracking: `cowork/WORKSPACE-ROADMAP.md` (search "OpenSSL hardened mode").
+The hardened OpenSSL adapter (chroot/container by default, env-var allow-list at the adapter layer, signed-script-binary verification, audit-log-on-every-invocation, per-call concurrency bound shared with the API surface) is V3-Pro work. Tracking: project roadmap, "OpenSSL hardened mode".
 
 ### Revocation Across Issuers
 
@@ -1711,7 +1711,7 @@ ORDER BY created_at DESC;
 
 Each row corresponds to one fired alert. The `channel` metadata field tells you which notifier ran. Combined with the Prometheus `certctl_expiry_alerts_total{result="failure"}` counter, you have full forensic visibility on every dispatch attempt.
 
-**V3-Pro forward path.** Per-owner / per-team channel routing (route the Production-CDN cert's alerts to its dedicated owner's PagerDuty service, the Internal-API cert's alerts to a different one), calendar-aware suppression (no T-30 informational alerts on weekends for non-on-call teams), and escalation chains (T-1 unanswered for 30m → escalate to manager) are tracked on `cowork/WORKSPACE-ROADMAP.md` under "Adapter hardening" → "Multi-channel expiry alerts: per-owner routing".
+**V3-Pro forward path.** Per-owner / per-team channel routing (route the Production-CDN cert's alerts to its dedicated owner's PagerDuty service, the Internal-API cert's alerts to a different one), calendar-aware suppression (no T-30 informational alerts on weekends for non-on-call teams), and escalation chains (T-1 unanswered for 30m → escalate to manager) are tracked on the project roadmap under "Adapter hardening" → "Multi-channel expiry alerts: per-owner routing".
 
 ### Email (SMTP) Notifier
 

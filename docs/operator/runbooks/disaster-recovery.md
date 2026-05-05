@@ -238,7 +238,7 @@ remains trusted by relying parties until its `notAfter` (typical
    openssl x509 -in new-cert -noout -issuer
    ```
 
-**Future:** when the HSM/PKCS#11 driver bundle (`cowork/hsm-pkcs11-
+**Future:** when the HSM/PKCS#11 driver bundle (planned;
 driver-prompt.md`) ships, this rotation procedure changes
 substantially — the HSM-backed key never moves, only the cert wrap
 rotates. The signer interface seam is the load-bearing prerequisite

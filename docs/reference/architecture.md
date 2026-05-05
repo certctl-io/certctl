@@ -1096,11 +1096,11 @@ Health checks live outside the API prefix: `GET /health` and `GET /ready`.
 
 ## MCP Server
 
-certctl includes an MCP (Model Context Protocol) server as a separate binary (`cmd/mcp-server/`) that enables AI assistants to interact with the certificate platform. The MCP server uses the official MCP Go SDK (`modelcontextprotocol/go-sdk`) with stdio transport for integration with Claude, Cursor, and other MCP-compatible tools.
+certctl includes an MCP (Model Context Protocol) server as a separate binary (`cmd/mcp-server/`) that enables AI assistants to interact with the certificate platform. The MCP server uses the official MCP Go SDK (`modelcontextprotocol/go-sdk`) with stdio transport for integration with any MCP-compatible AI client.
 
 ```mermaid
 flowchart LR
-    AI["AI Assistant\n(Claude, Cursor)"] -->|"stdio"| MCP["MCP Server\ncmd/mcp-server/"]
+    AI["AI Assistant\n(any MCP client)"] -->|"stdio"| MCP["MCP Server\ncmd/mcp-server/"]
     MCP -->|"HTTP + Bearer token"| API["certctl REST API\n:8443"]
 
     subgraph "MCP Tools"
@@ -1318,7 +1318,7 @@ For detailed test procedures, smoke tests, and the release sign-off checklist, s
 
 ## Performance Characteristics
 
-Closes the #8 acquisition-readiness blocker from the 2026-05-01 issuer coverage audit (see `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md`). Pre-audit, certctl had no benchmarks or load tests for any API path, so any throughput claim was hand-waved; the harness in `deploy/test/loadtest/` substantiates the API-tier capacity numbers with reproducible methodology.
+Closes the #8 acquisition-readiness blocker from the 2026-05-01 issuer coverage audit. Pre-audit, certctl had no benchmarks or load tests for any API path, so any throughput claim was hand-waved; the harness in `deploy/test/loadtest/` substantiates the API-tier capacity numbers with reproducible methodology.
 
 The harness drives a k6 client at sustained 50 req/s × 2 scenarios × 5 minutes against a docker-compose stack of postgres + tls-init + certctl-server. Two scenarios run in parallel: `POST /api/v1/certificates` (issuance-acceptance hot path: auth + JSON decode + validation + service `CreateCertificate` + `managed_certificates` insert) and `GET /api/v1/certificates?per_page=50` (most-trafficked read endpoint). Hard regression-guard thresholds: p99 < 5 s for issuance-acceptance, p99 < 2 s for list, error rate < 1% globally. k6 exits non-zero on any threshold breach so a future PR that pushes p99 above the bar fails `make loadtest`. Run via `make loadtest` from the repo root or via `.github/workflows/loadtest.yml` (`workflow_dispatch` + weekly cron — never per-push).
 

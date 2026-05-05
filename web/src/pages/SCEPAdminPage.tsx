@@ -20,7 +20,7 @@ import type {
 } from '../api/types';
 
 // SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-// (cowork/scep-gui-restructure-prompt.md): per-profile SCEP
+// (the project's SCEP GUI restructure spec): per-profile SCEP
 // administration page with three tabs.
 //
 //   Profiles (default)  — every configured SCEP profile, lean card per

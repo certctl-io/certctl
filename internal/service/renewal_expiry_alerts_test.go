@@ -1,7 +1,7 @@
 package service
 
 // Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5). Pins every leg of
+// (the project's deep-research deliverable, Part 5). Pins every leg of
 // the per-policy multi-channel expiry-alert fan-out matrix:
 //
 //   1. Default matrix → Email-only at every tier (back-compat).

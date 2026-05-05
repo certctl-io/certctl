@@ -504,7 +504,7 @@ arbitrary).
 EST signs certs using whatever issuer connector the profile binds.
 The `internal/crypto/signer/` interface (post-2026-04-28) means a
 future HSM/PKCS#11 driver bundle (parking-lot at
-`cowork/hsm-pkcs11-driver-prompt.md`) plugs in transparently — the
+planned) plugs in transparently — the
 EST handler doesn't change. EST-issued certs benefit from HSM-backed
 signing automatically once the HSM bundle ships and the operator
 swaps the local issuer's `FileDriver` for a `PKCS11Driver`.

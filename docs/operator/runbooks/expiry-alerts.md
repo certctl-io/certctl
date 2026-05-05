@@ -217,7 +217,7 @@ dedup on the `notification_events` table guards against that).
 
 ## V3-Pro forward path
 
-Tracked at `cowork/WORKSPACE-ROADMAP.md` under "Adapter hardening":
+Tracked under "Adapter hardening" on the project roadmap:
 
 - Per-owner / per-team / per-tenant channel routing (the matrix is
   per-policy today, not per-owner).

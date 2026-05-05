@@ -2,9 +2,9 @@
 
 > Last reviewed: 2026-05-05
 
-certctl ships with an MCP (Model Context Protocol) server that lets AI assistants manage your certificate infrastructure through natural language. Ask Claude to "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?" and the MCP server translates that into API calls against your certctl instance.
+certctl ships with an MCP (Model Context Protocol) server that lets AI assistants manage your certificate infrastructure through natural language. Ask your MCP-compatible AI client to "show me all expiring certificates," "revoke the VPN cert," or "what agents are offline?" and the MCP server translates that into API calls against your certctl instance.
 
-This guide covers setup, configuration, and usage with Claude, Cursor, and other MCP-compatible tools.
+This guide covers setup, configuration, and usage with any MCP-compatible AI client.
 
 ## What Is MCP?
 
@@ -18,7 +18,7 @@ You need:
 
 1. A running certctl server (see [Quick Start](../getting-started/quickstart.md))
 2. The MCP server binary — either built from source or from a Docker image
-3. An MCP-compatible AI client (Claude Desktop, Cursor, VS Code with Copilot, etc.)
+3. An MCP-compatible AI client
 
 ## Building the MCP Server
 
@@ -43,47 +43,9 @@ If your certctl server has auth enabled (the default), you must provide the API 
 
 Since v2.2 the certctl control plane is HTTPS-only. If the server cert is self-signed or chained to an internal CA, set `CERTCTL_SERVER_CA_BUNDLE_PATH` so the MCP server can verify the TLS handshake. Never set `CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY=true` outside local development — it disables all certificate validation.
 
-## Setting Up with Claude Desktop
+## Configuring Your MCP Client
 
-Add this to your Claude Desktop MCP configuration file (`~/Library/Application Support/Claude/claude_desktop_config.json` on macOS, `%APPDATA%\Claude\claude_desktop_config.json` on Windows):
-
-```json
-{
-  "mcpServers": {
-    "certctl": {
-      "command": "/path/to/certctl-mcp",
-      "env": {
-        "CERTCTL_SERVER_URL": "https://localhost:8443",
-        "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/certctl/deploy/test/certs/ca.crt",
-        "CERTCTL_API_KEY": "your-api-key-here"
-      }
-    }
-  }
-}
-```
-
-Restart Claude Desktop. You should see "certctl" appear in the MCP tools list (the available-tools count varies by certctl version; the exact set is enumerated in `internal/mcp/tools.go`).
-
-## Setting Up with Cursor
-
-In Cursor, go to Settings → MCP Servers and add:
-
-```json
-{
-  "certctl": {
-    "command": "/path/to/certctl-mcp",
-    "env": {
-      "CERTCTL_SERVER_URL": "https://localhost:8443",
-      "CERTCTL_SERVER_CA_BUNDLE_PATH": "/path/to/certctl/deploy/test/certs/ca.crt",
-      "CERTCTL_API_KEY": "your-api-key-here"
-    }
-  }
-}
-```
-
-## Setting Up with Claude Code
-
-Add certctl as an MCP server in your project's `.mcp.json`:
+Most MCP clients accept a JSON config block of this shape. Consult your client's documentation for the exact config-file location.
 
 ```json
 {
@@ -99,6 +61,8 @@ Add certctl as an MCP server in your project's `.mcp.json`:
   }
 }
 ```
+
+After saving, restart your MCP client. You should see "certctl" appear in its tool list (the available-tools count varies by certctl version; the exact set is enumerated in `internal/mcp/tools.go`).
 
 ## Available Tools
 
@@ -154,7 +118,7 @@ The AI calls `certctl_create_certificate` with the common name, team ID, and own
 
 ```mermaid
 flowchart LR
-    AI["AI Assistant\n(Claude, Cursor)"]
+    AI["AI Assistant\n(any MCP client)"]
     MCP["certctl MCP\ncmd/mcp-server/"]
     SERVER["certctl Server\n:8443"]
 

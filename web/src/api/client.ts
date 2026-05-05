@@ -313,7 +313,7 @@ export const reloadAdminSCEPIntuneTrust = (pathID: string) =>
   });
 
 // SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-// (cowork/scep-gui-restructure-prompt.md): per-profile SCEP admin
+// (the project's SCEP GUI restructure spec): per-profile SCEP admin
 // surface backing the Profiles tab on the SCEP Administration page.
 // M-008 admin-gated; same gating semantics as the existing
 // getAdminSCEPIntuneStats helper.

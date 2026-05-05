@@ -64,7 +64,7 @@ type AgentConfig struct {
 // ErrAgentRetired is the sentinel returned by [Agent.Run] when the control
 // plane responds with HTTP 410 Gone to a heartbeat or work-poll request — the
 // canonical signal that this agent's row has been soft-retired server-side
-// (see I-004 in cowork/certctl-coverage-gap-audit.md). The binary must
+// (see I-004 in the project's coverage-gap audit). The binary must
 // terminate cleanly: an init-system restart would only produce another 410
 // and wedge the host in a restart loop. main() translates this sentinel into
 // a zero exit code so systemd (Restart=on-failure) and launchd do not respawn

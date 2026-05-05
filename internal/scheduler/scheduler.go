@@ -1112,7 +1112,7 @@ func (s *Scheduler) runCRLGeneration(ctx context.Context) {
 var ErrSchedulerShutdownTimeout = errors.New("scheduler graceful shutdown timeout")
 
 // acmeGCLoop runs every acmeGCInterval and invokes ACMEGarbageCollector.
-// Per CLAUDE.md "Scheduler idempotency" architecture decision: an
+// Per the project's scheduler-idempotency architecture decision: an
 // atomic.Bool guard prevents concurrent tick execution; the
 // sync.WaitGroup tracks the in-flight goroutine for graceful shutdown.
 // Phase 5.

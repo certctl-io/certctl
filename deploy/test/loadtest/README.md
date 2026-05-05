@@ -1,7 +1,7 @@
 # certctl Load-Test Harness
 
 Closes the **#8 acquisition-readiness blocker** from the 2026-05-01 issuer
-coverage audit (`cowork/issuer-coverage-audit-2026-05-01/RESULTS.md`).
+coverage audit (the 2026-05-01 issuer coverage audit).
 Pre-fix, certctl had zero benchmarks or load tests for any API path; an
 acquirer evaluating "can certctl handle our 50k-cert fleet at 47-day
 rotation" had nothing to point at. This harness is the substantiation.
@@ -354,6 +354,6 @@ verification.
 
 ## Audit references
 
-- API tier:       `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` fix #8.
-- Connector tier: `cowork/deployment-target-audit-2026-05-02/RESULTS.md` Bundle 10.
-- ACME flows:     Phase 5 master prompt (`cowork/acme-server-prompts/06-phase-5-certmanager-hardening-prompt.md`).
+- API tier:       2026-05-01 issuer coverage audit fix #8.
+- Connector tier: 2026-05-02 deployment-target audit Bundle 10.
+- ACME flows:     Phase 5 master prompt (project notes).

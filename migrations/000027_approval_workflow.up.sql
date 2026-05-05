@@ -1,6 +1,6 @@
 -- 000027_approval_workflow.up.sql
 -- Rank 7 of the 2026-05-03 Infisical deep-research deliverable
--- (cowork/infisical-deep-research-results.md Part 5). Two-person
+-- (the project's deep-research deliverable, Part 5). Two-person
 -- integrity / four-eyes principle for compliance-tier certificate
 -- issuance. CertificateProfile.RequiresApproval gates the renewal-
 -- loop entry; issuance_approval_requests captures the per-job
@@ -8,7 +8,7 @@
 --
 -- All operations use IF NOT EXISTS / IF EXISTS so the migration is
 -- idempotent — safe to re-run on every certctl-server boot per the
--- "Idempotent migrations" architecture decision in CLAUDE.md.
+-- the project's "Idempotent migrations" architecture decision.
 --
 -- Existing scaffolding REUSED (not redefined here):
 --   - JobStatusAwaitingApproval enum value (internal/domain/job.go).

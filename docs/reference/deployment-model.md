@@ -23,7 +23,7 @@ a single shared primitive:
 |---|---|---|
 | **Atomic deploy with rollback** | F5 only (transactional API) | 12 of 13 connectors via `deploy.Apply` (K8s pending Bundle 2 — see [Section 1.5](#15-audit-closure-status-2026-05-02-deployment-target-audit)) |
 | **Post-deploy TLS verification** | None | NGINX/Apache/HAProxy/Traefik/Caddy/Envoy/Postfix all do TLS handshake + SHA-256 fingerprint compare; fail → rollback |
-| **Vendor-specific deployment recipes** | Light docs | (Bundle II — `cowork/deploy-hardening-ii-prompt.md`) |
+| **Vendor-specific deployment recipes** | Light docs | (Bundle II — per the project's deploy-hardening II spec) |
 
 This document describes the operator-visible surface. The Go-level
 contract lives at `internal/deploy/doc.go`.
@@ -31,7 +31,7 @@ contract lives at `internal/deploy/doc.go`.
 ## 1.5. Audit closure status (2026-05-02 deployment-target audit)
 
 The 2026-05-02 deployment-target coverage audit
-(`cowork/deployment-target-audit-2026-05-02/RESULTS.md`) tightened the
+(the 2026-05-02 deployment-target audit) tightened the
 atomic + rollback contract on the connectors below. All bundles in the
 table are committed to `master` as of this section's last edit; commit
 hashes pin to the canonical landing commit for each piece of work.
@@ -54,7 +54,7 @@ hashes pin to the canonical landing commit for each piece of work.
   real `k8s.io/client-go` implementation + `ResourceVersion` plumbing
   + post-deploy SHA-256 verify + kubelet sync poll is the remaining
   V2 P0 blocker. Tracking prompt:
-  `cowork/deployment-target-audit-2026-05-02/k8s-real-client-prompt.md`.
+  the project's k8s-real-client spec.
 
 Bundle 10 (per-connector loadtest harness, commit `6286cd4`) does not
 modify the per-connector contract table; it's a CI / observability
@@ -134,7 +134,7 @@ Apply's algorithm:
 | ssh | (Connect probe) | (SCP upload + remote chmod) | `tls.Dial` to remote TLS port | Pre-deploy SCP backup of remote files |
 | wincertstore | (Get-ChildItem Cert:\) | (Import-PfxCertificate) | (admin probe) | Get-ChildItem snapshot for rollback |
 | javakeystore | (`keytool -list`) | (`keytool -importkeystore`) | (admin probe) | keytool snapshot; rollback via `keytool -delete` + re-import |
-| k8ssecret | (V2 blocker — see note below) | (V2 blocker — see note below) | (V2 blocker — see note below) | **V2 blocker — Bundle 2 of the 2026-05-02 deployment-target audit.** Production `realK8sClient` at `internal/connector/target/k8ssecret/k8ssecret.go:397-420` is a stub (every method returns `"real Kubernetes client not implemented — use NewWithClient for tests"`). The SHA-256 post-deploy verify and kubelet sync poll are designed but not yet implemented; production deploys to a real cluster fail with "not implemented" until Bundle 2 lands. Test mocks via `NewWithClient` work today. Tracking prompt: `cowork/deployment-target-audit-2026-05-02/k8s-real-client-prompt.md`. |
+| k8ssecret | (V2 blocker — see note below) | (V2 blocker — see note below) | (V2 blocker — see note below) | **V2 blocker — Bundle 2 of the 2026-05-02 deployment-target audit.** Production `realK8sClient` at `internal/connector/target/k8ssecret/k8ssecret.go:397-420` is a stub (every method returns `"real Kubernetes client not implemented — use NewWithClient for tests"`). The SHA-256 post-deploy verify and kubelet sync poll are designed but not yet implemented; production deploys to a real cluster fail with "not implemented" until Bundle 2 lands. Test mocks via `NewWithClient` work today. Tracking prompt: the project's k8s-real-client spec. |
 
 > **Postfix vs Dovecot mode**: see "Choosing Mode=postfix vs Mode=dovecot" in
 > `docs/connectors.md` for the per-mode defaults (cert/key paths, validate +
@@ -302,7 +302,7 @@ Out of scope for the V2-free deploy-hardening I bundle:
   deploy audit trail in a reviewer-friendly format.
 - **Customer-paid validation matrices** — vendor-version certified
   quirks (e.g. "tested on F5 v15.1 + v17.0 + v17.5"). See
-  `cowork/deploy-hardening-ii-prompt.md` for the per-vendor
+  the project's deploy-hardening II spec for the per-vendor
   edge-case audit + integration test sidecars.
 
 ## 12. Per-connector quick reference

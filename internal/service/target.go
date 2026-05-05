@@ -16,7 +16,7 @@ import (
 // ErrAgentNotFound is returned by [TargetService.CreateTarget] when the caller
 // references an agent_id that is empty or does not correspond to a registered
 // agent. The handler layer maps this to HTTP 400 via [errors.Is]. See C-002 in
-// cowork/certctl-coverage-gap-audit.md — this sentinel replaces a silent
+// the project's coverage-gap audit — this sentinel replaces a silent
 // Postgres FK violation (23503 → HTTP 500) with a deterministic 400.
 var ErrAgentNotFound = errors.New("referenced agent does not exist")
 

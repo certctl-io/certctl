@@ -1,7 +1,7 @@
 package azurekv_test
 
 // Rank 5 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5). Happy-path tests
+// (the project's deep-research deliverable, Part 5). Happy-path tests
 // for the Azure Key Vault target connector. Mirrors the awsacm_test.go
 // shape so cross-cloud regressions are bisectable side-by-side.
 

@@ -438,7 +438,7 @@ export CERTCTL_SERVER_CA_BUNDLE_PATH="$CA"   # MCP is env-vars-only; no CLI flag
 ./mcp-server
 ```
 
-Exposes the full REST API via MCP over stdio transport. Ask Claude: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
+Exposes the full REST API via MCP over stdio transport. Ask your MCP client: "What certificates are expiring in the next 30 days?", "Revoke the payments cert due to key compromise", "Show me the audit trail."
 
 ## Demo Data Reference
 

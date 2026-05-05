@@ -609,7 +609,7 @@ Not yet automatic. Operators migrating: keep the old `managed_certificates`
 rows; create new ones via the ACME flow; flip targets one by one. A
 dedicated bulk-migration tool is on the roadmap (post-2.1.0). Track
 via the master prompt's roadmap section in
-`cowork/acme-server-endpoint-prompt.md`.
+the project's acme-server-endpoint spec.
 
 ### What audit-log events fire on each ACME operation?
 

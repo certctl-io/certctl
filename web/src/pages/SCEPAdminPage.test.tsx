@@ -5,7 +5,7 @@ import { MemoryRouter, Routes, Route } from 'react-router-dom';
 import type { ReactNode } from 'react';
 
 // SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-// (cowork/scep-gui-restructure-prompt.md): Vitest coverage for the
+// (the project's SCEP GUI restructure spec): Vitest coverage for the
 // rebranded SCEP Administration page. Pins:
 //   1. Admin gate — non-admin sees the gated banner; admin requests are
 //      never issued.

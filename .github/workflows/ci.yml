@@ -326,7 +326,7 @@ jobs:
   # RAM headroom on ubuntu-latest (16 GB ceiling) — operator-confirmed
   # in Phase 0 / frozen decision 0.14 prototype-branch run. If RAM
   # regresses, fall back to bucketed matrix per
-  # cowork/ci-pipeline-cleanup/decisions-revised.md.
+  # the project's frozen-decisions log.
   #
   # The Windows matrix (deploy-vendor-e2e-windows) was deleted entirely
   # per Phase 6 / frozen decision 0.5 (revises Bundle II decision 0.4).

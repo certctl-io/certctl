@@ -75,7 +75,7 @@ The three differentiators above get the headlines, but the feature surface is wi
 
 **Prometheus metrics** — `/api/v1/metrics/prometheus` in standard exposition format. Works with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics.
 
-**MCP server** — the entire REST API is exposed via MCP for AI-assisted certificate management via Claude, Cursor, or any MCP-compatible client. No other certificate platform offers this.
+**MCP server** — the entire REST API is exposed via MCP for AI-assisted certificate management via any MCP-compatible client. No other certificate platform offers this.
 
 **Full REST API** — OpenAPI 3.1-documented operations covering the entire platform. CLI tool with 10 subcommands. Helm chart for Kubernetes deployment. Scheduled certificate digest emails. Certificate export in PEM and PKCS#12. S/MIME support with EKU-aware issuance.
 

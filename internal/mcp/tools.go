@@ -1260,7 +1260,7 @@ func registerHealthTools(s *gomcp.Server, c *Client) {
 	// I-2 closure (cat-i-b0924b6675f8): pre-I-2 the README claimed "all
 	// API endpoints are exposed via MCP" but the discovered-certificate
 	// lifecycle (claim + dismiss) was never wrapped — operators using
-	// MCP clients (Claude, Cursor, etc.) had no path to bring an
+	// MCP clients had no path to bring an
 	// out-of-band cert under management or to mark a benign discovery
 	// as not-of-interest without dropping to the REST API directly.
 	// These two tools wrap the existing HTTP handlers

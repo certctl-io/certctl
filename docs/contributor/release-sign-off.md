@@ -66,7 +66,7 @@ After the release workflow runs (triggered by tag push), verify the published ar
 | Release workflow completed without errors | GitHub Actions | ☐ |
 | Sample binary downloaded and Cosign-verified by an operator who is not the release author | another team member | ☐ |
 | `WORKSPACE-CHANGELOG.md` notes the tag commit SHA | manual edit | ☐ |
-| `cowork/CLAUDE.md` "Active Focus" → "Current tag" updated | manual edit | ☐ |
+| workspace-tracking "Active Focus" → "Current tag" updated | manual edit | ☐ |
 | `certctl.io/index.html` star count + `data-gh-version` rendering picks up the new tag | open the landing page in 6+ hours (cache TTL) | ☐ |
 | Reddit / Hacker News / LinkedIn announcement drafted (if a major release) | per the operator's promotion playbook | ☐ |
 

@@ -137,7 +137,7 @@ multicast, IPv4-mapped-IPv6 to a reserved IPv4. See
 CodeQL alert #23 flags `client.Do(req)` in the SCEP-probe call site
 as `go/request-forgery` despite the dial-time guard; the analyzer
 can't trace through a custom `Transport.DialContext`. Operator-
-acknowledged false positive (CLAUDE.md task #10) — see the SCEP
+acknowledged false positive (tracked internally) — see the SCEP
 probe's same-shaped defense for the audit trail.
 
 ## DNS-01 cache poisoning posture

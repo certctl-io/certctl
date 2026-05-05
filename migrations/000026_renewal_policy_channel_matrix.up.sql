@@ -1,5 +1,5 @@
 -- Rank 4 of the 2026-05-03 Infisical deep-research deliverable
--- (cowork/infisical-deep-research-results.md Part 5). Adds the
+-- (the project's deep-research deliverable, Part 5). Adds the
 -- per-policy channel matrix that the multi-channel expiry-alert
 -- routing reads from. Two JSONB columns:
 --
@@ -16,7 +16,7 @@
 --
 -- Both columns use IF NOT EXISTS so the migration is idempotent —
 -- safe to re-run on every certctl-server boot per the
--- "Idempotent migrations" architecture decision in CLAUDE.md.
+-- the project's "Idempotent migrations" architecture decision.
 
 ALTER TABLE renewal_policies
     ADD COLUMN IF NOT EXISTS alert_channels JSONB NOT NULL DEFAULT '{}'::jsonb,

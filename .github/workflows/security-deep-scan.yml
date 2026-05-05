@@ -20,7 +20,7 @@ name: security-deep-scan
 #
 # Each step is best-effort — failures are uploaded as artefacts but do
 # NOT block the workflow. Triage happens via the Bundle-7 receipt
-# directory under cowork/comprehensive-audit-2026-04-25/tool-output/.
+# the project's comprehensive-audit tool-output directory.
 
 on:
   schedule:
@@ -82,7 +82,7 @@ jobs:
       # package is mutated independently; the per-package summary line
       # (`The mutation score is X.YZ`) is grep-extracted into the receipt.
       # Acceptance threshold: ≥80% kill ratio per package; surviving
-      # mutants get triaged in cowork/comprehensive-audit-2026-04-25/
+      # mutants get triaged in the project's comprehensive-audit notes/
       # d003-mutation-results.md (per-mutant action item or
       # equivalent-mutation justification).
 

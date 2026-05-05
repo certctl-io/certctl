@@ -197,4 +197,4 @@ only when ALL of the following are true:
 - This playbook's full procedure ran clean once on a real Windows host
 
 Operator records the validation date + Windows Server version in
-`cowork/<bundle>/iis-validation-receipts.md` for audit trail.
+the project's per-bundle iis-validation receipts for audit trail.

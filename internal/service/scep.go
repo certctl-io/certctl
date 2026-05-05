@@ -57,7 +57,7 @@ type SCEPService struct {
 
 	// Per-profile metadata surfaced by the new /admin/scep/profiles
 	// endpoint. SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-	// (cowork/scep-gui-restructure-prompt.md). All fields are nil/zero
+	// (the project's SCEP GUI restructure spec). All fields are nil/zero
 	// when the operator runs without Intune AND without mTLS — we still
 	// surface the always-present challenge-password-set + RA cert
 	// expiry on the Profiles tab for those.
@@ -292,7 +292,7 @@ func (s *SCEPService) SetMTLSConfig(enabled bool, bundlePath string) {
 // compatibility for the Phase 9 admin contract.
 //
 // SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-// (cowork/scep-gui-restructure-prompt.md).
+// (the project's SCEP GUI restructure spec).
 type SCEPProfileStatsSnapshot struct {
 	// Always-present per-profile fields.
 	PathID               string    `json:"path_id"`

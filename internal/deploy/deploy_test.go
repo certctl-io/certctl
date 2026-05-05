@@ -24,7 +24,7 @@ import (
 // rename-race correctness.
 //
 // All 12 are required by the prompt at
-// cowork/deploy-hardening-i-prompt.md::"Test plan (Phase 1
+// the project's deploy-hardening I spec::"Test plan (Phase 1
 // ships ≥95% coverage on the new package)".
 //
 // The tests run in non-root environments — they do NOT exercise

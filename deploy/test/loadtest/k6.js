@@ -60,8 +60,8 @@
 // tests are too slow to gate per-PR signal).
 //
 // Audit references:
-//   - API tier:       cowork/issuer-coverage-audit-2026-05-01/RESULTS.md fix #8.
-//   - Connector tier: cowork/deployment-target-audit-2026-05-02/RESULTS.md Bundle 10.
+//   - API tier:       2026-05-01 issuer coverage audit fix #8.
+//   - Connector tier: 2026-05-02 deployment-target audit Bundle 10.
 
 import http from 'k6/http';
 import { check } from 'k6';

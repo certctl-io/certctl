@@ -20,7 +20,7 @@ import (
 //     of the system control these — M-005).
 //
 // An attacker who plants "ignore previous instructions" inside any of
-// those fields can steer LLM consumers (Claude, Cursor, custom agents)
+// those fields can steer LLM consumers (any MCP-compatible AI client)
 // of the certctl MCP server. certctl's own MCP server cannot prevent
 // the LLM consumer from honoring such injection on its own — but it
 // CAN make the trust boundary explicit so consumers that fence

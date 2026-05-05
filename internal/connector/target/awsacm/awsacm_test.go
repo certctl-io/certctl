@@ -1,7 +1,7 @@
 package awsacm_test
 
 // Rank 5 of the 2026-05-03 Infisical deep-research deliverable
-// (cowork/infisical-deep-research-results.md Part 5). Happy-path table-
+// (the project's deep-research deliverable, Part 5). Happy-path table-
 // driven tests for the AWS ACM target connector. Mirrors the
 // k8ssecret_test.go ergonomics + the Bundle 5+ atomic-rollback
 // assertions from IIS / WinCertStore / JavaKeystore.

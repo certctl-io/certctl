@@ -125,7 +125,7 @@ type RenewalPolicy struct {
 	// grow Prometheus cardinality on a typo).
 	//
 	// Rank 4 of the 2026-05-03 Infisical deep-research deliverable
-	// (cowork/infisical-deep-research-results.md Part 5).
+	// (the project's deep-research deliverable, Part 5).
 	AlertChannels map[string][]string `json:"alert_channels,omitempty"`
 
 	// AlertSeverityMap maps each threshold-day value to its severity

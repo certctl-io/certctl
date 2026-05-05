@@ -116,5 +116,5 @@ enrollments per tick.
 
 ## Audit blocker reference
 
-cowork/issuer-coverage-audit-2026-05-01/RESULTS.md, Top-10 fix #5
+the 2026-05-01 issuer coverage audit, Top-10 fix #5
 (Part 1.5 finding #4: "No polling backoff for async CAs").

@@ -286,7 +286,7 @@ func TestSCEPHandler_ChromeOSPKIMessage_AESVariants(t *testing.T) {
 }
 
 // TestSCEPHandler_ChromeOSPKIMessage_RAKeyMismatch — closure-bundle
-// gap M-1 / acceptance D.1 (cowork/scep-bundle-gap-closure-prompt.md).
+// gap M-1 / acceptance D.1 (the project's SCEP gap-closure spec).
 // Build a PKIMessage encrypted to a freshly-generated RA cert whose
 // matching private key the server does NOT have. The handler MUST
 // reject (RFC 8894 path can't decrypt → falls through; MVP path can't

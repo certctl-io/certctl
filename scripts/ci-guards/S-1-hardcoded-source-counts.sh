@@ -2,12 +2,12 @@
 # scripts/ci-guards/S-1-hardcoded-source-counts.sh
 #
 # S-1 master closed cat-s1-9ce1cbe26876 (README + features.md
-# stale numeric counts; explicit CLAUDE.md violation per
+# stale numeric counts; explicit violation of project guidelines per
 # "version-stamped numbers rot") and
 # cat-s1-features_md_issuer_count_contradiction (features.md
 # self-disagreed on issuer count: 9 vs 12 in the same doc).
 # The fix replaced source-derived numbers in prose with
-# "rebuild via <command>" patterns documented in CLAUDE.md::
+# "rebuild via <command>" patterns documented in the project guidelines under
 # "Current-state commands". This script grep-fails the build if
 # any of the previously-stale sites reintroduces a hardcoded
 # count.
@@ -35,8 +35,8 @@ if [ -n "$BAD" ]; then
   echo "::error::S-1 regression: hardcoded source-count prose reappeared:"
   echo "$BAD"
   echo ""
-  echo "CLAUDE.md rule: 'Numeric claims about current state rot.'"
-  echo "Replace the count with the grep command from CLAUDE.md::"
+  echo "Project rule: 'Numeric claims about current state rot.'"
+  echo "Replace the count with the grep command documented under"
   echo "'Current-state commands' (e.g. 'ls -d internal/connector/issuer/*/ | wc -l')"
   echo "or rephrase to reference the rebuild command on the same line."
   echo "See coverage-gap-audit-2026-04-24-v5/unified-audit.md"

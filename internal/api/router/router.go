@@ -357,7 +357,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// the handler (M-003 pattern); non-admin callers get 403.
 	r.Register("GET /api/v1/admin/crl/cache", http.HandlerFunc(reg.AdminCRLCache.ListCache))
 	// SCEP RFC 8894 + Intune master bundle Phase 9.2 + Phase 9 follow-up
-	// (cowork/scep-gui-restructure-prompt.md). All three endpoints are
+	// (the project's SCEP GUI restructure spec). All three endpoints are
 	// admin-gated at the handler layer; the M-008 regression scanner pins
 	// the gate set and TestM008_AdminGatedHandlers_HaveTripletTests
 	// enforces the per-handler test triplet.

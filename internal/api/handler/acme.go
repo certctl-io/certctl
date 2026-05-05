@@ -167,7 +167,7 @@ func (h ACMEHandler) NewNonce(w http.ResponseWriter, r *http.Request) {
 func (h ACMEHandler) directoryBaseURL(r *http.Request, profileID string) string {
 	scheme := "https"
 	if r.TLS == nil {
-		// HTTPS-only architecture decision (CLAUDE.md): the listener
+		// HTTPS-only architecture decision: the listener
 		// is TLS 1.3 pinned. r.TLS == nil only happens in tests with
 		// httptest.NewServer (non-TLS); honor http: for those.
 		scheme = "http"

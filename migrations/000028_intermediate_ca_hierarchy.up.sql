@@ -7,7 +7,7 @@
 --
 -- All operations use IF NOT EXISTS / IF EXISTS so the migration is
 -- idempotent — safe to re-run on every certctl-server boot per the
--- "Idempotent migrations" architecture decision in CLAUDE.md.
+-- the project's "Idempotent migrations" architecture decision.
 --
 -- Defense in depth: NEVER persist CA private key bytes. The
 -- key_driver_id column is a reference (filesystem path / KMS key ID

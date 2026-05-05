@@ -147,7 +147,7 @@ The hardened OpenSSL adapter (chroot/container by default,
 env-var allow-list at the adapter layer, signed-script-binary
 verification, audit-log-on-every-invocation, per-call concurrency
 bound shared with the API surface) is V3-Pro work. Tracking:
-`cowork/WORKSPACE-ROADMAP.md` (search "OpenSSL hardened mode").
+the project roadmap (search "OpenSSL hardened mode").
 
 ## Related docs
 

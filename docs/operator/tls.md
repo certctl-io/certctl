@@ -156,7 +156,7 @@ Same three controls as CLI, env-var-driven only (no flags — MCP runs as a stdi
 - `CERTCTL_SERVER_CA_BUNDLE_PATH` optional CA bundle
 - `CERTCTL_SERVER_TLS_INSECURE_SKIP_VERIFY` optional skip
 
-Claude Desktop / other MCP client configs should set all three in the tool's env block.
+MCP-client configs should set all three in the tool's env block.
 
 ## Troubleshooting: fail-loud preflight errors
 

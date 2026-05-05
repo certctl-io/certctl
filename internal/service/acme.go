@@ -1039,7 +1039,7 @@ type FinalizeOrderResult struct {
 //
 // The window between Step B and Step C can leave a managed_certificates
 // row whose order is still in `processing`. Phase 5's GC scheduler
-// reconciles. Documented in cowork/acme-server-prompts/03-... + the
+// reconciles. Documented in the project's ACME-server design notes + the
 // service file's design notes.
 func (s *ACMEService) FinalizeOrder(
 	ctx context.Context,
@@ -1293,7 +1293,7 @@ func randIDSuffix() string {
 // base32encode emits the lowercase Crockford-style base32 alphabet
 // without padding. Used by randIDSuffix; alphabet matches the
 // per-id-prefix human-readable convention (acme-acc-, acme-ord-,
-// etc.) — see CLAUDE.md "TEXT primary keys with human-readable
+// etc.) — see the project's "TEXT primary keys with human-readable
 // prefixes" architecture decision.
 func base32encode(b []byte) string {
 	const alpha = "0123456789abcdefghjkmnpqrstvwxyz"

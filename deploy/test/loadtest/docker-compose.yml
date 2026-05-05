@@ -53,8 +53,8 @@
 # Usage:  make loadtest  (from the repo root)
 # Manual: cd deploy/test/loadtest && docker compose up --abort-on-container-exit --exit-code-from k6
 #
-# Audit reference (API tier):       cowork/issuer-coverage-audit-2026-05-01/RESULTS.md fix #8.
-# Audit reference (connector tier): cowork/deployment-target-audit-2026-05-02/RESULTS.md Bundle 10.
+# Audit reference (API tier):       2026-05-01 issuer coverage audit fix #8.
+# Audit reference (connector tier): 2026-05-02 deployment-target audit Bundle 10.
 # =============================================================================
 
 services:

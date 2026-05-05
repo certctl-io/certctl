@@ -17,7 +17,7 @@ import (
 // service-side and the handler stays test-friendly.
 //
 // SCEP RFC 8894 + Intune master bundle Phase 9.1, extended in the
-// Phase 9 follow-up (cowork/scep-gui-restructure-prompt.md) with
+// Phase 9 follow-up (the project's SCEP GUI restructure spec) with
 // Profiles for the per-profile SCEP Administration tab.
 type AdminSCEPIntuneService interface {
 	// Stats returns one snapshot per configured SCEP profile (Intune-

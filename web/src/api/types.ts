@@ -682,7 +682,7 @@ export interface IntuneReloadTrustResponse {
 }
 
 // SCEP RFC 8894 + Intune master bundle Phase 9 follow-up
-// (cowork/scep-gui-restructure-prompt.md): per-profile SCEP admin
+// (the project's SCEP GUI restructure spec): per-profile SCEP admin
 // snapshot. Backs the new /api/v1/admin/scep/profiles endpoint and
 // the Profiles tab on the SCEP Administration page.
 //

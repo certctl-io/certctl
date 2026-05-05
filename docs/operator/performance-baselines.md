@@ -97,7 +97,7 @@ After any of:
 - Connection pool config change
 - Changing the renewal scheduler interval
 
-Capture timing in `cowork/loadtest-baselines/<date>.md` so future regressions surface against a real baseline rather than the operator's gut feeling.
+Capture timing in your own loadtest-baselines log so future regressions surface against a real baseline rather than the operator's gut feeling.
 
 ## Related docs
 
