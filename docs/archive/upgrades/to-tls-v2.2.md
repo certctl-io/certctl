@@ -1,10 +1,16 @@
 # Upgrading to HTTPS-Everywhere (v2.2)
 
+> **Archived 2026-05-05.** This upgrade guide applies to certctl < v2.2.
+> Current operators on v2.2+ already have HTTPS-only control planes and
+> don't need this procedure. For the steady-state TLS reference, see
+> [`docs/operator/tls.md`](../../operator/tls.md). Preserved here for
+> late upgraders coming off pre-v2.2 releases.
+
 certctl's control plane is HTTPS-only as of v2.2. There is no `http` mode, no `auto` mode, no dual-listener bind, no N-release migration window. The cutover is a single step. Out-of-date agents that still point at `http://…` fail at the TCP/TLS handshake layer on first connect after the upgrade and stay `Offline` in the dashboard until their env block is updated and the fleet is rolled.
 
 This doc walks operators through the cutover for the two shipped deployment topologies — docker-compose and Helm — and documents the failure modes and rollback posture explicitly.
 
-For the deep-dive on cert provisioning patterns, SIGHUP cert reload, and client-side CA-trust configuration, read [`tls.md`](tls.md). This doc is the narrow "how do I upgrade" procedure.
+For the deep-dive on cert provisioning patterns, SIGHUP cert reload, and client-side CA-trust configuration, read [`tls.md`](../../operator/tls.md). This doc is the narrow "how do I upgrade" procedure.
 
 ## Preconditions
 

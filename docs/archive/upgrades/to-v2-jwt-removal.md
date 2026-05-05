@@ -1,8 +1,15 @@
 # Upgrading past G-1 — `CERTCTL_AUTH_TYPE=jwt` removal
 
+> **Archived 2026-05-05.** This upgrade guide applies to operators
+> upgrading past the G-1 milestone (the `CERTCTL_AUTH_TYPE=jwt` removal).
+> Current operators on post-G-1 releases don't need this. For the
+> steady-state security posture reference, see
+> [`docs/operator/security.md`](../../operator/security.md). Preserved
+> here for late upgraders.
+
 If your certctl deployment currently sets `CERTCTL_AUTH_TYPE=jwt` (or `server.auth.type=jwt` in Helm), the next certctl upgrade will fail-fast at startup with a dedicated diagnostic. This guide explains why, what to switch to, and how to keep JWT/OIDC at your edge.
 
-For everyone else — operators running `api-key` or `none` — this upgrade is a no-op. Skip to [`upgrade-to-tls.md`](upgrade-to-tls.md) for the v2.2 HTTPS-everywhere migration if you haven't done that one yet.
+For everyone else — operators running `api-key` or `none` — this upgrade is a no-op. Skip to [`to-tls-v2.2.md`](to-tls-v2.2.md) for the v2.2 HTTPS-everywhere migration if you haven't done that one yet.
 
 ## Why we removed it
 
