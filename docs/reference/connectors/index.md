@@ -1,6 +1,23 @@
 # Connector Development Guide
 
+> Last reviewed: 2026-05-05
+>
+> This is the canonical connector reference. Per-connector deep-dive
+> pages exist for the targets that have unique operational quirks
+> (apache, f5, iis, k8s, nginx — see siblings in this directory). Other
+> connectors are documented inline in this file and will be extracted
+> to their own pages as operational depth grows. Cross-link from this
+> index to per-connector pages where they exist.
+
 Connectors extend certctl to integrate with external systems for certificate issuance, deployment, and notifications. This guide covers the connector interfaces, built-in implementations, and how to build your own.
+
+**Per-connector deep-dive pages** (siblings in this directory):
+
+- [Apache](apache.md) — Apache httpd connector deep dive
+- [F5 BIG-IP](f5.md) — F5 connector deep dive (proxy agent + iControl REST)
+- [IIS](iis.md) — Microsoft IIS connector deep dive (local PowerShell + WinRM modes)
+- [Kubernetes Secrets](k8s.md) — k8s.io/tls Secrets connector deep dive
+- [NGINX](nginx.md) — NGINX connector deep dive (deploy contract + quirks)
 
 ## Contents
 

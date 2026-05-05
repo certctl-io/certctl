@@ -1,7 +1,12 @@
 # NGINX Connector — Operator Deep-Dive
 
-> Per Phase 14 of the deploy-hardening II master bundle. Operator-
-> grade documentation for the NGINX target connector.
+> Last reviewed: 2026-05-05
+>
+> Per Phase 14 of the deploy-hardening II master bundle. Operator-grade
+> documentation for the NGINX target connector. For the
+> connector-development context (interface contract, registry, atomic
+> deploy primitive shared across all targets), see the
+> [connector index](index.md).
 
 ## Overview
 

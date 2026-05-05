@@ -1,6 +1,11 @@
 # Kubernetes Secrets Connector — Operator Deep-Dive
 
-> Per Phase 14 of the deploy-hardening II master bundle.
+> Last reviewed: 2026-05-05
+>
+> Per Phase 14 of the deploy-hardening II master bundle. For the
+> connector-development context (interface contract, registry, atomic
+> deploy primitive shared across all targets), see the
+> [connector index](index.md).
 
 ## Overview
 
