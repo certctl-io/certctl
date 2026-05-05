@@ -91,17 +91,6 @@ You're moving from another cert-management tool to certctl, or running both in p
 | cert-manager ACME (point cert-manager at certctl) | [migration/acme-from-cert-manager.md](migration/acme-from-cert-manager.md) |
 | Traefik ACME (point Traefik at certctl) | [migration/acme-from-traefik.md](migration/acme-from-traefik.md) |
 
-## Compliance
-
-You're working through a SOC 2, PCI, or NIST audit and need to map certctl's capabilities to control objectives.
-
-| Doc | What it covers |
-|---|---|
-| [Compliance overview](compliance/index.md) | What these guides cover and what they don't |
-| [SOC 2 Type II](compliance/soc2.md) | Trust Service Criteria mapping (CC6, CC7, CC8, A1) |
-| [PCI-DSS 4.0](compliance/pci-dss.md) | Requirements 3, 4, 6, 7, 8, 10 |
-| [NIST SP 800-57](compliance/nist-sp-800-57.md) | Key management alignment with NIST guidance |
-
 ## Contributor
 
 You're contributing to certctl, running tests locally, or trying to understand the CI pipeline.
@@ -134,7 +123,5 @@ Historical docs preserved for reference. Most operators don't need these.
 **Production operator:** [Architecture](reference/architecture.md) → [Security posture](operator/security.md) → [Control plane TLS](operator/tls.md) → [Disaster recovery runbook](operator/runbooks/disaster-recovery.md). About 4 hours end to end.
 
 **PKI engineer:** [ACME server](reference/protocols/acme-server.md) → [SCEP server](reference/protocols/scep-server.md) → [EST server](reference/protocols/est.md) → [Intermediate CA hierarchy](reference/intermediate-ca-hierarchy.md). About 6 hours end to end.
-
-**Auditor / compliance team:** [Compliance overview](compliance/index.md) → applicable framework doc → [Disaster recovery runbook](operator/runbooks/disaster-recovery.md) → [Approval workflow](operator/approval-workflow.md) → [ACME server threat model](reference/protocols/acme-server-threat-model.md). About 4 hours end to end.
 
 **Contributor:** [Architecture](reference/architecture.md) → [Testing strategy](contributor/testing-strategy.md) → [Test environment](contributor/test-environment.md) → [CI pipeline](contributor/ci-pipeline.md). About 3 hours end to end.

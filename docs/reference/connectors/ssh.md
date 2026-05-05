@@ -39,10 +39,9 @@ Look elsewhere when:
   (`InsecureIgnoreHostKey`); MITM resistance requires the
   mitigations below.
 - Your environment has strict regulatory MITM-resistance
-  requirements (PCI-DSS Level 1, FedRAMP High). The inline-comment
-  "out of scope" framing on host-key acceptance doesn't satisfy
-  auditors who want documented host-key verification at the
-  connector level.
+  requirements. The inline-comment "out of scope" framing on
+  host-key acceptance doesn't satisfy reviewers who want
+  documented host-key verification at the connector level.
 
 ## Configuration
 

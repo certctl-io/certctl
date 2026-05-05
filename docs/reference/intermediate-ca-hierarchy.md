@@ -10,10 +10,10 @@ The default `single`-mode flow (one operator-supplied sub-CA loaded
 from disk at boot) is unchanged and will keep working byte-for-byte
 forever. This page is for operators who need a real CA tree:
 
-- FedRAMP boundary-CA deployments where the regulator requires
-  separation of policy and issuing authorities.
-- Financial-services policy-CA deployments (one root, one policy CA
-  per business unit, one issuing CA per environment).
+- Boundary-CA deployments where you want separation of policy and
+  issuing authorities.
+- Policy-CA deployments (one root, one policy CA per business unit,
+  one issuing CA per environment).
 - OT / industrial control networks where the air-gapped root signs
   online sub-CAs that go in and out of service on a rotation.
 
@@ -74,12 +74,12 @@ the children first.
 
 ## Common deployment patterns
 
-### Pattern A — 4-level FedRAMP boundary CA
+### Pattern A — 4-level boundary CA
 
 ```mermaid
 flowchart TD
     Root["Acme Root CA<br/>path_len=3<br/>offline air-gapped"]
-    Policy["Acme Policy CA<br/>path_len=2<br/>FedRAMP-Moderate boundary"]
+    Policy["Acme Policy CA<br/>path_len=2<br/>boundary"]
     IssA["Acme Issuing A<br/>path_len=0<br/>prod workload leaves"]
     IssB["Acme Issuing B<br/>path_len=0<br/>ephemeral pod identity"]
     Root --> Policy --> IssA --> IssB

@@ -164,7 +164,7 @@ This table shows what each Part tests and what's left for manual verification.
 | 36–37 | Issuer Catalog, Frontend Audit | SKIP | — | Requires browser |
 | 38 | Error Handling | 5 | Malformed JSON, missing required field, method not allowed, UTF-8 CN, empty body | Stack trace suppression, error response format |
 | 39 | Performance | 5 | List certs < 200ms, stats < 500ms, metrics < 200ms, Prometheus < 300ms, audit < 500ms | Load testing, concurrent request handling |
-| 40 | Documentation | 8 | README, quickstart, architecture, connectors, compliance exist; migration guides exist; 8 issuer types in docs; 11 target types in docs | Content accuracy, link validity |
+| 40 | Documentation | 8 | README, quickstart, architecture, connectors exist; migration guides exist; 8 issuer types in docs; 11 target types in docs | Content accuracy, link validity |
 | 41 | Regression | 3 | DELETE 204, per_page max fallback, network scan target seed count | `errors.Is(errors.New())` anti-pattern source scan |
 | 42 | Envoy Target | 5 | Domain type, connector file, test file, OpenAPI, agent dispatch | Envoy deployment test, SDS config |
 | 43 | Postfix/Dovecot | 3 | Domain types (Postfix + Dovecot), connector file, OpenAPI | Mail server deployment test |
@@ -198,7 +198,7 @@ A buyer's QA lead reading this doc wants "where are the existential bugs caught?
 | **Medium** (Operational pain or silent data drift) | Targets, notifiers, observability, error handling, performance, regression | 14, 15-17, 30, 31, 38, 39, 40, 41, 42, 43, 44, 45, 46 | 14/14 automated (15-17 indirect via Parts 42–46) |
 | **Low** (Hygiene) | Documentation, docs verification | 40 (Documentation), 50 (Onboarding) | 2/2 automated |
 | **Frontend** (XSS, render correctness, mutation contracts) | GUI testing | 35, 36-37 | 0/3 automated in this suite (Vitest covers separately under `web/`); this doc punts to manual + Vitest |
-| **Compliance** (PCI / SOC2 / HIPAA-relevant) | Audit trail, body-size limits, request limits, Helm chart deploy posture | 27, 32, 51, 52 | 4/4 automated |
+| **Audit-relevant** | Audit trail, body-size limits, request limits, Helm chart deploy posture | 27, 32, 51, 52 | 4/4 automated |
 
 This is the table acquisition reviewers screenshot for their report. When a new Part_* subtest lands in `qa_test.go`, classify it here.
 

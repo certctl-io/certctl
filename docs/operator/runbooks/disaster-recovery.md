@@ -9,10 +9,10 @@
 > if a procedure here doesn't work as documented, that's a bug in
 > docs (file an issue).
 
-This runbook is the SOC 2 / PCI procurement-team deliverable: it tells
-auditors and on-call operators what to do when a piece of certctl's
-state corrupts, when a CA key needs rotation, or when Postgres needs
-a point-in-time restore. Read it once when you set up certctl; print
+This runbook is the on-call deliverable: it tells reviewers and
+on-call operators what to do when a piece of certctl's state
+corrupts, when a CA key needs rotation, or when Postgres needs a
+point-in-time restore. Read it once when you set up certctl; print
 the [DR checklist](#dr-checklist) and pin it near your on-call rotation.
 
 ## Contents
@@ -57,7 +57,7 @@ without operator action. The fail-safes in the codebase:
 These fail-safes mean most of this runbook is "delete the corrupt
 row + wait for the next tick" rather than "restore from backup +
 manually re-issue." The runbook documents the full procedures
-anyway because compliance auditors need to see them written down.
+anyway because reviewers need to see them written down.
 
 ## CRL cache recovery
 
@@ -288,7 +288,7 @@ backups. Without them, a restored DB is unusable.
 ## Trust-bundle reload semantics
 
 This section codifies the fail-safe behavior that's already in code,
-for compliance auditors who need to see the procedure documented.
+for reviewers who need to see the procedure documented.
 
 **Pattern:** every trust-bundle holder (`internal/trustanchor.Holder`,
 used by SCEP/Intune dispatcher + EST mTLS sibling route) implements

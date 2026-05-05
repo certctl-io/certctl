@@ -125,7 +125,7 @@ At no point does the private key leave the agent. This is a fundamental security
 
 Agents also report **metadata** about themselves — their operating system, CPU architecture, IP address, hostname, and version — with every heartbeat. This gives ops teams fleet-wide visibility (e.g., "how many agents are running on ARM?", "which agents are still on v1.0.0?") and powers **agent groups** — dynamic device grouping where policies can be scoped to specific agent criteria like OS type, architecture, or network subnet.
 
-**Retiring an agent.** When you decommission a server, the certctl record for its agent needs to be retired, not deleted. certctl uses a **soft-delete** model: `DELETE /api/v1/agents/{id}` stamps the row with a retired-at timestamp and a reason, instead of removing it. This is deliberate — an audit trail of "who owned this certificate, on which host, for which team" stays intact forever, and the downstream deployment_targets, certificates, and jobs keep valid foreign keys. Retired agents are filtered out of default list views and the dashboard's agent counter, but remain visible through a separate retired-agents view for compliance reconciliation. If the agent still has active deployment targets, deployed certificates, or pending jobs, retirement is blocked by default so you don't silently orphan those rows; the API responds with the exact counts so you can retire or reassign each dependency explicitly. A force-retire escape hatch (`?force=true&reason=...`) is available for true decommission scenarios — it transactionally retires the downstream targets, cancels pending jobs, and records the cascade in the audit trail with the reason you provided. Four internal sentinel agents that back the network scanner and the cloud secret-manager discovery sources cannot be retired at all, even with force, because retiring them would orphan their subsystems. Once retired, an agent that still attempts to heartbeat receives `410 Gone` — the agent process reads that as "you've been retired, shut down" and exits cleanly.
+**Retiring an agent.** When you decommission a server, the certctl record for its agent needs to be retired, not deleted. certctl uses a **soft-delete** model: `DELETE /api/v1/agents/{id}` stamps the row with a retired-at timestamp and a reason, instead of removing it. This is deliberate — an audit trail of "who owned this certificate, on which host, for which team" stays intact forever, and the downstream deployment_targets, certificates, and jobs keep valid foreign keys. Retired agents are filtered out of default list views and the dashboard's agent counter, but remain visible through a separate retired-agents view for audit reconciliation. If the agent still has active deployment targets, deployed certificates, or pending jobs, retirement is blocked by default so you don't silently orphan those rows; the API responds with the exact counts so you can retire or reassign each dependency explicitly. A force-retire escape hatch (`?force=true&reason=...`) is available for true decommission scenarios — it transactionally retires the downstream targets, cancels pending jobs, and records the cascade in the audit trail with the reason you provided. Four internal sentinel agents that back the network scanner and the cloud secret-manager discovery sources cannot be retired at all, even with force, because retiring them would orphan their subsystems. Once retired, an agent that still attempts to heartbeat receives `410 Gone` — the agent process reads that as "you've been retired, shut down" and exits cleanly.
 
 ### Deployment Targets
 
@@ -244,7 +244,7 @@ Every action in certctl — issuing a certificate, renewing one, deploying to a 
 
 ### Audit Trail
 
-Every action is logged: who did it, what changed, when, and why. This is essential for compliance (SOC 2, PCI-DSS, ISO 27001) and for debugging. You can trace a certificate's entire history from creation through every renewal and deployment.
+Every action is logged: who did it, what changed, when, and why. This is essential for audit and for debugging. You can trace a certificate's entire history from creation through every renewal and deployment.
 
 ### Notifications
 
@@ -281,7 +281,7 @@ This gives you a three-step triage workflow:
 
 Network scan targets are managed from the **Network Scans** dashboard page — create CIDR ranges and ports to probe, enable/disable targets, trigger on-demand scans, and view results. Discovered certificates from network scans appear in the same Discovery triage page alongside filesystem discoveries.
 
-This is a prerequisite for multi-CA migration, compliance audits, and building confidence that you've found all the certificates that matter.
+This is a prerequisite for multi-CA migration, audit reviews, and building confidence that you've found all the certificates that matter.
 
 ### Observability
 

@@ -365,7 +365,7 @@ curl -s -X POST $API/api/v1/certificates \
 | `issuer_id` | Links to the issuer connector that will sign this certificate. Determines which CA backend is used. |
 | `renewal_policy_id` | Links to a `renewal_policies` row that defines: how many days before expiry to renew (`renewal_window_days`), whether auto-renewal is enabled (`auto_renew`), max retries, and retry interval. The default policy (`rp-default`) renews 30 days before expiry. |
 | `status` | Set to `Pending` because the certificate hasn't been issued yet. The scheduler will pick it up, or you can trigger renewal manually. |
-| `tags` | Arbitrary key-value metadata stored as JSONB. Useful for filtering, reporting, and integration with external systems (e.g., `"pci": "true"` for compliance scoping). |
+| `tags` | Arbitrary key-value metadata stored as JSONB. Useful for filtering, reporting, and integration with external systems (e.g., `"environment": "production"` for fleet scoping). |
 
 **Check the dashboard now.** Click "Certificates" in the sidebar. You'll see your new "Demo API Certificate" with status "Pending" alongside the pre-loaded demo certificates. Click on it to see the full details.
 
@@ -605,7 +605,7 @@ curl -s "$API/api/v1/audit?created_after=2026-03-24T09:00:00Z" | jq '.data | len
 
 The audit middleware (M19) records every HTTP request: method, path, status code, actor, request body SHA-256 hash, and latency. This creates a complete API audit trail without blocking responses (logging happens asynchronously).
 
-**Why immutable audit:** Compliance frameworks (SOC 2 Type II, PCI-DSS, ISO 27001) require tamper-evident audit logs. By making the repository interface append-only and recording API calls, even a compromised API server can't retroactively delete or modify audit records. In a production deployment, you'd also stream these to an external SIEM (Splunk, Datadog) for additional protection.
+**Why immutable audit:** tamper-evident audit logs are a hard requirement when an attacker has compromised the API server. By making the repository interface append-only and recording API calls, even a compromised API server can't retroactively delete or modify audit records. In a production deployment, you'd also stream these to an external SIEM (Splunk, Datadog) for additional protection.
 
 **Check the dashboard.** The "Audit" view shows the full timeline of all actions across the system with filtering and CSV/JSON export.
 
@@ -703,7 +703,7 @@ curl -s -X POST $API/api/v1/certificates \
 
 **Why `environment` matters:** The environment field isn't just metadata — it feeds the policy engine. A policy rule with type `AllowedEnvironments` can restrict which environments are valid. If someone tries to create a certificate with `environment: "yolo"`, the policy engine flags a violation. In a mature deployment, you'd enforce policies strictly: production certificates must use a trusted CA (not Local CA), staging certificates can use Let's Encrypt staging, and development certificates can use the Local CA.
 
-**Why `pci: true` in tags:** Tags are free-form, but they enable powerful filtering and compliance scoping. A security team could query `GET /api/v1/certificates?tags.pci=true` (not implemented yet, but the JSONB column supports it) to find all PCI-scoped certificates and verify they meet compliance requirements.
+**Why arbitrary tags in metadata:** Tags are free-form, but they enable powerful filtering and fleet scoping. A security team could query `GET /api/v1/certificates?tags.regulated=true` (not implemented yet, but the JSONB column supports it) to find all certificates marked regulated and verify they meet whatever requirements that label maps to.
 
 **Refresh the dashboard** — you'll see the new payment gateway certificate. Try filtering by environment or status to see how both certificates appear alongside the demo data.
 
@@ -780,7 +780,7 @@ Check existing violations:
 curl -s "$API/api/v1/policies/pr-max-certificate-lifetime/violations" | jq .
 ```
 
-**How it works:** This hits `GET /api/v1/policies/{id}/violations`, which queries `SELECT * FROM policy_violations WHERE rule_id = $1`. Each violation references the offending certificate and the rule it violated, creating a traceable link between the policy definition and the specific non-compliance.
+**How it works:** This hits `GET /api/v1/policies/{id}/violations`, which queries `SELECT * FROM policy_violations WHERE rule_id = $1`. Each violation references the offending certificate and the rule it violated, creating a traceable link between the policy definition and the specific violation.
 
 **In the dashboard**, click "Policies" in the sidebar to see all active rules and which certificates are violating them.
 
@@ -846,7 +846,7 @@ curl -s -X POST $API/api/v1/profiles \
 
 **How it works:** Certificate profiles are stored in the `certificate_profiles` table with a `allowed_key_algorithms` JSONB column that defines which key types and minimum sizes are acceptable. When a certificate is assigned to a profile, the profile constraints are enforced during CSR validation. The `max_validity_days` field controls the maximum certificate lifetime — profiles with values translating to under 1 hour enable short-lived certificate mode, where certs are exempt from CRL/OCSP.
 
-**Why profiles matter:** Without profiles, any agent can submit a CSR with any key type and any validity period. Profiles create crypto policy guardrails — "production TLS certs must use ECDSA P-256 with 90-day max TTL" — that prevent configuration drift and enforce compliance requirements across the fleet.
+**Why profiles matter:** Without profiles, any agent can submit a CSR with any key type and any validity period. Profiles create crypto policy guardrails — "production TLS certs must use ECDSA P-256 with 90-day max TTL" — that prevent configuration drift and enforce policy across the fleet.
 
 **In the dashboard**, click "Profiles" in the sidebar to see and manage certificate profiles.
 
@@ -896,17 +896,17 @@ Approve or reject them:
 # Approve a job
 curl -s -X POST $API/api/v1/jobs/JOB_ID/approve \
   -H "Content-Type: application/json" \
-  -d '{"reason": "Verified key type meets compliance requirements"}' | jq .
+  -d '{"reason": "Verified key type meets policy"}' | jq .
 
 # Reject a job
 curl -s -X POST $API/api/v1/jobs/JOB_ID/reject \
   -H "Content-Type: application/json" \
-  -d '{"reason": "Key type does not meet PCI requirements"}' | jq .
+  -d '{"reason": "Key type does not meet policy"}' | jq .
 ```
 
 **How it works:** When a renewal policy has `auto_renew` set to false, renewal jobs enter the `AwaitingApproval` state instead of being processed immediately. An operator must explicitly approve or reject the job via the API or the GUI. Approved jobs transition to `Pending` and are picked up by the job processor. Rejected jobs move to `Cancelled` with the provided reason recorded in the audit trail.
 
-**Why interactive approval:** Not every certificate renewal should be automatic. PCI-scoped certificates, certs with specific compliance requirements, or certificates being migrated between issuers benefit from a human checkpoint. The AwaitingApproval state creates that checkpoint without blocking the entire job pipeline.
+**Why interactive approval:** Not every certificate renewal should be automatic. High-value certificates, certs with specific policy requirements, or certificates being migrated between issuers benefit from a human checkpoint. The AwaitingApproval state creates that checkpoint without blocking the entire job pipeline.
 
 **In the dashboard:** Click "Jobs" in the sidebar, filter by status "AwaitingApproval", and you'll see a list of renewal jobs waiting for approval. Each job shows the certificate, issuer, and requested validity period. Click a job to open its detail view and see the Approve / Reject buttons with a reason text field. After approval or rejection, the job status updates in real-time and the audit trail records the decision.
 

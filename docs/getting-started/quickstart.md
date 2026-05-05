@@ -324,7 +324,7 @@ curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/jobs/JOB_ID/approve
 # Reject a pending job
 curl --cacert "$CA" -s -X POST https://localhost:8443/api/v1/jobs/JOB_ID/reject \
   -H "Content-Type: application/json" \
-  -d '{"reason": "Key type does not meet compliance requirements"}' | jq .
+  -d '{"reason": "Key type does not meet policy requirements"}' | jq .
 ```
 
 ## Certificate Discovery
@@ -482,7 +482,7 @@ A suggested 5-minute flow:
 6. **Agent fleet** — "Agents handle key generation locally (ECDSA P-256). Private keys never leave your infrastructure."
 7. **Discovery** — "Agents scan filesystems, server probes TLS endpoints. We find what you're not managing yet."
 8. **Bulk operations** — "Select multiple certs, renew or revoke in bulk. At 47-day lifespans with hundreds of certs, this is essential."
-9. **Audit trail** — "Every action recorded. Export to CSV/JSON for compliance."
+9. **Audit trail** — "Every action recorded. Export to CSV/JSON for review."
 10. **CLI + MCP** — "Terminal users get `certctl-cli`. AI assistants get MCP integration. Everything is API-first."
 
 ## Tear Down

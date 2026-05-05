@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-05
 
-**Audit reference:** Bundle B / M-018. PCI-DSS v4.0 Req 4 §2.2.5; CWE-319.
+**Audit reference:** Bundle B / M-018. CWE-319 (Cleartext transmission of sensitive information).
 
 certctl talks to Postgres over a single connection-string URL controlled by the
 `CERTCTL_DATABASE_URL` env var. The `sslmode` query parameter on that URL
@@ -15,16 +15,16 @@ explicit opt-in / opt-out paths for the four real-world deployment shapes.
 
 | Deployment shape                               | Default `sslmode` | When to change |
 |------------------------------------------------|--------------------|----------------|
-| Helm chart, bundled Postgres, in-cluster       | `disable`          | When the cluster does not provide pod-network encryption (CNI without WireGuard / IPSec) and the workload is in PCI-DSS scope. |
+| Helm chart, bundled Postgres, in-cluster       | `disable`          | When the cluster does not provide pod-network encryption (CNI without WireGuard / IPSec) and the workload handles sensitive data. |
 | Helm chart, external Postgres (RDS / Cloud SQL / Azure DB) | not auto-set | **Always** set to `verify-full` and provide the cloud provider's server CA bundle. |
 | docker-compose, bundled Postgres on docker bridge | `disable`        | Demo/dev only; not a deployment shape we expect operators to harden. |
 | docker-compose / k8s with external Postgres    | not auto-set       | **Always** set `CERTCTL_DATABASE_URL` to a connection string with `sslmode=verify-full`. |
 
 `sslmode` values come from `lib/pq` (the underlying driver). The full set is:
-`disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`. PCI-DSS
-Req 4 v4.0 §2.2.5 considers `verify-ca` the floor for sensitive-data transport;
-`verify-full` is the floor for systems exposed to spoofing risk (it adds
-hostname validation against the server cert's CN/SAN).
+`disable`, `allow`, `prefer`, `require`, `verify-ca`, `verify-full`.
+`verify-ca` is the floor for sensitive-data transport; `verify-full`
+is the floor for systems exposed to spoofing risk (it adds hostname
+validation against the server cert's CN/SAN).
 
 ## Helm chart (Bundle B)
 

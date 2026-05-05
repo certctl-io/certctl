@@ -202,7 +202,7 @@ The Local CA issuer signs certificates using Go's `crypto/x509` library. It supp
 
 **Sub-CA mode:** Loads a CA certificate and private key from disk (`CERTCTL_CA_CERT_PATH` + `CERTCTL_CA_KEY_PATH`). The CA cert is signed by an upstream CA (e.g., ADCS), so all issued certificates chain to the enterprise root trust hierarchy. Clients that already trust the enterprise root automatically trust certctl-issued certs. Supports RSA, ECDSA, and PKCS#8 key formats. If the paths are not set, falls back to self-signed mode. The loaded certificate must have `IsCA=true` and `KeyUsageCertSign`.
 
-**Tree mode (Rank 8 — multi-level CA hierarchy):** When `Issuer.HierarchyMode = "tree"` is set on the issuer row, the local connector reads the active CA hierarchy from the `intermediate_cas` table and assembles `IssuanceResult.ChainPEM` by walking the `parent_ca_id` ancestry from the issuing leaf CA up to the root. Tree mode is operator-managed via the admin-gated `/api/v1/issuers/{id}/intermediates` and `/api/v1/intermediates/{id}` endpoints (`POST` to create / sign children, `GET` to list / inspect, `POST .../retire` to two-phase retire). The signing path is shared with single-mode (cert is signed via `c.caCert` + `c.caSigner` from the on-disk issuing CA cert+key); only the chain bytes differ. RFC 5280 §3.2 (self-signed root validation), §4.2.1.9 (path-length tightening), and §4.2.1.10 (NameConstraints subset semantics) are enforced at the service layer fail-closed. The default is `single`, byte-identical to the pre-Rank-8 historical flow. See `docs/intermediate-ca-hierarchy.md` for the operator runbook covering 4-level FedRAMP boundary CA, 3-level financial-services policy CA, 2-level internal-PKI patterns + the migration runbook for flipping a single-mode issuer to tree.
+**Tree mode (Rank 8 — multi-level CA hierarchy):** When `Issuer.HierarchyMode = "tree"` is set on the issuer row, the local connector reads the active CA hierarchy from the `intermediate_cas` table and assembles `IssuanceResult.ChainPEM` by walking the `parent_ca_id` ancestry from the issuing leaf CA up to the root. Tree mode is operator-managed via the admin-gated `/api/v1/issuers/{id}/intermediates` and `/api/v1/intermediates/{id}` endpoints (`POST` to create / sign children, `GET` to list / inspect, `POST .../retire` to two-phase retire). The signing path is shared with single-mode (cert is signed via `c.caCert` + `c.caSigner` from the on-disk issuing CA cert+key); only the chain bytes differ. RFC 5280 §3.2 (self-signed root validation), §4.2.1.9 (path-length tightening), and §4.2.1.10 (NameConstraints subset semantics) are enforced at the service layer fail-closed. The default is `single`, byte-identical to the pre-Rank-8 historical flow. See `docs/reference/intermediate-ca-hierarchy.md` for the operator runbook covering common 4-level boundary, 3-level policy, and 2-level internal-PKI patterns + the migration runbook for flipping a single-mode issuer to tree.
 
 **CRL and OCSP support (M15b):** The Local CA supports DER-encoded X.509 CRL generation served unauthenticated at `GET /.well-known/pki/crl/{issuer_id}` (RFC 5280 §5, RFC 8615, `Content-Type: application/pkix-crl`) with 24-hour validity. An embedded OCSP responder at `GET /.well-known/pki/ocsp/{issuer_id}/{serial}` (RFC 6960, `Content-Type: application/ocsp-response`) returns signed OCSP responses for issued certificates (good/revoked/unknown status). Both endpoints are reachable by relying parties with no certctl API credentials, which is how standard TLS clients, browsers, and hardware appliances consume these resources. Certificates with profile TTL < 1 hour automatically skip CRL/OCSP — expiry is treated as sufficient revocation for short-lived credentials.
 
@@ -314,7 +314,7 @@ The connector is registered in the issuer registry under `iss-acme-staging` and 
 
 The cert version must exist in the local store: this means the cert was issued through certctl, not imported. If `GetVersionBySerial` returns `sql.ErrNoRows`, the connector returns an actionable error pointing at the local-store requirement. Revoke-by-serial is therefore only available for ACME certs that certctl issued.
 
-Reason codes follow RFC 5280 §5.3.1: nil reason maps to `unspecified` (0), and the connector accepts the canonical camelCase form (`keyCompromise`, `cACompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aACompromise`) plus underscore_lower and ALL_CAPS_UNDERSCORE variants. An unknown reason returns an error rather than silently demoting to `unspecified` — operators rely on the reason for compliance reporting (PCI-DSS §3.6, HIPAA §164.312).
+Reason codes follow RFC 5280 §5.3.1: nil reason maps to `unspecified` (0), and the connector accepts the canonical camelCase form (`keyCompromise`, `cACompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aACompromise`) plus underscore_lower and ALL_CAPS_UNDERSCORE variants. An unknown reason returns an error rather than silently demoting to `unspecified` — operators rely on the reason for audit reporting.
 
 Audit reference: `cowork/issuer-coverage-audit-2026-05-01/RESULTS.md` Top-10 fix #7.
 
@@ -398,7 +398,7 @@ certctl's OpenSSL adapter `exec`s an operator-supplied script for every certific
 
 **When you should NOT use the OpenSSL adapter:**
 
-- Compliance environments (PCI-DSS Level 1, FedRAMP High, HIPAA-regulated PHI handling) where shell-out attack surfaces are formally disallowed by your security policy.
+- Regulated environments where shell-out attack surfaces are formally disallowed by your security policy.
 - Multi-tenant certctl-server deployments where tenant-A's script can affect tenant-B's certificates.
 - Environments without operator review of every script line — trust-on-first-use is the wrong posture for a shell-out.
 - For these cases, switch to a Go-native issuer adapter (Vault, DigiCert, Sectigo, ACME, AWSACMPCA, GoogleCAS, EJBCA, Entrust, GlobalSign, step-ca) or commission a custom Go-native adapter for your CA (the issuer connector interface in `internal/connector/issuer/interface.go` is small — `IssueCertificate` + `RevokeCertificate` + `GetCACertPEM` + a few stubs).
@@ -478,7 +478,7 @@ See [`legacy-est-scep.md`](../protocols/scep-server.md#scep-mtls-sibling-route-p
 
 #### Microsoft Intune Certificate Connector dispatcher
 
-When a profile has `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true`, certctl validates the Microsoft Intune Certificate Connector's signed-challenge JWS natively as a drop-in NDES replacement (the Intune Connector documents itself as RFC 8894-compliant and works against any RFC 8894 SCEP server). The dispatcher walks parse → JWS signature verify (RS256 + ES256, alg=none rejected) → version dispatch → time bounds with ±tolerance → audience pin → CSR ↔ claim binding → replay cache → per-device rate limit → optional V3-Pro compliance hook. The trust anchor file is reloaded on `SIGHUP` (operator rotates the on-disk PEM, then `kill -HUP <certctl-pid>`); a parse failure during reload keeps the OLD pool so a half-rotation doesn't take Intune down.
+When a profile has `CERTCTL_SCEP_PROFILE_<NAME>_INTUNE_ENABLED=true`, certctl validates the Microsoft Intune Certificate Connector's signed-challenge JWS natively as a drop-in NDES replacement (the Intune Connector documents itself as RFC 8894-conformant and works against any RFC 8894 SCEP server). The dispatcher walks parse → JWS signature verify (RS256 + ES256, alg=none rejected) → version dispatch → time bounds with ±tolerance → audience pin → CSR ↔ claim binding → replay cache → per-device rate limit → optional V3-Pro device-state hook. The trust anchor file is reloaded on `SIGHUP` (operator rotates the on-disk PEM, then `kill -HUP <certctl-pid>`); a parse failure during reload keeps the OLD pool so a half-rotation doesn't take Intune down.
 
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
@@ -493,7 +493,7 @@ See [`scep-intune.md`](../protocols/scep-intune.md) for the full deployment guid
 
 #### SCEP probe in network scanner
 
-The Network Scans GUI surface includes a one-click "Probe SCEP" form that runs a capability + posture check against any reachable SCEP server URL — `GetCACaps` + `GetCACert` (NEVER `PKCSReq`) so the probe is read-only and safe to run against production endpoints. Result fields surface advertised caps (POSTPKIOperation, SHA-256, SHA-512, AES, SCEPStandard, Renewal), CA cert subject + issuer + algorithm + days-to-expiry + chain length, and a probe duration. Results persist to `scep_probe_results` (migration `000021`) and the probe history is paginated under `GET /api/v1/network-scan/scep-probes`. Useful for pre-migration assessment ("what does the existing NDES advertise?") and compliance-posture audits.
+The Network Scans GUI surface includes a one-click "Probe SCEP" form that runs a capability + posture check against any reachable SCEP server URL — `GetCACaps` + `GetCACert` (NEVER `PKCSReq`) so the probe is read-only and safe to run against production endpoints. Result fields surface advertised caps (POSTPKIOperation, SHA-256, SHA-512, AES, SCEPStandard, Renewal), CA cert subject + issuer + algorithm + days-to-expiry + chain length, and a probe duration. Results persist to `scep_probe_results` (migration `000021`) and the probe history is paginated under `GET /api/v1/network-scan/scep-probes`. Useful for pre-migration assessment ("what does the existing NDES advertise?") and posture review.
 
 | Endpoint | Auth | Description |
 |----------|------|-------------|
@@ -1325,7 +1325,7 @@ certctl's SSH connector dials each target with `HostKeyCallback: ssh.InsecureIgn
 **When you should NOT use the SSH connector:**
 
 - Deploying to **unknown / dynamic / multi-tenant** hosts where the IP-to-hostname binding isn't operator-controlled.
-- Environments with strict **regulatory MITM-resistance** requirements (PCI-DSS Level 1, FedRAMP High, etc.) — the inline-comment "out of scope" framing doesn't satisfy compliance auditors who want documented host-key verification at the connector level.
+- Environments with strict **regulatory MITM-resistance** requirements where the inline-comment "out of scope" framing doesn't satisfy reviewers who want documented host-key verification at the connector level.
 - For these cases, switch to a different connector (Kubernetes Secrets, WinCertStore, F5 with iControl REST under operator-managed cert pinning) **OR** layer a custom `SSHClient` with full `known_hosts` validation per the mitigations above.
 
 **V3-Pro forward path:**
@@ -1546,7 +1546,7 @@ The ARN updates in place across renewals (ACM `ImportCertificate` is upsert-styl
 - The cert key is held only in agent memory during the import call; never written to disk.
 - Every imported ACM cert is tagged with `certctl-managed-by=certctl` + `certctl-certificate-id=<mc-id>` for forensic traceability.
 - Failed imports trigger automatic rollback to the snapshotted previous cert; both outcomes are surfaced via Prometheus.
-- The minimum IAM policy is 5 actions on `arn:aws:acm:*:*:certificate/*`; CloudTrail captures every API call for compliance audits.
+- The minimum IAM policy is 5 actions on `arn:aws:acm:*:*:certificate/*`; CloudTrail captures every API call for audit.
 
 **ValidateOnly contract.** ACM has no dry-run API for `ImportCertificate`; `ValidateOnly` returns `target.ErrValidateOnlyNotSupported` per the deploy-hardening I Phase 3 sentinel contract. Operators preview deploys via `ValidateConfig` + `aws acm describe-certificate --certificate-arn <arn>` against the current ARN.
 
@@ -1628,7 +1628,7 @@ Application Gateway / Front Door reference the cert by KID URI; certctl rotates 
 - The cert key is held only in agent memory during the PFX wrap + import call; never written to disk.
 - Every imported Key Vault cert is tagged with `certctl-managed-by=certctl` + `certctl-certificate-id=<mc-id>` for forensic traceability.
 - Failed imports trigger automatic rollback by re-importing the snapshotted previous version's bytes; both outcomes are surfaced via Prometheus.
-- The minimum RBAC role is 3 data-plane actions; Activity Log captures every API call for compliance audits.
+- The minimum RBAC role is 3 data-plane actions; Activity Log captures every API call for audit.
 
 **ValidateOnly contract.** Key Vault has no dry-run API; `ValidateOnly` returns `target.ErrValidateOnlyNotSupported`. Operators preview deploys via `ValidateConfig` + `az keyvault certificate show --vault-name <name> --name <cert>`.
 

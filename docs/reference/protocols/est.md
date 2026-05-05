@@ -9,7 +9,7 @@
 > `internal/service/est*_test.go`, and (for the libest interop layer)
 > `deploy/test/est_e2e_test.go` under `//go:build integration`. The
 > bundle is **V2-free**; per-tenant CA isolation, Conditional-Access
-> compliance gating, and EST cert-bound usage analytics are documented
+> device-state gating, and EST cert-bound usage analytics are documented
 > as V3-Pro deferrals in [V3-Pro deferrals](#v3-pro-deferrals).
 
 ## Contents
@@ -710,10 +710,10 @@ These capabilities are deferred to V3-Pro (paid tier). They're not
 oversights — they're the natural follow-on bundles after v2.X.0 GA:
 
 - **Conditional Access / device-posture gating.** The per-profile
-  ESTService exposes a nil-default compliance-hook seam (mirrors the
-  SCEP/Intune `ComplianceCheck` pattern). V3-Pro plugs in a
+  ESTService exposes a nil-default device-state hook seam (mirrors
+  the SCEP/Intune `DeviceStateCheck` pattern). V3-Pro plugs in a
   Microsoft Graph or other posture-check callback before issuance;
-  non-compliant devices fail with a typed `est_compliance_failed`
+  failing devices fail with a typed `est_device_state_failed`
   reason.
 - **Multi-tenant CA isolation.** V2 has one trust anchor pool per
   EST profile and one issuer binding. V3-Pro ships per-tenant root

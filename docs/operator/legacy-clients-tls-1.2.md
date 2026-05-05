@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-05
 
-**Audit reference:** Bundle F / M-023. PCI-DSS v4.0 Req 4 §2.2.5; CWE-326.
+**Audit reference:** Bundle F / M-023. CWE-326 (Inadequate encryption strength).
 
 ## What this is
 
@@ -15,13 +15,12 @@ proxy and pass the request through to certctl over TLS 1.3.
 
 ## Why TLS 1.3 minimum
 
-certctl's audit posture, the SOC 2 / PCI-DSS / NIST SP 800-57 compliance
-mappings, and the M-001 PBKDF2 work factor all assume modern transport
-crypto. TLS 1.2 with the cipher suites still in the wild has known
-attack surface (BEAST, POODLE, ROBOT, raccoon — all CVE-categorized);
-allowing TLS 1.2 directly on the certctl listener would invalidate the
-guarantee that the server-side encryption chain is the strongest the
-ecosystem currently supports.
+certctl's audit posture and the M-001 PBKDF2 work factor both assume
+modern transport crypto. TLS 1.2 with the cipher suites still in the
+wild has known attack surface (BEAST, POODLE, ROBOT, raccoon — all
+CVE-categorized); allowing TLS 1.2 directly on the certctl listener
+would invalidate the guarantee that the server-side encryption chain
+is the strongest the ecosystem currently supports.
 
 ## When this runbook applies
 
@@ -71,8 +70,8 @@ server {
     server_name est.example.com;
 
     # Public-facing legacy listener. ssl_protocols includes TLSv1.2 explicitly.
-    # Keep ssl_ciphers conservative — only the strong AEAD suites that
-    # PCI-DSS Req 4 §2.2.5 still allows under TLS 1.2.
+    # Keep ssl_ciphers conservative — only strong AEAD suites with forward
+    # secrecy.
     ssl_certificate     /etc/nginx/certs/est.example.com.fullchain.pem;
     ssl_certificate_key /etc/nginx/certs/est.example.com.key;
     ssl_protocols       TLSv1.2 TLSv1.3;
@@ -168,21 +167,19 @@ only one would fail loud at startup. Until that work ships, the
 header-agnostic default described above is the only supported
 configuration.
 
-## PCI-DSS Req 4 §2.2.5 attestation
+## TLS posture summary
 
-PCI-DSS v4.0 §2.2.5 ("strong cryptography for authentication/transmission
-of cardholder data") considers TLS 1.2 with strong cipher suites
-acceptable for the foreseeable future, with the explicit caveat that NIST
-or the PCI Council may shorten the deprecation window if a TLS 1.2
-weakness is published. The configuration above:
+The configuration above:
 
 - Pins TLS 1.2 + TLS 1.3 only (no SSLv3, TLS 1.0, TLS 1.1).
 - Uses only AEAD cipher suites with forward secrecy (ECDHE-* with GCM or
   ChaCha20-Poly1305).
-- Re-encrypts to TLS 1.3 on the proxy-to-certctl hop.
+- Re-encrypts to TLS 1.3 on the proxy-to-certctl hop so the certctl
+  listener never speaks anything below 1.3.
 
-This is PCI-DSS Req 4 v4.0 compliant. Auditors looking for the
-attestation should be pointed at this section + the proxy's TLS config.
+That is the strongest posture currently achievable while still allowing
+the legacy clients to enroll. Reviewers looking for the attestation
+should be pointed at this section + the proxy's TLS config.
 
 ## What this runbook does NOT cover
 
@@ -197,14 +194,11 @@ attestation should be pointed at this section + the proxy's TLS config.
 
 ## When TLS 1.2 itself sunsets
 
-PCI-DSS, NIST, and major browsers will eventually deprecate TLS 1.2.
-When that happens, this runbook becomes obsolete; the only path forward
-will be to replace the legacy clients. Subscribe to RSS feeds at the
-following sources to catch the deprecation announcement before it
-becomes a compliance failure:
-
-- https://www.pcisecuritystandards.org/news_events/
-- https://nvlpubs.nist.gov/nistpubs/SpecialPublications/  (SP 800-52 revisions)
+Major browsers and OS vendors will eventually deprecate TLS 1.2. When
+that happens, this runbook becomes obsolete; the only path forward
+will be to replace the legacy clients. Watch the IETF TLS working
+group, the major browser vendors' announcement channels, and your
+own embedded-device vendors for deprecation notices.
 
 ## Related docs
 

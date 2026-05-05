@@ -5,10 +5,10 @@
 > **Status (this document):** Phase 11 of the SCEP RFC 8894 + Intune master
 > bundle. The behavior described here is shipped on `master` and exercised
 > end-to-end by `internal/api/handler/scep_intune_e2e_test.go`. The
-> bundle is V2-free (community edition) — Conditional-Access compliance
-> gating, native Microsoft Graph integration, and per-tenant trust
-> anchors are documented under [Limitations](#limitations) as V3-Pro
-> features.
+> bundle is V2-free (community edition) — Conditional-Access
+> device-state gating, native Microsoft Graph integration, and
+> per-tenant trust anchors are documented under
+> [Limitations](#limitations) as V3-Pro features.
 
 ## TL;DR
 
@@ -101,9 +101,10 @@ PKIMessage with the documented `pkiStatus`/`failInfo` codes (per RFC
    issuing many DIFFERENT valid challenges for the same device. Default
    3 enrollments per 24h covers legitimate first-cert + recovery +
    post-wipe.
-9. **Optional compliance check** — V3-Pro plug-in seam (nil-default
-   no-op). When set, the gate calls Microsoft Graph's compliance API
-   and short-circuits non-compliant devices with FAILURE+BadRequest.
+9. **Optional device-state check** — V3-Pro plug-in seam
+   (nil-default no-op). When set, the gate calls Microsoft Graph's
+   device-compliance API and short-circuits failing devices with
+   FAILURE+BadRequest.
 
 A request that passes all nine gates flows to
 `processEnrollment`, which builds the issuance request, calls the
@@ -245,7 +246,7 @@ common root cause and the operator action.
 | `rate_limited`       | A specific device hitting `429`-equivalent failures              | The device exceeded `INTUNE_PER_DEVICE_RATE_LIMIT_24H` (default 3). If legitimate (post-wipe + recovery + first-cert all in 24h), bump the cap. If suspicious, this is the limiter doing its job — investigate the device. |
 | `unknown_version`    | Sudden onset of failures across the entire fleet                  | Microsoft shipped a new Connector version with a `version` claim certctl doesn't understand. Open an issue on the certctl repo with the failing claim payload (anonymized); the parser dispatcher accepts new versions in ~30 LoC. |
 | `malformed`          | Sporadic, low-volume                                              | Malformed challenge bytes — almost always a network proxy mangling the request body, or the Connector logging itself out mid-handshake. Capture a packet trace; the Connector should re-emit on the next device retry. |
-| `compliance_failed`  | V3-Pro only                                                       | The pluggable compliance check returned non-compliant. The audit-log details carries the reason string from Microsoft Graph. V2 deployments never see this counter tick.                                          |
+| `device_state_failed` | V3-Pro only                                                      | The pluggable device-state check rejected the device. The audit-log details carries the reason string from Microsoft Graph. V2 deployments never see this counter tick.                                          |
 
 ## Operational monitoring (SCEP Administration → Intune Monitoring tab)
 
@@ -327,10 +328,10 @@ V3-Pro:
   directly — the Connector already did that. V3-Pro could ship a
   Graph client that pulls device-compliance state in addition to
   the challenge claim.
-- **Conditional Access compliance gating.** The dispatcher exposes a
-  nil-default `ComplianceCheck` hook. V3-Pro plugs in a Microsoft
-  Graph compliance lookup before issuance; non-compliant devices
-  fail with a typed `compliance_failed` failInfo.
+- **Conditional Access device-state gating.** The dispatcher exposes
+  a nil-default `DeviceStateCheck` hook. V3-Pro plugs in a Microsoft
+  Graph device-compliance lookup before issuance; failing devices
+  exit with a typed `device_state_failed` failInfo.
 - **Per-tenant trust anchors.** V2 has one trust anchor pool per
   SCEP profile; V3-Pro could support per-AAD-tenant anchor scoping
   for MSPs running shared certctl deployments across customers.

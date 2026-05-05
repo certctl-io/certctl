@@ -190,7 +190,7 @@ Paste into security review:
   previous cert; both outcomes are surfaced via Prometheus.
 - The minimum IAM policy is 5 actions on
   `arn:aws:acm:*:*:certificate/*`; CloudTrail captures every
-  API call for compliance audits.
+  API call for audit.
 
 ## ValidateOnly contract
 

@@ -179,7 +179,7 @@ Paste into security review:
   snapshotted previous version's bytes; both outcomes are
   surfaced via Prometheus.
 - The minimum RBAC role is 3 data-plane actions; Activity Log
-  captures every API call for compliance audits.
+  captures every API call for audit.
 
 ## ValidateOnly contract
 

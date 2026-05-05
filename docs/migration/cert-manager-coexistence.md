@@ -98,7 +98,7 @@ Go to **Policies** → **+ New Policy** to create enforcement rules:
 - **Severity:** `high`
 - **Config:** set your enforcement parameters
 
-Certificates are linked to issuers and profiles when created or claimed from discovery. Policies add guardrails — enforcing key algorithm requirements, expiration windows, and other compliance rules across your fleet.
+Certificates are linked to issuers and profiles when created or claimed from discovery. Policies add guardrails — enforcing key algorithm requirements, expiration windows, and other policy rules across your fleet.
 
 ### 6. View Unified Inventory
 

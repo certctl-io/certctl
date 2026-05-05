@@ -83,10 +83,9 @@ enforced at the service layer fail-closed. The default is
 `single`, byte-identical to the pre-Rank-8 historical flow.
 
 See [intermediate-ca-hierarchy.md](../intermediate-ca-hierarchy.md)
-for the operator runbook covering 4-level FedRAMP boundary CA,
-3-level financial-services policy CA, 2-level internal-PKI
-patterns, and the migration runbook for flipping a single-mode
-issuer to tree.
+for the operator runbook covering 4-level boundary, 3-level policy,
+and 2-level internal-PKI patterns, and the migration runbook for
+flipping a single-mode issuer to tree.
 
 ## Configuration
 

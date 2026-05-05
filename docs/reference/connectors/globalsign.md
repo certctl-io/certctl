@@ -23,7 +23,7 @@ Use the GlobalSign Atlas HVCA connector when:
 
 - You're a GlobalSign Atlas customer issuing high volumes of
   publicly trusted certificates (the "HV" in HVCA).
-- You want region-pinned issuance for compliance or latency
+- You want region-pinned issuance for regulatory or latency
   reasons (EMEA / APAC / Americas regional endpoints).
 - You're prepared to manage both mTLS client certs AND
   API key/secret credentials in tandem.

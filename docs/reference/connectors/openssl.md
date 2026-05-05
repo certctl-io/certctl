@@ -40,9 +40,8 @@ Look elsewhere when:
   Sectigo, ACME, AWS ACM PCA, Google CAS, EJBCA, Entrust,
   GlobalSign, step-ca). Use the native adapter — narrower attack
   surface, no shell-out exposure.
-- You're in a compliance environment (PCI-DSS Level 1, FedRAMP
-  High, HIPAA-regulated PHI handling) where shell-out attack
-  surfaces are formally disallowed.
+- You're in a regulated environment where shell-out attack
+  surfaces are formally disallowed by your security policy.
 - You're running multi-tenant certctl-server where tenant-A's
   script can affect tenant-B's certificates.
 

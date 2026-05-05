@@ -62,11 +62,11 @@ The three differentiators above get the headlines, but the feature surface is wi
 
 **Network certificate discovery** — active TLS scanning of CIDR ranges finds certificates you didn't know existed. Agents also scan local filesystems for PEM/DER files. Everything feeds into a triage workflow where you claim, dismiss, or import discovered certs into management.
 
-**Immutable audit trail** — every API call recorded (method, path, actor, body hash, status, latency). Every certificate lifecycle event tracked. Append-only, no update or delete. Mapped to SOC 2, PCI-DSS 4.0, and NIST SP 800-57 compliance frameworks with published evidence guides.
+**Immutable audit trail** — every API call recorded (method, path, actor, body hash, status, latency). Every certificate lifecycle event tracked. Append-only, no update or delete.
 
 **Policy engine** — 5 rule types (allowed issuers, allowed domains, required metadata, allowed environments, renewal lead time) with violation tracking and severity levels.
 
-**PKI compliance** — DER-encoded X.509 CRL signed by issuing CA, embedded OCSP responder, RFC 5280 revocation with all reason codes, short-lived certificate exemption.
+**Revocation infrastructure** — DER-encoded X.509 CRL signed by issuing CA, embedded OCSP responder, RFC 5280 revocation with all reason codes, short-lived certificate exemption.
 
 **Prometheus metrics** — `/api/v1/metrics/prometheus` in standard exposition format. Works with Prometheus, Grafana Agent, Datadog Agent, Victoria Metrics.
 

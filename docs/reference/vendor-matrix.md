@@ -3,7 +3,7 @@
 > Last reviewed: 2026-05-05
 
 > Deploy-hardening II master bundle deliverable. The procurement-team
-> headline doc — SOC 2 / PCI auditors paste this into evidence packs.
+> headline doc — reviewers paste this into vendor-evaluation packs.
 > Per frozen decision 0.14: a (connector × vendor-version) cell is
 > "verified" only when ALL apply: ≥1 happy-path e2e passes against
 > the real sidecar; ≥1 specific-quirk test for that version passes;

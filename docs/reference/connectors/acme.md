@@ -225,7 +225,7 @@ camelCase form (`keyCompromise`, `cACompromise`,
 `aACompromise`) plus underscore_lower and ALL_CAPS_UNDERSCORE
 variants. An unknown reason returns an error rather than silently
 demoting to `unspecified` — operators rely on the reason for
-compliance reporting (PCI-DSS §3.6, HIPAA §164.312).
+audit reporting.
 
 ## Related docs
 

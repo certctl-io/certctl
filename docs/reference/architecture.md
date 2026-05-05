@@ -495,7 +495,7 @@ Short-lived certificates (those with profile TTL < 1 hour) return "good" from OC
 
 #### Bulk Revocation
 
-For compliance events requiring fleet-wide revocation (key compromise, CA distrust, mass decommission), certctl supports bulk revocation by filter criteria. The `POST /api/v1/certificates/bulk-revoke` endpoint accepts filter parameters (profile_id, owner_id, agent_id, issuer_id) and creates individual revocation jobs for each matching certificate. Bulk revocation reuses the same 7-step single-cert flow for each certificate — no new issuer notification or audit mechanics. The operation is idempotent: revoking an already-revoked certificate is a no-op. Partial failures are tolerated — if one certificate fails to revoke (e.g., issuer unavailable), the operation continues for remaining certs and returns a summary. A single `bulk_revocation_initiated` audit event logs the operation with filter criteria, operator actor, and summary (total requested, succeeded, failed counts). Audit events for individual certificate revocations record the operator identity separately. The GUI bulk revoke button on the certificates list filters by visible selections and displays an affected-cert count modal before confirmation.
+For incident-response events requiring fleet-wide revocation (key compromise, CA distrust, mass decommission), certctl supports bulk revocation by filter criteria. The `POST /api/v1/certificates/bulk-revoke` endpoint accepts filter parameters (profile_id, owner_id, agent_id, issuer_id) and creates individual revocation jobs for each matching certificate. Bulk revocation reuses the same 7-step single-cert flow for each certificate — no new issuer notification or audit mechanics. The operation is idempotent: revoking an already-revoked certificate is a no-op. Partial failures are tolerated — if one certificate fails to revoke (e.g., issuer unavailable), the operation continues for remaining certs and returns a summary. A single `bulk_revocation_initiated` audit event logs the operation with filter criteria, operator actor, and summary (total requested, succeeded, failed counts). Audit events for individual certificate revocations record the operator identity separately. The GUI bulk revoke button on the certificates list filters by visible selections and displays an affected-cert count modal before confirmation.
 
 ### 4. Automatic Renewal
 
@@ -1264,7 +1264,7 @@ flowchart TB
    - **Claims it** via `POST /discovered-certificates/{id}/claim` — links to existing managed cert or creates new enrollment
    - **Dismisses it** via `POST /discovered-certificates/{id}/dismiss` — removes from triage, marked as "Dismissed"
 9. **Status tracking** — `discovery_cert_claimed` and `discovery_cert_dismissed` events audit the operator's decision
-10. **Summary** — `GET /api/v1/discovery-summary` returns count of Unmanaged, Managed, and Dismissed certs (useful for compliance reporting)
+10. **Summary** — `GET /api/v1/discovery-summary` returns count of Unmanaged, Managed, and Dismissed certs (useful for inventory reporting)
 
 This data flow is pull-based and non-blocking. Agents discover at their own pace; the server stores results for later review. There's no pressure to claim or dismiss; operators can leave certificates in "Unmanaged" status indefinitely.
 
@@ -1328,11 +1328,10 @@ Captured baseline numbers are committed in `deploy/test/loadtest/README.md` once
 
 ## What's Next
 
-- [Quick Start](quickstart.md) — Get certctl running locally
-- [Advanced Demo](demo-advanced.md) — Issue a certificate end-to-end
-- [Connector Guide](connectors.md) — Build custom connectors
-- [Compliance Mapping](compliance.md) — SOC 2, PCI-DSS 4.0, and NIST SP 800-57 alignment
+- [Quick Start](../getting-started/quickstart.md) — Get certctl running locally
+- [Advanced Demo](../getting-started/advanced-demo.md) — Issue a certificate end-to-end
+- [Connector Guide](connectors/index.md) — Build custom connectors
 - [MCP Server Guide](mcp.md) — AI-native access to the API
-- [OpenAPI Spec](openapi.md) — Full API reference and SDK generation
-- [Testing Guide](testing-guide.md) — Test procedures and release sign-off
-- [Test Environment](test-env.md) — Docker Compose test environment setup
+- [API Reference](api.md) — OpenAPI 3.1 spec and SDK generation
+- [QA Test Suite](../contributor/qa-test-suite.md) — Test procedures and release sign-off
+- [Test Environment](../contributor/test-environment.md) — Docker Compose test environment setup

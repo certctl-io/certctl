@@ -298,8 +298,8 @@ Out of scope for the V2-free deploy-hardening I bundle:
 - **Multi-region deployment coordination** — orchestration of N
   data-center deploys with operator approval gates per stage.
 - **Cert-pinning verification against mobile-app pin manifests**.
-- **SOC 2 evidence-report generator** — auto-export of the
-  deploy audit trail in the format SOC 2 auditors expect.
+- **Audit-evidence report generator** — auto-export of the
+  deploy audit trail in a reviewer-friendly format.
 - **Customer-paid validation matrices** — vendor-version certified
   quirks (e.g. "tested on F5 v15.1 + v17.0 + v17.5"). See
   `cowork/deploy-hardening-ii-prompt.md` for the per-vendor
