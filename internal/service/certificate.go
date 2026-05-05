@@ -287,7 +287,15 @@ func (s *CertificateService) GetVersions(ctx context.Context, certID string) ([]
 // TriggerRenewal initiates a renewal job if the certificate is eligible.
 // Creates a Renewal job (or Issuance for new certs) so the scheduler's job processor
 // can pick it up and route it through the issuer connector.
-func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, actor string) error {
+//
+// 2026-05-05 parity-defaults-cleanup (P3-1): the `force` parameter, when
+// true, overrides the RenewalInProgress block — operators use this to
+// recover from a stuck in-flight renewal where the previous job hung
+// without releasing the status flag. Archived and Expired remain terminal
+// blockers regardless of force; those are semantic dead-ends (archived =
+// "this cert is decommissioned", expired = "issue a new cert, don't renew
+// a dead one") that --force should not paper over.
+func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, actor string, force bool) error {
 	cert, err := s.certRepo.Get(ctx, certID)
 	if err != nil {
 		return fmt.Errorf("failed to fetch certificate: %w", err)
@@ -301,8 +309,9 @@ func (s *CertificateService) TriggerRenewal(ctx context.Context, certID string, 
 		return fmt.Errorf("cannot renew expired certificate; reissue instead")
 	}
 
-	// Check if already renewing
-	if cert.Status == domain.CertificateStatusRenewalInProgress {
+	// Check if already renewing — overridable with force=true so operators
+	// can clear stuck in-flight renewals.
+	if cert.Status == domain.CertificateStatusRenewalInProgress && !force {
 		return fmt.Errorf("certificate renewal already in progress")
 	}
 

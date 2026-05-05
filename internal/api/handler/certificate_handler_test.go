@@ -32,7 +32,7 @@ type MockCertificateService struct {
 	UpdateCertificateFn          func(ctx context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
 	ArchiveCertificateFn         func(ctx context.Context, id string) error
 	GetCertificateVersionsFn     func(ctx context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
-	TriggerRenewalFn             func(ctx context.Context, certID string, actor string) error
+	TriggerRenewalFn             func(ctx context.Context, certID string, actor string, force bool) error
 	TriggerDeploymentFn          func(ctx context.Context, certID string, targetID string, actor string) error
 	RevokeCertificateFn          func(ctx context.Context, certID string, reason string, actor string) error
 	GetRevokedCertificatesFn     func(ctx context.Context) ([]*domain.CertificateRevocation, error)
@@ -84,9 +84,9 @@ func (m *MockCertificateService) GetCertificateVersions(ctx context.Context, cer
 	return nil, 0, nil
 }
 
-func (m *MockCertificateService) TriggerRenewal(ctx context.Context, certID string, actor string) error {
+func (m *MockCertificateService) TriggerRenewal(ctx context.Context, certID string, actor string, force bool) error {
 	if m.TriggerRenewalFn != nil {
-		return m.TriggerRenewalFn(ctx, certID, actor)
+		return m.TriggerRenewalFn(ctx, certID, actor, force)
 	}
 	return nil
 }
@@ -690,7 +690,7 @@ func TestGetCertificateVersions_NotFound(t *testing.T) {
 // Test TriggerRenewal - success case
 func TestTriggerRenewal_Success(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerRenewalFn: func(_ context.Context, certID string, _ string) error {
+		TriggerRenewalFn: func(_ context.Context, certID string, _ string, _ bool) error {
 			if certID == "mc-prod-001" {
 				return nil
 			}
@@ -722,7 +722,7 @@ func TestTriggerRenewal_Success(t *testing.T) {
 // Test TriggerRenewal - service error
 func TestTriggerRenewal_ServiceError(t *testing.T) {
 	mock := &MockCertificateService{
-		TriggerRenewalFn: func(_ context.Context, certID string, _ string) error {
+		TriggerRenewalFn: func(_ context.Context, certID string, _ string, _ bool) error {
 			return ErrMockServiceFailed
 		},
 	}
@@ -736,6 +736,44 @@ func TestTriggerRenewal_ServiceError(t *testing.T) {
 
 	if w.Code != http.StatusInternalServerError {
 		t.Errorf("expected status %d, got %d", http.StatusInternalServerError, w.Code)
+	}
+}
+
+// TestTriggerRenewal_ForceQueryParam pins the 2026-05-05 parity-defaults-cleanup
+// (P3-1) wire: ?force=true on the renew URL flows through to the service-layer
+// `force bool` parameter so operators can override the RenewalInProgress block.
+func TestTriggerRenewal_ForceQueryParam(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		query     string
+		wantForce bool
+	}{
+		{"no-flag", "", false},
+		{"force-true", "?force=true", true},
+		{"force-1", "?force=1", true},
+		{"force-false", "?force=false", false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotForce bool
+			mock := &MockCertificateService{
+				TriggerRenewalFn: func(_ context.Context, _ string, _ string, force bool) error {
+					gotForce = force
+					return nil
+				},
+			}
+			handler := NewCertificateHandler(mock)
+			req := httptest.NewRequest(http.MethodPost,
+				"/api/v1/certificates/mc-prod-001/renew"+tc.query, nil)
+			req = req.WithContext(contextWithRequestID())
+			w := httptest.NewRecorder()
+			handler.TriggerRenewal(w, req)
+			if w.Code != http.StatusAccepted {
+				t.Fatalf("status: got %d want %d", w.Code, http.StatusAccepted)
+			}
+			if gotForce != tc.wantForce {
+				t.Errorf("force passthrough: got %v want %v", gotForce, tc.wantForce)
+			}
+		})
 	}
 }
 

@@ -144,22 +144,70 @@ func handleCerts(client *cli.Client, args []string) error {
 		}
 		return client.GetCertificate(subArgs[0])
 	case "renew":
+		// 2026-05-05 parity-defaults-cleanup (P3-1): expose --force as an
+		// explicit operator flag instead of the historical hardcoded
+		// `force=false` body field. force=true overrides the server-side
+		// RenewalInProgress block — used to recover stuck in-flight
+		// renewals. Archived/Expired remain terminal regardless.
+		//
+		// CLI convention: `certs renew <id> [--force]` — the ID is a
+		// positional arg that precedes the flags. Mirrors `agents retire
+		// <id>`'s pattern (Go's flag package stops at the first non-flag
+		// token, so we pull subArgs[0] as the ID and hand subArgs[1:] to
+		// the flag parser).
 		if len(subArgs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: certs renew <id>\n")
-			return nil
-		}
-		return client.RenewCertificate(subArgs[0])
-	case "revoke":
-		if len(subArgs) == 0 {
-			fmt.Fprintf(os.Stderr, "usage: certs revoke <id> [--reason <reason>]\n")
+			fmt.Fprintf(os.Stderr, "usage: certs renew <id> [--force]\n")
 			return nil
 		}
 		id := subArgs[0]
-		reason := "unspecified"
-		if len(subArgs) > 2 && subArgs[1] == "--reason" {
-			reason = subArgs[2]
+		fs := flag.NewFlagSet("certs renew", flag.ContinueOnError)
+		force := fs.Bool("force", false, "Force renewal even when the cert is currently in RenewalInProgress (clears stuck in-flight renewals; does NOT override Archived/Expired terminal states)")
+		if err := fs.Parse(subArgs[1:]); err != nil {
+			return err
 		}
-		return client.RevokeCertificate(id, reason)
+		return client.RenewCertificate(id, *force)
+	case "revoke":
+		// 2026-05-05 parity-defaults-cleanup (P3-2, Option A): --reason is
+		// strictly required. Empty reason refuses to dispatch and prints
+		// the RFC 5280 §5.3.1 reason-code menu so operators pick a real
+		// value. The pre-2026-05-05 silent fallback to "unspecified"
+		// defeated compliance reporting (PCI-DSS §3.6, HIPAA §164.312)
+		// because every revocation looked the same in the audit trail.
+		//
+		// CLI convention: `certs revoke <id> --reason <reason>` — same
+		// ID-first ordering as `certs renew`.
+		if len(subArgs) == 0 {
+			fmt.Fprintf(os.Stderr, "usage: certs revoke <id> --reason <reason>\n")
+			fmt.Fprintf(os.Stderr, "\nValid RFC 5280 §5.3.1 reasons:\n")
+			for _, r := range cli.ValidRevokeReasons() {
+				fmt.Fprintf(os.Stderr, "  %s\n", r)
+			}
+			return nil
+		}
+		id := subArgs[0]
+		fs := flag.NewFlagSet("certs revoke", flag.ContinueOnError)
+		reason := fs.String("reason", "", "RFC 5280 revocation reason (required). Valid values: keyCompromise, caCompromise, affiliationChanged, superseded, cessationOfOperation, certificateHold, removeFromCRL, privilegeWithdrawn, aaCompromise, unspecified")
+		if err := fs.Parse(subArgs[1:]); err != nil {
+			return err
+		}
+		if *reason == "" {
+			fmt.Fprintf(os.Stderr, "error: --reason is required (no silent fallback to 'unspecified' — pick a real RFC 5280 §5.3.1 code).\n\n")
+			fmt.Fprintf(os.Stderr, "Valid reasons:\n")
+			for _, r := range cli.ValidRevokeReasons() {
+				fmt.Fprintf(os.Stderr, "  %s\n", r)
+			}
+			return fmt.Errorf("--reason is required")
+		}
+		canonical, ok := cli.NormalizeRevokeReason(*reason)
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: %q is not a valid RFC 5280 §5.3.1 reason code.\n\n", *reason)
+			fmt.Fprintf(os.Stderr, "Valid reasons (camelCase or snake_case both accepted):\n")
+			for _, r := range cli.ValidRevokeReasons() {
+				fmt.Fprintf(os.Stderr, "  %s\n", r)
+			}
+			return fmt.Errorf("invalid --reason: %q", *reason)
+		}
+		return client.RevokeCertificate(id, canonical)
 	case "bulk-revoke":
 		return client.BulkRevokeCertificates(subArgs)
 	default:

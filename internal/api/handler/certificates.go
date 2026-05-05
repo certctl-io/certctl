@@ -32,7 +32,7 @@ type CertificateService interface {
 	UpdateCertificate(ctx context.Context, id string, cert domain.ManagedCertificate) (*domain.ManagedCertificate, error)
 	ArchiveCertificate(ctx context.Context, id string) error
 	GetCertificateVersions(ctx context.Context, certID string, page, perPage int) ([]domain.CertificateVersion, int64, error)
-	TriggerRenewal(ctx context.Context, certID string, actor string) error
+	TriggerRenewal(ctx context.Context, certID string, actor string, force bool) error
 	TriggerDeployment(ctx context.Context, certID string, targetID string, actor string) error
 	RevokeCertificate(ctx context.Context, certID string, reason string, actor string) error
 	GetRevokedCertificates(ctx context.Context) ([]*domain.CertificateRevocation, error)
@@ -437,7 +437,25 @@ func (h CertificateHandler) TriggerRenewal(w http.ResponseWriter, r *http.Reques
 
 	actor := resolveActor(r.Context())
 
-	if err := h.svc.TriggerRenewal(r.Context(), certID, actor); err != nil {
+	// 2026-05-05 parity-defaults-cleanup (P3-1): operators can opt into
+	// forcing a renewal when the cert is stuck in RenewalInProgress (a
+	// previous job hung without releasing the status flag). Accepted as
+	// either ?force=true query param OR {"force": true} JSON body so CLI
+	// + GUI clients can pick whichever flow fits their idiom.
+	force := false
+	if fv := r.URL.Query().Get("force"); fv == "true" || fv == "1" {
+		force = true
+	}
+	if !force && r.ContentLength > 0 && r.Header.Get("Content-Type") == "application/json" {
+		var body struct {
+			Force bool `json:"force,omitempty"`
+		}
+		if err := json.NewDecoder(r.Body).Decode(&body); err == nil {
+			force = body.Force
+		}
+	}
+
+	if err := h.svc.TriggerRenewal(r.Context(), certID, actor, force); err != nil {
 		errMsg := err.Error()
 		if strings.Contains(errMsg, "not found") {
 			ErrorWithRequestID(w, http.StatusNotFound, "Certificate not found", requestID)

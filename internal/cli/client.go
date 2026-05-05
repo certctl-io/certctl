@@ -179,12 +179,22 @@ func (c *Client) GetCertificate(id string) error {
 }
 
 // RenewCertificate triggers renewal for a certificate.
-func (c *Client) RenewCertificate(id string) error {
-	body := map[string]interface{}{
-		"force": false,
+//
+// 2026-05-05 parity-defaults-cleanup (P3-1): the `force` parameter, when
+// true, clears the server-side RenewalInProgress block — operators use
+// this to recover from a stuck in-flight renewal where the previous job
+// hung without releasing the status flag. Sent as `?force=true` query
+// parameter; the historical body field `{"force": false}` is gone (it was
+// a "lying field" — the API never read it). Archived and Expired remain
+// terminal blockers regardless of force; --force is not a magic wand for
+// terminal-state certs.
+func (c *Client) RenewCertificate(id string, force bool) error {
+	var q url.Values
+	if force {
+		q = url.Values{"force": []string{"true"}}
 	}
 
-	resp, err := c.do("POST", fmt.Sprintf("/api/v1/certificates/%s/renew", id), nil, body)
+	resp, err := c.do("POST", fmt.Sprintf("/api/v1/certificates/%s/renew", id), q, nil)
 	if err != nil {
 		return err
 	}
@@ -198,14 +208,94 @@ func (c *Client) RenewCertificate(id string) error {
 		return c.outputJSON(result)
 	}
 
-	fmt.Printf("Renewal triggered for certificate %s\n", id)
+	if force {
+		fmt.Printf("Renewal force-triggered for certificate %s (RenewalInProgress block cleared)\n", id)
+	} else {
+		fmt.Printf("Renewal triggered for certificate %s\n", id)
+	}
 	if jobID, ok := result["job_id"]; ok {
 		fmt.Printf("Job ID: %v\n", jobID)
 	}
 	return nil
 }
 
+// canonicalRevokeReasons enumerates the RFC 5280 §5.3.1 reason codes
+// accepted by `certctl-cli certs revoke --reason`. Mirrors the canonical
+// camelCase surface used by the local issuer + ACME server. Underscore_lower
+// variants (e.g. `key_compromise`) are accepted as a convenience and
+// normalised at this layer.
+//
+// 2026-05-05 parity-defaults-cleanup (P3-2): exposed via ValidRevokeReasons()
+// + NormalizeRevokeReason() so the CLI dispatch can validate before sending,
+// AND so the empty-reason error path can print the menu of valid choices
+// instead of silently sending `unspecified`.
+var canonicalRevokeReasons = []string{
+	"unspecified",
+	"keyCompromise",
+	"caCompromise",
+	"affiliationChanged",
+	"superseded",
+	"cessationOfOperation",
+	"certificateHold",
+	"removeFromCRL",
+	"privilegeWithdrawn",
+	"aaCompromise",
+}
+
+// ValidRevokeReasons returns the canonical RFC 5280 §5.3.1 reason-code
+// camelCase enum the CLI accepts. Used by `certctl-cli certs revoke` to
+// print the menu when --reason is missing or invalid.
+func ValidRevokeReasons() []string {
+	out := make([]string, len(canonicalRevokeReasons))
+	copy(out, canonicalRevokeReasons)
+	return out
+}
+
+// NormalizeRevokeReason maps the operator's input to the canonical
+// camelCase form. Returns the canonical form + ok=true if recognised,
+// otherwise the original input + ok=false. Accepts both camelCase
+// ("keyCompromise") and snake_case ("key_compromise") variants.
+func NormalizeRevokeReason(input string) (string, bool) {
+	// Direct camelCase match.
+	for _, r := range canonicalRevokeReasons {
+		if r == input {
+			return r, true
+		}
+	}
+	// snake_case → camelCase by converting the canonical entry to snake
+	// form and comparing.
+	for _, r := range canonicalRevokeReasons {
+		if strings.EqualFold(camelToSnake(r), input) {
+			return r, true
+		}
+	}
+	return input, false
+}
+
+// camelToSnake converts a camelCase identifier to snake_case (e.g.
+// "keyCompromise" → "key_compromise") so we can compare against operator
+// input that uses the snake form.
+func camelToSnake(camel string) string {
+	out := make([]byte, 0, len(camel)+4)
+	for i := 0; i < len(camel); i++ {
+		ch := camel[i]
+		if ch >= 'A' && ch <= 'Z' {
+			if i > 0 {
+				out = append(out, '_')
+			}
+			out = append(out, ch+('a'-'A'))
+		} else {
+			out = append(out, ch)
+		}
+	}
+	return string(out)
+}
+
 // RevokeCertificate revokes a certificate.
+//
+// 2026-05-05 parity-defaults-cleanup (P3-2, Option A): empty reason is
+// rejected at the CLI dispatch layer (see cmd/cli/main.go) — this method
+// expects a pre-validated, canonical RFC 5280 reason string.
 func (c *Client) RevokeCertificate(id, reason string) error {
 	body := map[string]interface{}{
 		"reason": reason,

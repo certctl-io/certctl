@@ -163,14 +163,79 @@ func TestHandleCerts_Revoke_HitsClientPath(t *testing.T) {
 	}))
 	t.Cleanup(srv.Close)
 	c := newDispatchTestClient(t, srv)
-	if err := handleCerts(c, []string{"revoke", "mc-x", "--reason", "compromise"}); err != nil {
+	// 2026-05-05 parity-defaults-cleanup (P3-2): reason must be a canonical
+	// RFC 5280 §5.3.1 code (camelCase or snake_case both accepted; this
+	// test asserts the snake_case path normalises to the camelCase wire
+	// format that the local issuer + ACME server expect).
+	if err := handleCerts(c, []string{"revoke", "mc-x", "--reason", "key_compromise"}); err != nil {
 		t.Errorf("handleCerts({revoke ...}): err=%v", err)
 	}
 	if lastMethod != "POST" || !strings.Contains(lastPath, "/revoke") {
 		t.Errorf("expected POST .../revoke, got %s %s", lastMethod, lastPath)
 	}
-	if !strings.Contains(lastBody, "compromise") {
-		t.Errorf("expected reason in body, got %q", lastBody)
+	if !strings.Contains(lastBody, "keyCompromise") {
+		t.Errorf("expected normalised reason 'keyCompromise' in body, got %q", lastBody)
+	}
+}
+
+// TestHandleCerts_Revoke_RequiresReason pins the 2026-05-05 parity-defaults-
+// cleanup (P3-2, Option A) strict-reason contract: empty --reason is a
+// fatal error, not a silent fallback to "unspecified".
+func TestHandleCerts_Revoke_RequiresReason(t *testing.T) {
+	srv := stubServer(t, 200, `{}`)
+	c := newDispatchTestClient(t, srv)
+	err := handleCerts(c, []string{"revoke", "mc-x"})
+	if err == nil {
+		t.Fatal("expected error when --reason is omitted; got nil (regression on P3-2 strict path)")
+	}
+	if !strings.Contains(err.Error(), "reason") {
+		t.Errorf("expected error to mention 'reason', got %q", err.Error())
+	}
+}
+
+// TestHandleCerts_Revoke_RejectsUnknownReason pins that off-RFC reason
+// codes are rejected at the CLI dispatch layer (P3-2 anti-typo guard).
+func TestHandleCerts_Revoke_RejectsUnknownReason(t *testing.T) {
+	srv := stubServer(t, 200, `{}`)
+	c := newDispatchTestClient(t, srv)
+	err := handleCerts(c, []string{"revoke", "mc-x", "--reason", "compromise"})
+	if err == nil {
+		t.Fatal("expected error for non-canonical reason; got nil")
+	}
+	if !strings.Contains(err.Error(), "compromise") {
+		t.Errorf("expected error to echo bad reason 'compromise', got %q", err.Error())
+	}
+}
+
+// TestHandleCerts_Renew_ForceFlag pins the 2026-05-05 parity-defaults-
+// cleanup (P3-1) wire: --force on the renew dispatch sends ?force=true.
+// CLI convention: ID is positional and precedes the flags (matches
+// `agents retire <id> [--force]`), so the flag MUST come after the ID.
+func TestHandleCerts_Renew_ForceFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		args      []string
+		wantQuery string
+	}{
+		{"no-force", []string{"renew", "mc-x"}, ""},
+		{"force-after-id", []string{"renew", "mc-x", "--force"}, "force=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var lastQuery string
+			srv := httptest.NewTLSServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				lastQuery = r.URL.RawQuery
+				w.WriteHeader(200)
+				_, _ = w.Write([]byte(`{}`))
+			}))
+			t.Cleanup(srv.Close)
+			c := newDispatchTestClient(t, srv)
+			if err := handleCerts(c, tc.args); err != nil {
+				t.Fatalf("handleCerts: %v", err)
+			}
+			if lastQuery != tc.wantQuery {
+				t.Errorf("query: got %q want %q", lastQuery, tc.wantQuery)
+			}
+		})
 	}
 }
 

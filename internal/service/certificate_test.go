@@ -294,7 +294,7 @@ func TestTriggerRenewal(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 
-	err := certService.TriggerRenewal(ctx, "cert-001", "user-1")
+	err := certService.TriggerRenewal(ctx, "cert-001", "user-1", false)
 	if err != nil {
 		t.Fatalf("TriggerRenewal failed: %v", err)
 	}
@@ -307,6 +307,53 @@ func TestTriggerRenewal(t *testing.T) {
 	if len(auditRepo.Events) != 1 {
 		t.Errorf("expected 1 audit event, got %d", len(auditRepo.Events))
 	}
+}
+
+// TestTriggerRenewal_ForceOverridesInProgress pins the 2026-05-05 parity-
+// defaults-cleanup (P3-1) semantic: force=true clears the
+// RenewalInProgress block so operators can recover stuck in-flight renewals.
+// force=false (the historical default) preserves the block.
+func TestTriggerRenewal_ForceOverridesInProgress(t *testing.T) {
+	ctx := context.Background()
+	now := time.Now()
+	mkCert := func() *domain.ManagedCertificate {
+		return &domain.ManagedCertificate{
+			ID:         "cert-stuck",
+			CommonName: "example.com",
+			IssuerID:   "iss-1",
+			Status:     domain.CertificateStatusRenewalInProgress,
+			ExpiresAt:  now.AddDate(0, 0, 5),
+			CreatedAt:  now,
+			UpdatedAt:  now,
+		}
+	}
+
+	t.Run("force=false blocks", func(t *testing.T) {
+		certRepo := &mockCertRepo{
+			Certs:    map[string]*domain.ManagedCertificate{"cert-stuck": mkCert()},
+			Versions: make(map[string][]*domain.CertificateVersion),
+		}
+		auditRepo := &mockAuditRepo{}
+		policyRepo := &mockPolicyRepo{Rules: make(map[string]*domain.PolicyRule)}
+		svc := NewCertificateService(certRepo, NewPolicyService(policyRepo, NewAuditService(auditRepo)), NewAuditService(auditRepo))
+		err := svc.TriggerRenewal(ctx, "cert-stuck", "user-1", false)
+		if err == nil {
+			t.Fatal("expected error when force=false on RenewalInProgress cert")
+		}
+	})
+
+	t.Run("force=true clears block", func(t *testing.T) {
+		certRepo := &mockCertRepo{
+			Certs:    map[string]*domain.ManagedCertificate{"cert-stuck": mkCert()},
+			Versions: make(map[string][]*domain.CertificateVersion),
+		}
+		auditRepo := &mockAuditRepo{}
+		policyRepo := &mockPolicyRepo{Rules: make(map[string]*domain.PolicyRule)}
+		svc := NewCertificateService(certRepo, NewPolicyService(policyRepo, NewAuditService(auditRepo)), NewAuditService(auditRepo))
+		if err := svc.TriggerRenewal(ctx, "cert-stuck", "user-1", true); err != nil {
+			t.Fatalf("force=true should override RenewalInProgress: %v", err)
+		}
+	})
 }
 
 func TestTriggerRenewal_Archived(t *testing.T) {
@@ -333,9 +380,14 @@ func TestTriggerRenewal_Archived(t *testing.T) {
 	auditService := NewAuditService(auditRepo)
 	certService := NewCertificateService(certRepo, policyService, auditService)
 
-	err := certService.TriggerRenewal(ctx, "cert-001", "user-1")
+	err := certService.TriggerRenewal(ctx, "cert-001", "user-1", false)
 	if err == nil {
 		t.Fatal("expected error for archived certificate")
+	}
+	// Archived is a terminal state — force=true must NOT magic it open
+	// (parity-defaults-cleanup P3-1 semantic guarantee).
+	if err := certService.TriggerRenewal(ctx, "cert-001", "user-1", true); err == nil {
+		t.Fatal("force=true should still block archived (terminal)")
 	}
 }
 

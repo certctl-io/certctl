@@ -88,9 +88,102 @@ func TestClient_RenewCertificate(t *testing.T) {
 	defer server.Close()
 
 	client, _ := NewClient(server.URL, "", "table", "", false)
-	err := client.RenewCertificate("mc-1")
+	err := client.RenewCertificate("mc-1", false)
 	if err != nil {
 		t.Fatalf("RenewCertificate failed: %v", err)
+	}
+}
+
+// TestClient_RenewCertificate_ForceFlag pins the 2026-05-05 parity-defaults-
+// cleanup (P3-1) wire: the CLI sends `?force=true` on the renew URL when
+// the operator passes --force. The pre-2026-05-05 hardcoded `force=false`
+// body field is gone (the API never read it — it was a "lying field").
+func TestClient_RenewCertificate_ForceFlag(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		force     bool
+		wantQuery string
+	}{
+		{"no-force", false, ""},
+		{"force-true", true, "force=true"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var gotQuery string
+			var gotBody string
+			server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				gotQuery = r.URL.RawQuery
+				buf := make([]byte, 1024)
+				n, _ := r.Body.Read(buf)
+				gotBody = string(buf[:n])
+				w.Header().Set("Content-Type", "application/json")
+				json.NewEncoder(w).Encode(map[string]interface{}{"job_id": "job-1"})
+			}))
+			defer server.Close()
+
+			client, _ := NewClient(server.URL, "", "table", "", false)
+			if err := client.RenewCertificate("mc-1", tc.force); err != nil {
+				t.Fatalf("RenewCertificate: %v", err)
+			}
+			if gotQuery != tc.wantQuery {
+				t.Errorf("query: got %q want %q", gotQuery, tc.wantQuery)
+			}
+			// Body must be empty — the lying `force=false` field is gone.
+			if gotBody != "" {
+				t.Errorf("body should be empty (no lying force field), got %q", gotBody)
+			}
+		})
+	}
+}
+
+// TestNormalizeRevokeReason pins the 2026-05-05 parity-defaults-cleanup
+// (P3-2) reason-code validator: canonical camelCase passes through, snake_
+// case normalises to camelCase, anything else returns ok=false.
+func TestNormalizeRevokeReason(t *testing.T) {
+	for _, tc := range []struct {
+		in     string
+		want   string
+		wantOK bool
+	}{
+		{"keyCompromise", "keyCompromise", true},
+		{"key_compromise", "keyCompromise", true},
+		{"superseded", "superseded", true},
+		{"cessation_of_operation", "cessationOfOperation", true},
+		{"unspecified", "unspecified", true},
+		{"BogusReason", "BogusReason", false},
+		{"", "", false},
+		{"key compromise", "key compromise", false},
+	} {
+		t.Run(tc.in, func(t *testing.T) {
+			got, ok := NormalizeRevokeReason(tc.in)
+			if got != tc.want || ok != tc.wantOK {
+				t.Errorf("NormalizeRevokeReason(%q) = (%q, %v), want (%q, %v)",
+					tc.in, got, ok, tc.want, tc.wantOK)
+			}
+		})
+	}
+}
+
+// TestValidRevokeReasons pins that the canonical RFC 5280 §5.3.1 reason
+// list is non-empty and contains the operator-critical entries (the help
+// menu printed when --reason is missing depends on this).
+func TestValidRevokeReasons(t *testing.T) {
+	got := ValidRevokeReasons()
+	if len(got) < 9 {
+		t.Errorf("expected ≥9 RFC 5280 §5.3.1 reasons, got %d: %v", len(got), got)
+	}
+	want := []string{"keyCompromise", "caCompromise", "superseded",
+		"cessationOfOperation", "certificateHold", "privilegeWithdrawn"}
+	for _, w := range want {
+		found := false
+		for _, g := range got {
+			if g == w {
+				found = true
+				break
+			}
+		}
+		if !found {
+			t.Errorf("missing canonical reason %q in %v", w, got)
+		}
 	}
 }
 

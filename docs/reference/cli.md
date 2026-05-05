@@ -73,21 +73,29 @@ certctl-cli certs list --fields id,common_name,expires_at,status
 ```bash
 certctl-cli certs renew mc-api-prod
 # Returns the job id; track with: certctl-cli jobs get <job-id>
+
+# Recovery: clear a stuck in-flight renewal so a new one can start
+certctl-cli certs renew mc-api-prod --force
 ```
+
+`--force` clears the server-side `RenewalInProgress` block — used when a previous renewal job hung without releasing the status flag. `--force` does NOT override `Archived` or `Expired` (those are terminal states; archived = decommissioned, expired = issue a new cert instead of renewing a dead one).
 
 ### Revoke
 
 ```bash
-# Single revoke
+# Single revoke — --reason is REQUIRED (no silent fallback to 'unspecified')
 certctl-cli certs revoke mc-api-prod --reason keyCompromise
+
+# snake_case is accepted and normalised to camelCase before dispatch
+certctl-cli certs revoke mc-api-prod --reason key_compromise
 
 # Bulk revoke by filter
 certctl-cli certs revoke --profile prof-deprecated --reason superseded
 certctl-cli certs revoke --team t-payments --reason cessationOfOperation
-certctl-cli certs revoke --issuer iss-old-vault --reason cACompromise
+certctl-cli certs revoke --issuer iss-old-vault --reason caCompromise
 ```
 
-Reason codes are the canonical RFC 5280 §5.3.1 set: `unspecified`, `keyCompromise`, `cACompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aACompromise`. Anything else returns an error.
+`--reason` is mandatory: omitting it prints the canonical RFC 5280 §5.3.1 menu and exits non-zero. Compliance reporting (PCI-DSS §3.6, HIPAA §164.312) relies on the reason code being meaningful, so the CLI no longer falls back silently. Valid camelCase set: `unspecified`, `keyCompromise`, `caCompromise`, `affiliationChanged`, `superseded`, `cessationOfOperation`, `certificateHold`, `removeFromCRL`, `privilegeWithdrawn`, `aaCompromise`. snake_case variants (`key_compromise`, `cessation_of_operation`, etc.) are accepted and normalised.
 
 ### Bulk import
 
