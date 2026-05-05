@@ -162,3 +162,121 @@ describe('CertificatesPage — T-1 page coverage', () => {
     });
   });
 });
+
+// -----------------------------------------------------------------------------
+// 2026-05-05 parity-defaults-cleanup (P3-3, P3-4, P3-5) closure.
+//
+// The audit flagged three "hidden defaults" in the create-cert form:
+//   - environment='production' baked in (P3-3)
+//   - shortLived=false baked in (P3-4)
+//   - selectedEkus=['serverAuth'] hardcoded (P3-5)
+//
+// Re-derive against the live source: the form already exposes an environment
+// selector with 3 options (production / staging / development). P3-3 was a
+// false-positive in the audit. shortLived + selectedEkus are NOT per-cert
+// form fields — they are properties of the CertificateProfile that the
+// operator binds via the Profile dropdown. Adding form-level toggles for
+// them would contradict the profile-as-primitive design.
+//
+// The genuine UX gap was opacity: operators picked a profile without
+// seeing what allow_short_lived / allowed_ekus the profile carried. The
+// fix surfaces those properties in a read-only "Profile contract" panel
+// that appears once a profile is selected. These tests pin that wire.
+// -----------------------------------------------------------------------------
+
+describe('CreateCertificateModal — P3-3..P3-5 form-state defaults', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+    mockAll();
+    // Override getProfiles to expose the load-bearing fields so the
+    // Profile-contract panel has data to render.
+    vi.mocked(client.getProfiles).mockResolvedValue({
+      data: [
+        {
+          id: 'cp-tls-server',
+          name: 'TLS Server',
+          allowed_ekus: ['serverAuth'],
+          allow_short_lived: false,
+          max_ttl_seconds: 86400,
+        },
+        {
+          id: 'cp-smime',
+          name: 'S/MIME Email',
+          allowed_ekus: ['emailProtection'],
+          allow_short_lived: false,
+          max_ttl_seconds: 86400 * 365,
+        },
+        {
+          id: 'cp-iot-shortlived',
+          name: 'IoT Short-Lived',
+          allowed_ekus: ['serverAuth', 'clientAuth'],
+          allow_short_lived: true,
+          max_ttl_seconds: 1800,
+        },
+      ],
+      total: 3,
+      page: 1,
+      per_page: 100,
+    } as never);
+  });
+
+  async function openCreateModal() {
+    renderWithQuery(<CertificatesPage />);
+    await waitFor(() => expect(client.getCertificates).toHaveBeenCalled());
+    const newBtn = screen.getByRole('button', { name: /new certificate/i });
+    fireEvent.click(newBtn);
+    await waitFor(() => expect(screen.getByText('New Certificate')).toBeInTheDocument());
+  }
+
+  it('environment selector renders with 3 options and defaults to production (P3-3)', async () => {
+    await openCreateModal();
+    const envSelect = await screen.findByTestId('cert-form-environment') as HTMLSelectElement;
+    expect(envSelect.value).toBe('production');
+    const opts = Array.from(envSelect.options).map(o => o.value);
+    expect(opts).toEqual(['production', 'staging', 'development']);
+  });
+
+  it('environment selector lets operators switch to staging or development (P3-3)', async () => {
+    await openCreateModal();
+    const envSelect = await screen.findByTestId('cert-form-environment') as HTMLSelectElement;
+    fireEvent.change(envSelect, { target: { value: 'staging' } });
+    expect(envSelect.value).toBe('staging');
+    fireEvent.change(envSelect, { target: { value: 'development' } });
+    expect(envSelect.value).toBe('development');
+  });
+
+  it('Profile contract panel is hidden until a profile is selected', async () => {
+    await openCreateModal();
+    expect(screen.queryByTestId('cert-form-profile-detail')).toBeNull();
+  });
+
+  it('Profile contract panel surfaces allowed_ekus when a TLS-server profile is picked (P3-5)', async () => {
+    await openCreateModal();
+    // Find the Profile dropdown (it's the second select after Issuer).
+    const profileSelect = await screen.findByTestId('cert-form-profile');
+    fireEvent.change(profileSelect, { target: { value: 'cp-tls-server' } });
+    const panel = await screen.findByTestId('cert-form-profile-detail');
+    expect(panel.textContent).toMatch(/serverAuth/);
+    expect(panel.textContent).toMatch(/not allowed/i); // short-lived = false
+  });
+
+  it('Profile contract panel surfaces emailProtection EKU when an S/MIME profile is picked (P3-5)', async () => {
+    await openCreateModal();
+    const profileSelect = await screen.findByTestId('cert-form-profile');
+    fireEvent.change(profileSelect, { target: { value: 'cp-smime' } });
+    const panel = await screen.findByTestId('cert-form-profile-detail');
+    expect(panel.textContent).toMatch(/emailProtection/);
+  });
+
+  it('Profile contract panel flags allow_short_lived=true when the IoT short-lived profile is picked (P3-4)', async () => {
+    await openCreateModal();
+    const profileSelect = await screen.findByTestId('cert-form-profile');
+    fireEvent.change(profileSelect, { target: { value: 'cp-iot-shortlived' } });
+    const panel = await screen.findByTestId('cert-form-profile-detail');
+    expect(panel.textContent).toMatch(/allowed/i);
+    // Both serverAuth and clientAuth surface
+    expect(panel.textContent).toMatch(/serverAuth/);
+    expect(panel.textContent).toMatch(/clientAuth/);
+  });
+});

@@ -75,6 +75,19 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
         : `${Math.round(selectedProfile.max_ttl_seconds / 86400)}d`
     : null;
 
+  // 2026-05-05 parity-defaults-cleanup (P3-4, P3-5): the audit flagged
+  // `shortLived` + `selectedEkus` as hidden form-state defaults. They are
+  // not — they're properties of the CertificateProfile that the operator
+  // selects via the dropdown above. Surface them in a read-only profile
+  // detail panel so the operator sees what their profile selection
+  // implies (TTL, allowed EKUs, short-lived eligibility) at the moment of
+  // choice rather than discovering it after a cert issues with the wrong
+  // shape. This closes the audit's opacity finding without introducing
+  // the wrong abstraction (per-cert EKU/short-lived toggles would
+  // contradict the profile-as-primitive design).
+  const profileEkus = selectedProfile?.allowed_ekus ?? [];
+  const profileShortLived = selectedProfile?.allow_short_lived === true;
+
   const mutation = useTrackedMutation({
     mutationFn: () => {
       const payload: Record<string, unknown> = { ...form };
@@ -150,7 +163,7 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
               <label className="text-xs text-ink-muted block mb-1">
                 Profile {ttlLabel && <span className="text-brand-400 font-medium">(TTL: {ttlLabel})</span>}
               </label>
-              <select value={form.certificate_profile_id} onChange={e => setForm(f => ({ ...f, certificate_profile_id: e.target.value }))}
+              <select data-testid="cert-form-profile" value={form.certificate_profile_id} onChange={e => setForm(f => ({ ...f, certificate_profile_id: e.target.value }))}
                 className={selectClass}>
                 <option value="">Select profile...</option>
                 {profiles.map(p => (
@@ -161,10 +174,39 @@ function CreateCertificateModal({ onClose, onSuccess }: { onClose: () => void; o
               </select>
             </div>
           </div>
+          {/* 2026-05-05 parity-defaults-cleanup (P3-4 + P3-5): surface the
+              selected profile's load-bearing defaults (allow_short_lived,
+              allowed_ekus) inline so the operator sees what they're
+              picking. Hidden until a profile is chosen (avoids visual
+              noise for the empty state). */}
+          {selectedProfile && (
+            <div data-testid="cert-form-profile-detail" className="bg-surface-muted border border-surface-border rounded px-3 py-2 text-xs text-ink-muted">
+              <div className="font-medium text-ink mb-1">Profile contract</div>
+              <div className="grid grid-cols-2 gap-x-4 gap-y-1">
+                <div>
+                  <span className="text-ink-faint">EKUs: </span>
+                  {profileEkus.length === 0 ? (
+                    <span className="italic">none restricted</span>
+                  ) : (
+                    profileEkus.join(', ')
+                  )}
+                </div>
+                <div>
+                  <span className="text-ink-faint">Short-lived (TTL &lt; 1h): </span>
+                  <span className={profileShortLived ? 'text-brand-400 font-medium' : ''}>
+                    {profileShortLived ? 'allowed' : 'not allowed'}
+                  </span>
+                </div>
+              </div>
+              <p className="text-ink-faint mt-1">
+                EKUs and short-lived eligibility are profile-level. To change them, edit the profile or pick a different one — they are not per-cert toggles.
+              </p>
+            </div>
+          )}
           <div className="grid grid-cols-2 gap-3">
             <div>
               <label className="text-xs text-ink-muted block mb-1">Environment</label>
-              <select value={form.environment} onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
+              <select data-testid="cert-form-environment" value={form.environment} onChange={e => setForm(f => ({ ...f, environment: e.target.value }))}
                 className={selectClass}>
                 <option value="production">Production</option>
                 <option value="staging">Staging</option>
