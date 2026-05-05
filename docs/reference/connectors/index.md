@@ -813,16 +813,16 @@ issued, SCEP-issued certs).
 
 See:
 
-- [ACME Server Reference](./acme-server.md) — env-var reference,
+- [ACME Server Reference](../protocols/acme-server.md) — env-var reference,
   endpoints, auth-mode decision tree, RFC 8555 conformance statement,
   troubleshooting, FAQ.
-- [cert-manager Walkthrough](./acme-cert-manager-walkthrough.md) — kind
+- [cert-manager Walkthrough](../../migration/acme-from-cert-manager.md) — kind
   → cert-manager → certctl-server → Certificate flow.
-- [Caddy Walkthrough](./acme-caddy-walkthrough.md) — Caddyfile `acme_ca`
+- [Caddy Walkthrough](../../migration/acme-from-caddy.md) — Caddyfile `acme_ca`
   + trust configuration.
-- [Traefik Walkthrough](./acme-traefik-walkthrough.md) — `certificatesResolvers`
+- [Traefik Walkthrough](../../migration/acme-from-traefik.md) — `certificatesResolvers`
   + `serversTransport.rootCAs`.
-- [Threat Model](./acme-server-threat-model.md) — JWS forgery
+- [Threat Model](../protocols/acme-server-threat-model.md) — JWS forgery
   resistance, nonce store integrity, HTTP-01 SSRF, DNS-01 cache
   posture, TLS-ALPN-01 chain-not-validated rationale, rate-limit
   tuning, audit trail.

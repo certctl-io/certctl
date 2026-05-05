@@ -12,9 +12,9 @@ external PKI vendors today.
 > **Phase status (2026-05-03):** Phase 6 — full operator-facing
 > reference. The functional surface is complete (Phases 1a-5); this
 > doc is the canonical procurement-readability reference. New: client-
-> walkthrough docs for [cert-manager](./acme-cert-manager-walkthrough.md),
-> [Caddy](./acme-caddy-walkthrough.md), and
-> [Traefik](./acme-traefik-walkthrough.md); a dedicated
+> walkthrough docs for [cert-manager](../../migration/acme-from-cert-manager.md),
+> [Caddy](../../migration/acme-from-caddy.md), and
+> [Traefik](../../migration/acme-from-traefik.md); a dedicated
 > [threat model](./acme-server-threat-model.md); a section-by-section
 > RFC 8555 + RFC 9773 conformance statement; a 5-failure-mode
 > troubleshooting playbook; a tested-clients version pinning table.
@@ -600,7 +600,7 @@ Yes. The endpoints are HTTPS over the certctl-server's listener (port
 Posh-ACME on a Mac all integrate against
 `https://<certctl-server>:8443/acme/profile/<profile-id>/directory`.
 The TLS-trust-bootstrap requirement applies the same way — see the
-[Caddy walkthrough](./acme-caddy-walkthrough.md) for the OS-trust-store
+[Caddy walkthrough](../../migration/acme-from-caddy.md) for the OS-trust-store
 recipe.
 
 ### How do I migrate manually-issued certs to ACME-issued ones?
@@ -640,9 +640,9 @@ Read before writing a security review.
 
 ## See also
 
-- [cert-manager integration walkthrough](./acme-cert-manager-walkthrough.md)
-- [Caddy integration walkthrough](./acme-caddy-walkthrough.md)
-- [Traefik integration walkthrough](./acme-traefik-walkthrough.md)
+- [cert-manager integration walkthrough](../../migration/acme-from-cert-manager.md)
+- [Caddy integration walkthrough](../../migration/acme-from-caddy.md)
+- [Traefik integration walkthrough](../../migration/acme-from-traefik.md)
 - [Threat model](./acme-server-threat-model.md)
 - [TLS trust bootstrap reference](./tls.md)
 - [Architecture (control-plane)](./architecture.md)

@@ -270,7 +270,7 @@ Documented to set scope expectations for security reviewers:
 ## See also
 
 - [`docs/acme-server.md`](./acme-server.md) — operator-facing reference.
-- [`docs/tls.md`](./tls.md) — TLS posture, including the L-001
+- [`docs/tls.md`](../../operator/tls.md) — TLS posture, including the L-001
   table of `InsecureSkipVerify` justifications (TLS-ALPN-01 row).
 - [`internal/api/acme/jws.go`](../internal/api/acme/jws.go) — verifier
   source.

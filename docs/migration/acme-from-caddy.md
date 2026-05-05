@@ -158,7 +158,7 @@ psql -c "SELECT actor, action, resource_id FROM audit_events
   legitimately high throughput.
 - **Caddy logs `urn:ietf:params:acme:error:rejectedIdentifier`** →
   the SAN list includes an identifier the certctl profile policy
-  rejects. Cross-reference [`docs/acme-server.md` § Troubleshooting](./acme-server.md#certificate-readyfalse-with-rejectedidentifier).
+  rejects. Cross-reference [`docs/acme-server.md` § Troubleshooting](../reference/protocols/acme-server.md#certificate-readyfalse-with-rejectedidentifier).
 - **`badNonce` in Caddy logs** → clock skew or multi-replica certctl
   without sticky sessions; same fix as the cert-manager walkthrough.
 

@@ -75,7 +75,7 @@ curl -X POST https://certctl-test.default.svc.cluster.local:8443/api/profiles \
 ```
 
 Auth-mode tradeoffs are covered in
-[`docs/acme-server.md` § Auth-mode decision tree](./acme-server.md#auth-mode-decision-tree).
+[`docs/acme-server.md` § Auth-mode decision tree](../reference/protocols/acme-server.md#auth-mode-decision-tree).
 For first-time deployments, `trust_authenticated` is the right default.
 
 ## Step 3 — Capture the certctl bootstrap CA
@@ -94,7 +94,7 @@ cat deploy/test/certs/ca.crt | base64 -w0
 Capture the output for Step 4. This is **the** single biggest first-
 time-deploy footgun on the cert-manager integration path. The reference
 recipe lives in
-[`docs/acme-server.md` § TLS trust bootstrap](./acme-server.md#tls-trust-bootstrap-read-this-before-configuring-cert-manager).
+[`docs/acme-server.md` § TLS trust bootstrap](../reference/protocols/acme-server.md#tls-trust-bootstrap-read-this-before-configuring-cert-manager).
 
 ## Step 4 — Apply the ClusterIssuer
 
@@ -229,7 +229,7 @@ psql -c "SELECT created_at, action, resource_type, resource_id
 ## Common failure modes
 
 These are operator-side; full troubleshooting reference is in
-[`docs/acme-server.md` § Troubleshooting](./acme-server.md#troubleshooting).
+[`docs/acme-server.md` § Troubleshooting](../reference/protocols/acme-server.md#troubleshooting).
 
 - `400 Bad Request: badNonce` → clock skew between certctl-server and
   cert-manager, or a multi-replica certctl fleet without sticky
