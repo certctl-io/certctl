@@ -1,5 +1,12 @@
 # Traefik Integration Walkthrough
 
+> **Use this walkthrough when** you're already running Traefik 3.0+
+> (Kubernetes or VM) and want it to ACME-issue from certctl (your
+> internal CA, your private PKI, or a local sub-CA chained under an
+> enterprise root) instead of Let's Encrypt. The Traefik static config
+> changes are minimal; the load-bearing piece is `serversTransport.rootCAs`
+> so Traefik trusts certctl's bootstrap CA on every outbound ACME call.
+
 End-to-end recipe for issuing certs from a certctl-server deployment
 through Traefik 3.0+. Target audience: operator running Traefik (in
 Kubernetes or on a VM) who wants to use certctl as their ACME source

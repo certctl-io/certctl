@@ -1,5 +1,12 @@
 # Caddy Integration Walkthrough
 
+> **Use this walkthrough when** you're already running Caddy 2.7+ and
+> want it to ACME-issue from certctl (your internal CA, your private
+> PKI, or a local sub-CA chained under an enterprise root) instead of
+> Let's Encrypt. The Caddyfile changes are minimal; the load-bearing
+> piece is trusting certctl's bootstrap CA so Caddy's ACME client can
+> talk to certctl over HTTPS.
+
 End-to-end recipe for issuing certs from a certctl-server deployment
 through Caddy 2.7+. Target audience: operator running Caddy on a VM
 or container who wants Caddy to ACME-issue from certctl instead of

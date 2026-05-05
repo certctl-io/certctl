@@ -1,5 +1,14 @@
 # cert-manager Integration Walkthrough
 
+> **Use this walkthrough when** you're already running cert-manager
+> 1.15+ in Kubernetes and want it to issue certs from certctl (your
+> internal CA, your private PKI, or a local sub-CA chained under an
+> enterprise root) via the standard ACME `ClusterIssuer` model. If
+> you want certctl to coexist with cert-manager rather than replace
+> its issuer backend, see
+> [`docs/migration/cert-manager-coexistence.md`](cert-manager-coexistence.md)
+> instead.
+
 End-to-end recipe for issuing certs from a certctl-server deployment
 through cert-manager 1.15+. Target audience: Kubernetes operator who
 has never deployed certctl before and wants a working
