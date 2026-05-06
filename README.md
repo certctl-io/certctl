@@ -13,6 +13,8 @@ certctl is a self-hosted platform that automates the entire TLS certificate life
 
 The CA/Browser Forum's [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) caps public TLS certificates at **200 days by March 2026**, **100 days by 2027**, and **47 days by 2029**. At 47-day lifespans, a team managing 100 certificates is processing 7+ renewals per week, every week, forever. Manual workflows stop being a choice.
 
+> **Status: Early-access.** Production-quality core (Local CA, ACME, agent deployment, CRUD, audit) with broader feature surface (intermediate CA hierarchy, ACME/SCEP/EST servers, network appliances) still maturing. Lab and dev deployments encouraged; production deployments welcome with the understanding that customer-scale battle-testing is in progress. File GitHub issues for any rough edges.
+
 > **Actively maintained, shipping weekly.** [Open an issue](https://github.com/certctl-io/certctl/issues) if something breaks. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
 
 **Ready to try it?** Jump to the [Quick Start](#quick-start). For the marketing site, see [certctl.io](https://certctl.io).
