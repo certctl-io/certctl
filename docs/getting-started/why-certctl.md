@@ -117,7 +117,7 @@ cd certctl/deploy && docker compose up -d
 # Dashboard at https://localhost:8443 (self-signed cert — pin deploy/test/certs/ca.crt)
 ```
 
-See the [Quickstart Guide](quickstart.md) for a full walkthrough, or explore the [5 turnkey examples](../examples/) for specific scenarios (ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer).
+See the [Quickstart Guide](quickstart.md) for a full walkthrough, or explore the [5 turnkey examples](../../examples/) for specific scenarios (ACME+NGINX, wildcard DNS-01, private CA+Traefik, step-ca+HAProxy, multi-issuer).
 
 ## License
 

@@ -32,7 +32,7 @@ cp .env.example .env   # Edit with your domain and email
 docker compose up -d
 ```
 
-The full walkthrough — including how HTTP-01 challenges work, adding multiple domains, switching to staging for testing, and a production checklist — is in the [example README](../examples/acme-nginx/acme-nginx.md).
+The full walkthrough — including how HTTP-01 challenges work, adding multiple domains, switching to staging for testing, and a production checklist — is in the [example README](../../examples/acme-nginx/acme-nginx.md).
 
 **Migrating from Certbot?** certctl discovers your existing `/etc/letsencrypt/live/` certificates automatically. You keep your ACME account, disable the Certbot cron, and certctl takes over renewal with centralized visibility and deployment verification. The step-by-step process is in [Migrating from Certbot](../migration/from-certbot.md).
 
@@ -52,7 +52,7 @@ cp .env.example .env   # Edit with domain, email, DNS provider credentials
 docker compose up -d
 ```
 
-The full walkthrough — including DNS-PERSIST-01 (set a TXT record once, never touch DNS again on renewals), adapting scripts for other providers, and propagation troubleshooting — is in the [example README](../examples/acme-wildcard-dns01/acme-wildcard-dns01.md).
+The full walkthrough — including DNS-PERSIST-01 (set a TXT record once, never touch DNS again on renewals), adapting scripts for other providers, and propagation troubleshooting — is in the [example README](../../examples/acme-wildcard-dns01/acme-wildcard-dns01.md).
 
 **Migrating from acme.sh?** Your existing `dns_*` hook scripts are compatible with certctl's DNS-01 — they use the same pattern (shell scripts creating TXT records). The migration guide covers script adaptation, discovery of existing acme.sh certificates, and phasing out the acme.sh cron. See [Migrating from acme.sh](../migration/from-acmesh.md).
 
@@ -71,7 +71,7 @@ cd examples/private-ca-traefik
 docker compose up -d    # Self-signed mode (no .env needed for demo)
 ```
 
-The full walkthrough — including sub-CA setup with `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH`, creating certificates via the API, monitoring deployments, and production hardening — is in the [example README](../examples/private-ca-traefik/private-ca-traefik.md).
+The full walkthrough — including sub-CA setup with `CERTCTL_CA_CERT_PATH` and `CERTCTL_CA_KEY_PATH`, creating certificates via the API, monitoring deployments, and production hardening — is in the [example README](../../examples/private-ca-traefik/private-ca-traefik.md).
 
 ---
 
@@ -88,7 +88,7 @@ cd examples/step-ca-haproxy
 docker compose up -d
 ```
 
-The full walkthrough — including step-ca provisioner configuration, integrating with an existing step-ca instance, HAProxy PEM format details, and advanced features (approval workflows, policy-based renewal, multi-instance HAProxy) — is in the [example README](../examples/step-ca-haproxy/step-ca-haproxy.md).
+The full walkthrough — including step-ca provisioner configuration, integrating with an existing step-ca instance, HAProxy PEM format details, and advanced features (approval workflows, policy-based renewal, multi-instance HAProxy) — is in the [example README](../../examples/step-ca-haproxy/step-ca-haproxy.md).
 
 ---
 
@@ -105,7 +105,7 @@ cd examples/multi-issuer
 docker compose up -d
 ```
 
-The full walkthrough — including profile-based issuer assignment, testing with ACME staging, Local CA enterprise sub-CA mode, and scaling beyond Docker Compose — is in the [example README](../examples/multi-issuer/multi-issuer.md).
+The full walkthrough — including profile-based issuer assignment, testing with ACME staging, Local CA enterprise sub-CA mode, and scaling beyond Docker Compose — is in the [example README](../../examples/multi-issuer/multi-issuer.md).
 
 **Using cert-manager for Kubernetes?** certctl complements cert-manager — cert-manager handles in-cluster certs, certctl handles everything outside: VMs, bare metal, network appliances, Windows servers. They can share the same CA (ACME, step-ca, Vault PKI). See [certctl for cert-manager Users](../migration/cert-manager-coexistence.md).
 

@@ -142,6 +142,6 @@ For now: cert-manager handles Kubernetes, certctl handles everything else. They 
 ## Next Steps
 
 1. Run through the [Quick Start](../getting-started/quickstart.md) for a 5-minute demo
-2. Try the [Multi-Issuer example](../examples/multi-issuer/multi-issuer.md) — manages public and internal certs from one dashboard
+2. Try the [Multi-Issuer example](../../examples/multi-issuer/multi-issuer.md) — manages public and internal certs from one dashboard
 3. Explore [Architecture](../reference/architecture.md#agents) for deployment patterns
 4. Check the [Helm Chart](../deploy/helm/certctl/) for production Kubernetes deployment
