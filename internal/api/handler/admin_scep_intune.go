@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/service"
 )
 
@@ -90,7 +90,7 @@ func (h AdminSCEPIntuneHandler) Profiles(w http.ResponseWriter, r *http.Request)
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -118,7 +118,7 @@ func (h AdminSCEPIntuneHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -146,7 +146,7 @@ func (h AdminSCEPIntuneHandler) ReloadTrust(w http.ResponseWriter, r *http.Reque
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}

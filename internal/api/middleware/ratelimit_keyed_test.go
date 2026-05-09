@@ -5,6 +5,8 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // Bundle B / Audit M-025 (OWASP ASVS L2 §11.2.1): per-key rate-limiter
@@ -61,7 +63,7 @@ func TestRateLimiter_M025_SameUserDifferentIPsShareBucket(t *testing.T) {
 	mkReq := func(remote string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote
-		ctx := context.WithValue(req.Context(), UserKey{}, "alice")
+		ctx := context.WithValue(req.Context(), auth.UserKey{}, "alice")
 		return req.WithContext(ctx)
 	}
 
@@ -88,7 +90,7 @@ func TestRateLimiter_M025_TwoUsersHaveIndependentBuckets(t *testing.T) {
 	mkReq := func(user string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.1:54321"
-		ctx := context.WithValue(req.Context(), UserKey{}, user)
+		ctx := context.WithValue(req.Context(), auth.UserKey{}, user)
 		return req.WithContext(ctx)
 	}
 
@@ -145,7 +147,7 @@ func TestRateLimiter_M025_PerUserBudgetOverride(t *testing.T) {
 	userReq := func() *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = "10.0.0.42:54321"
-		ctx := context.WithValue(req.Context(), UserKey{}, "carol")
+		ctx := context.WithValue(req.Context(), auth.UserKey{}, "carol")
 		return req.WithContext(ctx)
 	}
 	for i := 1; i <= 5; i++ {
@@ -171,7 +173,7 @@ func TestRateLimiter_M025_EmptyUserKeyTreatedAsAnonymous(t *testing.T) {
 	mkReq := func(remote string) *http.Request {
 		req := httptest.NewRequest(http.MethodGet, "/", nil)
 		req.RemoteAddr = remote
-		ctx := context.WithValue(req.Context(), UserKey{}, "")
+		ctx := context.WithValue(req.Context(), auth.UserKey{}, "")
 		return req.WithContext(ctx)
 	}
 

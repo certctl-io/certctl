@@ -5,7 +5,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 )
@@ -74,7 +74,7 @@ func (h AdminCRLCacheHandler) ListCache(w http.ResponseWriter, r *http.Request) 
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}

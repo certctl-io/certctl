@@ -361,7 +361,7 @@ type ListApprovalsInput struct {
 
 // ApprovalDecisionInput is the MCP tool input for approve / reject endpoints.
 // The decided_by actor is derived server-side from the authenticated API-key
-// name (middleware.UserKey) — NOT from this body. The two-person-integrity
+// name (auth.UserKey) — NOT from this body. The two-person-integrity
 // contract (ErrApproveBySameActor) is enforced regardless of who pushes the
 // decision through MCP, so as long as the MCP server's API key identity is
 // distinct from the requesting actor, the contract holds.

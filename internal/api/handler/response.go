@@ -9,7 +9,7 @@ import (
 	"strings"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // resolveActor extracts the authenticated named-key identity from the request
@@ -23,7 +23,7 @@ import (
 // or "api" — always go through this helper so the named-key identity flows to
 // services and the audit trail.
 func resolveActor(ctx context.Context) string {
-	if user := middleware.GetUser(ctx); user != "" {
+	if user := auth.GetUser(ctx); user != "" {
 		return user
 	}
 	return "api"

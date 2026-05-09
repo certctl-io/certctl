@@ -9,7 +9,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	_ "github.com/lib/pq" // Bundle-5 / H-006: postgres driver for /ready DB-probe regression test
 )
 
@@ -238,8 +238,8 @@ func TestAuthCheck_AdminCaller_ReportsAdminTrue(t *testing.T) {
 	handler := NewHealthHandler("api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
-	ctx := context.WithValue(req.Context(), middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx := context.WithValue(req.Context(), auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()
@@ -276,8 +276,8 @@ func TestAuthCheck_NonAdminCaller_ReportsAdminFalse(t *testing.T) {
 	handler := NewHealthHandler("api-key", nil)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil)
-	ctx := context.WithValue(req.Context(), middleware.AdminKey{}, false)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "alice")
+	ctx := context.WithValue(req.Context(), auth.AdminKey{}, false)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "alice")
 	req = req.WithContext(ctx)
 
 	w := httptest.NewRecorder()

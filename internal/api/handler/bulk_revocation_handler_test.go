@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 )
 
@@ -31,7 +32,7 @@ func (m *mockBulkRevocationService) BulkRevoke(ctx context.Context, criteria dom
 // M-003: bulk revocation handler requires admin context to reach the service.
 func adminContext() context.Context {
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id-bulk")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
 	return ctx
 }
 
@@ -243,7 +244,7 @@ func TestBulkRevoke_AdminExplicitFalse_Returns403(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
+	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -273,8 +274,8 @@ func TestBulkRevoke_AdminPermitted_ForwardsActor(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 

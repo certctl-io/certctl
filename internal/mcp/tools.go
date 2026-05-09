@@ -1310,7 +1310,7 @@ func registerHealthTools(s *gomcp.Server, c *Client) {
 // assistants for cert-renewal in regulated environments need natural-language
 // approve/reject. The service layer enforces ErrApproveBySameActor (the
 // requesting actor cannot self-approve) and the handler extracts the
-// decided_by actor from middleware.UserKey — so the MCP server's API key
+// decided_by actor from auth.UserKey — so the MCP server's API key
 // identity becomes the audit-trail actor automatically. Two-person integrity
 // is preserved as long as the MCP server's key is distinct from the
 // requesting actor's; the tool inputs deliberately omit any actor_id field
@@ -1706,7 +1706,7 @@ func registerDiscoveryReadTools(s *gomcp.Server, c *Client) {
 //
 // 2026-05-05 CLI/API/MCP↔GUI parity audit closure. Rank 8 primitive
 // (multi-level CA hierarchy management). The handlers are admin-gated via
-// middleware.IsAdmin — non-admin callers see HTTP 403 regardless of MCP
+// auth.IsAdmin — non-admin callers see HTTP 403 regardless of MCP
 // surface. We expose the full management API rather than carving it off
 // because the operator ran the original Rank 8 deliverable to make this
 // a first-class managed primitive; gating by API key role at the handler

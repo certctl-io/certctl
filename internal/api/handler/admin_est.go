@@ -7,7 +7,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/service"
 )
 
@@ -76,7 +76,7 @@ func (h AdminESTHandler) Profiles(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -104,7 +104,7 @@ func (h AdminESTHandler) ReloadTrust(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}

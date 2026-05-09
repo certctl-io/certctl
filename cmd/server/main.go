@@ -21,6 +21,7 @@ import (
 	"github.com/certctl-io/certctl/internal/api/handler"
 	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -1483,13 +1484,13 @@ func main() {
 	// Named keys come from CERTCTL_API_KEYS_NAMED (preferred). For backward
 	// compatibility CERTCTL_AUTH_SECRET is synthesized into legacy-key-N
 	// entries with Admin=false.
-	var namedKeys []middleware.NamedAPIKey
+	var namedKeys []auth.NamedAPIKey
 	if config.AuthType(cfg.Auth.Type) != config.AuthTypeNone {
-		// Translate typed config.NamedAPIKey -> middleware.NamedAPIKey. The
+		// Translate typed config.NamedAPIKey -> auth.NamedAPIKey. The
 		// two structs are field-compatible but live in different packages to
 		// preserve the config→middleware dependency direction.
 		for _, nk := range cfg.Auth.NamedKeys {
-			namedKeys = append(namedKeys, middleware.NamedAPIKey{
+			namedKeys = append(namedKeys, auth.NamedAPIKey{
 				Name:  nk.Name,
 				Key:   nk.Key,
 				Admin: nk.Admin,
@@ -1506,7 +1507,7 @@ func main() {
 				if p == "" {
 					continue
 				}
-				namedKeys = append(namedKeys, middleware.NamedAPIKey{
+				namedKeys = append(namedKeys, auth.NamedAPIKey{
 					Name:  fmt.Sprintf("legacy-key-%d", idx),
 					Key:   p,
 					Admin: false,
@@ -1519,7 +1520,7 @@ func main() {
 			}
 		}
 	}
-	authMiddleware := middleware.NewAuthWithNamedKeys(namedKeys)
+	authMiddleware := auth.NewAuthWithNamedKeys(namedKeys)
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})

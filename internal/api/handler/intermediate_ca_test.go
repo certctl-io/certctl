@@ -16,7 +16,7 @@ import (
 	"testing"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/service"
 )
@@ -80,8 +80,8 @@ func (m *mockIntermediateCAService) LoadHierarchy(ctx context.Context, issuerID 
 // authenticated user — the standard "admin caller" shape for these
 // tests.
 func withAdmin(actor string, admin bool) context.Context {
-	ctx := context.WithValue(context.Background(), middleware.UserKey{}, actor)
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, admin)
+	ctx := context.WithValue(context.Background(), auth.UserKey{}, actor)
+	ctx = context.WithValue(ctx, auth.AdminKey{}, admin)
 	return ctx
 }
 
@@ -177,8 +177,8 @@ func TestIntermediateCA_Handler_AdminExplicitFalse_Returns403(t *testing.T) {
 		bytes.NewReader([]byte(`{"name":"r"}`)))
 	req.SetPathValue("id", "iss-1")
 	// AdminKey explicitly set to false — distinct from missing key.
-	ctx := context.WithValue(context.Background(), middleware.UserKey{}, "alice")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
+	ctx := context.WithValue(context.Background(), auth.UserKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.Create(w, req)

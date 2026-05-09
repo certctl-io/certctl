@@ -6,6 +6,7 @@ import (
 	"net/http"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 )
 
@@ -53,7 +54,7 @@ func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request
 	// M-003: admin-only gate. Non-admin callers are rejected before any
 	// criteria/body processing to avoid leaking validation behavior to
 	// unauthorized actors.
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		ErrorWithRequestID(w, http.StatusForbidden,
 			"Bulk revocation requires admin privileges",
 			requestID)
@@ -127,7 +128,7 @@ func (h BulkRevocationHandler) BulkRevokeEST(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	requestID := middleware.GetRequestID(r.Context())
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		ErrorWithRequestID(w, http.StatusForbidden,
 			"EST bulk revocation requires admin privileges", requestID)
 		return

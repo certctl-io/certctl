@@ -172,7 +172,7 @@ func authenticatedContext(actor string) context.Context {
 	type userKey struct{}
 	// The middleware UserKey is a private type in the middleware package, so
 	// in this handler test we can't construct one directly. Bulk-renew and
-	// bulk-reassign read the actor through the same middleware.GetUser path
+	// bulk-reassign read the actor through the same auth.GetUser path
 	// that bulk-revoke does — adminContext() in the existing test suite is
 	// the canonical helper. Reuse it (delivers both UserKey and AdminKey).
 	_ = userKey{}

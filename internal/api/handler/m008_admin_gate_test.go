@@ -14,19 +14,19 @@ import (
 //
 // The audit's request is "Admin-gated operation role-gate test coverage
 // needs verification". Verified-already-clean recon: only one handler
-// in internal/api/handler/ calls middleware.IsAdmin to gate access:
+// in internal/api/handler/ calls auth.IsAdmin to gate access:
 // bulk_revocation.go — which has 3 dedicated tests
 // (NonAdmin_Returns403, AdminExplicitFalse_Returns403,
 // AdminPermitted_ForwardsActor) covering all three branches.
 //
 // This test enforces the invariant going forward by walking every
-// .go file in this package, finding every middleware.IsAdmin call
+// .go file in this package, finding every auth.IsAdmin call
 // site, and asserting the file appears in AdminGatedHandlers below.
-// Adding a new middleware.IsAdmin call without updating the constant
+// Adding a new auth.IsAdmin call without updating the constant
 // AND adding a parallel test triplet fails CI.
 
 // AdminGatedHandlers is the documented allowlist of handler files that
-// gate access on middleware.IsAdmin. Every entry MUST have:
+// gate access on auth.IsAdmin. Every entry MUST have:
 //   - a non-admin-rejection test ("_NonAdmin_Returns403")
 //   - an explicit-false-admin-rejection test ("_AdminExplicitFalse_Returns403")
 //   - an admin-allowed actor-attribution test ("_AdminPermitted_ForwardsActor")
@@ -43,7 +43,7 @@ var AdminGatedHandlers = map[string]string{
 }
 
 // InformationalIsAdminCallers is the documented allowlist of files that
-// call middleware.IsAdmin without using the result to gate access. The
+// call auth.IsAdmin without using the result to gate access. The
 // only legitimate use of an informational call is reporting the flag to
 // a downstream consumer (e.g. health.go::AuthCheck reports admin to the
 // GUI so it can hide admin-only buttons).
@@ -64,7 +64,7 @@ func TestM008_AdminGatedHandlers_PinExpectedSet(t *testing.T) {
 
 	if !slicesEqual008(actual, expected) {
 		t.Errorf(
-			"middleware.IsAdmin call sites changed:\n"+
+			"auth.IsAdmin call sites changed:\n"+
 				"  actual:   %v\n"+
 				"  expected: %v\n"+
 				"\n"+
@@ -143,10 +143,10 @@ func scanIsAdminCallers(dir string) ([]string, error) {
 		if parseErr != nil {
 			continue
 		}
-		// Substring-match middleware.IsAdmin — cheap and sufficient
+		// Substring-match auth.IsAdmin — cheap and sufficient
 		// because the import path is fixed and there's no aliasing
 		// shenanigans elsewhere in this package.
-		if strings.Contains(string(body), "middleware.IsAdmin(") {
+		if strings.Contains(string(body), "auth.IsAdmin(") {
 			out = append(out, name)
 		}
 	}

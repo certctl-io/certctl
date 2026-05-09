@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/service"
@@ -36,7 +37,7 @@ type IntermediateCAServicer interface {
 // All routes are pinned at /api/v1/issuers/{id}/intermediates and
 // /api/v1/intermediates/{id}.
 //
-// Admin gate: every method calls middleware.IsAdmin first and surfaces
+// Admin gate: every method calls auth.IsAdmin first and surfaces
 // HTTP 403 for non-admin Bearer callers (M-003 admin-gating pattern,
 // matches AdminCRLCacheHandler / AdminESTHandler / AdminSCEPIntuneHandler).
 // CA hierarchy management is a high-blast-radius surface — adding a
@@ -111,7 +112,7 @@ func (h IntermediateCAHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -122,7 +123,7 @@ func (h IntermediateCAHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, "issuer id required", requestID)
 		return
 	}
-	actor, _ := r.Context().Value(middleware.UserKey{}).(string)
+	actor, _ := r.Context().Value(auth.UserKey{}).(string)
 	if actor == "" {
 		ErrorWithRequestID(w, http.StatusUnauthorized,
 			"authentication required", requestID)
@@ -211,7 +212,7 @@ func (h IntermediateCAHandler) List(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -237,7 +238,7 @@ func (h IntermediateCAHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -270,7 +271,7 @@ func (h IntermediateCAHandler) Retire(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
+	if !auth.IsAdmin(r.Context()) {
 		Error(w, http.StatusForbidden, "Admin access required")
 		return
 	}
@@ -281,7 +282,7 @@ func (h IntermediateCAHandler) Retire(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, "id required", requestID)
 		return
 	}
-	actor, _ := r.Context().Value(middleware.UserKey{}).(string)
+	actor, _ := r.Context().Value(auth.UserKey{}).(string)
 	if actor == "" {
 		ErrorWithRequestID(w, http.StatusUnauthorized,
 			"authentication required", requestID)

@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // HealthHandler handles health and readiness check endpoints.
@@ -152,8 +152,8 @@ func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 func (h HealthHandler) AuthCheck(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"status": "authenticated",
-		"user":   middleware.GetUser(r.Context()),
-		"admin":  middleware.IsAdmin(r.Context()),
+		"user":   auth.GetUser(r.Context()),
+		"admin":  auth.IsAdmin(r.Context()),
 	}
 	JSON(w, http.StatusOK, response)
 }

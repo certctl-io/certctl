@@ -10,6 +10,7 @@ import (
 	"testing"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // fakeAdminCRLCacheService is the test stub for the
@@ -67,7 +68,7 @@ func TestAdminCRLCache_AdminExplicitFalse_Returns403(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/crl/cache", nil)
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
+	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -99,8 +100,8 @@ func TestAdminCRLCache_AdminPermitted_ForwardsActor(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/crl/cache", nil)
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -131,7 +132,7 @@ func TestAdminCRLCache_RejectsNonGetMethod(t *testing.T) {
 	h := NewAdminCRLCacheHandler(&fakeAdminCRLCacheService{})
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/crl/cache", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -150,7 +151,7 @@ func TestAdminCRLCache_PropagatesServiceError(t *testing.T) {
 	h := NewAdminCRLCacheHandler(svc)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/crl/cache", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
