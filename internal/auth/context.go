@@ -48,3 +48,85 @@ func IsAdmin(ctx context.Context) bool {
 	admin, ok := ctx.Value(AdminKey{}).(bool)
 	return ok && admin
 }
+
+// =============================================================================
+// Bundle 1 Phase 3: RBAC-aware context keys.
+//
+// ActorIDKey, ActorTypeKey, and TenantIDKey are populated by the auth
+// middleware (NewAuthWithNamedKeys, NewDemoModeAuth, and Bundle 2's
+// session middleware) so that downstream RBAC checks have a stable
+// identity + tenancy view of the caller.
+//
+// UserKey + AdminKey continue to be populated for back-compat with
+// existing audit / rate-limiter / handler code; the new keys are the
+// canonical Phase 3+ identity.
+// =============================================================================
+
+// ActorIDKey is the canonical actor identifier (e.g. an API-key name,
+// an OIDC user id, or the synthetic `actor-demo-anon`). Phase 3
+// middleware populates this; auth.RequirePermission and
+// auth.CallerFromContext read it.
+type ActorIDKey struct{}
+
+// ActorTypeKey is the typed-string actor type (User, System, Agent,
+// APIKey, Anonymous) corresponding to internal/domain.ActorType. Stored
+// as a string so the internal/auth package doesn't need to import the
+// domain package and create a cycle.
+type ActorTypeKey struct{}
+
+// TenantIDKey is the tenant the request executes in. Bundle 1 ships
+// single-tenant; every authenticated request gets the seeded
+// `t-default` tenant unless the future managed-service offering
+// configures a different one.
+type TenantIDKey struct{}
+
+// GetActorID returns the canonical actor id from context, or "" when
+// no actor is present (anonymous request, missing middleware in test
+// harnesses, etc.). Falls back to the legacy UserKey value for
+// back-compat with handlers that have not yet adopted the new keys.
+func GetActorID(ctx context.Context) string {
+	if id, ok := ctx.Value(ActorIDKey{}).(string); ok && id != "" {
+		return id
+	}
+	return GetUser(ctx)
+}
+
+// GetActorType returns the actor type string from context, or "" when
+// no actor type was set. Phase 3 middleware sets this to "APIKey" for
+// validated bearer-token requests and "Anonymous" for the demo-mode
+// synthetic actor.
+func GetActorType(ctx context.Context) string {
+	if t, ok := ctx.Value(ActorTypeKey{}).(string); ok {
+		return t
+	}
+	return ""
+}
+
+// GetTenantID returns the tenant id from context, or the seeded
+// default tenant when no value was set. Returning the default rather
+// than "" keeps RBAC lookups working in deployments that haven't
+// configured a tenant explicitly (the Bundle 1 baseline).
+func GetTenantID(ctx context.Context) string {
+	if t, ok := ctx.Value(TenantIDKey{}).(string); ok && t != "" {
+		return t
+	}
+	return DefaultTenantID
+}
+
+// DefaultTenantID is the seeded single tenant. Mirrors
+// internal/domain/auth.DefaultTenantID; duplicated here to avoid a
+// cross-package import in the hot-path middleware.
+const DefaultTenantID = "t-default"
+
+// DemoAnonActorID is the synthetic actor id used by the demo-mode
+// auth middleware when CERTCTL_AUTH_TYPE=none. Mirrors
+// internal/domain/auth.DemoAnonActorID.
+const DemoAnonActorID = "actor-demo-anon"
+
+// ActorTypeAPIKey + ActorTypeAnonymous mirror the corresponding
+// domain.ActorType values. Stored as untyped strings here so callers
+// don't have to import the domain package.
+const (
+	ActorTypeAPIKey    = "APIKey"
+	ActorTypeAnonymous = "Anonymous"
+)

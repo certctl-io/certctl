@@ -100,9 +100,44 @@ func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handl
 				return
 			}
 
-			// Store the authenticated identity and admin flag in context
+			// Store the authenticated identity and admin flag in context.
+			// Bundle 1 Phase 0: legacy UserKey + AdminKey for back-compat.
+			// Bundle 1 Phase 3: new ActorIDKey + ActorTypeKey + TenantIDKey
+			// for RBAC-aware downstream code (RequirePermission, etc.).
 			ctx := context.WithValue(r.Context(), UserKey{}, matched.name)
 			ctx = context.WithValue(ctx, AdminKey{}, matched.admin)
+			ctx = context.WithValue(ctx, ActorIDKey{}, matched.name)
+			ctx = context.WithValue(ctx, ActorTypeKey{}, ActorTypeAPIKey)
+			ctx = context.WithValue(ctx, TenantIDKey{}, DefaultTenantID)
+			next.ServeHTTP(w, r.WithContext(ctx))
+		})
+	}
+}
+
+// NewDemoModeAuth returns a middleware that injects the synthetic
+// `actor-demo-anon` identity into every request context. Used when
+// CERTCTL_AUTH_TYPE=none is configured (the demo path) so that
+// RBAC-gated handlers see an admin-equivalent caller without operator
+// configuration.
+//
+// The synthetic actor is seeded by migration 000029_rbac.up.sql with
+// the admin role at global scope, so RequirePermission resolves
+// every gated request as an admin. The reserved-actor guard in the
+// service layer prevents the API from accidentally mutating this
+// actor's role assignments.
+//
+// Production deployments MUST NOT use this middleware. The cmd/server
+// startup wires it only when CERTCTL_AUTH_TYPE=none is explicitly
+// configured.
+func NewDemoModeAuth() func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			ctx := r.Context()
+			ctx = context.WithValue(ctx, UserKey{}, DemoAnonActorID)
+			ctx = context.WithValue(ctx, AdminKey{}, true)
+			ctx = context.WithValue(ctx, ActorIDKey{}, DemoAnonActorID)
+			ctx = context.WithValue(ctx, ActorTypeKey{}, ActorTypeAnonymous)
+			ctx = context.WithValue(ctx, TenantIDKey{}, DefaultTenantID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}
