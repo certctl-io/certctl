@@ -217,6 +217,17 @@ func (r *RoleRepository) ListPermissions(ctx context.Context, roleID string) ([]
 }
 
 func (r *RoleRepository) AddPermission(ctx context.Context, g *authdomain.RolePermission) error {
+	// TODO(bundle-2): Bundle 1 Phase 12 deferral — scope_id is NOT
+	// currently FK-constrained against the resource tables
+	// (certificate_profiles, issuers). This means an operator can
+	// grant a permission at scope_type=profile / scope_id=p-bogus
+	// without the bogus profile existing; the gate still works
+	// (no permission rows match the bogus scope at request time)
+	// but a strict 404 on grant would be cleaner. Adding the FK
+	// requires a migration that confirms every existing
+	// role_permissions row references a real resource and is
+	// tracked as Bundle 2 work. See
+	// cowork/auth-bundle-1-prompt.md negative-test path #12.
 	var scopeID interface{}
 	if g.ScopeID != nil {
 		scopeID = *g.ScopeID
