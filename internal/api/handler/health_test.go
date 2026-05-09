@@ -10,6 +10,9 @@ import (
 	"time"
 
 	"github.com/certctl-io/certctl/internal/auth"
+	"github.com/certctl-io/certctl/internal/domain"
+	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
+	"github.com/certctl-io/certctl/internal/repository"
 	_ "github.com/lib/pq" // Bundle-5 / H-006: postgres driver for /ready DB-probe regression test
 )
 
@@ -335,6 +338,120 @@ func TestAuthCheck_NoAuthContext_DefaultsToEmptyUserAndFalseAdmin(t *testing.T) 
 	}
 	if result["user"] != "" {
 		t.Errorf("user = %q, want empty string", result["user"])
+	}
+}
+
+// fakeAuthCheckResolver is a tiny in-memory stand-in for the postgres
+// ActorRoleRepository so the M1 enrichment can be tested without a DB.
+type fakeAuthCheckResolver struct {
+	roles []*authdomain.ActorRole
+	perms []repository.EffectivePermission
+	err   error
+}
+
+func (f fakeAuthCheckResolver) ListRoles(_ context.Context, _ string, _ domain.ActorType, _ string) ([]*authdomain.ActorRole, error) {
+	return f.roles, f.err
+}
+func (f fakeAuthCheckResolver) EffectivePermissions(_ context.Context, _ string, _ domain.ActorType, _ string) ([]repository.EffectivePermission, error) {
+	return f.perms, f.err
+}
+
+// TestAuthCheck_M1_ResolverEnrichesResponseWithRolesAndPerms is the
+// Bundle 1 Phase 3 closure (M1) regression: when HealthHandler.Resolver
+// is wired, the response includes actor_id / actor_type / tenant_id /
+// roles / effective_permissions / admin_via_role. The legacy `admin`
+// boolean is preserved for back-compat with pre-Bundle-1 GUIs.
+func TestAuthCheck_M1_ResolverEnrichesResponseWithRolesAndPerms(t *testing.T) {
+	handler := NewHealthHandler("api-key", nil)
+	scopeID := "profile-prod"
+	handler.Resolver = fakeAuthCheckResolver{
+		roles: []*authdomain.ActorRole{
+			{ActorID: "alice", RoleID: authdomain.RoleIDAdmin, TenantID: authdomain.DefaultTenantID},
+			{ActorID: "alice", RoleID: authdomain.RoleIDOperator, TenantID: authdomain.DefaultTenantID},
+		},
+		perms: []repository.EffectivePermission{
+			{PermissionName: "cert.bulk_revoke", ScopeType: authdomain.ScopeTypeGlobal},
+			{PermissionName: "cert.issue", ScopeType: authdomain.ScopeTypeProfile, ScopeID: &scopeID},
+		},
+	}
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, auth.ActorIDKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.ActorTypeKey{}, "APIKey")
+	ctx = context.WithValue(ctx, auth.TenantIDKey{}, "t-default")
+	ctx = context.WithValue(ctx, auth.UserKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.AuthCheck(w, req)
+
+	if w.Code != http.StatusOK {
+		t.Fatalf("expected status 200, got %d", w.Code)
+	}
+	var result map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+
+	if result["actor_id"] != "alice" {
+		t.Errorf("actor_id = %v, want alice", result["actor_id"])
+	}
+	if result["actor_type"] != "APIKey" {
+		t.Errorf("actor_type = %v, want APIKey", result["actor_type"])
+	}
+	if result["tenant_id"] != "t-default" {
+		t.Errorf("tenant_id = %v, want t-default", result["tenant_id"])
+	}
+	if result["admin_via_role"] != true {
+		t.Errorf("admin_via_role = %v, want true (alice holds r-admin)", result["admin_via_role"])
+	}
+	roles, ok := result["roles"].([]any)
+	if !ok || len(roles) != 2 {
+		t.Fatalf("roles = %v, want 2-element slice", result["roles"])
+	}
+	perms, ok := result["effective_permissions"].([]any)
+	if !ok || len(perms) != 2 {
+		t.Fatalf("effective_permissions = %v, want 2-element slice", result["effective_permissions"])
+	}
+	first := perms[0].(map[string]any)
+	if first["permission"] != "cert.bulk_revoke" || first["scope_type"] != "global" {
+		t.Errorf("perm[0] = %v, want cert.bulk_revoke/global", first)
+	}
+	second := perms[1].(map[string]any)
+	if second["permission"] != "cert.issue" || second["scope_type"] != "profile" || second["scope_id"] != "profile-prod" {
+		t.Errorf("perm[1] = %v, want cert.issue/profile/profile-prod", second)
+	}
+}
+
+// TestAuthCheck_M1_NilResolverPreservesLegacyShape pins backwards
+// compatibility: when no resolver is wired, the response keeps the
+// original {status, user, admin} contract that pre-Bundle-1 GUIs key
+// off. New keys (actor_id, roles, ...) must be absent.
+func TestAuthCheck_M1_NilResolverPreservesLegacyShape(t *testing.T) {
+	handler := NewHealthHandler("api-key", nil) // Resolver left nil
+
+	ctx := context.Background()
+	ctx = context.WithValue(ctx, auth.ActorIDKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.ActorTypeKey{}, "APIKey")
+	ctx = context.WithValue(ctx, auth.UserKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/check", nil).WithContext(ctx)
+	w := httptest.NewRecorder()
+	handler.AuthCheck(w, req)
+
+	var result map[string]any
+	if err := json.NewDecoder(w.Body).Decode(&result); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	for _, k := range []string{"actor_id", "actor_type", "tenant_id", "roles", "effective_permissions", "admin_via_role"} {
+		if _, present := result[k]; present {
+			t.Errorf("%s should be absent in legacy (nil resolver) response, got %v", k, result[k])
+		}
+	}
+	if result["admin"] != true || result["user"] != "alice" {
+		t.Errorf("legacy fields not preserved: admin=%v user=%v", result["admin"], result["user"])
 	}
 }
 

@@ -127,3 +127,37 @@ func TestRBACGate_NoActorReturns401(t *testing.T) {
 		t.Errorf("handler body must NOT run when no actor in context")
 	}
 }
+
+// TestRBACGate_DemoModeChainReachesHandler is the end-to-end Bundle 1
+// Phase 3 closure (C1) regression: when CERTCTL_AUTH_TYPE=none, the
+// auth.NewDemoModeAuth middleware injects the synthetic actor-demo-anon
+// actor into context. The rbacGate downstream sees a populated actor +
+// the fake checker (standing in for the seeded admin grant on the
+// demo actor) and forwards the request. Without the C1 fix, the
+// pre-closure NewAuthWithNamedKeys no-op pass-through would have left
+// context unpopulated and the rbacGate would 401 every demo request.
+func TestRBACGate_DemoModeChainReachesHandler(t *testing.T) {
+	rh := &reachedHandler{}
+	// Mirror the seeded admin grant on actor-demo-anon: the checker
+	// allows every permission for the demo actor (matches the data
+	// migration seeds in 000029_rbac.up.sql).
+	checker := &fakeChecker{permFn: func(_ context.Context, actorID, _, _, _, _ string, _ *string) (bool, error) {
+		if actorID != auth.DemoAnonActorID {
+			t.Errorf("checker called for unexpected actor %q (want demo-anon)", actorID)
+		}
+		return true, nil
+	}}
+	gated := rbacGate(checker, "cert.bulk_revoke", rh.ServeHTTP)
+	chain := auth.NewDemoModeAuth()(gated)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/certificates/bulk-revoke", nil)
+	rec := httptest.NewRecorder()
+	chain.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Errorf("demo-mode caller against admin route should reach handler 200; got %d", rec.Code)
+	}
+	if !rh.called {
+		t.Errorf("handler body must run for demo-mode caller (C1 closure regression)")
+	}
+}

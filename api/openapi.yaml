@@ -147,7 +147,16 @@ paths:
     get:
       tags: [Health]
       summary: Validate credentials
-      description: Returns 200 if auth credentials are valid, 401 otherwise.
+      description: |
+        Returns 200 if auth credentials are valid, 401 otherwise.
+
+        Bundle 1 Phase 3 closure (M1): when the server has the RBAC
+        primitive wired (Bundle 1 default), the response also includes
+        the caller's `actor_id`, `actor_type`, `tenant_id`, the
+        `roles` they hold, and `effective_permissions` they resolve
+        to. The legacy `admin` boolean is preserved for back-compat
+        with pre-Bundle-1 GUIs; new GUIs should switch to
+        `effective_permissions` for affordance gating.
       operationId: checkAuth
       responses:
         "200":
@@ -156,12 +165,352 @@ paths:
             application/json:
               schema:
                 type: object
+                required: [status]
                 properties:
                   status:
                     type: string
                     example: authenticated
+                  user:
+                    type: string
+                    description: Named-key identity (empty when CERTCTL_AUTH_TYPE=none)
+                  admin:
+                    type: boolean
+                    description: Legacy admin flag (back-compat with pre-Bundle-1 GUIs).
+                  actor_id:
+                    type: string
+                    description: Actor identifier for the authenticated request (Bundle 1+).
+                  actor_type:
+                    type: string
+                    enum: [User, System, Agent, APIKey, Anonymous]
+                    description: Actor-type discriminator (Bundle 1+).
+                  tenant_id:
+                    type: string
+                    description: Tenant the actor belongs to (Bundle 1 ships single-tenant `t-default`).
+                  admin_via_role:
+                    type: boolean
+                    description: True when the actor holds `r-admin`. Authoritative admin signal under Bundle 1+.
+                  roles:
+                    type: array
+                    items:
+                      type: string
+                    description: Role IDs (e.g. `r-admin`, `r-viewer`) the actor holds.
+                  effective_permissions:
+                    type: array
+                    items:
+                      type: object
+                      required: [permission, scope_type]
+                      properties:
+                        permission:
+                          type: string
+                          example: cert.bulk_revoke
+                        scope_type:
+                          type: string
+                          enum: [global, profile, issuer]
+                        scope_id:
+                          type: string
         "401":
           description: Unauthorized
+
+  # ─── Auth / RBAC (Bundle 1 Phase 4) ─────────────────────────────────
+  # The RBAC primitive surface for managing roles, permissions, and the
+  # role grants assigned to actors (API keys today; OIDC-federated users
+  # in Bundle 2). Every mutating route runs through the service layer's
+  # privilege-escalation guard — callers need `auth.role.assign` for
+  # role grants on actors, `auth.role.create/edit/delete` for the role
+  # lifecycle, `auth.key.*` for key management. Read endpoints require
+  # `auth.role.list`. The /v1/auth/me endpoint has no permission gate
+  # (every authenticated caller can read their own permissions).
+  /api/v1/auth/me:
+    get:
+      tags: [Auth]
+      summary: Current actor's roles + effective permissions
+      description: |
+        Returns the standing roles + effective permission set for the
+        authenticated caller. This is the query the GUI uses to gate
+        affordance rendering; /api/v1/auth/check returns the same shape
+        on the boot path.
+      operationId: getAuthMe
+      responses:
+        "200":
+          description: Caller identity + roles + effective permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actor_id, actor_type, tenant_id, admin, roles, effective_permissions]
+                properties:
+                  actor_id: { type: string }
+                  actor_type: { type: string, enum: [User, System, Agent, APIKey, Anonymous] }
+                  tenant_id: { type: string }
+                  admin: { type: boolean }
+                  roles:
+                    type: array
+                    items: { type: string }
+                  effective_permissions:
+                    type: array
+                    items:
+                      type: object
+                      required: [permission, scope_type]
+                      properties:
+                        permission: { type: string }
+                        scope_type: { type: string, enum: [global, profile, issuer] }
+                        scope_id: { type: string }
+        "401":
+          description: Unauthorized
+
+  /api/v1/auth/permissions:
+    get:
+      tags: [Auth]
+      summary: List canonical permission catalogue
+      description: |
+        Returns every permission name registered in the canonical
+        catalogue. Used by the GUI's role editor to populate the
+        "grant permission" picker. Permission: `auth.role.list`.
+      operationId: listAuthPermissions
+      responses:
+        "200":
+          description: Permission catalogue
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  permissions:
+                    type: array
+                    items:
+                      type: object
+                      required: [id, name, namespace]
+                      properties:
+                        id: { type: string }
+                        name: { type: string }
+                        namespace: { type: string }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+
+  /api/v1/auth/roles:
+    get:
+      tags: [Auth]
+      summary: List roles for the active tenant
+      description: Permission `auth.role.list`. Returns every role registered for `t-default` (Bundle 1 single-tenant).
+      operationId: listAuthRoles
+      responses:
+        "200":
+          description: Role list
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  roles:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuthRole" }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+    post:
+      tags: [Auth]
+      summary: Create a custom role
+      description: Permission `auth.role.create`. Default roles (`r-admin` / `r-operator` / `r-viewer` / `r-agent` / `r-mcp` / `r-cli` / `r-auditor`) are seeded by migration and immutable.
+      operationId: createAuthRole
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name]
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        "201":
+          description: Role created
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/AuthRole" }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "409": { description: Role with that name already exists }
+
+  /api/v1/auth/roles/{id}:
+    get:
+      tags: [Auth]
+      summary: Get a role and its permissions
+      description: Permission `auth.role.list`.
+      operationId: getAuthRole
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Role + permissions
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  role: { $ref: "#/components/schemas/AuthRole" }
+                  permissions:
+                    type: array
+                    items: { $ref: "#/components/schemas/AuthRolePermission" }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not found }
+    put:
+      tags: [Auth]
+      summary: Update a custom role's name or description
+      description: Permission `auth.role.edit`. Default roles cannot be renamed.
+      operationId: updateAuthRole
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                name: { type: string }
+                description: { type: string }
+      responses:
+        "200": { description: Updated }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not found }
+        "409": { description: Default role cannot be renamed / name collision }
+    delete:
+      tags: [Auth]
+      summary: Delete a custom role
+      description: Permission `auth.role.delete`. Fails with 409 when actors still hold the role (FK ON DELETE RESTRICT).
+      operationId: deleteAuthRole
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Deleted }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not found }
+        "409": { description: Role still has active actor assignments }
+
+  /api/v1/auth/roles/{id}/permissions:
+    post:
+      tags: [Auth]
+      summary: Grant a permission to a role at a scope
+      description: Permission `auth.role.edit`. ScopeType defaults to `global`; per-profile / per-issuer scopes require ScopeID.
+      operationId: grantAuthRolePermission
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [permission]
+              properties:
+                permission: { type: string }
+                scope_type:
+                  type: string
+                  enum: [global, profile, issuer]
+                  default: global
+                scope_id: { type: string }
+      responses:
+        "204": { description: Granted }
+        "400": { description: Permission not in canonical catalogue / scope_id missing for non-global scope }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not found }
+
+  /api/v1/auth/roles/{id}/permissions/{perm}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a permission from a role
+      description: Permission `auth.role.edit`.
+      operationId: revokeAuthRolePermission
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: perm
+          required: true
+          schema: { type: string }
+        - in: query
+          name: scope_type
+          schema:
+            type: string
+            enum: [global, profile, issuer]
+        - in: query
+          name: scope_id
+          schema: { type: string }
+      responses:
+        "204": { description: Revoked }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role or permission grant not found }
+
+  /api/v1/auth/keys/{id}/roles:
+    post:
+      tags: [Auth]
+      summary: Assign a role to an API key
+      description: Permission `auth.role.assign`. The reserved `actor-demo-anon` actor cannot be re-assigned.
+      operationId: assignAuthKeyRole
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [role_id]
+              properties:
+                role_id: { type: string }
+      responses:
+        "204": { description: Assigned }
+        "400": { description: Validation error }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not found }
+        "409": { description: Reserved system actor cannot be modified }
+
+  /api/v1/auth/keys/{id}/roles/{role_id}:
+    delete:
+      tags: [Auth]
+      summary: Revoke a role from an API key
+      description: Permission `auth.role.assign`. Revoking the synthetic `actor-demo-anon` admin grant is rejected.
+      operationId: revokeAuthKeyRole
+      parameters:
+        - in: path
+          name: id
+          required: true
+          schema: { type: string }
+        - in: path
+          name: role_id
+          required: true
+          schema: { type: string }
+      responses:
+        "204": { description: Revoked }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
+        "404": { description: Role not assigned to actor }
+        "409": { description: Reserved system actor cannot be modified }
 
   /api/v1/version:
     get:
@@ -4361,6 +4710,45 @@ components:
             $ref: "#/components/schemas/ErrorResponse"
 
   schemas:
+    # ─── Auth / RBAC (Bundle 1 Phase 4) ─────────────────────────────
+    AuthRole:
+      type: object
+      required: [id, tenant_id, name]
+      properties:
+        id:
+          type: string
+          description: Role ID (`r-` prefix).
+          example: r-admin
+        tenant_id:
+          type: string
+          example: t-default
+        name:
+          type: string
+          example: admin
+        description:
+          type: string
+        created_at:
+          type: string
+          format: date-time
+        updated_at:
+          type: string
+          format: date-time
+
+    AuthRolePermission:
+      type: object
+      required: [role_id, permission_id, scope_type]
+      properties:
+        role_id:
+          type: string
+        permission_id:
+          type: string
+        scope_type:
+          type: string
+          enum: [global, profile, issuer]
+        scope_id:
+          type: string
+          description: NULL/absent for global scope; profile/issuer ID otherwise.
+
     # ─── Approvals ───────────────────────────────────────────────────
     ApprovalRequest:
       type: object

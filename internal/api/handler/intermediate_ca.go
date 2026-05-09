@@ -37,12 +37,15 @@ type IntermediateCAServicer interface {
 // All routes are pinned at /api/v1/issuers/{id}/intermediates and
 // /api/v1/intermediates/{id}.
 //
-// Admin gate: every method calls auth.IsAdmin first and surfaces
-// HTTP 403 for non-admin Bearer callers (M-003 admin-gating pattern,
-// matches AdminCRLCacheHandler / AdminESTHandler / AdminSCEPIntuneHandler).
-// CA hierarchy management is a high-blast-radius surface — adding a
-// child CA mints a new sub-CA cert that becomes a trust root for every
-// downstream leaf. Operators expect this gated behind admin role.
+// Bundle 1 Phase 3.5: the admin gate moved from in-handler auth.IsAdmin
+// checks to router-level auth.RequirePermission middleware (rbacGate
+// wraps the handler with the ca.hierarchy.manage permission gate before
+// the handler body runs — non-admin Bearer callers get 403 from the
+// middleware layer instead of from each handler method). CA hierarchy
+// management is a high-blast-radius surface — adding a child CA mints a
+// new sub-CA cert that becomes a trust root for every downstream leaf.
+// The router gate guarantees the only callers reaching this handler
+// hold the admin role at global scope.
 type IntermediateCAHandler struct {
 	svc IntermediateCAServicer
 }

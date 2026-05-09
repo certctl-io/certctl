@@ -35,6 +35,7 @@ import (
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomainAlias "github.com/certctl-io/certctl/internal/domain/auth"
 	"github.com/certctl-io/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/certctl-io/certctl/internal/repository/postgres"
 	"github.com/certctl-io/certctl/internal/scep/intune"
 	"github.com/certctl-io/certctl/internal/scheduler"
@@ -678,6 +679,12 @@ func main() {
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
+	// Bundle 1 Phase 3 closure (M1): wire the AuthCheckResolver so
+	// /v1/auth/check returns the caller's standing roles + effective
+	// permissions in the same response. The shim is tiny — just a type-
+	// erasure wrap around the repo so the handler layer doesn't have to
+	// import internal/domain/auth or internal/repository/postgres.
+	healthHandler.Resolver = authCheckResolverAdapter{repo: authActorRoleRepo}
 	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
 	// answers GET /api/v1/version with build identity (ldflags Version,
 	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
@@ -1558,7 +1565,33 @@ func main() {
 			}
 		}
 	}
-	authMiddleware := auth.NewAuthWithNamedKeys(namedKeys)
+	// Bundle 1 Phase 3 closure (C2): backfill actor_roles rows for every
+	// CERTCTL_API_KEYS_NAMED entry (and the legacy CERTCTL_AUTH_SECRET
+	// synthesized fallbacks) so RBAC checks have a row to match against.
+	// Without this, named keys would land on a Phase-3 actor context
+	// that authorizes every request through the legacy in-handler
+	// auth.IsAdmin path but fails every Phase-3.5 rbacGate (no
+	// actor_roles row → empty EffectivePermissions → 403). The helper
+	// lives in cmd/server/auth_backfill.go so the role-mapping invariant
+	// is pinned by a focused unit test without dragging in the full
+	// server bootstrap path.
+	backfillNamedKeyActorRoles(ctx, authActorRoleRepo, namedKeys, logger)
+	// Bundle 1 Phase 3 closure (C1): when CERTCTL_AUTH_TYPE=none the
+	// legacy NewAuthWithNamedKeys returns a no-op pass-through, which
+	// would leave ActorIDKey / ActorTypeKey / TenantIDKey unpopulated
+	// in context. Phase 3.5's rbacGate + Phase 4's RBAC handlers all
+	// require an actor in context (or they 401), so demo mode would be
+	// completely broken. NewDemoModeAuth injects the synthetic
+	// `actor-demo-anon` actor seeded by migration 000029, which holds
+	// the admin role at global scope; the demo + 5 examples in
+	// examples/*/docker-compose.yml continue to work end-to-end.
+	var authMiddleware func(http.Handler) http.Handler
+	switch config.AuthType(cfg.Auth.Type) {
+	case config.AuthTypeNone:
+		authMiddleware = auth.NewDemoModeAuth()
+	default:
+		authMiddleware = auth.NewAuthWithNamedKeys(namedKeys)
+	}
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
@@ -2300,4 +2333,37 @@ func (ad authPermissionCheckerAdapter) CheckPermission(
 		authdomainAlias.ScopeType(scopeType),
 		scopeID,
 	)
+}
+
+// authCheckResolverAdapter bridges the postgres ActorRoleRepository
+// (authdomain.ActorTypeValue) to handler.AuthCheckResolver
+// (domain.ActorType). Lives in cmd/server so the handler layer keeps its
+// existing import set; the GUI's /v1/auth/check probe round-trips
+// through this on every page load. Read-only — no caller / no audit row.
+//
+// Bundle 1 Phase 3 closure (M1): the equivalent surface area on
+// /v1/auth/me runs through the service layer's auth.role.list permission
+// gate, which the GUI may not yet hold during initial render. AuthCheck
+// has no permission gate (its only requirement is "the request
+// authenticated"), so the bypass is by design.
+type authCheckResolverAdapter struct {
+	repo *postgres.ActorRoleRepository
+}
+
+func (ad authCheckResolverAdapter) ListRoles(
+	ctx context.Context,
+	actorID string,
+	actorType domain.ActorType,
+	tenantID string,
+) ([]*authdomainAlias.ActorRole, error) {
+	return ad.repo.ListByActor(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
+}
+
+func (ad authCheckResolverAdapter) EffectivePermissions(
+	ctx context.Context,
+	actorID string,
+	actorType domain.ActorType,
+	tenantID string,
+) ([]repository.EffectivePermission, error) {
+	return ad.repo.EffectivePermissions(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
 }
