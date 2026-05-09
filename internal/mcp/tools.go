@@ -40,6 +40,11 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	registerDiscoveryReadTools(s, client)  // Phase E — P1-10..P1-13
 	registerIntermediateCATools(s, client) // Phase F — P1-6..P1-9
 	registerVerificationTools(s, client)   // Phase G — P1-32, P1-34, P1-35
+	// Bundle 1 Phase 11 — RBAC management tools (12 tools).
+	// auth_me + role lifecycle + permission grants + key→role grants.
+	// All route through the existing HTTP client; permission gates fire
+	// server-side. See internal/mcp/tools_auth.go.
+	registerAuthTools(s, client)
 	// Phase G P1-33 (POST /api/v1/agents/{id}/discoveries) is
 	// intentionally NOT exposed via MCP — it is a machine-to-machine
 	// channel for agents to push filesystem-scan reports, not an

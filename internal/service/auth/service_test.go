@@ -411,3 +411,28 @@ func TestCallerFromContext_Phase2ReturnsUnauthenticated(t *testing.T) {
 		t.Errorf("Phase 2 stub should return ErrUnauthenticated; got %v. Phase 3 wires the middleware-context bridge.", err)
 	}
 }
+
+// =============================================================================
+// Bundle 1 Phase 12 — additional negative-test paths from the prompt list:
+//   #9: role delete with actors assigned → ErrAuthRoleInUse (HTTP 409).
+// The Authorizer wrong-scope path is already covered by
+// TestAuthorizer_SpecificScopeMatchesExactID (the wrongID arm asserts
+// false). The ErrInvalidPermission path is covered by
+// TestRoleService_AddPermissionRejectsNonCanonical.
+// =============================================================================
+
+// TestRoleService_DeleteWithActorsAssignedReturns409 pins the
+// repository sentinel pass-through: when the FK ON DELETE RESTRICT
+// trips at the postgres layer, the repo returns
+// repository.ErrAuthRoleInUse; the service surfaces that verbatim so
+// the handler can map to HTTP 409.
+func TestRoleService_DeleteWithActorsAssignedReturns409(t *testing.T) {
+	rs, _, _ := newRoleServiceWithFakes()
+	// Pin the repo to surface ErrAuthRoleInUse on Delete (simulates
+	// the FK guard tripping in postgres).
+	rs.repo.(*fakeRoleRepo).deleteFail = repository.ErrAuthRoleInUse
+	err := rs.Delete(context.Background(), AsSystemCaller(), "r-operator")
+	if !errors.Is(err, repository.ErrAuthRoleInUse) {
+		t.Errorf("Delete err = %v, want repository.ErrAuthRoleInUse (handler maps to 409)", err)
+	}
+}
