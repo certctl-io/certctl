@@ -191,7 +191,7 @@ func (s *IssuerService) Create(ctx context.Context, iss *domain.Issuer, actor st
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_issuer", "issuer", iss.ID, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "create_issuer", domain.EventCategoryConfig, "issuer", iss.ID, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}
@@ -232,7 +232,7 @@ func (s *IssuerService) Update(ctx context.Context, id string, iss *domain.Issue
 	s.rebuildRegistryQuiet(ctx)
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_issuer", "issuer", id, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "update_issuer", domain.EventCategoryConfig, "issuer", id, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}
@@ -252,7 +252,7 @@ func (s *IssuerService) Delete(ctx context.Context, id string, actor string) err
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_issuer", "issuer", id, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "delete_issuer", domain.EventCategoryConfig, "issuer", id, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}

@@ -19,10 +19,10 @@ import (
 // authMeResponse mirrors handler.meResponse without importing the
 // handler package (would couple CLI build to the server tree).
 type authMeResponse struct {
-	ActorID              string `json:"actor_id"`
-	ActorType            string `json:"actor_type"`
-	TenantID             string `json:"tenant_id"`
-	Admin                bool   `json:"admin"`
+	ActorID              string   `json:"actor_id"`
+	ActorType            string   `json:"actor_type"`
+	TenantID             string   `json:"tenant_id"`
+	Admin                bool     `json:"admin"`
 	Roles                []string `json:"roles"`
 	EffectivePermissions []struct {
 		Permission string  `json:"permission"`

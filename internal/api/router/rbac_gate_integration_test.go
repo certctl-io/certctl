@@ -128,6 +128,76 @@ func TestRBACGate_NoActorReturns401(t *testing.T) {
 	}
 }
 
+// TestRBACGate_AuditorRole_403sOnAdminRoutes is the Bundle 1 Phase 8
+// exit-criterion test: an actor holding only the auditor role
+// (audit.read + audit.export) gets 403 on every rbacGate-wrapped admin
+// route. This pins the prompt's "auditor user can list/export audit
+// events but gets 403 on every other endpoint" requirement.
+//
+// We exercise every admin perm name registered in router.go's rbacGate
+// calls (cert.bulk_revoke / crl.admin / scep.admin / est.admin /
+// ca.hierarchy.manage). The checker simulates the auditor's permission
+// matrix — only audit.read + audit.export return true; every admin
+// permission returns false. The handler MUST NOT be reached for any
+// admin perm; the wrapper MUST emit 403.
+func TestRBACGate_AuditorRole_403sOnAdminRoutes(t *testing.T) {
+	auditorPerms := map[string]bool{
+		"audit.read":   true,
+		"audit.export": true,
+	}
+	checker := &fakeChecker{permFn: func(_ context.Context, _, _, _, perm, _ string, _ *string) (bool, error) {
+		return auditorPerms[perm], nil
+	}}
+	for _, adminPerm := range []string{
+		"cert.bulk_revoke",
+		"crl.admin",
+		"scep.admin",
+		"est.admin",
+		"ca.hierarchy.manage",
+	} {
+		t.Run(adminPerm, func(t *testing.T) {
+			rh := &reachedHandler{}
+			gated := rbacGate(checker, adminPerm, rh.ServeHTTP)
+			req := withActor(httptest.NewRequest(http.MethodPost, "/api/v1/", nil), "audrey", auth.ActorTypeAPIKey)
+			rec := httptest.NewRecorder()
+			gated.ServeHTTP(rec, req)
+			if rec.Code != http.StatusForbidden {
+				t.Errorf("auditor on %q route should get 403; got %d", adminPerm, rec.Code)
+			}
+			if rh.called {
+				t.Errorf("handler body must NOT run for auditor on admin route %q", adminPerm)
+			}
+		})
+	}
+}
+
+// TestRBACGate_AuditorRole_PassesAuditReadGate confirms the positive
+// half of the auditor invariant: a route gated on audit.read does
+// reach the handler when the auditor calls it. (Bundle 1 doesn't
+// currently wrap any audit route via rbacGate at the router level —
+// /v1/audit relies on auth.role.list at the service layer instead;
+// this test simulates a future wrap to pin the symmetric path.)
+func TestRBACGate_AuditorRole_PassesAuditReadGate(t *testing.T) {
+	auditorPerms := map[string]bool{
+		"audit.read":   true,
+		"audit.export": true,
+	}
+	checker := &fakeChecker{permFn: func(_ context.Context, _, _, _, perm, _ string, _ *string) (bool, error) {
+		return auditorPerms[perm], nil
+	}}
+	rh := &reachedHandler{}
+	gated := rbacGate(checker, "audit.read", rh.ServeHTTP)
+	req := withActor(httptest.NewRequest(http.MethodGet, "/api/v1/audit", nil), "audrey", auth.ActorTypeAPIKey)
+	rec := httptest.NewRecorder()
+	gated.ServeHTTP(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Errorf("auditor on audit.read route should reach handler 200; got %d", rec.Code)
+	}
+	if !rh.called {
+		t.Errorf("handler body must run for auditor on audit-read gate")
+	}
+}
+
 // TestRBACGate_DemoModeChainReachesHandler is the end-to-end Bundle 1
 // Phase 3 closure (C1) regression: when CERTCTL_AUTH_TYPE=none, the
 // auth.NewDemoModeAuth middleware injects the synthetic actor-demo-anon

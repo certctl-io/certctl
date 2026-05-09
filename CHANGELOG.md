@@ -41,7 +41,7 @@ What else changed in v2.1.0:
   `auth.RequirePermission` middleware (replaces the legacy
   `IsAdmin` boolean check on the 5 admin-only handlers).
 - **Day-0 admin bootstrap.** Set `CERTCTL_BOOTSTRAP_TOKEN` on a fresh
-  deploy and POST a single curl call against `/v1/auth/bootstrap` to
+  deploy and POST a single curl call against `/api/v1/auth/bootstrap` to
   mint the first admin API key; one-shot, never logged, and locks
   closed once any admin actor exists. Migration 000031 ships the
   `api_keys` table that stores the SHA-256 hash; the plaintext is
