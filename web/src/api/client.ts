@@ -223,6 +223,50 @@ export const authBootstrapAvailable = () =>
     headers: { 'Content-Type': 'application/json' },
   }).then(r => r.json() as Promise<BootstrapAvailability>);
 
+// =============================================================================
+// Bundle 1 Phase 10 — approvals queue.
+//
+// Backs ApprovalsPage. Bundle-1's ApprovalKind enum includes
+// `cert_issuance` (existing) and `profile_edit` (Phase 9). The list
+// surface returns both kinds; the page renders them with a kind
+// pill so an approver can tell them apart at a glance.
+// =============================================================================
+
+export type ApprovalKind = 'cert_issuance' | 'profile_edit';
+export type ApprovalState = 'pending' | 'approved' | 'rejected' | 'expired';
+
+export interface ApprovalRequest {
+  id: string;
+  kind: ApprovalKind;
+  certificate_id?: string;
+  job_id?: string;
+  profile_id: string;
+  requested_by: string;
+  state: ApprovalState;
+  decided_by?: string;
+  decided_at?: string;
+  decision_note?: string;
+  metadata?: Record<string, string>;
+  payload?: string; // base64 / raw JSON pass-through
+  created_at: string;
+  updated_at: string;
+}
+
+export const listApprovals = (state: ApprovalState = 'pending') =>
+  fetchJSON<PaginatedResponse<ApprovalRequest>>(`${BASE}/approvals?state=${state}`);
+
+export const approveApproval = (id: string, note: string) =>
+  fetchJSON<unknown>(`${BASE}/approvals/${id}/approve`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+
+export const rejectApproval = (id: string, note: string) =>
+  fetchJSON<unknown>(`${BASE}/approvals/${id}/reject`, {
+    method: 'POST',
+    body: JSON.stringify({ note }),
+  });
+
 // Certificates
 export const getCertificates = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();

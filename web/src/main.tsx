@@ -40,6 +40,7 @@ import RolesPage from './pages/auth/RolesPage';
 import RoleDetailPage from './pages/auth/RoleDetailPage';
 import KeysPage from './pages/auth/KeysPage';
 import AuthSettingsPage from './pages/auth/AuthSettingsPage';
+import ApprovalsPage from './pages/auth/ApprovalsPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -120,6 +121,7 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="auth/roles/:id" element={<RoleDetailPage />} />
                   <Route path="auth/keys" element={<KeysPage />} />
                   <Route path="auth/settings" element={<AuthSettingsPage />} />
+                  <Route path="auth/approvals" element={<ApprovalsPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>
