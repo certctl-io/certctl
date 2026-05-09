@@ -112,6 +112,12 @@ type HandlerRegistry struct {
 	Digest         handler.DigestHandler
 	HealthChecks   *handler.HealthCheckHandler
 	BulkRevocation handler.BulkRevocationHandler
+
+	// Auth (Bundle 1 Phase 4) handles RBAC management endpoints under
+	// /api/v1/auth/{roles,permissions,keys,me}. Wired in cmd/server with
+	// the service-layer Authorizer + RoleService + ActorRoleService +
+	// PermissionService dependencies. Phase 5 ships the CLI mirror.
+	Auth handler.AuthHandler
 	// L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
 	// server-side bulk endpoints replace pre-L-1 client-side N×HTTP
 	// loops in CertificatesPage.tsx. See handler/bulk_renewal.go and
@@ -217,6 +223,23 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	))
 	// Auth check endpoint (uses full middleware chain via r.Register)
 	r.Register("GET /api/v1/auth/check", http.HandlerFunc(reg.Health.AuthCheck))
+
+	// RBAC management routes (Bundle 1 Phase 4). Permission gates are
+	// enforced inside each handler via the service layer; the Phase 3
+	// auth.RequirePermission middleware factory will wrap these in a
+	// Phase 3.5 router-level pass once the legacy admin handlers are
+	// converted in lockstep.
+	r.Register("GET /api/v1/auth/me", http.HandlerFunc(reg.Auth.Me))
+	r.Register("GET /api/v1/auth/permissions", http.HandlerFunc(reg.Auth.ListPermissions))
+	r.Register("GET /api/v1/auth/roles", http.HandlerFunc(reg.Auth.ListRoles))
+	r.Register("POST /api/v1/auth/roles", http.HandlerFunc(reg.Auth.CreateRole))
+	r.Register("GET /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.GetRole))
+	r.Register("PUT /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.UpdateRole))
+	r.Register("DELETE /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.DeleteRole))
+	r.Register("POST /api/v1/auth/roles/{id}/permissions", http.HandlerFunc(reg.Auth.AddRolePermission))
+	r.Register("DELETE /api/v1/auth/roles/{id}/permissions/{perm}", http.HandlerFunc(reg.Auth.RemoveRolePermission))
+	r.Register("POST /api/v1/auth/keys/{id}/roles", http.HandlerFunc(reg.Auth.AssignRoleToKey))
+	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", http.HandlerFunc(reg.Auth.RevokeRoleFromKey))
 
 	// Certificates routes: /api/v1/certificates
 	// Bulk operations MUST register before {id} routes — Go 1.22 ServeMux

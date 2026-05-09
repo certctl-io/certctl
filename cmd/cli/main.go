@@ -111,6 +111,8 @@ Examples:
 		err = handleEST(client, cmdArgs)
 	case "status":
 		err = handleStatus(client)
+	case "auth":
+		err = handleAuth(client, cmdArgs)
 	case "version":
 		fmt.Println("certctl-cli version 0.1.0")
 	default:
@@ -362,5 +364,89 @@ func validateHTTPSScheme(serverURL string) error {
 		return fmt.Errorf("server URL %q is missing a scheme — expected https://", serverURL)
 	default:
 		return fmt.Errorf("server URL %q uses unsupported scheme %q — expected https://", serverURL, u.Scheme)
+	}
+}
+
+// handleAuth dispatches the `certctl-cli auth ...` subcommand tree.
+// Bundle 1 Phase 5: ships read + grant operations against the
+// /api/v1/auth/* surface introduced in Phase 4. Mutations like role
+// create / update / delete can be added in a Phase 5.5 follow-up; this
+// commit ships the operator-facing subset most useful for migration
+// and day-2 scope-down (`auth keys list` + `auth keys assign` +
+// `auth me`).
+func handleAuth(client *cli.Client, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: auth <roles|permissions|keys|me> [...]\n")
+		return nil
+	}
+	subcommand := args[0]
+	subArgs := args[1:]
+
+	switch subcommand {
+	case "roles":
+		return handleAuthRoles(client, subArgs)
+	case "permissions":
+		return handleAuthPermissions(client, subArgs)
+	case "keys":
+		return handleAuthKeys(client, subArgs)
+	case "me":
+		return client.AuthMe()
+	default:
+		fmt.Fprintf(os.Stderr, "unknown auth subcommand: %s\n", subcommand)
+		return nil
+	}
+}
+
+func handleAuthRoles(client *cli.Client, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: auth roles <list|get> [id]\n")
+		return nil
+	}
+	switch args[0] {
+	case "list":
+		return client.AuthListRoles()
+	case "get":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "usage: auth roles get <id>\n")
+			return nil
+		}
+		return client.AuthGetRole(args[1])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown roles subcommand: %s\n", args[0])
+		return nil
+	}
+}
+
+func handleAuthPermissions(client *cli.Client, args []string) error {
+	if len(args) == 0 || args[0] != "list" {
+		fmt.Fprintf(os.Stderr, "usage: auth permissions list\n")
+		return nil
+	}
+	return client.AuthListPermissions()
+}
+
+func handleAuthKeys(client *cli.Client, args []string) error {
+	if len(args) == 0 {
+		fmt.Fprintf(os.Stderr, "usage: auth keys <assign|revoke> [...]\n")
+		return nil
+	}
+	switch args[0] {
+	case "assign":
+		// auth keys assign <key-id> --role <role-id>
+		if len(args) < 4 || args[2] != "--role" {
+			fmt.Fprintf(os.Stderr, "usage: auth keys assign <key-id> --role <role-id>\n")
+			return nil
+		}
+		return client.AuthAssignRoleToKey(args[1], args[3])
+	case "revoke":
+		// auth keys revoke <key-id> --role <role-id>
+		if len(args) < 4 || args[2] != "--role" {
+			fmt.Fprintf(os.Stderr, "usage: auth keys revoke <key-id> --role <role-id>\n")
+			return nil
+		}
+		return client.AuthRevokeRoleFromKey(args[1], args[3])
+	default:
+		fmt.Fprintf(os.Stderr, "unknown keys subcommand: %s\n", args[0])
+		return nil
 	}
 }

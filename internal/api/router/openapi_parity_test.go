@@ -92,6 +92,24 @@ var SpecParityExceptions = map[string]string{
 	"POST /acme/key-change":                         "Phase 4 default-profile shorthand for key rollover.",
 	"POST /acme/revoke-cert":                        "Phase 4 default-profile shorthand for revoke-cert.",
 	"GET /acme/renewal-info/{cert_id}":              "Phase 4 default-profile shorthand for ARI.",
+
+	// Bundle 1 / Phase 4 RBAC API: routes registered in this commit;
+	// OpenAPI schema entries land in a Phase 4 follow-up commit so the
+	// schema review is its own atomic change. Each route's request /
+	// response shape is documented in internal/api/handler/auth.go's
+	// type definitions; the OpenAPI section lift will mirror those.
+	// Routes:
+	"GET /api/v1/auth/me":                                  "Bundle 1 Phase 4 RBAC: current actor's effective permissions; OpenAPI follow-up.",
+	"GET /api/v1/auth/permissions":                         "Bundle 1 Phase 4 RBAC: canonical permission catalogue; OpenAPI follow-up.",
+	"GET /api/v1/auth/roles":                               "Bundle 1 Phase 4 RBAC: list roles; OpenAPI follow-up.",
+	"POST /api/v1/auth/roles":                              "Bundle 1 Phase 4 RBAC: create role; OpenAPI follow-up.",
+	"GET /api/v1/auth/roles/{id}":                          "Bundle 1 Phase 4 RBAC: get role + permissions; OpenAPI follow-up.",
+	"PUT /api/v1/auth/roles/{id}":                          "Bundle 1 Phase 4 RBAC: update role; OpenAPI follow-up.",
+	"DELETE /api/v1/auth/roles/{id}":                       "Bundle 1 Phase 4 RBAC: delete role; OpenAPI follow-up.",
+	"POST /api/v1/auth/roles/{id}/permissions":             "Bundle 1 Phase 4 RBAC: grant permission to role; OpenAPI follow-up.",
+	"DELETE /api/v1/auth/roles/{id}/permissions/{perm}":    "Bundle 1 Phase 4 RBAC: revoke permission from role; OpenAPI follow-up.",
+	"POST /api/v1/auth/keys/{id}/roles":                    "Bundle 1 Phase 4 RBAC: assign role to API key; OpenAPI follow-up.",
+	"DELETE /api/v1/auth/keys/{id}/roles/{role_id}":        "Bundle 1 Phase 4 RBAC: revoke role from API key; OpenAPI follow-up.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

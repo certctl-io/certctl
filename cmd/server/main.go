@@ -33,11 +33,13 @@ import (
 	notifyteams "github.com/certctl-io/certctl/internal/connector/notifier/teams"
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
+	authdomainAlias "github.com/certctl-io/certctl/internal/domain/auth"
 	"github.com/certctl-io/certctl/internal/ratelimit"
 	"github.com/certctl-io/certctl/internal/repository/postgres"
 	"github.com/certctl-io/certctl/internal/scep/intune"
 	"github.com/certctl-io/certctl/internal/scheduler"
 	"github.com/certctl-io/certctl/internal/service"
+	authsvc "github.com/certctl-io/certctl/internal/service/auth"
 	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
@@ -252,6 +254,20 @@ func main() {
 
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
+
+	// RBAC primitive (Bundle 1 Phase 4). Wires the postgres auth repos
+	// + service-layer Authorizer that the AuthHandler / RequirePermission
+	// middleware uses. Migration 000029_rbac.up.sql provides the schema
+	// and seeds the seven default roles + canonical permission catalogue
+	// + actor-demo-anon synthetic admin (CERTCTL_AUTH_TYPE=none demo path).
+	authRoleRepo := postgres.NewRoleRepository(db)
+	authPermRepo := postgres.NewPermissionRepository(db)
+	authActorRoleRepo := postgres.NewActorRoleRepository(db)
+	authAuthorizer := authsvc.NewAuthorizer(authActorRoleRepo)
+	// authCheckerAdapter bridges authsvc.Authorizer (typed-string args)
+	// to the auth.PermissionChecker interface (plain-string args) so
+	// internal/auth doesn't have to import internal/service/auth.
+	authCheckerAdapter := authPermissionCheckerAdapter{a: authAuthorizer}
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
@@ -962,6 +978,22 @@ func main() {
 		// Rank 8 of the 2026-05-03 deep-research deliverable. See
 		// docs/intermediate-ca-hierarchy.md.
 		IntermediateCAs: intermediateCAHandler,
+		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
+		// auth repos + service-layer Authorizer / RoleService /
+		// ActorRoleService / PermissionService into the HTTP surface
+		// under /api/v1/auth/*. The service layer enforces every
+		// permission gate (auth.role.* + auth.role.assign privilege-
+		// escalation guard); the Phase 3 RequirePermission middleware
+		// is currently used by these RBAC routes via the in-handler
+		// callerFromRequest path. Phase 3.5 router-wrapping conversion
+		// of the legacy admin handlers (bulk_revocation, admin_*,
+		// intermediate_ca) is the remaining sweep.
+		Auth: handler.NewAuthHandler(
+			authsvc.NewRoleService(authRoleRepo, authPermRepo, authAuthorizer, auditService),
+			authsvc.NewPermissionService(authPermRepo),
+			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
+			authCheckerAdapter,
+		),
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//
@@ -2231,4 +2263,35 @@ func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, da
 		}
 		http.ServeFile(w, r, webDir+"/index.html")
 	})
+}
+
+// authPermissionCheckerAdapter bridges the typed-string Authorizer
+// signature (authsvc.Authorizer.CheckPermission takes
+// authdomain.ActorTypeValue + authdomain.ScopeType) to the plain-string
+// auth.PermissionChecker interface used by the auth.RequirePermission
+// middleware factory. Lives in cmd/server so internal/auth doesn't have
+// to import internal/service/auth + internal/domain/auth (would create
+// a cycle).
+type authPermissionCheckerAdapter struct {
+	a *authsvc.Authorizer
+}
+
+func (ad authPermissionCheckerAdapter) CheckPermission(
+	ctx context.Context,
+	actorID string,
+	actorType string,
+	tenantID string,
+	permission string,
+	scopeType string,
+	scopeID *string,
+) (bool, error) {
+	return ad.a.CheckPermission(
+		ctx,
+		actorID,
+		authdomainAlias.ActorTypeValue(actorType),
+		tenantID,
+		permission,
+		authdomainAlias.ScopeType(scopeType),
+		scopeID,
+	)
 }
