@@ -170,19 +170,53 @@ func (f *fakeActorRoleRepo) Revoke(_ context.Context, actorID string, actorType 
 	f.grants = out
 	return nil
 }
+func (f *fakeActorRoleRepo) AdminExists(_ context.Context, _ string) (bool, error) {
+	for _, g := range f.grants {
+		if g.RoleID == authdomain.RoleIDAdmin && g.ActorID != authdomain.DemoAnonActorID {
+			return true, nil
+		}
+	}
+	return false, nil
+}
+func (f *fakeActorRoleRepo) ListDistinctActors(_ context.Context, _ string) ([]repository.ActorWithRoles, error) {
+	seen := map[string]*repository.ActorWithRoles{}
+	for _, g := range f.grants {
+		k := string(g.ActorType) + ":" + g.ActorID
+		if seen[k] == nil {
+			seen[k] = &repository.ActorWithRoles{
+				ActorID:   g.ActorID,
+				ActorType: g.ActorType,
+				TenantID:  g.TenantID,
+			}
+		}
+		seen[k].RoleIDs = append(seen[k].RoleIDs, g.RoleID)
+	}
+	out := make([]repository.ActorWithRoles, 0, len(seen))
+	for _, v := range seen {
+		out = append(out, *v)
+	}
+	return out, nil
+}
 func (f *fakeActorRoleRepo) EffectivePermissions(_ context.Context, actorID string, actorType authdomain.ActorTypeValue, _ string) ([]repository.EffectivePermission, error) {
 	return f.perms[actorKey(actorID, actorType)], nil
 }
 
 type fakeAudit struct {
 	calls []struct {
-		Actor, ActorType, Action, ResourceID string
+		Actor, ActorType, Action, Category, ResourceID string
 	}
 }
 
 func (f *fakeAudit) RecordEvent(_ context.Context, actor string, actorType domain.ActorType, action, resourceType, resourceID string, _ map[string]interface{}) error {
-	f.calls = append(f.calls, struct{ Actor, ActorType, Action, ResourceID string }{
-		actor, string(actorType), action, resourceID,
+	f.calls = append(f.calls, struct{ Actor, ActorType, Action, Category, ResourceID string }{
+		actor, string(actorType), action, "", resourceID,
+	})
+	return nil
+}
+
+func (f *fakeAudit) RecordEventWithCategory(_ context.Context, actor string, actorType domain.ActorType, action, eventCategory, resourceType, resourceID string, _ map[string]interface{}) error {
+	f.calls = append(f.calls, struct{ Actor, ActorType, Action, Category, ResourceID string }{
+		actor, string(actorType), action, eventCategory, resourceID,
 	})
 	return nil
 }

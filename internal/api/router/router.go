@@ -78,10 +78,12 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 // The TestRouter_AuthExemptAllowlist regression test below pins the slice
 // to the actual mux.Handle calls — adding an undocumented bypass fails CI.
 var AuthExemptRouterRoutes = []string{
-	"GET /health",           // K8s/Docker liveness probe; cannot carry Bearer
-	"GET /ready",            // K8s/Docker readiness probe; cannot carry Bearer
-	"GET /api/v1/auth/info", // GUI calls before login to detect auth mode
-	"GET /api/v1/version",   // Rollout probes need build identity without key
+	"GET /health",                 // K8s/Docker liveness probe; cannot carry Bearer
+	"GET /ready",                  // K8s/Docker readiness probe; cannot carry Bearer
+	"GET /api/v1/auth/info",       // GUI calls before login to detect auth mode
+	"GET /api/v1/version",         // Rollout probes need build identity without key
+	"GET /api/v1/auth/bootstrap",  // Bundle 1 Phase 6 — GUI / install one-liner probes "is bootstrap available?" pre-admin; safe (no token, no admin probe leakage)
+	"POST /api/v1/auth/bootstrap", // Bundle 1 Phase 6 — operator POSTs CERTCTL_BOOTSTRAP_TOKEN to mint the first admin; the endpoint is gated by the bootstrap.Strategy and the admin-existence probe
 }
 
 // AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
@@ -130,6 +132,13 @@ type HandlerRegistry struct {
 	// the service-layer Authorizer + RoleService + ActorRoleService +
 	// PermissionService dependencies. Phase 5 ships the CLI mirror.
 	Auth handler.AuthHandler
+
+	// Bootstrap (Bundle 1 Phase 6) handles the day-0 admin path under
+	// /api/v1/auth/bootstrap. GET probes availability without revealing
+	// state; POST consumes CERTCTL_BOOTSTRAP_TOKEN once and mints the
+	// first admin API key. Both routes are auth-exempt (the endpoint
+	// itself authenticates via the bootstrap token).
+	Bootstrap handler.BootstrapHandler
 
 	// Checker is the load-bearing auth.PermissionChecker that
 	// auth.RequirePermission middleware uses to gate the legacy admin
@@ -245,6 +254,21 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Auth check endpoint (uses full middleware chain via r.Register)
 	r.Register("GET /api/v1/auth/check", http.HandlerFunc(reg.Health.AuthCheck))
 
+	// Bundle 1 Phase 6 — bootstrap routes. Auth-exempt because the
+	// endpoint itself authenticates via the CERTCTL_BOOTSTRAP_TOKEN
+	// (see internal/auth/bootstrap). Both routes are pinned in the
+	// AuthExemptRouterRoutes allowlist above.
+	r.mux.Handle("GET /api/v1/auth/bootstrap", middleware.Chain(
+		http.HandlerFunc(reg.Bootstrap.Available),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+	r.mux.Handle("POST /api/v1/auth/bootstrap", middleware.Chain(
+		http.HandlerFunc(reg.Bootstrap.Mint),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+
 	// RBAC management routes (Bundle 1 Phase 4). Permission gates are
 	// enforced inside each handler via the service layer; the Phase 3
 	// auth.RequirePermission middleware factory will wrap these in a
@@ -259,6 +283,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("DELETE /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.DeleteRole))
 	r.Register("POST /api/v1/auth/roles/{id}/permissions", http.HandlerFunc(reg.Auth.AddRolePermission))
 	r.Register("DELETE /api/v1/auth/roles/{id}/permissions/{perm}", http.HandlerFunc(reg.Auth.RemoveRolePermission))
+	r.Register("GET /api/v1/auth/keys", http.HandlerFunc(reg.Auth.ListKeys))
 	r.Register("POST /api/v1/auth/keys/{id}/roles", http.HandlerFunc(reg.Auth.AssignRoleToKey))
 	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", http.HandlerFunc(reg.Auth.RevokeRoleFromKey))
 

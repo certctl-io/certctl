@@ -137,6 +137,27 @@ func (s *ActorRoleService) EffectivePermissions(ctx context.Context, caller *Cal
 	return s.repo.EffectivePermissions(ctx, actorID, authdomain.ActorTypeValue(actorType), s.tenantOf(caller))
 }
 
+// ListKeys (Bundle 1 Phase 7) returns every actor in the tenant that
+// holds at least one role grant. Permission `auth.role.list` is
+// required (or the caller must be system). The CLI's `auth keys list`
+// + scope-down helper consume this to enumerate the operator-key
+// population without a separate /v1/auth/keys-by-name surface.
+func (s *ActorRoleService) ListKeys(ctx context.Context, caller *Caller) ([]repository.ActorWithRoles, error) {
+	if caller == nil {
+		return nil, ErrUnauthenticated
+	}
+	if !caller.IsSystem {
+		ok, err := s.authorizer.HoldsAnyOf(ctx, caller.ActorID, authdomain.ActorTypeValue(caller.ActorType), s.tenantOf(caller), "auth.role.list")
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, fmt.Errorf("%w: auth.role.list required to list keys", ErrForbidden)
+		}
+	}
+	return s.repo.ListDistinctActors(ctx, s.tenantOf(caller))
+}
+
 func (s *ActorRoleService) tenantOf(caller *Caller) string {
 	if caller != nil && caller.TenantID != "" {
 		return caller.TenantID
@@ -148,5 +169,9 @@ func (s *ActorRoleService) recordAudit(ctx context.Context, caller *Caller, acti
 	if s.audit == nil || caller == nil {
 		return
 	}
-	_ = s.audit.RecordEvent(ctx, caller.ActorID, caller.ActorType, action, resourceType, resourceID, details)
+	// Bundle 1 Phase 8: every actor-role grant/revoke is an
+	// authentication / authorization event. The auditor role queries
+	// /v1/audit?category=auth to surface this slice without
+	// also pulling in cert.* events.
+	_ = s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details)
 }

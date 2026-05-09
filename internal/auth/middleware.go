@@ -2,7 +2,6 @@ package auth
 
 import (
 	"context"
-	"crypto/subtle"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -44,27 +43,23 @@ func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handl
 			return next
 		}
 	}
-
-	// Pre-compute hashes of all valid keys for constant-time comparison.
-	type keyEntry struct {
-		hash  string
-		name  string
-		admin bool
-	}
-	var entries []keyEntry
-	for _, nk := range namedKeys {
-		entries = append(entries, keyEntry{
-			hash:  HashAPIKey(nk.Key),
-			name:  nk.Name,
-			admin: nk.Admin,
-		})
-	}
-
-	// Warn if only one key is configured in production mode
-	if len(entries) == 1 {
+	if len(namedKeys) == 1 {
 		slog.Warn("only one API key configured — consider adding a rotation key for zero-downtime rotation")
 	}
+	return NewAuthWithKeyStore(NewStaticKeyStore(namedKeys))
+}
 
+// NewAuthWithKeyStore is the Bundle-1 Phase-6 entry point. It builds a
+// Bearer-token middleware whose lookup table is supplied by the caller
+// instead of being baked into the closure. Production wiring passes a
+// MutableKeyStore so the bootstrap path can mint new admin keys at
+// runtime; tests pass a StaticKeyStore for the immutable case. A nil
+// store yields the demo-mode pass-through (matches NewAuthWithNamedKeys
+// with an empty slice).
+func NewAuthWithKeyStore(store KeyStore) func(http.Handler) http.Handler {
+	if store == nil {
+		return func(next http.Handler) http.Handler { return next }
+	}
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 			authHeader := r.Header.Get("Authorization")
@@ -74,8 +69,6 @@ func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handl
 				http.Error(w, `{"error":"Authorization header required"}`, http.StatusUnauthorized)
 				return
 			}
-
-			// Extract Bearer token
 			if len(authHeader) < 8 || authHeader[:7] != "Bearer " {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				http.Error(w, `{"error":"Invalid Authorization header format, expected: Bearer <token>"}`, http.StatusUnauthorized)
@@ -83,30 +76,20 @@ func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handl
 			}
 
 			token := authHeader[7:]
-			tokenHash := HashAPIKey(token)
-
-			// Check against all valid keys using constant-time comparison
-			var matched *keyEntry
-			for i := range entries {
-				if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(entries[i].hash)) == 1 {
-					matched = &entries[i]
-					break
-				}
-			}
-
-			if matched == nil {
+			matched, ok := store.LookupByHash(HashAPIKey(token))
+			if !ok {
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				http.Error(w, `{"error":"Invalid API key"}`, http.StatusUnauthorized)
 				return
 			}
 
-			// Store the authenticated identity and admin flag in context.
-			// Bundle 1 Phase 0: legacy UserKey + AdminKey for back-compat.
-			// Bundle 1 Phase 3: new ActorIDKey + ActorTypeKey + TenantIDKey
-			// for RBAC-aware downstream code (RequirePermission, etc.).
-			ctx := context.WithValue(r.Context(), UserKey{}, matched.name)
-			ctx = context.WithValue(ctx, AdminKey{}, matched.admin)
-			ctx = context.WithValue(ctx, ActorIDKey{}, matched.name)
+			// Bundle 1 Phase 0 legacy UserKey/AdminKey + Phase 3 RBAC
+			// ActorIDKey/ActorTypeKey/TenantIDKey are populated on every
+			// authenticated request so downstream RequirePermission +
+			// audit-attribution code see a consistent actor.
+			ctx := context.WithValue(r.Context(), UserKey{}, matched.Name)
+			ctx = context.WithValue(ctx, AdminKey{}, matched.Admin)
+			ctx = context.WithValue(ctx, ActorIDKey{}, matched.Name)
 			ctx = context.WithValue(ctx, ActorTypeKey{}, ActorTypeAPIKey)
 			ctx = context.WithValue(ctx, TenantIDKey{}, DefaultTenantID)
 			next.ServeHTTP(w, r.WithContext(ctx))

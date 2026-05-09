@@ -2,12 +2,59 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
+	"strings"
 
 	"github.com/certctl-io/certctl/internal/auth"
+	"github.com/certctl-io/certctl/internal/config"
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
 )
+
+// assembleNamedAPIKeys translates the operator's CERTCTL_API_KEYS_NAMED
+// env-var (preferred) or CERTCTL_AUTH_SECRET (legacy) into the
+// auth.NamedAPIKey slice the rest of the boot path consumes.
+//
+// Authentication unification (M-002): every authenticated request now
+// carries a named actor in the request context so audit events record
+// the real key identity instead of the hardcoded "api-key-user"
+// string. Named keys come from CERTCTL_API_KEYS_NAMED (preferred). For
+// backward compatibility CERTCTL_AUTH_SECRET is synthesized into
+// legacy-key-N entries with Admin=false.
+func assembleNamedAPIKeys(cfg *config.Config, logger *slog.Logger) []auth.NamedAPIKey {
+	if config.AuthType(cfg.Auth.Type) == config.AuthTypeNone {
+		return nil
+	}
+	var out []auth.NamedAPIKey
+	for _, nk := range cfg.Auth.NamedKeys {
+		out = append(out, auth.NamedAPIKey{
+			Name:  nk.Name,
+			Key:   nk.Key,
+			Admin: nk.Admin,
+		})
+	}
+	if len(out) == 0 && cfg.Auth.Secret != "" {
+		idx := 0
+		for _, p := range strings.Split(cfg.Auth.Secret, ",") {
+			p = strings.TrimSpace(p)
+			if p == "" {
+				continue
+			}
+			out = append(out, auth.NamedAPIKey{
+				Name:  fmt.Sprintf("legacy-key-%d", idx),
+				Key:   p,
+				Admin: false,
+			})
+			idx++
+		}
+		if len(out) > 0 && logger != nil {
+			logger.Warn("CERTCTL_AUTH_SECRET is deprecated — set CERTCTL_API_KEYS_NAMED for named actor attribution and admin gating",
+				"synthesized_keys", len(out))
+		}
+	}
+	return out
+}
 
 // actorRoleGranter is the narrow interface backfillNamedKeyActorRoles
 // needs from the postgres ActorRoleRepository. Pulled out so the unit

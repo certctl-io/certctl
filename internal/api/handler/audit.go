@@ -14,6 +14,12 @@ import (
 type AuditService interface {
 	ListAuditEvents(ctx context.Context, page, perPage int) ([]domain.AuditEvent, int64, error)
 	GetAuditEvent(ctx context.Context, id string) (*domain.AuditEvent, error)
+	// ListAuditEventsByCategory (Bundle 1 Phase 8) returns audit
+	// rows whose event_category column matches eventCategory.
+	// eventCategory is one of "cert_lifecycle", "auth", "config";
+	// empty string returns all categories. Used by the auditor role
+	// (filtered to "auth" via /v1/audit?category=auth).
+	ListAuditEventsByCategory(ctx context.Context, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error)
 }
 
 // AuditHandler handles HTTP requests for audit event operations.
@@ -27,7 +33,12 @@ func NewAuditHandler(svc AuditService) AuditHandler {
 }
 
 // ListAuditEvents lists audit events.
-// GET /api/v1/audit?page=1&per_page=50
+// GET /api/v1/audit?page=1&per_page=50&category=auth
+//
+// Bundle 1 Phase 8 adds the optional `category` query parameter for
+// auditor-role filtering. Allowed values: cert_lifecycle, auth, config.
+// Unknown values surface 400 so misuse is caught loud (instead of
+// silently returning all rows).
 func (h AuditHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
@@ -49,8 +60,29 @@ func (h AuditHandler) ListAuditEvents(w http.ResponseWriter, r *http.Request) {
 			perPage = parsed
 		}
 	}
+	category := query.Get("category")
+	if category != "" {
+		switch category {
+		case domain.EventCategoryCertLifecycle, domain.EventCategoryAuth, domain.EventCategoryConfig:
+			// ok
+		default:
+			ErrorWithRequestID(w, http.StatusBadRequest,
+				"Invalid category — allowed: cert_lifecycle, auth, config",
+				requestID)
+			return
+		}
+	}
 
-	events, total, err := h.svc.ListAuditEvents(r.Context(), page, perPage)
+	var (
+		events []domain.AuditEvent
+		total  int64
+		err    error
+	)
+	if category != "" {
+		events, total, err = h.svc.ListAuditEventsByCategory(r.Context(), category, page, perPage)
+	} else {
+		events, total, err = h.svc.ListAuditEvents(r.Context(), page, perPage)
+	}
 	if err != nil {
 		ErrorWithRequestID(w, http.StatusInternalServerError, "Failed to list audit events", requestID)
 		return

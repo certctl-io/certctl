@@ -191,11 +191,15 @@ func (s *RoleService) requirePermission(ctx context.Context, caller *Caller, per
 
 // recordAudit emits an audit row tied to the caller. Best-effort: audit
 // failures are logged via panic-recover but do not fail the operation.
+//
+// Bundle 1 Phase 8: every role-mutation is an authentication /
+// authorization event. The auditor role queries
+// /v1/audit?category=auth to surface this slice.
 func (s *RoleService) recordAudit(ctx context.Context, caller *Caller, action, resourceType, resourceID string, details map[string]interface{}) {
 	if s.audit == nil || caller == nil {
 		return
 	}
-	_ = s.audit.RecordEvent(ctx, caller.ActorID, caller.ActorType, action, resourceType, resourceID, details)
+	_ = s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details)
 }
 
 // Ensure the compile-time pin: domain.ActorType is convertible to

@@ -427,10 +427,12 @@ func handleAuthPermissions(client *cli.Client, args []string) error {
 
 func handleAuthKeys(client *cli.Client, args []string) error {
 	if len(args) == 0 {
-		fmt.Fprintf(os.Stderr, "usage: auth keys <assign|revoke> [...]\n")
+		fmt.Fprintf(os.Stderr, "usage: auth keys <list|assign|revoke|scope-down> [...]\n")
 		return nil
 	}
 	switch args[0] {
+	case "list":
+		return client.AuthListKeys()
 	case "assign":
 		// auth keys assign <key-id> --role <role-id>
 		if len(args) < 4 || args[2] != "--role" {
@@ -445,8 +447,42 @@ func handleAuthKeys(client *cli.Client, args []string) error {
 			return nil
 		}
 		return client.AuthRevokeRoleFromKey(args[1], args[3])
+	case "scope-down":
+		// Bundle 1 Phase 7 — interactive (default), --non-interactive
+		// <config.json>, or --suggest [--apply].
+		return handleAuthKeysScopeDown(client, args[1:])
 	default:
 		fmt.Fprintf(os.Stderr, "unknown keys subcommand: %s\n", args[0])
+		return nil
+	}
+}
+
+// handleAuthKeysScopeDown dispatches the three scope-down modes:
+//
+//	auth keys scope-down                              → interactive
+//	auth keys scope-down --non-interactive <config>   → JSON-driven
+//	auth keys scope-down --suggest [--apply]          → audit-driven suggestions
+func handleAuthKeysScopeDown(client *cli.Client, args []string) error {
+	if len(args) == 0 {
+		return client.AuthScopeDown()
+	}
+	switch args[0] {
+	case "--non-interactive":
+		if len(args) < 2 {
+			fmt.Fprintf(os.Stderr, "usage: auth keys scope-down --non-interactive <config.json>\n")
+			return nil
+		}
+		return client.AuthScopeDownNonInteractive(args[1])
+	case "--suggest":
+		apply := false
+		for _, a := range args[1:] {
+			if a == "--apply" {
+				apply = true
+			}
+		}
+		return client.AuthScopeDownSuggest(apply)
+	default:
+		fmt.Fprintf(os.Stderr, "unknown scope-down flag: %s\n", args[0])
 		return nil
 	}
 }

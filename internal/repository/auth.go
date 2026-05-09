@@ -101,6 +101,40 @@ type ActorRoleRepository interface {
 	// gated request; implementations should cache or use SQL JOINs
 	// for performance.
 	EffectivePermissions(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, tenantID string) ([]EffectivePermission, error)
+
+	// AdminExists reports whether ANY actor in the tenant currently
+	// holds the r-admin role. Bundle 1 Phase 6's bootstrap probe
+	// uses this to gate the day-0 endpoint: once the answer flips
+	// from false to true the bootstrap path stays closed forever
+	// (the seeded actor-demo-anon admin only exists in demo mode;
+	// in api-key mode the operator either uses bootstrap or
+	// CERTCTL_API_KEYS_NAMED to mint the first admin). The query
+	// excludes the synthetic actor-demo-anon so demo-mode deploys
+	// can still bootstrap a real admin if/when the operator
+	// switches to api-key mode without re-migrating.
+	AdminExists(ctx context.Context, tenantID string) (bool, error)
+
+	// ListDistinctActors returns one row per (actor_id, actor_type)
+	// pair with at least one actor_roles grant in the tenant.
+	// Bundle 1 Phase 7's `auth keys list` + scope-down helper use
+	// this to enumerate the actor population without joining
+	// against the env-var-loaded namedKeys (whose canonical record
+	// is the actor_roles backfill from Phase 1 / C2). The synthetic
+	// actor-demo-anon is included so the GUI can render it as
+	// "system-managed, scope-down hidden"; Phase 7's interactive
+	// flow filters it out of the prompt loop.
+	ListDistinctActors(ctx context.Context, tenantID string) ([]ActorWithRoles, error)
+}
+
+// ActorWithRoles is the (actor, roles) projection returned by
+// ActorRoleRepository.ListDistinctActors. Roles is the slice of role
+// IDs the actor holds; the caller can resolve role names via the
+// RoleRepository or the CLI's already-cached role list.
+type ActorWithRoles struct {
+	ActorID   string
+	ActorType authdomain.ActorTypeValue
+	TenantID  string
+	RoleIDs   []string
 }
 
 // EffectivePermission is the (permission, scope) pair returned by
@@ -111,4 +145,26 @@ type EffectivePermission struct {
 	PermissionName string
 	ScopeType      authdomain.ScopeType
 	ScopeID        *string // NULL = global
+}
+
+// APIKeyRepository wraps the api_keys table. Bundle 1 Phase 6 ships
+// this so the bootstrap endpoint (POST /v1/auth/bootstrap) can mint
+// the first admin API key without needing the operator to roundtrip
+// through CERTCTL_API_KEYS_NAMED. Operator-tier keys live here;
+// agent-tier keys remain on the agents table (`api_key_hash` column).
+type APIKeyRepository interface {
+	// Create stores a new key row. ID + CreatedAt default if zero.
+	// The plaintext key is NOT stored — callers pass only the
+	// SHA-256 hex hash. Returns ErrAuthDuplicateName when the
+	// (name) UNIQUE constraint fires.
+	Create(ctx context.Context, key *authdomain.APIKey) error
+	// GetByName returns a single row by operator-visible name.
+	// Returns ErrAuthNotFound when no row matches.
+	GetByName(ctx context.Context, name string) (*authdomain.APIKey, error)
+	// List returns every key row across the tenant. Bundle 1 ships
+	// single-tenant so tenantID is typically t-default.
+	List(ctx context.Context, tenantID string) ([]*authdomain.APIKey, error)
+	// Delete removes a key row by name. Used by the RBAC API's key
+	// rotation/revocation paths.
+	Delete(ctx context.Context, name string) error
 }

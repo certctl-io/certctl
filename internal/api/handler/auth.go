@@ -58,6 +58,12 @@ type AuthActorRoleService interface {
 	Revoke(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType, roleID string) error
 	ListForActor(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]*authdomain.ActorRole, error)
 	EffectivePermissions(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]repository.EffectivePermission, error)
+	// ListKeys (Bundle 1 Phase 7) returns every actor in the tenant
+	// with at least one role grant. The CLI's `auth keys list` and
+	// scope-down helper consume this. The synthetic actor-demo-anon
+	// row is included; the CLI filters it out of the interactive
+	// prompt loop.
+	ListKeys(ctx context.Context, caller *authsvc.Caller) ([]repository.ActorWithRoles, error)
 }
 
 // NewAuthHandler constructs an AuthHandler with the service-layer
@@ -289,6 +295,39 @@ func (h AuthHandler) ListPermissions(w http.ResponseWriter, r *http.Request) {
 		out = append(out, permToResponse(p))
 	}
 	writeJSON(w, http.StatusOK, map[string]interface{}{"permissions": out})
+}
+
+// ListKeys handles GET /api/v1/auth/keys (Bundle 1 Phase 7).
+// Permission: auth.role.list. Returns every distinct actor in the
+// tenant with at least one role grant — the CLI's `auth keys list`
+// and scope-down flow consume this.
+func (h AuthHandler) ListKeys(w http.ResponseWriter, r *http.Request) {
+	caller, err := callerFromRequest(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	keys, err := h.actors.ListKeys(r.Context(), caller)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	type keyEntry struct {
+		ActorID   string   `json:"actor_id"`
+		ActorType string   `json:"actor_type"`
+		TenantID  string   `json:"tenant_id"`
+		RoleIDs   []string `json:"role_ids"`
+	}
+	out := make([]keyEntry, 0, len(keys))
+	for _, k := range keys {
+		out = append(out, keyEntry{
+			ActorID:   k.ActorID,
+			ActorType: string(k.ActorType),
+			TenantID:  k.TenantID,
+			RoleIDs:   k.RoleIDs,
+		})
+	}
+	writeJSON(w, http.StatusOK, map[string]interface{}{"keys": out})
 }
 
 // AddRolePermission handles POST /api/v1/auth/roles/{id}/permissions.

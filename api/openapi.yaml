@@ -220,6 +220,80 @@ paths:
   # lifecycle, `auth.key.*` for key management. Read endpoints require
   # `auth.role.list`. The /v1/auth/me endpoint has no permission gate
   # (every authenticated caller can read their own permissions).
+  /api/v1/auth/bootstrap:
+    get:
+      tags: [Auth]
+      summary: Probe whether the day-0 bootstrap endpoint is callable
+      description: |
+        Returns `{available: true}` when CERTCTL_BOOTSTRAP_TOKEN is set
+        AND no admin-roled actor exists yet; otherwise `{available: false}`.
+        Auth-exempt because it serves the GUI / install one-liner before
+        the first admin key has been minted. Bundle 1 Phase 6.
+      security: []
+      operationId: getAuthBootstrap
+      responses:
+        "200":
+          description: Bootstrap availability
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [available]
+                properties:
+                  available:
+                    type: boolean
+    post:
+      tags: [Auth]
+      summary: Mint the first admin API key from a one-shot bootstrap token
+      description: |
+        Operator POSTs the CERTCTL_BOOTSTRAP_TOKEN value plus the desired
+        admin-key name. Returns the freshly minted plaintext key value
+        once; the server stores only the SHA-256 hash. Subsequent calls
+        return 410 Gone (the strategy is one-shot AND the admin-existence
+        probe re-closes the door once the new admin lands). Auth-exempt
+        because the endpoint authenticates via the bootstrap token
+        itself. Bundle 1 Phase 6.
+      security: []
+      operationId: postAuthBootstrap
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [token, actor_name]
+              properties:
+                token:
+                  type: string
+                  description: The CERTCTL_BOOTSTRAP_TOKEN value (constant-time compared server-side).
+                actor_name:
+                  type: string
+                  description: 3-64 chars, lowercase alphanumeric + hyphen + underscore.
+                  pattern: "^[a-z0-9][a-z0-9_-]{2,63}$"
+      responses:
+        "201":
+          description: Admin key minted
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [actor_id, api_key_id, key_value, created_at, message]
+                properties:
+                  actor_id: { type: string }
+                  api_key_id: { type: string }
+                  key_value:
+                    type: string
+                    description: The plaintext API key. Capture this — it is shown only once.
+                  created_at: { type: string, format: date-time }
+                  message: { type: string }
+        "400": { description: Invalid actor_name or malformed body }
+        "401": { description: Bootstrap token mismatch }
+        "410":
+          description: |
+            Endpoint disabled. Either CERTCTL_BOOTSTRAP_TOKEN is unset,
+            an admin actor already exists, or the strategy was already
+            consumed by a successful prior call.
+
   /api/v1/auth/me:
     get:
       tags: [Auth]
@@ -461,6 +535,43 @@ paths:
         "401": { description: Unauthorized }
         "403": { description: Forbidden }
         "404": { description: Role or permission grant not found }
+
+  /api/v1/auth/keys:
+    get:
+      tags: [Auth]
+      summary: List actors with role grants in the active tenant
+      description: |
+        Returns every distinct (actor_id, actor_type) pair in the
+        tenant that holds at least one role grant. Bundle 1 Phase 7
+        ships this so the CLI's `auth keys list` and scope-down helper
+        can enumerate the operator-key population without joining
+        against the env-var-loaded namedKeys directly. Permission
+        `auth.role.list`.
+      operationId: listAuthKeys
+      responses:
+        "200":
+          description: Actor list with role assignments
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  keys:
+                    type: array
+                    items:
+                      type: object
+                      required: [actor_id, actor_type, tenant_id, role_ids]
+                      properties:
+                        actor_id: { type: string }
+                        actor_type:
+                          type: string
+                          enum: [User, System, Agent, APIKey, Anonymous]
+                        tenant_id: { type: string }
+                        role_ids:
+                          type: array
+                          items: { type: string }
+        "401": { description: Unauthorized }
+        "403": { description: Forbidden }
 
   /api/v1/auth/keys/{id}/roles:
     post:
@@ -3057,10 +3168,22 @@ paths:
     get:
       tags: [Audit]
       summary: List audit events
+      description: |
+        Bundle 1 Phase 8 adds the optional `category` query parameter
+        for auditor-role filtering. Allowed values: `cert_lifecycle`
+        (cert/agent/deployment events), `auth` (role/key/bootstrap
+        mutations), `config` (issuer/target/settings edits). Omitting
+        the parameter returns every category.
       operationId: listAuditEvents
       parameters:
         - $ref: "#/components/parameters/page"
         - $ref: "#/components/parameters/per_page"
+        - in: query
+          name: category
+          schema:
+            type: string
+            enum: [cert_lifecycle, auth, config]
+          description: Filter to events of this event_category. (Bundle 1 Phase 8)
       responses:
         "200":
           description: Paginated list of audit events
@@ -3075,6 +3198,8 @@ paths:
                         type: array
                         items:
                           $ref: "#/components/schemas/AuditEvent"
+        "400":
+          description: Invalid `category` value
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -5699,6 +5824,13 @@ components:
         timestamp:
           type: string
           format: date-time
+        event_category:
+          type: string
+          enum: [cert_lifecycle, auth, config]
+          description: |
+            Bundle 1 Phase 8: classifies the event for auditor-role
+            filtering. Empty / absent on rows from pre-Phase-8
+            deployments (the migration backfills "cert_lifecycle").
 
     # ─── Notifications ───────────────────────────────────────────────
     NotificationType:

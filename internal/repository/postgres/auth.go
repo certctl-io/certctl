@@ -388,6 +388,61 @@ func (r *ActorRoleRepository) Revoke(ctx context.Context, actorID string, actorT
 	return nil
 }
 
+func (r *ActorRoleRepository) ListDistinctActors(ctx context.Context, tenantID string) ([]repository.ActorWithRoles, error) {
+	if tenantID == "" {
+		tenantID = authdomain.DefaultTenantID
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT actor_id, actor_type,
+		       array_agg(role_id ORDER BY role_id) AS role_ids
+		FROM actor_roles
+		WHERE tenant_id = $1
+		  AND (expires_at IS NULL OR expires_at > NOW())
+		GROUP BY actor_id, actor_type
+		ORDER BY actor_id ASC
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("actorRole.listDistinctActors: %w", err)
+	}
+	defer rows.Close()
+	var out []repository.ActorWithRoles
+	for rows.Next() {
+		var a repository.ActorWithRoles
+		var actorType string
+		// pq.StringArray decodes the postgres array_agg result.
+		var roles pq.StringArray
+		if err := rows.Scan(&a.ActorID, &actorType, &roles); err != nil {
+			return nil, fmt.Errorf("actorRole.listDistinctActors scan: %w", err)
+		}
+		a.ActorType = authdomain.ActorTypeValue(actorType)
+		a.TenantID = tenantID
+		a.RoleIDs = []string(roles)
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+func (r *ActorRoleRepository) AdminExists(ctx context.Context, tenantID string) (bool, error) {
+	if tenantID == "" {
+		tenantID = authdomain.DefaultTenantID
+	}
+	// Exclude the seeded synthetic demo actor so a demo deploy that
+	// later switches to api-key mode can still bootstrap the first
+	// real admin. Matches the carve-out documented on the interface.
+	var count int
+	err := r.db.QueryRowContext(ctx, `
+		SELECT COUNT(*) FROM actor_roles
+		WHERE role_id = $1
+		  AND tenant_id = $2
+		  AND actor_id != $3
+		  AND (expires_at IS NULL OR expires_at > NOW())
+	`, authdomain.RoleIDAdmin, tenantID, authdomain.DemoAnonActorID).Scan(&count)
+	if err != nil {
+		return false, fmt.Errorf("actorRole.adminExists: %w", err)
+	}
+	return count > 0, nil
+}
+
 func (r *ActorRoleRepository) EffectivePermissions(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, tenantID string) ([]repository.EffectivePermission, error) {
 	rows, err := r.db.QueryContext(ctx, `
 		SELECT DISTINCT p.name, rp.scope_type, rp.scope_id
@@ -439,4 +494,116 @@ func scanActorRoles(rows *sql.Rows) ([]*authdomain.ActorRole, error) {
 		out = append(out, &ar)
 	}
 	return out, rows.Err()
+}
+
+// =============================================================================
+// APIKeyRepository (Bundle 1 Phase 6 — bootstrap path)
+// =============================================================================
+
+// APIKeyRepository is the postgres implementation of
+// repository.APIKeyRepository. Stores SHA-256 hashes only; the
+// plaintext key value is never persisted.
+type APIKeyRepository struct {
+	db *sql.DB
+}
+
+// NewAPIKeyRepository constructs an APIKeyRepository.
+func NewAPIKeyRepository(db *sql.DB) *APIKeyRepository {
+	return &APIKeyRepository{db: db}
+}
+
+func (r *APIKeyRepository) Create(ctx context.Context, k *authdomain.APIKey) error {
+	if k.ID == "" {
+		k.ID = "ak-" + uuid.NewString()
+	}
+	if k.TenantID == "" {
+		k.TenantID = authdomain.DefaultTenantID
+	}
+	if k.CreatedAt.IsZero() {
+		k.CreatedAt = time.Now().UTC()
+	}
+	var expires interface{}
+	if k.ExpiresAt != nil {
+		expires = *k.ExpiresAt
+	}
+	_, err := r.db.ExecContext(ctx, `
+		INSERT INTO api_keys (id, name, key_hash, tenant_id, admin, created_by, created_at, expires_at)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+	`, k.ID, k.Name, k.KeyHash, k.TenantID, k.Admin, k.CreatedBy, k.CreatedAt, expires)
+	if err != nil {
+		// Translate UNIQUE-constraint violations to the canonical
+		// auth sentinel so the service layer can return 409.
+		if pqErr, ok := err.(*pq.Error); ok && pqErr.Code == "23505" {
+			return repository.ErrAuthDuplicateName
+		}
+		return fmt.Errorf("apiKey.create: %w", err)
+	}
+	return nil
+}
+
+func (r *APIKeyRepository) GetByName(ctx context.Context, name string) (*authdomain.APIKey, error) {
+	row := r.db.QueryRowContext(ctx, `
+		SELECT id, name, key_hash, tenant_id, admin, created_by, created_at, expires_at, last_used_at
+		FROM api_keys WHERE name = $1
+	`, name)
+	var k authdomain.APIKey
+	var expires, lastUsed sql.NullTime
+	if err := row.Scan(&k.ID, &k.Name, &k.KeyHash, &k.TenantID, &k.Admin, &k.CreatedBy, &k.CreatedAt, &expires, &lastUsed); err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, repository.ErrAuthNotFound
+		}
+		return nil, fmt.Errorf("apiKey.getByName: %w", err)
+	}
+	if expires.Valid {
+		t := expires.Time
+		k.ExpiresAt = &t
+	}
+	if lastUsed.Valid {
+		t := lastUsed.Time
+		k.LastUsedAt = &t
+	}
+	return &k, nil
+}
+
+func (r *APIKeyRepository) List(ctx context.Context, tenantID string) ([]*authdomain.APIKey, error) {
+	if tenantID == "" {
+		tenantID = authdomain.DefaultTenantID
+	}
+	rows, err := r.db.QueryContext(ctx, `
+		SELECT id, name, key_hash, tenant_id, admin, created_by, created_at, expires_at, last_used_at
+		FROM api_keys WHERE tenant_id = $1 ORDER BY created_at DESC
+	`, tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("apiKey.list: %w", err)
+	}
+	defer rows.Close()
+	var out []*authdomain.APIKey
+	for rows.Next() {
+		var k authdomain.APIKey
+		var expires, lastUsed sql.NullTime
+		if err := rows.Scan(&k.ID, &k.Name, &k.KeyHash, &k.TenantID, &k.Admin, &k.CreatedBy, &k.CreatedAt, &expires, &lastUsed); err != nil {
+			return nil, fmt.Errorf("apiKey.list scan: %w", err)
+		}
+		if expires.Valid {
+			t := expires.Time
+			k.ExpiresAt = &t
+		}
+		if lastUsed.Valid {
+			t := lastUsed.Time
+			k.LastUsedAt = &t
+		}
+		out = append(out, &k)
+	}
+	return out, rows.Err()
+}
+
+func (r *APIKeyRepository) Delete(ctx context.Context, name string) error {
+	res, err := r.db.ExecContext(ctx, `DELETE FROM api_keys WHERE name = $1`, name)
+	if err != nil {
+		return fmt.Errorf("apiKey.delete: %w", err)
+	}
+	if n, _ := res.RowsAffected(); n == 0 {
+		return repository.ErrAuthNotFound
+	}
+	return nil
 }

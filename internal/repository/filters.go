@@ -47,10 +47,14 @@ type AuditFilter struct {
 	ActorType    string // "user", "agent", "system"
 	ResourceType string // e.g., "certificate", "policy", "agent"
 	ResourceID   string
-	From         time.Time
-	To           time.Time
-	Page         int
-	PerPage      int
+	// EventCategory (Bundle 1 Phase 8) filters by event_category
+	// column. Allowed values: "cert_lifecycle", "auth", "config".
+	// Empty string disables the filter (all categories returned).
+	EventCategory string
+	From          time.Time
+	To            time.Time
+	Page          int
+	PerPage       int
 }
 
 // NotificationFilter defines filtering criteria for notification queries.

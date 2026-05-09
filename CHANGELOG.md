@@ -1,5 +1,67 @@
 # Changelog
 
+## v2.1.0 — Auth Bundle 1: RBAC primitive ⚠️
+
+> **SECURITY: AUDIT YOUR API KEYS.**
+>
+> Bundle 1 ships role-based authorization. Every existing API key
+> configured via `CERTCTL_API_KEYS_NAMED` (or the legacy
+> `CERTCTL_AUTH_SECRET`) is mapped to the **r-admin role on the first
+> upgrade boot** so existing automation keeps working unchanged. Most
+> keys do NOT need full admin power; downgrade them before tagging
+> the next release.
+>
+> Recommended post-upgrade flow:
+>
+> ```bash
+> # 1. List every key with its current role:
+> certctl-cli auth keys list
+>
+> # 2. Walk an interactive prompt that downgrades each key:
+> certctl-cli auth keys scope-down
+>
+> # 3. Or get a heuristic suggestion based on 30 days of audit history:
+> certctl-cli auth keys scope-down --suggest
+> certctl-cli auth keys scope-down --suggest --apply   # applies the suggestion
+>
+> # 4. Or drive scope-down from a JSON config (Helm post-upgrade hook):
+> certctl-cli auth keys scope-down --non-interactive ./scope-down.json
+> ```
+>
+> The synthetic `actor-demo-anon` actor (used when
+> `CERTCTL_AUTH_TYPE=none` is configured) is system-managed and
+> excluded from the prompt loop.
+
+What else changed in v2.1.0:
+
+- **RBAC primitive shipped.** `tenants`, `roles`, `permissions`,
+  `role_permissions`, `actor_roles` tables (migration 000029); 33-permission
+  canonical catalogue; 7 default roles (`admin`, `operator`, `viewer`,
+  `agent`, `mcp`, `cli`, `auditor`); per-handler permission gates via
+  `auth.RequirePermission` middleware (replaces the legacy
+  `IsAdmin` boolean check on the 5 admin-only handlers).
+- **Day-0 admin bootstrap.** Set `CERTCTL_BOOTSTRAP_TOKEN` on a fresh
+  deploy and POST a single curl call against `/v1/auth/bootstrap` to
+  mint the first admin API key; one-shot, never logged, and locks
+  closed once any admin actor exists. Migration 000031 ships the
+  `api_keys` table that stores the SHA-256 hash; the plaintext is
+  shown in the response body once and never persisted.
+- **Auditor role split.** New `auditor` role holds only `audit.read`
+  + `audit.export`. Compliance reviewers can read the audit trail
+  without holding mutation power. Migration 000032 adds
+  `audit_events.event_category` so auditors can filter to
+  authentication-related events specifically.
+- **`/v1/auth/check` enrichment.** Response now includes the actor's
+  standing roles and effective permissions, so the GUI gates
+  affordances from a single fetch on app boot.
+- **OpenAPI catalogues every new route.** Every Bundle 1 endpoint
+  ships with an `operationId`; the parity test guards against drift.
+- **Bundle 2 (OIDC + sessions) starts after Bundle 1 lands on
+  master.** Roadmap entry remains in `cowork/auth-bundle-2-prompt.md`.
+
+Migration ordering, idempotency, and downgrade are documented in
+`docs/migration/api-keys-to-rbac.md`.
+
 ## v2.0.68 — Image registry path changed ⚠️
 
 > **Image registry path changed.** Starting this release, container images publish to `ghcr.io/certctl-io/certctl-server` and `ghcr.io/certctl-io/certctl-agent`. Existing pulls from `ghcr.io/shankar0123/certctl-{server,agent}:<tag>` continue to work for previously-published tags (the registry never deletes images), but the `:latest` tag at the old path stops moving forward at this release. Update your `docker pull` paths, `docker-compose.yml` `image:` keys, or Helm `image.repository` values to receive future updates. Old `git clone` / `git push` / install-script / API URLs continue to redirect forever — only the container-registry path changed.

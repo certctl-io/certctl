@@ -49,13 +49,23 @@ var (
 
 // AuditService is the audit-recording dependency the service layer
 // expects. Mirrors the existing service.AuditService interface so
-// Bundle 1 doesn't introduce a parallel concept.
+// Bundle 1 doesn't introduce a parallel concept. Bundle 1 Phase 8
+// adds RecordEventWithCategory; the auth service uses the
+// categorized variant exclusively (event_category=auth) so the
+// auditor role can filter to authentication / authorization events.
 type AuditService interface {
 	RecordEvent(
 		ctx context.Context,
 		actor string,
 		actorType domain.ActorType,
 		action, resourceType, resourceID string,
+		details map[string]interface{},
+	) error
+	RecordEventWithCategory(
+		ctx context.Context,
+		actor string,
+		actorType domain.ActorType,
+		action, eventCategory, resourceType, resourceID string,
 		details map[string]interface{},
 	) error
 }

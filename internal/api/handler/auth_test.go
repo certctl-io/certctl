@@ -142,6 +142,18 @@ func (f *fakeAuthActorSvc) ListForActor(_ context.Context, _ *authsvc.Caller, _ 
 func (f *fakeAuthActorSvc) EffectivePermissions(_ context.Context, _ *authsvc.Caller, _ string, _ domain.ActorType) ([]repository.EffectivePermission, error) {
 	return f.effective, nil
 }
+func (f *fakeAuthActorSvc) ListKeys(_ context.Context, _ *authsvc.Caller) ([]repository.ActorWithRoles, error) {
+	out := make([]repository.ActorWithRoles, 0, len(f.roles))
+	for _, ar := range f.roles {
+		out = append(out, repository.ActorWithRoles{
+			ActorID:   ar.ActorID,
+			ActorType: ar.ActorType,
+			TenantID:  ar.TenantID,
+			RoleIDs:   []string{ar.RoleID},
+		})
+	}
+	return out, nil
+}
 
 type fakePermChecker struct {
 	check func(ctx context.Context, actorID, actorType, tenantID, perm, scopeType string, scopeID *string) (bool, error)

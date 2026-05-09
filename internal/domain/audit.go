@@ -15,7 +15,35 @@ type AuditEvent struct {
 	ResourceID   string          `json:"resource_id"`
 	Details      json.RawMessage `json:"details"`
 	Timestamp    time.Time       `json:"timestamp"`
+
+	// EventCategory (Bundle 1 Phase 8) classifies the event into one
+	// of "cert_lifecycle", "auth", or "config" so the auditor role
+	// can filter to authentication / authorization events without
+	// also seeing every cert.issue. The persistence layer treats an
+	// empty value as "cert_lifecycle" (the migration default + the
+	// DB CHECK constraint).
+	EventCategory string `json:"event_category,omitempty"`
 }
+
+// Audit event-category constants. Bundle 1 Phase 8 ships exactly
+// three; future bundles extend the enum (and the migration's CHECK
+// constraint) without reshaping the column.
+const (
+	// EventCategoryCertLifecycle is the default for cert.* /
+	// agent.* / deployment.* / verification.* events.
+	EventCategoryCertLifecycle = "cert_lifecycle"
+
+	// EventCategoryAuth covers every auth.role.* / auth.key.* /
+	// auth.bootstrap.* event plus the bootstrap.consume action
+	// recorded by Phase 6. Auditors filter to this category to
+	// review who minted / granted / revoked roles.
+	EventCategoryAuth = "auth"
+
+	// EventCategoryConfig covers issuer / target / settings
+	// mutations. Distinct from cert_lifecycle so a regulator can
+	// review configuration changes separately from cert ops.
+	EventCategoryConfig = "config"
+)
 
 // ActorType represents the entity performing an action.
 type ActorType string

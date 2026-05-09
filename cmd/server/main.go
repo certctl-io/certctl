@@ -22,6 +22,7 @@ import (
 	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/api/router"
 	"github.com/certctl-io/certctl/internal/auth"
+	"github.com/certctl-io/certctl/internal/auth/bootstrap"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -264,11 +265,68 @@ func main() {
 	authRoleRepo := postgres.NewRoleRepository(db)
 	authPermRepo := postgres.NewPermissionRepository(db)
 	authActorRoleRepo := postgres.NewActorRoleRepository(db)
+	authAPIKeyRepo := postgres.NewAPIKeyRepository(db)
 	authAuthorizer := authsvc.NewAuthorizer(authActorRoleRepo)
 	// authCheckerAdapter bridges authsvc.Authorizer (typed-string args)
 	// to the auth.PermissionChecker interface (plain-string args) so
 	// internal/auth doesn't have to import internal/service/auth.
 	authCheckerAdapter := authPermissionCheckerAdapter{a: authAuthorizer}
+
+	// Bundle 1 Phase 6 — parse env-var named API keys + assemble the
+	// runtime keystore + wire the bootstrap service. The keystore +
+	// bootstrap handler must exist before the HandlerRegistry is
+	// constructed below; the auth middleware that reads from the same
+	// keystore is wired further down (next to the rest of the
+	// middleware stack) but holds a reference to the same keystore so
+	// runtime additions from bootstrap propagate without restart.
+	//
+	// boot-path operations use context.Background() because the long-
+	// lived request context isn't constructed until later in main();
+	// this matches the convention used by other one-shot setup calls
+	// in this section (issuerService.SeedFromEnvVars, etc.).
+	bootCtx := context.Background()
+	namedKeys := assembleNamedAPIKeys(cfg, logger)
+	backfillNamedKeyActorRoles(bootCtx, authActorRoleRepo, namedKeys, logger)
+	authKeyStore := auth.NewMutableKeyStore(namedKeys)
+	if persistedKeys, err := authAPIKeyRepo.List(bootCtx, authdomainAlias.DefaultTenantID); err == nil {
+		for _, pk := range persistedKeys {
+			authKeyStore.AddHashed(pk.Name, pk.KeyHash, pk.Admin)
+		}
+		if len(persistedKeys) > 0 {
+			logger.Info("loaded persisted api_keys into runtime keystore",
+				"count", len(persistedKeys))
+		}
+	} else {
+		logger.Warn("api_keys boot loader failed; bootstrap-minted keys will not authenticate until next restart that succeeds",
+			"err", err)
+	}
+	bootstrapStrategy := bootstrap.NewEnvTokenStrategy(
+		cfg.Auth.BootstrapToken,
+		func(ctx context.Context) (bool, error) {
+			return authActorRoleRepo.AdminExists(ctx, authdomainAlias.DefaultTenantID)
+		},
+	)
+	bootstrapService := bootstrap.NewService(
+		bootstrapStrategy,
+		authAPIKeyRepo,
+		authActorRoleRepo,
+		auditService,
+		authKeyStore,
+		auth.HashAPIKey,
+	)
+	if cfg.Auth.BootstrapToken != "" {
+		// Honour the prompt's "warn at startup if token set + admin
+		// exists" requirement. The strategy re-probes on every Validate
+		// so this boot-time warning is purely informational.
+		if exists, probeErr := authActorRoleRepo.AdminExists(bootCtx, authdomainAlias.DefaultTenantID); probeErr == nil && exists {
+			logger.Warn("CERTCTL_BOOTSTRAP_TOKEN set but admin actors already exist; bootstrap endpoint will return 410 Gone — unset the env var to silence this warning")
+		} else if probeErr != nil {
+			logger.Warn("CERTCTL_BOOTSTRAP_TOKEN admin-existence probe failed at startup; behaviour will be determined by the live probe at request time", "err", probeErr)
+		} else {
+			logger.Info("bootstrap endpoint enabled — POST /api/v1/auth/bootstrap to mint the first admin key (one-shot)")
+		}
+	}
+	bootstrapHandler := handler.NewBootstrapHandler(bootstrapService)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
@@ -1001,6 +1059,10 @@ func main() {
 			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
 			authCheckerAdapter,
 		),
+		// Bundle 1 Phase 6 — bootstrap day-0 admin endpoint. The
+		// service is wired above; handler is auth-exempt at the
+		// router (gated by the bootstrap.Strategy itself).
+		Bootstrap: bootstrapHandler,
 		// Checker is the load-bearing auth.PermissionChecker that
 		// auth.RequirePermission middleware uses to gate the legacy admin
 		// handlers (Bundle 1 Phase 3.5: bulk_revocation, admin_crl_cache,
@@ -1523,75 +1585,19 @@ func main() {
 
 	// Build middleware stack.
 	//
-	// Authentication unification (M-002): every authenticated request now
-	// carries a named actor in the request context so audit events record
-	// the real key identity instead of the hardcoded "api-key-user" string.
-	// Named keys come from CERTCTL_API_KEYS_NAMED (preferred). For backward
-	// compatibility CERTCTL_AUTH_SECRET is synthesized into legacy-key-N
-	// entries with Admin=false.
-	var namedKeys []auth.NamedAPIKey
-	if config.AuthType(cfg.Auth.Type) != config.AuthTypeNone {
-		// Translate typed config.NamedAPIKey -> auth.NamedAPIKey. The
-		// two structs are field-compatible but live in different packages to
-		// preserve the config→middleware dependency direction.
-		for _, nk := range cfg.Auth.NamedKeys {
-			namedKeys = append(namedKeys, auth.NamedAPIKey{
-				Name:  nk.Name,
-				Key:   nk.Key,
-				Admin: nk.Admin,
-			})
-		}
-		// Back-compat: if no named keys but legacy Secret is configured,
-		// synthesize named entries so the audit trail still attributes the
-		// action (instead of falling back to "api-key-user" / "anonymous").
-		if len(namedKeys) == 0 && cfg.Auth.Secret != "" {
-			parts := strings.Split(cfg.Auth.Secret, ",")
-			idx := 0
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p == "" {
-					continue
-				}
-				namedKeys = append(namedKeys, auth.NamedAPIKey{
-					Name:  fmt.Sprintf("legacy-key-%d", idx),
-					Key:   p,
-					Admin: false,
-				})
-				idx++
-			}
-			if len(namedKeys) > 0 {
-				logger.Warn("CERTCTL_AUTH_SECRET is deprecated — set CERTCTL_API_KEYS_NAMED for named actor attribution and admin gating",
-					"synthesized_keys", len(namedKeys))
-			}
-		}
-	}
-	// Bundle 1 Phase 3 closure (C2): backfill actor_roles rows for every
-	// CERTCTL_API_KEYS_NAMED entry (and the legacy CERTCTL_AUTH_SECRET
-	// synthesized fallbacks) so RBAC checks have a row to match against.
-	// Without this, named keys would land on a Phase-3 actor context
-	// that authorizes every request through the legacy in-handler
-	// auth.IsAdmin path but fails every Phase-3.5 rbacGate (no
-	// actor_roles row → empty EffectivePermissions → 403). The helper
-	// lives in cmd/server/auth_backfill.go so the role-mapping invariant
-	// is pinned by a focused unit test without dragging in the full
-	// server bootstrap path.
-	backfillNamedKeyActorRoles(ctx, authActorRoleRepo, namedKeys, logger)
-	// Bundle 1 Phase 3 closure (C1): when CERTCTL_AUTH_TYPE=none the
-	// legacy NewAuthWithNamedKeys returns a no-op pass-through, which
-	// would leave ActorIDKey / ActorTypeKey / TenantIDKey unpopulated
-	// in context. Phase 3.5's rbacGate + Phase 4's RBAC handlers all
-	// require an actor in context (or they 401), so demo mode would be
-	// completely broken. NewDemoModeAuth injects the synthetic
-	// `actor-demo-anon` actor seeded by migration 000029, which holds
-	// the admin role at global scope; the demo + 5 examples in
-	// examples/*/docker-compose.yml continue to work end-to-end.
+	// Bundle 1 Phase 6: namedKeys + authKeyStore + bootstrap service
+	// are now constructed earlier (right after the auth repos) so the
+	// HandlerRegistry can wire the bootstrap handler. The auth
+	// middleware below reads from the same authKeyStore reference, so
+	// runtime additions from bootstrap propagate without restart.
 	var authMiddleware func(http.Handler) http.Handler
 	switch config.AuthType(cfg.Auth.Type) {
 	case config.AuthTypeNone:
 		authMiddleware = auth.NewDemoModeAuth()
 	default:
-		authMiddleware = auth.NewAuthWithNamedKeys(namedKeys)
+		authMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
 	}
+	_ = bootstrapHandler // referenced by HandlerRegistry above
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
