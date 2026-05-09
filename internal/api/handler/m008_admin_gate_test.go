@@ -34,13 +34,15 @@ import (
 // Keys are the handler filenames; values are short descriptions of why
 // the gate exists. health.go is an INFORMATIONAL caller of IsAdmin (it
 // surfaces the flag to the GUI but does not gate) — explicitly excluded.
-var AdminGatedHandlers = map[string]string{
-	"bulk_revocation.go":   "M-003: bulk revocation is fleet-scale destructive — admin-only",
-	"admin_crl_cache.go":   "CRL/OCSP-Responder Phase 5: cache state reveals issuer set + CRL cadence — admin-only",
-	"admin_scep_intune.go": "SCEP RFC 8894 + Intune master bundle Phase 9.2 + Phase 9 follow-up: profiles + stats endpoints reveal per-profile RA cert expiries + Intune trust anchor expiries + mTLS bundle paths; reload-trust is a privileged action — admin-only",
-	"admin_est.go":         "EST RFC 7030 hardening master bundle Phase 7.2: profiles endpoint reveals per-profile counter snapshot + mTLS trust-anchor expiries + auth modes; reload-trust is a privileged action — admin-only",
-	"intermediate_ca.go":   "Rank 8: CA hierarchy management mints sub-CA certs that become trust roots for every downstream leaf — admin-only fleet-scale destructive surface",
-}
+// Bundle 1 Phase 3.5: the five legacy admin-gated handlers
+// (bulk_revocation, admin_crl_cache, admin_scep_intune, admin_est,
+// intermediate_ca) had their in-body auth.IsAdmin checks removed and
+// the gate moved to router.go via auth.RequirePermission middleware.
+// AdminGatedHandlers is now empty; the only legitimate auth.IsAdmin
+// call site in this package is health.go (informational, surfaces the
+// admin flag to the GUI but doesn't gate). New routes should not add
+// in-handler auth.IsAdmin checks; gate at the router level instead.
+var AdminGatedHandlers = map[string]string{}
 
 // InformationalIsAdminCallers is the documented allowlist of files that
 // call auth.IsAdmin without using the result to gate access. The
@@ -68,11 +70,9 @@ func TestM008_AdminGatedHandlers_PinExpectedSet(t *testing.T) {
 				"  actual:   %v\n"+
 				"  expected: %v\n"+
 				"\n"+
-				"If you added a new admin gate, append it to AdminGatedHandlers AND\n"+
-				"add the 3-test triplet (_NonAdmin_Returns403 / _AdminExplicitFalse_Returns403 /\n"+
-				"_AdminPermitted_ForwardsActor) — see bulk_revocation_handler_test.go for\n"+
-				"the template.\n"+
-				"\n"+
+				"Bundle 1 Phase 3.5 removed in-handler auth.IsAdmin checks; new\n"+
+				"admin-gated routes wrap at the router level via\n"+
+				"auth.RequirePermission middleware (see router.go::rbacGate).\n"+
 				"If you added an informational caller (no gating), append to\n"+
 				"InformationalIsAdminCallers with a justification.",
 			actual, expected)

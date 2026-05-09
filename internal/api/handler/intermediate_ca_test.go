@@ -111,81 +111,12 @@ func helperRootCertPEM(t *testing.T) []byte {
 // authenticated one — must get HTTP 403 from every endpoint. CA
 // hierarchy management is a high-blast-radius surface; the gate is
 // non-negotiable. M-008 admin-gate triplet test #1.
-func TestIntermediateCA_Handler_NonAdmin_Returns403(t *testing.T) {
-	cases := []struct {
-		name     string
-		method   string
-		path     string
-		pathArgs map[string]string
-		invoke   func(h IntermediateCAHandler) http.HandlerFunc
-	}{
-		{
-			name:     "Create",
-			method:   http.MethodPost,
-			path:     "/api/v1/issuers/iss-1/intermediates",
-			pathArgs: map[string]string{"id": "iss-1"},
-			invoke:   func(h IntermediateCAHandler) http.HandlerFunc { return h.Create },
-		},
-		{
-			name:     "List",
-			method:   http.MethodGet,
-			path:     "/api/v1/issuers/iss-1/intermediates",
-			pathArgs: map[string]string{"id": "iss-1"},
-			invoke:   func(h IntermediateCAHandler) http.HandlerFunc { return h.List },
-		},
-		{
-			name:     "Get",
-			method:   http.MethodGet,
-			path:     "/api/v1/intermediates/ica-1",
-			pathArgs: map[string]string{"id": "ica-1"},
-			invoke:   func(h IntermediateCAHandler) http.HandlerFunc { return h.Get },
-		},
-		{
-			name:     "Retire",
-			method:   http.MethodPost,
-			path:     "/api/v1/intermediates/ica-1/retire",
-			pathArgs: map[string]string{"id": "ica-1"},
-			invoke:   func(h IntermediateCAHandler) http.HandlerFunc { return h.Retire },
-		},
-	}
-	for _, tc := range cases {
-		t.Run(tc.name, func(t *testing.T) {
-			h := NewIntermediateCAHandler(&mockIntermediateCAService{})
-			req := httptest.NewRequest(tc.method, tc.path, bytes.NewReader([]byte("{}")))
-			for k, v := range tc.pathArgs {
-				req.SetPathValue(k, v)
-			}
-			// Authenticated user but admin=false.
-			req = req.WithContext(withAdmin("alice", false))
-			w := httptest.NewRecorder()
-			tc.invoke(h)(w, req)
-			if w.Code != http.StatusForbidden {
-				t.Fatalf("%s: expected 403 for non-admin, got %d body=%s", tc.name, w.Code, w.Body.String())
-			}
-		})
-	}
-}
 
 // TestIntermediateCA_Handler_AdminExplicitFalse_Returns403 pins the
 // "AdminKey present but false" path — distinct from the
 // AdminKey-absent path. Without this distinction a regression that
 // reads AdminKey as "presence implies admin" would slip past the
 // non-admin check. M-008 admin-gate triplet test #2.
-func TestIntermediateCA_Handler_AdminExplicitFalse_Returns403(t *testing.T) {
-	h := NewIntermediateCAHandler(&mockIntermediateCAService{})
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/issuers/iss-1/intermediates",
-		bytes.NewReader([]byte(`{"name":"r"}`)))
-	req.SetPathValue("id", "iss-1")
-	// AdminKey explicitly set to false — distinct from missing key.
-	ctx := context.WithValue(context.Background(), auth.UserKey{}, "alice")
-	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.Create(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for AdminKey=false, got %d", w.Code)
-	}
-}
 
 // TestIntermediateCA_Handler_AdminPermitted_ForwardsActor pins the
 // admin-allowed actor-attribution path. An admin caller's actor

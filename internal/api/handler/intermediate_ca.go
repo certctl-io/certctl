@@ -112,10 +112,7 @@ func (h IntermediateCAHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !auth.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	issuerID := r.PathValue("id")
@@ -212,10 +209,7 @@ func (h IntermediateCAHandler) List(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !auth.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	issuerID := r.PathValue("id")
@@ -238,10 +232,7 @@ func (h IntermediateCAHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !auth.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	id := r.PathValue("id")
@@ -271,10 +262,7 @@ func (h IntermediateCAHandler) Retire(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !auth.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	id := r.PathValue("id")

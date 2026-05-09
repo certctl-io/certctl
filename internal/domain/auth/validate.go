@@ -93,6 +93,16 @@ var CanonicalPermissions = []string{
 
 	// Bootstrap path (Phase 6)
 	"auth.bootstrap.use",
+
+	// Bundle 1 Phase 3.5: admin-only fine-grained perms for the
+	// legacy admin handlers, seeded by migration 000030. Wrapped at
+	// the router level via auth.RequirePermission middleware; the
+	// in-handler auth.IsAdmin checks have been removed in Phase 3.5.
+	"cert.bulk_revoke",
+	"crl.admin",
+	"scep.admin",
+	"est.admin",
+	"ca.hierarchy.manage",
 }
 
 // DefaultRoles describes the seven default roles seeded by the

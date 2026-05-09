@@ -5,7 +5,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 )
@@ -74,10 +73,7 @@ func (h AdminCRLCacheHandler) ListCache(w http.ResponseWriter, r *http.Request) 
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !auth.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	rows, err := h.svc.CacheRows(r.Context())
 	if err != nil {

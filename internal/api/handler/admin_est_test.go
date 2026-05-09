@@ -46,38 +46,6 @@ func (f *fakeAdminESTService) ReloadTrust(_ context.Context, pathID string) erro
 
 // ----- M-008 admin-gate triplet for Profiles (GET) -----
 
-func TestAdminEST_Profiles_NonAdmin_Returns403(t *testing.T) {
-	svc := &fakeAdminESTService{}
-	h := NewAdminESTHandler(svc)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/est/profiles", nil)
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-	h.Profiles(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("non-admin status = %d, want 403", w.Code)
-	}
-	if svc.profilesCalled {
-		t.Errorf("service was invoked despite non-admin caller — gate failed open")
-	}
-}
-
-func TestAdminEST_Profiles_AdminExplicitFalse_Returns403(t *testing.T) {
-	svc := &fakeAdminESTService{}
-	h := NewAdminESTHandler(svc)
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/est/profiles", nil)
-	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.Profiles(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("admin=false status = %d, want 403", w.Code)
-	}
-	if svc.profilesCalled {
-		t.Errorf("service was invoked despite admin=false — gate failed open")
-	}
-}
-
 func TestAdminEST_Profiles_AdminTrue_Returns200(t *testing.T) {
 	svc := &fakeAdminESTService{
 		rows: []service.ESTStatsSnapshot{
@@ -133,42 +101,6 @@ func TestAdminEST_Profiles_NilRowsSerializedAsEmptyArray(t *testing.T) {
 }
 
 // ----- M-008 admin-gate triplet for ReloadTrust (POST) -----
-
-func TestAdminEST_ReloadTrust_NonAdmin_Returns403(t *testing.T) {
-	svc := &fakeAdminESTService{}
-	h := NewAdminESTHandler(svc)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/est/reload-trust",
-		strings.NewReader(`{"path_id":"corp"}`))
-	req.ContentLength = int64(len(`{"path_id":"corp"}`))
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-	h.ReloadTrust(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("non-admin status = %d, want 403", w.Code)
-	}
-	if svc.reloadCalled {
-		t.Errorf("service was invoked despite non-admin caller — gate failed open")
-	}
-}
-
-func TestAdminEST_ReloadTrust_AdminExplicitFalse_Returns403(t *testing.T) {
-	svc := &fakeAdminESTService{}
-	h := NewAdminESTHandler(svc)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/est/reload-trust",
-		strings.NewReader(`{"path_id":"corp"}`))
-	req.ContentLength = int64(len(`{"path_id":"corp"}`))
-	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, auth.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-	h.ReloadTrust(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("admin=false status = %d, want 403", w.Code)
-	}
-	if svc.reloadCalled {
-		t.Errorf("service was invoked despite admin=false — gate failed open")
-	}
-}
 
 func TestAdminEST_ReloadTrust_HappyPath(t *testing.T) {
 	svc := &fakeAdminESTService{}

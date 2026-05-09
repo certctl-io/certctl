@@ -994,6 +994,12 @@ func main() {
 			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
 			authCheckerAdapter,
 		),
+		// Checker is the load-bearing auth.PermissionChecker that
+		// auth.RequirePermission middleware uses to gate the legacy admin
+		// handlers (Bundle 1 Phase 3.5: bulk_revocation, admin_crl_cache,
+		// admin_scep_intune, admin_est, intermediate_ca). Wraps live in
+		// router.go via rbacGate(reg.Checker, perm, handler).
+		Checker: authCheckerAdapter,
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//
