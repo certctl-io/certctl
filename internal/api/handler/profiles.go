@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"github.com/certctl-io/certctl/internal/repository"
 	"net/http"
 	"strconv"
 	"strings"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/domain"
+	"github.com/certctl-io/certctl/internal/repository"
+	"github.com/certctl-io/certctl/internal/service"
 )
 
 // ProfileService defines the service interface for certificate profile operations.
@@ -164,6 +165,24 @@ func (h ProfileHandler) UpdateProfile(w http.ResponseWriter, r *http.Request) {
 
 	updated, err := h.svc.UpdateProfile(r.Context(), id, profile)
 	if err != nil {
+		// Bundle 1 Phase 9: a profile with RequiresApproval=true (or
+		// an edit that would set it true) routes through the approval
+		// workflow. The service returns ErrProfileEditPendingApproval
+		// wrapped with the new approval ID; surface 202 Accepted +
+		// pending_approval_id so the operator knows to chase a
+		// non-requester admin to approve via /v1/approvals/{id}/approve.
+		if errors.Is(err, service.ErrProfileEditPendingApproval) {
+			approvalID := ""
+			if msg := err.Error(); strings.Contains(msg, "approval=") {
+				approvalID = msg[strings.Index(msg, "approval=")+len("approval="):]
+			}
+			JSON(w, http.StatusAccepted, map[string]interface{}{
+				"status":              "pending_approval",
+				"pending_approval_id": approvalID,
+				"message":             "profile edit requires approval (see /v1/approvals/{id}/approve)",
+			})
+			return
+		}
 		if errors.Is(err, repository.ErrNotFound) {
 			ErrorWithRequestID(w, http.StatusNotFound, "Profile not found", requestID)
 			return

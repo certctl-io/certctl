@@ -35,6 +35,11 @@ import IssuerHierarchyPage from './pages/IssuerHierarchyPage';
 import TargetDetailPage from './pages/TargetDetailPage';
 import SCEPAdminPage from './pages/SCEPAdminPage';
 import ESTAdminPage from './pages/ESTAdminPage';
+// Bundle 1 Phase 10 — RBAC management pages.
+import RolesPage from './pages/auth/RolesPage';
+import RoleDetailPage from './pages/auth/RoleDetailPage';
+import KeysPage from './pages/auth/KeysPage';
+import AuthSettingsPage from './pages/auth/AuthSettingsPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -105,6 +110,16 @@ createRoot(document.getElementById('root')!).render(
                       required" banner for non-admin callers and skips the
                       underlying API calls so the server never sees a 403. */}
                   <Route path="est" element={<ESTAdminPage />} />
+                  {/* Bundle 1 Phase 10 — RBAC management surface.
+                      Every page reads /api/v1/auth/me on mount via the
+                      useAuthMe hook and gates affordances against the
+                      cached effective_permissions slice. Server-side
+                      enforcement is the load-bearing layer; client-side
+                      hide/disable is UX. */}
+                  <Route path="auth/roles" element={<RolesPage />} />
+                  <Route path="auth/roles/:id" element={<RoleDetailPage />} />
+                  <Route path="auth/keys" element={<KeysPage />} />
+                  <Route path="auth/settings" element={<AuthSettingsPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

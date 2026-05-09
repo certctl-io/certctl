@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -559,6 +560,36 @@ func main() {
 	defer issuerRegistry.StopLifecycles()
 	targetService := service.NewTargetService(targetRepo, auditService, agentRepo, encryptionKey, logger)
 	profileService := service.NewProfileService(profileRepo, auditService)
+	// Bundle 1 Phase 9 — approval-bypass closure. Wire the profile
+	// service's gate to the existing ApprovalService so edits to a
+	// RequiresApproval=true profile route through the four-eyes
+	// workflow. The profile-edit-apply callback registered on the
+	// ApprovalService closes the loop: when an approver decides,
+	// the callback deserializes req.Payload and persists the diff.
+	profileService.SetApprovalService(approvalService)
+	approvalService.SetProfileEditApply(func(ctx context.Context, req *domain.ApprovalRequest) error {
+		var pendingProfile domain.CertificateProfile
+		if err := json.Unmarshal(req.Payload, &pendingProfile); err != nil {
+			return fmt.Errorf("decode profile-edit payload: %w", err)
+		}
+		pendingProfile.ID = req.ProfileID
+		if err := profileRepo.Update(ctx, &pendingProfile); err != nil {
+			return fmt.Errorf("apply profile-edit diff: %w", err)
+		}
+		// Audit row category=auth so the auditor surface keeps the
+		// approval-decision history grouped with the request side.
+		if auditService != nil {
+			_ = auditService.RecordEventWithCategory(ctx, "approval-system",
+				domain.ActorTypeSystem, "profile.edit_applied",
+				domain.EventCategoryAuth, "certificate_profile",
+				req.ProfileID,
+				map[string]interface{}{
+					"approval_id":  req.ID,
+					"requested_by": req.RequestedBy,
+				})
+		}
+		return nil
+	})
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
 	agentGroupRepo := postgres.NewAgentGroupRepository(db)

@@ -103,6 +103,126 @@ export const checkAuth = (key: string) =>
     return r.json() as Promise<AuthCheckResponse>;
   });
 
+// =============================================================================
+// Bundle 1 Phase 10 — RBAC management API surface.
+//
+// Backs the Roles / Keys / Auth Settings GUI pages (web/src/pages/auth/*).
+// Every function maps 1:1 to a Phase-4 / Phase-7 server endpoint;
+// permission gates fire server-side, the GUI's permission-aware
+// renders are a UX layer on top.
+// =============================================================================
+
+export interface AuthRole {
+  id: string;
+  tenant_id: string;
+  name: string;
+  description?: string;
+  created_at?: string;
+  updated_at?: string;
+}
+
+export interface AuthRolePermission {
+  role_id: string;
+  permission_id: string;
+  scope_type: 'global' | 'profile' | 'issuer';
+  scope_id?: string;
+}
+
+export interface AuthPermission {
+  id: string;
+  name: string;
+  namespace: string;
+}
+
+export interface AuthEffectivePermission {
+  permission: string;
+  scope_type: 'global' | 'profile' | 'issuer';
+  scope_id?: string;
+}
+
+export interface AuthMeResponse {
+  actor_id: string;
+  actor_type: string;
+  tenant_id: string;
+  admin: boolean;
+  roles: string[];
+  effective_permissions: AuthEffectivePermission[];
+}
+
+export interface AuthKeyEntry {
+  actor_id: string;
+  actor_type: string;
+  tenant_id: string;
+  role_ids: string[];
+}
+
+export const authMe = () => fetchJSON<AuthMeResponse>(`${BASE}/auth/me`);
+
+export const authListRoles = () =>
+  fetchJSON<{ roles: AuthRole[] }>(`${BASE}/auth/roles`).then(r => r.roles);
+
+export const authGetRole = (id: string) =>
+  fetchJSON<{ role: AuthRole; permissions: AuthRolePermission[] }>(
+    `${BASE}/auth/roles/${id}`,
+  );
+
+export const authCreateRole = (body: { name: string; description?: string }) =>
+  fetchJSON<AuthRole>(`${BASE}/auth/roles`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const authUpdateRole = (id: string, body: { name: string; description?: string }) =>
+  fetchJSON<unknown>(`${BASE}/auth/roles/${id}`, {
+    method: 'PUT',
+    body: JSON.stringify(body),
+  });
+
+export const authDeleteRole = (id: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/roles/${id}`, { method: 'DELETE' });
+
+export const authListPermissions = () =>
+  fetchJSON<{ permissions: AuthPermission[] }>(`${BASE}/auth/permissions`).then(
+    r => r.permissions,
+  );
+
+export const authAddRolePermission = (
+  roleId: string,
+  body: { permission: string; scope_type?: string; scope_id?: string },
+) =>
+  fetchJSON<unknown>(`${BASE}/auth/roles/${roleId}/permissions`, {
+    method: 'POST',
+    body: JSON.stringify(body),
+  });
+
+export const authRemoveRolePermission = (roleId: string, perm: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/roles/${roleId}/permissions/${perm}`, {
+    method: 'DELETE',
+  });
+
+export const authListKeys = () =>
+  fetchJSON<{ keys: AuthKeyEntry[] }>(`${BASE}/auth/keys`).then(r => r.keys);
+
+export const authAssignKeyRole = (keyId: string, roleId: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles`, {
+    method: 'POST',
+    body: JSON.stringify({ role_id: roleId }),
+  });
+
+export const authRevokeKeyRole = (keyId: string, roleId: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles/${roleId}`, {
+    method: 'DELETE',
+  });
+
+export interface BootstrapAvailability {
+  available: boolean;
+}
+
+export const authBootstrapAvailable = () =>
+  fetch(`${BASE}/auth/bootstrap`, {
+    headers: { 'Content-Type': 'application/json' },
+  }).then(r => r.json() as Promise<BootstrapAvailability>);
+
 // Certificates
 export const getCertificates = (params: Record<string, string> = {}) => {
   const qs = new URLSearchParams({ page: '1', per_page: '50', ...params }).toString();

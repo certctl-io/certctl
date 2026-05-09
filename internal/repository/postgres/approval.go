@@ -60,19 +60,41 @@ func (r *ApprovalRepository) Create(ctx context.Context, req *domain.ApprovalReq
 		metadataJSON = []byte("{}")
 	}
 
+	// Bundle 1 Phase 9: empty Kind defaults to cert_issuance to
+	// preserve back-compat for every Phase-7-2026-05-03 caller.
+	if req.Kind == "" {
+		req.Kind = domain.ApprovalKindCertIssuance
+	}
+	if !domain.IsValidApprovalKind(req.Kind) {
+		return fmt.Errorf("invalid approval kind %q", req.Kind)
+	}
+
+	// nullable cert_id / job_id for profile_edit rows.
+	var certID, jobID interface{}
+	if req.CertificateID != "" {
+		certID = req.CertificateID
+	}
+	if req.JobID != "" {
+		jobID = req.JobID
+	}
+	var payload interface{}
+	if len(req.Payload) > 0 {
+		payload = req.Payload
+	}
+
 	const q = `
 		INSERT INTO issuance_approval_requests
 			(id, certificate_id, job_id, profile_id, requested_by,
 			 state, decided_by, decided_at, decision_note, metadata,
-			 created_at, updated_at)
+			 created_at, updated_at, approval_kind, payload)
 		VALUES
-			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12)
+			($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
 	`
 
 	_, err = r.db.ExecContext(ctx, q,
-		req.ID, req.CertificateID, req.JobID, req.ProfileID, req.RequestedBy,
+		req.ID, certID, jobID, req.ProfileID, req.RequestedBy,
 		string(req.State), req.DecidedBy, req.DecidedAt, req.DecisionNote, metadataJSON,
-		req.CreatedAt, req.UpdatedAt,
+		req.CreatedAt, req.UpdatedAt, string(req.Kind), payload,
 	)
 	if err != nil {
 		var pqErr *pq.Error
@@ -89,7 +111,7 @@ func (r *ApprovalRepository) Get(ctx context.Context, id string) (*domain.Approv
 	const q = `
 		SELECT id, certificate_id, job_id, profile_id, requested_by,
 		       state, decided_by, decided_at, decision_note, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, approval_kind, payload
 		FROM   issuance_approval_requests
 		WHERE  id = $1
 	`
@@ -103,7 +125,7 @@ func (r *ApprovalRepository) GetByJobID(ctx context.Context, jobID string) (*dom
 	const q = `
 		SELECT id, certificate_id, job_id, profile_id, requested_by,
 		       state, decided_by, decided_at, decision_note, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, approval_kind, payload
 		FROM   issuance_approval_requests
 		WHERE  job_id = $1
 		ORDER  BY created_at DESC
@@ -131,7 +153,7 @@ func (r *ApprovalRepository) List(ctx context.Context, filter *repository.Approv
 	q := `
 		SELECT id, certificate_id, job_id, profile_id, requested_by,
 		       state, decided_by, decided_at, decision_note, metadata,
-		       created_at, updated_at
+		       created_at, updated_at, approval_kind, payload
 		FROM   issuance_approval_requests
 		WHERE  1 = 1
 	`
@@ -269,16 +291,20 @@ type rowScanner interface {
 func scanApprovalRow(row rowScanner) (*domain.ApprovalRequest, error) {
 	var (
 		req          domain.ApprovalRequest
+		certID       sql.NullString
+		jobID        sql.NullString
 		stateStr     string
 		decidedBy    sql.NullString
 		decidedAt    sql.NullTime
 		decisionNote sql.NullString
 		metadataJSON []byte
+		kindStr      string
+		payload      []byte
 	)
 	err := row.Scan(
-		&req.ID, &req.CertificateID, &req.JobID, &req.ProfileID, &req.RequestedBy,
+		&req.ID, &certID, &jobID, &req.ProfileID, &req.RequestedBy,
 		&stateStr, &decidedBy, &decidedAt, &decisionNote, &metadataJSON,
-		&req.CreatedAt, &req.UpdatedAt,
+		&req.CreatedAt, &req.UpdatedAt, &kindStr, &payload,
 	)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -288,6 +314,16 @@ func scanApprovalRow(row rowScanner) (*domain.ApprovalRequest, error) {
 	}
 
 	req.State = domain.ApprovalState(stateStr)
+	req.Kind = domain.ApprovalKind(kindStr)
+	if certID.Valid {
+		req.CertificateID = certID.String
+	}
+	if jobID.Valid {
+		req.JobID = jobID.String
+	}
+	if len(payload) > 0 {
+		req.Payload = payload
+	}
 	if decidedBy.Valid {
 		s := decidedBy.String
 		req.DecidedBy = &s

@@ -102,3 +102,28 @@ describe('AuditPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     });
   });
 });
+
+// =============================================================================
+// Bundle 1 Phase 10 — category filter render test. Pins that the
+// new <select data-testid="audit-category-filter"> renders with the
+// canonical 4 enum values and surfaces the chosen filter to the
+// API call params.
+// =============================================================================
+
+describe('AuditPage Phase-10 category filter', () => {
+  it('renders the category-filter select with the 4 documented options', async () => {
+    vi.mocked(client.getAuditEvents).mockResolvedValue({
+      data: [],
+      total: 0,
+      page: 1,
+      per_page: 50,
+    } as never);
+
+    renderWithQuery(<AuditPage />);
+    await waitFor(() => screen.getByTestId('audit-category-filter'));
+
+    const select = screen.getByTestId('audit-category-filter') as HTMLSelectElement;
+    const optValues = Array.from(select.options).map(o => o.value);
+    expect(optValues).toEqual(['', 'cert_lifecycle', 'auth', 'config']);
+  });
+});
