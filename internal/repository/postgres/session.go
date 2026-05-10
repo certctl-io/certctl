@@ -129,6 +129,21 @@ func (r *SessionRepository) UpdateLastSeen(ctx context.Context, id string) error
 	return nil
 }
 
+// UpdateCSRFTokenHash replaces csrf_token_hash on the named session.
+// Phase 4's RotateCSRFToken consumes this on login completion, logout,
+// and any actor-role mutation against this actor.
+func (r *SessionRepository) UpdateCSRFTokenHash(ctx context.Context, id, csrfTokenHash string) error {
+	res, err := r.db.ExecContext(ctx, `UPDATE sessions SET csrf_token_hash = $2 WHERE id = $1`, id, csrfTokenHash)
+	if err != nil {
+		return fmt.Errorf("sessions update_csrf_token_hash: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return repository.ErrSessionNotFound
+	}
+	return nil
+}
+
 // Revoke sets revoked_at = NOW() for the named session. Idempotent:
 // re-revoking an already-revoked session is a no-op (returns nil).
 func (r *SessionRepository) Revoke(ctx context.Context, id string) error {

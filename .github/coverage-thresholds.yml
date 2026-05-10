@@ -148,3 +148,38 @@ internal/auth/oidc/domain:
     cover all canonical IdP shapes (Okta / Azure AD / Google
     Workspace / Keycloak / Authentik / Auth0). Floor at 90 to
     catch any future field that ships without a validator.
+
+internal/auth/session:
+  floor: 90
+  why: |
+    Bundle 2 Phase 4 — session lifecycle service. Phase 4 spec
+    pins the floor at 90 because every fail-closed branch carries
+    a security invariant: HMAC-SHA256 cookie signing with a
+    LENGTH-PREFIXED canonical input (defeats the
+    `<a, bc>`-vs-`<ab, c>` concatenation collision attack on the
+    bare-concat form), v1. version-prefix lock, idle expiry,
+    absolute expiry, revocation, retired-but-in-retention key
+    success path, retired-past-retention failure path, CSRF
+    constant-time compare against the SHA-256-hashed copy on the
+    session row, optional IP/UA-bind defense-in-depth gates,
+    fail-fatal initial-key bootstrap. A regression in any one of
+    these branches is a security incident; the floor catches it
+    before the commit lands. The 15-case negative-test matrix in
+    service_test.go is the load-bearing harness; the in-memory
+    stubs of SessionRepo + SigningKeyRepo + AuditRecorder let the
+    state machine be exercised without the postgres testcontainer
+    overhead (which Phase 2's integration tests already cover).
+
+internal/auth/session/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — Session + SessionSigningKey domain. Both
+    types ship Validate() with full invariant coverage: ID prefix
+    enforcement (ses-/sk-), expiry-order CHECK (absolute > idle >
+    created), CSRFTokenHash format pin (64 lowercase hex chars),
+    KeyMaterialEncrypted non-empty, retired-before-created
+    rejection, TenantID defaulting. Cookie naming constants are
+    pinned by TestCookieNamingConstants because the GUI's
+    web/src/api/client.ts will read `certctl_csrf` by string.
+    Floor at 90 to catch any future field that ships without a
+    validator.

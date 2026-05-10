@@ -24,6 +24,7 @@ import (
 	"github.com/certctl-io/certctl/internal/api/router"
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/auth/bootstrap"
+	"github.com/certctl-io/certctl/internal/auth/session"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -341,6 +342,47 @@ func main() {
 		}
 	}
 	bootstrapHandler := handler.NewBootstrapHandler(bootstrapService)
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 4 — session service.
+	//
+	// Wired AFTER migrations + RBAC backfill, BEFORE the HTTP listener
+	// binds (per the prompt's "fail-fatal on bootstrap key mint failure"
+	// requirement). EnsureInitialSigningKey is idempotent: if a non-
+	// retired signing key already exists for the tenant the call is a
+	// no-op; otherwise it mints a fresh 32-byte HMAC key, persists it,
+	// and emits an auth.session_signing_key_bootstrap audit row with
+	// event_category=auth.
+	//
+	// Failure here is fatal — the server refuses to boot rather than
+	// serve session-less.
+	//
+	// The session service is wired into the scheduler below (sessionGCLoop)
+	// so the GC sweep runs every CERTCTL_SESSION_GC_INTERVAL tick. The
+	// HTTP middleware that consumes ValidateInput / ValidateCSRF lands
+	// in Phase 5; pre-Phase-5 deployments boot the service so the GC
+	// sweep can keep the sessions + signing-keys tables tidy.
+	sessionRepo := postgres.NewSessionRepository(db)
+	sessionKeyRepo := postgres.NewSessionSigningKeyRepository(db)
+	sessionService := session.NewService(
+		sessionRepo,
+		sessionKeyRepo,
+		auditService,
+		authdomainAlias.DefaultTenantID,
+		session.Config{
+			IdleTimeout:         cfg.Auth.Session.IdleTimeout,
+			AbsoluteTimeout:     cfg.Auth.Session.AbsoluteTimeout,
+			SigningKeyRetention: cfg.Auth.Session.SigningKeyRetention,
+			BindIP:              cfg.Auth.Session.BindIP,
+			BindUserAgent:       cfg.Auth.Session.BindUserAgent,
+		},
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	if err := sessionService.EnsureInitialSigningKey(bootCtx); err != nil {
+		logger.Error("FATAL: session signing key bootstrap failed; refusing to boot", "err", err)
+		os.Exit(1)
+	}
+
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
@@ -937,6 +979,18 @@ func main() {
 	sched.SetJobTimeoutInterval(cfg.Scheduler.JobTimeoutInterval)
 	sched.SetAwaitingCSRTimeout(cfg.Scheduler.AwaitingCSRTimeout)
 	sched.SetAwaitingApprovalTimeout(cfg.Scheduler.AwaitingApprovalTimeout)
+
+	// Auth Bundle 2 Phase 4 — wire the session-GC sweep. The service
+	// itself was constructed (with the EnsureInitialSigningKey fail-
+	// fatal call) above the policy/cert-service block; here we just
+	// register it with the scheduler so the loop fires every
+	// CERTCTL_SESSION_GC_INTERVAL.
+	sched.SetSessionGarbageCollector(sessionService)
+	sched.SetSessionGCInterval(cfg.Auth.Session.GCInterval)
+	logger.Info("session GC sweep enabled",
+		"interval", cfg.Auth.Session.GCInterval.String(),
+		"absolute_timeout", cfg.Auth.Session.AbsoluteTimeout.String(),
+		"signing_key_retention", cfg.Auth.Session.SigningKeyRetention.String())
 	logger.Info("job timeout reaper enabled",
 		"interval", cfg.Scheduler.JobTimeoutInterval.String(),
 		"csr_timeout", cfg.Scheduler.AwaitingCSRTimeout.String(),

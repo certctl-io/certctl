@@ -1589,6 +1589,13 @@ type AuthConfig struct {
 	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN environment variable.
 	AgentBootstrapToken string
 
+	// Session holds the Auth Bundle 2 Phase 4 session-service tunables.
+	// Defaults are documented on the SessionConfig fields. The session
+	// service is wired into cmd/server/main.go alongside the OIDC
+	// service in Phase 5; pre-Phase-5 deployments that run with the
+	// legacy `api-key` auth type ignore this struct entirely.
+	Session SessionConfig
+
 	// BootstrapToken is the one-shot pre-shared secret that gates the
 	// Bundle 1 Phase 6 bootstrap endpoint (POST /v1/auth/bootstrap). When
 	// set at server startup AND no admin-roled actors exist, the
@@ -1607,6 +1614,56 @@ type AuthConfig struct {
 	// Generation guidance: `openssl rand -hex 32` (256-bit entropy).
 	// Setting: CERTCTL_BOOTSTRAP_TOKEN environment variable.
 	BootstrapToken string
+}
+
+// SessionConfig contains the Auth Bundle 2 Phase 4 session-service
+// tunables. Every field is operator-overridable via the documented
+// CERTCTL_SESSION_* env var; defaults are the conservative values from
+// the Phase 4 spec.
+//
+// Bundle 2 Phase 4 / OWASP ASVS V3 (Session Management). The defaults
+// (1h idle / 8h absolute / 24h key retention / 1h GC / Lax cookies /
+// no IP-or-UA bind) are the conservative starting point that matches
+// the prompt; tightening to Strict + IP/UA bind suits high-security
+// environments at the cost of breaking inbound deep-links from external
+// apps and login-from-mobile-on-cellular flows.
+type SessionConfig struct {
+	// IdleTimeout: maximum time between authenticated requests on a
+	// session before re-auth is required. Default 1h. Wire:
+	// CERTCTL_SESSION_IDLE_TIMEOUT.
+	IdleTimeout time.Duration
+
+	// AbsoluteTimeout: maximum lifetime of a session regardless of
+	// activity. Default 8h. Wire: CERTCTL_SESSION_ABSOLUTE_TIMEOUT.
+	AbsoluteTimeout time.Duration
+
+	// SigningKeyRetention: time a retired signing key stays valid for
+	// verification before being purged from the keys table. Default
+	// 24h. Wire: CERTCTL_SESSION_SIGNING_KEY_RETENTION.
+	SigningKeyRetention time.Duration
+
+	// GCInterval: scheduler tick interval for the session-GC sweep.
+	// Default 1h. Wire: CERTCTL_SESSION_GC_INTERVAL.
+	GCInterval time.Duration
+
+	// SameSite: SameSite cookie attribute. Valid values: "Lax"
+	// (default) or "Strict". Strict is recommended for high-security
+	// environments at the cost of breaking inbound deep-links from
+	// external apps. Wire: CERTCTL_SESSION_SAMESITE.
+	SameSite string
+
+	// BindIP: when true, the session middleware compares the request's
+	// client IP to the session row's recorded IP on every Validate.
+	// Mismatch -> 401, audit row, session NOT auto-revoked (user may
+	// have legitimate IP change). Default false. Wire:
+	// CERTCTL_SESSION_BIND_IP.
+	BindIP bool
+
+	// BindUserAgent: when true, the session middleware compares the
+	// request's User-Agent to the session row's recorded UA on every
+	// Validate. Default false; useful only in tightly-controlled
+	// environments. Wire: CERTCTL_SESSION_BIND_USER_AGENT.
+	BindUserAgent bool
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -1732,6 +1789,18 @@ func Load() (*Config, error) {
 			// /v1/auth/bootstrap endpoint that mints the first admin
 			// key. Empty = bootstrap endpoint disabled (default).
 			BootstrapToken: getEnv("CERTCTL_BOOTSTRAP_TOKEN", ""),
+			// Bundle 2 Phase 4: session-service tunables. Defaults match
+			// the prompt; high-security deployments tighten via the env
+			// vars documented on SessionConfig fields.
+			Session: SessionConfig{
+				IdleTimeout:         getEnvDuration("CERTCTL_SESSION_IDLE_TIMEOUT", 1*time.Hour),
+				AbsoluteTimeout:     getEnvDuration("CERTCTL_SESSION_ABSOLUTE_TIMEOUT", 8*time.Hour),
+				SigningKeyRetention: getEnvDuration("CERTCTL_SESSION_SIGNING_KEY_RETENTION", 24*time.Hour),
+				GCInterval:          getEnvDuration("CERTCTL_SESSION_GC_INTERVAL", 1*time.Hour),
+				SameSite:            getEnv("CERTCTL_SESSION_SAMESITE", "Lax"),
+				BindIP:              getEnvBool("CERTCTL_SESSION_BIND_IP", false),
+				BindUserAgent:       getEnvBool("CERTCTL_SESSION_BIND_USER_AGENT", false),
+			},
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),

@@ -61,6 +61,12 @@ type SessionRepository interface {
 	// idle-expiry sliding window fresh.
 	UpdateLastSeen(ctx context.Context, id string) error
 
+	// UpdateCSRFTokenHash replaces the csrf_token_hash on the session
+	// row. Phase 4's RotateCSRFToken consumes this on login completion,
+	// logout, and any actor-role mutation against this actor. The hash
+	// is the SHA-256 hex of the operator-facing CSRF token plaintext.
+	UpdateCSRFTokenHash(ctx context.Context, id, csrfTokenHash string) error
+
 	// Revoke sets revoked_at = NOW() for the named session. Subsequent
 	// Get returns the row with RevokedAt set; Phase 4's Validate maps
 	// to 401.
