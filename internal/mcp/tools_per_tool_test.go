@@ -417,6 +417,20 @@ var allHappyPathCases = []toolCase{
 	{"certctl_list_certificate_deployments", map[string]any{"id": "mc-1"}, http.MethodGet, "/api/v1/certificates/mc-1/deployments"},
 	{"certctl_verify_job", map[string]any{"id": "j-1", "target_id": "t-1", "expected_fingerprint": "AA:BB", "actual_fingerprint": "AA:BB", "verified": true}, http.MethodPost, "/api/v1/jobs/j-1/verify"},
 	{"certctl_get_job_verification", map[string]any{"id": "j-1"}, http.MethodGet, "/api/v1/jobs/j-1/verification"},
+
+	// Bundle 1 Phase 11 — RBAC tools.
+	{"certctl_auth_me", map[string]any{}, http.MethodGet, "/api/v1/auth/me"},
+	{"certctl_auth_list_roles", map[string]any{}, http.MethodGet, "/api/v1/auth/roles"},
+	{"certctl_auth_get_role", map[string]any{"id": "r-admin"}, http.MethodGet, "/api/v1/auth/roles/r-admin"},
+	{"certctl_auth_create_role", map[string]any{"name": "release"}, http.MethodPost, "/api/v1/auth/roles"},
+	{"certctl_auth_update_role", map[string]any{"id": "r-x", "name": "renamed"}, http.MethodPut, "/api/v1/auth/roles/r-x"},
+	{"certctl_auth_delete_role", map[string]any{"id": "r-x"}, http.MethodDelete, "/api/v1/auth/roles/r-x"},
+	{"certctl_auth_list_permissions", map[string]any{}, http.MethodGet, "/api/v1/auth/permissions"},
+	{"certctl_auth_add_permission_to_role", map[string]any{"role_id": "r-admin", "permission": "cert.read"}, http.MethodPost, "/api/v1/auth/roles/r-admin/permissions"},
+	{"certctl_auth_remove_permission_from_role", map[string]any{"role_id": "r-admin", "permission": "cert.read"}, http.MethodDelete, "/api/v1/auth/roles/r-admin/permissions/cert.read"},
+	{"certctl_auth_list_keys", map[string]any{}, http.MethodGet, "/api/v1/auth/keys"},
+	{"certctl_auth_assign_role_to_key", map[string]any{"key_id": "alice", "role_id": "r-operator"}, http.MethodPost, "/api/v1/auth/keys/alice/roles"},
+	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-admin"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-admin"},
 }
 
 // TestMCP_AllTools_HappyPath dispatches every tool against the mock API in

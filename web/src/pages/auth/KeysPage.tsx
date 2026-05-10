@@ -1,0 +1,252 @@
+import { useState } from 'react';
+import { useQuery, useQueryClient } from '@tanstack/react-query';
+import {
+  authListKeys,
+  authListRoles,
+  authAssignKeyRole,
+  authRevokeKeyRole,
+  type AuthKeyEntry,
+  type AuthRole,
+} from '../../api/client';
+import { useAuthMe } from '../../hooks/useAuthMe';
+import PageHeader from '../../components/PageHeader';
+import ErrorState from '../../components/ErrorState';
+
+// =============================================================================
+// Bundle 1 Phase 10 — KeysPage.
+//
+// Lists every actor in the active tenant with at least one role grant
+// (the GET /v1/auth/keys surface added in Phase 7). Operators use this
+// page to audit key→role assignments and to grant / revoke roles in
+// place of running `certctl auth keys scope-down`. The synthetic
+// actor-demo-anon row is shown but flagged "system-managed" with
+// disabled actions; the server-side reserved-actor guard rejects
+// mutations regardless.
+// =============================================================================
+
+const DEMO_ANON = 'actor-demo-anon';
+
+export default function KeysPage() {
+  const me = useAuthMe();
+  const qc = useQueryClient();
+
+  const keysQuery = useQuery<AuthKeyEntry[], Error>({
+    queryKey: ['auth', 'keys'],
+    queryFn: authListKeys,
+    staleTime: 30_000,
+  });
+  const rolesQuery = useQuery<AuthRole[], Error>({
+    queryKey: ['auth', 'roles'],
+    queryFn: authListRoles,
+    staleTime: 60_000,
+  });
+
+  const [assignTarget, setAssignTarget] = useState<AuthKeyEntry | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  const canAssign = me.hasPerm('auth.role.assign') || me.isAdmin();
+  const canRevoke = me.hasPerm('auth.role.assign') || me.isAdmin();
+
+  const handleRevoke = async (entry: AuthKeyEntry, roleID: string) => {
+    if (entry.actor_id === DEMO_ANON) return;
+    if (!window.confirm(`Revoke ${roleID} from ${entry.actor_id}?`)) return;
+    setBusy(true);
+    setActionError(null);
+    try {
+      await authRevokeKeyRole(entry.actor_id, roleID);
+      qc.invalidateQueries({ queryKey: ['auth', 'keys'] });
+    } catch (err) {
+      setActionError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  if (keysQuery.isLoading) return <PageHeader title="API keys" subtitle="Loading…" />;
+  if (keysQuery.error) {
+    return (
+      <div className="space-y-4">
+        <PageHeader title="API keys" />
+        <ErrorState
+          error={keysQuery.error}
+          onRetry={() => qc.invalidateQueries({ queryKey: ['auth', 'keys'] })}
+        />
+      </div>
+    );
+  }
+
+  const keys = keysQuery.data ?? [];
+
+  return (
+    <div className="space-y-4" data-testid="keys-page">
+      <PageHeader
+        title="API keys"
+        subtitle="Every API key in the active tenant. Bundle 1 backfills existing keys to r-admin; use scope-down (CLI) or per-row revoke + assign here to narrow."
+      />
+      {actionError && (
+        <div
+          className="bg-red-50 border border-red-200 text-red-700 text-sm p-3 rounded"
+          data-testid="keys-action-error"
+        >
+          {actionError}
+        </div>
+      )}
+      {keys.length === 0 ? (
+        <div
+          className="bg-surface border border-surface-border rounded p-8 text-center text-sm text-ink-muted"
+          data-testid="keys-empty"
+        >
+          No API keys with role grants yet. Configure CERTCTL_API_KEYS_NAMED or run the bootstrap flow to mint one.
+        </div>
+      ) : (
+        <div className="bg-surface border border-surface-border rounded">
+          <table className="w-full text-sm" data-testid="keys-table">
+            <thead className="bg-surface-muted text-xs uppercase tracking-wide text-ink-muted">
+              <tr>
+                <th className="text-left px-3 py-2">Actor</th>
+                <th className="text-left px-3 py-2">Type</th>
+                <th className="text-left px-3 py-2">Roles</th>
+                <th className="px-3 py-2 w-32"></th>
+              </tr>
+            </thead>
+            <tbody>
+              {keys.map(k => {
+                const isDemo = k.actor_id === DEMO_ANON;
+                return (
+                  <tr key={k.actor_id} className="border-t border-surface-border align-top">
+                    <td className="px-3 py-2 font-mono text-xs">
+                      {k.actor_id}
+                      {isDemo && <span className="ml-2 text-ink-faint">(system-managed)</span>}
+                    </td>
+                    <td className="px-3 py-2 text-xs">{k.actor_type}</td>
+                    <td className="px-3 py-2">
+                      <div className="flex flex-wrap gap-1">
+                        {k.role_ids.map(r => (
+                          <span
+                            key={r}
+                            className="inline-flex items-center gap-1 px-2 py-0.5 rounded bg-surface-muted text-xs"
+                            data-testid={`keys-role-tag-${k.actor_id}-${r}`}
+                          >
+                            {r}
+                            {canRevoke && !isDemo && (
+                              <button
+                                className="text-ink-muted hover:text-red-700"
+                                onClick={() => handleRevoke(k, r)}
+                                disabled={busy}
+                                data-testid={`keys-revoke-${k.actor_id}-${r}`}
+                                title={`Revoke ${r}`}
+                              >
+                                ×
+                              </button>
+                            )}
+                          </span>
+                        ))}
+                      </div>
+                    </td>
+                    <td className="px-3 py-2 text-right">
+                      {canAssign && !isDemo && (
+                        <button
+                          className="btn btn-ghost text-xs"
+                          onClick={() => setAssignTarget(k)}
+                          data-testid={`keys-assign-${k.actor_id}`}
+                        >
+                          Assign role
+                        </button>
+                      )}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      )}
+      {assignTarget && (
+        <AssignRoleModal
+          actor={assignTarget}
+          roles={rolesQuery.data ?? []}
+          onClose={() => setAssignTarget(null)}
+          onSuccess={() => {
+            setAssignTarget(null);
+            qc.invalidateQueries({ queryKey: ['auth', 'keys'] });
+          }}
+        />
+      )}
+    </div>
+  );
+}
+
+interface AssignProps {
+  actor: AuthKeyEntry;
+  roles: AuthRole[];
+  onClose: () => void;
+  onSuccess: () => void;
+}
+
+function AssignRoleModal({ actor, roles, onClose, onSuccess }: AssignProps) {
+  const [roleID, setRoleID] = useState('');
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const submit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!roleID) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await authAssignKeyRole(actor.actor_id, roleID);
+      onSuccess();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : String(err));
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-50" onClick={onClose}>
+      <div
+        className="bg-surface border border-surface-border rounded p-5 w-full max-w-md shadow-xl"
+        onClick={e => e.stopPropagation()}
+        data-testid="assign-role-modal"
+      >
+        <h2 className="text-lg font-semibold mb-4">Assign role to {actor.actor_id}</h2>
+        {error && (
+          <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-sm text-red-700">{error}</div>
+        )}
+        <form onSubmit={submit} className="space-y-4">
+          <select
+            value={roleID}
+            onChange={e => setRoleID(e.target.value)}
+            className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm"
+            required
+            data-testid="assign-role-select"
+          >
+            <option value="">Select a role…</option>
+            {roles
+              .filter(r => !actor.role_ids.includes(r.id))
+              .map(r => (
+                <option key={r.id} value={r.id}>
+                  {r.name} ({r.id})
+                </option>
+              ))}
+          </select>
+          <div className="flex gap-2 pt-2">
+            <button
+              type="submit"
+              disabled={busy || !roleID}
+              className="flex-1 btn btn-primary disabled:opacity-50"
+              data-testid="assign-role-submit"
+            >
+              {busy ? 'Assigning…' : 'Assign'}
+            </button>
+            <button type="button" onClick={onClose} className="flex-1 btn btn-ghost" data-testid="assign-role-cancel">
+              Cancel
+            </button>
+          </div>
+        </form>
+      </div>
+    </div>
+  );
+}

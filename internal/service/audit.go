@@ -31,9 +31,21 @@ func NewAuditService(auditRepo repository.AuditRepository) *AuditService {
 // `redacted_keys` array so operators can audit the redactor itself during
 // a compliance review. See internal/service/audit_redact.go.
 func (s *AuditService) RecordEvent(ctx context.Context, actor string, actorType domain.ActorType, action string, resourceType string, resourceID string, details map[string]interface{}) error {
-	// Bundle-6: scrub credentials + PII before persistence. Returns nil
-	// for nil/empty input, preserving pre-Bundle-6 behaviour for callers
-	// that pass nil details.
+	return s.RecordEventWithCategory(ctx, actor, actorType, action, "", resourceType, resourceID, details)
+}
+
+// RecordEventWithCategory is the Bundle 1 Phase 8 categorized variant
+// of RecordEvent. eventCategory is one of
+// domain.EventCategoryCertLifecycle, domain.EventCategoryAuth,
+// domain.EventCategoryConfig — empty defaults to cert_lifecycle in
+// the persistence layer + DB CHECK constraint.
+//
+// Existing 90+ call sites that don't yet pass a category route
+// through the legacy RecordEvent and inherit the cert_lifecycle
+// default; new callers (auth handlers, bootstrap, config-mutation
+// handlers) call this method directly with their explicit category.
+// Both paths share the same redaction + marshaling contract.
+func (s *AuditService) RecordEventWithCategory(ctx context.Context, actor string, actorType domain.ActorType, action, eventCategory, resourceType, resourceID string, details map[string]interface{}) error {
 	redacted := RedactDetailsForAudit(details)
 	detailsJSON, err := json.Marshal(redacted)
 	if err != nil {
@@ -41,14 +53,15 @@ func (s *AuditService) RecordEvent(ctx context.Context, actor string, actorType 
 	}
 
 	event := &domain.AuditEvent{
-		ID:           generateID("audit"),
-		Timestamp:    time.Now(),
-		Actor:        actor,
-		ActorType:    actorType,
-		Action:       action,
-		ResourceType: resourceType,
-		ResourceID:   resourceID,
-		Details:      json.RawMessage(detailsJSON),
+		ID:            generateID("audit"),
+		Timestamp:     time.Now(),
+		Actor:         actor,
+		ActorType:     actorType,
+		Action:        action,
+		ResourceType:  resourceType,
+		ResourceID:    resourceID,
+		Details:       json.RawMessage(detailsJSON),
+		EventCategory: eventCategory,
 	}
 
 	if err := s.auditRepo.Create(ctx, event); err != nil {
@@ -157,6 +170,12 @@ func (s *AuditService) ListByAction(ctx context.Context, action string, from, to
 
 // ListAuditEvents returns paginated audit events (handler interface method).
 func (s *AuditService) ListAuditEvents(ctx context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
+	return s.ListAuditEventsByCategory(ctx, "", page, perPage)
+}
+
+// ListAuditEventsByCategory is the Bundle 1 Phase 8 categorized variant.
+// Empty eventCategory disables the filter.
+func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCategory string, page, perPage int) ([]domain.AuditEvent, int64, error) {
 	if page < 1 {
 		page = 1
 	}
@@ -165,8 +184,9 @@ func (s *AuditService) ListAuditEvents(ctx context.Context, page, perPage int) (
 	}
 
 	filter := &repository.AuditFilter{
-		Page:    page,
-		PerPage: perPage,
+		EventCategory: eventCategory,
+		Page:          page,
+		PerPage:       perPage,
 	}
 
 	events, err := s.auditRepo.List(ctx, filter)

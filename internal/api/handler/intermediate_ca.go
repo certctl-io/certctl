@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/service"
@@ -36,12 +37,15 @@ type IntermediateCAServicer interface {
 // All routes are pinned at /api/v1/issuers/{id}/intermediates and
 // /api/v1/intermediates/{id}.
 //
-// Admin gate: every method calls middleware.IsAdmin first and surfaces
-// HTTP 403 for non-admin Bearer callers (M-003 admin-gating pattern,
-// matches AdminCRLCacheHandler / AdminESTHandler / AdminSCEPIntuneHandler).
-// CA hierarchy management is a high-blast-radius surface — adding a
-// child CA mints a new sub-CA cert that becomes a trust root for every
-// downstream leaf. Operators expect this gated behind admin role.
+// Bundle 1 Phase 3.5: the admin gate moved from in-handler auth.IsAdmin
+// checks to router-level auth.RequirePermission middleware (rbacGate
+// wraps the handler with the ca.hierarchy.manage permission gate before
+// the handler body runs — non-admin Bearer callers get 403 from the
+// middleware layer instead of from each handler method). CA hierarchy
+// management is a high-blast-radius surface — adding a child CA mints a
+// new sub-CA cert that becomes a trust root for every downstream leaf.
+// The router gate guarantees the only callers reaching this handler
+// hold the admin role at global scope.
 type IntermediateCAHandler struct {
 	svc IntermediateCAServicer
 }
@@ -111,10 +115,7 @@ func (h IntermediateCAHandler) Create(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	issuerID := r.PathValue("id")
@@ -122,7 +123,7 @@ func (h IntermediateCAHandler) Create(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, "issuer id required", requestID)
 		return
 	}
-	actor, _ := r.Context().Value(middleware.UserKey{}).(string)
+	actor, _ := r.Context().Value(auth.UserKey{}).(string)
 	if actor == "" {
 		ErrorWithRequestID(w, http.StatusUnauthorized,
 			"authentication required", requestID)
@@ -211,10 +212,7 @@ func (h IntermediateCAHandler) List(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	issuerID := r.PathValue("id")
@@ -237,10 +235,7 @@ func (h IntermediateCAHandler) Get(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	id := r.PathValue("id")
@@ -270,10 +265,7 @@ func (h IntermediateCAHandler) Retire(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 	requestID := middleware.GetRequestID(r.Context())
 
 	id := r.PathValue("id")
@@ -281,7 +273,7 @@ func (h IntermediateCAHandler) Retire(w http.ResponseWriter, r *http.Request) {
 		ErrorWithRequestID(w, http.StatusBadRequest, "id required", requestID)
 		return
 	}
-	actor, _ := r.Context().Value(middleware.UserKey{}).(string)
+	actor, _ := r.Context().Value(auth.UserKey{}).(string)
 	if actor == "" {
 		ErrorWithRequestID(w, http.StatusUnauthorized,
 			"authentication required", requestID)

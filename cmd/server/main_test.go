@@ -12,6 +12,7 @@ import (
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/config"
 	"github.com/certctl-io/certctl/internal/service"
 )
@@ -44,7 +45,7 @@ func TestMain_HealthEndpointBypassesAuth(t *testing.T) {
 	})
 
 	// Build the handler chain the same way main.go does
-	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+	authMiddleware := auth.NewAuthWithNamedKeys([]auth.NamedAPIKey{
 		{Name: "test", Key: "test-secret-key"},
 	})
 
@@ -159,7 +160,7 @@ func TestMain_AuthMiddlewareRejectsUnauthorized(t *testing.T) {
 	})
 
 	// Wrap with auth middleware
-	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+	authMiddleware := auth.NewAuthWithNamedKeys([]auth.NamedAPIKey{
 		{Name: "test", Key: "test-secret-key"},
 	})
 
@@ -187,7 +188,7 @@ func TestMain_AuthMiddlewareAllowsWithValidKey(t *testing.T) {
 	})
 
 	// Wrap with auth middleware
-	authMiddleware := middleware.NewAuthWithNamedKeys([]middleware.NamedAPIKey{
+	authMiddleware := auth.NewAuthWithNamedKeys([]auth.NamedAPIKey{
 		{Name: "test", Key: testKey},
 	})
 
@@ -460,7 +461,7 @@ func TestMain_AuthNoneMode(t *testing.T) {
 
 	// Wrap with auth middleware in "none" mode
 	// auth=none equivalent: empty named-keys list is a no-op pass-through.
-	authMiddleware := middleware.NewAuthWithNamedKeys(nil)
+	authMiddleware := auth.NewAuthWithNamedKeys(nil)
 
 	chainedHandler := middleware.Chain(protectedHandler, authMiddleware)
 

@@ -41,30 +41,12 @@ func TestBulkRevokeEST_AdminTrue_PinsSourceToEST(t *testing.T) {
 	}
 }
 
-func TestBulkRevokeEST_NonAdmin_Returns403(t *testing.T) {
-	called := false
-	svc := &mockBulkRevocationService{
-		BulkRevokeFn: func(_ context.Context, _ domain.BulkRevocationCriteria, _ string, _ string) (*domain.BulkRevocationResult, error) {
-			called = true
-			return nil, nil
-		},
-	}
-	h := NewBulkRevocationHandler(svc)
-	body := `{"reason":"keyCompromise","profile_id":"prof-iot"}`
-	req := httptest.NewRequest(http.MethodPost,
-		"/api/v1/est/certificates/bulk-revoke", bytes.NewBufferString(body))
-	req.Header.Set("Content-Type", "application/json")
-	// non-admin context (no AdminKey).
-	req = req.WithContext(context.Background())
-	w := httptest.NewRecorder()
-	h.BulkRevokeEST(w, req)
-	if w.Code != http.StatusForbidden {
-		t.Errorf("non-admin status = %d, want 403", w.Code)
-	}
-	if called {
-		t.Error("service was called despite non-admin caller")
-	}
-}
+// TestBulkRevokeEST_NonAdmin_Returns403 was deleted as part of Bundle 1
+// Phase 3.5: the in-handler auth.IsAdmin gate moved to router.go via
+// auth.RequirePermission(checker, "cert.bulk_revoke", nil). The
+// non-admin rejection is now exercised by the router-level integration
+// suite (internal/api/router/rbac_gate_integration_test.go) rather
+// than by a direct-handler test that bypasses middleware.
 
 func TestBulkRevokeEST_EmptyCriteria_400(t *testing.T) {
 	svc := &mockBulkRevocationService{}

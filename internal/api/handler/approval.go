@@ -8,6 +8,7 @@ import (
 	"strconv"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/certctl-io/certctl/internal/service"
@@ -111,7 +112,7 @@ func (h ApprovalHandler) GetApproval(w http.ResponseWriter, r *http.Request) {
 
 // Approve transitions a pending approval request to approved + transitions
 // the linked Job from AwaitingApproval to Pending. RBAC: the authenticated
-// actor extracted via middleware.UserKey must NOT equal the request's
+// actor extracted via auth.UserKey must NOT equal the request's
 // RequestedBy — the service-layer check enforces this and the handler
 // surfaces it as HTTP 403.
 //
@@ -153,7 +154,7 @@ func (h ApprovalHandler) decision(w http.ResponseWriter, r *http.Request, action
 	// Extract authenticated actor. The auth middleware sets UserKey to the
 	// API-key NamedAPIKey.Name (or empty for unauthenticated). RBAC at the
 	// service layer requires a non-empty actor.
-	actor, _ := r.Context().Value(middleware.UserKey{}).(string)
+	actor, _ := r.Context().Value(auth.UserKey{}).(string)
 	if actor == "" {
 		ErrorWithRequestID(w, http.StatusUnauthorized,
 			"authentication required to approve / reject", requestID)

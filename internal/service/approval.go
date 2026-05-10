@@ -39,6 +39,25 @@ type ApprovalService struct {
 	metrics      *ApprovalMetrics
 
 	bypassEnabled bool
+
+	// profileEditApply is the Bundle 1 Phase 9 hook the approve
+	// path invokes when req.Kind=profile_edit. Registered by
+	// cmd/server/main.go via SetProfileEditApply so the service
+	// doesn't import internal/service/profile.go (would create a
+	// cycle: ApprovalService -> ProfileService -> ApprovalService).
+	profileEditApply ProfileEditApplyFunc
+}
+
+// ProfileEditApplyFunc deserializes the pending profile diff stored
+// in req.Payload and persists it via the profile repository. The
+// caller registers this once at boot via SetProfileEditApply.
+type ProfileEditApplyFunc func(ctx context.Context, req *domain.ApprovalRequest) error
+
+// SetProfileEditApply registers the profile-edit apply callback. Called
+// from main.go after both the ApprovalService and ProfileService are
+// constructed; the closure captures the profile repo + audit service.
+func (s *ApprovalService) SetProfileEditApply(f ProfileEditApplyFunc) {
+	s.profileEditApply = f
 }
 
 // JobStatusUpdater is the narrow interface ApprovalService depends on
@@ -139,6 +158,53 @@ func (s *ApprovalService) RequestApproval(
 	return req.ID, nil
 }
 
+// RequestProfileEditApproval is the Bundle 1 Phase 9 entry point for
+// gated profile mutations. ProfileService.UpdateProfile calls this
+// when the live profile (or the proposed update) carries
+// RequiresApproval=true. Returns the new pending approval ID.
+//
+// The pending diff is serialized to req.Payload as JSON; the
+// profile-edit-apply callback (registered by main.go) deserializes
+// and persists when an approver decides.
+//
+// In bypass mode (CERTCTL_APPROVAL_BYPASS=true) the call short-
+// circuits via approveInternal — the same dev/CI escape hatch as
+// cert_issuance — so renewal-loop tests remain fast.
+func (s *ApprovalService) RequestProfileEditApproval(
+	ctx context.Context,
+	profileID, requestedBy string,
+	payload []byte,
+) (string, error) {
+	if profileID == "" || requestedBy == "" {
+		return "", fmt.Errorf("approval: profileID + requestedBy required")
+	}
+	if len(payload) == 0 {
+		return "", fmt.Errorf("approval: payload required for profile_edit")
+	}
+	now := time.Now().UTC()
+	req := &domain.ApprovalRequest{
+		Kind:        domain.ApprovalKindProfileEdit,
+		ProfileID:   profileID,
+		RequestedBy: requestedBy,
+		State:       domain.ApprovalStatePending,
+		Payload:     payload,
+		CreatedAt:   now,
+		UpdatedAt:   now,
+	}
+	if err := s.approvalRepo.Create(ctx, req); err != nil {
+		return "", fmt.Errorf("approval: create profile_edit request: %w", err)
+	}
+	s.recordAudit(ctx, requestedBy, domain.ActorTypeUser, "approval_profile_edit_requested", req, nil)
+	if s.bypassEnabled {
+		if err := s.approveInternal(ctx, req.ID, domain.ApprovalActorSystemBypass,
+			"auto-approved by CERTCTL_APPROVAL_BYPASS — dev/CI mode",
+			domain.ApprovalOutcomeBypassed, domain.ActorTypeSystem); err != nil {
+			return req.ID, fmt.Errorf("approval: bypass auto-approve profile_edit: %w", err)
+		}
+	}
+	return req.ID, nil
+}
+
 // Approve transitions a pending request to approved AND the linked Job
 // from AwaitingApproval to Pending so the job processor picks it up.
 // RBAC: rejects if decidedBy == request.RequestedBy.
@@ -192,6 +258,31 @@ func (s *ApprovalService) approveInternal(
 			return ErrApprovalAlreadyDecided
 		}
 		return fmt.Errorf("approval: update state to approved: %w", err)
+	}
+
+	// Bundle 1 Phase 9: profile_edit kind requires the apply
+	// callback to deserialize req.Payload + persist the profile
+	// diff. cert_issuance kind continues through the existing job-
+	// transition path. The kind discriminator is the load-bearing
+	// dispatch — adding a future ApprovalKind goes here.
+	if req.Kind == domain.ApprovalKindProfileEdit {
+		if s.profileEditApply == nil {
+			s.recordAudit(ctx, decidedBy, actorType, "approval_profile_apply_missing", req,
+				map[string]interface{}{"error": "profileEditApply callback not wired"})
+			return fmt.Errorf("approval: profile-edit apply callback not registered")
+		}
+		if err := s.profileEditApply(ctx, req); err != nil {
+			s.recordAudit(ctx, decidedBy, actorType, "approval_profile_apply_failed", req,
+				map[string]interface{}{"error": err.Error()})
+			return fmt.Errorf("approval: apply profile edit: %w", err)
+		}
+		s.recordAudit(ctx, decidedBy, actorType, "approval_"+outcome, req,
+			map[string]interface{}{"note": note, "outcome": outcome, "kind": string(req.Kind)})
+		if s.metrics != nil {
+			s.metrics.RecordDecision(outcome, req.ProfileID)
+			s.metrics.ObservePendingAge(now.Sub(req.CreatedAt).Seconds())
+		}
+		return nil
 	}
 
 	// Transition the linked Job from AwaitingApproval to Pending so the

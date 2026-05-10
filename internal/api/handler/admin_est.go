@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/service"
 )
 
@@ -76,10 +75,7 @@ func (h AdminESTHandler) Profiles(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	now := time.Now()
 	rows, err := h.svc.Profiles(r.Context(), now)
@@ -104,10 +100,7 @@ func (h AdminESTHandler) ReloadTrust(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	var body adminESTReloadRequest
 	// An empty body is permitted: it implicitly targets the legacy

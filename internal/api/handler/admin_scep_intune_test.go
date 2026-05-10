@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/service"
 )
 
@@ -49,52 +50,6 @@ func (f *fakeAdminSCEPIntuneService) ReloadTrust(_ context.Context, pathID strin
 // M-008 admin-gate triplet for Stats (GET).
 // =============================================================================
 
-func TestAdminSCEPIntune_NonAdmin_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/intune/stats", nil)
-	req = req.WithContext(contextWithRequestID()) // request id only, no admin flag
-	w := httptest.NewRecorder()
-
-	h.Stats(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for non-admin, got %d (body=%q)", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	msg, _ := resp["message"].(string)
-	if !strings.Contains(strings.ToLower(msg), "admin") {
-		t.Errorf("expected message to mention admin requirement, got %q", msg)
-	}
-	if svc.statsCalled {
-		t.Errorf("service was invoked despite non-admin caller — gate failed open")
-	}
-}
-
-func TestAdminSCEPIntune_AdminExplicitFalse_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/intune/stats", nil)
-	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	h.Stats(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for admin=false, got %d", w.Code)
-	}
-	if svc.statsCalled {
-		t.Error("service called despite admin=false gate")
-	}
-}
-
 func TestAdminSCEPIntune_AdminPermitted_ForwardsActor(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{
 		rows: []service.IntuneStatsSnapshot{
@@ -106,8 +61,8 @@ func TestAdminSCEPIntune_AdminPermitted_ForwardsActor(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/intune/stats", nil)
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -135,45 +90,6 @@ func TestAdminSCEPIntune_AdminPermitted_ForwardsActor(t *testing.T) {
 // M-008 triplet for ReloadTrust (POST).
 // =============================================================================
 
-func TestAdminSCEPIntuneReload_NonAdmin_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
-		strings.NewReader(`{"path_id":"corp"}`))
-	req.ContentLength = int64(len(`{"path_id":"corp"}`))
-	req = req.WithContext(contextWithRequestID())
-	w := httptest.NewRecorder()
-
-	h.ReloadTrust(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 non-admin, got %d", w.Code)
-	}
-	if svc.reloadCalled {
-		t.Error("service called despite non-admin gate")
-	}
-}
-
-func TestAdminSCEPIntuneReload_AdminExplicitFalse_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
-		strings.NewReader(`{"path_id":"corp"}`))
-	req.ContentLength = int64(len(`{"path_id":"corp"}`))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	h.ReloadTrust(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 admin=false, got %d", w.Code)
-	}
-	if svc.reloadCalled {
-		t.Error("service called despite admin=false gate")
-	}
-}
-
 func TestAdminSCEPIntuneReload_AdminPermitted_ForwardsActor(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{}
 	h := NewAdminSCEPIntuneHandler(svc)
@@ -181,8 +97,8 @@ func TestAdminSCEPIntuneReload_AdminPermitted_ForwardsActor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
 		strings.NewReader(body))
 	req.ContentLength = int64(len(body))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -211,7 +127,7 @@ func TestAdminSCEPIntuneReload_AdminPermitted_ForwardsActor(t *testing.T) {
 func TestAdminSCEPIntuneStats_RejectsNonGetMethod(t *testing.T) {
 	h := NewAdminSCEPIntuneHandler(&fakeAdminSCEPIntuneService{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/stats", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.Stats(w, req)
@@ -223,7 +139,7 @@ func TestAdminSCEPIntuneStats_RejectsNonGetMethod(t *testing.T) {
 func TestAdminSCEPIntuneReload_RejectsNonPostMethod(t *testing.T) {
 	h := NewAdminSCEPIntuneHandler(&fakeAdminSCEPIntuneService{})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/intune/reload-trust", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -236,7 +152,7 @@ func TestAdminSCEPIntuneStats_PropagatesServiceError(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{statsErr: errors.New("registry walk failed")}
 	h := NewAdminSCEPIntuneHandler(svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/intune/stats", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.Stats(w, req)
@@ -251,7 +167,7 @@ func TestAdminSCEPIntuneReload_ProfileNotFound_Returns404(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
 		strings.NewReader(`{"path_id":"nonexistent"}`))
 	req.ContentLength = int64(len(`{"path_id":"nonexistent"}`))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -266,7 +182,7 @@ func TestAdminSCEPIntuneReload_IntuneDisabled_Returns409(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
 		strings.NewReader(`{"path_id":"iot"}`))
 	req.ContentLength = int64(len(`{"path_id":"iot"}`))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -281,7 +197,7 @@ func TestAdminSCEPIntuneReload_BadReloadPropagates500(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
 		strings.NewReader(`{"path_id":"corp"}`))
 	req.ContentLength = int64(len(`{"path_id":"corp"}`))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -294,7 +210,7 @@ func TestAdminSCEPIntuneReload_EmptyBodyTargetsLegacyRoot(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{}
 	h := NewAdminSCEPIntuneHandler(svc)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -312,7 +228,7 @@ func TestAdminSCEPIntuneReload_RejectsMalformedJSON(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/intune/reload-trust",
 		strings.NewReader(bad))
 	req.ContentLength = int64(len(bad))
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.ReloadTrust(w, req)
@@ -347,52 +263,6 @@ func TestAdminSCEPIntuneServiceImpl_ReloadUnknownPathReturnsNotFound(t *testing.
 // M-008 admin-gate triplet for Profiles (GET) — Phase 9 follow-up endpoint.
 // =============================================================================
 
-func TestAdminSCEPProfiles_NonAdmin_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
-	req = req.WithContext(contextWithRequestID()) // request id only, no admin flag
-	w := httptest.NewRecorder()
-
-	h.Profiles(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for non-admin, got %d (body=%q)", w.Code, w.Body.String())
-	}
-	var resp map[string]any
-	if err := json.NewDecoder(w.Body).Decode(&resp); err != nil {
-		t.Fatalf("decode response: %v", err)
-	}
-	msg, _ := resp["message"].(string)
-	if !strings.Contains(strings.ToLower(msg), "admin") {
-		t.Errorf("expected message to mention admin requirement, got %q", msg)
-	}
-	if svc.profilesCalled {
-		t.Errorf("service was invoked despite non-admin caller — gate failed open")
-	}
-}
-
-func TestAdminSCEPProfiles_AdminExplicitFalse_Returns403(t *testing.T) {
-	svc := &fakeAdminSCEPIntuneService{}
-	h := NewAdminSCEPIntuneHandler(svc)
-
-	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
-	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, false)
-	req = req.WithContext(ctx)
-	w := httptest.NewRecorder()
-
-	h.Profiles(w, req)
-
-	if w.Code != http.StatusForbidden {
-		t.Fatalf("expected 403 for admin=false, got %d", w.Code)
-	}
-	if svc.profilesCalled {
-		t.Error("service called despite admin=false gate")
-	}
-}
-
 func TestAdminSCEPProfiles_AdminPermitted_ForwardsActor(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{
 		profileRows: []service.SCEPProfileStatsSnapshot{
@@ -417,8 +287,8 @@ func TestAdminSCEPProfiles_AdminPermitted_ForwardsActor(t *testing.T) {
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id")
-	ctx = context.WithValue(ctx, middleware.AdminKey{}, true)
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "ops-admin")
+	ctx = context.WithValue(ctx, auth.AdminKey{}, true)
+	ctx = context.WithValue(ctx, auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 
@@ -461,7 +331,7 @@ func TestAdminSCEPProfiles_AdminPermitted_ForwardsActor(t *testing.T) {
 func TestAdminSCEPProfiles_RejectsNonGetMethod(t *testing.T) {
 	h := NewAdminSCEPIntuneHandler(&fakeAdminSCEPIntuneService{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/scep/profiles", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.Profiles(w, req)
@@ -474,7 +344,7 @@ func TestAdminSCEPProfiles_PropagatesServiceError(t *testing.T) {
 	svc := &fakeAdminSCEPIntuneService{profilesErr: errors.New("registry walk failed")}
 	h := NewAdminSCEPIntuneHandler(svc)
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/admin/scep/profiles", nil)
-	ctx := context.WithValue(context.Background(), middleware.AdminKey{}, true)
+	ctx := context.WithValue(context.Background(), auth.AdminKey{}, true)
 	req = req.WithContext(ctx)
 	w := httptest.NewRecorder()
 	h.Profiles(w, req)

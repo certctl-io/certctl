@@ -15,11 +15,22 @@ import (
 
 // mockAuditService implements AuditService for testing.
 type mockAuditService struct {
-	listFunc func(page, perPage int) ([]domain.AuditEvent, int64, error)
-	getFunc  func(id string) (*domain.AuditEvent, error)
+	listFunc      func(page, perPage int) ([]domain.AuditEvent, int64, error)
+	listByCatFunc func(category string, page, perPage int) ([]domain.AuditEvent, int64, error)
+	getFunc       func(id string) (*domain.AuditEvent, error)
 }
 
 func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
+	if m.listFunc != nil {
+		return m.listFunc(page, perPage)
+	}
+	return nil, 0, nil
+}
+
+func (m *mockAuditService) ListAuditEventsByCategory(_ context.Context, category string, page, perPage int) ([]domain.AuditEvent, int64, error) {
+	if m.listByCatFunc != nil {
+		return m.listByCatFunc(category, page, perPage)
+	}
 	if m.listFunc != nil {
 		return m.listFunc(page, perPage)
 	}

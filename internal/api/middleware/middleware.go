@@ -2,9 +2,6 @@ package middleware
 
 import (
 	"context"
-	"crypto/sha256"
-	"crypto/subtle"
-	"encoding/hex"
 	"fmt"
 	"log"
 	"log/slog"
@@ -14,23 +11,21 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
+	"github.com/certctl-io/certctl/internal/auth"
 )
+
+// Bundle 1 / Phase 0: the auth surface (NamedAPIKey, HashAPIKey, AuthConfig,
+// NewAuthWithNamedKeys, NewAuth, UserKey, AdminKey, GetUser, IsAdmin) moved
+// to internal/auth/. The rate limiter below still keys per-user via
+// auth.GetUser(ctx); other middlewares in this package are auth-agnostic.
+//
+// Existing callers continue to import internal/auth/middleware "as
+// middleware" only for the non-auth helpers below; auth-related references
+// have been migrated to the new package.
 
 // RequestIDKey is the context key for storing request IDs.
 type RequestIDKey struct{}
-
-// UserKey is the context key for storing authenticated user information.
-type UserKey struct{}
-
-// AdminKey is the context key for storing admin flag information.
-type AdminKey struct{}
-
-// NamedAPIKey represents a named API key with optional admin flag.
-type NamedAPIKey struct {
-	Name  string
-	Key   string
-	Admin bool
-}
 
 // RequestID middleware generates a unique request ID and adds it to the request context and response headers.
 func RequestID(next http.Handler) http.Handler {
@@ -46,7 +41,7 @@ func RequestID(next http.Handler) http.Handler {
 // Deprecated: Use NewLogging for structured logging with slog.
 //
 // CWE-117 log-injection defense: r.Method and r.URL.Path are
-// attacker-controllable (request-line bytes — Go's net/http leaves
+// attacker-controllable (request-line bytes; Go's net/http leaves
 // percent-decoded path segments in r.URL.Path, which can include CR/LF
 // in the decoded form even though the raw HTTP request line cannot).
 // strings.ReplaceAll on CR/LF/NUL strips the forgery vector before the
@@ -54,7 +49,7 @@ func RequestID(next http.Handler) http.Handler {
 //
 // The replacement is intentionally inlined at the call site (literal
 // strings.ReplaceAll chains) because CodeQL's go/log-injection
-// taint tracker only recognizes that exact pattern as a sanitizer —
+// taint tracker only recognizes that exact pattern as a sanitizer;
 // strings.NewReplacer / wrapper helpers don't trigger the recognition,
 // reopening the alert. The OWASP example in the CodeQL rule docs uses
 // the same pattern.
@@ -71,7 +66,7 @@ func Logging(next http.Handler) http.Handler {
 		requestID := getRequestID(r.Context())
 
 		// Strip CR/LF/NUL from attacker-controllable request fields
-		// before logging. Inlined per CodeQL #32 — the ReplaceAll
+		// before logging. Inlined per CodeQL #32; the ReplaceAll
 		// chain is the pattern the analyzer pattern-matches as a
 		// sanitizer.
 		method := strings.ReplaceAll(r.Method, "\n", "")
@@ -133,143 +128,11 @@ func Recovery(next http.Handler) http.Handler {
 	})
 }
 
-// HashAPIKey computes the SHA-256 hash of an API key for secure storage.
-// We use SHA-256 rather than bcrypt because API keys are high-entropy
-// random strings (not user-chosen passwords), so rainbow tables and
-// brute-force attacks are not a practical concern.
-func HashAPIKey(key string) string {
-	h := sha256.Sum256([]byte(key))
-	return hex.EncodeToString(h[:])
-}
-
-// AuthConfig holds configuration for the Auth middleware.
-//
-// G-1 (P1): valid Type values are "api-key" or "none" only. "jwt" was
-// removed because no JWT middleware ships with certctl (silent auth
-// downgrade pre-G-1). The single source of truth for the allowed set
-// lives at internal/config.AuthType / config.ValidAuthTypes() — prefer
-// those constants over string literals when comparing.
-type AuthConfig struct {
-	Type   string // "api-key" or "none" (see config.AuthType constants)
-	Secret string // The raw API key or comma-separated list of valid API keys
-}
-
-// NewAuthWithNamedKeys creates an authentication middleware that validates
-// Bearer tokens against a set of named API keys. Each key carries a name
-// (propagated as the actor via context) and an admin flag (consulted by
-// authorization gates such as bulk revocation).
-//
-// When namedKeys is empty the returned middleware is a no-op pass-through,
-// which is used in demo/development mode (CERTCTL_AUTH_TYPE=none). When one
-// or more keys are provided, requests must include a matching Bearer token
-// or they are rejected with 401.
-func NewAuthWithNamedKeys(namedKeys []NamedAPIKey) func(http.Handler) http.Handler {
-	if len(namedKeys) == 0 {
-		return func(next http.Handler) http.Handler {
-			return next
-		}
-	}
-
-	// Pre-compute hashes of all valid keys for constant-time comparison.
-	type keyEntry struct {
-		hash  string
-		name  string
-		admin bool
-	}
-	var entries []keyEntry
-	for _, nk := range namedKeys {
-		entries = append(entries, keyEntry{
-			hash:  HashAPIKey(nk.Key),
-			name:  nk.Name,
-			admin: nk.Admin,
-		})
-	}
-
-	// Warn if only one key is configured in production mode
-	if len(entries) == 1 {
-		slog.Warn("only one API key configured — consider adding a rotation key for zero-downtime rotation")
-	}
-
-	return func(next http.Handler) http.Handler {
-		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-			authHeader := r.Header.Get("Authorization")
-			if authHeader == "" {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				w.Header().Set("WWW-Authenticate", `Bearer realm="certctl"`)
-				http.Error(w, `{"error":"Authorization header required"}`, http.StatusUnauthorized)
-				return
-			}
-
-			// Extract Bearer token
-			if len(authHeader) < 8 || authHeader[:7] != "Bearer " {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				http.Error(w, `{"error":"Invalid Authorization header format, expected: Bearer <token>"}`, http.StatusUnauthorized)
-				return
-			}
-
-			token := authHeader[7:]
-			tokenHash := HashAPIKey(token)
-
-			// Check against all valid keys using constant-time comparison
-			var matched *keyEntry
-			for i := range entries {
-				if subtle.ConstantTimeCompare([]byte(tokenHash), []byte(entries[i].hash)) == 1 {
-					matched = &entries[i]
-					break
-				}
-			}
-
-			if matched == nil {
-				w.Header().Set("Content-Type", "application/json; charset=utf-8")
-				http.Error(w, `{"error":"Invalid API key"}`, http.StatusUnauthorized)
-				return
-			}
-
-			// Store the authenticated identity and admin flag in context
-			ctx := context.WithValue(r.Context(), UserKey{}, matched.name)
-			ctx = context.WithValue(ctx, AdminKey{}, matched.admin)
-			next.ServeHTTP(w, r.WithContext(ctx))
-		})
-	}
-}
-
-// NewAuth is a legacy shim that converts a comma-separated Secret list into
-// synthesized legacy-key-N named entries and delegates to NewAuthWithNamedKeys.
-// It preserves the pre-M-002 behavior for callers that still pass raw AuthConfig
-// (primarily cmd/server/main_test.go). The synthesized actor is "legacy-key-N"
-// rather than the old hardcoded "api-key-user" so audit events carry
-// meaningful identity even on the legacy path.
-//
-// Deprecated: Use NewAuthWithNamedKeys with explicit NamedAPIKey entries.
-func NewAuth(cfg AuthConfig) func(http.Handler) http.Handler {
-	if cfg.Type == "none" {
-		return func(next http.Handler) http.Handler {
-			return next
-		}
-	}
-
-	var namedKeys []NamedAPIKey
-	idx := 0
-	for _, k := range strings.Split(cfg.Secret, ",") {
-		k = strings.TrimSpace(k)
-		if k == "" {
-			continue
-		}
-		namedKeys = append(namedKeys, NamedAPIKey{
-			Name:  fmt.Sprintf("legacy-key-%d", idx),
-			Key:   k,
-			Admin: false,
-		})
-		idx++
-	}
-	return NewAuthWithNamedKeys(namedKeys)
-}
-
 // RateLimitConfig holds configuration for the rate limiter.
 //
 // Bundle B / Audit M-025 (OWASP ASVS L2 §11.2.1) extends this with per-user
 // and per-IP keying. The historic RPS / BurstSize fields are preserved for
-// source compatibility — they now describe the per-key budget rather than
+// source compatibility; they now describe the per-key budget rather than
 // the global budget. PerUserRPS / PerUserBurstSize, when non-zero, override
 // RPS / BurstSize for authenticated callers; the IP-keyed fallback
 // continues to use RPS / BurstSize so unauthenticated callers don't get
@@ -278,8 +141,9 @@ type RateLimitConfig struct {
 	RPS       float64 // Tokens per second per key (default applies to IP-keyed buckets)
 	BurstSize int     // Max tokens per key (default applies to IP-keyed buckets)
 
-	// PerUserRPS overrides RPS for authenticated callers (keyed by UserKey
-	// in context). Zero means "use RPS as the authenticated budget too".
+	// PerUserRPS overrides RPS for authenticated callers (keyed by
+	// auth.UserKey in context). Zero means "use RPS as the authenticated
+	// budget too".
 	PerUserRPS float64
 
 	// PerUserBurstSize overrides BurstSize for authenticated callers.
@@ -295,11 +159,11 @@ type RateLimitConfig struct {
 // authenticated user and each unauthenticated IP gets its own bucket. Keys
 // are computed per request:
 //
-//   - Authenticated: "user:" + middleware.GetUser(ctx)
+//   - Authenticated: "user:" + auth.GetUser(ctx)
 //   - Unauthenticated: "ip:" + r.RemoteAddr's host portion
 //
 // The bucket map is sync.RWMutex-guarded; create-on-demand for new keys.
-// There is no eviction — for a long-running server with millions of unique
+// There is no eviction; for a long-running server with millions of unique
 // IPs this can leak memory. A future enhancement is per-key TTL via a
 // lazy sweeper. For now the leak is bounded by realistic operator IP
 // fan-out and is acceptable per OWASP ASVS L2 (the threat model is abuse
@@ -339,9 +203,9 @@ func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 
 // rateLimitKey computes the per-request bucket key. Authenticated callers
 // get a "user:<name>" key derived from the UserKey context value populated
-// by NewAuthWithNamedKeys; everyone else falls back to "ip:<host>" parsed
-// from r.RemoteAddr (X-Forwarded-For is intentionally NOT consulted here
-// — operators behind a trusted proxy must configure that proxy to set
+// by auth.NewAuthWithNamedKeys; everyone else falls back to "ip:<host>"
+// parsed from r.RemoteAddr (X-Forwarded-For is intentionally NOT consulted
+// here; operators behind a trusted proxy must configure that proxy to set
 // RemoteAddr correctly, or the rate limiter would be trivially bypassable
 // by spoofing the header).
 //
@@ -349,7 +213,7 @@ func NewRateLimiter(cfg RateLimitConfig) func(http.Handler) http.Handler {
 // unauthenticated so a misconfigured auth middleware doesn't grant the
 // same bucket to every anonymous request.
 func rateLimitKey(r *http.Request) (string, bool) {
-	if user := GetUser(r.Context()); user != "" {
+	if user := auth.GetUser(r.Context()); user != "" {
 		return "user:" + user, true
 	}
 	host := r.RemoteAddr
@@ -463,7 +327,7 @@ func NewCORS(cfg CORSConfig) func(http.Handler) http.Handler {
 			// Security default: deny CORS when no origins are configured.
 			// This prevents CSRF attacks from arbitrary origins.
 			if len(cfg.AllowedOrigins) == 0 {
-				// No CORS headers set — only same-origin requests can read response
+				// No CORS headers set; only same-origin requests can read response
 				if r.Method == http.MethodOptions {
 					w.WriteHeader(http.StatusNoContent)
 					return
@@ -536,23 +400,6 @@ func getRequestID(ctx context.Context) string {
 		return "unknown"
 	}
 	return id
-}
-
-// GetUser extracts the authenticated user from context.
-// Returns the name of the matched API key and whether it was found.
-func GetUser(ctx context.Context) string {
-	user, ok := ctx.Value(UserKey{}).(string)
-	if !ok {
-		return ""
-	}
-	return user
-}
-
-// IsAdmin extracts the admin flag from context.
-// Returns true if the authenticated user has admin privileges.
-func IsAdmin(ctx context.Context) bool {
-	admin, ok := ctx.Value(AdminKey{}).(bool)
-	return ok && admin
 }
 
 // responseWriter wraps http.ResponseWriter to capture the status code.

@@ -361,7 +361,7 @@ type ListApprovalsInput struct {
 
 // ApprovalDecisionInput is the MCP tool input for approve / reject endpoints.
 // The decided_by actor is derived server-side from the authenticated API-key
-// name (middleware.UserKey) — NOT from this body. The two-person-integrity
+// name (auth.UserKey) — NOT from this body. The two-person-integrity
 // contract (ErrApproveBySameActor) is enforced regardless of who pushes the
 // decision through MCP, so as long as the MCP server's API key identity is
 // distinct from the requesting actor, the contract holds.
@@ -552,3 +552,57 @@ type VerifyJobInput struct {
 // ── Empty ───────────────────────────────────────────────────────────
 
 type EmptyInput struct{}
+
+// ── Auth (Bundle 1 Phase 11 — RBAC) ────────────────────────────────
+
+// AuthRoleIDInput is the role-id-only input shape used by the get +
+// delete tools. Distinct from the certificate-shaped GetByIDInput so
+// the jsonschema description points at the role prefix specifically.
+type AuthRoleIDInput struct {
+	ID string `json:"id" jsonschema:"Role ID (e.g. r-admin, r-operator)"`
+}
+
+// AuthCreateRoleInput is the body for certctl_auth_create_role.
+type AuthCreateRoleInput struct {
+	Name        string `json:"name" jsonschema:"Role display name (required, must be unique within the tenant)"`
+	Description string `json:"description,omitempty" jsonschema:"Optional human-readable description of what the role grants"`
+}
+
+// AuthUpdateRoleInput is the body for certctl_auth_update_role.
+type AuthUpdateRoleInput struct {
+	ID          string `json:"id" jsonschema:"Role ID to update (e.g. r-release-manager)"`
+	Name        string `json:"name,omitempty" jsonschema:"New role display name. Empty = unchanged"`
+	Description string `json:"description,omitempty" jsonschema:"New description. Empty = unchanged"`
+}
+
+// AuthRolePermissionGrantInput is the body for
+// certctl_auth_add_permission_to_role.
+type AuthRolePermissionGrantInput struct {
+	RoleID     string `json:"role_id" jsonschema:"Role ID to grant the permission to"`
+	Permission string `json:"permission" jsonschema:"Canonical permission name (e.g. cert.read, auth.role.assign). Must be in the catalogue returned by certctl_auth_list_permissions"`
+	ScopeType  string `json:"scope_type,omitempty" jsonschema:"Scope type: global (default) | profile | issuer"`
+	ScopeID    string `json:"scope_id,omitempty" jsonschema:"Scope ID; required when scope_type is profile or issuer"`
+}
+
+// AuthRolePermissionRevokeInput is the input for
+// certctl_auth_remove_permission_from_role.
+type AuthRolePermissionRevokeInput struct {
+	RoleID     string `json:"role_id" jsonschema:"Role ID to revoke the permission from"`
+	Permission string `json:"permission" jsonschema:"Canonical permission name to revoke"`
+	ScopeType  string `json:"scope_type,omitempty" jsonschema:"Optional scope type to disambiguate when the permission is granted at multiple scopes"`
+	ScopeID    string `json:"scope_id,omitempty" jsonschema:"Optional scope ID for scope_type=profile|issuer revocations"`
+}
+
+// AuthAssignKeyRoleInput is the body for
+// certctl_auth_assign_role_to_key.
+type AuthAssignKeyRoleInput struct {
+	KeyID  string `json:"key_id" jsonschema:"API-key actor ID (the named-key Name from CERTCTL_API_KEYS_NAMED, or an ak-<slug> ID minted by the bootstrap path)"`
+	RoleID string `json:"role_id" jsonschema:"Role ID to assign (e.g. r-operator)"`
+}
+
+// AuthRevokeKeyRoleInput is the input for
+// certctl_auth_revoke_role_from_key.
+type AuthRevokeKeyRoleInput struct {
+	KeyID  string `json:"key_id" jsonschema:"API-key actor ID. Reserved actor-demo-anon is rejected server-side"`
+	RoleID string `json:"role_id" jsonschema:"Role ID to revoke"`
+}

@@ -133,6 +133,15 @@ services:
       CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
       CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI with seeded demo targets
       CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}  # AES-256-GCM for dynamic issuer/target config
+      # Bundle 1 follow-on: this compose IS the bundled demo path
+      # (CERTCTL_AUTH_TYPE=none + KEYGEN_MODE=server above), so the
+      # demo seed runs by default. seed_demo.sql pre-seeds the
+      # agent-demo-1 row that the bundled certctl-agent below needs
+      # to authenticate. The docker-compose.demo.yml overlay still
+      # works (it sets the same flag) and remains for backward
+      # compat. Production deploys override CERTCTL_AUTH_TYPE +
+      # KEYGEN_MODE + DEMO_SEED via their own compose.
+      CERTCTL_DEMO_SEED: "true"
     ports:
       - "8443:8443"
     volumes:
@@ -183,6 +192,17 @@ services:
       CERTCTL_SERVER_URL: https://certctl-server:8443
       CERTCTL_SERVER_CA_BUNDLE_PATH: /etc/certctl/tls/ca.crt
       CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
+      # Bundle 1 follow-on: pre-Bundle-1 the bundled agent had no
+      # CERTCTL_AGENT_ID set, hit cmd/agent/main.go's fail-fast guard
+      # ("agent-id flag or CERTCTL_AGENT_ID env var is required"), and
+      # restart-looped silently on every fresh `docker compose up`.
+      # Latent since 2026-03-14 (commit d395776). seed_demo.sql now
+      # pre-seeds the matching agents row; the demo runs with
+      # CERTCTL_AUTH_TYPE=none on the server so the api_key Bearer
+      # token is irrelevant here. Production deploys override
+      # CERTCTL_AGENT_ID with the value returned from
+      # POST /api/v1/agents during registration.
+      CERTCTL_AGENT_ID: ${CERTCTL_AGENT_ID:-agent-demo-1}
       CERTCTL_AGENT_NAME: docker-agent
       CERTCTL_LOG_LEVEL: info
       CERTCTL_DISCOVERY_DIRS: /var/lib/certctl/keys  # Agent scans this directory for existing certificates

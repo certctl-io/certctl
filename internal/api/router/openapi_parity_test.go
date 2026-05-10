@@ -92,6 +92,14 @@ var SpecParityExceptions = map[string]string{
 	"POST /acme/key-change":                         "Phase 4 default-profile shorthand for key rollover.",
 	"POST /acme/revoke-cert":                        "Phase 4 default-profile shorthand for revoke-cert.",
 	"GET /acme/renewal-info/{cert_id}":              "Phase 4 default-profile shorthand for ARI.",
+
+	// Bundle 1 / Phase 4 RBAC API: shipped with full OpenAPI schema in
+	// the Phase 0-5 closure commit. The 11 routes (auth/me + permissions
+	// catalogue + 5 role-lifecycle + 2 role-permission grant/revoke + 2
+	// actor-role grant/revoke) live in api/openapi.yaml under tag
+	// `[Auth]`. Shared shapes: AuthRole + AuthRolePermission in the
+	// schemas section. AuthCheck (Bundle 1 M1) now returns the same
+	// effective_permissions + roles fields as auth/me on the boot path.
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

@@ -285,7 +285,7 @@ qa-stats:
 	@echo "t.Skip sites: $$(grep -rE 't\.Skip(Now|f)?\(' --include='*_test.go' . 2>/dev/null | wc -l | tr -d ' ')"
 	@echo "qa_test.go Part_ subtests: $$(grep -cE 't\.Run\(\"Part[0-9]+_' deploy/test/qa_test.go 2>/dev/null || echo 0)"
 	@echo "Seed unique mc-* IDs:  $$(grep -oE "mc-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
-	@echo "Seed unique ag-* IDs:  $$(grep -oE "ag-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (incl. agent_groups; agents-table count is 12)"
+	@echo "Seed unique ag-* IDs:  $$(grep -oE "ag-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (incl. agent_groups; agents-table count is 13 incl. agent-demo-1 + 3 cloud sentinels + server-scanner)"
 	@echo "Seed unique iss-* IDs: $$(grep -oE "iss-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ') (issuers table count is 13)"
 	@echo "Seed unique tgt-* IDs: $$(grep -oE "tgt-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"
 	@echo "Seed unique nst-* IDs: $$(grep -oE "nst-[a-z0-9_-]+" migrations/seed_demo.sql 2>/dev/null | sort -u | wc -l | tr -d ' ')"

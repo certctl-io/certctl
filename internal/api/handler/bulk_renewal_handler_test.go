@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 )
 
@@ -30,7 +31,7 @@ func (m *mockBulkRenewalService) BulkRenew(ctx context.Context, criteria domain.
 // bulk-renew is NOT admin-gated, any authenticated caller can use it.
 func authedContext() context.Context {
 	ctx := context.WithValue(context.Background(), middleware.RequestIDKey{}, "test-request-id-renew")
-	ctx = context.WithValue(ctx, middleware.UserKey{}, "alice")
+	ctx = context.WithValue(ctx, auth.UserKey{}, "alice")
 	return ctx
 }
 
@@ -126,7 +127,7 @@ func TestBulkRenew_Handler_ActorAttribution(t *testing.T) {
 	h.BulkRenew(w, req)
 
 	if capturedActor != "alice" {
-		t.Errorf("actor not threaded from middleware.UserKey: got %q, want 'alice'", capturedActor)
+		t.Errorf("actor not threaded from auth.UserKey: got %q, want 'alice'", capturedActor)
 	}
 }
 

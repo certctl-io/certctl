@@ -11,6 +11,8 @@ import (
 	"sync"
 	"testing"
 	"time"
+
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // mockAuditRecorder captures RecordAPICall invocations for testing.
@@ -271,7 +273,7 @@ func TestAuditLog_ExtractsAuthenticatedActor(t *testing.T) {
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/certificates/mc-1", nil)
 	// Simulate auth middleware having set the named-key identity in context
 	// (post-M-002: actor is the named-key name, not the old "api-key-user").
-	ctx := context.WithValue(req.Context(), UserKey{}, "ops-admin")
+	ctx := context.WithValue(req.Context(), auth.UserKey{}, "ops-admin")
 	req = req.WithContext(ctx)
 
 	rr := httptest.NewRecorder()

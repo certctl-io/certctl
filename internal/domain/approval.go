@@ -22,18 +22,54 @@ import "time"
 // PCI-DSS Level 1, FedRAMP Moderate / High, and SOC 2 Type II
 // customers.
 type ApprovalRequest struct {
-	ID            string            `json:"id"`                      // ar-<slug>
-	CertificateID string            `json:"certificate_id"`          // FK managed_certificates.id
-	JobID         string            `json:"job_id"`                  // FK jobs.id (the blocked Job)
-	ProfileID     string            `json:"profile_id"`              // CertificateProfile that triggered the gate
-	RequestedBy   string            `json:"requested_by"`            // actor that triggered the renewal
-	State         ApprovalState     `json:"state"`                   // pending / approved / rejected / expired
-	DecidedBy     *string           `json:"decided_by,omitempty"`    // null while state=pending
-	DecidedAt     *time.Time        `json:"decided_at,omitempty"`    // null while state=pending
-	DecisionNote  *string           `json:"decision_note,omitempty"` // operator's reason text
-	Metadata      map[string]string `json:"metadata,omitempty"`      // common_name, sans, issuer_id, severity_tier
-	CreatedAt     time.Time         `json:"created_at"`
-	UpdatedAt     time.Time         `json:"updated_at"`
+	ID            string            `json:"id"`                       // ar-<slug>
+	Kind          ApprovalKind      `json:"kind"`                     // cert_issuance | profile_edit (Phase 9)
+	CertificateID string            `json:"certificate_id,omitempty"` // FK managed_certificates.id (nullable for profile_edit)
+	JobID         string            `json:"job_id,omitempty"`         // FK jobs.id (nullable for profile_edit)
+	ProfileID     string            `json:"profile_id"`               // CertificateProfile that triggered the gate
+	RequestedBy   string            `json:"requested_by"`             // actor that triggered the renewal
+	State         ApprovalState     `json:"state"`                    // pending / approved / rejected / expired
+	DecidedBy     *string           `json:"decided_by,omitempty"`     // null while state=pending
+	DecidedAt     *time.Time        `json:"decided_at,omitempty"`     // null while state=pending
+	DecisionNote  *string           `json:"decision_note,omitempty"`  // operator's reason text
+	Metadata      map[string]string `json:"metadata,omitempty"`       // common_name, sans, issuer_id, severity_tier
+	// Payload (Phase 9) carries the pending profile diff for
+	// approval_kind=profile_edit rows. Empty for cert_issuance.
+	// Stored as a raw JSON byte slice so the service layer
+	// serializes/deserializes the *domain.CertificateProfile
+	// without the repository needing to know the inner shape.
+	Payload   []byte    `json:"payload,omitempty"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
+}
+
+// ApprovalKind classifies the row into one of the supported approval
+// workflows. Bundle 1 Phase 9 ships exactly two kinds. Bundle 2 will
+// extend the enum (and the migration's CHECK constraint) without
+// reshaping the column.
+type ApprovalKind string
+
+const (
+	// ApprovalKindCertIssuance is the original Rank-7 workflow:
+	// cert/renewal blocked at JobStatusAwaitingApproval until a
+	// non-requester decides. cert_id + job_id are required.
+	ApprovalKindCertIssuance ApprovalKind = "cert_issuance"
+
+	// ApprovalKindProfileEdit (Phase 9) closes the flip-flop loophole:
+	// a profile with RequiresApproval=true cannot be mutated until a
+	// non-requester decides. The pending diff lives in Payload until
+	// the approver's POST /v1/approvals/{id}/approve triggers the
+	// apply path. cert_id / job_id are NULL for these rows.
+	ApprovalKindProfileEdit ApprovalKind = "profile_edit"
+)
+
+// IsValidApprovalKind reports whether k is a closed-enum value.
+func IsValidApprovalKind(k ApprovalKind) bool {
+	switch k {
+	case ApprovalKindCertIssuance, ApprovalKindProfileEdit:
+		return true
+	}
+	return false
 }
 
 // ApprovalState is the closed enum of approval lifecycle states.

@@ -5,7 +5,19 @@ import (
 
 	"github.com/certctl-io/certctl/internal/api/handler"
 	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 )
+
+// rbacGate wraps a handler with auth.RequirePermission(checker, perm,
+// nil). Used by RegisterHandlers to gate the legacy admin routes
+// (Bundle 1 Phase 3.5). When checker is nil the wrap is a no-op so
+// tests / demo deployments without the RBAC stack continue to work.
+func rbacGate(checker auth.PermissionChecker, perm string, h http.HandlerFunc) http.Handler {
+	if checker == nil {
+		return h
+	}
+	return auth.RequirePermission(checker, perm, nil)(h)
+}
 
 // Router wraps http.ServeMux and manages route registration with middleware.
 type Router struct {
@@ -66,10 +78,12 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 // The TestRouter_AuthExemptAllowlist regression test below pins the slice
 // to the actual mux.Handle calls — adding an undocumented bypass fails CI.
 var AuthExemptRouterRoutes = []string{
-	"GET /health",           // K8s/Docker liveness probe; cannot carry Bearer
-	"GET /ready",            // K8s/Docker readiness probe; cannot carry Bearer
-	"GET /api/v1/auth/info", // GUI calls before login to detect auth mode
-	"GET /api/v1/version",   // Rollout probes need build identity without key
+	"GET /health",                 // K8s/Docker liveness probe; cannot carry Bearer
+	"GET /ready",                  // K8s/Docker readiness probe; cannot carry Bearer
+	"GET /api/v1/auth/info",       // GUI calls before login to detect auth mode
+	"GET /api/v1/version",         // Rollout probes need build identity without key
+	"GET /api/v1/auth/bootstrap",  // Bundle 1 Phase 6 — GUI / install one-liner probes "is bootstrap available?" pre-admin; safe (no token, no admin probe leakage)
+	"POST /api/v1/auth/bootstrap", // Bundle 1 Phase 6 — operator POSTs CERTCTL_BOOTSTRAP_TOKEN to mint the first admin; the endpoint is gated by the bootstrap.Strategy and the admin-existence probe
 }
 
 // AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
@@ -112,6 +126,28 @@ type HandlerRegistry struct {
 	Digest         handler.DigestHandler
 	HealthChecks   *handler.HealthCheckHandler
 	BulkRevocation handler.BulkRevocationHandler
+
+	// Auth (Bundle 1 Phase 4) handles RBAC management endpoints under
+	// /api/v1/auth/{roles,permissions,keys,me}. Wired in cmd/server with
+	// the service-layer Authorizer + RoleService + ActorRoleService +
+	// PermissionService dependencies. Phase 5 ships the CLI mirror.
+	Auth handler.AuthHandler
+
+	// Bootstrap (Bundle 1 Phase 6) handles the day-0 admin path under
+	// /api/v1/auth/bootstrap. GET probes availability without revealing
+	// state; POST consumes CERTCTL_BOOTSTRAP_TOKEN once and mints the
+	// first admin API key. Both routes are auth-exempt (the endpoint
+	// itself authenticates via the bootstrap token).
+	Bootstrap handler.BootstrapHandler
+
+	// Checker is the load-bearing auth.PermissionChecker that
+	// auth.RequirePermission middleware uses to gate the legacy admin
+	// handlers (Bundle 1 Phase 3.5). cmd/server wires the postgres
+	// Authorizer here via the authPermissionCheckerAdapter shim. When
+	// nil, the wraps are no-ops and the routes fall through unguarded
+	// (only valid in tests / demo deployments — production MUST
+	// configure a Checker).
+	Checker auth.PermissionChecker
 	// L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
 	// server-side bulk endpoints replace pre-L-1 client-side N×HTTP
 	// loops in CertificatesPage.tsx. See handler/bulk_renewal.go and
@@ -218,6 +254,39 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Auth check endpoint (uses full middleware chain via r.Register)
 	r.Register("GET /api/v1/auth/check", http.HandlerFunc(reg.Health.AuthCheck))
 
+	// Bundle 1 Phase 6 — bootstrap routes. Auth-exempt because the
+	// endpoint itself authenticates via the CERTCTL_BOOTSTRAP_TOKEN
+	// (see internal/auth/bootstrap). Both routes are pinned in the
+	// AuthExemptRouterRoutes allowlist above.
+	r.mux.Handle("GET /api/v1/auth/bootstrap", middleware.Chain(
+		http.HandlerFunc(reg.Bootstrap.Available),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+	r.mux.Handle("POST /api/v1/auth/bootstrap", middleware.Chain(
+		http.HandlerFunc(reg.Bootstrap.Mint),
+		middleware.CORS,
+		middleware.ContentType,
+	))
+
+	// RBAC management routes (Bundle 1 Phase 4). Permission gates are
+	// enforced inside each handler via the service layer; the Phase 3
+	// auth.RequirePermission middleware factory will wrap these in a
+	// Phase 3.5 router-level pass once the legacy admin handlers are
+	// converted in lockstep.
+	r.Register("GET /api/v1/auth/me", http.HandlerFunc(reg.Auth.Me))
+	r.Register("GET /api/v1/auth/permissions", http.HandlerFunc(reg.Auth.ListPermissions))
+	r.Register("GET /api/v1/auth/roles", http.HandlerFunc(reg.Auth.ListRoles))
+	r.Register("POST /api/v1/auth/roles", http.HandlerFunc(reg.Auth.CreateRole))
+	r.Register("GET /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.GetRole))
+	r.Register("PUT /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.UpdateRole))
+	r.Register("DELETE /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.DeleteRole))
+	r.Register("POST /api/v1/auth/roles/{id}/permissions", http.HandlerFunc(reg.Auth.AddRolePermission))
+	r.Register("DELETE /api/v1/auth/roles/{id}/permissions/{perm}", http.HandlerFunc(reg.Auth.RemoveRolePermission))
+	r.Register("GET /api/v1/auth/keys", http.HandlerFunc(reg.Auth.ListKeys))
+	r.Register("POST /api/v1/auth/keys/{id}/roles", http.HandlerFunc(reg.Auth.AssignRoleToKey))
+	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", http.HandlerFunc(reg.Auth.RevokeRoleFromKey))
+
 	// Certificates routes: /api/v1/certificates
 	// Bulk operations MUST register before {id} routes — Go 1.22 ServeMux
 	// gives literal segments precedence over pattern-var segments, but
@@ -227,11 +296,11 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// in, {total_matched, total_<verb>, total_skipped, total_failed,
 	// errors[]} out). L-1 master added bulk-renew + bulk-reassign
 	// alongside the pre-existing bulk-revoke.
-	r.Register("POST /api/v1/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevoke))
+	r.Register("POST /api/v1/certificates/bulk-revoke", rbacGate(reg.Checker, "cert.bulk_revoke", reg.BulkRevocation.BulkRevoke))
 	// EST RFC 7030 hardening Phase 11.2 — Source-scoped EST bulk-revoke.
 	// Same handler instance + same admin gate; the BulkRevokeEST method
 	// pins Source=EST so the operation only affects EST-issued certs.
-	r.Register("POST /api/v1/est/certificates/bulk-revoke", http.HandlerFunc(reg.BulkRevocation.BulkRevokeEST))
+	r.Register("POST /api/v1/est/certificates/bulk-revoke", rbacGate(reg.Checker, "cert.bulk_revoke", reg.BulkRevocation.BulkRevokeEST))
 	r.Register("POST /api/v1/certificates/bulk-renew", http.HandlerFunc(reg.BulkRenewal.BulkRenew))
 	r.Register("POST /api/v1/certificates/bulk-reassign", http.HandlerFunc(reg.BulkReassignment.BulkReassign))
 	r.Register("GET /api/v1/certificates", http.HandlerFunc(reg.Certificates.ListCertificates))
@@ -355,18 +424,18 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Bundle CRL/OCSP-Responder Phase 5: admin observability for the
 	// scheduler-driven CRL pre-generation cache. Admin-gated inside
 	// the handler (M-003 pattern); non-admin callers get 403.
-	r.Register("GET /api/v1/admin/crl/cache", http.HandlerFunc(reg.AdminCRLCache.ListCache))
+	r.Register("GET /api/v1/admin/crl/cache", rbacGate(reg.Checker, "crl.admin", reg.AdminCRLCache.ListCache))
 	// SCEP RFC 8894 + Intune master bundle Phase 9.2 + Phase 9 follow-up
 	// (the project's SCEP GUI restructure spec). All three endpoints are
 	// admin-gated at the handler layer; the M-008 regression scanner pins
 	// the gate set and TestM008_AdminGatedHandlers_HaveTripletTests
 	// enforces the per-handler test triplet.
-	r.Register("GET /api/v1/admin/scep/profiles", http.HandlerFunc(reg.AdminSCEPIntune.Profiles))
-	r.Register("GET /api/v1/admin/scep/intune/stats", http.HandlerFunc(reg.AdminSCEPIntune.Stats))
-	r.Register("POST /api/v1/admin/scep/intune/reload-trust", http.HandlerFunc(reg.AdminSCEPIntune.ReloadTrust))
+	r.Register("GET /api/v1/admin/scep/profiles", rbacGate(reg.Checker, "scep.admin", reg.AdminSCEPIntune.Profiles))
+	r.Register("GET /api/v1/admin/scep/intune/stats", rbacGate(reg.Checker, "scep.admin", reg.AdminSCEPIntune.Stats))
+	r.Register("POST /api/v1/admin/scep/intune/reload-trust", rbacGate(reg.Checker, "scep.admin", reg.AdminSCEPIntune.ReloadTrust))
 	// EST RFC 7030 hardening Phase 7.2 — admin-gated EST observability.
-	r.Register("GET /api/v1/admin/est/profiles", http.HandlerFunc(reg.AdminEST.Profiles))
-	r.Register("POST /api/v1/admin/est/reload-trust", http.HandlerFunc(reg.AdminEST.ReloadTrust))
+	r.Register("GET /api/v1/admin/est/profiles", rbacGate(reg.Checker, "est.admin", reg.AdminEST.Profiles))
+	r.Register("POST /api/v1/admin/est/reload-trust", rbacGate(reg.Checker, "est.admin", reg.AdminEST.ReloadTrust))
 
 	// Notifications routes: /api/v1/notifications
 	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))
@@ -392,10 +461,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// /retire literal segment resolves before the {id} pattern-var
 	// route under Go 1.22 ServeMux precedence — the ordering below
 	// matches the notifications + approvals blocks above.
-	r.Register("POST /api/v1/issuers/{id}/intermediates", http.HandlerFunc(reg.IntermediateCAs.Create))
-	r.Register("GET /api/v1/issuers/{id}/intermediates", http.HandlerFunc(reg.IntermediateCAs.List))
-	r.Register("POST /api/v1/intermediates/{id}/retire", http.HandlerFunc(reg.IntermediateCAs.Retire))
-	r.Register("GET /api/v1/intermediates/{id}", http.HandlerFunc(reg.IntermediateCAs.Get))
+	r.Register("POST /api/v1/issuers/{id}/intermediates", rbacGate(reg.Checker, "ca.hierarchy.manage", reg.IntermediateCAs.Create))
+	r.Register("GET /api/v1/issuers/{id}/intermediates", rbacGate(reg.Checker, "ca.hierarchy.manage", reg.IntermediateCAs.List))
+	r.Register("POST /api/v1/intermediates/{id}/retire", rbacGate(reg.Checker, "ca.hierarchy.manage", reg.IntermediateCAs.Retire))
+	r.Register("GET /api/v1/intermediates/{id}", rbacGate(reg.Checker, "ca.hierarchy.manage", reg.IntermediateCAs.Get))
 
 	// Stats routes: /api/v1/stats
 	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(reg.Stats.GetDashboardSummary))

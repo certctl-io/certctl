@@ -10,7 +10,7 @@ import (
 	"sync"
 	"testing"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/certctl-io/certctl/internal/service"
@@ -117,7 +117,7 @@ func reqWithActor(t *testing.T, method, target string, body string, actor string
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if actor != "" {
-		req = req.WithContext(context.WithValue(req.Context(), middleware.UserKey{}, actor))
+		req = req.WithContext(context.WithValue(req.Context(), auth.UserKey{}, actor))
 	}
 	if pathID != "" {
 		req.SetPathValue("id", pathID)

@@ -5,6 +5,7 @@ import (
 	"crypto"
 	"crypto/tls"
 	"crypto/x509"
+	"encoding/json"
 	"encoding/pem"
 	"fmt"
 	"log/slog"
@@ -21,6 +22,8 @@ import (
 	"github.com/certctl-io/certctl/internal/api/handler"
 	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/api/router"
+	"github.com/certctl-io/certctl/internal/auth"
+	"github.com/certctl-io/certctl/internal/auth/bootstrap"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -32,11 +35,14 @@ import (
 	notifyteams "github.com/certctl-io/certctl/internal/connector/notifier/teams"
 	"github.com/certctl-io/certctl/internal/crypto/signer"
 	"github.com/certctl-io/certctl/internal/domain"
+	authdomainAlias "github.com/certctl-io/certctl/internal/domain/auth"
 	"github.com/certctl-io/certctl/internal/ratelimit"
+	"github.com/certctl-io/certctl/internal/repository"
 	"github.com/certctl-io/certctl/internal/repository/postgres"
 	"github.com/certctl-io/certctl/internal/scep/intune"
 	"github.com/certctl-io/certctl/internal/scheduler"
 	"github.com/certctl-io/certctl/internal/service"
+	authsvc "github.com/certctl-io/certctl/internal/service/auth"
 	"github.com/certctl-io/certctl/internal/trustanchor"
 )
 
@@ -251,6 +257,77 @@ func main() {
 
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
+
+	// RBAC primitive (Bundle 1 Phase 4). Wires the postgres auth repos
+	// + service-layer Authorizer that the AuthHandler / RequirePermission
+	// middleware uses. Migration 000029_rbac.up.sql provides the schema
+	// and seeds the seven default roles + canonical permission catalogue
+	// + actor-demo-anon synthetic admin (CERTCTL_AUTH_TYPE=none demo path).
+	authRoleRepo := postgres.NewRoleRepository(db)
+	authPermRepo := postgres.NewPermissionRepository(db)
+	authActorRoleRepo := postgres.NewActorRoleRepository(db)
+	authAPIKeyRepo := postgres.NewAPIKeyRepository(db)
+	authAuthorizer := authsvc.NewAuthorizer(authActorRoleRepo)
+	// authCheckerAdapter bridges authsvc.Authorizer (typed-string args)
+	// to the auth.PermissionChecker interface (plain-string args) so
+	// internal/auth doesn't have to import internal/service/auth.
+	authCheckerAdapter := authPermissionCheckerAdapter{a: authAuthorizer}
+
+	// Bundle 1 Phase 6 — parse env-var named API keys + assemble the
+	// runtime keystore + wire the bootstrap service. The keystore +
+	// bootstrap handler must exist before the HandlerRegistry is
+	// constructed below; the auth middleware that reads from the same
+	// keystore is wired further down (next to the rest of the
+	// middleware stack) but holds a reference to the same keystore so
+	// runtime additions from bootstrap propagate without restart.
+	//
+	// boot-path operations use context.Background() because the long-
+	// lived request context isn't constructed until later in main();
+	// this matches the convention used by other one-shot setup calls
+	// in this section (issuerService.SeedFromEnvVars, etc.).
+	bootCtx := context.Background()
+	namedKeys := assembleNamedAPIKeys(cfg, logger)
+	backfillNamedKeyActorRoles(bootCtx, authActorRoleRepo, namedKeys, logger)
+	authKeyStore := auth.NewMutableKeyStore(namedKeys)
+	if persistedKeys, err := authAPIKeyRepo.List(bootCtx, authdomainAlias.DefaultTenantID); err == nil {
+		for _, pk := range persistedKeys {
+			authKeyStore.AddHashed(pk.Name, pk.KeyHash, pk.Admin)
+		}
+		if len(persistedKeys) > 0 {
+			logger.Info("loaded persisted api_keys into runtime keystore",
+				"count", len(persistedKeys))
+		}
+	} else {
+		logger.Warn("api_keys boot loader failed; bootstrap-minted keys will not authenticate until next restart that succeeds",
+			"err", err)
+	}
+	bootstrapStrategy := bootstrap.NewEnvTokenStrategy(
+		cfg.Auth.BootstrapToken,
+		func(ctx context.Context) (bool, error) {
+			return authActorRoleRepo.AdminExists(ctx, authdomainAlias.DefaultTenantID)
+		},
+	)
+	bootstrapService := bootstrap.NewService(
+		bootstrapStrategy,
+		authAPIKeyRepo,
+		authActorRoleRepo,
+		auditService,
+		authKeyStore,
+		auth.HashAPIKey,
+	)
+	if cfg.Auth.BootstrapToken != "" {
+		// Honour the prompt's "warn at startup if token set + admin
+		// exists" requirement. The strategy re-probes on every Validate
+		// so this boot-time warning is purely informational.
+		if exists, probeErr := authActorRoleRepo.AdminExists(bootCtx, authdomainAlias.DefaultTenantID); probeErr == nil && exists {
+			logger.Warn("CERTCTL_BOOTSTRAP_TOKEN set but admin actors already exist; bootstrap endpoint will return 410 Gone — unset the env var to silence this warning")
+		} else if probeErr != nil {
+			logger.Warn("CERTCTL_BOOTSTRAP_TOKEN admin-existence probe failed at startup; behaviour will be determined by the live probe at request time", "err", probeErr)
+		} else {
+			logger.Info("bootstrap endpoint enabled — POST /api/v1/auth/bootstrap to mint the first admin key (one-shot)")
+		}
+	}
+	bootstrapHandler := handler.NewBootstrapHandler(bootstrapService)
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
@@ -483,6 +560,36 @@ func main() {
 	defer issuerRegistry.StopLifecycles()
 	targetService := service.NewTargetService(targetRepo, auditService, agentRepo, encryptionKey, logger)
 	profileService := service.NewProfileService(profileRepo, auditService)
+	// Bundle 1 Phase 9 — approval-bypass closure. Wire the profile
+	// service's gate to the existing ApprovalService so edits to a
+	// RequiresApproval=true profile route through the four-eyes
+	// workflow. The profile-edit-apply callback registered on the
+	// ApprovalService closes the loop: when an approver decides,
+	// the callback deserializes req.Payload and persists the diff.
+	profileService.SetApprovalService(approvalService)
+	approvalService.SetProfileEditApply(func(ctx context.Context, req *domain.ApprovalRequest) error {
+		var pendingProfile domain.CertificateProfile
+		if err := json.Unmarshal(req.Payload, &pendingProfile); err != nil {
+			return fmt.Errorf("decode profile-edit payload: %w", err)
+		}
+		pendingProfile.ID = req.ProfileID
+		if err := profileRepo.Update(ctx, &pendingProfile); err != nil {
+			return fmt.Errorf("apply profile-edit diff: %w", err)
+		}
+		// Audit row category=auth so the auditor surface keeps the
+		// approval-decision history grouped with the request side.
+		if auditService != nil {
+			_ = auditService.RecordEventWithCategory(ctx, "approval-system",
+				domain.ActorTypeSystem, "profile.edit_applied",
+				domain.EventCategoryAuth, "certificate_profile",
+				req.ProfileID,
+				map[string]interface{}{
+					"approval_id":  req.ID,
+					"requested_by": req.RequestedBy,
+				})
+		}
+		return nil
+	})
 	teamService := service.NewTeamService(teamRepo, auditService)
 	ownerService := service.NewOwnerService(ownerRepo, auditService)
 	agentGroupRepo := postgres.NewAgentGroupRepository(db)
@@ -661,6 +768,12 @@ func main() {
 	// Bundle-5 / H-006: pass the *sql.DB pool so /ready can probe DB
 	// connectivity via PingContext. /health stays shallow (liveness signal).
 	healthHandler := handler.NewHealthHandler(cfg.Auth.Type, db)
+	// Bundle 1 Phase 3 closure (M1): wire the AuthCheckResolver so
+	// /v1/auth/check returns the caller's standing roles + effective
+	// permissions in the same response. The shim is tiny — just a type-
+	// erasure wrap around the repo so the handler layer doesn't have to
+	// import internal/domain/auth or internal/repository/postgres.
+	healthHandler.Resolver = authCheckResolverAdapter{repo: authActorRoleRepo}
 	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
 	// answers GET /api/v1/version with build identity (ldflags Version,
 	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
@@ -961,6 +1074,32 @@ func main() {
 		// Rank 8 of the 2026-05-03 deep-research deliverable. See
 		// docs/intermediate-ca-hierarchy.md.
 		IntermediateCAs: intermediateCAHandler,
+		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
+		// auth repos + service-layer Authorizer / RoleService /
+		// ActorRoleService / PermissionService into the HTTP surface
+		// under /api/v1/auth/*. The service layer enforces every
+		// permission gate (auth.role.* + auth.role.assign privilege-
+		// escalation guard); the Phase 3 RequirePermission middleware
+		// is currently used by these RBAC routes via the in-handler
+		// callerFromRequest path. Phase 3.5 router-wrapping conversion
+		// of the legacy admin handlers (bulk_revocation, admin_*,
+		// intermediate_ca) is the remaining sweep.
+		Auth: handler.NewAuthHandler(
+			authsvc.NewRoleService(authRoleRepo, authPermRepo, authAuthorizer, auditService),
+			authsvc.NewPermissionService(authPermRepo),
+			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
+			authCheckerAdapter,
+		),
+		// Bundle 1 Phase 6 — bootstrap day-0 admin endpoint. The
+		// service is wired above; handler is auth-exempt at the
+		// router (gated by the bootstrap.Strategy itself).
+		Bootstrap: bootstrapHandler,
+		// Checker is the load-bearing auth.PermissionChecker that
+		// auth.RequirePermission middleware uses to gate the legacy admin
+		// handlers (Bundle 1 Phase 3.5: bulk_revocation, admin_crl_cache,
+		// admin_scep_intune, admin_est, intermediate_ca). Wraps live in
+		// router.go via rbacGate(reg.Checker, perm, handler).
+		Checker: authCheckerAdapter,
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//
@@ -1477,49 +1616,19 @@ func main() {
 
 	// Build middleware stack.
 	//
-	// Authentication unification (M-002): every authenticated request now
-	// carries a named actor in the request context so audit events record
-	// the real key identity instead of the hardcoded "api-key-user" string.
-	// Named keys come from CERTCTL_API_KEYS_NAMED (preferred). For backward
-	// compatibility CERTCTL_AUTH_SECRET is synthesized into legacy-key-N
-	// entries with Admin=false.
-	var namedKeys []middleware.NamedAPIKey
-	if config.AuthType(cfg.Auth.Type) != config.AuthTypeNone {
-		// Translate typed config.NamedAPIKey -> middleware.NamedAPIKey. The
-		// two structs are field-compatible but live in different packages to
-		// preserve the config→middleware dependency direction.
-		for _, nk := range cfg.Auth.NamedKeys {
-			namedKeys = append(namedKeys, middleware.NamedAPIKey{
-				Name:  nk.Name,
-				Key:   nk.Key,
-				Admin: nk.Admin,
-			})
-		}
-		// Back-compat: if no named keys but legacy Secret is configured,
-		// synthesize named entries so the audit trail still attributes the
-		// action (instead of falling back to "api-key-user" / "anonymous").
-		if len(namedKeys) == 0 && cfg.Auth.Secret != "" {
-			parts := strings.Split(cfg.Auth.Secret, ",")
-			idx := 0
-			for _, p := range parts {
-				p = strings.TrimSpace(p)
-				if p == "" {
-					continue
-				}
-				namedKeys = append(namedKeys, middleware.NamedAPIKey{
-					Name:  fmt.Sprintf("legacy-key-%d", idx),
-					Key:   p,
-					Admin: false,
-				})
-				idx++
-			}
-			if len(namedKeys) > 0 {
-				logger.Warn("CERTCTL_AUTH_SECRET is deprecated — set CERTCTL_API_KEYS_NAMED for named actor attribution and admin gating",
-					"synthesized_keys", len(namedKeys))
-			}
-		}
+	// Bundle 1 Phase 6: namedKeys + authKeyStore + bootstrap service
+	// are now constructed earlier (right after the auth repos) so the
+	// HandlerRegistry can wire the bootstrap handler. The auth
+	// middleware below reads from the same authKeyStore reference, so
+	// runtime additions from bootstrap propagate without restart.
+	var authMiddleware func(http.Handler) http.Handler
+	switch config.AuthType(cfg.Auth.Type) {
+	case config.AuthTypeNone:
+		authMiddleware = auth.NewDemoModeAuth()
+	default:
+		authMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
 	}
-	authMiddleware := middleware.NewAuthWithNamedKeys(namedKeys)
+	_ = bootstrapHandler // referenced by HandlerRegistry above
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
 	})
@@ -2230,4 +2339,68 @@ func buildFinalHandler(apiHandler, noAuthHandler http.Handler, webDir string, da
 		}
 		http.ServeFile(w, r, webDir+"/index.html")
 	})
+}
+
+// authPermissionCheckerAdapter bridges the typed-string Authorizer
+// signature (authsvc.Authorizer.CheckPermission takes
+// authdomain.ActorTypeValue + authdomain.ScopeType) to the plain-string
+// auth.PermissionChecker interface used by the auth.RequirePermission
+// middleware factory. Lives in cmd/server so internal/auth doesn't have
+// to import internal/service/auth + internal/domain/auth (would create
+// a cycle).
+type authPermissionCheckerAdapter struct {
+	a *authsvc.Authorizer
+}
+
+func (ad authPermissionCheckerAdapter) CheckPermission(
+	ctx context.Context,
+	actorID string,
+	actorType string,
+	tenantID string,
+	permission string,
+	scopeType string,
+	scopeID *string,
+) (bool, error) {
+	return ad.a.CheckPermission(
+		ctx,
+		actorID,
+		authdomainAlias.ActorTypeValue(actorType),
+		tenantID,
+		permission,
+		authdomainAlias.ScopeType(scopeType),
+		scopeID,
+	)
+}
+
+// authCheckResolverAdapter bridges the postgres ActorRoleRepository
+// (authdomain.ActorTypeValue) to handler.AuthCheckResolver
+// (domain.ActorType). Lives in cmd/server so the handler layer keeps its
+// existing import set; the GUI's /v1/auth/check probe round-trips
+// through this on every page load. Read-only — no caller / no audit row.
+//
+// Bundle 1 Phase 3 closure (M1): the equivalent surface area on
+// /v1/auth/me runs through the service layer's auth.role.list permission
+// gate, which the GUI may not yet hold during initial render. AuthCheck
+// has no permission gate (its only requirement is "the request
+// authenticated"), so the bypass is by design.
+type authCheckResolverAdapter struct {
+	repo *postgres.ActorRoleRepository
+}
+
+func (ad authCheckResolverAdapter) ListRoles(
+	ctx context.Context,
+	actorID string,
+	actorType domain.ActorType,
+	tenantID string,
+) ([]*authdomainAlias.ActorRole, error) {
+	return ad.repo.ListByActor(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
+}
+
+func (ad authCheckResolverAdapter) EffectivePermissions(
+	ctx context.Context,
+	actorID string,
+	actorType domain.ActorType,
+	tenantID string,
+) ([]repository.EffectivePermission, error) {
+	return ad.repo.EffectivePermissions(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
 }

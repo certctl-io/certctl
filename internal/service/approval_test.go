@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -30,9 +31,14 @@ func (f *fakeApprovalRepo) Create(ctx context.Context, req *domain.ApprovalReque
 		req.ID = "ar-fake-" + time.Now().Format("150405.000000000")
 	}
 	// Enforce the partial-unique pending-per-job at the mock layer too.
-	for _, existing := range f.rows {
-		if existing.JobID == req.JobID && existing.State == domain.ApprovalStatePending {
-			return repository.ErrAlreadyExists
+	// Bundle 1 Phase 9: Postgres treats NULLs as distinct in UNIQUE
+	// indexes, so profile_edit rows (JobID="") never collide with
+	// each other or with cert_issuance rows. Mirror that here.
+	if req.JobID != "" {
+		for _, existing := range f.rows {
+			if existing.JobID == req.JobID && existing.State == domain.ApprovalStatePending {
+				return repository.ErrAlreadyExists
+			}
 		}
 	}
 	cp := *req
@@ -382,5 +388,100 @@ func TestApproval_MetricCounterIncrements(t *testing.T) {
 	hist := metrics.SnapshotApprovalPendingAgeHistogram()
 	if hist.Count < 3 {
 		t.Fatalf("expected at least 3 histogram samples; got %d", hist.Count)
+	}
+}
+
+// =============================================================================
+// Bundle 1 Phase 9 — profile_edit kind tests.
+// =============================================================================
+
+// TestApproval_RequestProfileEditCreatesPendingRow pins the new
+// RequestProfileEditApproval entry point: creates a pending row with
+// Kind=profile_edit, no cert_id / job_id, and the serialized profile
+// diff in Payload.
+func TestApproval_RequestProfileEditCreatesPendingRow(t *testing.T) {
+	svc, ar, _ := newApprovalSvcForTest(false)
+	payload := []byte(`{"id":"prof-prod","name":"renamed","requires_approval":true}`)
+	id, err := svc.RequestProfileEditApproval(context.Background(), "prof-prod", "user-alice", payload)
+	if err != nil {
+		t.Fatalf("RequestProfileEditApproval err: %v", err)
+	}
+	got, err := ar.Get(context.Background(), id)
+	if err != nil {
+		t.Fatalf("Get err: %v", err)
+	}
+	if got.Kind != domain.ApprovalKindProfileEdit {
+		t.Errorf("Kind = %q, want profile_edit", got.Kind)
+	}
+	if got.CertificateID != "" || got.JobID != "" {
+		t.Errorf("profile_edit row carries cert_id=%q job_id=%q; both must be empty", got.CertificateID, got.JobID)
+	}
+	if string(got.Payload) != string(payload) {
+		t.Errorf("payload roundtrip wrong; got %s", string(got.Payload))
+	}
+}
+
+// TestApproval_ProfileEdit_SameActorSelfApproveRejected pins the
+// load-bearing two-person integrity invariant for profile_edit
+// approvals: the requester cannot approve their own row.
+func TestApproval_ProfileEdit_SameActorSelfApproveRejected(t *testing.T) {
+	svc, _, _ := newApprovalSvcForTest(false)
+	id, err := svc.RequestProfileEditApproval(context.Background(),
+		"prof-prod", "user-alice",
+		[]byte(`{"id":"prof-prod"}`))
+	if err != nil {
+		t.Fatalf("RequestProfileEditApproval err: %v", err)
+	}
+	got := svc.Approve(context.Background(), id, "user-alice", "self-approve attempt")
+	if !errors.Is(got, ErrApproveBySameActor) {
+		t.Errorf("self-approve err = %v, want ErrApproveBySameActor", got)
+	}
+}
+
+// TestApproval_ProfileEdit_RejectsWhenApplyCallbackMissing pins
+// that the approve path fails closed when a profile_edit row is
+// approved without a registered profileEditApply callback. Better
+// to surface a 500 than silently mark the row approved while the
+// underlying profile is untouched.
+func TestApproval_ProfileEdit_RejectsWhenApplyCallbackMissing(t *testing.T) {
+	svc, _, _ := newApprovalSvcForTest(false)
+	id, _ := svc.RequestProfileEditApproval(context.Background(),
+		"prof-prod", "user-alice",
+		[]byte(`{"id":"prof-prod"}`))
+	// Approver = different actor.
+	err := svc.Approve(context.Background(), id, "user-bob", "approving")
+	if err == nil {
+		t.Fatalf("Approve must fail when profile-edit-apply is unwired; got nil")
+	}
+	// Sentinel propagates from approveInternal — message contains the cue.
+	if !strings.Contains(err.Error(), "apply callback not registered") {
+		t.Errorf("err = %v, want 'apply callback not registered'", err)
+	}
+}
+
+// TestApproval_ProfileEdit_ApplyCallbackInvokedOnApprove pins the
+// happy-path: when a profile-edit-apply callback is registered AND
+// a non-requester approves, the callback fires with the right row.
+func TestApproval_ProfileEdit_ApplyCallbackInvokedOnApprove(t *testing.T) {
+	svc, _, _ := newApprovalSvcForTest(false)
+	var captured *domain.ApprovalRequest
+	svc.SetProfileEditApply(func(_ context.Context, req *domain.ApprovalRequest) error {
+		captured = req
+		return nil
+	})
+	id, _ := svc.RequestProfileEditApproval(context.Background(),
+		"prof-prod", "user-alice",
+		[]byte(`{"id":"prof-prod","name":"renamed"}`))
+	if err := svc.Approve(context.Background(), id, "user-bob", "looks good"); err != nil {
+		t.Fatalf("Approve err: %v", err)
+	}
+	if captured == nil {
+		t.Fatalf("apply callback never invoked")
+	}
+	if captured.Kind != domain.ApprovalKindProfileEdit {
+		t.Errorf("captured.Kind = %q, want profile_edit", captured.Kind)
+	}
+	if captured.ProfileID != "prof-prod" {
+		t.Errorf("captured.ProfileID = %q, want prof-prod", captured.ProfileID)
 	}
 }

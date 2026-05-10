@@ -1566,6 +1566,25 @@ type AuthConfig struct {
 	// Generation guidance: `openssl rand -hex 32` (256-bit entropy).
 	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN environment variable.
 	AgentBootstrapToken string
+
+	// BootstrapToken is the one-shot pre-shared secret that gates the
+	// Bundle 1 Phase 6 bootstrap endpoint (POST /v1/auth/bootstrap). When
+	// set at server startup AND no admin-roled actors exist, the
+	// bootstrap endpoint becomes callable: an operator POSTs the token
+	// and a desired admin-key name; the server mints a fresh API key,
+	// grants it the r-admin role, and returns the key value once. The
+	// token is then invalidated in memory; subsequent calls return 410
+	// Gone. The endpoint also returns 410 Gone when admin actors already
+	// exist (no need for the bootstrap path).
+	//
+	// Server NEVER logs this token. The minted admin key is returned in
+	// the HTTP response body only; not logged. Operators who lose track
+	// of the minted key can rotate it via the regular RBAC API after
+	// bootstrap.
+	//
+	// Generation guidance: `openssl rand -hex 32` (256-bit entropy).
+	// Setting: CERTCTL_BOOTSTRAP_TOKEN environment variable.
+	BootstrapToken string
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -1687,6 +1706,10 @@ func Load() (*Config, error) {
 			// Bundle-5 / Audit H-007: agent-registration bootstrap secret.
 			// Empty (default) = warn-mode pass-through; v2.2.0 will require it.
 			AgentBootstrapToken: getEnv("CERTCTL_AGENT_BOOTSTRAP_TOKEN", ""),
+			// Bundle 1 Phase 6: one-shot bootstrap token for the
+			// /v1/auth/bootstrap endpoint that mints the first admin
+			// key. Empty = bootstrap endpoint disabled (default).
+			BootstrapToken: getEnv("CERTCTL_BOOTSTRAP_TOKEN", ""),
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),

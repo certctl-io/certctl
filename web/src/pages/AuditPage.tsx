@@ -63,16 +63,29 @@ function exportJSON(events: AuditEvent[]) {
   downloadFile(json, `audit-trail-${new Date().toISOString().slice(0, 10)}.json`, 'application/json');
 }
 
+// Bundle 1 Phase 8 + Phase 10 — event_category filter exposed via the
+// category query param. Allowed values match the server's CHECK
+// constraint; the auditor role uses category=auth to surface only
+// authentication / authorization rows.
+const CATEGORIES = [
+  { label: 'All categories', value: '' },
+  { label: 'Cert lifecycle', value: 'cert_lifecycle' },
+  { label: 'Auth', value: 'auth' },
+  { label: 'Config', value: 'config' },
+];
+
 export default function AuditPage() {
   const [resourceType, setResourceType] = useState('');
   const [actorFilter, setActorFilter] = useState('');
   const [timeRange, setTimeRange] = useState('');
   const [actionFilter, setActionFilter] = useState('');
+  const [category, setCategory] = useState('');
 
   const params: Record<string, string> = {};
   if (resourceType) params.resource_type = resourceType;
   if (actorFilter) params.actor = actorFilter;
   if (actionFilter) params.action = actionFilter;
+  if (category) params.category = category;
 
   const { data, isLoading, error, refetch } = useQuery({
     queryKey: ['audit', params],
@@ -134,7 +147,7 @@ export default function AuditPage() {
     { key: 'time', label: 'Time', render: (e) => <span className="text-xs text-ink-muted">{formatDateTime(e.timestamp)}</span> },
   ];
 
-  const hasFilters = resourceType || actorFilter || timeRange || actionFilter;
+  const hasFilters = resourceType || actorFilter || timeRange || actionFilter || category;
 
   return (
     <>
@@ -155,6 +168,16 @@ export default function AuditPage() {
         }
       />
       <div className="px-4 py-3 flex flex-wrap gap-3 border-b border-surface-border/50">
+        <select
+          value={category}
+          onChange={(e) => setCategory(e.target.value)}
+          className="bg-surface border border-surface-border rounded px-3 py-1.5 text-xs text-ink focus:outline-none focus:border-brand-400"
+          data-testid="audit-category-filter"
+        >
+          {CATEGORIES.map((c) => (
+            <option key={c.value} value={c.value}>{c.label}</option>
+          ))}
+        </select>
         <select
           value={resourceType}
           onChange={(e) => setResourceType(e.target.value)}

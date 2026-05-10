@@ -73,6 +73,22 @@ INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at
   ('server-scanner', 'Network Scanner (Server-Side)', 'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.0.14')
 ON CONFLICT (id) DO NOTHING;
 
+-- Bundled docker-compose agent. Pre-Bundle-1 the bundled `certctl-agent`
+-- service hit a fail-fast path on startup ("agent-id flag or
+-- CERTCTL_AGENT_ID env var is required") because no row was pre-seeded
+-- and no auto-register was wired; the container restart-looped silently
+-- on every fresh `docker compose up`. Latent since 2026-03-14
+-- (commit d395776 added the env var but no seed). Bundle 1 closes the
+-- loop: seed_demo.sql pre-seeds this row, docker-compose.yml's agent
+-- service sets CERTCTL_AGENT_ID=agent-demo-1 + CERTCTL_DEMO_SEED=true
+-- on the server. api_key_hash is opaque since the demo runs with
+-- CERTCTL_AUTH_TYPE=none (synthetic actor-demo-anon covers every
+-- request); production deploys override both env vars + use the
+-- regular registration flow.
+INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
+  ('agent-demo-1', 'docker-agent', 'certctl-agent', 'Online', NOW(), NOW(), 'demo_no_auth', 'linux', 'amd64', '127.0.0.1', '2.1.0')
+ON CONFLICT (id) DO NOTHING;
+
 -- Sentinel agents for cloud discovery sources (M50)
 INSERT INTO agents (id, name, hostname, status, last_heartbeat_at, registered_at, api_key_hash, os, architecture, ip_address, version) VALUES
   ('cloud-aws-sm',   'AWS Secrets Manager Discovery',  'certctl-server', 'Online', NOW(), NOW() - INTERVAL '90 days', 'sentinel_no_auth', 'linux', 'amd64', '127.0.0.1', '2.1.0'),

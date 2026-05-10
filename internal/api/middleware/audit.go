@@ -12,6 +12,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/certctl-io/certctl/internal/auth"
 )
 
 // AuditRecorder is the interface that the audit middleware uses to record API calls.
@@ -115,7 +117,7 @@ func (a *AuditMiddleware) Middleware(next http.Handler) http.Handler {
 
 		// Extract actor from auth context
 		actor := "anonymous"
-		if user := GetUser(r.Context()); user != "" {
+		if user := auth.GetUser(r.Context()); user != "" {
 			actor = user
 		}
 

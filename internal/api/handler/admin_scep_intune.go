@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
 	"github.com/certctl-io/certctl/internal/service"
 )
 
@@ -90,10 +89,7 @@ func (h AdminSCEPIntuneHandler) Profiles(w http.ResponseWriter, r *http.Request)
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	now := time.Now()
 	rows, err := h.svc.Profiles(r.Context(), now)
@@ -118,10 +114,7 @@ func (h AdminSCEPIntuneHandler) Stats(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	now := time.Now()
 	rows, err := h.svc.Stats(r.Context(), now)
@@ -146,10 +139,7 @@ func (h AdminSCEPIntuneHandler) ReloadTrust(w http.ResponseWriter, r *http.Reque
 		Error(w, http.StatusMethodNotAllowed, "Method not allowed")
 		return
 	}
-	if !middleware.IsAdmin(r.Context()) {
-		Error(w, http.StatusForbidden, "Admin access required")
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (RequirePermission middleware).
 
 	var body adminScepIntuneReloadRequest
 	// An empty body is permitted: it implicitly targets the legacy

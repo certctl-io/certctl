@@ -1,6 +1,6 @@
 # certctl Security Posture & Operator Guidance
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-09
 
 This document collects the operator-facing security guidance that the source
 code's per-finding comment blocks reference. Each section names the audit
@@ -41,10 +41,10 @@ For certificates issued to systems where revocation correctness matters:
    ignore it.
 3. **Confirm the deployment target is configured for OCSP stapling** so the
    server can actually deliver the stapled response in the handshake.
-   - **nginx:** `ssl_stapling on; ssl_stapling_verify on;`
-   - **Apache:** `SSLUseStapling on`
-   - **HAProxy:** `set ssl ocsp-response /path/to/response.der`
-   - **Envoy:** `ocsp_staple_policy: must_staple`
+ - **nginx:** `ssl_stapling on; ssl_stapling_verify on;`
+ - **Apache:** `SSLUseStapling on`
+ - **HAProxy:** `set ssl ocsp-response /path/to/response.der`
+ - **Envoy:** `ocsp_staple_policy: must_staple`
 
 ### What this does NOT cover
 
@@ -67,7 +67,7 @@ Bundle B / M-001. PBKDF2-SHA256 at 600,000 rounds (OWASP 2024 Password
 Storage Cheat Sheet floor) for the operator-supplied passphrase that
 derives the AES-256-GCM key for sensitive config columns. v3 blob format
 with a per-ciphertext random salt; v1/v2 read fallback for legacy rows.
-See [internal/crypto/encryption.go](../internal/crypto/encryption.go) and
+See [internal/crypto/encryption.go](../../internal/crypto/encryption.go) and
 the accompanying tests for the format spec.
 
 ## Authentication surface
@@ -75,15 +75,60 @@ the accompanying tests for the format spec.
 Bundle B / M-002. Two layers decide auth-exempt status:
 
 1. **Router layer:** `internal/api/router/router.go::AuthExemptRouterRoutes`
-   — the 4 endpoints registered via direct `r.mux.Handle` without going
+ - the endpoints registered via direct `r.mux.Handle` without going
    through the middleware chain (`/health`, `/ready`, `/api/v1/auth/info`,
-   `/api/v1/version`).
+   `/api/v1/version`, plus `/api/v1/auth/bootstrap` GET + POST per
+   Bundle 1 Phase 6).
 2. **Dispatch layer:** `internal/api/router/router.go::AuthExemptDispatchPrefixes`
-   — URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
-   `/.well-known/pki/*`, `/.well-known/est/*`, and `/scep[/...]*`.
+ - URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
+   `/.well-known/pki/*`, `/.well-known/est/*`, `/.well-known/est-mtls`,
+   and `/scep[/...]*` (incl. `/scep-mtls`).
 
 Both lists have AST-walking regression tests (`auth_exempt_test.go`) that
-fail CI if a new bypass lands without an updating the documented constant.
+fail CI if a new bypass lands without updating the documented constant.
+
+### RBAC primitive (Bundle 1)
+
+Bundle 1 ships role-based authorization on top of API-key
+authentication. Every gated handler routes through the
+`auth.RequirePermission` middleware (or its router-level wrap
+`rbacGate`); the middleware resolves the actor's effective
+permissions via the service-layer `Authorizer.CheckPermission`
+and returns HTTP 403 BEFORE the handler body runs on miss. The
+seven default roles (`admin` / `operator` / `viewer` / `agent` /
+`mcp` / `cli` / `auditor`), 33-permission canonical catalogue,
+and the auditor split (`r-auditor` holds only `audit.read` +
+`audit.export`) are seeded by migration 000029.
+
+For the operator how-to, see [`rbac.md`](rbac.md). For the
+threat model + compliance mapping, see
+[`auth-threat-model.md`](auth-threat-model.md). For the upgrade
+flow from a pre-Bundle-1 deployment, see
+[`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md).
+
+### Day-0 admin bootstrap (Bundle 1 Phase 6)
+
+Fresh deployments where no admin actor exists yet can mint the
+first admin via `POST /api/v1/auth/bootstrap` - set
+`CERTCTL_BOOTSTRAP_TOKEN`, POST a single curl with the token, and
+the server returns the plaintext key value once. The token is
+constant-time-compared; the strategy is one-shot via mutex; the
+admin-existence probe re-closes the path once an admin lands.
+The token is NEVER logged. The minted plaintext key flows only
+into the HTTP response body. See
+[`rbac.md`](rbac.md#day-0-bootstrap-first-admin-path) for the
+full flow.
+
+### Approval-bypass closure (Bundle 1 Phase 9)
+
+`CertificateProfile.RequiresApproval=true` profiles route both
+issuance/renewal AND profile edits through the
+`ApprovalService` two-person integrity gate (Phase 9 closes the
+flip-flop loophole where an admin could disable approval, mutate,
+re-enable). Same-actor self-approve is rejected at the service
+layer with `ErrApproveBySameActor`. See
+[`docs/reference/profiles.md`](../reference/profiles.md) for the
+full gate semantics.
 
 ## Per-user rate limiting
 
@@ -95,12 +140,12 @@ budget when set non-zero.
 
 ## API key rotation
 
-**Audit reference:** L-004. CWE-924 (improper enforcement of message integrity during transmission in a communication channel) — operator UX variant.
+**Audit reference:** L-004. CWE-924 (improper enforcement of message integrity during transmission in a communication channel) - operator UX variant.
 
 certctl's API keys are configured via the `CERTCTL_API_KEYS_NAMED` env var
 (format `name1:key1,name2:key2:admin`) and parsed at startup into an
 in-memory list. There is no DB-resident key store, no GUI, no `/api/v1/keys`
-endpoint — the env var IS the key inventory.
+endpoint - the env var IS the key inventory.
 
 Pre-Bundle-G the env var rejected duplicate names, so rotating a key
 required: stop accepting OLDKEY → restart → roll NEWKEY out. Any client
@@ -118,7 +163,7 @@ rotation as:
    ```
    CERTCTL_API_KEYS_NAMED="alice:OLDKEY:admin,alice:NEWKEY:admin"
    ```
-   Both entries MUST carry the same admin flag — startup fails loud if
+   Both entries MUST carry the same admin flag - startup fails loud if
    they don't (a non-admin shouldn't share an identity with an admin).
 
 3. **Restart certctl.** A startup INFO log confirms the rotation window
@@ -139,7 +184,7 @@ rotation as:
 
 6. **Restart certctl.** OLDKEY now fails with 401. Rotation complete.
 
-The rotation window has no operator-set timeout — it lasts for as long
+The rotation window has no operator-set timeout - it lasts for as long
 as both entries are in the env var. Best practice is a 24-72h window
 covering a full deploy cadence; if a client hasn't rolled to NEWKEY by
 the end of step 4, extend the window before step 5.
@@ -151,7 +196,7 @@ the end of step 4, extend the window before step 5.
 - Two entries with the same `name` but mismatched admin: **rejected at
   startup** (privilege escalation guard).
 - Two entries with the same `(name, key)` pair: **rejected at startup**
-  (typo guard — rotation requires DIFFERENT keys under the same name).
+  (typo guard - rotation requires DIFFERENT keys under the same name).
 - Single-entry steady state: unchanged from pre-Bundle-G behavior.
 
 ### What the contract does NOT do

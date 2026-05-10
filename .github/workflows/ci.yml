@@ -107,7 +107,7 @@ jobs:
 
       - name: Go Test with Coverage
         run: |
-          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -cover -coverprofile=coverage.out
+          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/api/router/... ./internal/auth/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -cover -coverprofile=coverage.out
 
       - name: Check Coverage Thresholds
         # ci-pipeline-cleanup Phase 2: per-package floors moved to

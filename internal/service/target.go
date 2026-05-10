@@ -153,7 +153,7 @@ func (s *TargetService) Create(ctx context.Context, target *domain.DeploymentTar
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "create_target", "target", target.ID, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "create_target", domain.EventCategoryConfig, "target", target.ID, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}
@@ -191,7 +191,7 @@ func (s *TargetService) Update(ctx context.Context, id string, target *domain.De
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "update_target", "target", id, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "update_target", domain.EventCategoryConfig, "target", id, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}
@@ -206,7 +206,7 @@ func (s *TargetService) Delete(ctx context.Context, id string, actor string) err
 	}
 
 	if s.auditService != nil {
-		if auditErr := s.auditService.RecordEvent(ctx, actor, domain.ActorTypeUser, "delete_target", "target", id, nil); auditErr != nil {
+		if auditErr := s.auditService.RecordEventWithCategory(ctx, actor, domain.ActorTypeUser, "delete_target", domain.EventCategoryConfig, "target", id, nil); auditErr != nil {
 			s.logger.Error("failed to record audit event", "error", auditErr)
 		}
 	}

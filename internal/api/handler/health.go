@@ -6,8 +6,33 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/certctl-io/certctl/internal/api/middleware"
+	"github.com/certctl-io/certctl/internal/auth"
+	"github.com/certctl-io/certctl/internal/domain"
+	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
+	"github.com/certctl-io/certctl/internal/repository"
 )
+
+// AuthCheckResolver is the optional dependency HealthHandler uses to enrich
+// the /v1/auth/check response with the caller's standing roles and
+// effective permission set. The auth handler's /v1/auth/me endpoint
+// returns the same shape; we duplicate it here so the GUI can render the
+// auth gate from a single round-trip on app boot. main.go wires this
+// from the same authsvc.ActorRoleService used by AuthHandler; tests pass
+// nil and AuthCheck degrades to the legacy minimal payload.
+//
+// Bundle 1 Phase 3 closure (M1): pre-closure, /v1/auth/check returned
+// only {status, user, admin}. The GUI had to second-fetch /v1/auth/me to
+// know which buttons to render — and Me is gated by the rbacGate on
+// auth.role.list which the GUI's pre-render path may not yet hold (chicken-
+// and-egg with the role-list affordance). Folding the same payload into
+// AuthCheck keeps the GUI's boot path single-shot.
+type AuthCheckResolver interface {
+	// ListRoles returns the actor's standing role grants.
+	ListRoles(ctx context.Context, actorID string, actorType domain.ActorType, tenantID string) ([]*authdomain.ActorRole, error)
+	// EffectivePermissions returns the deduplicated (perm, scope) triples
+	// the actor holds across all of its roles.
+	EffectivePermissions(ctx context.Context, actorID string, actorType domain.ActorType, tenantID string) ([]repository.EffectivePermission, error)
+}
 
 // HealthHandler handles health and readiness check endpoints.
 //
@@ -45,6 +70,13 @@ type HealthHandler struct {
 	// ReadyProbeTimeout is the per-probe ceiling for the DB ping. Defaults
 	// to 2s when zero. Exposed so tests can shorten it.
 	ReadyProbeTimeout time.Duration
+
+	// AuthCheck (M1) — optional. When set, AuthCheck includes the caller's
+	// standing roles + effective permissions in the response so the GUI
+	// can gate affordances from a single fetch. Nil resolver degrades to
+	// the legacy {status, user, admin} payload (preserves test fixtures
+	// and the no-db deploy path).
+	Resolver AuthCheckResolver
 }
 
 // NewHealthHandler creates a new HealthHandler.
@@ -53,6 +85,10 @@ type HealthHandler struct {
 // Ready returns 200 with {"db":"not_configured"} — preserves backwards
 // compatibility for the call sites that haven't wired the dependency yet.
 // Production main.go always passes a non-nil pool.
+//
+// Bundle 1 Phase 3 closure (M1): the resolver is wired separately via
+// HealthHandler.Resolver after construction so existing call sites
+// (legacy tests, no-db deploys) keep compiling without churn.
 func NewHealthHandler(authType string, db *sql.DB) HealthHandler {
 	return HealthHandler{
 		AuthType:          authType,
@@ -145,15 +181,69 @@ func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 // that would otherwise 403 at the server. This is a hint for UX only —
 // authorization remains enforced at the handler layer (bulk_revocation.go).
 //
+// Bundle 1 Phase 3 closure (M1): when HealthHandler.Resolver is wired,
+// the response is enriched with the caller's standing roles and effective
+// permissions. This mirrors the /v1/auth/me payload but lives on /auth/check
+// so the GUI can gate affordance rendering with a single fetch on app
+// boot. Resolver lookups are best-effort: failures fall back to the
+// legacy minimal payload rather than 500-ing the GUI's auth probe.
+//
 // The auth middleware runs before this handler, so reaching here means auth
 // passed. `user` falls back to an empty string when auth is disabled
 // (CERTCTL_AUTH_TYPE=none).
 // GET /api/v1/auth/check
 func (h HealthHandler) AuthCheck(w http.ResponseWriter, r *http.Request) {
+	ctx := r.Context()
 	response := map[string]interface{}{
 		"status": "authenticated",
-		"user":   middleware.GetUser(r.Context()),
-		"admin":  middleware.IsAdmin(r.Context()),
+		"user":   auth.GetUser(ctx),
+		"admin":  auth.IsAdmin(ctx),
 	}
+
+	if h.Resolver != nil {
+		actorID, _ := ctx.Value(auth.ActorIDKey{}).(string)
+		actorType, _ := ctx.Value(auth.ActorTypeKey{}).(string)
+		tenantID, _ := ctx.Value(auth.TenantIDKey{}).(string)
+		if tenantID == "" {
+			tenantID = authdomain.DefaultTenantID
+		}
+		if actorID != "" && actorType != "" {
+			at := domain.ActorType(actorType)
+			roles, rerr := h.Resolver.ListRoles(ctx, actorID, at, tenantID)
+			perms, perr := h.Resolver.EffectivePermissions(ctx, actorID, at, tenantID)
+			if rerr == nil && perr == nil {
+				roleIDs := make([]string, 0, len(roles))
+				hasAdmin := false
+				for _, role := range roles {
+					roleIDs = append(roleIDs, role.RoleID)
+					if role.RoleID == authdomain.RoleIDAdmin {
+						hasAdmin = true
+					}
+				}
+				permPayload := make([]map[string]interface{}, 0, len(perms))
+				for _, p := range perms {
+					entry := map[string]interface{}{
+						"permission": p.PermissionName,
+						"scope_type": string(p.ScopeType),
+					}
+					if p.ScopeID != nil {
+						entry["scope_id"] = *p.ScopeID
+					}
+					permPayload = append(permPayload, entry)
+				}
+				response["actor_id"] = actorID
+				response["actor_type"] = actorType
+				response["tenant_id"] = tenantID
+				response["roles"] = roleIDs
+				response["effective_permissions"] = permPayload
+				// Authoritative admin signal: the standing-roles list. The
+				// legacy `admin` boolean above is preserved for back-compat
+				// (in-handler IsAdmin for non-rbacGate routes), but the
+				// rbacGate-gated routes now key off effective_permissions.
+				response["admin_via_role"] = hasAdmin
+			}
+		}
+	}
+
 	JSON(w, http.StatusOK, response)
 }

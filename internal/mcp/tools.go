@@ -40,6 +40,11 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	registerDiscoveryReadTools(s, client)  // Phase E — P1-10..P1-13
 	registerIntermediateCATools(s, client) // Phase F — P1-6..P1-9
 	registerVerificationTools(s, client)   // Phase G — P1-32, P1-34, P1-35
+	// Bundle 1 Phase 11 — RBAC management tools (12 tools).
+	// auth_me + role lifecycle + permission grants + key→role grants.
+	// All route through the existing HTTP client; permission gates fire
+	// server-side. See internal/mcp/tools_auth.go.
+	registerAuthTools(s, client)
 	// Phase G P1-33 (POST /api/v1/agents/{id}/discoveries) is
 	// intentionally NOT exposed via MCP — it is a machine-to-machine
 	// channel for agents to push filesystem-scan reports, not an
@@ -1310,7 +1315,7 @@ func registerHealthTools(s *gomcp.Server, c *Client) {
 // assistants for cert-renewal in regulated environments need natural-language
 // approve/reject. The service layer enforces ErrApproveBySameActor (the
 // requesting actor cannot self-approve) and the handler extracts the
-// decided_by actor from middleware.UserKey — so the MCP server's API key
+// decided_by actor from auth.UserKey — so the MCP server's API key
 // identity becomes the audit-trail actor automatically. Two-person integrity
 // is preserved as long as the MCP server's key is distinct from the
 // requesting actor's; the tool inputs deliberately omit any actor_id field
@@ -1706,7 +1711,7 @@ func registerDiscoveryReadTools(s *gomcp.Server, c *Client) {
 //
 // 2026-05-05 CLI/API/MCP↔GUI parity audit closure. Rank 8 primitive
 // (multi-level CA hierarchy management). The handlers are admin-gated via
-// middleware.IsAdmin — non-admin callers see HTTP 403 regardless of MCP
+// auth.IsAdmin — non-admin callers see HTTP 403 regardless of MCP
 // surface. We expose the full management API rather than carving it off
 // because the operator ran the original Rank 8 deliverable to make this
 // a first-class managed primitive; gating by API key role at the handler

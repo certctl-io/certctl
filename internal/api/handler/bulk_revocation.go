@@ -50,15 +50,12 @@ func (h BulkRevocationHandler) BulkRevoke(w http.ResponseWriter, r *http.Request
 
 	requestID := middleware.GetRequestID(r.Context())
 
-	// M-003: admin-only gate. Non-admin callers are rejected before any
-	// criteria/body processing to avoid leaking validation behavior to
-	// unauthorized actors.
-	if !middleware.IsAdmin(r.Context()) {
-		ErrorWithRequestID(w, http.StatusForbidden,
-			"Bulk revocation requires admin privileges",
-			requestID)
-		return
-	}
+	// Bundle 1 Phase 3.5: M-003 admin-only gate moved to router.go.
+	// auth.RequirePermission(checker, "cert.bulk_revoke", nil) wraps
+	// this handler at registration time; non-admin callers without
+	// the cert.bulk_revoke permission get 403 from the middleware
+	// before reaching the handler body. The pre-3.5 in-body
+	// auth.IsAdmin check is gone.
 
 	var req bulkRevokeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -127,11 +124,7 @@ func (h BulkRevocationHandler) BulkRevokeEST(w http.ResponseWriter, r *http.Requ
 		return
 	}
 	requestID := middleware.GetRequestID(r.Context())
-	if !middleware.IsAdmin(r.Context()) {
-		ErrorWithRequestID(w, http.StatusForbidden,
-			"EST bulk revocation requires admin privileges", requestID)
-		return
-	}
+	// Bundle 1 Phase 3.5: gate moved to router.go (cert.bulk_revoke perm).
 	var req bulkRevokeRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
 		ErrorWithRequestID(w, http.StatusBadRequest, "Invalid request body", requestID)

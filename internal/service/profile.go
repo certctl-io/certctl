@@ -2,18 +2,37 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 )
 
+// ErrProfileEditPendingApproval (Bundle 1 Phase 9) is returned by
+// UpdateProfile when the live profile (or the proposed update) carries
+// RequiresApproval=true. The handler maps this to HTTP 202 Accepted +
+// {pending_approval_id} so the operator knows to chase a second-admin
+// approve. See docs/reference/profiles.md.
+var ErrProfileEditPendingApproval = errors.New("profile edit gated by approval workflow")
+
+// ProfileEditApprovalRequester is the slice of ApprovalService the
+// ProfileService consumes when a profile edit triggers the gate.
+// Pulled out as a small interface so unit tests can drive the gate
+// without the full ApprovalService dependency tree.
+type ProfileEditApprovalRequester interface {
+	RequestProfileEditApproval(ctx context.Context, profileID, requestedBy string, payload []byte) (string, error)
+}
+
 // ProfileService provides business logic for certificate profile management.
 type ProfileService struct {
-	profileRepo  repository.CertificateProfileRepository
-	auditService *AuditService
+	profileRepo     repository.CertificateProfileRepository
+	auditService    *AuditService
+	approvalService ProfileEditApprovalRequester // Bundle 1 Phase 9; nil disables the gate
 }
 
 // NewProfileService creates a new profile service.
@@ -25,6 +44,14 @@ func NewProfileService(
 		profileRepo:  profileRepo,
 		auditService: auditService,
 	}
+}
+
+// SetApprovalService wires the Bundle 1 Phase 9 gate. cmd/server/main.go
+// calls this after both ProfileService and ApprovalService are
+// constructed. nil disables the gate (preserving pre-Phase-9 behaviour
+// for any test fixture or alternate boot path that doesn't wire it).
+func (s *ProfileService) SetApprovalService(a ProfileEditApprovalRequester) {
+	s.approvalService = a
 }
 
 // ListProfiles returns all profiles (handler interface method).
@@ -97,12 +124,59 @@ func (s *ProfileService) CreateProfile(ctx context.Context, profile domain.Certi
 }
 
 // UpdateProfile modifies an existing profile (handler interface method).
+//
+// Bundle 1 Phase 9 (approval-bypass closure): if the LIVE profile has
+// RequiresApproval=true OR the proposed update would set it true, the
+// edit is NOT applied directly. Instead it is serialized to a pending
+// ApprovalRequest with Kind=profile_edit and the caller receives
+// ErrProfileEditPendingApproval. The handler maps this to HTTP 202 +
+// the new approval ID. A non-requester admin then approves via the
+// existing /v1/approvals/{id}/approve endpoint, which deserializes
+// the payload and persists the diff via the profile-edit-apply
+// callback registered in main.go. This closes the flip-flop loophole
+// where an admin could disable RequiresApproval, mutate, re-enable.
+//
+// SetApprovalService(nil) disables the gate (test fixtures); the
+// pre-Phase-9 direct-apply path is preserved.
 func (s *ProfileService) UpdateProfile(ctx context.Context, id string, profile domain.CertificateProfile) (*domain.CertificateProfile, error) {
 	if err := validateProfile(&profile); err != nil {
 		return nil, err
 	}
-
 	profile.ID = id
+
+	if s.approvalService != nil {
+		live, err := s.profileRepo.Get(ctx, id)
+		if err != nil {
+			return nil, fmt.Errorf("failed to load live profile: %w", err)
+		}
+		// Gate when the live profile is approval-tier OR the edit
+		// would flip it on. Both arms close the loophole: a flip-
+		// flop attacker can't set false→mutate→true because every
+		// transition through an approval-tier profile triggers the
+		// gate.
+		if (live != nil && live.RequiresApproval) || profile.RequiresApproval {
+			payload, perr := json.Marshal(profile)
+			if perr != nil {
+				return nil, fmt.Errorf("marshal profile for approval payload: %w", perr)
+			}
+			requester := actorFromContext(ctx)
+			approvalID, gerr := s.approvalService.RequestProfileEditApproval(ctx, id, requester, payload)
+			if gerr != nil {
+				return nil, fmt.Errorf("approval gate: %w", gerr)
+			}
+			if s.auditService != nil {
+				_ = s.auditService.RecordEventWithCategory(
+					context.WithoutCancel(ctx),
+					requester, domain.ActorTypeUser,
+					"profile.edit_request", domain.EventCategoryAuth,
+					"certificate_profile", id,
+					map[string]interface{}{"approval_id": approvalID},
+				)
+			}
+			return nil, fmt.Errorf("%w: approval=%s", ErrProfileEditPendingApproval, approvalID)
+		}
+	}
+
 	if err := s.profileRepo.Update(ctx, &profile); err != nil {
 		return nil, fmt.Errorf("failed to update profile: %w", err)
 	}
@@ -115,6 +189,23 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, id string, profile d
 	}
 
 	return &profile, nil
+}
+
+// actorFromContext pulls the caller's actor ID from the
+// auth-middleware ActorIDKey populated by NewAuthWithKeyStore /
+// NewDemoModeAuth. Falls back to "api" so legacy test fixtures that
+// don't wire the auth context still record meaningful audit rows.
+func actorFromContext(ctx context.Context) string {
+	if ctx == nil {
+		return "api"
+	}
+	if id := auth.GetActorID(ctx); id != "" {
+		return id
+	}
+	if id, ok := ctx.Value(auth.UserKey{}).(string); ok && id != "" {
+		return id
+	}
+	return "api"
 }
 
 // DeleteProfile removes a profile (handler interface method).

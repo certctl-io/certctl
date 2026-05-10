@@ -39,14 +39,21 @@ func (r *AuditRepository) CreateWithTx(ctx context.Context, q repository.Querier
 	if event.ID == "" {
 		event.ID = uuid.New().String()
 	}
+	// Bundle 1 Phase 8: empty EventCategory defaults to
+	// cert_lifecycle (matches the migration's DEFAULT clause + the
+	// DB CHECK constraint). The boundary catches callers that
+	// haven't yet been migrated to the categorized API.
+	if event.EventCategory == "" {
+		event.EventCategory = domain.EventCategoryCertLifecycle
+	}
 
 	err := q.QueryRowContext(ctx, `
 		INSERT INTO audit_events (
-			id, actor, actor_type, action, resource_type, resource_id, details, timestamp
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
+			id, actor, actor_type, action, resource_type, resource_id, details, timestamp, event_category
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
 		RETURNING id
 	`, event.ID, event.Actor, event.ActorType, event.Action, event.ResourceType,
-		event.ResourceID, event.Details, event.Timestamp).Scan(&event.ID)
+		event.ResourceID, event.Details, event.Timestamp, event.EventCategory).Scan(&event.ID)
 
 	if err != nil {
 		return fmt.Errorf("failed to create audit event: %w", err)
@@ -104,6 +111,11 @@ func (r *AuditRepository) List(ctx context.Context, filter *repository.AuditFilt
 		args = append(args, filter.To)
 		argCount++
 	}
+	if filter.EventCategory != "" {
+		whereConditions = append(whereConditions, fmt.Sprintf("event_category = $%d", argCount))
+		args = append(args, filter.EventCategory)
+		argCount++
+	}
 
 	whereClause := ""
 	if len(whereConditions) > 0 {
@@ -120,7 +132,7 @@ func (r *AuditRepository) List(ctx context.Context, filter *repository.AuditFilt
 	// Get paginated results
 	offset := (filter.Page - 1) * filter.PerPage
 	query := fmt.Sprintf(`
-		SELECT id, actor, actor_type, action, resource_type, resource_id, details, timestamp
+		SELECT id, actor, actor_type, action, resource_type, resource_id, details, timestamp, event_category
 		FROM audit_events
 		%s
 		ORDER BY timestamp DESC
@@ -139,7 +151,7 @@ func (r *AuditRepository) List(ctx context.Context, filter *repository.AuditFilt
 	for rows.Next() {
 		var event domain.AuditEvent
 		if err := rows.Scan(&event.ID, &event.Actor, &event.ActorType, &event.Action,
-			&event.ResourceType, &event.ResourceID, &event.Details, &event.Timestamp); err != nil {
+			&event.ResourceType, &event.ResourceID, &event.Details, &event.Timestamp, &event.EventCategory); err != nil {
 			return nil, fmt.Errorf("failed to scan audit event: %w", err)
 		}
 		events = append(events, &event)
