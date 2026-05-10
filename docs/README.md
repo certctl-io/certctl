@@ -34,6 +34,7 @@ You're operating certctl in production or building integrations and need authori
 | [MCP server](reference/mcp.md) | Model Context Protocol integration for AI assistants |
 | [Release verification](reference/release-verification.md) | Cosign / SLSA / SBOM verification procedure |
 | [Intermediate CA hierarchy](reference/intermediate-ca-hierarchy.md) | Multi-level CA tree management — RFC 5280 §3.2/§4.2.1.9/§4.2.1.10 enforcement |
+| [Auth standards implemented](reference/auth-standards-implemented.md) | RFC + CWE evidence for the Auth Bundle 1 + 2 surface (NOT a compliance-mapping doc) |
 | [Deployment model](reference/deployment-model.md) | Atomic write, post-deploy verify, rollback semantics across all targets |
 | [Vendor matrix](reference/vendor-matrix.md) | Tested vendor versions per target connector |
 
