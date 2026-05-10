@@ -377,11 +377,24 @@ func (r *ActorRoleRepository) Grant(ctx context.Context, ar *authdomain.ActorRol
 	if ar.ExpiresAt != nil {
 		expires = *ar.ExpiresAt
 	}
+	// Audit 2026-05-10 HIGH-10 — per-actor scope columns. Default to
+	// "global"+NULL when the caller didn't supply them (back-compat
+	// with pre-migration code paths). Migration 000043's schema-level
+	// DEFAULT 'global' covers the same case; passing explicitly here
+	// makes the Go-level write deterministic.
+	scopeType := string(ar.ScopeType)
+	if scopeType == "" {
+		scopeType = string(authdomain.ScopeTypeGlobal)
+	}
+	var scopeID interface{}
+	if ar.ScopeID != nil && *ar.ScopeID != "" {
+		scopeID = *ar.ScopeID
+	}
 	_, err := r.db.ExecContext(ctx, `
-		INSERT INTO actor_roles (id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8)
-		ON CONFLICT (actor_id, actor_type, role_id, tenant_id) DO NOTHING
-	`, ar.ID, ar.ActorID, string(ar.ActorType), ar.RoleID, ar.GrantedAt, expires, ar.GrantedBy, ar.TenantID)
+		INSERT INTO actor_roles (id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id, scope_type, scope_id)
+		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+		ON CONFLICT (actor_id, actor_type, role_id, scope_type, scope_id, tenant_id) DO NOTHING
+	`, ar.ID, ar.ActorID, string(ar.ActorType), ar.RoleID, ar.GrantedAt, expires, ar.GrantedBy, ar.TenantID, scopeType, scopeID)
 	if err != nil {
 		return fmt.Errorf("actorRole.grant: %w", err)
 	}

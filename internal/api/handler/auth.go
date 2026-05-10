@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
@@ -174,8 +175,26 @@ type addPermissionRequest struct {
 	ScopeID    *string `json:"scope_id,omitempty"`
 }
 
+// assignRoleRequest is the POST /api/v1/auth/keys/{id}/roles body.
+//
+// Audit 2026-05-10 HIGH-10 closure — extended with scope_type /
+// scope_id / expires_at so per-actor scoped + time-bound grants are
+// expressible via the API. Pre-fix, the only path was creating a
+// scoped role and granting that; now operators can scope a standing
+// role to a specific resource on a per-actor basis.
+//
+// Validation rules:
+//   - role_id is required.
+//   - scope_type defaults to "global"; allowed values are global /
+//     profile / issuer.
+//   - scope_id is required when scope_type != "global"; rejected
+//     (must be empty) when scope_type == "global".
+//   - expires_at must be in the future when present; nil = standing.
 type assignRoleRequest struct {
-	RoleID string `json:"role_id"`
+	RoleID    string     `json:"role_id"`
+	ScopeType string     `json:"scope_type,omitempty"`
+	ScopeID   *string    `json:"scope_id,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type meResponse struct {
@@ -427,10 +446,39 @@ func (h AuthHandler) AssignRoleToKey(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "role_id is required")
 		return
 	}
+
+	// Audit 2026-05-10 HIGH-10 validation.
+	scopeType := authdomain.ScopeType(req.ScopeType)
+	if scopeType == "" {
+		scopeType = authdomain.ScopeTypeGlobal
+	}
+	switch scopeType {
+	case authdomain.ScopeTypeGlobal:
+		if req.ScopeID != nil && *req.ScopeID != "" {
+			Error(w, http.StatusBadRequest, "scope_id must be empty when scope_type=global")
+			return
+		}
+	case authdomain.ScopeTypeProfile, authdomain.ScopeTypeIssuer:
+		if req.ScopeID == nil || strings.TrimSpace(*req.ScopeID) == "" {
+			Error(w, http.StatusBadRequest, "scope_id is required when scope_type is profile or issuer")
+			return
+		}
+	default:
+		Error(w, http.StatusBadRequest, "invalid scope_type — must be global, profile, or issuer")
+		return
+	}
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now().UTC()) {
+		Error(w, http.StatusBadRequest, "expires_at must be in the future")
+		return
+	}
+
 	ar := &authdomain.ActorRole{
 		ActorID:   keyID,
 		ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey),
 		RoleID:    req.RoleID,
+		ScopeType: scopeType,
+		ScopeID:   req.ScopeID,
+		ExpiresAt: req.ExpiresAt,
 	}
 	if err := h.actors.Grant(r.Context(), caller, ar); err != nil {
 		writeAuthError(w, err)

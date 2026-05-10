@@ -95,6 +95,19 @@ type ActorRole struct {
 	ExpiresAt *time.Time     `json:"expires_at,omitempty"`
 	GrantedBy string         `json:"granted_by"`
 	TenantID  string         `json:"tenant_id"`
+
+	// Audit 2026-05-10 HIGH-10 closure — per-actor scope override on
+	// the grant. Pre-fix, scope was per-role only; now operators can
+	// grant the standing r-operator role to Alice scoped to profile-X
+	// via (ScopeType="profile", ScopeID="p-X"). Authorizer.CheckPermission
+	// already understands the tuple via role_permissions. Migration
+	// 000043 ships the schema columns + uniqueness extension.
+	//
+	// ScopeType ∈ {global, profile, issuer}. Empty/missing defaults
+	// to "global" at the persistence layer (schema column DEFAULT).
+	// ScopeID is required when ScopeType != "global"; nil otherwise.
+	ScopeType ScopeType `json:"scope_type,omitempty"`
+	ScopeID   *string   `json:"scope_id,omitempty"`
 }
 
 // ActorTypeValue is the typed-string actor identifier used in

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
@@ -301,6 +302,125 @@ func TestAuthHandler_AssignRoleToKey(t *testing.T) {
 	}
 	if actorSvc.roles[0].RoleID != "r-viewer" || actorSvc.roles[0].ActorID != "alice" {
 		t.Errorf("grant fields wrong; got %+v", actorSvc.roles[0])
+	}
+}
+
+// Audit 2026-05-10 HIGH-10 regression matrix — pin the new
+// scope_type / scope_id / expires_at fields on assignRoleRequest.
+// Pre-fix, the request body accepted only `{role_id}` so per-actor
+// scope-bound grants and time-bound grants weren't expressible via
+// the API even though the schema reserved the columns. Post-fix,
+// validation rules:
+//
+//   - scope_type ∈ {global, profile, issuer}; defaults to global.
+//   - scope_id required when scope_type != global; rejected when
+//     scope_type == global.
+//   - expires_at must be in the future when present.
+func TestAssignRoleToKey_HIGH10_ProfileScopeBoundGrantPersists(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	scopeID := "p-finance"
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "profile",
+		ScopeID:   &scopeID,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(actorSvc.roles) != 1 {
+		t.Fatalf("expected 1 grant; got %d", len(actorSvc.roles))
+	}
+	if got := string(actorSvc.roles[0].ScopeType); got != "profile" {
+		t.Errorf("ScopeType = %q; want profile", got)
+	}
+	if actorSvc.roles[0].ScopeID == nil || *actorSvc.roles[0].ScopeID != "p-finance" {
+		t.Errorf("ScopeID = %v; want p-finance", actorSvc.roles[0].ScopeID)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_TimeBoundGrantPersists(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	future := time.Now().Add(24 * time.Hour).UTC()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ExpiresAt: &future,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(actorSvc.roles) != 1 || actorSvc.roles[0].ExpiresAt == nil {
+		t.Fatalf("expected 1 grant with ExpiresAt; got %+v", actorSvc.roles)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsScopeIDWithGlobalScope(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	bad := "p-finance"
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "global",
+		ScopeID:   &bad,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("scope_id with scope_type=global should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsMissingScopeIDOnProfile(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "profile",
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing scope_id on scope_type=profile should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsPastExpiry(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	past := time.Now().Add(-1 * time.Hour).UTC()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ExpiresAt: &past,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("past expires_at should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsInvalidScopeType(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "tenant", // not a valid scope_type
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid scope_type should be 400; got %d", rec.Code)
 	}
 }
 
