@@ -72,6 +72,31 @@ function readCSRFCookie(): string {
   return '';
 }
 
+// Audit 2026-05-10 HIGH-8 — extract the session-failure cause from the
+// WWW-Authenticate header the server emits on 401. The server format
+// (RFC 6750 §3) is: `Bearer realm="certctl", error="invalid_token",
+// error_description="<cause>"` where <cause> is one of the stable
+// categories `idle_timeout` / `absolute_timeout` /
+// `back_channel_revoked` / `invalid_token`. Returns "" when the
+// header is missing, malformed, or carries an unrecognised cause —
+// the AuthProvider falls back to the generic "Session expired" UX
+// in that case (forward-compat with future categories).
+function parseWWWAuthenticateCause(header: string | null): string {
+  if (!header) return '';
+  const m = header.match(/error_description="([^"]+)"/i);
+  if (!m) return '';
+  const cause = m[1];
+  switch (cause) {
+    case 'idle_timeout':
+    case 'absolute_timeout':
+    case 'back_channel_revoked':
+    case 'invalid_token':
+      return cause;
+    default:
+      return '';
+  }
+}
+
 // isStateChangingMethod mirrors the server-side
 // internal/auth/session/middleware.go::isStateChangingMethod predicate.
 // State-changing requests get the X-CSRF-Token header auto-attached
@@ -106,8 +131,14 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
     headers, // intentional: spread init first, then override headers with the merged map (init.headers already merged into `headers` above)
   });
   if (res.status === 401) {
-    // Trigger re-auth
-    const event = new CustomEvent('certctl:auth-required');
+    // Audit 2026-05-10 HIGH-8 — propagate the WWW-Authenticate
+    // error_description so the AuthProvider can route the user into
+    // OIDC-aware re-login UX instead of generic "session expired."
+    // Stable cause categories: idle_timeout, absolute_timeout,
+    // back_channel_revoked, invalid_token. Anything else is treated
+    // as invalid_token by the server-side classifier.
+    const cause = parseWWWAuthenticateCause(res.headers.get('WWW-Authenticate'));
+    const event = new CustomEvent('certctl:auth-required', { detail: { cause } });
     window.dispatchEvent(event);
     throw new Error('Authentication required');
   }
@@ -827,7 +858,9 @@ export const retireAgent = async (
   });
 
   if (res.status === 401) {
-    window.dispatchEvent(new CustomEvent('certctl:auth-required'));
+    // Audit 2026-05-10 HIGH-8 — see fetchAPI() for the cause-extraction rationale.
+    const cause = parseWWWAuthenticateCause(res.headers.get('WWW-Authenticate'));
+    window.dispatchEvent(new CustomEvent('certctl:auth-required', { detail: { cause } }));
     throw new Error('Authentication required');
   }
 

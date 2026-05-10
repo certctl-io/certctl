@@ -66,14 +66,35 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Listen for 401 events from the API client
+  // Listen for 401 events from the API client.
+  //
+  // Audit 2026-05-10 HIGH-8 — the API client now attaches a cause
+  // category to the event detail (parsed from the WWW-Authenticate
+  // header). When a cause is recognised, redirect to
+  // /login?session_expired=<cause> so the LoginPage renders OIDC-aware
+  // re-login wording instead of the generic "session expired" + API-key
+  // copy. Cookie-mode (OIDC) and Bearer-mode (API-key) callers share
+  // the same wire shape; the LoginPage banner is purely UX.
   useEffect(() => {
-    const handler = () => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ cause?: string }>).detail;
+      const cause = detail?.cause || '';
       setAuthenticated(false);
       setApiKey(null);
       setUser('');
       setAdmin(false);
+      // Generic copy; the LoginPage will overlay a cause-specific
+      // banner when ?session_expired=<cause> is present.
       setError('Session expired. Please re-enter your API key.');
+      // Forward the cause to the LoginPage. window.location is used
+      // (not React Router's navigate) because this listener fires
+      // outside any route component's render and we want a hard
+      // navigation that clears any stale state.
+      if (cause && cause !== 'invalid_token' &&
+          window.location.pathname !== '/login') {
+        const params = new URLSearchParams({ session_expired: cause });
+        window.location.href = '/login?' + params.toString();
+      }
     };
     window.addEventListener('certctl:auth-required', handler);
     return () => window.removeEventListener('certctl:auth-required', handler);

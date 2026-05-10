@@ -141,4 +141,83 @@ describe('LoginPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     });
     expect(screen.queryByTestId('login-oidc-providers')).toBeNull();
   });
+
+  // Audit 2026-05-10 HIGH-7 — when the OIDC callback path redirects
+  // here with ?error=oidc_failed&reason=<category>, the page renders
+  // an operator-friendly cause banner instead of leaving the user
+  // staring at a blank form.
+  it('renders OIDC failure banner when ?error=oidc_failed&reason=email_domain_not_allowed (HIGH-7)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/login?error=oidc_failed&reason=email_domain_not_allowed']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('login-oidc-failure-banner')).toBeTruthy();
+    });
+    const banner = screen.getByTestId('login-oidc-failure-banner');
+    expect(banner.getAttribute('data-reason')).toBe('email_domain_not_allowed');
+    expect(banner.textContent).toContain('email domain is not in the configured allowlist');
+  });
+
+  it('falls back to unspecified text when ?reason= is unknown (HIGH-7 forward-compat)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/login?error=oidc_failed&reason=newcat_from_future_release']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('login-oidc-failure-banner')).toBeTruthy();
+    });
+    const banner = screen.getByTestId('login-oidc-failure-banner');
+    expect(banner.textContent).toContain('OIDC sign-in failed');
+  });
+
+  it('does NOT render the OIDC failure banner without the error query param', () => {
+    render(
+      <MemoryRouter initialEntries={['/login']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('login-oidc-failure-banner')).toBeNull();
+  });
+
+  // Audit 2026-05-10 HIGH-8 — session-expired causes routed via
+  // ?session_expired=<cause> render an OIDC-aware re-login banner.
+  it('renders session-cause banner when ?session_expired=back_channel_revoked (HIGH-8)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/login?session_expired=back_channel_revoked']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('login-session-cause-banner')).toBeTruthy();
+    });
+    const banner = screen.getByTestId('login-session-cause-banner');
+    expect(banner.getAttribute('data-cause')).toBe('back_channel_revoked');
+    expect(banner.textContent).toContain('back-channel logout');
+  });
+
+  it('renders idle-timeout cause banner when ?session_expired=idle_timeout (HIGH-8)', async () => {
+    render(
+      <MemoryRouter initialEntries={['/login?session_expired=idle_timeout']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    await waitFor(() => {
+      expect(screen.getByTestId('login-session-cause-banner')).toBeTruthy();
+    });
+    expect(screen.getByTestId('login-session-cause-banner').textContent).toContain(
+      'timed out from inactivity',
+    );
+  });
+
+  it('does NOT render the session-cause banner for an unknown cause', () => {
+    render(
+      <MemoryRouter initialEntries={['/login?session_expired=zzz_unknown_cause']}>
+        <LoginPage />
+      </MemoryRouter>,
+    );
+    expect(screen.queryByTestId('login-session-cause-banner')).toBeNull();
+  });
 });

@@ -258,7 +258,11 @@ func (h *AuthSessionOIDCHandler) LoginCallback(w http.ResponseWriter, r *http.Re
 
 	res, err := h.oidcSvc.HandleCallback(r.Context(), preLoginCookie.Value, code, state, clientIP, userAgent)
 	if err != nil {
-		// Uniform 400 to the wire; specific failure category in audit.
+		// Audit 2026-05-10 HIGH-7 — instead of a blank 400, redirect
+		// to /login?error=oidc_failed&reason=<category>. The LoginPage
+		// reads the query params and renders an operator-friendly
+		// alert. The audit row still carries the specific
+		// failure_category so server-side observability is unchanged.
 		category := classifyOIDCFailure(err)
 		h.recordAudit(r.Context(), "auth.oidc_login_failed", "anonymous", domain.ActorTypeSystem, "",
 			map[string]interface{}{"failure_category": category})
@@ -270,7 +274,10 @@ func (h *AuthSessionOIDCHandler) LoginCallback(w http.ResponseWriter, r *http.Re
 		}
 		// Always clear the pre-login cookie on failure.
 		h.clearPreLoginCookie(w)
-		Error(w, http.StatusBadRequest, "OIDC login failed")
+		// 302 to the login page; the reason categorizes the failure for
+		// the GUI to render. Keep the redirect target relative — the
+		// SPA serves /login.
+		http.Redirect(w, r, "/login?error=oidc_failed&reason="+category, http.StatusFound)
 		return
 	}
 
@@ -1073,6 +1080,17 @@ func classifyOIDCFailure(err error) string {
 		return "groups_missing"
 	case strings.Contains(msg, "jwks"):
 		return "jwks_unreachable"
+	// Audit 2026-05-10 HIGH-7 — surface CRIT-5 email-domain rejection
+	// + PKCE invalidation distinctly so the LoginPage can render an
+	// operator-friendly reason. The sentinel errors live in
+	// internal/auth/oidc/service.go (ErrEmailDomainNotAllowed,
+	// ErrEmailMissingButRequired, ErrPKCEPlainRejected).
+	case strings.Contains(msg, "email domain not in allowlist"):
+		return "email_domain_not_allowed"
+	case strings.Contains(msg, "requires email but token has none"):
+		return "email_missing_but_required"
+	case strings.Contains(msg, "pkce"):
+		return "pkce_invalid"
 	default:
 		return "unspecified"
 	}

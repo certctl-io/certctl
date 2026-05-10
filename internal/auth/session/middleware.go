@@ -32,6 +32,7 @@ package session
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/certctl-io/certctl/internal/auth"
@@ -93,7 +94,13 @@ func NewSessionMiddleware(svc SessionValidator) func(http.Handler) http.Handler 
 				// the next middleware so a valid Bearer can still
 				// authenticate. The auth combinator 401s if neither
 				// works.
-				next.ServeHTTP(w, r)
+				//
+				// Audit 2026-05-10 HIGH-8 — stash the cause classification
+				// in context so the 401 emitter can emit a
+				// WWW-Authenticate: Bearer error_description="<cause>"
+				// header. OIDC users get cause-aware re-login UX.
+				ctx := context.WithValue(r.Context(), sessionCauseKey{}, classifySessionError(verr))
+				next.ServeHTTP(w, r.WithContext(ctx))
 				return
 			}
 
@@ -225,6 +232,15 @@ func bearerSkipIfAuthenticated(bearerMW func(http.Handler) http.Handler) func(ht
 					next.ServeHTTP(w, r)
 					return
 				}
+				// Audit 2026-05-10 HIGH-8 — emit WWW-Authenticate with the
+				// classified cause so the GUI can render OIDC-aware
+				// re-login UX. RFC 6750 §3 challenge format.
+				cause, _ := r.Context().Value(sessionCauseKey{}).(string)
+				if cause == "" {
+					cause = "invalid_token"
+				}
+				w.Header().Set("WWW-Authenticate",
+					`Bearer realm="certctl", error="invalid_token", error_description="`+cause+`"`)
 				w.Header().Set("Content-Type", "application/json; charset=utf-8")
 				http.Error(w, `{"error":"Authentication required"}`, http.StatusUnauthorized)
 			})
@@ -238,9 +254,39 @@ func bearerSkipIfAuthenticated(bearerMW func(http.Handler) http.Handler) func(ht
 				next.ServeHTTP(w, r)
 				return
 			}
-			// Defer to Bearer.
+			// Defer to Bearer. If the Bearer middleware 401s and there's
+			// a stashed session cause, downstream callers see it via the
+			// context key; the Bearer middleware's own 401 doesn't read
+			// it (Bearer-only deployments have no session context to
+			// stash from). Cause-aware UX needs session-mode auth.
 			bearerInner.ServeHTTP(w, r)
 		})
+	}
+}
+
+// sessionCauseKey is the context key used by Audit 2026-05-10 HIGH-8.
+// SessionMiddleware stashes the failure-cause classification on the
+// context when Validate returns an error; the 401 emitter reads it
+// and renders WWW-Authenticate's error_description.
+type sessionCauseKey struct{}
+
+// classifySessionError maps a session Validate error to a stable
+// wire-string the GUI consumes to render OIDC-aware re-login UX.
+// Stable categories: idle_timeout, absolute_timeout,
+// back_channel_revoked, invalid_token.
+func classifySessionError(err error) string {
+	if err == nil {
+		return ""
+	}
+	switch {
+	case errors.Is(err, ErrSessionExpiredIdle):
+		return "idle_timeout"
+	case errors.Is(err, ErrSessionExpiredAbsolute):
+		return "absolute_timeout"
+	case errors.Is(err, ErrSessionRevoked):
+		return "back_channel_revoked"
+	default:
+		return "invalid_token"
 	}
 }
 

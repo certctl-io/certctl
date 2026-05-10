@@ -362,9 +362,11 @@ func TestLoginCallback_HappyPath(t *testing.T) {
 	}
 }
 
-// Phase 5 spec mandate #4: Callback with replayed state -> 400.
+// Phase 5 spec mandate #4: Callback with replayed state -> 302 to /login.
 // (The OIDC service's PreLoginStore.LookupAndConsume returns
-// ErrPreLoginNotFound on the second call; the handler maps to 400.)
+// ErrPreLoginNotFound on the second call; Audit 2026-05-10 HIGH-7
+// flipped this from a blank 400 to a 302 to /login?error=oidc_failed
+// &reason=<category>. The audit row still records failure_category.)
 func TestLoginCallback_ReplayedState_Returns400(t *testing.T) {
 	o := &stubOIDCSvc{callbackErr: oidcsvc.ErrPreLoginNotFound}
 	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
@@ -373,17 +375,20 @@ func TestLoginCallback_ReplayedState_Returns400(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
 	h.LoginCallback(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d; want 400", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d; want 302 (post-HIGH-7 redirect)", w.Code)
+	}
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/login?error=oidc_failed&reason=") {
+		t.Errorf("Location = %q; want /login?error=oidc_failed&reason=...", loc)
 	}
 	if !contains(audit.events, "auth.oidc_login_failed") {
 		t.Errorf("expected auth.oidc_login_failed audit event; got %v", audit.events)
 	}
 }
 
-// Phase 5 spec mandate #5: Callback with PKCE verifier mismatch -> 400.
+// Phase 5 spec mandate #5: Callback with PKCE verifier mismatch -> 302.
 // The OIDC service's code-exchange step fails when the verifier doesn't
-// match the challenge; the handler surfaces it as 400.
+// match the challenge; HIGH-7 redirects to /login with reason.
 func TestLoginCallback_PKCEVerifierMismatch_Returns400(t *testing.T) {
 	o := &stubOIDCSvc{callbackErr: errors.New("oidc: code exchange failed: invalid_grant")}
 	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
@@ -391,23 +396,27 @@ func TestLoginCallback_PKCEVerifierMismatch_Returns400(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
 	h.LoginCallback(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d; want 400", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d; want 302 (post-HIGH-7 redirect)", w.Code)
+	}
+	if loc := w.Header().Get("Location"); !strings.HasPrefix(loc, "/login?error=oidc_failed") {
+		t.Errorf("Location = %q; want /login?error=oidc_failed&reason=...", loc)
 	}
 }
 
-// Phase 5 spec mandate #6: Callback with expired pre-login row -> 400.
+// Phase 5 spec mandate #6: Callback with expired pre-login row -> 302.
 func TestLoginCallback_ExpiredPreLoginRow_Returns400(t *testing.T) {
-	// Adapter maps ErrPreLoginExpired -> ErrPreLoginNotFound (uniform
-	// 400 per spec; specific reason in audit row).
+	// Adapter maps ErrPreLoginExpired -> ErrPreLoginNotFound; HIGH-7
+	// flipped the wire shape from 400 to a 302 redirect (specific
+	// reason still in audit row).
 	o := &stubOIDCSvc{callbackErr: oidcsvc.ErrPreLoginNotFound}
 	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
 	h.LoginCallback(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d; want 400", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d; want 302 (post-HIGH-7 redirect)", w.Code)
 	}
 }
 
@@ -431,8 +440,11 @@ func TestLoginCallback_UnmappedGroups_AuditRowDistinguished(t *testing.T) {
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
 	h.LoginCallback(w, req)
-	if w.Code != http.StatusBadRequest {
-		t.Errorf("status = %d; want 400", w.Code)
+	if w.Code != http.StatusFound {
+		t.Errorf("status = %d; want 302 (post-HIGH-7 redirect)", w.Code)
+	}
+	if loc := w.Header().Get("Location"); !strings.Contains(loc, "reason=unmapped_groups") {
+		t.Errorf("Location = %q; want reason=unmapped_groups", loc)
 	}
 	if !contains(audit.events, "auth.oidc_login_unmapped_groups") {
 		t.Errorf("expected auth.oidc_login_unmapped_groups; got %v", audit.events)
