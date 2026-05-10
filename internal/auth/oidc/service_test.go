@@ -753,6 +753,7 @@ func makeProvider(idpURL, providerID string) *oidcdomain.OIDCProvider {
 		Scopes:                []string{"openid", "profile", "email"},
 		IATWindowSeconds:      300,
 		JWKSCacheTTLSeconds:   3600,
+		Enabled:               true, // MED-9: default-on for test fixtures
 	}
 }
 

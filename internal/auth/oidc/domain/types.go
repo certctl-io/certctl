@@ -47,8 +47,16 @@ type OIDCProvider struct {
 	AllowedEmailDomains   []string  `json:"allowed_email_domains"`
 	IATWindowSeconds      int       `json:"iat_window_seconds"`
 	JWKSCacheTTLSeconds   int       `json:"jwks_cache_ttl_seconds"`
-	CreatedAt             time.Time `json:"created_at"`
-	UpdatedAt             time.Time `json:"updated_at"`
+	// Enabled gates whether the provider is offered on the LoginPage and
+	// accepted at HandleAuthRequest. Audit 2026-05-10 MED-9 closure:
+	// pre-fix the only way to take a provider offline was DELETE (which
+	// breaks active user_oidc_provider FK references); now operators can
+	// flip Enabled=false to keep the row + group mappings around while
+	// suppressing new logins. Default true (existing rows are enabled
+	// post-migration).
+	Enabled   bool      `json:"enabled"`
+	CreatedAt time.Time `json:"created_at"`
+	UpdatedAt time.Time `json:"updated_at"`
 }
 
 // GroupRoleMapping maps a group name (string from the IdP's group

@@ -231,6 +231,14 @@ var (
 	// includes `email` and the IdP releases the claim.
 	ErrEmailMissingButRequired = errors.New("oidc: provider requires email but token has none")
 
+	// ErrProviderDisabled signals the operator has flipped
+	// OIDCProvider.Enabled=false on the matched provider. HandleAuthRequest
+	// rejects with this sentinel so the LoginPage doesn't initiate a
+	// handshake; AuthInfo's provider list filters disabled providers
+	// out so the LoginPage button doesn't appear in the first place.
+	// Audit 2026-05-10 MED-9 closure.
+	ErrProviderDisabled = errors.New("oidc: provider is disabled")
+
 	// ErrGroupsUnmapped: the user's groups don't match any of the
 	// operator's group_role_mappings for this provider. No session
 	// minted; audit row records auth.oidc_login_unmapped_groups.
@@ -311,6 +319,13 @@ func (s *Service) HandleAuthRequest(ctx context.Context, providerID string) (aut
 	entry, err := s.getOrLoad(ctx, providerID)
 	if err != nil {
 		return "", "", "", err
+	}
+	// Audit 2026-05-10 MED-9 closure — refuse to mint a pre-login row
+	// for a disabled provider. The LoginPage's AuthInfo filter should
+	// already prevent the button from rendering, but defense-in-depth
+	// catches the direct-API/MCP/CLI invocation path too.
+	if entry.cfgRow != nil && !entry.cfgRow.Enabled {
+		return "", "", "", ErrProviderDisabled
 	}
 
 	state, err := randomB64URL(32)

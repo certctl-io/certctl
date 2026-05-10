@@ -27,11 +27,14 @@ func NewOIDCProviderRepository(db *sql.DB) *OIDCProviderRepository {
 	return &OIDCProviderRepository{db: db}
 }
 
+// Audit 2026-05-10 MED-9: `enabled` column added to the SELECT/INSERT/
+// UPDATE column list. Migration 000042 added the column with default
+// TRUE; existing rows are all enabled post-migration.
 const oidcProviderColumns = `id, tenant_id, name, issuer_url, client_id,
 		client_secret_encrypted, redirect_uri, groups_claim_path,
 		groups_claim_format, fetch_userinfo, scopes,
 		allowed_email_domains, iat_window_seconds,
-		jwks_cache_ttl_seconds, created_at, updated_at`
+		jwks_cache_ttl_seconds, enabled, created_at, updated_at`
 
 func scanOIDCProvider(row interface{ Scan(...interface{}) error }) (*oidcdomain.OIDCProvider, error) {
 	var p oidcdomain.OIDCProvider
@@ -41,7 +44,7 @@ func scanOIDCProvider(row interface{ Scan(...interface{}) error }) (*oidcdomain.
 		&p.ClientSecretEncrypted, &p.RedirectURI, &p.GroupsClaimPath,
 		&p.GroupsClaimFormat, &p.FetchUserinfo, &scopes,
 		&domains, &p.IATWindowSeconds,
-		&p.JWKSCacheTTLSeconds, &p.CreatedAt, &p.UpdatedAt,
+		&p.JWKSCacheTTLSeconds, &p.Enabled, &p.CreatedAt, &p.UpdatedAt,
 	); err != nil {
 		return nil, err
 	}
@@ -104,19 +107,24 @@ func (r *OIDCProviderRepository) GetByName(ctx context.Context, tenantID, name s
 // Translates SQLSTATE 23505 (unique_violation) to
 // ErrOIDCProviderDuplicateName.
 func (r *OIDCProviderRepository) Create(ctx context.Context, p *oidcdomain.OIDCProvider) error {
+	// MED-9: persist `enabled` on Create. New providers default to
+	// enabled=true; the schema column also has DEFAULT TRUE, so an
+	// older client sending the pre-MED-9 row shape without the column
+	// would still get enabled=true. We pass the field explicitly to
+	// honor a `Enabled=false` create.
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO oidc_providers (
 			id, tenant_id, name, issuer_url, client_id,
 			client_secret_encrypted, redirect_uri, groups_claim_path,
 			groups_claim_format, fetch_userinfo, scopes,
 			allowed_email_domains, iat_window_seconds,
-			jwks_cache_ttl_seconds
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14)`,
+			jwks_cache_ttl_seconds, enabled
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15)`,
 		p.ID, p.TenantID, p.Name, p.IssuerURL, p.ClientID,
 		p.ClientSecretEncrypted, p.RedirectURI, p.GroupsClaimPath,
 		p.GroupsClaimFormat, p.FetchUserinfo, pq.StringArray(p.Scopes),
 		pq.StringArray(p.AllowedEmailDomains), p.IATWindowSeconds,
-		p.JWKSCacheTTLSeconds,
+		p.JWKSCacheTTLSeconds, p.Enabled,
 	)
 	if err != nil {
 		var pqErr *pq.Error
@@ -131,6 +139,8 @@ func (r *OIDCProviderRepository) Create(ctx context.Context, p *oidcdomain.OIDCP
 // Update writes the mutable fields back. Immutable: id, tenant_id,
 // created_at. updated_at = NOW().
 func (r *OIDCProviderRepository) Update(ctx context.Context, p *oidcdomain.OIDCProvider) error {
+	// MED-9: persist `enabled` on Update so the toggle endpoint and
+	// the regular update path share the same write surface.
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE oidc_providers SET
 			name = $2,
@@ -145,13 +155,14 @@ func (r *OIDCProviderRepository) Update(ctx context.Context, p *oidcdomain.OIDCP
 			allowed_email_domains = $11,
 			iat_window_seconds = $12,
 			jwks_cache_ttl_seconds = $13,
+			enabled = $14,
 			updated_at = NOW()
 		WHERE id = $1`,
 		p.ID, p.Name, p.IssuerURL, p.ClientID,
 		p.ClientSecretEncrypted, p.RedirectURI, p.GroupsClaimPath,
 		p.GroupsClaimFormat, p.FetchUserinfo, pq.StringArray(p.Scopes),
 		pq.StringArray(p.AllowedEmailDomains), p.IATWindowSeconds,
-		p.JWKSCacheTTLSeconds,
+		p.JWKSCacheTTLSeconds, p.Enabled,
 	)
 	if err != nil {
 		var pqErr *pq.Error

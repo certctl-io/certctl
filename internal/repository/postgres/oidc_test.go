@@ -36,6 +36,7 @@ func newValidProvider(suffix string) *oidcdomain.OIDCProvider {
 		AllowedEmailDomains:   []string{},
 		IATWindowSeconds:      300,
 		JWKSCacheTTLSeconds:   3600,
+		Enabled:               true, // MED-9: default-on for test fixtures
 	}
 }
 

@@ -208,6 +208,13 @@ func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 		"required":  h.AuthType != "none",
 	}
 	if h.OIDCProvidersResolver != nil {
+		// Audit 2026-05-10 MED-9 closure — the adapter
+		// (cmd/server/main.go::oidcProvidersListAdapter.List) filters
+		// disabled providers before constructing OIDCProviderInfo, so
+		// the LoginPage never sees a button for an offline IdP. The
+		// HandleAuthRequest service-layer ErrProviderDisabled check
+		// is the defense-in-depth guard for direct API / MCP / CLI
+		// callers that bypass the GUI.
 		if provs, err := h.OIDCProvidersResolver.List(r.Context(), authdomain.DefaultTenantID); err == nil {
 			response["oidc_providers"] = provs
 		}

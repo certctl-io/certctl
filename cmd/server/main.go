@@ -2761,6 +2761,14 @@ func (a oidcProvidersListAdapter) List(ctx context.Context, tenantID string) ([]
 	}
 	out := make([]*handler.OIDCProviderInfo, 0, len(provs))
 	for _, p := range provs {
+		// Audit 2026-05-10 MED-9 closure — filter disabled providers
+		// at the adapter so the LoginPage's "Sign in with X" buttons
+		// don't render for offline IdPs. The HandleAuthRequest
+		// service-layer ErrProviderDisabled check is the
+		// defense-in-depth guard for direct API / MCP / CLI callers.
+		if !p.Enabled {
+			continue
+		}
 		out = append(out, &handler.OIDCProviderInfo{
 			ID:          p.ID,
 			DisplayName: p.Name,
