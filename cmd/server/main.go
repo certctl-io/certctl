@@ -1335,6 +1335,11 @@ func main() {
 		// admin_scep_intune, admin_est, intermediate_ca). Wraps live in
 		// router.go via rbacGate(reg.Checker, perm, handler).
 		Checker: authCheckerAdapter,
+		// Audit 2026-05-10 CRIT-3 closure — operator-configured CORS
+		// applied to the credentialed auth-exempt routes (OIDC handshake,
+		// BCL, logout, bootstrap, breakglass-login). Health probes
+		// continue to use middleware.CORSWildcard.
+		CorsCfg: middleware.CORSConfig{AllowedOrigins: cfg.CORS.AllowedOrigins},
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//

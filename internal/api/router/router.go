@@ -195,6 +195,23 @@ type HandlerRegistry struct {
 	// (only valid in tests / demo deployments — production MUST
 	// configure a Checker).
 	Checker auth.PermissionChecker
+
+	// CorsCfg is the operator-configured CORS middleware applied to the
+	// credentialed auth-exempt routes (OIDC handshake, BCL, logout,
+	// bootstrap, breakglass-login). Honors CERTCTL_CORS_ORIGINS — deny-
+	// by-default when AllowedOrigins is empty. Audit 2026-05-10 CRIT-3
+	// closure: previously these routes used middleware.CORSWildcard
+	// (formerly middleware.CORS) which emitted Access-Control-Allow-
+	// Origin: * regardless of operator config, ignoring the
+	// CERTCTL_CORS_ORIGINS knob (CWE-942).
+	//
+	// Health probes (/health, /ready, /api/v1/version, /api/v1/auth/info)
+	// continue to use middleware.CORSWildcard because they must be
+	// reachable from any origin without credentials. Each wildcard call
+	// site is listed in scripts/ci-guards/cors-wildcard-allowlist.sh —
+	// the CI guard fails when a new wildcard wrap appears outside the
+	// allowlist.
+	CorsCfg middleware.CORSConfig
 	// L-1 master closure (cat-l-fa0c1ac07ab5 + cat-l-8a1fb258a38a):
 	// server-side bulk endpoints replace pre-L-1 client-side N×HTTP
 	// loops in CertificatesPage.tsx. See handler/bulk_renewal.go and
@@ -306,18 +323,18 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Health endpoints (no auth middleware — must always be accessible)
 	r.mux.Handle("GET /health", middleware.Chain(
 		http.HandlerFunc(reg.Health.Health),
-		middleware.CORS,
+		middleware.CORSWildcard,
 		middleware.ContentType,
 	))
 	r.mux.Handle("GET /ready", middleware.Chain(
 		http.HandlerFunc(reg.Health.Ready),
-		middleware.CORS,
+		middleware.CORSWildcard,
 		middleware.ContentType,
 	))
 	// Auth info endpoint (no auth middleware — GUI needs this before login)
 	r.mux.Handle("GET /api/v1/auth/info", middleware.Chain(
 		http.HandlerFunc(reg.Health.AuthInfo),
-		middleware.CORS,
+		middleware.CORSWildcard,
 		middleware.ContentType,
 	))
 	// Version endpoint (no auth middleware — used by rollout probes that
@@ -328,7 +345,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// is preferred when present.
 	r.mux.Handle("GET /api/v1/version", middleware.Chain(
 		reg.Version,
-		middleware.CORS,
+		middleware.CORSWildcard,
 		middleware.ContentType,
 	))
 	// Auth check endpoint (uses full middleware chain via r.Register)
@@ -340,12 +357,12 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// AuthExemptRouterRoutes allowlist above.
 	r.mux.Handle("GET /api/v1/auth/bootstrap", middleware.Chain(
 		http.HandlerFunc(reg.Bootstrap.Available),
-		middleware.CORS,
+		middleware.NewCORS(reg.CorsCfg),
 		middleware.ContentType,
 	))
 	r.mux.Handle("POST /api/v1/auth/bootstrap", middleware.Chain(
 		http.HandlerFunc(reg.Bootstrap.Mint),
-		middleware.CORS,
+		middleware.NewCORS(reg.CorsCfg),
 		middleware.ContentType,
 	))
 
@@ -407,19 +424,19 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		//   /auth/logout           -> caller's own session cookie
 		r.mux.Handle("GET /auth/oidc/login", middleware.Chain(
 			http.HandlerFunc(reg.AuthSessionOIDC.LoginInitiate),
-			middleware.CORS, middleware.ContentType,
+			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
 		r.mux.Handle("GET /auth/oidc/callback", middleware.Chain(
 			http.HandlerFunc(reg.AuthSessionOIDC.LoginCallback),
-			middleware.CORS, middleware.ContentType,
+			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
 		r.mux.Handle("POST /auth/oidc/back-channel-logout", middleware.Chain(
 			http.HandlerFunc(reg.AuthSessionOIDC.BackChannelLogout),
-			middleware.CORS, middleware.ContentType,
+			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
 		r.mux.Handle("POST /auth/logout", middleware.Chain(
 			http.HandlerFunc(reg.AuthSessionOIDC.Logout),
-			middleware.CORS, middleware.ContentType,
+			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
 
 		// Session management. auth.session.list gates the all-actors
@@ -457,7 +474,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	if reg.AuthBreakglass != nil {
 		r.mux.Handle("POST /auth/breakglass/login", middleware.Chain(
 			http.HandlerFunc(reg.AuthBreakglass.Login),
-			middleware.CORS, middleware.ContentType,
+			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
 		r.Register("POST /api/v1/auth/breakglass/credentials", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.SetPassword))
 		r.Register("POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.Unlock))
