@@ -215,6 +215,22 @@ var (
 	// to nothing or is malformed. Phase 3 fails closed.
 	ErrGroupsMissing = errors.New("oidc: configured groups claim missing or malformed")
 
+	// ErrEmailDomainNotAllowed: the configured
+	// OIDCProvider.AllowedEmailDomains list is non-empty but the
+	// authenticated user's email domain isn't in it. CRIT-5 closure
+	// of the 2026-05-10 audit (pre-fix, the field was persisted +
+	// surfaced through the API + MCP + GUI but never read here).
+	// Operator-facing: configure the IdP to issue tokens for only
+	// the right tenants, or add the domain to the provider's
+	// allowed_email_domains list.
+	ErrEmailDomainNotAllowed = errors.New("oidc: email domain not in allowlist")
+
+	// ErrEmailMissingButRequired: AllowedEmailDomains is set on the
+	// provider but the ID token / userinfo response did not surface
+	// an email claim. Operator-facing: ensure the IdP scope set
+	// includes `email` and the IdP releases the claim.
+	ErrEmailMissingButRequired = errors.New("oidc: provider requires email but token has none")
+
 	// ErrGroupsUnmapped: the user's groups don't match any of the
 	// operator's group_role_mappings for this provider. No session
 	// minted; audit row records auth.oidc_login_unmapped_groups.
@@ -492,6 +508,33 @@ func (s *Service) HandleCallback(
 		return nil, fmt.Errorf("oidc: raw claims unmarshal: %w", err)
 	}
 	profile.Raw = raw
+
+	// Step 7.5: email-domain allowlist enforcement. Audit 2026-05-10
+	// CRIT-5 closure. When OIDCProvider.AllowedEmailDomains is non-
+	// empty, the user's email-domain MUST be in the list (case-
+	// insensitive exact match; subdomains are NOT auto-accepted — the
+	// operator must list each subdomain explicitly).
+	//
+	// Empty list (default for new providers) = any email domain
+	// accepted, matching the pre-fix behavior. Empty email claim with
+	// a non-empty allowlist = ErrEmailMissingButRequired (operators
+	// who set the allowlist explicitly expect email to be present).
+	if len(entry.cfgRow.AllowedEmailDomains) > 0 {
+		emailDomain, edErr := extractEmailDomain(profile.Email)
+		if edErr != nil {
+			return nil, ErrEmailMissingButRequired
+		}
+		matched := false
+		for _, allowed := range entry.cfgRow.AllowedEmailDomains {
+			if strings.EqualFold(strings.TrimSpace(allowed), emailDomain) {
+				matched = true
+				break
+			}
+		}
+		if !matched {
+			return nil, ErrEmailDomainNotAllowed
+		}
+	}
 
 	// Step 8: group claim resolution.
 	groups, err := groupclaim.Resolve(profile.Raw, entry.cfgRow.GroupsClaimPath)
@@ -874,4 +917,23 @@ func decryptClientSecret(blob []byte, key string) ([]byte, error) {
 		return nil, err
 	}
 	return plain, nil
+}
+
+// extractEmailDomain returns the lowercase domain portion of an RFC
+// 5322-ish email address. Used by HandleCallback Step 7.5 (CRIT-5
+// closure) to enforce OIDCProvider.AllowedEmailDomains. Rejects empty
+// input, addresses with no '@', and addresses with empty local-part
+// or domain-part. Does NOT validate the full RFC grammar — IdPs are
+// upstream of this and have their own validation; we only need a
+// stable domain-extraction for the allowlist comparison.
+func extractEmailDomain(email string) (string, error) {
+	email = strings.TrimSpace(email)
+	if email == "" {
+		return "", fmt.Errorf("empty email")
+	}
+	at := strings.LastIndex(email, "@")
+	if at <= 0 || at == len(email)-1 {
+		return "", fmt.Errorf("invalid email shape: %q", email)
+	}
+	return strings.ToLower(email[at+1:]), nil
 }
