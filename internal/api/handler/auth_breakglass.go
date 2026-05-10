@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/certctl-io/certctl/internal/auth/breakglass"
+	bgdomain "github.com/certctl-io/certctl/internal/auth/breakglass/domain"
 	sessiondomain "github.com/certctl-io/certctl/internal/auth/session/domain"
 )
 
@@ -46,6 +47,7 @@ type BreakglassService interface {
 	Authenticate(ctx context.Context, actorID, plaintext, ip, userAgent string) (*breakglass.AuthenticateResult, error)
 	Unlock(ctx context.Context, callerActorID, targetActorID string) error
 	RemoveCredential(ctx context.Context, callerActorID, targetActorID string) error
+	List(ctx context.Context) ([]*bgdomain.BreakglassCredential, error)
 }
 
 // AuthBreakglassHandler ships the Phase 7.5 surface.
@@ -253,4 +255,63 @@ func (h *AuthBreakglassHandler) Remove(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// breakglassCredentialResponse is the wire shape returned by ListCredentials.
+// Intentionally omits PasswordHash — the admin GUI only needs metadata to
+// render the credentialed-actor table.
+type breakglassCredentialResponse struct {
+	ActorID              string  `json:"actor_id"`
+	CreatedAt            string  `json:"created_at"`
+	LastPasswordChangeAt string  `json:"last_password_change_at"`
+	FailureCount         int     `json:"failure_count"`
+	LockedUntil          *string `json:"locked_until,omitempty"`
+	LastFailureAt        *string `json:"last_failure_at,omitempty"`
+}
+
+type listBreakglassCredentialsResponse struct {
+	Credentials []breakglassCredentialResponse `json:"credentials"`
+}
+
+// ListCredentials handles GET /api/v1/auth/breakglass/credentials.
+// Permission: auth.breakglass.admin.
+//
+// Audit 2026-05-10 CRIT-4 closure — backs the admin GUI Break-glass
+// page. Returns 404 when CERTCTL_BREAKGLASS_ENABLED=false (surface
+// invisibility, consistent with the other break-glass admin endpoints).
+// The password hash is NEVER serialized to the wire.
+func (h *AuthBreakglassHandler) ListCredentials(w http.ResponseWriter, r *http.Request) {
+	if h.svc == nil || !h.svc.Enabled() {
+		http.NotFound(w, r)
+		return
+	}
+	creds, err := h.svc.List(r.Context())
+	if err != nil {
+		if errors.Is(err, breakglass.ErrDisabled) {
+			http.NotFound(w, r)
+			return
+		}
+		Error(w, http.StatusInternalServerError, "could not list break-glass credentials")
+		return
+	}
+	resp := listBreakglassCredentialsResponse{Credentials: make([]breakglassCredentialResponse, 0, len(creds))}
+	for _, c := range creds {
+		row := breakglassCredentialResponse{
+			ActorID:              c.ActorID,
+			CreatedAt:            c.CreatedAt.UTC().Format(time.RFC3339),
+			LastPasswordChangeAt: c.LastPasswordChangeAt.UTC().Format(time.RFC3339),
+			FailureCount:         c.FailureCount,
+		}
+		if c.LockedUntil != nil {
+			s := c.LockedUntil.UTC().Format(time.RFC3339)
+			row.LockedUntil = &s
+		}
+		if c.LastFailureAt != nil {
+			s := c.LastFailureAt.UTC().Format(time.RFC3339)
+			row.LastFailureAt = &s
+		}
+		resp.Credentials = append(resp.Credentials, row)
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(resp)
 }

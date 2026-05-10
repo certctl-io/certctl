@@ -164,3 +164,33 @@ func (r *BreakglassCredentialRepository) Delete(ctx context.Context, actorID, te
 	}
 	return nil
 }
+
+// List returns every break-glass credential in the tenant. Audit
+// 2026-05-10 CRIT-4 closure — backs the GUI admin page that lists
+// credentialed actors. The password hash is read into the returned
+// row (it's an internal type passed to the handler which strips it
+// before serializing the JSON response).
+func (r *BreakglassCredentialRepository) List(ctx context.Context, tenantID string) ([]*bgdomain.BreakglassCredential, error) {
+	rows, err := r.db.QueryContext(ctx,
+		`SELECT `+breakglassColumns+`
+		   FROM breakglass_credentials
+		  WHERE tenant_id = $1
+		  ORDER BY created_at ASC`,
+		tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("breakglass list: %w", err)
+	}
+	defer rows.Close()
+	var out []*bgdomain.BreakglassCredential
+	for rows.Next() {
+		c, err := scanBreakglass(rows)
+		if err != nil {
+			return nil, fmt.Errorf("breakglass list scan: %w", err)
+		}
+		out = append(out, c)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("breakglass list iter: %w", err)
+	}
+	return out, nil
+}

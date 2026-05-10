@@ -112,6 +112,16 @@ func (s *stubRepo) Delete(_ context.Context, actorID, _ string) error {
 	delete(s.rows, actorID)
 	return nil
 }
+func (s *stubRepo) List(_ context.Context, _ string) ([]*bgdomain.BreakglassCredential, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	out := make([]*bgdomain.BreakglassCredential, 0, len(s.rows))
+	for _, c := range s.rows {
+		cp := *c
+		out = append(out, &cp)
+	}
+	return out, nil
+}
 
 type stubAudit struct {
 	mu     sync.Mutex

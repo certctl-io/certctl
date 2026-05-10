@@ -453,6 +453,23 @@ export const breakglassRemove = (targetActorID: string) =>
     method: 'DELETE',
   });
 
+export type BreakglassCredentialRow = {
+  actor_id: string;
+  created_at: string;
+  last_password_change_at: string;
+  failure_count: number;
+  locked_until?: string;
+  last_failure_at?: string;
+};
+
+// Audit 2026-05-10 CRIT-4 closure — admin GUI Break-glass page. The
+// password hash is never returned by the server; this lists only the
+// metadata operators need to render the credentialed-actor table.
+// Returns 404 when CERTCTL_BREAKGLASS_ENABLED=false (surface invisibility).
+export const breakglassListCredentials = () =>
+  fetchJSON<{ credentials: BreakglassCredentialRow[] }>(`${BASE}/auth/breakglass/credentials`)
+    .then(r => r.credentials);
+
 // =============================================================================
 // Bundle 1 Phase 10 — approvals queue.
 //

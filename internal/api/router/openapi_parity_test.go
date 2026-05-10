@@ -140,6 +140,7 @@ var SpecParityExceptions = map[string]string{
 	// extension). Full per-endpoint OpenAPI rows ride along with that
 	// commit; until then the surface is tracked here.
 	"POST /auth/breakglass/login":                                "Auth Bundle 2 Phase 7.5 — local-password login; auth-exempt; 404 when disabled (surface invisibility per spec).",
+	"GET /api/v1/auth/breakglass/credentials":                    "Audit 2026-05-10 CRIT-4 — list credentialed actors (metadata only; no password hash on the wire); gated auth.breakglass.admin.",
 	"POST /api/v1/auth/breakglass/credentials":                   "Auth Bundle 2 Phase 7.5 — set/rotate password; gated auth.breakglass.admin.",
 	"POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock": "Auth Bundle 2 Phase 7.5 — clear lockout state; gated auth.breakglass.admin.",
 	"DELETE /api/v1/auth/breakglass/credentials/{actor_id}":      "Auth Bundle 2 Phase 7.5 — remove credential; gated auth.breakglass.admin.",

@@ -476,6 +476,7 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 			http.HandlerFunc(reg.AuthBreakglass.Login),
 			middleware.NewCORS(reg.CorsCfg), middleware.ContentType,
 		))
+		r.Register("GET /api/v1/auth/breakglass/credentials", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.ListCredentials))
 		r.Register("POST /api/v1/auth/breakglass/credentials", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.SetPassword))
 		r.Register("POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.Unlock))
 		r.Register("DELETE /api/v1/auth/breakglass/credentials/{actor_id}", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.Remove))

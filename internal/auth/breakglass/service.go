@@ -408,6 +408,25 @@ func (s *Service) RemoveCredential(ctx context.Context, callerActorID, targetAct
 	return nil
 }
 
+// List returns the metadata for every break-glass credential in the
+// tenant. Audit 2026-05-10 CRIT-4 closure — backs the GUI admin page
+// that enumerates credentialed actors. Returns ErrDisabled when the
+// service is off (callers map to 404 for surface invisibility).
+//
+// The returned rows DO include the password_hash field (the service
+// boundary is the repo; the handler is responsible for stripping the
+// hash from the wire response).
+func (s *Service) List(ctx context.Context) ([]*bgdomain.BreakglassCredential, error) {
+	if !s.Enabled() {
+		return nil, ErrDisabled
+	}
+	out, err := s.repo.List(ctx, s.tenantID)
+	if err != nil {
+		return nil, fmt.Errorf("breakglass: list: %w", err)
+	}
+	return out, nil
+}
+
 // =============================================================================
 // Helpers — Argon2id hash + verify, ID generation, audit, dummy verify.
 // =============================================================================

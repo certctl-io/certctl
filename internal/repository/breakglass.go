@@ -59,4 +59,10 @@ type BreakglassCredentialRepository interface {
 	// (separate concern; the operator can call SessionService.RevokeAll
 	// in lockstep).
 	Delete(ctx context.Context, actorID, tenantID string) error
+
+	// List returns the metadata for every break-glass credential in the
+	// tenant. The password hash is NOT included in the returned rows —
+	// the admin GUI uses this to render the credentialed-actor table
+	// (audit 2026-05-10 CRIT-4 closure). Order: created_at ASC.
+	List(ctx context.Context, tenantID string) ([]*bgdomain.BreakglassCredential, error)
 }
