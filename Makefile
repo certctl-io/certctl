@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -196,6 +196,28 @@ okta-smoke-test:
 	@echo "==> running Okta smoke test (requires OKTA_ISSUER / _CLIENT_ID / _CLIENT_SECRET env vars)"
 	@go test -tags='integration okta_smoke' -count=1 -timeout=2m \
 	  ./internal/auth/oidc/...
+
+# Auth Bundle 2 Phase 14 — auth performance benchmarks. Three default-
+# tag benchmarks (session steady-state + session cold-process + oidc
+# steady-state) producing p50/p95/p99/max numbers per the auth-
+# benchmarks.md operator-doc table.
+benchmark-auth:
+	@echo "==> running auth performance benchmarks (session + oidc steady-state)"
+	@go test -bench='BenchmarkSession_|BenchmarkOIDC_SteadyState' -benchmem \
+	  -benchtime=2000x -run='^$$' \
+	  ./internal/auth/session/ ./internal/auth/oidc/
+
+# Auth Bundle 2 Phase 14 — OIDC cold-cache benchmark against a live
+# Keycloak container (requires Docker). Build-tag-gated so the
+# default-tag benchmarks above never pull in the 60-90s container
+# boot. Runs the integration test FIRST to populate the
+# sharedKeycloak fixture, then runs the benchmark.
+benchmark-auth-coldcache:
+	@echo "==> running OIDC cold-cache benchmark against live Keycloak (requires Docker)"
+	@go test -tags integration -count=1 -timeout=10m \
+	  -run TestKeycloakIntegration_RefreshKeysFetchesDiscoveryAndJWKS \
+	  -bench BenchmarkOIDC_ColdCache -benchmem -benchtime=10x \
+	  ./internal/auth/oidc/
 
 # Phase 5 — kind-driven cert-manager integration test. Requires
 # `kind`, `kubectl`, `helm`, and a local Docker daemon. Sets

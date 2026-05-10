@@ -72,6 +72,7 @@ You're running certctl in production and need operational guidance.
 | [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance + Phase 9 profile-edit closure |
 | [Helm deployment](operator/helm-deployment.md) | Kubernetes installation via the bundled chart |
 | [Performance baselines](operator/performance-baselines.md) | Operator-runnable benchmarks for regression spot checks |
+| [Auth benchmarks](operator/auth-benchmarks.md) | Session + OIDC validation p99 targets and measured baselines (Bundle 2 Phase 14) |
 | [Legacy clients (TLS 1.2)](operator/legacy-clients-tls-1.2.md) | Reverse-proxy runbook for embedded EST/SCEP clients on TLS 1.2 |
 
 ### Runbooks

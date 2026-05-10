@@ -94,6 +94,16 @@ type mockIdP struct {
 
 func newMockIdP(t *testing.T) *mockIdP {
 	t.Helper()
+	return newMockIdPWithTB(t)
+}
+
+// newMockIdPWithTB is the testing.TB-typed sibling so benchmarks
+// (bench_test.go) can construct the same fixture without forcing a
+// *testing.T parameter. testing.TB is satisfied by both *testing.T
+// and *testing.B; this is a standard Go pattern for shared test
+// helpers.
+func newMockIdPWithTB(t testing.TB) *mockIdP {
+	t.Helper()
 	key, err := rsa.GenerateKey(rand.Reader, 2048)
 	if err != nil {
 		t.Fatalf("rsa.GenerateKey: %v", err)
