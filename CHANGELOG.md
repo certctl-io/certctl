@@ -54,13 +54,48 @@ What else changed in v2.1.0:
 - **`/v1/auth/check` enrichment.** Response now includes the actor's
   standing roles and effective permissions, so the GUI gates
   affordances from a single fetch on app boot.
+- **Approval-bypass closure.** Edits to a profile that has (or
+  would have) `RequiresApproval=true` now route through the
+  `ApprovalService` two-person integrity gate (Phase 9). Migration
+  000033 adds `approval_kind` + `payload` to
+  `issuance_approval_requests` so cert-issuance and profile-edit
+  approvals share the same workflow. Same-actor self-approve is
+  rejected with `ErrApproveBySameActor` for both kinds. Closes the
+  flip-flop loophole where an admin could disable approval, mutate,
+  re-enable. Documented at
+  [`docs/reference/profiles.md`](docs/reference/profiles.md).
+- **GUI: Roles / API Keys / Auth Settings / Approvals queue.**
+  Four new pages under `/auth/*` consume `/v1/auth/me` for
+  permission-aware rendering. The Approvals queue blocks
+  self-approve at the client layer (Approve/Reject buttons hidden
+  when requested_by == current actor_id) on top of the server-side
+  enforcement. AuditPage gains a category filter (cert_lifecycle /
+  auth / config) for the auditor view.
+- **MCP server gains 12 RBAC tools.** Operators driving certctl
+  from Claude / VS Code / any MCP client get parity with the GUI
+  + CLI. Each tool routes through the same HTTP handler; permission
+  gates fire server-side.
 - **OpenAPI catalogues every new route.** Every Bundle 1 endpoint
   ships with an `operationId`; the parity test guards against drift.
+- **Coverage gates.** `internal/auth/` and `internal/service/auth/`
+  now have ≥85% coverage floors in `.github/coverage-thresholds.yml`.
+  The 12-path negative-test list from the Bundle 1 prompt is
+  fully covered (path #12 deferred with in-tree TODO).
+- **Protocol-endpoint allowlist pinned at three layers.** The
+  middleware bypass (`auth.IsProtocolEndpoint`), the router-level
+  `AuthExemptRouterRoutes` constant, and a new
+  `phase12_protocol_allowlist_test.go` AST scan all guard against
+  accidentally wrapping ACME / SCEP / EST / OCSP / CRL routes in
+  `rbacGate`.
 - **Bundle 2 (OIDC + sessions) starts after Bundle 1 lands on
   master.** Roadmap entry remains in `cowork/auth-bundle-2-prompt.md`.
 
 Migration ordering, idempotency, and downgrade are documented in
-`docs/migration/api-keys-to-rbac.md`.
+[`docs/migration/api-keys-to-rbac.md`](docs/migration/api-keys-to-rbac.md).
+The threat model + compliance mapping live at
+[`docs/operator/auth-threat-model.md`](docs/operator/auth-threat-model.md).
+Day-2 RBAC operations live at
+[`docs/operator/rbac.md`](docs/operator/rbac.md).
 
 ## v2.0.68 — Image registry path changed ⚠️
 

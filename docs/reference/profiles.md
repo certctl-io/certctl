@@ -1,6 +1,6 @@
 # Certificate profiles
 
-Last reviewed: 2026-05-09
+> Last reviewed: 2026-05-09
 
 A `CertificateProfile` is the policy object that groups every cert with
 the same shape: which issuer mints it, which key algorithm + size are

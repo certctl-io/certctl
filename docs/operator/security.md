@@ -1,6 +1,6 @@
 # certctl Security Posture & Operator Guidance
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-09
 
 This document collects the operator-facing security guidance that the source
 code's per-finding comment blocks reference. Each section names the audit
@@ -75,15 +75,60 @@ the accompanying tests for the format spec.
 Bundle B / M-002. Two layers decide auth-exempt status:
 
 1. **Router layer:** `internal/api/router/router.go::AuthExemptRouterRoutes`
-   — the 4 endpoints registered via direct `r.mux.Handle` without going
+   — the endpoints registered via direct `r.mux.Handle` without going
    through the middleware chain (`/health`, `/ready`, `/api/v1/auth/info`,
-   `/api/v1/version`).
+   `/api/v1/version`, plus `/api/v1/auth/bootstrap` GET + POST per
+   Bundle 1 Phase 6).
 2. **Dispatch layer:** `internal/api/router/router.go::AuthExemptDispatchPrefixes`
    — URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
-   `/.well-known/pki/*`, `/.well-known/est/*`, and `/scep[/...]*`.
+   `/.well-known/pki/*`, `/.well-known/est/*`, `/.well-known/est-mtls`,
+   and `/scep[/...]*` (incl. `/scep-mtls`).
 
 Both lists have AST-walking regression tests (`auth_exempt_test.go`) that
-fail CI if a new bypass lands without an updating the documented constant.
+fail CI if a new bypass lands without updating the documented constant.
+
+### RBAC primitive (Bundle 1)
+
+Bundle 1 ships role-based authorization on top of API-key
+authentication. Every gated handler routes through the
+`auth.RequirePermission` middleware (or its router-level wrap
+`rbacGate`); the middleware resolves the actor's effective
+permissions via the service-layer `Authorizer.CheckPermission`
+and returns HTTP 403 BEFORE the handler body runs on miss. The
+seven default roles (`admin` / `operator` / `viewer` / `agent` /
+`mcp` / `cli` / `auditor`), 33-permission canonical catalogue,
+and the auditor split (`r-auditor` holds only `audit.read` +
+`audit.export`) are seeded by migration 000029.
+
+For the operator how-to, see [`rbac.md`](rbac.md). For the
+threat model + compliance mapping, see
+[`auth-threat-model.md`](auth-threat-model.md). For the upgrade
+flow from a pre-Bundle-1 deployment, see
+[`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md).
+
+### Day-0 admin bootstrap (Bundle 1 Phase 6)
+
+Fresh deployments where no admin actor exists yet can mint the
+first admin via `POST /api/v1/auth/bootstrap` — set
+`CERTCTL_BOOTSTRAP_TOKEN`, POST a single curl with the token, and
+the server returns the plaintext key value once. The token is
+constant-time-compared; the strategy is one-shot via mutex; the
+admin-existence probe re-closes the path once an admin lands.
+The token is NEVER logged. The minted plaintext key flows only
+into the HTTP response body. See
+[`rbac.md`](rbac.md#day-0-bootstrap-first-admin-path) for the
+full flow.
+
+### Approval-bypass closure (Bundle 1 Phase 9)
+
+`CertificateProfile.RequiresApproval=true` profiles route both
+issuance/renewal AND profile edits through the
+`ApprovalService` two-person integrity gate (Phase 9 closes the
+flip-flop loophole where an admin could disable approval, mutate,
+re-enable). Same-actor self-approve is rejected at the service
+layer with `ErrApproveBySameActor`. See
+[`docs/reference/profiles.md`](../reference/profiles.md) for the
+full gate semantics.
 
 ## Per-user rate limiting
 

@@ -27,6 +27,7 @@ You're operating certctl in production or building integrations and need authori
 | Doc | What it covers |
 |---|---|
 | [Architecture](reference/architecture.md) | System design, data flow, security model, deployment topologies |
+| [Profiles](reference/profiles.md) | CertificateProfile policy object — issuer wiring, EKUs, RequiresApproval gate (Phase 9 closure) |
 | [API](reference/api.md) | OpenAPI 3.1 spec, integration patterns, client SDK generation |
 | [CLI](reference/cli.md) | certctl-cli command reference and CI/CD integration patterns |
 | [Configuration](reference/configuration.md) | `CERTCTL_*` environment variable reference (scheduler, rate limits, deploy verify, audit, agent) |
@@ -62,10 +63,12 @@ You're running certctl in production and need operational guidance.
 
 | Doc | What it covers |
 |---|---|
-| [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation |
+| [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation, RBAC primitive (Bundle 1), bootstrap |
+| [RBAC operator reference](operator/rbac.md) | Roles, permissions, scopes, scope-down + bootstrap flow (Bundle 1) |
+| [Auth threat model](operator/auth-threat-model.md) | API-key compromise, role-grant abuse, bootstrap-token leak, audit-mutation, compliance mapping (Bundle 1) |
 | [Control plane TLS](operator/tls.md) | Self-signed bootstrap, operator-supplied Secret, cert-manager Certificate CR |
 | [Database TLS](operator/database-tls.md) | PostgreSQL transport encryption |
-| [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance |
+| [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance + Phase 9 profile-edit closure |
 | [Helm deployment](operator/helm-deployment.md) | Kubernetes installation via the bundled chart |
 | [Performance baselines](operator/performance-baselines.md) | Operator-runnable benchmarks for regression spot checks |
 | [Legacy clients (TLS 1.2)](operator/legacy-clients-tls-1.2.md) | Reverse-proxy runbook for embedded EST/SCEP clients on TLS 1.2 |
@@ -90,6 +93,7 @@ You're moving from another cert-management tool to certctl, or running both in p
 | Caddy ACME (point Caddy at certctl) | [migration/acme-from-caddy.md](migration/acme-from-caddy.md) |
 | cert-manager ACME (point cert-manager at certctl) | [migration/acme-from-cert-manager.md](migration/acme-from-cert-manager.md) |
 | Traefik ACME (point Traefik at certctl) | [migration/acme-from-traefik.md](migration/acme-from-traefik.md) |
+| **API keys → RBAC (v2.0.x → v2.1.0)** | [migration/api-keys-to-rbac.md](migration/api-keys-to-rbac.md) — **AUDIT YOUR API KEYS** post-upgrade |
 
 ## Contributor
 
