@@ -884,6 +884,12 @@ func main() {
 	// erasure wrap around the repo so the handler layer doesn't have to
 	// import internal/domain/auth or internal/repository/postgres.
 	healthHandler.Resolver = authCheckResolverAdapter{repo: authActorRoleRepo}
+	// Bundle 2 Phase 6 / Category E — wire the OIDC providers resolver
+	// so GET /api/v1/auth/info returns the configured provider list
+	// (id + display_name + login_url) for the GUI's Login page button
+	// rendering. The shim adapts the postgres OIDCProviderRepository
+	// to the handler's narrow OIDCProvidersListResolver projection.
+	healthHandler.OIDCProvidersResolver = oidcProvidersListAdapter{repo: oidcProviderRepo}
 	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
 	// answers GET /api/v1/version with build identity (ldflags Version,
 	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
@@ -1747,13 +1753,25 @@ func main() {
 	// HandlerRegistry can wire the bootstrap handler. The auth
 	// middleware below reads from the same authKeyStore reference, so
 	// runtime additions from bootstrap propagate without restart.
-	var authMiddleware func(http.Handler) http.Handler
+	var bearerMiddleware func(http.Handler) http.Handler
 	switch config.AuthType(cfg.Auth.Type) {
 	case config.AuthTypeNone:
-		authMiddleware = auth.NewDemoModeAuth()
+		bearerMiddleware = auth.NewDemoModeAuth()
 	default:
-		authMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
+		bearerMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
 	}
+	// Auth Bundle 2 Phase 6 — chained-auth middleware. Tries the
+	// `certctl_session` cookie first (sessionMW); on miss / invalid,
+	// falls back to the API-key Bearer middleware. If neither
+	// authenticates, 401. The session middleware is a pass-through
+	// when sessionService is nil (pre-Bundle-2 builds).
+	sessionMW := session.NewSessionMiddleware(sessionService)
+	authMiddleware := session.ChainAuthSessionThenBearer(sessionMW, bearerMiddleware)
+	// CSRF middleware — gates state-changing methods (POST/PUT/DELETE/
+	// PATCH) for session-authenticated requests. API-key actors are
+	// CSRF-exempt (not browser-driven). Pass-through when
+	// sessionService is nil.
+	csrfMiddleware := session.NewCSRFMiddleware(sessionService)
 	_ = bootstrapHandler // referenced by HandlerRegistry above
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
@@ -1802,7 +1820,10 @@ func main() {
 		bodyLimitMiddleware,
 		securityHeadersMiddleware,
 		corsMiddleware,
+		// Phase 6 chain: Auth (session-then-Bearer fallback) → CSRF
+		// (state-changing only; API-key actors exempt) → Audit.
 		authMiddleware,
+		csrfMiddleware,
 		auditMiddleware.Middleware,
 	}
 
@@ -1824,7 +1845,10 @@ func main() {
 			bodyLimitMiddleware,
 			rateLimiter,
 			corsMiddleware,
+			// Phase 6 chain: Auth (session-then-Bearer fallback) → CSRF
+			// (state-changing only; API-key actors exempt) → Audit.
 			authMiddleware,
+			csrfMiddleware,
 			auditMiddleware.Middleware,
 		}
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
@@ -2569,3 +2593,30 @@ func (a *sessionMinterAdapter) MintForUser(
 var (
 	_ = oidcdomain.OIDCProvider{}
 )
+
+// oidcProvidersListAdapter bridges the postgres OIDCProviderRepository
+// to handler.OIDCProvidersListResolver. The handler returns
+// []*OIDCProviderInfo (id + display_name + login_url) for the public-
+// safe GUI Login-page payload; the repo returns the full OIDCProvider
+// row. The adapter projects + maps the login_url shape that
+// /auth/oidc/login?provider=<id> expects. Auth Bundle 2 Phase 6 /
+// Category E.
+type oidcProvidersListAdapter struct {
+	repo repository.OIDCProviderRepository
+}
+
+func (a oidcProvidersListAdapter) List(ctx context.Context, tenantID string) ([]*handler.OIDCProviderInfo, error) {
+	provs, err := a.repo.List(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*handler.OIDCProviderInfo, 0, len(provs))
+	for _, p := range provs {
+		out = append(out, &handler.OIDCProviderInfo{
+			ID:          p.ID,
+			DisplayName: p.Name,
+			LoginURL:    "/auth/oidc/login?provider=" + p.ID,
+		})
+	}
+	return out, nil
+}
