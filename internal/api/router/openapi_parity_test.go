@@ -130,6 +130,19 @@ var SpecParityExceptions = map[string]string{
 	"GET /api/v1/auth/oidc/group-mappings":         "Auth Bundle 2 Phase 5 — list group→role mappings; gated auth.oidc.list.",
 	"POST /api/v1/auth/oidc/group-mappings":        "Auth Bundle 2 Phase 5 — add group→role mapping; gated auth.oidc.edit.",
 	"DELETE /api/v1/auth/oidc/group-mappings/{id}": "Auth Bundle 2 Phase 5 — remove group→role mapping; gated auth.oidc.edit.",
+
+	// Auth Bundle 2 Phase 7.5 — break-glass admin HTTP surface (4 routes).
+	// Operator-toggleable local-password recovery for the SSO-broken case
+	// (Decision 4). Default-OFF; the entire surface returns 404 (not 403)
+	// when CERTCTL_BREAKGLASS_ENABLED=false so it is invisible to scanners.
+	// Threat model + operator runbook live in docs/operator/breakglass.md
+	// (deferred to the Phase 12 doc bundle alongside the auth threat-model
+	// extension). Full per-endpoint OpenAPI rows ride along with that
+	// commit; until then the surface is tracked here.
+	"POST /auth/breakglass/login":                                "Auth Bundle 2 Phase 7.5 — local-password login; auth-exempt; 404 when disabled (surface invisibility per spec).",
+	"POST /api/v1/auth/breakglass/credentials":                   "Auth Bundle 2 Phase 7.5 — set/rotate password; gated auth.breakglass.admin.",
+	"POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock": "Auth Bundle 2 Phase 7.5 — clear lockout state; gated auth.breakglass.admin.",
+	"DELETE /api/v1/auth/breakglass/credentials/{actor_id}":      "Auth Bundle 2 Phase 7.5 — remove credential; gated auth.breakglass.admin.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

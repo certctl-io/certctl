@@ -1092,6 +1092,150 @@ func TestService_RandomB64URL_ProducesNonEmptyAndUnique(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// Phase 7 — OIDC first-admin bootstrap hook tests.
+// =============================================================================
+
+// Phase 7 spec test #1: fresh DB + OIDC login matching bootstrap groups
+// → user becomes admin. Pin: when the hook returns grantAdmin=true, the
+// resolved roleIDs include r-admin even if mappings.Map returned empty.
+func TestService_BootstrapHook_GrantsAdminOnMatch(t *testing.T) {
+	idp := newMockIdP(t)
+	prov := makeProvider(idp.URL(), "op-bootstrap")
+	pl := newStubPreLogin()
+	mappings := &stubMappings{roleIDs: nil} // intentionally empty — fresh deploy
+	users := newStubUsers()
+	sessions := &stubSessions{}
+	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
+
+	hookCalled := false
+	svc.SetAdminBootstrapHook(func(_ context.Context, providerID string, groups []string, userID string) (bool, error) {
+		hookCalled = true
+		// Verify the hook receives the right inputs.
+		if providerID != "op-bootstrap" {
+			t.Errorf("hook providerID = %q; want op-bootstrap", providerID)
+		}
+		if len(groups) == 0 {
+			t.Errorf("hook groups empty; expected at least one")
+		}
+		if userID == "" {
+			t.Errorf("hook userID empty; expected upserted user id")
+		}
+		return true, nil // grant admin
+	})
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-bootstrap", "s", "test-nonce-fixed", "v-bootstrapxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("HandleCallback: %v", err)
+	}
+	if !hookCalled {
+		t.Errorf("bootstrap hook never invoked")
+	}
+	if !sliceContains(res.RoleIDs, "r-admin") {
+		t.Errorf("expected r-admin in RoleIDs after bootstrap; got %v", res.RoleIDs)
+	}
+}
+
+// Phase 7 spec test #2: fresh DB + OIDC login NOT matching bootstrap
+// groups → user upserted but mapping fails closed (no admin grant).
+// The hook returns grantAdmin=false; mappings.Map empty → ErrGroupsUnmapped.
+func TestService_BootstrapHook_NoMatchPreservesEmptyMappingFailClosed(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPLNoMappings(t, idp.URL(), "op-no-match")
+	svc.SetAdminBootstrapHook(func(_ context.Context, _ string, _ []string, _ string) (bool, error) {
+		return false, nil // not a bootstrap match
+	})
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-no-match", "s", "test-nonce-fixed", "v-nomatchxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	if !errors.Is(err, ErrGroupsUnmapped) {
+		t.Errorf("err = %v; want ErrGroupsUnmapped (no bootstrap match + empty mappings)", err)
+	}
+}
+
+// Phase 7 spec test #3: existing admin + OIDC login matching bootstrap
+// groups → bootstrap mode disabled (hook returns grantAdmin=false), normal
+// group-role mapping wins. Pin: the hook is ALWAYS called but its
+// grantAdmin=false response means the user gets the ordinary mapped
+// role set, not r-admin.
+func TestService_BootstrapHook_AdminAlreadyExistsFallsThroughToNormalMapping(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-existing-admin")
+	// Hook says grantAdmin=false because (in production) an admin already
+	// exists; the closure does the AdminExists probe.
+	svc.SetAdminBootstrapHook(func(_ context.Context, _ string, _ []string, _ string) (bool, error) {
+		return false, nil
+	})
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-existing-admin", "s", "test-nonce-fixed", "v-existingxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	if err != nil {
+		t.Fatalf("HandleCallback: %v", err)
+	}
+	// stubMappings returns r-operator; the hook returned false; r-admin
+	// MUST NOT appear in the role set.
+	if sliceContains(res.RoleIDs, "r-admin") {
+		t.Errorf("admin-already-exists path should not grant r-admin; got %v", res.RoleIDs)
+	}
+	if !sliceContains(res.RoleIDs, "r-operator") {
+		t.Errorf("expected normal mapping (r-operator) to win; got %v", res.RoleIDs)
+	}
+}
+
+// Phase 7 hook-error path: hook returns an error → HandleCallback wraps it.
+func TestService_BootstrapHook_ErrorWraps(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-hook-err")
+	svc.SetAdminBootstrapHook(func(_ context.Context, _ string, _ []string, _ string) (bool, error) {
+		return false, fmt.Errorf("simulated AdminExists probe failure")
+	})
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-hook-err", "s", "test-nonce-fixed", "v-errxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	if err == nil || !strings.Contains(err.Error(), "admin bootstrap") {
+		t.Errorf("err = %v; want admin bootstrap wrap", err)
+	}
+}
+
+// Phase 7 idempotence: hook returns grantAdmin=true AND mappings.Map
+// already includes r-admin → roleIDs has r-admin exactly once.
+func TestService_BootstrapHook_IdempotentWhenAdminAlreadyMapped(t *testing.T) {
+	idp := newMockIdP(t)
+	prov := makeProvider(idp.URL(), "op-idem")
+	pl := newStubPreLogin()
+	mappings := &stubMappings{roleIDs: []string{"r-admin"}} // already mapped
+	users := newStubUsers()
+	sessions := &stubSessions{}
+	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
+	svc.SetAdminBootstrapHook(func(_ context.Context, _ string, _ []string, _ string) (bool, error) {
+		return true, nil
+	})
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-idem", "s", "test-nonce-fixed", "v-idempxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	if err != nil {
+		t.Fatalf("HandleCallback: %v", err)
+	}
+	count := 0
+	for _, rid := range res.RoleIDs {
+		if rid == "r-admin" {
+			count++
+		}
+	}
+	if count != 1 {
+		t.Errorf("expected r-admin to appear exactly once; got %d (RoleIDs=%v)", count, res.RoleIDs)
+	}
+}
+
+func sliceContains(s []string, v string) bool {
+	for _, x := range s {
+		if x == v {
+			return true
+		}
+	}
+	return false
+}
+
 // TestService_SetClockForTest_OverridesNow pins the test seam works.
 func TestService_SetClockForTest_OverridesNow(t *testing.T) {
 	svc := newServiceForUnitTest(t)

@@ -1596,6 +1596,33 @@ type AuthConfig struct {
 	// legacy `api-key` auth type ignore this struct entirely.
 	Session SessionConfig
 
+	// Breakglass holds the Auth Bundle 2 Phase 7.5 break-glass admin
+	// tunables. Default-OFF; the entire surface is invisible (404
+	// instead of 403) when CERTCTL_BREAKGLASS_ENABLED is not true.
+	// Threat model: enabling break-glass is a deliberate bypass of
+	// the SSO security boundary; operators turn it on during SSO
+	// incidents and turn it off after recovery.
+	Breakglass BreakglassConfig
+
+	// BootstrapAdminGroups is the comma-separated list of IdP group
+	// names that grant the FIRST OIDC-authenticated user the r-admin
+	// role. Auth Bundle 2 Phase 7 / Decision 3. Empty (default)
+	// disables the OIDC-first-admin bootstrap path; the env-var-token
+	// path (BootstrapToken below) remains the fallback for fresh
+	// deployments without OIDC. When both are configured, OIDC wins
+	// on group match.
+	// Setting: CERTCTL_BOOTSTRAP_ADMIN_GROUPS environment variable.
+	BootstrapAdminGroups []string
+
+	// BootstrapOIDCProviderID restricts the OIDC-first-admin bootstrap
+	// path to a specific provider id (matches the seeded provider
+	// name in oidc_providers.id). Empty (default) accepts a match
+	// from any configured provider. Useful when an operator
+	// configures multiple IdPs and wants only the corporate IdP to
+	// be eligible for bootstrap.
+	// Setting: CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID environment variable.
+	BootstrapOIDCProviderID string
+
 	// BootstrapToken is the one-shot pre-shared secret that gates the
 	// Bundle 1 Phase 6 bootstrap endpoint (POST /v1/auth/bootstrap). When
 	// set at server startup AND no admin-roled actors exist, the
@@ -1664,6 +1691,38 @@ type SessionConfig struct {
 	// Validate. Default false; useful only in tightly-controlled
 	// environments. Wire: CERTCTL_SESSION_BIND_USER_AGENT.
 	BindUserAgent bool
+}
+
+// BreakglassConfig contains the Auth Bundle 2 Phase 7.5 break-glass
+// admin tunables. Decision 4: operator-toggleable local-password
+// admin for the SSO-broken case. Default-OFF; the entire surface is
+// invisible (404 NOT 403) when Enabled=false.
+//
+// Threat model (load-bearing): enabling break-glass is a deliberate
+// bypass of the SSO security boundary. An attacker who phishes the
+// password OR finds it in a compromised password manager bypasses
+// MFA, OIDC, and every group-claim gate. Recommendation: keep
+// CERTCTL_BREAKGLASS_ENABLED=false in steady-state. Enable only
+// during SSO-broken incidents. Disable after recovery. WebAuthn
+// pairing (v3 per Decision 12) is the load-bearing second factor.
+type BreakglassConfig struct {
+	// Enabled gates the entire service surface. Default false.
+	// Wire: CERTCTL_BREAKGLASS_ENABLED.
+	Enabled bool
+
+	// LockoutThreshold is the failure count that trips the lockout.
+	// Default 5. Wire: CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD.
+	LockoutThreshold int
+
+	// LockoutDuration is how long the account stays locked after the
+	// threshold trips. Default 15m.
+	// Wire: CERTCTL_BREAKGLASS_LOCKOUT_DURATION.
+	LockoutDuration time.Duration
+
+	// LockoutResetInterval is the idle time after last_failure_at
+	// before the failure counter resets to 0 on next attempt.
+	// Default 1h. Wire: CERTCTL_BREAKGLASS_LOCKOUT_RESET_INTERVAL.
+	LockoutResetInterval time.Duration
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -1789,6 +1848,12 @@ func Load() (*Config, error) {
 			// /v1/auth/bootstrap endpoint that mints the first admin
 			// key. Empty = bootstrap endpoint disabled (default).
 			BootstrapToken: getEnv("CERTCTL_BOOTSTRAP_TOKEN", ""),
+			// Bundle 2 Phase 7: OIDC-first-admin bootstrap. When the
+			// configured group list is non-empty, the first OIDC
+			// login that carries any of those groups is auto-granted
+			// r-admin. Coexists with BootstrapToken.
+			BootstrapAdminGroups:    getEnvList("CERTCTL_BOOTSTRAP_ADMIN_GROUPS", nil),
+			BootstrapOIDCProviderID: getEnv("CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID", ""),
 			// Bundle 2 Phase 4: session-service tunables. Defaults match
 			// the prompt; high-security deployments tighten via the env
 			// vars documented on SessionConfig fields.
@@ -1800,6 +1865,16 @@ func Load() (*Config, error) {
 				SameSite:            getEnv("CERTCTL_SESSION_SAMESITE", "Lax"),
 				BindIP:              getEnvBool("CERTCTL_SESSION_BIND_IP", false),
 				BindUserAgent:       getEnvBool("CERTCTL_SESSION_BIND_USER_AGENT", false),
+			},
+			// Bundle 2 Phase 7.5: break-glass admin tunables. Default-
+			// OFF; the entire surface is invisible (404 NOT 403) when
+			// Enabled=false. Threat model + recommendation in the
+			// BreakglassConfig docstring.
+			Breakglass: BreakglassConfig{
+				Enabled:              getEnvBool("CERTCTL_BREAKGLASS_ENABLED", false),
+				LockoutThreshold:     getEnvInt("CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD", 5),
+				LockoutDuration:      getEnvDuration("CERTCTL_BREAKGLASS_LOCKOUT_DURATION", 15*time.Minute),
+				LockoutResetInterval: getEnvDuration("CERTCTL_BREAKGLASS_LOCKOUT_RESET_INTERVAL", 1*time.Hour),
 			},
 		},
 		RateLimit: RateLimitConfig{

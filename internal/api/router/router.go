@@ -88,6 +88,7 @@ var AuthExemptRouterRoutes = []string{
 	"GET /auth/oidc/callback",             // Auth Bundle 2 Phase 5 — IdP redirects here pre-auth; cookie + state validated inside
 	"POST /auth/oidc/back-channel-logout", // Auth Bundle 2 Phase 5 — IdP-initiated; auth via the IdP-signed logout_token JWT in body
 	"POST /auth/logout",                   // Auth Bundle 2 Phase 5 — caller's session-cookie is checked inside the handler; no Bearer requirement
+	"POST /auth/breakglass/login",         // Auth Bundle 2 Phase 7.5 — local-password recovery; returns 404 when CERTCTL_BREAKGLASS_ENABLED=false (surface invisible)
 }
 
 // AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
@@ -232,6 +233,16 @@ type HandlerRegistry struct {
 	// Optional — when nil the routes are not registered (pre-Bundle-2
 	// deployments still build + run).
 	AuthSessionOIDC *handler.AuthSessionOIDCHandler
+
+	// AuthBreakglass handles the Auth Bundle 2 Phase 7.5 break-glass
+	// admin HTTP surface — operator-toggleable local-password
+	// recovery path for the SSO-broken case. 4 endpoints:
+	//   POST   /auth/breakglass/login                                    (auth-exempt; returns 404 when disabled)
+	//   POST   /api/v1/auth/breakglass/credentials                       (auth.breakglass.admin)
+	//   POST   /api/v1/auth/breakglass/credentials/{actor_id}/unlock     (auth.breakglass.admin)
+	//   DELETE /api/v1/auth/breakglass/credentials/{actor_id}            (auth.breakglass.admin)
+	// Optional — when nil the routes are not registered.
+	AuthBreakglass *handler.AuthBreakglassHandler
 
 	// IntermediateCAs handles the admin-gated CA-hierarchy management
 	// surface under /api/v1/issuers/{id}/intermediates and
@@ -386,6 +397,27 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		r.Register("GET /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListGroupMappings))
 		r.Register("POST /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.AddGroupMapping))
 		r.Register("DELETE /api/v1/auth/oidc/group-mappings/{id}", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.RemoveGroupMapping))
+	}
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 7.5 — break-glass admin HTTP surface.
+	//
+	// Public login endpoint (auth-exempt; the whole point is to log in
+	// WITHOUT existing creds). Returns 404 when CERTCTL_BREAKGLASS_ENABLED
+	// is false so the surface is invisible to scanners. Pinned in
+	// AuthExemptRouterRoutes above.
+	//
+	// Admin endpoints (RBAC-gated auth.breakglass.admin per migration
+	// 000038) — the handler also returns 404 when disabled, sharing the
+	// surface-invisibility property with the public login path.
+	if reg.AuthBreakglass != nil {
+		r.mux.Handle("POST /auth/breakglass/login", middleware.Chain(
+			http.HandlerFunc(reg.AuthBreakglass.Login),
+			middleware.CORS, middleware.ContentType,
+		))
+		r.Register("POST /api/v1/auth/breakglass/credentials", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.SetPassword))
+		r.Register("POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.Unlock))
+		r.Register("DELETE /api/v1/auth/breakglass/credentials/{actor_id}", rbacGate(reg.Checker, "auth.breakglass.admin", reg.AuthBreakglass.Remove))
 	}
 
 	// Certificates routes: /api/v1/certificates

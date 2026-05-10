@@ -118,6 +118,17 @@ var CanonicalPermissions = []string{
 	"auth.oidc.create",
 	"auth.oidc.edit",
 	"auth.oidc.delete",
+
+	// Bundle 2 Phase 7.5 — break-glass admin permissions seeded by
+	// migration 000038. auth.breakglass.admin gates set/rotate/unlock/
+	// remove operations on any actor's break-glass credential.
+	// auth.breakglass.login is granted to each actor when their
+	// break-glass credential is set, so they can use the local-
+	// password recovery path during SSO outages. The whole surface
+	// is gated on CERTCTL_BREAKGLASS_ENABLED at the service layer
+	// (Service.Enabled() short-circuits every operation when false).
+	"auth.breakglass.admin",
+	"auth.breakglass.login",
 }
 
 // DefaultRoles describes the seven default roles seeded by the

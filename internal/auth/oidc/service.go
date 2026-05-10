@@ -79,6 +79,12 @@ type Service struct {
 	mu       sync.RWMutex
 	cache    map[string]*providerEntry // keyed by provider ID
 	clockNow func() time.Time          // injectable for tests
+
+	// adminBootstrapHook is the optional Phase 7 first-admin bootstrap
+	// closure. When set, HandleCallback consults it after group
+	// resolution + user upsert; on grantAdmin=true the user's resolved
+	// role IDs are extended with r-admin. See bootstrap_hook.go.
+	adminBootstrapHook AdminBootstrapHook
 }
 
 // providerEntry caches the go-oidc Provider + the OAuth2 config + the
@@ -503,13 +509,13 @@ func (s *Service) HandleCallback(
 		}
 	}
 
-	// Step 9: map groups to role IDs. Empty result => fail closed.
+	// Step 9: map groups to role IDs. Phase 7 defers the empty-mapping
+	// fail-closed check until after the bootstrap hook gets a chance to
+	// grant r-admin (Step 11) — a fresh deployment with zero group_role_
+	// mappings still needs to mint the first admin.
 	roleIDs, err := s.mappings.Map(ctx, providerID, groups)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: group-role mapping lookup: %w", err)
-	}
-	if len(roleIDs) == 0 {
-		return nil, ErrGroupsUnmapped
 	}
 
 	// Step 10: upsert the user record. Per Phase 1 contract, identity
@@ -520,7 +526,31 @@ func (s *Service) HandleCallback(
 		return nil, fmt.Errorf("oidc: upsert user: %w", err)
 	}
 
-	// Step 11: mint a post-login session via Phase 4's SessionService.
+	// Step 11 — Phase 7: OIDC first-admin bootstrap hook. Optional;
+	// runs after upsertUser. The hook checks AdminExists + group
+	// intersection against CERTCTL_BOOTSTRAP_ADMIN_GROUPS; on first
+	// match it grants r-admin to the user via ActorRoleRepository
+	// + emits a bootstrap.oidc_first_admin audit row + returns
+	// grantAdmin=true so we ensure r-admin lands in the role set.
+	// Subsequent logins (admin-already-exists) silently skip via
+	// grantAdmin=false.
+	if s.adminBootstrapHook != nil {
+		grantAdmin, herr := s.adminBootstrapHook(ctx, providerID, groups, user.ID)
+		if herr != nil {
+			return nil, fmt.Errorf("oidc: admin bootstrap: %w", herr)
+		}
+		if grantAdmin {
+			roleIDs = appendIfMissing(roleIDs, "r-admin")
+		}
+	}
+
+	// Step 12: empty-mapping fail-closed. Phase 3 contract preserved —
+	// deferred from Step 9 only to give the bootstrap hook a chance.
+	if len(roleIDs) == 0 {
+		return nil, ErrGroupsUnmapped
+	}
+
+	// Step 13: mint a post-login session via Phase 4's SessionService.
 	cookieValue, csrfToken, err := s.sessions.MintForUser(ctx, user, roleIDs, ip, userAgent)
 	if err != nil {
 		return nil, fmt.Errorf("oidc: session mint: %w", err)

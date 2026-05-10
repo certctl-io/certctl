@@ -24,6 +24,7 @@ import (
 	"github.com/certctl-io/certctl/internal/api/router"
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/auth/bootstrap"
+	"github.com/certctl-io/certctl/internal/auth/breakglass"
 	oidcsvc "github.com/certctl-io/certctl/internal/auth/oidc"
 	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
 	"github.com/certctl-io/certctl/internal/auth/session"
@@ -437,6 +438,102 @@ func main() {
 			Secure:   true,
 		},
 	)
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 7 — OIDC first-admin bootstrap hook.
+	//
+	// Wired AFTER oidcService is constructed. The hook closure consults
+	// the configured CERTCTL_BOOTSTRAP_ADMIN_GROUPS + the AdminExists
+	// probe; on first match it grants r-admin via the ActorRoleRepository
+	// + emits a bootstrap.oidc_first_admin audit row. Subsequent
+	// admin-already-exists logins return grantAdmin=false silently.
+	// Disabled (no-op) when CERTCTL_BOOTSTRAP_ADMIN_GROUPS is empty.
+	if len(cfg.Auth.BootstrapAdminGroups) > 0 {
+		bootstrapGroups := make(map[string]struct{}, len(cfg.Auth.BootstrapAdminGroups))
+		for _, g := range cfg.Auth.BootstrapAdminGroups {
+			bootstrapGroups[strings.TrimSpace(g)] = struct{}{}
+		}
+		bootstrapProviderID := cfg.Auth.BootstrapOIDCProviderID
+		oidcService.SetAdminBootstrapHook(func(ctx context.Context, providerID string, groups []string, userID string) (bool, error) {
+			// Provider-specificity: when configured, only the named
+			// provider is eligible for bootstrap.
+			if bootstrapProviderID != "" && providerID != bootstrapProviderID {
+				return false, nil
+			}
+			// Admin-already-exists: bootstrap mode is disabled once
+			// any actor in the tenant holds r-admin.
+			adminExists, probeErr := authActorRoleRepo.AdminExists(ctx, authdomainAlias.DefaultTenantID)
+			if probeErr != nil {
+				return false, fmt.Errorf("admin existence probe: %w", probeErr)
+			}
+			if adminExists {
+				return false, nil
+			}
+			// Group intersection check.
+			matched := false
+			for _, g := range groups {
+				if _, ok := bootstrapGroups[g]; ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return false, nil
+			}
+			// Match. Grant r-admin via the actor-role repo.
+			grant := &authdomainAlias.ActorRole{
+				ActorID:   userID,
+				ActorType: authdomainAlias.ActorTypeValue("User"),
+				RoleID:    authdomainAlias.RoleIDAdmin,
+				TenantID:  authdomainAlias.DefaultTenantID,
+				GrantedBy: "oidc-bootstrap",
+			}
+			if gerr := authActorRoleRepo.Grant(ctx, grant); gerr != nil {
+				return false, fmt.Errorf("grant r-admin: %w", gerr)
+			}
+			// Emit audit row with event_category=auth.
+			_ = auditService.RecordEventWithCategory(ctx, userID, domain.ActorTypeUser,
+				"bootstrap.oidc_first_admin", domain.EventCategoryAuth,
+				"users", userID,
+				map[string]interface{}{
+					"user_id":     userID,
+					"provider_id": providerID,
+					"trigger":     "oidc_group_match",
+				})
+			logger.Info("OIDC first-admin bootstrap fired — user granted r-admin",
+				"user_id", userID, "provider_id", providerID)
+			return true, nil
+		})
+		logger.Info("OIDC first-admin bootstrap enabled",
+			"groups", cfg.Auth.BootstrapAdminGroups,
+			"provider_id_filter", bootstrapProviderID)
+	}
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 7.5 — break-glass admin service + handler.
+	// =========================================================================
+	breakglassRepo := postgres.NewBreakglassCredentialRepository(db)
+	breakglassService := breakglass.NewService(
+		breakglassRepo,
+		auditService,
+		breakglassSessionMinterAdapter{svc: sessionService},
+		breakglass.Config{
+			Enabled:              cfg.Auth.Breakglass.Enabled,
+			LockoutThreshold:     cfg.Auth.Breakglass.LockoutThreshold,
+			LockoutDuration:      cfg.Auth.Breakglass.LockoutDuration,
+			LockoutResetInterval: cfg.Auth.Breakglass.LockoutResetInterval,
+		},
+		authdomainAlias.DefaultTenantID,
+	)
+	breakglassHandler := handler.NewAuthBreakglassHandler(breakglassService, handler.SessionCookieAttrs{
+		SameSite: sameSiteMode,
+		Secure:   true,
+	})
+	if cfg.Auth.Breakglass.Enabled {
+		logger.Warn("CERTCTL_BREAKGLASS_ENABLED=true — break-glass admin path is ACTIVE; this bypasses SSO. Disable in steady-state.",
+			"lockout_threshold", cfg.Auth.Breakglass.LockoutThreshold,
+			"lockout_duration", cfg.Auth.Breakglass.LockoutDuration.String())
+	}
 
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
@@ -1206,6 +1303,11 @@ func main() {
 		// surface. 13 endpoints across login flow + session management
 		// + OIDC provider CRUD + group-mapping CRUD.
 		AuthSessionOIDC: authSessionOIDCHandler,
+
+		// AuthBreakglass — Auth Bundle 2 Phase 7.5 break-glass admin
+		// HTTP surface. 4 endpoints (1 public login + 3 admin CRUD).
+		// All endpoints return 404 when CERTCTL_BREAKGLASS_ENABLED=false.
+		AuthBreakglass: breakglassHandler,
 		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
 		// auth repos + service-layer Authorizer / RoleService /
 		// ActorRoleService / PermissionService into the HTTP surface
@@ -2593,6 +2695,28 @@ func (a *sessionMinterAdapter) MintForUser(
 var (
 	_ = oidcdomain.OIDCProvider{}
 )
+
+// =============================================================================
+// breakglassSessionMinterAdapter — bridge from *session.Service to
+// breakglass.SessionMinter.
+//
+// The break-glass service's SessionMinter port (Phase 7.5) returns
+// (cookie, csrf, err); the underlying *session.Service.Create returns
+// *CreateResult. This adapter unwraps the result. Lives in cmd/server
+// so the breakglass package doesn't have to know about session.Service.
+// =============================================================================
+
+type breakglassSessionMinterAdapter struct {
+	svc *session.Service
+}
+
+func (a breakglassSessionMinterAdapter) Create(ctx context.Context, actorID, actorType, ip, userAgent string) (string, string, error) {
+	res, err := a.svc.Create(ctx, actorID, actorType, ip, userAgent)
+	if err != nil {
+		return "", "", err
+	}
+	return res.CookieValue, res.CSRFToken, nil
+}
 
 // oidcProvidersListAdapter bridges the postgres OIDCProviderRepository
 // to handler.OIDCProvidersListResolver. The handler returns
