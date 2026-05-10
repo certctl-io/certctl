@@ -97,6 +97,7 @@ You're moving from another cert-management tool to certctl, or running both in p
 | cert-manager ACME (point cert-manager at certctl) | [migration/acme-from-cert-manager.md](migration/acme-from-cert-manager.md) |
 | Traefik ACME (point Traefik at certctl) | [migration/acme-from-traefik.md](migration/acme-from-traefik.md) |
 | **API keys → RBAC (v2.0.x → v2.1.0)** | [migration/api-keys-to-rbac.md](migration/api-keys-to-rbac.md) — **AUDIT YOUR API KEYS** post-upgrade |
+| **Enable OIDC SSO on a Bundle-1-merged deployment** | [migration/oidc-enable.md](migration/oidc-enable.md) — step-by-step Bundle 2 OIDC onboarding |
 
 ## Contributor
 
