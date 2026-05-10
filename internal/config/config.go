@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -1596,6 +1597,22 @@ type AuthConfig struct {
 	// legacy `api-key` auth type ignore this struct entirely.
 	Session SessionConfig
 
+	// DemoModeAck must be true to allow CERTCTL_AUTH_TYPE=none with a
+	// non-loopback listen address. Default false. Audit 2026-05-10
+	// HIGH-12 closure: pre-fix, an operator who flipped Type=none
+	// "temporarily" or via misconfig exposed admin functions to anyone
+	// reachable on port 8443 — the demo-mode synthetic actor
+	// `actor-demo-anon` is wired with `AdminKey=true`, so every
+	// request was served as a full admin. The control plane is
+	// HTTPS-only but a misconfigured ingress / public bind meant
+	// unauthenticated full admin. Post-fix: Validate() refuses to
+	// start when Type=none AND the listener binds to a non-loopback
+	// address (0.0.0.0, ::, or a routable IP) UNLESS the operator
+	// also sets DemoModeAck=true to acknowledge the bypass. Production
+	// deployments MUST set Type to a real authn type (api-key | oidc).
+	// Setting: CERTCTL_DEMO_MODE_ACK environment variable.
+	DemoModeAck bool
+
 	// OIDCBCLMaxAgeSeconds is the iat-freshness skew window for OIDC
 	// back-channel-logout tokens. logout_tokens with iat outside the
 	// window are rejected with audit outcome=iat_stale (in the past)
@@ -1849,6 +1866,9 @@ func Load() (*Config, error) {
 		Auth: AuthConfig{
 			Type:   getEnv("CERTCTL_AUTH_TYPE", "api-key"),
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
+			// Audit 2026-05-10 HIGH-12 closure: required-true to allow
+			// CERTCTL_AUTH_TYPE=none with a non-loopback listen address.
+			DemoModeAck: getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
 			// can surface parse errors alongside other config errors.
 
@@ -2526,6 +2546,36 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
 	}
 
+	// Audit 2026-05-10 HIGH-12 closure: refuse to start when
+	// CERTCTL_AUTH_TYPE=none is bound to a non-loopback address unless
+	// the operator explicitly acknowledges the bypass via
+	// CERTCTL_DEMO_MODE_ACK=true.
+	//
+	// Rationale: demo mode wires the synthetic actor `actor-demo-anon`
+	// with `AdminKey=true` on every request. The control plane is
+	// HTTPS-only, but a misconfigured ingress / public listen-bind
+	// means any reachable client gets full admin without authentication.
+	// The fail-closed guard converts what was a documentation-only
+	// warning into a hard runtime check operators cannot ignore.
+	//
+	// Localhost / loopback (127.0.0.1, ::1, "localhost") is exempt
+	// because the demo `docker compose up` flow legitimately serves
+	// the dashboard to the operator's own browser; binding to
+	// 0.0.0.0 / :: / a routable IP is what surfaces the admin to the
+	// network and triggers the guard.
+	if c.Auth.Type == string(AuthTypeNone) {
+		if !isLoopbackAddr(c.Server.Host) && !c.Auth.DemoModeAck {
+			return fmt.Errorf(
+				"CERTCTL_AUTH_TYPE=none with non-loopback CERTCTL_SERVER_HOST=%q "+
+					"requires CERTCTL_DEMO_MODE_ACK=true to acknowledge that every "+
+					"request will be served as the synthetic admin actor `actor-demo-anon`. "+
+					"This is INSECURE — operators must explicitly opt in. Production "+
+					"deployments MUST set CERTCTL_AUTH_TYPE to a real authn type "+
+					"(api-key | oidc); see docs/operator/security.md for guidance.",
+				c.Server.Host)
+		}
+	}
+
 	// Validate keygen mode
 	validKeygenModes := map[string]bool{
 		"agent":  true,
@@ -3032,4 +3082,45 @@ func isValidKeyName(s string) bool {
 		}
 	}
 	return true
+}
+
+// isLoopbackAddr returns true when host is bound to a loopback
+// interface only (127.0.0.1, ::1, or "localhost"). Used by the
+// HIGH-12 demo-mode startup guard to refuse non-loopback binds when
+// CERTCTL_AUTH_TYPE=none is in effect.
+//
+// "" (unset) AND "0.0.0.0" / "::" / "[::]" return false because those
+// surface the listener to every interface — exactly the misconfiguration
+// the guard is designed to catch.
+//
+// Hostnames other than "localhost" return false defensively: a hostname
+// could resolve to a non-loopback IP at runtime; we don't perform DNS
+// here because the guard runs at startup before any network state is
+// available, and we don't want a misconfigured /etc/hosts to silently
+// pass the guard. Operators wanting to bind to a non-default loopback
+// alias must either use 127.0.0.1 / ::1 directly or set
+// CERTCTL_DEMO_MODE_ACK=true.
+func isLoopbackAddr(host string) bool {
+	switch host {
+	case "":
+		// Empty / unset host — Go's net/http.Server treats this as
+		// "all interfaces" (equivalent to 0.0.0.0). Surface it to the
+		// network → not loopback.
+		return false
+	case "0.0.0.0", "::", "[::]":
+		return false
+	case "localhost":
+		return true
+	}
+	// Strip a trailing :port if the operator passed a host:port pair
+	// rather than a bare host (defensive — Server.Host is documented
+	// as host-only, but be lenient).
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	// Hostname that isn't "localhost" — fail closed.
+	return false
 }
