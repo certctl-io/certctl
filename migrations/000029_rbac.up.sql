@@ -65,13 +65,24 @@ CREATE TABLE IF NOT EXISTS permissions (
 -- 'global', 'profile', 'issuer'; ScopeID is NULL when global, otherwise
 -- references the resource id (managed at the application layer because
 -- profiles + issuers live in different tables; we don't FK on scope_id).
+-- Bundle 1 fix: PRIMARY KEY columns are implicitly NOT NULL in Postgres,
+-- but global-scope grants legitimately have scope_id=NULL by design
+-- (the CHECK constraint enforces it). The earlier composite PK over
+-- (role_id, permission_id, scope_type, scope_id) tripped on every
+-- global-scope insert because scope_id was NULL. Fix: use a synthetic
+-- BIGSERIAL primary key + UNIQUE NULLS NOT DISTINCT on the natural
+-- key (Postgres 15+; the project's compose targets postgres:16-alpine).
+-- NULLS NOT DISTINCT means two NULL scope_ids collide for uniqueness,
+-- which is what ON CONFLICT (...) DO NOTHING below relies on.
 CREATE TABLE IF NOT EXISTS role_permissions (
+    id            BIGSERIAL PRIMARY KEY,
     role_id       TEXT NOT NULL REFERENCES roles(id) ON DELETE CASCADE,
     permission_id TEXT NOT NULL REFERENCES permissions(id) ON DELETE RESTRICT,
     scope_type    TEXT NOT NULL DEFAULT 'global',
     scope_id      TEXT,                                -- NULL for global
 
-    PRIMARY KEY (role_id, permission_id, scope_type, scope_id),
+    CONSTRAINT role_permissions_unique
+        UNIQUE NULLS NOT DISTINCT (role_id, permission_id, scope_type, scope_id),
     CONSTRAINT role_permission_scope_check CHECK (
         scope_type IN ('global', 'profile', 'issuer')
     ),
