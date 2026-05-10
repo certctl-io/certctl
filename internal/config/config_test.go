@@ -553,17 +553,23 @@ func TestValidAuthTypesDoesNotContainJWT(t *testing.T) {
 	}
 }
 
-// TestValidAuthTypesIsExactly_APIKey_None pins the current allowed set.
-// If a future change adds a new auth type, this test must be updated
-// alongside the validator and the helm-chart `validateAuthType` helper —
-// keeping all three surfaces in sync.
-func TestValidAuthTypesIsExactly_APIKey_None(t *testing.T) {
+// TestValidAuthTypesIsExactly_APIKey_None_OIDC pins the current allowed
+// set. If a future change adds a new auth type, this test must be
+// updated alongside the validator and the helm-chart `validateAuthType`
+// helper — keeping all three surfaces in sync.
+//
+// Bundle 2 Phase 0: extended from {api-key, none} to {api-key, none,
+// oidc}. The G-1 closure test (TestValidAuthTypesDoesNotContainJWT)
+// stays passing because "jwt" is never added back. ID tokens are JWTs
+// internally but the auth-type literal is "oidc", so the silent
+// auth-downgrade that drove G-1 cannot regress through this addition.
+func TestValidAuthTypesIsExactly_APIKey_None_OIDC(t *testing.T) {
 	t.Parallel()
 	got := ValidAuthTypes()
-	if len(got) != 2 {
-		t.Fatalf("ValidAuthTypes() returned %d entries, want 2: %v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("ValidAuthTypes() returned %d entries, want 3: %v", len(got), got)
 	}
-	want := map[AuthType]bool{AuthTypeAPIKey: true, AuthTypeNone: true}
+	want := map[AuthType]bool{AuthTypeAPIKey: true, AuthTypeNone: true, AuthTypeOIDC: true}
 	for _, at := range got {
 		if !want[at] {
 			t.Errorf("unexpected auth type in ValidAuthTypes: %q", at)
@@ -577,7 +583,7 @@ func TestValidAuthTypesIsExactly_APIKey_None(t *testing.T) {
 // rejection didn't accidentally swallow non-jwt typos.
 func TestValidate_GenericInvalidAuthType(t *testing.T) {
 	t.Parallel()
-	for _, badType := range []string{"", "garbage", "oidc", "mtls", "API-KEY"} {
+	for _, badType := range []string{"", "garbage", "saml", "mtls", "API-KEY"} {
 		t.Run("type="+badType, func(t *testing.T) {
 			cfg := &Config{
 				Server:   validServerConfig(t),

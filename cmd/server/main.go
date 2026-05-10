@@ -64,9 +64,22 @@ func main() {
 	// unsupported auth shape. The error path uses fmt.Fprintf because
 	// the slog logger is constructed from cfg below this point; we want
 	// the failure to be visible regardless of log-level configuration.
+	//
+	// Auth Bundle 2 Phase 0: AuthTypeOIDC is in ValidAuthTypes() but the
+	// session middleware + OIDC handler chain ship in later phases. An
+	// operator who sets CERTCTL_AUTH_TYPE=oidc on a Bundle-2-incomplete
+	// deployment must NOT silently fall back to api-key (the silent
+	// auth-downgrade failure mode that drove G-1 in the first place).
+	// The OIDC case below refuses-to-start with an actionable message.
+	// Phase 6 of Bundle 2 (session middleware wiring) relaxes this case
+	// to fall through alongside the api-key + none cases.
 	switch config.AuthType(cfg.Auth.Type) {
 	case config.AuthTypeAPIKey, config.AuthTypeNone:
 		// ok — fall through
+	case config.AuthTypeOIDC:
+		fmt.Fprintf(os.Stderr,
+			"CERTCTL_AUTH_TYPE=oidc: the OIDC auth chain is not yet wired in this build (Auth Bundle 2 Phase 6 ships the session middleware that consumes this auth-type literal). Set CERTCTL_AUTH_TYPE=api-key or run an authenticating gateway with CERTCTL_AUTH_TYPE=none until Bundle 2 lands. See cowork/auth-bundle-2-prompt.md.\n")
+		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr,
 			"unsupported auth type at runtime: %q (valid: %v) — config validation should have caught this; refusing to start\n",

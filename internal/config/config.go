@@ -1507,6 +1507,22 @@ const (
 	// and set this value on the upstream certctl process. See
 	// docs/architecture.md "Authenticating-gateway pattern".
 	AuthTypeNone AuthType = "none"
+
+	// AuthTypeOIDC (Auth Bundle 2 Phase 0) reserves the literal that the
+	// OIDC handler chain (Bundle 2 Phase 5+6) consumes. Pre-Bundle-2
+	// behavior: the literal is allowed by the validator but the handler
+	// chain is not yet wired, so the runtime guard in cmd/server/main.go
+	// surfaces a clear "oidc auth-type configured but Bundle 2 handlers
+	// not registered" error rather than silently falling back to api-key
+	// (the failure mode that drove G-1's jwt-literal removal). Once
+	// Bundle 2's session middleware + OIDC service ship, the runtime
+	// guard relaxes and CERTCTL_AUTH_TYPE=oidc routes through them.
+	//
+	// Note: this is the AUTH-TYPE literal value, NOT the JWT alg literal.
+	// ID tokens are JWTs internally but the auth-type config string is
+	// "oidc". The G-1 closure test (TestValidAuthTypesDoesNotContainJWT)
+	// stays passing because "jwt" is never added back to the slice.
+	AuthTypeOIDC AuthType = "oidc"
 )
 
 // ValidAuthTypes returns the allowed CERTCTL_AUTH_TYPE values. The set is
@@ -1515,8 +1531,14 @@ const (
 // validator below, the runtime guard in cmd/server/main.go, the helm
 // chart template (`certctl.validateAuthType`), and the property test in
 // config_test.go that pins "jwt" out of the slice forever.
+//
+// Bundle 2 Phase 0 adds AuthTypeOIDC to the slice. The G-1 invariant
+// remains: "jwt" stays out of the allowed set forever; OIDC ID tokens
+// are JWTs internally but the auth-type literal is "oidc", so the
+// silent-downgrade attack surface that "jwt" represented does not
+// regress.
 func ValidAuthTypes() []AuthType {
-	return []AuthType{AuthTypeAPIKey, AuthTypeNone}
+	return []AuthType{AuthTypeAPIKey, AuthTypeNone, AuthTypeOIDC}
 }
 
 // AuthConfig contains authentication configuration.

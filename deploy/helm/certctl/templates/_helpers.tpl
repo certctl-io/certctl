@@ -202,8 +202,8 @@ Any template that consumes .Values.server.auth.type should call
 runs once per affected resource. No-op when configured correctly.
 */}}
 {{- define "certctl.validateAuthType" -}}
-{{- $valid := list "api-key" "none" -}}
+{{- $valid := list "api-key" "none" "oidc" -}}
 {{- if not (has .Values.server.auth.type $valid) -}}
-{{- fail (printf "\n\nserver.auth.type=%q is not supported (valid: %v).\n\nFor JWT/OIDC, run an authenticating gateway in front of certctl\n(oauth2-proxy / Envoy ext_authz / Traefik ForwardAuth / Pomerium) and\nset server.auth.type=none here so the gateway terminates federated\nidentity. See docs/architecture.md \"Authenticating-gateway pattern\"\nand docs/upgrade-to-v2-jwt-removal.md for the migration walkthrough.\n\nG-1 audit closure: pre-G-1 the chart accepted type=jwt and the binary\nsilently downgraded to api-key middleware. The chart now fails at\ntemplate time so misconfigured deployments cannot ship.\n" .Values.server.auth.type $valid) -}}
+{{- fail (printf "\n\nserver.auth.type=%q is not supported (valid: %v).\n\nFor JWT/SAML/LDAP, run an authenticating gateway in front of certctl\n(oauth2-proxy / Envoy ext_authz / Traefik ForwardAuth / Pomerium) and\nset server.auth.type=none here so the gateway terminates federated\nidentity. See docs/architecture.md \"Authenticating-gateway pattern\"\nand docs/upgrade-to-v2-jwt-removal.md for the migration walkthrough.\n\nG-1 audit closure: pre-G-1 the chart accepted type=jwt and the binary\nsilently downgraded to api-key middleware. The chart now fails at\ntemplate time so misconfigured deployments cannot ship.\n\nAuth Bundle 2 Phase 0: server.auth.type=oidc is in the valid set but\nthe OIDC handler chain ships in later Bundle 2 phases. Pre-Bundle-2\noperators who set type=oidc see the certctl-server container exit at\nstartup with an actionable error — chart-time validation no longer\nblocks deploy because the binary's runtime guard takes over. Once\nBundle 2 lands, the runtime guard relaxes and OIDC works end-to-end.\n" .Values.server.auth.type $valid) -}}
 {{- end -}}
 {{- end }}
