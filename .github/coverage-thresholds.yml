@@ -105,3 +105,46 @@ internal/service/auth:
     (ErrUnauthenticated / ErrForbidden / ErrSelfRoleAssignment /
     ErrAuthReservedActor / ErrAuthUnknownPermission /
     ErrAuthRoleInUse).
+
+internal/auth/oidc:
+  floor: 90
+  why: |
+    Bundle 2 Phase 3 — OIDC service coverage gate. Phase 3 spec
+    pins the floor at 90 explicitly because every fail-closed
+    branch is load-bearing for the security posture: alg pinning
+    (deny-list HS*/none + allow-list RS*/ES*/EdDSA), audience
+    re-check, azp enforcement on multi-aud tokens, at_hash
+    REQUIRED-when-access-token-present (Phase 3 lifts the OIDC
+    core "MAY" to a service-level "MUST"), iat-window window,
+    nonce constant-time-compare, single-use state replay defense,
+    PKCE-S256 mandatory, IdP downgrade-attack defense at
+    provider-load + RefreshKeys time, JWKS-fail-closed semantics,
+    group-claim resolution + userinfo-fallback fail-closed
+    semantics, token-leak hygiene. A regression in any one of
+    these branches is a security incident; the floor catches it
+    before the commit lands. The mock-IdP fixture in
+    service_test.go is the load-bearing harness.
+
+internal/auth/oidc/groupclaim:
+  floor: 95
+  why: |
+    Bundle 2 Phase 3 — group-claim resolver. Hand-rolled (no
+    JSON-path dep per Decision 10); ~150 LOC, every branch
+    exercised by 19 unit tests covering the documented IdP shapes
+    (Okta string array, Keycloak realm_access.roles, Auth0
+    namespaced URL claim, single-string normalization,
+    deeply-nested 3-segment walks) plus every fail-closed branch
+    (empty path, missing key, missing nested key, non-object
+    intermediate, bool/number/object/nil values, array with
+    non-string element, URL-shape with dots-in-path treated as
+    literal). Resolver should be at 100%; floor at 95 leaves a
+    1-statement margin for future error-message refactors.
+
+internal/auth/oidc/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — OIDCProvider + GroupRoleMapping domain.
+    Validation-heavy package; constructors + Validate methods
+    cover all canonical IdP shapes (Okta / Azure AD / Google
+    Workspace / Keycloak / Authentik / Auth0). Floor at 90 to
+    catch any future field that ships without a validator.
