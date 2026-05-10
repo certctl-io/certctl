@@ -606,3 +606,86 @@ type AuthRevokeKeyRoleInput struct {
 	KeyID  string `json:"key_id" jsonschema:"API-key actor ID. Reserved actor-demo-anon is rejected server-side"`
 	RoleID string `json:"role_id" jsonschema:"Role ID to revoke"`
 }
+
+// =============================================================================
+// Bundle 2 Phase 9 — OIDC + session MCP tool input types.
+//
+// 11 tools that route through the same Phase-5 HTTP handlers the GUI
+// uses; permission gates fire server-side. Each input is the
+// minimal shape the underlying handler expects (the request bodies
+// match the wire format from internal/api/handler/auth_session_oidc.go).
+// =============================================================================
+
+// AuthOIDCProviderIDInput is the input for tools that target a
+// single provider by id (get, delete, refresh).
+type AuthOIDCProviderIDInput struct {
+	ID string `json:"id" jsonschema:"OIDC provider ID (e.g. op-okta, op-keycloak)"`
+}
+
+// AuthCreateOIDCProviderInput is the body for certctl_auth_create_oidc_provider.
+// Mirrors handler.oidcProviderRequest at internal/api/handler/auth_session_oidc.go.
+// client_secret is plaintext on the wire ONLY at create/update; the server
+// encrypts at rest via internal/crypto.EncryptIfKeySet (AES-256-GCM v3 blob).
+type AuthCreateOIDCProviderInput struct {
+	Name                string   `json:"name" jsonschema:"Display name (e.g. \"Okta production\"). Tenant-unique."`
+	IssuerURL           string   `json:"issuer_url" jsonschema:"Discovery doc base (e.g. https://example.okta.com). Server fetches /.well-known/openid-configuration on create + caches per jwks_cache_ttl_seconds."`
+	ClientID            string   `json:"client_id" jsonschema:"OAuth2 client_id registered with the IdP for certctl."`
+	ClientSecret        string   `json:"client_secret" jsonschema:"OAuth2 client_secret. Plaintext on the wire; AES-256-GCM-encrypted at rest. Required on create."`
+	RedirectURI         string   `json:"redirect_uri" jsonschema:"certctl-side redirect URI registered with the IdP (e.g. https://certctl.example.com/auth/oidc/callback)."`
+	GroupsClaimPath     string   `json:"groups_claim_path,omitempty" jsonschema:"Path into the ID token claim set (e.g. groups, realm_access.roles, https://your-namespace/groups). Default: \"groups\"."`
+	GroupsClaimFormat   string   `json:"groups_claim_format,omitempty" jsonschema:"Closed enum: string-array | json-path. Default: string-array."`
+	FetchUserinfo       bool     `json:"fetch_userinfo,omitempty" jsonschema:"When true, falls back to the IdP /userinfo endpoint when the ID token's groups claim is empty."`
+	Scopes              []string `json:"scopes,omitempty" jsonschema:"OAuth2 scopes requested at the authorize step. openid is REQUIRED; profile + email + groups are optional."`
+	AllowedEmailDomains []string `json:"allowed_email_domains,omitempty" jsonschema:"Optional allowlist; empty = any domain accepted."`
+	IATWindowSeconds    int      `json:"iat_window_seconds,omitempty" jsonschema:"Maximum clock-skew tolerance for the ID token's iat claim, in seconds (1..600). Default 300."`
+	JWKSCacheTTLSeconds int      `json:"jwks_cache_ttl_seconds,omitempty" jsonschema:"How long the server caches the IdP's JWKS before refresh, in seconds (>=60). Default 3600."`
+}
+
+// AuthUpdateOIDCProviderInput is the body for certctl_auth_update_oidc_provider.
+// Same shape as Create; client_secret may be omitted to keep the existing
+// ciphertext (matches the GUI's edit-without-rotate UX).
+type AuthUpdateOIDCProviderInput struct {
+	ID                  string   `json:"id" jsonschema:"OIDC provider ID to update (e.g. op-okta)."`
+	Name                string   `json:"name" jsonschema:"Display name."`
+	IssuerURL           string   `json:"issuer_url" jsonschema:"Discovery doc base."`
+	ClientID            string   `json:"client_id" jsonschema:"OAuth2 client_id."`
+	ClientSecret        string   `json:"client_secret,omitempty" jsonschema:"OAuth2 client_secret. Empty preserves the existing ciphertext on the server (no rotate). Provide a new value to rotate."`
+	RedirectURI         string   `json:"redirect_uri" jsonschema:"certctl-side redirect URI."`
+	GroupsClaimPath     string   `json:"groups_claim_path,omitempty" jsonschema:"Path into the ID token claim set."`
+	GroupsClaimFormat   string   `json:"groups_claim_format,omitempty" jsonschema:"string-array | json-path."`
+	FetchUserinfo       bool     `json:"fetch_userinfo,omitempty" jsonschema:"Fall back to /userinfo when ID token groups claim is empty."`
+	Scopes              []string `json:"scopes,omitempty" jsonschema:"OAuth2 scopes requested."`
+	AllowedEmailDomains []string `json:"allowed_email_domains,omitempty" jsonschema:"Email-domain allowlist."`
+	IATWindowSeconds    int      `json:"iat_window_seconds,omitempty" jsonschema:"iat clock-skew tolerance, seconds (1..600)."`
+	JWKSCacheTTLSeconds int      `json:"jwks_cache_ttl_seconds,omitempty" jsonschema:"JWKS cache TTL, seconds (>=60)."`
+}
+
+// AuthListGroupMappingsInput is the input for certctl_auth_list_group_mappings.
+type AuthListGroupMappingsInput struct {
+	ProviderID string `json:"provider_id" jsonschema:"OIDC provider ID to scope the mapping list to. Required (server returns 400 when omitted)."`
+}
+
+// AuthAddGroupMappingInput is the body for certctl_auth_add_group_mapping.
+type AuthAddGroupMappingInput struct {
+	ProviderID string `json:"provider_id" jsonschema:"OIDC provider ID the mapping belongs to."`
+	GroupName  string `json:"group_name" jsonschema:"IdP-supplied group name (e.g. engineers, realm-admins, the literal string an Auth0 namespaced claim emits)."`
+	RoleID     string `json:"role_id" jsonschema:"certctl role ID to grant on group match (e.g. r-operator). Must already exist."`
+}
+
+// AuthRemoveGroupMappingInput is the input for certctl_auth_remove_group_mapping.
+type AuthRemoveGroupMappingInput struct {
+	ID string `json:"id" jsonschema:"Group-mapping ID (e.g. gm-abc123). Returned by certctl_auth_list_group_mappings."`
+}
+
+// AuthListSessionsInput is the input for certctl_auth_list_sessions. When
+// actor_id is empty the call lists the caller's own sessions; when set
+// (with auth.session.list.all) it lists the targeted actor's sessions.
+type AuthListSessionsInput struct {
+	ActorID   string `json:"actor_id,omitempty" jsonschema:"Empty = caller's own sessions (auth.session.list). Non-empty = admin all-actors view (auth.session.list.all required)."`
+	ActorType string `json:"actor_type,omitempty" jsonschema:"Optional actor_type filter. Defaults to User on the server when actor_id is set."`
+}
+
+// AuthRevokeSessionInput is the input for certctl_auth_revoke_session.
+type AuthRevokeSessionInput struct {
+	ID string `json:"id" jsonschema:"Session ID (e.g. ses-abc123). Server-side own-bypass: caller may revoke their own session even without auth.session.revoke."`
+}
