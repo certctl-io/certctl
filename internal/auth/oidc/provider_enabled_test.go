@@ -23,7 +23,7 @@ func TestService_HandleAuthRequest_DisabledProvider_RejectsWithErrProviderDisabl
 	// to simulate the operator toggling the provider offline. The next
 	// HandleAuthRequest hits the disabled-check before the cached entry
 	// is reused.
-	if _, _, _, err := svc.HandleAuthRequest(context.Background(), "op-disabled"); err != nil {
+	if _, _, _, err := svc.HandleAuthRequest(context.Background(), "op-disabled", "", ""); err != nil {
 		t.Fatalf("warm HandleAuthRequest: %v", err)
 	}
 	if entry, ok := svc.cache["op-disabled"]; ok && entry.cfgRow != nil {
@@ -32,7 +32,7 @@ func TestService_HandleAuthRequest_DisabledProvider_RejectsWithErrProviderDisabl
 		t.Fatal("expected cache entry for op-disabled after warmup")
 	}
 
-	_, _, _, err := svc.HandleAuthRequest(context.Background(), "op-disabled")
+	_, _, _, err := svc.HandleAuthRequest(context.Background(), "op-disabled", "", "")
 	if !errors.Is(err, ErrProviderDisabled) {
 		t.Errorf("HandleAuthRequest(disabled provider) err = %v; want ErrProviderDisabled", err)
 	}

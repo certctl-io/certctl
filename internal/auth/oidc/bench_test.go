@@ -94,7 +94,7 @@ func BenchmarkOIDC_SteadyState(b *testing.B) {
 		// Each iteration needs a fresh pre-login row (HandleCallback
 		// consumes the row atomically + single-use). State + nonce +
 		// verifier are stable; the cookie value is unique per call.
-		cookie, _, err := pl.CreatePreLogin(ctx, "op-bench", "bench-state", "test-nonce-fixed", "verifier-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		cookie, _, err := pl.CreatePreLogin(ctx, "op-bench", "bench-state", "test-nonce-fixed", "verifier-xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "", "")
 		if err != nil {
 			b.Fatalf("CreatePreLogin: %v", err)
 		}

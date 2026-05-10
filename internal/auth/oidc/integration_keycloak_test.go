@@ -420,7 +420,7 @@ func TestKeycloakIntegration_AuthCodeFlow_HappyPath(t *testing.T) {
 	defer cancel()
 
 	// HandleAuthRequest produces the IdP redirect URL + pre-login cookie.
-	authURL, preLoginCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID)
+	authURL, preLoginCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID, "", "")
 	if err != nil {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
@@ -486,7 +486,7 @@ func TestKeycloakIntegration_LogoutRevokesSession(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	authURL, preLoginCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID)
+	authURL, preLoginCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID, "", "")
 	if err != nil {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
@@ -529,7 +529,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 	defer cancel()
 
 	// Pre-rotate baseline login.
-	preAuthURL, preCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID)
+	preAuthURL, preCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID, "", "")
 	if err != nil {
 		t.Fatalf("pre-rotate HandleAuthRequest: %v", err)
 	}
@@ -548,7 +548,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 
 	// Post-rotate login: Keycloak signs the new token under the new
 	// key (higher priority); the service must validate it.
-	postAuthURL, postCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID)
+	postAuthURL, postCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID, "", "")
 	if err != nil {
 		t.Fatalf("post-rotate HandleAuthRequest: %v", err)
 	}
@@ -573,7 +573,7 @@ func TestKeycloakIntegration_UnmappedGroupsFailsClosed(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
 
-	authURL, preCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID)
+	authURL, preCookie, _, err := svc.HandleAuthRequest(ctx, fx.Provider.ID, "", "")
 	if err != nil {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}

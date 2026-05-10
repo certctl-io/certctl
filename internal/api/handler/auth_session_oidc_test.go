@@ -43,7 +43,7 @@ type stubOIDCSvc struct {
 	refreshErr  error
 }
 
-func (s *stubOIDCSvc) HandleAuthRequest(_ context.Context, _ string) (string, string, string, error) {
+func (s *stubOIDCSvc) HandleAuthRequest(_ context.Context, _, _, _ string) (string, string, string, error) {
 	return s.authURL, s.cookie, s.preLoginID, s.authReqErr
 }
 func (s *stubOIDCSvc) HandleCallback(_ context.Context, _, _, _, _, _, _ string) (*oidcsvc.CallbackResult, error) {

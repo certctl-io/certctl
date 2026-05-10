@@ -50,7 +50,7 @@ func TestLoggingHygiene_HandleAuthRequest_LeaksNothing(t *testing.T) {
 	buf, restore := captureLogger(t)
 	defer restore()
 
-	authURL, cookieValue, _, err := svc.HandleAuthRequest(context.Background(), "op-leak-1")
+	authURL, cookieValue, _, err := svc.HandleAuthRequest(context.Background(), "op-leak-1", "", "")
 	if err != nil {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
@@ -83,7 +83,7 @@ func TestLoggingHygiene_HandleCallback_LeaksNothing(t *testing.T) {
 
 	// Pre-login row with a known verifier we can grep for after.
 	verifier := "test-verifier-do-not-leak-aaaaaaaaaaaaa"
-	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-leak-2", "the-state", "test-nonce-fixed", verifier)
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-leak-2", "the-state", "test-nonce-fixed", verifier, "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}

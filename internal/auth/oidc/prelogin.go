@@ -87,9 +87,12 @@ func (a *PreLoginAdapter) SetRandReaderForTest(r func([]byte) (int, error)) {
 // value under the active SessionSigningKey, persists the row, and
 // returns the cookie value + the row id.
 //
+// Audit 2026-05-10 MED-16 — clientIP + userAgent are persisted into
+// the row for the callback-time UA/IP binding check.
+//
 // Implements the Phase 3 OIDCService.PreLoginStore.CreatePreLogin
 // interface signature.
-func (a *PreLoginAdapter) CreatePreLogin(ctx context.Context, providerID, state, nonce, verifier string) (cookieValue, sessionID string, err error) {
+func (a *PreLoginAdapter) CreatePreLogin(ctx context.Context, providerID, state, nonce, verifier, clientIP, userAgent string) (cookieValue, sessionID string, err error) {
 	active, err := a.keys.GetActive(ctx, a.tenantID)
 	if err != nil {
 		return "", "", fmt.Errorf("pre-login: get active signing key: %w", err)
@@ -110,6 +113,8 @@ func (a *PreLoginAdapter) CreatePreLogin(ctx context.Context, providerID, state,
 		State:          state,
 		Nonce:          nonce,
 		PKCEVerifier:   verifier,
+		ClientIP:       clientIP,
+		UserAgent:      userAgent,
 	}
 	if err := a.repo.Create(ctx, row); err != nil {
 		return "", "", fmt.Errorf("pre-login: persist row: %w", err)
@@ -132,25 +137,28 @@ func (a *PreLoginAdapter) CreatePreLogin(ctx context.Context, providerID, state,
 //   - Row found but past 10-minute TTL -> ErrPreLoginExpired (row is
 //     deleted at the repo layer regardless).
 //
+// Audit 2026-05-10 MED-16 — also returns the row's stored clientIP +
+// userAgent so the service-layer caller can enforce the UA/IP binding.
+//
 // Implements the Phase 3 OIDCService.PreLoginStore.LookupAndConsume
 // interface signature.
-func (a *PreLoginAdapter) LookupAndConsume(ctx context.Context, cookieValue string) (providerID, state, nonce, verifier string, err error) {
+func (a *PreLoginAdapter) LookupAndConsume(ctx context.Context, cookieValue string) (providerID, state, nonce, verifier, clientIP, userAgent string, err error) {
 	plID, signingKeyID, providedHMAC, perr := session.ParseCookieValue(cookieValue, "pl-")
 	if perr != nil {
-		return "", "", "", "", ErrPreLoginNotFound
+		return "", "", "", "", "", "", ErrPreLoginNotFound
 	}
 
 	signingKey, kerr := a.keys.Get(ctx, signingKeyID)
 	if kerr != nil {
-		return "", "", "", "", ErrPreLoginNotFound
+		return "", "", "", "", "", "", ErrPreLoginNotFound
 	}
 	hmacKey, derr := session.DecryptKeyMaterial(signingKey.KeyMaterialEncrypted, a.encryptionKey)
 	if derr != nil {
-		return "", "", "", "", ErrPreLoginNotFound
+		return "", "", "", "", "", "", ErrPreLoginNotFound
 	}
 	expectedHMAC := session.ComputeCookieHMAC(plID, signingKeyID, hmacKey)
 	if subtle.ConstantTimeCompare(expectedHMAC, providedHMAC) != 1 {
-		return "", "", "", "", ErrPreLoginNotFound
+		return "", "", "", "", "", "", ErrPreLoginNotFound
 	}
 
 	row, lerr := a.repo.LookupAndConsume(ctx, plID)
@@ -159,15 +167,15 @@ func (a *PreLoginAdapter) LookupAndConsume(ctx context.Context, cookieValue stri
 		// the OIDC service consumes; the audit row distinguishes via
 		// the wrapped error from the repo (which the handler logs).
 		if errors.Is(lerr, repository.ErrPreLoginNotFound) {
-			return "", "", "", "", ErrPreLoginNotFound
+			return "", "", "", "", "", "", ErrPreLoginNotFound
 		}
 		if errors.Is(lerr, repository.ErrPreLoginExpired) {
-			return "", "", "", "", ErrPreLoginNotFound
+			return "", "", "", "", "", "", ErrPreLoginNotFound
 		}
-		return "", "", "", "", fmt.Errorf("pre-login: lookup_and_consume: %w", lerr)
+		return "", "", "", "", "", "", fmt.Errorf("pre-login: lookup_and_consume: %w", lerr)
 	}
 
-	return row.OIDCProviderID, row.State, row.Nonce, row.PKCEVerifier, nil
+	return row.OIDCProviderID, row.State, row.Nonce, row.PKCEVerifier, row.ClientIP, row.UserAgent, nil
 }
 
 // newID returns `pl-<base64url-no-pad>` with 16 bytes of entropy.

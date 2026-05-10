@@ -85,6 +85,17 @@ type Service struct {
 	// resolution + user upsert; on grantAdmin=true the user's resolved
 	// role IDs are extended with r-admin. See bootstrap_hook.go.
 	adminBootstrapHook AdminBootstrapHook
+
+	// Audit 2026-05-10 MED-16 — Per-leg toggles for the pre-login UA/IP
+	// binding check. Both default to true; operators on enterprise
+	// proxies (UA rewrite) or dual-stack v4/v6 (IP flip) flip the
+	// affected leg false via CERTCTL_OIDC_PRELOGIN_REQUIRE_UA /
+	// CERTCTL_OIDC_PRELOGIN_REQUIRE_IP. Even when both are false,
+	// the binding values are still persisted so audit forensics can
+	// detect mismatches retroactively — only the in-band reject is
+	// suppressed.
+	preLoginRequireUA bool
+	preLoginRequireIP bool
 }
 
 // providerEntry caches the go-oidc Provider + the OAuth2 config + the
@@ -126,16 +137,28 @@ type PreLoginStore interface {
 	// CreatePreLogin persists a row with the given identifiers.
 	// providerID is the configured op-... id; state, nonce, verifier
 	// are server-generated random strings the callback will validate.
+	// clientIP + userAgent (Audit 2026-05-10 MED-16) are the
+	// /auth/oidc/login request's source IP (post LOW-5 XFF gating) +
+	// User-Agent header, persisted into the row so HandleCallback can
+	// reject mismatches at consume time. Empty strings are tolerated
+	// (rolling-deploy compat + headless / proxy contexts) — the
+	// consume-side check only enforces when both sides carry non-empty
+	// values for the leg in question.
 	// Returns the opaque cookie value the handler sets, plus the
 	// session ID (used as the audit trail anchor).
-	CreatePreLogin(ctx context.Context, providerID, state, nonce, verifier string) (cookieValue, sessionID string, err error)
+	CreatePreLogin(ctx context.Context, providerID, state, nonce, verifier, clientIP, userAgent string) (cookieValue, sessionID string, err error)
 
 	// LookupAndConsume reads the pre-login row by cookie value AND
 	// deletes it atomically. Single-use: a second call with the same
 	// cookie value returns ErrPreLoginNotFound. Returns the stored
 	// state/nonce/verifier/providerID for the caller to validate
 	// against the callback parameters.
-	LookupAndConsume(ctx context.Context, cookieValue string) (providerID, state, nonce, verifier string, err error)
+	//
+	// Audit 2026-05-10 MED-16 — also returns the row's persisted
+	// clientIP + userAgent so HandleCallback can defeat replay of a
+	// stolen pre-login cookie by a different browser. Empty values are
+	// returned for rows persisted before migration 000044.
+	LookupAndConsume(ctx context.Context, cookieValue string) (providerID, state, nonce, verifier, clientIP, userAgent string, err error)
 }
 
 // SessionMinter wraps the post-login session creation. Phase 4's
@@ -192,6 +215,20 @@ var (
 	// the matched provider's issuer URL. Mixed-up attack defense per
 	// RFC 9207 §2.3. HTTP 400.
 	ErrIssParamMismatch = errors.New("oidc: callback iss parameter does not match provider issuer URL")
+
+	// ErrPreLoginUAMismatch: pre-login row's User-Agent doesn't match
+	// the request hitting /auth/oidc/callback. Audit 2026-05-10 MED-16
+	// closure — RFC 9700 §4.7.1 binding-state recommendation. HTTP 400.
+	// Operators on enterprise proxies that rewrite UA may set
+	// CERTCTL_OIDC_PRELOGIN_REQUIRE_UA=false to disable.
+	ErrPreLoginUAMismatch = errors.New("oidc: pre-login row User-Agent does not match callback request")
+
+	// ErrPreLoginIPMismatch: pre-login row's client IP doesn't match
+	// the request hitting /auth/oidc/callback. Audit 2026-05-10
+	// MED-16. HTTP 400. Operators on dual-stack v4/v6 environments
+	// where source IP routinely flips may set
+	// CERTCTL_OIDC_PRELOGIN_REQUIRE_IP=false to disable.
+	ErrPreLoginIPMismatch = errors.New("oidc: pre-login row client IP does not match callback request")
 
 	// ErrAudienceMismatch: ID token `aud` doesn't include the
 	// configured client_id. HTTP 400.
@@ -322,6 +359,11 @@ func NewService(
 		encryptionKey: encryptionKey,
 		cache:         make(map[string]*providerEntry),
 		clockNow:      time.Now,
+		// MED-16 defaults: both legs ON. cmd/server/main.go reads
+		// CERTCTL_OIDC_PRELOGIN_REQUIRE_UA / _IP and calls
+		// SetPreLoginBindingRequirements to override.
+		preLoginRequireUA: true,
+		preLoginRequireIP: true,
 	}
 }
 
@@ -329,6 +371,16 @@ func NewService(
 // for tests; production paths read time.Now via the default.
 func (s *Service) SetClockForTest(now func() time.Time) {
 	s.clockNow = now
+}
+
+// SetPreLoginBindingRequirements wires the MED-16 UA/IP enforcement
+// toggles. Both default to true; set false to log-only behaviour for
+// a given leg (the binding is still persisted + audited; only the
+// in-band reject is suppressed). Called by cmd/server/main.go from
+// the config layer.
+func (s *Service) SetPreLoginBindingRequirements(requireUA, requireIP bool) {
+	s.preLoginRequireUA = requireUA
+	s.preLoginRequireIP = requireIP
 }
 
 // =============================================================================
@@ -346,7 +398,14 @@ func (s *Service) SetClockForTest(now func() time.Time) {
 
 // HandleAuthRequest builds the IdP redirect URL + persists the
 // pre-login session row holding state + nonce + PKCE verifier.
-func (s *Service) HandleAuthRequest(ctx context.Context, providerID string) (authURL, cookieValue, preLoginID string, err error) {
+//
+// Audit 2026-05-10 MED-16 — clientIP + userAgent are persisted into
+// the pre-login row so HandleCallback can reject a stolen cookie
+// replayed by a different browser. Empty values are tolerated for
+// headless / proxy callers; the consume-side check only enforces
+// when both row and request carry non-empty values on the leg in
+// question.
+func (s *Service) HandleAuthRequest(ctx context.Context, providerID, clientIP, userAgent string) (authURL, cookieValue, preLoginID string, err error) {
 	entry, err := s.getOrLoad(ctx, providerID)
 	if err != nil {
 		return "", "", "", err
@@ -371,7 +430,7 @@ func (s *Service) HandleAuthRequest(ctx context.Context, providerID string) (aut
 	// (well within the RFC 7636 43-128 character bound).
 	verifier := oauth2.GenerateVerifier()
 
-	cookieValue, preLoginID, err = s.preLogin.CreatePreLogin(ctx, providerID, state, nonce, verifier)
+	cookieValue, preLoginID, err = s.preLogin.CreatePreLogin(ctx, providerID, state, nonce, verifier, clientIP, userAgent)
 	if err != nil {
 		return "", "", "", fmt.Errorf("oidc: pre-login store: %w", err)
 	}
@@ -428,9 +487,26 @@ func (s *Service) HandleCallback(
 	preLoginCookie, code, callbackState, callbackIss, ip, userAgent string,
 ) (*CallbackResult, error) {
 	// Step 1: consume the pre-login row (single-use).
-	providerID, storedState, storedNonce, verifier, err := s.preLogin.LookupAndConsume(ctx, preLoginCookie)
+	providerID, storedState, storedNonce, verifier, storedIP, storedUA, err := s.preLogin.LookupAndConsume(ctx, preLoginCookie)
 	if err != nil {
 		return nil, ErrPreLoginNotFound
+	}
+
+	// Step 1.5: Audit 2026-05-10 MED-16 — UA / IP binding compare.
+	// Enforced only when (a) the leg's toggle is on, (b) the row
+	// carries a non-empty stored value (legacy rows pre-migration
+	// 000044 have NULL → empty string), and (c) the incoming request
+	// carries a non-empty value too. Constant-time compares for both
+	// legs to avoid leaking UA/IP length differences via timing.
+	if s.preLoginRequireUA && storedUA != "" && userAgent != "" {
+		if subtle.ConstantTimeCompare([]byte(userAgent), []byte(storedUA)) != 1 {
+			return nil, ErrPreLoginUAMismatch
+		}
+	}
+	if s.preLoginRequireIP && storedIP != "" && ip != "" {
+		if subtle.ConstantTimeCompare([]byte(ip), []byte(storedIP)) != 1 {
+			return nil, ErrPreLoginIPMismatch
+		}
 	}
 
 	// Step 2: state constant-time compare.

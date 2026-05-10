@@ -1635,6 +1635,23 @@ type AuthConfig struct {
 	// Setting: CERTCTL_OIDC_BCL_MAX_AGE_SECONDS environment variable.
 	OIDCBCLMaxAgeSeconds int
 
+	// OIDCPreLoginRequireUA enables the RFC 9700 §4.7.1 user-agent
+	// binding check on /auth/oidc/callback. Audit 2026-05-10 MED-16.
+	// Default true. Operators on enterprise proxies that rewrite the
+	// UA header set this false; the binding value is still persisted
+	// + audited even when enforcement is off so retroactive forensics
+	// remain possible.
+	// Setting: CERTCTL_OIDC_PRELOGIN_REQUIRE_UA environment variable.
+	OIDCPreLoginRequireUA bool
+
+	// OIDCPreLoginRequireIP enables the RFC 9700 §4.7.1 source-IP
+	// binding check on /auth/oidc/callback. Audit 2026-05-10 MED-16.
+	// Default true. Operators on dual-stack v4/v6 or mobile
+	// carrier-grade NAT where source IP routinely flips set this
+	// false; persistence + audit behave the same as UA above.
+	// Setting: CERTCTL_OIDC_PRELOGIN_REQUIRE_IP environment variable.
+	OIDCPreLoginRequireIP bool
+
 	// Breakglass holds the Auth Bundle 2 Phase 7.5 break-glass admin
 	// tunables. Default-OFF; the entire surface is invisible (404
 	// instead of 403) when CERTCTL_BREAKGLASS_ENABLED is not true.
@@ -1912,6 +1929,10 @@ func Load() (*Config, error) {
 			},
 			// Audit 2026-05-10 HIGH-3 — BCL iat-skew window.
 			OIDCBCLMaxAgeSeconds: getEnvInt("CERTCTL_OIDC_BCL_MAX_AGE_SECONDS", 60),
+
+			// Audit 2026-05-10 MED-16 — pre-login UA/IP binding toggles.
+			OIDCPreLoginRequireUA: getEnvBool("CERTCTL_OIDC_PRELOGIN_REQUIRE_UA", true),
+			OIDCPreLoginRequireIP: getEnvBool("CERTCTL_OIDC_PRELOGIN_REQUIRE_IP", true),
 			// Bundle 2 Phase 7.5: break-glass admin tunables. Default-
 			// OFF; the entire surface is invisible (404 NOT 403) when
 			// Enabled=false. Threat model + recommendation in the

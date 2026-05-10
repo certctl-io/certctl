@@ -196,7 +196,7 @@ func TestPreLoginAdapter_CreatePreLogin_GetActiveFailure(t *testing.T) {
 	keys := newStubSigningKeyLookup(nil)
 	keys.getActErr = errors.New("postgres unavailable")
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err == nil || !strings.Contains(err.Error(), "get active signing key") {
 		t.Errorf("err = %v, want wrapped 'get active signing key'", err)
 	}
@@ -210,7 +210,7 @@ func TestPreLoginAdapter_CreatePreLogin_DecryptFailure(t *testing.T) {
 	key.KeyMaterialEncrypted = []byte{0x03, 0x00, 0x01, 0x02} // bogus v3 blob
 	keys := newStubSigningKeyLookup(key)
 	a := NewPreLoginAdapter(repo, keys, "t-default", "passphrase-set")
-	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err == nil || !strings.Contains(err.Error(), "decrypt active key") {
 		t.Errorf("err = %v, want wrapped 'decrypt active key'", err)
 	}
@@ -223,7 +223,7 @@ func TestPreLoginAdapter_CreatePreLogin_RNGFailure(t *testing.T) {
 	a.SetRandReaderForTest(func(_ []byte) (int, error) {
 		return 0, errors.New("RNG drained")
 	})
-	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err == nil || !strings.Contains(err.Error(), "generate id") {
 		t.Errorf("err = %v, want wrapped 'generate id'", err)
 	}
@@ -234,7 +234,7 @@ func TestPreLoginAdapter_CreatePreLogin_PersistFailure(t *testing.T) {
 	repo.createErr = errors.New("FK violation")
 	keys := newStubSigningKeyLookup(activeKeyForTest(t, "sk-1"))
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	_, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err == nil || !strings.Contains(err.Error(), "persist row") {
 		t.Errorf("err = %v, want wrapped 'persist row'", err)
 	}
@@ -247,7 +247,7 @@ func TestPreLoginAdapter_CreatePreLogin_HappyPath(t *testing.T) {
 	repo := newStubPreLoginRepo()
 	keys := newStubSigningKeyLookup(activeKeyForTest(t, "sk-1"))
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	cookie, sid, err := a.CreatePreLogin(context.Background(), "op-x", "the-state", "the-nonce", "verifier-xxx")
+	cookie, sid, err := a.CreatePreLogin(context.Background(), "op-x", "the-state", "the-nonce", "verifier-xxx", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
@@ -279,7 +279,7 @@ func TestPreLoginAdapter_CreatePreLogin_HappyPath(t *testing.T) {
 func TestPreLoginAdapter_LookupAndConsume_MalformedCookie(t *testing.T) {
 	a := NewPreLoginAdapter(newStubPreLoginRepo(),
 		newStubSigningKeyLookup(activeKeyForTest(t, "sk-1")), "t-default", "")
-	_, _, _, _, err := a.LookupAndConsume(context.Background(), "definitely-not-a-cookie")
+	_, _, _, _, _, _, err := a.LookupAndConsume(context.Background(), "definitely-not-a-cookie")
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound", err)
 	}
@@ -292,14 +292,14 @@ func TestPreLoginAdapter_LookupAndConsume_UnknownSigningKey(t *testing.T) {
 	createKey := activeKeyForTest(t, "sk-1")
 	createKeys := newStubSigningKeyLookup(createKey)
 	createAdapter := NewPreLoginAdapter(repo, createKeys, "t-default", "")
-	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
 
 	emptyKeys := newStubSigningKeyLookup(nil) // sk-1 is not in this lookup
 	consumeAdapter := NewPreLoginAdapter(repo, emptyKeys, "t-default", "")
-	_, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound (unknown signing key)", err)
 	}
@@ -312,7 +312,7 @@ func TestPreLoginAdapter_LookupAndConsume_DecryptKeyFailure(t *testing.T) {
 	createKey := activeKeyForTest(t, "sk-1")
 	createKeys := newStubSigningKeyLookup(createKey)
 	createAdapter := NewPreLoginAdapter(repo, createKeys, "t-default", "")
-	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
@@ -322,7 +322,7 @@ func TestPreLoginAdapter_LookupAndConsume_DecryptKeyFailure(t *testing.T) {
 	corruptedKey.KeyMaterialEncrypted = []byte{0x03, 0x00, 0x01, 0x02} // bogus v3
 	corruptedKeys := newStubSigningKeyLookup(&corruptedKey)
 	consumeAdapter := NewPreLoginAdapter(repo, corruptedKeys, "t-default", "passphrase-set")
-	_, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound (decrypt failure → uniform sentinel)", err)
 	}
@@ -336,7 +336,7 @@ func TestPreLoginAdapter_LookupAndConsume_HMACMismatch(t *testing.T) {
 	createKey := activeKeyForTest(t, "sk-1")
 	createKeys := newStubSigningKeyLookup(createKey)
 	createAdapter := NewPreLoginAdapter(repo, createKeys, "t-default", "")
-	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	cookie, _, err := createAdapter.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
@@ -349,7 +349,7 @@ func TestPreLoginAdapter_LookupAndConsume_HMACMismatch(t *testing.T) {
 	swapped.KeyMaterialEncrypted = swappedMaterial
 	swappedKeys := newStubSigningKeyLookup(&swapped)
 	consumeAdapter := NewPreLoginAdapter(repo, swappedKeys, "t-default", "")
-	_, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = consumeAdapter.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound (HMAC mismatch)", err)
 	}
@@ -368,7 +368,7 @@ func TestPreLoginAdapter_LookupAndConsume_RepoNotFound(t *testing.T) {
 	plID := "pl-orphan-id"
 	cookie := session.SignCookieValue(plID, keys.active.ID, hmacKey)
 
-	_, _, _, _, err := a.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err := a.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound (repo miss)", err)
 	}
@@ -378,12 +378,12 @@ func TestPreLoginAdapter_LookupAndConsume_RepoExpired(t *testing.T) {
 	repo := newStubPreLoginRepo()
 	keys := newStubSigningKeyLookup(activeKeyForTest(t, "sk-1"))
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	cookie, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	cookie, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
 	repo.expireOnNext = true
-	_, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v, want ErrPreLoginNotFound (expired → uniform sentinel)", err)
 	}
@@ -393,13 +393,13 @@ func TestPreLoginAdapter_LookupAndConsume_RepoOtherError(t *testing.T) {
 	repo := newStubPreLoginRepo()
 	keys := newStubSigningKeyLookup(activeKeyForTest(t, "sk-1"))
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	cookie, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v")
+	cookie, _, err := a.CreatePreLogin(context.Background(), "op-x", "s", "n", "v", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
 	// Inject a non-NotFound, non-Expired error to exercise the wrap branch.
 	repo.wrappedErr = errors.New("postgres dropped connection")
-	_, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
 	if errors.Is(err, ErrPreLoginNotFound) {
 		t.Error("err must NOT be ErrPreLoginNotFound for non-sentinel repo failure")
 	}
@@ -412,11 +412,11 @@ func TestPreLoginAdapter_LookupAndConsume_HappyPath(t *testing.T) {
 	repo := newStubPreLoginRepo()
 	keys := newStubSigningKeyLookup(activeKeyForTest(t, "sk-1"))
 	a := NewPreLoginAdapter(repo, keys, "t-default", "")
-	cookie, _, err := a.CreatePreLogin(context.Background(), "op-okta", "the-state-42", "the-nonce-42", "the-verifier-42")
+	cookie, _, err := a.CreatePreLogin(context.Background(), "op-okta", "the-state-42", "the-nonce-42", "the-verifier-42", "", "")
 	if err != nil {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
-	pid, st, nn, vf, err := a.LookupAndConsume(context.Background(), cookie)
+	pid, st, nn, vf, _, _, err := a.LookupAndConsume(context.Background(), cookie)
 	if err != nil {
 		t.Fatalf("LookupAndConsume: %v", err)
 	}
@@ -425,7 +425,7 @@ func TestPreLoginAdapter_LookupAndConsume_HappyPath(t *testing.T) {
 	}
 
 	// Single-use: second consume returns ErrPreLoginNotFound.
-	_, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
+	_, _, _, _, _, _, err = a.LookupAndConsume(context.Background(), cookie)
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("second consume err = %v, want ErrPreLoginNotFound (single-use violated)", err)
 	}

@@ -121,7 +121,7 @@ func TestOktaSmoke_DiscoveryAndRefreshKeys(t *testing.T) {
 	// the configured Okta issuer. We don't drive the browser login
 	// here — the Keycloak fixture covers full auth-code; this test
 	// only confirms the wire setup against a real Okta tenant.
-	authURL, _, _, err := svc.HandleAuthRequest(ctx, prov.ID)
+	authURL, _, _, err := svc.HandleAuthRequest(ctx, prov.ID, "", "")
 	if err != nil {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}

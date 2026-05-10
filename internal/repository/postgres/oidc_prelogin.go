@@ -75,14 +75,23 @@ func (r *PreLoginRepository) Create(ctx context.Context, p *repository.PreLoginS
 		return fmt.Errorf("oidc_pre_login encrypt pkce_verifier: %w", verr)
 	}
 
+	// Audit 2026-05-10 MED-16 — persist UA/IP binding on Create.
+	// Empty values are inserted as NULL via sql.NullString so the
+	// schema's nullable column constraint is respected and existing
+	// integration tests that don't provide UA/IP keep working.
+	clientIP := nullableString(p.ClientIP)
+	userAgent := nullableString(p.UserAgent)
+
 	if p.CreatedAt.IsZero() && p.AbsoluteExpiresAt.IsZero() {
 		_, err := r.db.ExecContext(ctx, `
 			INSERT INTO oidc_pre_login_sessions (
 				id, tenant_id, signing_key_id, oidc_provider_id,
-				state_enc, nonce_enc, pkce_verifier_enc
-			) VALUES ($1,$2,$3,$4,$5,$6,$7)`,
+				state_enc, nonce_enc, pkce_verifier_enc,
+				client_ip, user_agent
+			) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
 			p.ID, p.TenantID, p.SigningKeyID, p.OIDCProviderID,
-			stateEnc, nonceEnc, verifierEnc)
+			stateEnc, nonceEnc, verifierEnc,
+			clientIP, userAgent)
 		if err != nil {
 			return fmt.Errorf("oidc_pre_login create: %w", err)
 		}
@@ -98,15 +107,25 @@ func (r *PreLoginRepository) Create(ctx context.Context, p *repository.PreLoginS
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO oidc_pre_login_sessions (
 			id, tenant_id, signing_key_id, oidc_provider_id,
-			state_enc, nonce_enc, pkce_verifier_enc, created_at, absolute_expires_at
-		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9)`,
+			state_enc, nonce_enc, pkce_verifier_enc,
+			client_ip, user_agent,
+			created_at, absolute_expires_at
+		) VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)`,
 		p.ID, p.TenantID, p.SigningKeyID, p.OIDCProviderID,
-		stateEnc, nonceEnc, verifierEnc, p.CreatedAt, p.AbsoluteExpiresAt)
+		stateEnc, nonceEnc, verifierEnc,
+		clientIP, userAgent,
+		p.CreatedAt, p.AbsoluteExpiresAt)
 	if err != nil {
 		return fmt.Errorf("oidc_pre_login create: %w", err)
 	}
 	return nil
 }
+
+// MED-16 reuses nullableString from discovery.go (same package). It
+// returns sql.NullString{Valid:false} for empty strings so the database
+// stores NULL rather than the literal empty string — avoiding ambiguity
+// at consume time between "row had no binding" and "row had an explicit
+// empty binding".
 
 // LookupAndConsume reads the row by id and atomically deletes it
 // (single-use). Returns ErrPreLoginNotFound on miss; ErrPreLoginExpired
@@ -132,16 +151,19 @@ func (r *PreLoginRepository) LookupAndConsume(ctx context.Context, id string) (*
 		RETURNING id, tenant_id, signing_key_id, oidc_provider_id,
 		          state, nonce, pkce_verifier,
 		          state_enc, nonce_enc, pkce_verifier_enc,
+		          client_ip, user_agent,
 		          created_at, absolute_expires_at`,
 		id)
 
 	var p repository.PreLoginSession
 	var statePlain, noncePlain, verifierPlain sql.NullString
+	var clientIP, userAgent sql.NullString
 	var stateEnc, nonceEnc, verifierEnc []byte
 	if err := row.Scan(
 		&p.ID, &p.TenantID, &p.SigningKeyID, &p.OIDCProviderID,
 		&statePlain, &noncePlain, &verifierPlain,
 		&stateEnc, &nonceEnc, &verifierEnc,
+		&clientIP, &userAgent,
 		&p.CreatedAt, &p.AbsoluteExpiresAt,
 	); err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
@@ -166,6 +188,16 @@ func (r *PreLoginRepository) LookupAndConsume(ctx context.Context, id string) (*
 		return nil, fmt.Errorf("oidc_pre_login decrypt pkce_verifier: %w", err)
 	} else {
 		p.PKCEVerifier = verifier
+	}
+
+	// Audit 2026-05-10 MED-16 — surface the binding columns for the
+	// service-layer UA / IP compare. Empty when the row was created
+	// before this migration landed (rolling-deploy compat).
+	if clientIP.Valid {
+		p.ClientIP = clientIP.String
+	}
+	if userAgent.Valid {
+		p.UserAgent = userAgent.String
 	}
 
 	if time.Now().UTC().After(p.AbsoluteExpiresAt) {

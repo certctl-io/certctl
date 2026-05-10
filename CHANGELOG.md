@@ -34,6 +34,21 @@
   RFC-9207 discovery. Providers that don't advertise support (the majority
   today) keep pre-fix behavior — back-compat is preserved.
 
+- **Pre-login UA / source-IP binding on OIDC callback (Audit 2026-05-10
+  MED-16).** RFC 9700 §4.7.1 defense against stolen-pre-login-cookie replay
+  by a different browser / source. Migration `000044_prelogin_uaip` adds
+  `client_ip` + `user_agent` to `oidc_pre_login_sessions`; values captured at
+  `/auth/oidc/login` are constant-time compared at `/auth/oidc/callback`.
+  Mismatches return HTTP 400 with audit `failure_category` =
+  `prelogin_ua_mismatch` or `prelogin_ip_mismatch`. Two operator escape
+  hatches: `CERTCTL_OIDC_PRELOGIN_REQUIRE_UA` and
+  `CERTCTL_OIDC_PRELOGIN_REQUIRE_IP` (both default `true`) — operators on
+  enterprise proxies that rewrite UA, or dual-stack v4/v6 environments where
+  source IP routinely flips, can disable the affected leg. The binding column
+  is persisted even when enforcement is off, so retroactive forensics remain
+  possible. Empty values on either side pass through (rolling-deploy +
+  headless-proxy compat).
+
 ## v2.1.0 - Auth Bundles 1 + 2: RBAC primitive + OIDC SSO + sessions ⚠️
 
 > **SECURITY: AUDIT YOUR API KEYS.**

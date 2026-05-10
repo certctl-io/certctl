@@ -55,7 +55,10 @@ import (
 // OIDCAuthHandshaker is the slice of *oidc.Service the OIDC HTTP path
 // consumes. Phase 3's *oidc.Service satisfies this directly.
 type OIDCAuthHandshaker interface {
-	HandleAuthRequest(ctx context.Context, providerID string) (authURL, cookieValue, preLoginID string, err error)
+	// Audit 2026-05-10 MED-16 — clientIP + userAgent persist into the
+	// pre-login row so HandleCallback can reject mismatches at consume
+	// time (RFC 9700 §4.7.1 binding).
+	HandleAuthRequest(ctx context.Context, providerID, clientIP, userAgent string) (authURL, cookieValue, preLoginID string, err error)
 	// Audit 2026-05-10 MED-17 — callbackIss carries the value of the
 	// RFC 9207 `iss` query parameter on /auth/oidc/callback (empty
 	// string when the IdP doesn't send it). The service enforces the
@@ -233,7 +236,14 @@ func (h *AuthSessionOIDCHandler) LoginInitiate(w http.ResponseWriter, r *http.Re
 		Error(w, http.StatusBadRequest, "missing required query parameter `provider`")
 		return
 	}
-	authURL, cookieValue, _, err := h.oidcSvc.HandleAuthRequest(r.Context(), providerID)
+	// Audit 2026-05-10 MED-16 — capture clientIP + UA at /auth/oidc/login
+	// so HandleCallback can reject a stolen pre-login cookie replayed
+	// from a different browser/source. clientIPFromRequest already
+	// honours the LOW-5 trusted-proxy gating; r.UserAgent() reads the
+	// header verbatim.
+	loginIP := clientIPFromRequest(r)
+	loginUA := r.UserAgent()
+	authURL, cookieValue, _, err := h.oidcSvc.HandleAuthRequest(r.Context(), providerID, loginIP, loginUA)
 	if err != nil {
 		// Provider not found is the most common case; map to 404.
 		if errors.Is(err, repository.ErrOIDCProviderNotFound) {
@@ -1178,6 +1188,9 @@ func classifyOIDCFailure(err error) string {
 		return "ok"
 	}
 	// Audit 2026-05-10 MED-17 — typed dispatch for the iss family.
+	// Audit 2026-05-10 MED-16 — typed dispatch for the UA/IP binding
+	// family (no substring guarantees because UA strings are operator
+	// data and could match anything).
 	switch {
 	case errors.Is(err, oidcsvc.ErrIssParamMissing):
 		return "iss_param_missing"
@@ -1185,6 +1198,10 @@ func classifyOIDCFailure(err error) string {
 		return "iss_param_mismatch"
 	case errors.Is(err, oidcsvc.ErrIssuerMismatch):
 		return "id_token_iss_mismatch"
+	case errors.Is(err, oidcsvc.ErrPreLoginUAMismatch):
+		return "prelogin_ua_mismatch"
+	case errors.Is(err, oidcsvc.ErrPreLoginIPMismatch):
+		return "prelogin_ip_mismatch"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

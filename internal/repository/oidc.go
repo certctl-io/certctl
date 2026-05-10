@@ -121,6 +121,15 @@ type PreLoginSession struct {
 	PKCEVerifier      string
 	CreatedAt         time.Time
 	AbsoluteExpiresAt time.Time
+
+	// Audit 2026-05-10 MED-16 — UA / IP binding (RFC 9700 §4.7.1).
+	// Persisted at /auth/oidc/login; compared on consume to defeat
+	// pre-login cookie theft. Either column may be empty for in-flight
+	// rows from a pre-deploy code path during a rolling deploy; the
+	// consume-side check only enforces when BOTH the row AND the
+	// incoming request carry non-empty values.
+	ClientIP  string
+	UserAgent string
 }
 
 // Sentinel errors for PreLoginRepository.

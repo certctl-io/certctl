@@ -421,6 +421,12 @@ func main() {
 		preLoginAdapter,
 		cfg.Encryption.ConfigEncryptionKey,
 	)
+	// Audit 2026-05-10 MED-16 — apply per-leg pre-login UA / IP
+	// binding enforcement toggles from config.
+	oidcService.SetPreLoginBindingRequirements(
+		cfg.Auth.OIDCPreLoginRequireUA,
+		cfg.Auth.OIDCPreLoginRequireIP,
+	)
 	// SameSite resolution from CERTCTL_SESSION_SAMESITE (default Lax;
 	// "Strict" for high-security environments at the cost of breaking
 	// inbound deep-links from external apps).
