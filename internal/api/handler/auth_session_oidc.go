@@ -103,6 +103,7 @@ type AuthSessionOIDCHandler struct {
 	providerRepo  repository.OIDCProviderRepository
 	mappingRepo   repository.GroupRoleMappingRepository
 	sessionRepo   repository.SessionRepository
+	userRepo      repository.UserRepository // CRIT-2: BCL sub→actor_id lookup
 	audit         AuditRecorder
 	encryptionKey string
 	cookieAttrs   SessionCookieAttrs
@@ -116,6 +117,11 @@ type AuditRecorder interface {
 }
 
 // NewAuthSessionOIDCHandler constructs the handler.
+//
+// userRepo is load-bearing for the BCL sub→actor_id resolution
+// (CRIT-2 of the 2026-05-10 audit). Passing nil here is only valid in
+// tests that exercise non-BCL paths; production wiring in
+// cmd/server/main.go MUST inject a non-nil repository.
 func NewAuthSessionOIDCHandler(
 	oidcSvc OIDCAuthHandshaker,
 	sessionSvc SessionMinter,
@@ -123,6 +129,7 @@ func NewAuthSessionOIDCHandler(
 	providerRepo repository.OIDCProviderRepository,
 	mappingRepo repository.GroupRoleMappingRepository,
 	sessionRepo repository.SessionRepository,
+	userRepo repository.UserRepository,
 	audit AuditRecorder,
 	encryptionKey, tenantID, postLoginURL string,
 	cookieAttrs SessionCookieAttrs,
@@ -137,6 +144,7 @@ func NewAuthSessionOIDCHandler(
 		providerRepo:  providerRepo,
 		mappingRepo:   mappingRepo,
 		sessionRepo:   sessionRepo,
+		userRepo:      userRepo,
 		audit:         audit,
 		encryptionKey: encryptionKey,
 		cookieAttrs:   cookieAttrs,
@@ -314,16 +322,80 @@ func (h *AuthSessionOIDCHandler) BackChannelLogout(w http.ResponseWriter, r *htt
 		h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sid,
 			map[string]interface{}{"sub_or_sid": "sid", "issuer": issuer, "session_id": sid})
 	} else if sub != "" {
-		// Phase 5 simplification: revoke ALL sessions belonging to a User
-		// actor with this oidc_subject. The full subject->actor_id lookup
-		// is a 1-row select on users; for v1 we treat sub as the actor_id
-		// directly (this matches the user.id seeding pattern in Phase 3
-		// upsertUser, which uses oidc_subject as the actor_id stem).
-		if rerr := h.sessionSvc.RevokeAllForActor(r.Context(), sub, "User"); rerr != nil {
-			_ = rerr
+		// CRIT-2 closure of the 2026-05-10 audit. Pre-fix this branch called
+		// RevokeAllForActor(sub, "User") under the false assumption that
+		// the OIDC subject was used as the actor_id stem. In reality,
+		// internal/auth/oidc/service.go::upsertUser mints
+		// u.ID = "u-" + randomB64URL(16) and stores the OIDC subject in
+		// a separate column, so the pre-fix lookup never found a session
+		// row and the error was silently swallowed. BCL silently revoked
+		// nothing — CWE-613.
+		//
+		// The fix resolves the IdP-signed `iss` claim back to a provider
+		// row via providerRepo.List + IssuerURL filter, then resolves
+		// sub → user.ID via userRepo.GetByOIDCSubject, then revokes all
+		// sessions for that actor. Outcome categories audited:
+		//   - revoked            (happy path)
+		//   - issuer_unknown     (iss doesn't match any configured provider)
+		//   - user_unknown       (provider matched, but no user.id seeded for this subject)
+		//   - revoke_failed      (DB hiccup at the revoke step)
+		//   - provider_lookup_failed / user_lookup_failed → 503 (transient; IdP retries)
+		// All success-shaped outcomes return 200 + Cache-Control: no-store
+		// per OIDC BCL 1.0 §2.7. Transient errors return 503 so the IdP
+		// follows its own retry semantics.
+		providers, plerr := h.providerRepo.List(r.Context(), h.tenantID)
+		if plerr != nil {
+			h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
+				map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "provider_lookup_failed"})
+			http.Error(w, "transient", http.StatusServiceUnavailable)
+			return
 		}
-		h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
-			map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub})
+		var matched *oidcdomain.OIDCProvider
+		for _, p := range providers {
+			if p.IssuerURL == issuer {
+				matched = p
+				break
+			}
+		}
+		if matched == nil {
+			h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
+				map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "issuer_unknown"})
+			// Idempotent — return 200 per spec.
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		user, uerr := h.userRepo.GetByOIDCSubject(r.Context(), matched.ID, sub)
+		if uerr != nil {
+			if errors.Is(uerr, repository.ErrUserNotFound) {
+				// Idempotent: nothing to revoke. IdP may BCL a user we
+				// never logged in. RFC compliance: still 200.
+				h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
+					map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "user_unknown"})
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			// Transient — let the IdP retry.
+			h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
+				map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "user_lookup_failed"})
+			http.Error(w, "transient", http.StatusServiceUnavailable)
+			return
+		}
+
+		if rerr := h.sessionSvc.RevokeAllForActor(r.Context(), user.ID, string(domain.ActorTypeUser)); rerr != nil {
+			// Revoke failed — BCL is best-effort per §2.8; still 200,
+			// audit the failure.
+			h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", user.ID, domain.ActorTypeUser, sub,
+				map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "revoke_failed"})
+			w.Header().Set("Cache-Control", "no-store")
+			w.WriteHeader(http.StatusOK)
+			return
+		}
+
+		h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", user.ID, domain.ActorTypeUser, sub,
+			map[string]interface{}{"sub_or_sid": "sub", "issuer": issuer, "subject": sub, "outcome": "revoked"})
 	}
 	// Per spec §2.7 — Cache-Control: no-store on success.
 	w.Header().Set("Cache-Control", "no-store")

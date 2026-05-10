@@ -194,6 +194,39 @@ func (s *stubSessionRepo) RevokeAllForActor(_ context.Context, _, _, _ string) e
 func (s *stubSessionRepo) GarbageCollectExpired(_ context.Context) (int, error)      { return 0, nil }
 func (s *stubSessionRepo) Delete(_ context.Context, _ string) error                  { return nil }
 
+// stubUserRepo implements just enough of repository.UserRepository for
+// the BCL sub→actor_id resolution path (CRIT-2 closure). Lookups by
+// (providerID, subject) return the seeded row if present, ErrUserNotFound
+// otherwise. lookupErr forces a non-NotFound error (the "transient"
+// 503 path).
+type stubUserRepo struct {
+	users     map[string]*userdomain.User // key = providerID|subject
+	lookupErr error                       // when non-nil, GetByOIDCSubject returns this
+}
+
+func (s *stubUserRepo) Get(_ context.Context, _ string) (*userdomain.User, error) {
+	return nil, repository.ErrUserNotFound
+}
+
+func (s *stubUserRepo) GetByOIDCSubject(_ context.Context, providerID, subject string) (*userdomain.User, error) {
+	if s.lookupErr != nil {
+		return nil, s.lookupErr
+	}
+	if s.users == nil {
+		return nil, repository.ErrUserNotFound
+	}
+	if u, ok := s.users[providerID+"|"+subject]; ok {
+		return u, nil
+	}
+	return nil, repository.ErrUserNotFound
+}
+
+func (s *stubUserRepo) Create(_ context.Context, _ *userdomain.User) error { return nil }
+func (s *stubUserRepo) Update(_ context.Context, _ *userdomain.User) error { return nil }
+func (s *stubUserRepo) ListAll(_ context.Context, _ string) ([]*userdomain.User, error) {
+	return nil, nil
+}
+
 type phase5StubAudit struct {
 	events []string
 }
@@ -212,18 +245,19 @@ func newPhase5Handler(
 	oidcSvc *stubOIDCSvc,
 	sess *stubSession,
 	bcl *stubBCLVerifier,
-) (*AuthSessionOIDCHandler, *stubProviderRepo, *stubMappingRepo, *stubSessionRepo, *phase5StubAudit) {
+) (*AuthSessionOIDCHandler, *stubProviderRepo, *stubMappingRepo, *stubSessionRepo, *phase5StubAudit, *stubUserRepo) {
 	t.Helper()
 	provRepo := &stubProviderRepo{}
 	mapRepo := &stubMappingRepo{}
 	sessRepo := newStubSessionRepo()
+	userRepo := &stubUserRepo{}
 	audit := &phase5StubAudit{}
 	h := NewAuthSessionOIDCHandler(
-		oidcSvc, sess, bcl, provRepo, mapRepo, sessRepo, audit,
+		oidcSvc, sess, bcl, provRepo, mapRepo, sessRepo, userRepo, audit,
 		"", "t-default", "/dashboard",
 		SessionCookieAttrs{SameSite: http.SameSiteLaxMode, Secure: true},
 	)
-	return h, provRepo, mapRepo, sessRepo, audit
+	return h, provRepo, mapRepo, sessRepo, audit, userRepo
 }
 
 // withActor adds the same context keys the auth middleware would set.
@@ -248,7 +282,7 @@ func TestLoginInitiate_HappyPath(t *testing.T) {
 		cookie:     "v1.pl-abc.sk-xyz.somemac",
 		preLoginID: "pl-abc",
 	}
-	h, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login?provider=op-x", nil)
 	w := httptest.NewRecorder()
@@ -273,7 +307,7 @@ func TestLoginInitiate_HappyPath(t *testing.T) {
 }
 
 func TestLoginInitiate_MissingProvider(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login", nil)
 	w := httptest.NewRecorder()
 	h.LoginInitiate(w, req)
@@ -284,7 +318,7 @@ func TestLoginInitiate_MissingProvider(t *testing.T) {
 
 func TestLoginInitiate_ProviderNotFound(t *testing.T) {
 	o := &stubOIDCSvc{authReqErr: repository.ErrOIDCProviderNotFound}
-	h, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/login?provider=op-missing", nil)
 	w := httptest.NewRecorder()
 	h.LoginInitiate(w, req)
@@ -305,7 +339,7 @@ func TestLoginCallback_HappyPath(t *testing.T) {
 		CookieValue: "v1.ses-abc.sk-xyz.mac",
 		CSRFToken:   "csrf-token-value",
 	}}
-	h, _, _, _, audit := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
@@ -331,7 +365,7 @@ func TestLoginCallback_HappyPath(t *testing.T) {
 // ErrPreLoginNotFound on the second call; the handler maps to 400.)
 func TestLoginCallback_ReplayedState_Returns400(t *testing.T) {
 	o := &stubOIDCSvc{callbackErr: oidcsvc.ErrPreLoginNotFound}
-	h, _, _, _, audit := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
@@ -350,7 +384,7 @@ func TestLoginCallback_ReplayedState_Returns400(t *testing.T) {
 // match the challenge; the handler surfaces it as 400.
 func TestLoginCallback_PKCEVerifierMismatch_Returns400(t *testing.T) {
 	o := &stubOIDCSvc{callbackErr: errors.New("oidc: code exchange failed: invalid_grant")}
-	h, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
@@ -365,7 +399,7 @@ func TestLoginCallback_ExpiredPreLoginRow_Returns400(t *testing.T) {
 	// Adapter maps ErrPreLoginExpired -> ErrPreLoginNotFound (uniform
 	// 400 per spec; specific reason in audit row).
 	o := &stubOIDCSvc{callbackErr: oidcsvc.ErrPreLoginNotFound}
-	h, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
@@ -376,7 +410,7 @@ func TestLoginCallback_ExpiredPreLoginRow_Returns400(t *testing.T) {
 }
 
 func TestLoginCallback_MissingPreLoginCookie_Returns400(t *testing.T) {
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	w := httptest.NewRecorder()
 	h.LoginCallback(w, req)
@@ -390,7 +424,7 @@ func TestLoginCallback_MissingPreLoginCookie_Returns400(t *testing.T) {
 
 func TestLoginCallback_UnmappedGroups_AuditRowDistinguished(t *testing.T) {
 	o := &stubOIDCSvc{callbackErr: oidcsvc.ErrGroupsUnmapped}
-	h, _, _, _, audit := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/auth/oidc/callback?code=abc&state=xyz", nil)
 	req.AddCookie(&http.Cookie{Name: sessiondomain.PreLoginCookieName, Value: "v1.pl-abc.sk-xyz.mac"})
 	w := httptest.NewRecorder()
@@ -410,7 +444,7 @@ func TestLoginCallback_UnmappedGroups_AuditRowDistinguished(t *testing.T) {
 // Phase 5 spec mandate #1: BCL with missing events claim -> 400.
 func TestBackChannelLogout_MissingEvents_Returns400(t *testing.T) {
 	bcl := &stubBCLVerifier{err: errors.New("missing events claim")}
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
 		strings.NewReader("logout_token=eyJ.payload.sig"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -427,7 +461,7 @@ func TestBackChannelLogout_MissingEvents_Returns400(t *testing.T) {
 // Phase 5 spec mandate #2: BCL with nonce present -> 400 (per spec §2.4).
 func TestBackChannelLogout_NoncePresent_Returns400(t *testing.T) {
 	bcl := &stubBCLVerifier{err: errors.New("nonce claim must be absent in logout_token")}
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
 		strings.NewReader("logout_token=eyJ.payload.sig"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -441,7 +475,7 @@ func TestBackChannelLogout_NoncePresent_Returns400(t *testing.T) {
 // Phase 5 spec mandate #3: BCL with sig signed by an unknown key -> 400.
 func TestBackChannelLogout_UnknownKeySig_Returns400(t *testing.T) {
 	bcl := &stubBCLVerifier{err: errors.New("verify: signature key not found in JWKS")}
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, bcl)
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
 		strings.NewReader("logout_token=eyJ.payload.sig"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -452,10 +486,26 @@ func TestBackChannelLogout_UnknownKeySig_Returns400(t *testing.T) {
 	}
 }
 
+// TestBackChannelLogout_HappyPath_RevokesSubject pins the CRIT-2
+// closure happy-path: an IdP fires BCL with sub=<oidc-subject>, the
+// handler resolves sub → user.ID via providerRepo (issuer match) +
+// userRepo.GetByOIDCSubject, then calls sessionSvc.RevokeAllForActor
+// with the RESOLVED actor_id (NOT the OIDC subject — pre-fix bug
+// where the handler called RevokeAllForActor(sub, "User") and silently
+// revoked nothing because session rows are keyed by user.ID).
 func TestBackChannelLogout_HappyPath_RevokesSubject(t *testing.T) {
-	bcl := &stubBCLVerifier{issuer: "https://idp", sub: "u-alice"}
+	bcl := &stubBCLVerifier{issuer: "https://idp", sub: "alice@example.com"}
 	sess := &stubSession{}
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	h, provRepo, _, _, audit, userRepo := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+
+	// Seed: provider with matching IssuerURL + user keyed by (provider.ID, sub).
+	provRepo.provs = []*oidcdomain.OIDCProvider{
+		{ID: "iss-1", IssuerURL: "https://idp", TenantID: "t-default"},
+	}
+	userRepo.users = map[string]*userdomain.User{
+		"iss-1|alice@example.com": {ID: "u-alice", TenantID: "t-default"},
+	}
+
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
 		strings.NewReader("logout_token=eyJ.payload.sig"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -470,15 +520,139 @@ func TestBackChannelLogout_HappyPath_RevokesSubject(t *testing.T) {
 	if len(sess.revokeAllIDs) != 1 || sess.revokeAllIDs[0] != "u-alice" {
 		t.Errorf("expected RevokeAllForActor(u-alice); got %v", sess.revokeAllIDs)
 	}
+	if len(sess.revokeAllTypes) != 1 || sess.revokeAllTypes[0] != "User" {
+		t.Errorf("expected actor_type=User; got %v", sess.revokeAllTypes)
+	}
 	if !contains(audit.events, "auth.oidc_back_channel_logout") {
 		t.Errorf("expected auth.oidc_back_channel_logout audit event")
+	}
+}
+
+// TestBackChannelLogout_UnknownUserReturns200WithAudit covers the
+// idempotent-200 path when the IdP BCLs a user we never logged in.
+// Per OIDC BCL §2.7 we still return 200 + Cache-Control: no-store; the
+// audit row carries outcome=user_unknown so forensics can distinguish.
+func TestBackChannelLogout_UnknownUserReturns200WithAudit(t *testing.T) {
+	bcl := &stubBCLVerifier{issuer: "https://idp", sub: "stranger@example.com"}
+	sess := &stubSession{}
+	h, provRepo, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	// Provider matches, but no user is seeded for the subject.
+	provRepo.provs = []*oidcdomain.OIDCProvider{
+		{ID: "iss-1", IssuerURL: "https://idp", TenantID: "t-default"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
+		strings.NewReader("logout_token=eyJ.payload.sig"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.BackChannelLogout(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d; want 200 (idempotent); got %d", http.StatusOK, w.Code)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q; want no-store", cc)
+	}
+	if len(sess.revokeAllIDs) != 0 {
+		t.Errorf("expected no RevokeAllForActor calls (no user seeded); got %v", sess.revokeAllIDs)
+	}
+	if !contains(audit.events, "auth.oidc_back_channel_logout") {
+		t.Errorf("expected auth.oidc_back_channel_logout audit event with outcome=user_unknown")
+	}
+}
+
+// TestBackChannelLogout_IssuerUnknownReturns200WithAudit covers the
+// "iss doesn't match any configured provider" path. Per RFC idempotency,
+// still 200; outcome=issuer_unknown in the audit row.
+func TestBackChannelLogout_IssuerUnknownReturns200WithAudit(t *testing.T) {
+	bcl := &stubBCLVerifier{issuer: "https://wrong-idp", sub: "alice@example.com"}
+	sess := &stubSession{}
+	h, provRepo, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	provRepo.provs = []*oidcdomain.OIDCProvider{
+		{ID: "iss-1", IssuerURL: "https://idp", TenantID: "t-default"}, // mismatched
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
+		strings.NewReader("logout_token=eyJ.payload.sig"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.BackChannelLogout(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d; want 200 (idempotent on unknown issuer)", w.Code)
+	}
+	if len(sess.revokeAllIDs) != 0 {
+		t.Errorf("expected no RevokeAllForActor calls; got %v", sess.revokeAllIDs)
+	}
+	if !contains(audit.events, "auth.oidc_back_channel_logout") {
+		t.Errorf("expected audit event with outcome=issuer_unknown")
+	}
+}
+
+// TestBackChannelLogout_TransientUserRepoErrorReturns503 covers the
+// transient-DB-failure path. A non-NotFound error from the user
+// repository surfaces as 503 so the IdP follows its retry semantics
+// (per OIDC BCL §2.8 IdPs SHOULD retry on transient failures).
+func TestBackChannelLogout_TransientUserRepoErrorReturns503(t *testing.T) {
+	bcl := &stubBCLVerifier{issuer: "https://idp", sub: "alice@example.com"}
+	sess := &stubSession{}
+	h, provRepo, _, _, _, userRepo := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	provRepo.provs = []*oidcdomain.OIDCProvider{
+		{ID: "iss-1", IssuerURL: "https://idp", TenantID: "t-default"},
+	}
+	userRepo.lookupErr = errors.New("db connection reset")
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
+		strings.NewReader("logout_token=eyJ.payload.sig"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.BackChannelLogout(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d; want 503 (transient → IdP retries)", w.Code)
+	}
+	if len(sess.revokeAllIDs) != 0 {
+		t.Errorf("expected no revoke on transient error; got %v", sess.revokeAllIDs)
+	}
+}
+
+// TestBackChannelLogout_RevokeFailureReturns200WithAuditFailureOutcome
+// covers the path where user resolution succeeds but the
+// RevokeAllForActor call fails. BCL is best-effort per §2.8; still 200,
+// audit row carries outcome=revoke_failed.
+func TestBackChannelLogout_RevokeFailureReturns200WithAuditFailureOutcome(t *testing.T) {
+	bcl := &stubBCLVerifier{issuer: "https://idp", sub: "alice@example.com"}
+	sess := &stubSession{revokeAllErr: errors.New("transient")}
+	h, provRepo, _, _, audit, userRepo := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	provRepo.provs = []*oidcdomain.OIDCProvider{
+		{ID: "iss-1", IssuerURL: "https://idp", TenantID: "t-default"},
+	}
+	userRepo.users = map[string]*userdomain.User{
+		"iss-1|alice@example.com": {ID: "u-alice", TenantID: "t-default"},
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
+		strings.NewReader("logout_token=eyJ.payload.sig"))
+	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
+	w := httptest.NewRecorder()
+	h.BackChannelLogout(w, req)
+	if w.Code != http.StatusOK {
+		t.Errorf("status = %d; want 200 (best-effort on revoke failure)", w.Code)
+	}
+	if cc := w.Header().Get("Cache-Control"); cc != "no-store" {
+		t.Errorf("Cache-Control = %q; want no-store", cc)
+	}
+	// RevokeAllForActor WAS called (and failed); audit MUST record the
+	// outcome so the operator can debug.
+	if len(sess.revokeAllIDs) != 1 || sess.revokeAllIDs[0] != "u-alice" {
+		t.Errorf("expected RevokeAllForActor(u-alice) attempted; got %v", sess.revokeAllIDs)
+	}
+	if !contains(audit.events, "auth.oidc_back_channel_logout") {
+		t.Errorf("expected audit event with outcome=revoke_failed")
 	}
 }
 
 func TestBackChannelLogout_HappyPath_RevokesSid(t *testing.T) {
 	bcl := &stubBCLVerifier{issuer: "https://idp", sid: "ses-xyz"}
 	sess := &stubSession{}
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, bcl)
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout",
 		strings.NewReader("logout_token=eyJ.payload.sig"))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
@@ -493,7 +667,7 @@ func TestBackChannelLogout_HappyPath_RevokesSid(t *testing.T) {
 }
 
 func TestBackChannelLogout_MissingTokenReturns400(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodPost, "/auth/oidc/back-channel-logout", strings.NewReader(""))
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
 	w := httptest.NewRecorder()
@@ -509,7 +683,7 @@ func TestBackChannelLogout_MissingTokenReturns400(t *testing.T) {
 
 func TestLogout_HappyPath(t *testing.T) {
 	sess := &stubSession{validateRes: &sessiondomain.Session{ID: "ses-abc", ActorID: "u-x", ActorType: "User"}}
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, sess, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, &stubBCLVerifier{})
 
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req = withActor(req, "u-x", "User")
@@ -528,7 +702,7 @@ func TestLogout_HappyPath(t *testing.T) {
 }
 
 func TestLogout_NoCookie_Returns204(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
 	req = withActor(req, "u-x", "User")
 	w := httptest.NewRecorder()
@@ -543,7 +717,7 @@ func TestLogout_NoCookie_Returns204(t *testing.T) {
 // =============================================================================
 
 func TestListSessions_OwnSessions(t *testing.T) {
-	h, _, _, sessRepo, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, sessRepo, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	now := time.Now()
 	sessRepo.rows["ses-1"] = &sessiondomain.Session{
 		ID: "ses-1", ActorID: "u-x", ActorType: "User",
@@ -563,7 +737,7 @@ func TestListSessions_OwnSessions(t *testing.T) {
 }
 
 func TestRevokeSession_HappyPath(t *testing.T) {
-	h, _, _, sessRepo, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, sessRepo, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	sessRepo.rows["ses-rev"] = &sessiondomain.Session{ID: "ses-rev", ActorID: "u-x", ActorType: "User"}
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/ses-rev", nil)
 	req.SetPathValue("id", "ses-rev")
@@ -579,7 +753,7 @@ func TestRevokeSession_HappyPath(t *testing.T) {
 }
 
 func TestRevokeSession_NotFound(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/ses-nope", nil)
 	req.SetPathValue("id", "ses-nope")
 	req = withActor(req, "u-x", "User")
@@ -595,7 +769,7 @@ func TestRevokeSession_NotFound(t *testing.T) {
 // =============================================================================
 
 func TestListProviders(t *testing.T) {
-	h, provRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, provRepo, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	provRepo.provs = []*oidcdomain.OIDCProvider{
 		{ID: "op-x", Name: "Okta", IssuerURL: "https://x", ClientID: "c"},
 	}
@@ -612,7 +786,7 @@ func TestListProviders(t *testing.T) {
 }
 
 func TestCreateProvider_MissingClientSecret(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	body := strings.NewReader(`{"name":"x","issuer_url":"https://x","client_id":"c","redirect_uri":"https://r","groups_claim_path":"groups","groups_claim_format":"string-array"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers", body)
 	req = withActor(req, "u-admin", "User")
@@ -624,7 +798,7 @@ func TestCreateProvider_MissingClientSecret(t *testing.T) {
 }
 
 func TestDeleteProvider_InUse_Returns409(t *testing.T) {
-	h, provRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, provRepo, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	provRepo.deleteErr = repository.ErrOIDCProviderInUse
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/oidc/providers/op-x", nil)
 	req.SetPathValue("id", "op-x")
@@ -638,7 +812,7 @@ func TestDeleteProvider_InUse_Returns409(t *testing.T) {
 
 func TestRefreshProvider_HappyPath(t *testing.T) {
 	o := &stubOIDCSvc{}
-	h, _, _, _, audit := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers/op-x/refresh", nil)
 	req.SetPathValue("id", "op-x")
 	req = withActor(req, "u-admin", "User")
@@ -657,7 +831,7 @@ func TestRefreshProvider_HappyPath(t *testing.T) {
 // =============================================================================
 
 func TestListGroupMappings_MissingProviderID(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/oidc/group-mappings", nil)
 	req = withActor(req, "u-admin", "User")
 	w := httptest.NewRecorder()
@@ -668,7 +842,7 @@ func TestListGroupMappings_MissingProviderID(t *testing.T) {
 }
 
 func TestAddGroupMapping_HappyPath(t *testing.T) {
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	body := strings.NewReader(`{"provider_id":"op-x","group_name":"engineers","role_id":"r-operator"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/group-mappings", body)
 	req = withActor(req, "u-admin", "User")
@@ -683,7 +857,7 @@ func TestAddGroupMapping_HappyPath(t *testing.T) {
 }
 
 func TestRemoveGroupMapping_NotFound(t *testing.T) {
-	h, _, mapRepo, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, mapRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	mapRepo.rmErr = repository.ErrGroupRoleMappingNotFound
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/oidc/group-mappings/grm-x", nil)
 	req.SetPathValue("id", "grm-x")
@@ -749,7 +923,7 @@ func TestClientIPFromRequest(t *testing.T) {
 func TestNewAuthSessionOIDCHandler_DefaultsPostLoginURL(t *testing.T) {
 	h := NewAuthSessionOIDCHandler(
 		&stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{},
-		&stubProviderRepo{}, &stubMappingRepo{}, newStubSessionRepo(), &phase5StubAudit{},
+		&stubProviderRepo{}, &stubMappingRepo{}, newStubSessionRepo(), &stubUserRepo{}, &phase5StubAudit{},
 		"key", "t-default", "", // empty postLoginURL
 		SessionCookieAttrs{},
 	)
@@ -827,7 +1001,7 @@ func TestPeekIssuer_RejectsBadSegmentCount(t *testing.T) {
 }
 
 func TestCreateProvider_HappyPath(t *testing.T) {
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	body := strings.NewReader(`{"name":"OktaTest","issuer_url":"https://example.okta.com","client_id":"c","client_secret":"s","redirect_uri":"https://r/cb","groups_claim_path":"groups","groups_claim_format":"string-array","scopes":["openid","profile","email"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers", body)
 	req = withActor(req, "u-admin", "User")
@@ -842,7 +1016,7 @@ func TestCreateProvider_HappyPath(t *testing.T) {
 }
 
 func TestCreateProvider_DuplicateName_Returns409(t *testing.T) {
-	h, provRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, provRepo, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	provRepo.createErr = repository.ErrOIDCProviderDuplicateName
 	body := strings.NewReader(`{"name":"DupTest","issuer_url":"https://example.okta.com","client_id":"c","client_secret":"s","redirect_uri":"https://r/cb","groups_claim_path":"groups","groups_claim_format":"string-array","scopes":["openid"]}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers", body)
@@ -855,7 +1029,7 @@ func TestCreateProvider_DuplicateName_Returns409(t *testing.T) {
 }
 
 func TestCreateProvider_InvalidJSON_Returns400(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers", strings.NewReader("{not-json"))
 	req = withActor(req, "u-admin", "User")
 	w := httptest.NewRecorder()
@@ -866,7 +1040,7 @@ func TestCreateProvider_InvalidJSON_Returns400(t *testing.T) {
 }
 
 func TestUpdateProvider_HappyPath(t *testing.T) {
-	h, provRepo, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, provRepo, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	provRepo.provs = []*oidcdomain.OIDCProvider{
 		{
 			ID: "op-x", TenantID: "t-default", Name: "Old",
@@ -891,7 +1065,7 @@ func TestUpdateProvider_HappyPath(t *testing.T) {
 }
 
 func TestUpdateProvider_NotFound(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	body := strings.NewReader(`{"name":"X"}`)
 	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/oidc/providers/op-missing", body)
 	req.SetPathValue("id", "op-missing")
@@ -905,7 +1079,7 @@ func TestUpdateProvider_NotFound(t *testing.T) {
 
 func TestRefreshProvider_NotFound(t *testing.T) {
 	o := &stubOIDCSvc{refreshErr: repository.ErrOIDCProviderNotFound}
-	h, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/providers/op-missing/refresh", nil)
 	req.SetPathValue("id", "op-missing")
 	req = withActor(req, "u-admin", "User")
@@ -917,7 +1091,7 @@ func TestRefreshProvider_NotFound(t *testing.T) {
 }
 
 func TestListGroupMappings_HappyPath(t *testing.T) {
-	h, _, mapRepo, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, mapRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	mapRepo.mappings = []*oidcdomain.GroupRoleMapping{
 		{ID: "grm-1", ProviderID: "op-x", GroupName: "engineers", RoleID: "r-operator", TenantID: "t-default"},
 	}
@@ -931,7 +1105,7 @@ func TestListGroupMappings_HappyPath(t *testing.T) {
 }
 
 func TestAddGroupMapping_Duplicate_Returns409(t *testing.T) {
-	h, _, mapRepo, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, mapRepo, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	mapRepo.addErr = repository.ErrGroupRoleMappingDuplicate
 	body := strings.NewReader(`{"provider_id":"op-x","group_name":"g","role_id":"r-operator"}`)
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/group-mappings", body)
@@ -944,7 +1118,7 @@ func TestAddGroupMapping_Duplicate_Returns409(t *testing.T) {
 }
 
 func TestRemoveGroupMapping_HappyPath(t *testing.T) {
-	h, _, _, _, audit := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/oidc/group-mappings/grm-x", nil)
 	req.SetPathValue("id", "grm-x")
 	req = withActor(req, "u-admin", "User")
@@ -959,7 +1133,7 @@ func TestRemoveGroupMapping_HappyPath(t *testing.T) {
 }
 
 func TestRevokeSession_MissingID(t *testing.T) {
-	h, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/sessions/", nil)
 	req = withActor(req, "u-x", "User")
 	w := httptest.NewRecorder()
@@ -970,7 +1144,7 @@ func TestRevokeSession_MissingID(t *testing.T) {
 }
 
 func TestListSessions_AsAdmin_QueryActorID(t *testing.T) {
-	h, _, _, sessRepo, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+	h, _, _, sessRepo, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
 	now := time.Now()
 	sessRepo.rows["ses-other"] = &sessiondomain.Session{
 		ID: "ses-other", ActorID: "u-other", ActorType: "User",

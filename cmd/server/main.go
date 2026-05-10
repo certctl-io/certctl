@@ -429,6 +429,7 @@ func main() {
 		oidcProviderRepo,
 		oidcMappingRepo,
 		sessionRepo,
+		oidcUserRepo, // CRIT-2: BCL sub→actor_id lookup via users.GetByOIDCSubject
 		auditService,
 		cfg.Encryption.ConfigEncryptionKey,
 		authdomainAlias.DefaultTenantID,
