@@ -407,6 +407,13 @@ func (s *Service) Validate(ctx context.Context, in ValidateInput) (*sessiondomai
 	if err != nil {
 		return nil, ErrSessionInvalidCookie
 	}
+	// Defense-in-depth: post-login cookies must carry the `ses-` prefix.
+	// Pre-login cookies (`pl-`) are verified by the OIDC pre-login
+	// machinery via internal/auth/oidc/prelogin.go and never reach
+	// SessionService.Validate.
+	if !strings.HasPrefix(sessionID, "ses-") {
+		return nil, ErrSessionInvalidCookie
+	}
 
 	signingKey, err := s.keys.Get(ctx, signingKeyID)
 	if err != nil {
@@ -703,6 +710,51 @@ func (s *Service) GarbageCollect(ctx context.Context) (int, error) {
 // Helpers.
 // =============================================================================
 
+// SignCookieValue is the public wrapper around the cookie-signing helper.
+// Phase 5's pre-login cookie machinery (internal/auth/oidc/prelogin.go)
+// reuses this so the cookie wire format stays identical across both
+// post-login and pre-login surfaces. id1 is the resource identifier
+// (`ses-...` or `pl-...`); id2 is the signing-key id; hmacKey is the
+// 32-byte plaintext HMAC key.
+func SignCookieValue(id1, id2 string, hmacKey []byte) string {
+	return signCookie(id1, id2, hmacKey)
+}
+
+// ParseCookieValue is the public wrapper around the cookie-parser. It
+// validates the v1. version prefix, splits the four segments,
+// base64url-decodes the HMAC, and returns the two embedded ids + the
+// HMAC bytes. Caller is responsible for the HMAC re-compute /
+// constant-time compare. expectedID1Prefix is the prefix the caller
+// expects on segment 1 ("ses-" for post-login, "pl-" for pre-login);
+// passing empty skips the prefix check.
+func ParseCookieValue(cookieValue, expectedID1Prefix string) (id1, id2 string, hmacBytes []byte, err error) {
+	id1, id2, hmacBytes, err = parseCookie(cookieValue)
+	if err != nil {
+		return "", "", nil, err
+	}
+	if expectedID1Prefix != "" && !strings.HasPrefix(id1, expectedID1Prefix) {
+		return "", "", nil, errInvalidIDPrefix
+	}
+	return id1, id2, hmacBytes, nil
+}
+
+// ComputeCookieHMAC is the public wrapper around the length-prefixed
+// HMAC compute helper. Pre-login cookie verification uses this to
+// recompute the HMAC against the same canonical input the post-login
+// signing path uses.
+func ComputeCookieHMAC(id1, id2 string, hmacKey []byte) []byte {
+	return computeHMAC(id1, id2, hmacKey)
+}
+
+// DecryptKeyMaterial is the public wrapper around decryptKeyMaterial.
+// Pre-login cookie verification uses this to derive the HMAC key from
+// the SessionSigningKey row's key_material_encrypted blob.
+func DecryptKeyMaterial(blob []byte, passphrase string) ([]byte, error) {
+	return decryptKeyMaterial(blob, passphrase)
+}
+
+var errInvalidIDPrefix = errors.New("session: cookie id has unexpected prefix")
+
 // signCookie returns the wire-format session cookie value:
 // `v1.<session_id>.<signing_key_id>.<base64url-no-pad(HMAC-SHA256)>`.
 func signCookie(sessionID, signingKeyID string, hmacKey []byte) string {
@@ -750,8 +802,14 @@ func parseCookie(cookieValue string) (sessionID, signingKeyID string, hmacBytes 
 	if parts[0] != sessiondomain.CookieFormatVersion {
 		return "", "", nil, errors.New("unsupported version prefix")
 	}
-	if !strings.HasPrefix(parts[1], "ses-") {
-		return "", "", nil, errors.New("session id missing prefix")
+	// Phase 5: parseCookie itself does NOT enforce a fixed prefix on
+	// segment 1. The post-login Validate path checks `ses-` via the
+	// prefix on the row id; the pre-login verifier (in
+	// internal/auth/oidc/prelogin.go) checks `pl-` via the public
+	// ParseCookieValue wrapper. Keeping the check out of parseCookie
+	// lets both surfaces share the same HMAC parser.
+	if parts[1] == "" {
+		return "", "", nil, errors.New("session id segment empty")
 	}
 	if !strings.HasPrefix(parts[2], "sk-") {
 		return "", "", nil, errors.New("signing key id missing prefix")

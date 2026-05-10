@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"errors"
+	"time"
 
 	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
 )
@@ -91,4 +92,67 @@ type GroupRoleMappingRepository interface {
 	// mapping (Phase 3 fail-closed: no session minted, audit row
 	// `auth.oidc_login_unmapped_groups`).
 	Map(ctx context.Context, providerID string, groupNames []string) ([]string, error)
+}
+
+// =============================================================================
+// PreLoginRepository — Bundle 2 Phase 5.
+//
+// Holds short-lived rows that carry OIDC state + nonce + PKCE verifier
+// across the IdP redirect. Distinct from the sessions table because
+// sessions doesn't carry OIDC-specific columns. 10-minute absolute TTL
+// at the schema layer (oidc_pre_login_sessions.absolute_expires_at);
+// the GC sweep deletes expired rows.
+//
+// Cookie wire format `v1.<pl-id>.<sk-id>.<HMAC-SHA256>` matches the
+// post-login session cookie format exactly; signing-key id is the
+// active SessionSigningKey at handshake time.
+// =============================================================================
+
+// PreLoginSession is the row shape for oidc_pre_login_sessions. Held
+// here (not in oidc/domain) because it's a Phase-5 storage primitive,
+// not a domain concept the wider service layer reasons about.
+type PreLoginSession struct {
+	ID                string // prefix `pl-`
+	TenantID          string
+	SigningKeyID      string // FK to session_signing_keys.id
+	OIDCProviderID    string // FK to oidc_providers.id
+	State             string
+	Nonce             string
+	PKCEVerifier      string
+	CreatedAt         time.Time
+	AbsoluteExpiresAt time.Time
+}
+
+// Sentinel errors for PreLoginRepository.
+var (
+	// ErrPreLoginNotFound: LookupAndConsume found no row with the
+	// supplied id. The handler maps to HTTP 400 (replay or forgery).
+	ErrPreLoginNotFound = errors.New("oidc: pre-login session not found or already consumed")
+
+	// ErrPreLoginExpired: the row was found but absolute_expires_at is
+	// in the past. The handler maps to HTTP 400. The row is also
+	// deleted (the consume side of LookupAndConsume).
+	ErrPreLoginExpired = errors.New("oidc: pre-login session expired (10-minute TTL exceeded)")
+)
+
+// PreLoginRepository wraps the oidc_pre_login_sessions table.
+type PreLoginRepository interface {
+	// Create persists a new pre-login row. Caller MUST have already
+	// generated the random id, state, nonce, and PKCE verifier;
+	// CreatedAt + AbsoluteExpiresAt default to NOW() and NOW()+10min
+	// at the schema layer when zero.
+	Create(ctx context.Context, p *PreLoginSession) error
+
+	// LookupAndConsume reads the row by id AND deletes it atomically
+	// (single-use). Returns ErrPreLoginNotFound if no row matches OR
+	// if the row was already consumed by a concurrent caller.
+	// Returns ErrPreLoginExpired if the row was found but expired
+	// (the row is still deleted in this case so retries don't
+	// re-trigger the expiry check).
+	LookupAndConsume(ctx context.Context, id string) (*PreLoginSession, error)
+
+	// GarbageCollectExpired deletes pre-login rows whose
+	// absolute_expires_at is in the past. Returns the count deleted.
+	// Wired into the same scheduler sweep as expired post-login sessions.
+	GarbageCollectExpired(ctx context.Context) (int, error)
 }

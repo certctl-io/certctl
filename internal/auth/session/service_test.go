@@ -1065,11 +1065,47 @@ func TestParseCookie_RejectsWrongSegmentCount(t *testing.T) {
 
 func TestParseCookie_RejectsMissingPrefixes(t *testing.T) {
 	mac := base64.RawURLEncoding.EncodeToString(make([]byte, sha256.Size))
-	if _, _, _, err := parseCookie("v1.bad-id.sk-y." + mac); err == nil {
-		t.Errorf("expected error for session id missing prefix")
+	// parseCookie itself does NOT enforce the ses-/pl- prefix on the
+	// id segment (Phase 5 split: prefix-check moved to Validate so the
+	// pre-login `pl-` cookie can share the same parser). We still
+	// reject empty segments + wrong signing-key prefix here.
+	if _, _, _, err := parseCookie("v1..sk-y." + mac); err == nil {
+		t.Errorf("expected error for empty session id segment")
 	}
 	if _, _, _, err := parseCookie("v1.ses-x.bad-key." + mac); err == nil {
 		t.Errorf("expected error for signing key id missing prefix")
+	}
+}
+
+// Phase 5: ParseCookieValue (the exported wrapper) DOES enforce the
+// caller-specified prefix on segment 1. Pin both the post-login
+// `ses-` and pre-login `pl-` consumer flows.
+func TestParseCookieValue_EnforcesCallerSuppliedPrefix(t *testing.T) {
+	mac := base64.RawURLEncoding.EncodeToString(make([]byte, sha256.Size))
+	if _, _, _, err := ParseCookieValue("v1.bad-id.sk-y."+mac, "ses-"); !errors.Is(err, errInvalidIDPrefix) {
+		t.Errorf("ParseCookieValue with wrong prefix: err = %v; want errInvalidIDPrefix", err)
+	}
+	if _, _, _, err := ParseCookieValue("v1.bad-id.sk-y."+mac, "pl-"); !errors.Is(err, errInvalidIDPrefix) {
+		t.Errorf("ParseCookieValue with wrong prefix (pl-): err = %v; want errInvalidIDPrefix", err)
+	}
+	// Empty prefix skips the check.
+	if _, _, _, err := ParseCookieValue("v1.anything.sk-y."+mac, ""); err != nil {
+		t.Errorf("ParseCookieValue with empty prefix: err = %v; want nil (skip prefix check)", err)
+	}
+}
+
+// Pin that the post-login Validate path rejects pre-login (`pl-`)
+// cookies even when the HMAC signs valid — defense-in-depth so a
+// stolen pre-login cookie can't be replayed against /api/* gates.
+func TestService_Validate_RejectsPreLoginCookieAtPostLoginGate(t *testing.T) {
+	svc, _, keys, _, _ := newTestService(t, defaultCfg())
+	// Forge a `pl-` cookie signed under the active key.
+	active, _ := keys.GetActive(context.Background(), testTenant)
+	hmacKey, _ := DecryptKeyMaterial(active.KeyMaterialEncrypted, "")
+	forged := SignCookieValue("pl-forged-id", active.ID, hmacKey)
+	_, err := svc.Validate(context.Background(), ValidateInput{CookieValue: forged})
+	if !errors.Is(err, ErrSessionInvalidCookie) {
+		t.Errorf("Validate accepted pl- cookie: err = %v; want ErrSessionInvalidCookie", err)
 	}
 }
 

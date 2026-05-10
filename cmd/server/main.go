@@ -24,7 +24,10 @@ import (
 	"github.com/certctl-io/certctl/internal/api/router"
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/auth/bootstrap"
+	oidcsvc "github.com/certctl-io/certctl/internal/auth/oidc"
+	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
 	"github.com/certctl-io/certctl/internal/auth/session"
+	userdomain "github.com/certctl-io/certctl/internal/auth/user/domain"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -382,6 +385,58 @@ func main() {
 		logger.Error("FATAL: session signing key bootstrap failed; refusing to boot", "err", err)
 		os.Exit(1)
 	}
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 5 — OIDC service + pre-login store + Phase 5 handler.
+	//
+	// Wired AFTER sessionService (Phase 4) so the OIDC PreLoginAdapter
+	// can sign pre-login cookies under the active SessionSigningKey.
+	// =========================================================================
+	oidcProviderRepo := postgres.NewOIDCProviderRepository(db)
+	oidcMappingRepo := postgres.NewGroupRoleMappingRepository(db)
+	oidcUserRepo := postgres.NewUserRepository(db)
+	oidcPreLoginRepo := postgres.NewPreLoginRepository(db)
+	preLoginAdapter := oidcsvc.NewPreLoginAdapter(
+		oidcPreLoginRepo,
+		sessionKeyRepo, // Phase 4 SessionSigningKeyRepository
+		authdomainAlias.DefaultTenantID,
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	// SessionMinter port for the OIDC service. The OIDC HandleCallback
+	// uses this to mint the post-login session after successful token
+	// validation + group→role mapping.
+	oidcSessionMinter := &sessionMinterAdapter{svc: sessionService}
+	oidcService := oidcsvc.NewService(
+		oidcProviderRepo,
+		oidcMappingRepo,
+		oidcUserRepo,
+		oidcSessionMinter,
+		preLoginAdapter,
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	// SameSite resolution from CERTCTL_SESSION_SAMESITE (default Lax;
+	// "Strict" for high-security environments at the cost of breaking
+	// inbound deep-links from external apps).
+	sameSiteMode := http.SameSiteLaxMode
+	if strings.EqualFold(cfg.Auth.Session.SameSite, "Strict") {
+		sameSiteMode = http.SameSiteStrictMode
+	}
+	authSessionOIDCHandler := handler.NewAuthSessionOIDCHandler(
+		oidcService,
+		sessionService,
+		handler.NewDefaultBCLVerifier(oidcProviderRepo, authdomainAlias.DefaultTenantID, nil),
+		oidcProviderRepo,
+		oidcMappingRepo,
+		sessionRepo,
+		auditService,
+		cfg.Encryption.ConfigEncryptionKey,
+		authdomainAlias.DefaultTenantID,
+		"/", // post-login redirect target; GUI dashboard
+		handler.SessionCookieAttrs{
+			SameSite: sameSiteMode,
+			Secure:   true,
+		},
+	)
 
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
@@ -1141,6 +1196,10 @@ func main() {
 		// Rank 8 of the 2026-05-03 deep-research deliverable. See
 		// docs/intermediate-ca-hierarchy.md.
 		IntermediateCAs: intermediateCAHandler,
+		// AuthSessionOIDC — Auth Bundle 2 Phase 5 OIDC + session HTTP
+		// surface. 13 endpoints across login flow + session management
+		// + OIDC provider CRUD + group-mapping CRUD.
+		AuthSessionOIDC: authSessionOIDCHandler,
 		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
 		// auth repos + service-layer Authorizer / RoleService /
 		// ActorRoleService / PermissionService into the HTTP surface
@@ -2471,3 +2530,42 @@ func (ad authCheckResolverAdapter) EffectivePermissions(
 ) ([]repository.EffectivePermission, error) {
 	return ad.repo.EffectivePermissions(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
 }
+
+// =============================================================================
+// sessionMinterAdapter — bridge from *session.Service to oidcsvc.SessionMinter.
+//
+// The OIDC service's SessionMinter port (Phase 3) takes a *userdomain.User
+// + role IDs and returns (cookie, csrf, err). The session.Service's
+// Create method takes (actorID, actorType, ip, ua) -> *CreateResult.
+// This adapter unwraps the User into actorID/actorType + reshapes the
+// return tuple. Lives in cmd/server so the session package doesn't have
+// to know about user.User and the user package doesn't have to know
+// about session.CreateResult.
+// =============================================================================
+
+type sessionMinterAdapter struct {
+	svc *session.Service
+}
+
+func (a *sessionMinterAdapter) MintForUser(
+	ctx context.Context,
+	user *userdomain.User,
+	_ []string, // roleIDs unused at the session-mint layer; the rbac middleware looks them up at request time
+	ip, userAgent string,
+) (cookieValue, csrfToken string, err error) {
+	if user == nil {
+		return "", "", fmt.Errorf("session mint: user is nil")
+	}
+	res, err := a.svc.Create(ctx, user.ID, string(domain.ActorTypeUser), ip, userAgent)
+	if err != nil {
+		return "", "", err
+	}
+	return res.CookieValue, res.CSRFToken, nil
+}
+
+// silenceUnusedImports keeps the new oidcsvc + oidcdomain imports load-
+// bearing in case any file shuffles. Linker dead-code elimination handles
+// the runtime cost.
+var (
+	_ = oidcdomain.OIDCProvider{}
+)

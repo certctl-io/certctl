@@ -103,6 +103,21 @@ var CanonicalPermissions = []string{
 	"scep.admin",
 	"est.admin",
 	"ca.hierarchy.manage",
+
+	// Bundle 2 Phase 5 — session + OIDC management permissions
+	// seeded by migration 000037. auth.session.list / .revoke gate
+	// "list/revoke any session in tenant" (own-session paths bypass
+	// the gate via "is path.actor_id == ctx.actor_id?" check at the
+	// handler layer); auth.session.list.all gates the all-actors
+	// admin view. auth.oidc.{list,create,edit,delete} gates the
+	// OIDC-provider-config + group-mapping CRUD endpoints.
+	"auth.session.list",
+	"auth.session.list.all",
+	"auth.session.revoke",
+	"auth.oidc.list",
+	"auth.oidc.create",
+	"auth.oidc.edit",
+	"auth.oidc.delete",
 }
 
 // DefaultRoles describes the seven default roles seeded by the

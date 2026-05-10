@@ -4794,6 +4794,27 @@ components:
       type: http
       scheme: bearer
       description: API key passed as Bearer token. Configure via CERTCTL_AUTH_SECRET.
+    # Auth Bundle 2 Phase 5 — session-cookie auth scheme. New
+    # session-authenticated endpoints declare
+    # `security: [{cookieAuth: []}, {bearerAuth: []}]` (either auth
+    # method works, OR semantics). Per Phase 5 spec, the
+    # `/auth/oidc/back-channel-logout` endpoint declares `security: []`
+    # because auth comes from the IdP-signed logout token in the body,
+    # not certctl-issued credentials.
+    cookieAuth:
+      type: apiKey
+      in: cookie
+      name: certctl_session
+      description: |
+        Session cookie minted by `POST /auth/oidc/callback` after a
+        successful OIDC handshake (Auth Bundle 2). Wire format
+        `v1.<session_id>.<signing_key_id>.<HMAC-SHA256>`; HMAC is
+        verified server-side against the active session signing key.
+        Cookie attributes: `Secure` `HttpOnly` `SameSite=Lax|Strict`
+        (configurable via `CERTCTL_SESSION_SAMESITE`) `Path=/`.
+        State-changing requests additionally require the
+        `X-CSRF-Token` header to match the SHA-256 hash on the
+        session row (validated by the session middleware in Phase 6).
 
   parameters:
     resourceId:

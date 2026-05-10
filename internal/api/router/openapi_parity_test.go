@@ -100,6 +100,36 @@ var SpecParityExceptions = map[string]string{
 	// `[Auth]`. Shared shapes: AuthRole + AuthRolePermission in the
 	// schemas section. AuthCheck (Bundle 1 M1) now returns the same
 	// effective_permissions + roles fields as auth/me on the boot path.
+
+	// Auth Bundle 2 Phase 5 — OIDC + session HTTP surface (13 routes).
+	// The `cookieAuth` security scheme is documented in api/openapi.yaml
+	// under components.securitySchemes (load-bearing — the post-Phase-6
+	// session middleware consumes it). Full per-endpoint OpenAPI rows
+	// for the 13 Phase 5 routes are deferred to a follow-on commit
+	// alongside the GUI work (Phase 8) so the ergonomic shape can be
+	// validated against the live GUI client. Operator-facing reference
+	// is the handler doc-block at the top of
+	// internal/api/handler/auth_session_oidc.go and the Phase 5 spec at
+	// cowork/auth-bundle-2-prompt.md.
+	//
+	// Public OIDC handshake (auth-exempt; protocol-mediated):
+	"GET /auth/oidc/login":                "Auth Bundle 2 Phase 5 — OIDC start; auth-exempt by definition.",
+	"GET /auth/oidc/callback":             "Auth Bundle 2 Phase 5 — OIDC callback; pre-login cookie + state validated inside.",
+	"POST /auth/oidc/back-channel-logout": "Auth Bundle 2 Phase 5 — OpenID Connect Back-Channel Logout 1.0; auth via IdP-signed logout_token JWT in body. security: [] when documented.",
+	"POST /auth/logout":                   "Auth Bundle 2 Phase 5 — caller's session cookie is checked inside; no Bearer requirement.",
+	// Session management (RBAC-gated auth.session.*):
+	"GET /api/v1/auth/sessions":         "Auth Bundle 2 Phase 5 — list sessions; gated auth.session.list; cookieAuth+bearerAuth.",
+	"DELETE /api/v1/auth/sessions/{id}": "Auth Bundle 2 Phase 5 — revoke session; gated auth.session.revoke (own-session bypass at handler).",
+	// OIDC provider CRUD + refresh (RBAC-gated auth.oidc.*):
+	"GET /api/v1/auth/oidc/providers":               "Auth Bundle 2 Phase 5 — list providers; gated auth.oidc.list.",
+	"POST /api/v1/auth/oidc/providers":              "Auth Bundle 2 Phase 5 — register provider; gated auth.oidc.create; client_secret encrypted at rest.",
+	"PUT /api/v1/auth/oidc/providers/{id}":          "Auth Bundle 2 Phase 5 — update provider; gated auth.oidc.edit.",
+	"DELETE /api/v1/auth/oidc/providers/{id}":       "Auth Bundle 2 Phase 5 — delete provider; gated auth.oidc.delete; refused when users authenticated.",
+	"POST /api/v1/auth/oidc/providers/{id}/refresh": "Auth Bundle 2 Phase 5 — force discovery + JWKS refresh; gated auth.oidc.edit; re-runs IdP downgrade defense.",
+	// Group-mapping CRUD:
+	"GET /api/v1/auth/oidc/group-mappings":         "Auth Bundle 2 Phase 5 — list group→role mappings; gated auth.oidc.list.",
+	"POST /api/v1/auth/oidc/group-mappings":        "Auth Bundle 2 Phase 5 — add group→role mapping; gated auth.oidc.edit.",
+	"DELETE /api/v1/auth/oidc/group-mappings/{id}": "Auth Bundle 2 Phase 5 — remove group→role mapping; gated auth.oidc.edit.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

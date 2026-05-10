@@ -78,12 +78,16 @@ func (r *Router) RegisterFunc(pattern string, handler func(http.ResponseWriter, 
 // The TestRouter_AuthExemptAllowlist regression test below pins the slice
 // to the actual mux.Handle calls — adding an undocumented bypass fails CI.
 var AuthExemptRouterRoutes = []string{
-	"GET /health",                 // K8s/Docker liveness probe; cannot carry Bearer
-	"GET /ready",                  // K8s/Docker readiness probe; cannot carry Bearer
-	"GET /api/v1/auth/info",       // GUI calls before login to detect auth mode
-	"GET /api/v1/version",         // Rollout probes need build identity without key
-	"GET /api/v1/auth/bootstrap",  // Bundle 1 Phase 6 — GUI / install one-liner probes "is bootstrap available?" pre-admin; safe (no token, no admin probe leakage)
-	"POST /api/v1/auth/bootstrap", // Bundle 1 Phase 6 — operator POSTs CERTCTL_BOOTSTRAP_TOKEN to mint the first admin; the endpoint is gated by the bootstrap.Strategy and the admin-existence probe
+	"GET /health",                         // K8s/Docker liveness probe; cannot carry Bearer
+	"GET /ready",                          // K8s/Docker readiness probe; cannot carry Bearer
+	"GET /api/v1/auth/info",               // GUI calls before login to detect auth mode
+	"GET /api/v1/version",                 // Rollout probes need build identity without key
+	"GET /api/v1/auth/bootstrap",          // Bundle 1 Phase 6 — GUI / install one-liner probes "is bootstrap available?" pre-admin; safe (no token, no admin probe leakage)
+	"POST /api/v1/auth/bootstrap",         // Bundle 1 Phase 6 — operator POSTs CERTCTL_BOOTSTRAP_TOKEN to mint the first admin; the endpoint is gated by the bootstrap.Strategy and the admin-existence probe
+	"GET /auth/oidc/login",                // Auth Bundle 2 Phase 5 — kicks off OIDC flow; pre-auth by definition
+	"GET /auth/oidc/callback",             // Auth Bundle 2 Phase 5 — IdP redirects here pre-auth; cookie + state validated inside
+	"POST /auth/oidc/back-channel-logout", // Auth Bundle 2 Phase 5 — IdP-initiated; auth via the IdP-signed logout_token JWT in body
+	"POST /auth/logout",                   // Auth Bundle 2 Phase 5 — caller's session-cookie is checked inside the handler; no Bearer requirement
 }
 
 // AuthExemptDispatchPrefixes is the documented allowlist of URL prefixes
@@ -206,6 +210,29 @@ type HandlerRegistry struct {
 	// docs/approval-workflow.md for the operator playbook.
 	Approvals handler.ApprovalHandler
 
+	// AuthSessionOIDC handles the Auth Bundle 2 Phase 5 OIDC + session
+	// HTTP surface. 13 endpoints across three groups:
+	//   1. Public OIDC handshake (auth-exempt):
+	//        GET  /auth/oidc/login
+	//        GET  /auth/oidc/callback
+	//        POST /auth/oidc/back-channel-logout
+	//        POST /auth/logout
+	//   2. Session management (RBAC-gated auth.session.*):
+	//        GET    /api/v1/auth/sessions
+	//        DELETE /api/v1/auth/sessions/{id}
+	//   3. OIDC provider + group-mapping CRUD (RBAC-gated auth.oidc.*):
+	//        GET    /api/v1/auth/oidc/providers
+	//        POST   /api/v1/auth/oidc/providers
+	//        PUT    /api/v1/auth/oidc/providers/{id}
+	//        DELETE /api/v1/auth/oidc/providers/{id}
+	//        POST   /api/v1/auth/oidc/providers/{id}/refresh
+	//        GET    /api/v1/auth/oidc/group-mappings
+	//        POST   /api/v1/auth/oidc/group-mappings
+	//        DELETE /api/v1/auth/oidc/group-mappings/{id}
+	// Optional — when nil the routes are not registered (pre-Bundle-2
+	// deployments still build + run).
+	AuthSessionOIDC *handler.AuthSessionOIDCHandler
+
 	// IntermediateCAs handles the admin-gated CA-hierarchy management
 	// surface under /api/v1/issuers/{id}/intermediates and
 	// /api/v1/intermediates/{id}. Rank 8 of the 2026-05-03 deep-
@@ -286,6 +313,80 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/auth/keys", http.HandlerFunc(reg.Auth.ListKeys))
 	r.Register("POST /api/v1/auth/keys/{id}/roles", http.HandlerFunc(reg.Auth.AssignRoleToKey))
 	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", http.HandlerFunc(reg.Auth.RevokeRoleFromKey))
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 5 — OIDC + session HTTP surface.
+	//
+	// Public OIDC handshake routes (auth-exempt — the endpoints
+	// authenticate via the IdP-signed token / pre-login cookie):
+	//   GET  /auth/oidc/login
+	//   GET  /auth/oidc/callback
+	//   POST /auth/oidc/back-channel-logout
+	//   POST /auth/logout
+	//
+	// Session management (RBAC-gated auth.session.* — see migration 000037):
+	//   GET    /api/v1/auth/sessions           -> auth.session.list
+	//   DELETE /api/v1/auth/sessions/{id}      -> auth.session.revoke
+	//
+	// OIDC provider + group-mapping CRUD (RBAC-gated auth.oidc.*):
+	//   GET    /api/v1/auth/oidc/providers              -> auth.oidc.list
+	//   POST   /api/v1/auth/oidc/providers              -> auth.oidc.create
+	//   PUT    /api/v1/auth/oidc/providers/{id}         -> auth.oidc.edit
+	//   DELETE /api/v1/auth/oidc/providers/{id}         -> auth.oidc.delete
+	//   POST   /api/v1/auth/oidc/providers/{id}/refresh -> auth.oidc.edit
+	//   GET    /api/v1/auth/oidc/group-mappings         -> auth.oidc.list
+	//   POST   /api/v1/auth/oidc/group-mappings         -> auth.oidc.edit
+	//   DELETE /api/v1/auth/oidc/group-mappings/{id}    -> auth.oidc.edit
+	//
+	// Routes are only registered when reg.AuthSessionOIDC is non-nil
+	// (Phase 5 wiring — production main.go always passes it; pre-Phase-5
+	// builds skip this block entirely).
+	if reg.AuthSessionOIDC != nil {
+		// Public OIDC handshake — auth-exempt. Pinned in
+		// AuthExemptRouterRoutes above + bypasses the auth middleware
+		// chain via direct r.mux.Handle calls. Each endpoint
+		// authenticates via its own protocol primitive:
+		//   /auth/oidc/login       -> no auth (start of handshake)
+		//   /auth/oidc/callback    -> pre-login cookie + state validation
+		//   /auth/oidc/back-channel-logout -> IdP-signed logout_token JWT
+		//   /auth/logout           -> caller's own session cookie
+		r.mux.Handle("GET /auth/oidc/login", middleware.Chain(
+			http.HandlerFunc(reg.AuthSessionOIDC.LoginInitiate),
+			middleware.CORS, middleware.ContentType,
+		))
+		r.mux.Handle("GET /auth/oidc/callback", middleware.Chain(
+			http.HandlerFunc(reg.AuthSessionOIDC.LoginCallback),
+			middleware.CORS, middleware.ContentType,
+		))
+		r.mux.Handle("POST /auth/oidc/back-channel-logout", middleware.Chain(
+			http.HandlerFunc(reg.AuthSessionOIDC.BackChannelLogout),
+			middleware.CORS, middleware.ContentType,
+		))
+		r.mux.Handle("POST /auth/logout", middleware.Chain(
+			http.HandlerFunc(reg.AuthSessionOIDC.Logout),
+			middleware.CORS, middleware.ContentType,
+		))
+
+		// Session management. auth.session.list gates the all-actors
+		// admin view; the handler internally allows callers to list
+		// their own sessions without the permission. Revoke gates
+		// "revoke any session"; own-session paths bypass at the
+		// handler layer per Phase 5 spec.
+		r.Register("GET /api/v1/auth/sessions", rbacGate(reg.Checker, "auth.session.list", reg.AuthSessionOIDC.ListSessions))
+		r.Register("DELETE /api/v1/auth/sessions/{id}", rbacGate(reg.Checker, "auth.session.revoke", reg.AuthSessionOIDC.RevokeSession))
+
+		// OIDC provider CRUD.
+		r.Register("GET /api/v1/auth/oidc/providers", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListProviders))
+		r.Register("POST /api/v1/auth/oidc/providers", rbacGate(reg.Checker, "auth.oidc.create", reg.AuthSessionOIDC.CreateProvider))
+		r.Register("PUT /api/v1/auth/oidc/providers/{id}", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.UpdateProvider))
+		r.Register("DELETE /api/v1/auth/oidc/providers/{id}", rbacGate(reg.Checker, "auth.oidc.delete", reg.AuthSessionOIDC.DeleteProvider))
+		r.Register("POST /api/v1/auth/oidc/providers/{id}/refresh", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.RefreshProvider))
+
+		// Group-mapping CRUD.
+		r.Register("GET /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListGroupMappings))
+		r.Register("POST /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.AddGroupMapping))
+		r.Register("DELETE /api/v1/auth/oidc/group-mappings/{id}", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.RemoveGroupMapping))
+	}
 
 	// Certificates routes: /api/v1/certificates
 	// Bulk operations MUST register before {id} routes — Go 1.22 ServeMux
