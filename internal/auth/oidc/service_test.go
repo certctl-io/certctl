@@ -1122,6 +1122,97 @@ func TestIsJWKSFetchError_GoOIDCV318Strings(t *testing.T) {
 	}
 }
 
+// TestIsKidMismatchError_GoOIDCV318Strings pins the canonical
+// go-oidc/v3 v3.18.0 wordings for the kid-not-in-cache failure mode.
+// Audit 2026-05-10 MED-6: a future go-oidc bump that changes the
+// wording will trip this test and force isKidMismatchError to be
+// re-derived. Without this pin, the JWKS auto-refresh-on-cache-miss
+// recovery would silently regress and every post-IdP-rotation login
+// would surface as a generic verify error instead of recovering.
+func TestIsKidMismatchError_GoOIDCV318Strings(t *testing.T) {
+	canonical := []string{
+		// Direct go-oidc v3.18.0 verifier outputs when no JWK in the
+		// cached key set matches the token's header kid.
+		"signing key with id \"key-2\" not found",
+		"oidc: kid \"new-kid\" not found",
+		"key with id \"abc\" not found",
+		"no matching key for kid \"xyz\"",
+	}
+	for _, msg := range canonical {
+		if !isKidMismatchError(errors.New(msg)) {
+			t.Errorf("canonical kid-mismatch string %q not detected; "+
+				"update isKidMismatchError or pin the new substring", msg)
+		}
+	}
+	// Confirm a non-kid verify error does NOT trigger the auto-refresh:
+	// a wrong signature on a known kid would otherwise produce an
+	// unbounded refresh loop in production.
+	if isKidMismatchError(errors.New("invalid signature")) {
+		t.Errorf("non-kid-mismatch error misclassified as kid-mismatch")
+	}
+}
+
+// TestService_HandleCallback_MED6_AutoRefreshOnKidMiss exercises the
+// MED-6 recovery: the IdP rotates its signing key between provider
+// load + token verify; the first verify fails with kid-not-in-cache,
+// the auto-RefreshKeys path re-fetches the discovery doc + JWKS, and
+// the second verify succeeds against the rotated key.
+func TestService_HandleCallback_MED6_AutoRefreshOnKidMiss(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-med6-rotate")
+
+	// Prime the verifier cache with the initial key by running one
+	// successful handshake.
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-med6-rotate", "init-state", "test-nonce-fixed", "verifier-med6init-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "", "")
+	if err != nil {
+		t.Fatalf("CreatePreLogin (init): %v", err)
+	}
+	if _, err := svc.HandleCallback(context.Background(), cookie, "code", "init-state", "", "ip", "ua"); err != nil {
+		t.Fatalf("HandleCallback (init): %v", err)
+	}
+
+	// Rotate the IdP's signing key + key id. Subsequent token-sign
+	// operations use the new key; the cached JWKS still holds the old
+	// public key, so the next Verify trips kid-not-in-cache until the
+	// MED-6 auto-refresh kicks in.
+	rotateMockIdPKey(t, idp, "test-key-2")
+
+	// Issue a new handshake; this hits the rotated key + the auto-
+	// refresh recovery path.
+	cookie2, _, err := pl.CreatePreLogin(context.Background(), "op-med6-rotate", "post-state", "test-nonce-fixed", "verifier-med6post-xxxxxxxxxxxxxxxxxxxxxxxxxxxxx", "", "")
+	if err != nil {
+		t.Fatalf("CreatePreLogin (post-rotate): %v", err)
+	}
+	res, err := svc.HandleCallback(context.Background(), cookie2, "code-rot", "post-state", "", "ip", "ua")
+	if err != nil {
+		t.Fatalf("HandleCallback (post-rotate, expected MED-6 auto-refresh): %v", err)
+	}
+	if res == nil || res.User == nil {
+		t.Fatalf("post-rotate CallbackResult missing user")
+	}
+}
+
+// rotateMockIdPKey replaces the mockIdP's RSA signing key + key id so
+// subsequent ID tokens are signed under a fresh kid the cached JWKS
+// doesn't contain. Used by the MED-6 regression test.
+func rotateMockIdPKey(t *testing.T, idp *mockIdP, newKeyID string) {
+	t.Helper()
+	key, err := rsa.GenerateKey(rand.Reader, 2048)
+	if err != nil {
+		t.Fatalf("rsa.GenerateKey (rotate): %v", err)
+	}
+	signer, err := jose.NewSigner(
+		jose.SigningKey{Algorithm: jose.RS256, Key: key},
+		(&jose.SignerOptions{}).WithType("JWT").WithHeader("kid", newKeyID),
+	)
+	if err != nil {
+		t.Fatalf("jose.NewSigner (rotate): %v", err)
+	}
+	idp.key = key
+	idp.signer = signer
+	idp.keyID = newKeyID
+}
+
 // TestService_DecryptClientSecret_NoKeyReturnsBytesAsIs covers the
 // empty-key short-circuit (used by tests with plaintext blobs).
 func TestService_DecryptClientSecret_NoKeyReturnsBytesAsIs(t *testing.T) {

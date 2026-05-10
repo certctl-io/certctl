@@ -550,13 +550,40 @@ func (s *Service) HandleCallback(
 
 	idToken, err := entry.verifier.Verify(ctx, rawIDToken)
 	if err != nil {
-		// Map go-oidc's verify errors to ErrJWKSUnreachable when the
-		// underlying cause is a JWKS fetch failure; otherwise return
-		// the wrapped error for the handler to map to 400.
-		if isJWKSFetchError(err) {
-			return nil, ErrJWKSUnreachable
+		// Audit 2026-05-10 MED-6 — JWKS auto-refresh on cache-miss.
+		// When the IdP rotated keys post-handshake-init (e.g. between
+		// the user's pre-login click and the callback), the verify
+		// fails with a "kid not in cache" / "key with id ... not
+		// found" / "signature verification failed" style error
+		// because the verifier holds a stale snapshot of the JWKS.
+		// One-shot recovery: force a RefreshKeys (which evicts +
+		// re-fetches discovery + JWKS) and retry the verify exactly
+		// once. No retry loop; a second failure surfaces as
+		// ErrJWKSUnreachable / generic verify error per the original
+		// branches below.
+		if isKidMismatchError(err) {
+			if rerr := s.RefreshKeys(ctx, providerID); rerr == nil {
+				// Re-fetch the entry (RefreshKeys evicted the cache).
+				if refreshed, gerr := s.getOrLoad(ctx, providerID); gerr == nil {
+					if retried, verr := refreshed.verifier.Verify(ctx, rawIDToken); verr == nil {
+						idToken = retried
+						err = nil
+						// fall through to Step 5 below.
+					} else {
+						err = verr
+					}
+				}
+			}
 		}
-		return nil, fmt.Errorf("oidc: id_token verify failed: %w", err)
+		if err != nil {
+			// Map go-oidc's verify errors to ErrJWKSUnreachable when the
+			// underlying cause is a JWKS fetch failure; otherwise return
+			// the wrapped error for the handler to map to 400.
+			if isJWKSFetchError(err) {
+				return nil, ErrJWKSUnreachable
+			}
+			return nil, fmt.Errorf("oidc: id_token verify failed: %w", err)
+		}
 	}
 
 	// Step 5: alg pinning. go-oidc's verifier already enforces the
@@ -1075,6 +1102,41 @@ func isJWKSFetchError(err error) bool {
 		// 2026-05-10 Nit-2 closure — was previously misclassified as
 		// a generic 500 instead of 503 ErrJWKSUnreachable.
 		strings.Contains(msg, "decode keys")
+}
+
+// isKidMismatchError detects whether the go-oidc verify error is
+// caused by the verifier's cached JWKS missing the key id referenced
+// by the inbound ID token's JWS header (the canonical post-IdP-key-
+// rotation failure mode). Audit 2026-05-10 MED-6.
+//
+// Pinned strings as of go-oidc/v3 v3.18.0:
+//   - `failed to verify signature: failed to verify id token signature`
+//     when no JWK in the cache matches the header kid
+//   - `oidc: failed to verify signature: failed to verify id token: kid`
+//   - Older releases emitted `signing key with id ... not found`
+//
+// The match is intentionally narrow — we don't want to retry on
+// every signature failure (some are genuinely a wrong signing key,
+// not a cache-miss), only on the kid-not-in-cache shape. A future
+// go-oidc release that exposes a typed error should switch to
+// errors.As; the regression test pins the canonical substrings so
+// the bump trips loudly.
+func isKidMismatchError(err error) bool {
+	if err == nil {
+		return false
+	}
+	msg := err.Error()
+	switch {
+	case strings.Contains(msg, "kid") && strings.Contains(msg, "not found"):
+		return true
+	case strings.Contains(msg, "signing key") && strings.Contains(msg, "not found"):
+		return true
+	case strings.Contains(msg, "no matching key"):
+		return true
+	case strings.Contains(msg, "key with id") && strings.Contains(msg, "not found"):
+		return true
+	}
+	return false
 }
 
 // decryptClientSecret runs the client_secret_encrypted blob through

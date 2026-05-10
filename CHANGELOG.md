@@ -34,6 +34,20 @@
   RFC-9207 discovery. Providers that don't advertise support (the majority
   today) keep pre-fix behavior — back-compat is preserved.
 
+- **JWKS auto-refresh on cache-miss (Audit 2026-05-10 MED-6).** When
+  the IdP rotates its signing key between pre-login + callback, the
+  cached JWKS no longer contains the kid referenced by the inbound ID
+  token's JWS header. Pre-fix, the verify failed with a generic error
+  and the operator had to manually call `POST
+  /api/v1/auth/oidc/providers/{id}/refresh`. The service now detects
+  the kid-not-in-cache shape (`isKidMismatchError`) and runs a
+  one-shot `RefreshKeys` (evict cache → re-fetch discovery + JWKS →
+  re-run alg-downgrade defense) before retrying the verify exactly
+  once. Bounded recovery: a second failure surfaces as
+  `ErrJWKSUnreachable` per the original branches; no retry loop. A
+  separate matcher (`isKidMismatchError`) is intentionally narrow
+  so generic signature failures don't trigger refresh.
+
 - **OIDC provider test endpoint (Audit 2026-05-10 MED-5).** New
   `POST /api/v1/auth/oidc/test` dry-runs an OIDC provider configuration
   without persisting: fetches the discovery doc, runs the alg-downgrade
