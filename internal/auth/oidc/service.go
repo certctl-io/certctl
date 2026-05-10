@@ -908,6 +908,19 @@ func atHashMatches(rawIDToken, accessToken, claimAtHash string) bool {
 // error talking to the IdP's jwks_uri during a key rotation event).
 // Maps to ErrJWKSUnreachable so the handler returns 503 to the
 // in-flight login attempt without auto-revoking existing sessions.
+//
+// Audit 2026-05-10 Nit-2 — pinned against go-oidc/v3 v3.18.0. As of
+// that release, the only typed error exposed by the oidc package is
+// `*oidc.TokenExpiredError`; JWKS-fetch failures bubble up as
+// fmt.Errorf-wrapped strings from internal/keyset.go's `verify` path
+// (`failed to verify signature: fetching keys: ...`,
+// `oidc: fetching keys ...`, `oidc: failed to get keys for kid ...`).
+// The regression test in service_test.go::TestIsJWKSFetchError_GoOIDCV318Strings
+// pins the canonical substrings; a future go-oidc bump that changes
+// the wording trips the test and forces this function to be re-derived.
+// When go-oidc exposes a typed error (track at
+// https://github.com/coreos/go-oidc/issues for the upstream RFE),
+// switch to errors.As.
 func isJWKSFetchError(err error) bool {
 	if err == nil {
 		return false
@@ -915,7 +928,13 @@ func isJWKSFetchError(err error) bool {
 	msg := err.Error()
 	return strings.Contains(msg, "fetching keys") ||
 		strings.Contains(msg, "jwks_uri") ||
-		strings.Contains(msg, "key set")
+		strings.Contains(msg, "key set") ||
+		// go-oidc/v3 v3.18.0 jwks.go:260: `oidc: failed to decode keys`
+		// — emitted when the IdP returns non-JSON at the jwks_uri
+		// (broken proxy, gateway HTML error page, etc.). Audit
+		// 2026-05-10 Nit-2 closure — was previously misclassified as
+		// a generic 500 instead of 503 ErrJWKSUnreachable.
+		strings.Contains(msg, "decode keys")
 }
 
 // decryptClientSecret runs the client_secret_encrypted blob through

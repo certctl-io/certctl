@@ -90,6 +90,20 @@ func NewSessionMiddleware(svc SessionValidator) func(http.Handler) http.Handler 
 				UserAgent:   r.UserAgent(),
 			})
 			if verr != nil {
+				// Audit 2026-05-10 LOW-6 closure — ErrSessionTransient
+				// means the backend hit a retryable error (DB hiccup,
+				// connection reset, etc.) rather than the cookie being
+				// malformed. Surface 503 + Retry-After so well-behaved
+				// clients (curl --retry, browser fetch automatic retry,
+				// MCP clients) retry instead of forcing the user to
+				// re-auth on a transient issue. Pre-fix, every DB error
+				// looked like a forged-cookie 401.
+				if errors.Is(verr, ErrSessionTransient) {
+					w.Header().Set("Retry-After", "1")
+					w.Header().Set("Content-Type", "application/json; charset=utf-8")
+					http.Error(w, `{"error":"transient backend error; retry"}`, http.StatusServiceUnavailable)
+					return
+				}
 				// Cookie present but invalid (expired / tampered /
 				// retired-key / IP-bind / UA-bind / revoked). Defer to
 				// the next middleware so a valid Bearer can still

@@ -153,6 +153,18 @@ var (
 	// auto-revoked (user may have legitimate IP change).
 	ErrSessionIPMismatch = errors.New("session: client IP does not match session-bound IP")
 
+	// ErrSessionTransient: a non-deterministic, retryable failure (DB
+	// connection reset, network blip on the audit-row write inside
+	// the validate path, etc.). Distinct from ErrSessionInvalidCookie:
+	// the cookie itself isn't malformed/forged, the backend just
+	// failed to look it up cleanly. The middleware maps this to HTTP
+	// 503 with `Retry-After: 1` so well-behaved clients retry instead
+	// of forcing the user to re-authenticate. Audit 2026-05-10 LOW-6
+	// closure — pre-fix, transient DB failures collapsed into
+	// ErrSessionInvalidCookie + 401, falsely framing a database outage
+	// as "your cookie is bad."
+	ErrSessionTransient = errors.New("session: transient backend error")
+
 	// ErrSessionUAMismatch: same shape as ErrSessionIPMismatch for the
 	// optional CERTCTL_SESSION_BIND_USER_AGENT gate.
 	ErrSessionUAMismatch = errors.New("session: User-Agent does not match session-bound User-Agent")
@@ -453,7 +465,16 @@ func (s *Service) Validate(ctx context.Context, in ValidateInput) (*sessiondomai
 
 	row, err := s.sessions.Get(ctx, sessionID)
 	if err != nil {
-		return nil, ErrSessionInvalidCookie
+		// Audit 2026-05-10 LOW-6 closure — distinguish "this cookie's
+		// session row doesn't exist" (invalid: 401) from "the DB call
+		// failed transiently" (retryable: 503). Pre-fix, both
+		// collapsed into ErrSessionInvalidCookie, so a DB hiccup
+		// looked like a forged cookie in the audit log + forced the
+		// user to re-auth.
+		if errors.Is(err, repository.ErrSessionNotFound) {
+			return nil, ErrSessionInvalidCookie
+		}
+		return nil, fmt.Errorf("%w: %v", ErrSessionTransient, err)
 	}
 
 	if row.RevokedAt != nil {

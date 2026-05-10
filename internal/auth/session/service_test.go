@@ -921,13 +921,39 @@ func TestService_RotateSigningKey_RetireError(t *testing.T) {
 	}
 }
 
-func TestService_Validate_SessionGetErrorMappedToInvalidCookie(t *testing.T) {
+// TestService_Validate_TransientSessionGetError pins the LOW-6
+// closure (audit 2026-05-10): a non-deterministic DB error from
+// session.Get bubbles up as ErrSessionTransient (→ 503), NOT
+// ErrSessionInvalidCookie (→ 401). The middleware test pins the
+// 503-with-Retry-After wire shape; this one pins the service-layer
+// sentinel.
+func TestService_Validate_TransientSessionGetError(t *testing.T) {
 	svc, sessions, _, _, _ := newTestService(t, defaultCfg())
 	res, _ := svc.Create(context.Background(), "u-y", "User", "", "")
 	sessions.getErr = fmt.Errorf("simulated session.Get failure")
 	_, err := svc.Validate(context.Background(), ValidateInput{CookieValue: res.CookieValue})
+	if !errors.Is(err, ErrSessionTransient) {
+		t.Errorf("err = %v; want ErrSessionTransient", err)
+	}
+	if errors.Is(err, ErrSessionInvalidCookie) {
+		t.Errorf("err also matched ErrSessionInvalidCookie; want only ErrSessionTransient")
+	}
+}
+
+// TestService_Validate_SessionNotFoundMapsToInvalidCookie pins the
+// other half of the LOW-6 split: repository.ErrSessionNotFound (a
+// real, deterministic "the row doesn't exist" answer from the DB)
+// stays mapped to ErrSessionInvalidCookie (→ 401), NOT 503.
+func TestService_Validate_SessionNotFoundMapsToInvalidCookie(t *testing.T) {
+	svc, sessions, _, _, _ := newTestService(t, defaultCfg())
+	res, _ := svc.Create(context.Background(), "u-y2", "User", "", "")
+	sessions.getErr = repository.ErrSessionNotFound
+	_, err := svc.Validate(context.Background(), ValidateInput{CookieValue: res.CookieValue})
 	if !errors.Is(err, ErrSessionInvalidCookie) {
 		t.Errorf("err = %v; want ErrSessionInvalidCookie", err)
+	}
+	if errors.Is(err, ErrSessionTransient) {
+		t.Errorf("err also matched ErrSessionTransient; want only ErrSessionInvalidCookie")
 	}
 }
 

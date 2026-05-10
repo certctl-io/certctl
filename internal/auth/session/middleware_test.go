@@ -338,6 +338,26 @@ func TestClientIPFromRequest_Variants(t *testing.T) {
 	}
 }
 
+// TestSessionMiddleware_TransientErrorMappedTo503 pins the LOW-6
+// closure (audit 2026-05-10): when Validate returns
+// ErrSessionTransient, the middleware MUST emit 503 with Retry-After
+// instead of falling through to the Bearer/401 path. Pre-fix, a DB
+// hiccup looked like a forged-cookie 401 + forced re-auth.
+func TestSessionMiddleware_TransientErrorMappedTo503(t *testing.T) {
+	stub := &stubSessionValidator{validateErr: ErrSessionTransient}
+	chain := ChainAuthSessionThenBearer(NewSessionMiddleware(stub), nil)(markAuthenticated())
+	req := httptest.NewRequest(http.MethodGet, "/x", nil)
+	req.AddCookie(&http.Cookie{Name: sessiondomain.PostLoginCookieName, Value: "v1.ses.sk.bad"})
+	w := httptest.NewRecorder()
+	chain.ServeHTTP(w, req)
+	if w.Code != http.StatusServiceUnavailable {
+		t.Errorf("status = %d; want 503", w.Code)
+	}
+	if w.Header().Get("Retry-After") != "1" {
+		t.Errorf("Retry-After = %q; want 1", w.Header().Get("Retry-After"))
+	}
+}
+
 func TestChainAuthSessionThenBearer_NilBearer_Session401Path(t *testing.T) {
 	stub := &stubSessionValidator{validateErr: ErrSessionInvalidCookie}
 	chain := ChainAuthSessionThenBearer(NewSessionMiddleware(stub), nil)(markAuthenticated())

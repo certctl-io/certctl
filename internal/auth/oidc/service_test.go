@@ -1071,6 +1071,41 @@ func TestService_IsJWKSFetchError(t *testing.T) {
 	}
 }
 
+// TestIsJWKSFetchError_GoOIDCV318Strings pins the canonical go-oidc/v3
+// v3.18.0 error wordings against isJWKSFetchError. Audit 2026-05-10
+// Nit-2: go-oidc's only typed error as of v3.18.0 is
+// *oidc.TokenExpiredError; JWKS-fetch failures bubble up as
+// fmt.Errorf-wrapped strings. A future go-oidc bump that changes
+// these strings will trip this test and force isJWKSFetchError to be
+// re-derived (or, ideally, switched to errors.As against a newly-
+// exposed typed error). Without this pin, a silent upstream string
+// change would make every JWKS-rotation login surface as 500 instead
+// of 503 — the operator-distinguishable wire shape promised by
+// ErrJWKSUnreachable.
+func TestIsJWKSFetchError_GoOIDCV318Strings(t *testing.T) {
+	// Canonical substrings observed in go-oidc/v3 v3.18.0 verify path.
+	// Sources (all under github.com/coreos/go-oidc/v3@v3.18.0/oidc/):
+	//   - jwks.go:175  → fmt.Errorf("fetching keys %w", err)
+	//   - jwks.go:260  → fmt.Errorf("oidc: failed to decode keys: %v %s", ...)
+	// Also stably matched by isJWKSFetchError's "jwks_uri" + "key set"
+	// fallbacks (substrings inside go-oidc-emitted strings and our
+	// own /api/v1/auth/oidc/.../refresh wrap errors).
+	canonical := []string{
+		// Direct go-oidc v3.18.0 fmt.Errorf outputs.
+		"fetching keys: dial tcp: lookup idp.example.com: no such host",
+		"oidc: failed to decode keys: invalid character 'h' looking for beginning of value",
+		// Wrap from our own RefreshKeys / verify retry path.
+		"failed to refresh remote key set: timeout",
+		"unable to load key set: cancelled",
+	}
+	for _, msg := range canonical {
+		if !isJWKSFetchError(errors.New(msg)) {
+			t.Errorf("canonical go-oidc v3.18.0 string %q not detected as JWKS-fetch error; "+
+				"update isJWKSFetchError or pin the new substring", msg)
+		}
+	}
+}
+
 // TestService_DecryptClientSecret_NoKeyReturnsBytesAsIs covers the
 // empty-key short-circuit (used by tests with plaintext blobs).
 func TestService_DecryptClientSecret_NoKeyReturnsBytesAsIs(t *testing.T) {
