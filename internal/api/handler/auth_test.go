@@ -434,3 +434,211 @@ func TestAuthHandler_MeReturnsActorIdentity(t *testing.T) {
 		t.Errorf("effective_permissions wrong; got %+v", resp.EffectivePermissions)
 	}
 }
+
+// =============================================================================
+// Coverage-floor closure (post-Bundle-1 follow-on, 2026-05-09).
+//
+// CI run #486 caught internal/api/handler at 74.7% — 0.3pp below the
+// 75 floor. The auth handlers added in Bundle 1 had several 0%-covered
+// methods: GetRole, UpdateRole, ListKeys, RemoveRolePermission. The
+// tests below close the gap.
+// =============================================================================
+
+func TestAuthHandler_GetRoleReturnsRoleAndPermissions(t *testing.T) {
+	h, roleSvc, _, _ := newAuthHandlerWithFakes()
+	roleSvc.roles["r-admin"] = &authdomain.Role{ID: "r-admin", Name: "admin", Description: "the admin role"}
+	scope := "p-corp"
+	roleSvc.rolePerms["r-admin"] = []*authdomain.RolePermission{
+		{RoleID: "r-admin", PermissionID: "p-cert.read", ScopeType: authdomain.ScopeTypeGlobal},
+		{RoleID: "r-admin", PermissionID: "p-profile.edit", ScopeType: authdomain.ScopeTypeProfile, ScopeID: &scope},
+	}
+	req := withAuthCtx(httptest.NewRequest(http.MethodGet, "/api/v1/auth/roles/r-admin", nil), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-admin")
+	rec := httptest.NewRecorder()
+	h.GetRole(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetRole code = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Role        roleResponse             `json:"role"`
+		Permissions []rolePermissionResponse `json:"permissions"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Role.ID != "r-admin" || resp.Role.Name != "admin" {
+		t.Errorf("Role envelope wrong: %+v", resp.Role)
+	}
+	if len(resp.Permissions) != 2 {
+		t.Errorf("permissions length = %d; want 2", len(resp.Permissions))
+	}
+}
+
+func TestAuthHandler_GetRoleNotFoundReturns404(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodGet, "/api/v1/auth/roles/r-missing", nil), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-missing")
+	rec := httptest.NewRecorder()
+	h.GetRole(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("GetRole(missing) code = %d; want 404", rec.Code)
+	}
+}
+
+func TestAuthHandler_GetRoleNoActorReturns401(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/roles/r-admin", nil)
+	req.SetPathValue("id", "r-admin")
+	rec := httptest.NewRecorder()
+	h.GetRole(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("GetRole no-actor code = %d; want 401", rec.Code)
+	}
+}
+
+func TestAuthHandler_UpdateRoleReturns200(t *testing.T) {
+	h, roleSvc, _, _ := newAuthHandlerWithFakes()
+	roleSvc.roles["r-x"] = &authdomain.Role{ID: "r-x", Name: "old", Description: ""}
+	body := bytes.NewBufferString(`{"name":"new","description":"updated"}`)
+	req := withAuthCtx(httptest.NewRequest(http.MethodPut, "/api/v1/auth/roles/r-x", body), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-x")
+	rec := httptest.NewRecorder()
+	h.UpdateRole(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("UpdateRole code = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp roleResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if resp.Name != "new" || resp.Description != "updated" {
+		t.Errorf("UpdateRole returned %+v; want Name=new, Description=updated", resp)
+	}
+}
+
+func TestAuthHandler_UpdateRoleInvalidJSONReturns400(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	body := strings.NewReader(`{"name":`) // truncated
+	req := withAuthCtx(httptest.NewRequest(http.MethodPut, "/api/v1/auth/roles/r-x", body), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-x")
+	rec := httptest.NewRecorder()
+	h.UpdateRole(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("UpdateRole invalid JSON code = %d; want 400", rec.Code)
+	}
+}
+
+func TestAuthHandler_UpdateRoleNoActorReturns401(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := httptest.NewRequest(http.MethodPut, "/api/v1/auth/roles/r-x", bytes.NewBufferString(`{"name":"new"}`))
+	req.SetPathValue("id", "r-x")
+	rec := httptest.NewRecorder()
+	h.UpdateRole(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("UpdateRole no-actor code = %d; want 401", rec.Code)
+	}
+}
+
+func TestAuthHandler_ListKeysReturnsActorList(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	actorSvc.roles = []*authdomain.ActorRole{
+		{ID: "ar-1", ActorID: "alice", ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey), TenantID: authdomain.DefaultTenantID, RoleID: "r-admin"},
+		{ID: "ar-2", ActorID: "carol", ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey), TenantID: authdomain.DefaultTenantID, RoleID: "r-viewer"},
+	}
+	req := withAuthCtx(httptest.NewRequest(http.MethodGet, "/api/v1/auth/keys", nil), "alice", auth.ActorTypeAPIKey)
+	rec := httptest.NewRecorder()
+	h.ListKeys(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListKeys code = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	var resp struct {
+		Keys []struct {
+			ActorID   string   `json:"actor_id"`
+			ActorType string   `json:"actor_type"`
+			TenantID  string   `json:"tenant_id"`
+			RoleIDs   []string `json:"role_ids"`
+		} `json:"keys"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &resp); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	if len(resp.Keys) != 2 {
+		t.Errorf("ListKeys returned %d keys; want 2", len(resp.Keys))
+	}
+}
+
+func TestAuthHandler_ListKeysNoActorReturns401(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/auth/keys", nil)
+	rec := httptest.NewRecorder()
+	h.ListKeys(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("ListKeys no-actor code = %d; want 401", rec.Code)
+	}
+}
+
+func TestAuthHandler_RemoveRolePermissionReturns204(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete, "/api/v1/auth/roles/r-admin/permissions/cert.read", nil), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-admin")
+	req.SetPathValue("perm", "cert.read")
+	rec := httptest.NewRecorder()
+	h.RemoveRolePermission(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("RemoveRolePermission code = %d; want 204", rec.Code)
+	}
+}
+
+func TestAuthHandler_RemoveRolePermissionScopedReturns204(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete, "/api/v1/auth/roles/r-admin/permissions/profile.edit?scope_type=profile&scope_id=p-corp", nil), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-admin")
+	req.SetPathValue("perm", "profile.edit")
+	rec := httptest.NewRecorder()
+	h.RemoveRolePermission(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Errorf("RemoveRolePermission(scoped) code = %d; want 204", rec.Code)
+	}
+}
+
+func TestAuthHandler_RemoveRolePermissionNoActorReturns401(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/auth/roles/r-admin/permissions/cert.read", nil)
+	req.SetPathValue("id", "r-admin")
+	req.SetPathValue("perm", "cert.read")
+	rec := httptest.NewRecorder()
+	h.RemoveRolePermission(rec, req)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("RemoveRolePermission no-actor code = %d; want 401", rec.Code)
+	}
+}
+
+// Pin the rolePermToResponse helper indirectly via GetRole; the test
+// above already exercises both global + scoped permission encoding.
+// Add an explicit assertion here so the helper's nil-scope branch is
+// readable in coverage output.
+func TestAuthHandler_GetRoleRolePermResponseEncodesScope(t *testing.T) {
+	h, roleSvc, _, _ := newAuthHandlerWithFakes()
+	roleSvc.roles["r-x"] = &authdomain.Role{ID: "r-x", Name: "x"}
+	scope := "iss-corp"
+	roleSvc.rolePerms["r-x"] = []*authdomain.RolePermission{
+		{RoleID: "r-x", PermissionID: "p-cert.read", ScopeType: authdomain.ScopeTypeGlobal, ScopeID: nil},
+		{RoleID: "r-x", PermissionID: "p-issuer.edit", ScopeType: authdomain.ScopeTypeIssuer, ScopeID: &scope},
+	}
+	req := withAuthCtx(httptest.NewRequest(http.MethodGet, "/api/v1/auth/roles/r-x", nil), "alice", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "r-x")
+	rec := httptest.NewRecorder()
+	h.GetRole(rec, req)
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetRole code = %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"scope_type":"issuer"`)) {
+		t.Errorf("body should include scope_type=issuer; got %s", rec.Body.String())
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte(`"scope_id":"iss-corp"`)) {
+		t.Errorf("body should include scope_id=iss-corp; got %s", rec.Body.String())
+	}
+}
+
+// ensure 'errors' import stays used after edits.
+var _ = errors.Is

@@ -53,6 +53,42 @@ type fakeKeyStore struct {
 	added []addedEntry
 }
 
+// TestService_Available_NilServiceOrStrategyReturnsErrDisabled pins the
+// no-strategy short-circuit on the Available probe. The HTTP handler
+// uses Available to decide between 410 Gone (consumed/disabled) and
+// proceeding to read the request body. A nil service or nil strategy
+// means the bootstrap path was not configured at all; both arms return
+// ErrDisabled so the operator-facing surface is identical.
+func TestService_Available_NilServiceOrStrategyReturnsErrDisabled(t *testing.T) {
+	var svc *Service // nil receiver
+	if ok, err := svc.Available(context.Background()); ok || !errors.Is(err, ErrDisabled) {
+		t.Errorf("nil service: Available = (%v, %v); want (false, ErrDisabled)", ok, err)
+	}
+	// non-nil service but nil strategy
+	svc = &Service{}
+	if ok, err := svc.Available(context.Background()); ok || !errors.Is(err, ErrDisabled) {
+		t.Errorf("nil strategy: Available = (%v, %v); want (false, ErrDisabled)", ok, err)
+	}
+}
+
+// TestService_Available_DelegatesToStrategy pins the happy-path
+// delegation: when an admin already exists, the strategy probe returns
+// `exists=true` and Available reports false (one-shot path closes once
+// any admin lands).
+func TestService_Available_DelegatesToStrategy(t *testing.T) {
+	strategy := NewEnvTokenStrategy("the-token", func(_ context.Context) (bool, error) {
+		return true, nil // admin exists → bootstrap path closed
+	})
+	svc := NewService(strategy, &fakeMinter{}, &fakeGranter{}, &fakeAudit{}, &fakeKeyStore{}, sha)
+	ok, err := svc.Available(context.Background())
+	if err != nil {
+		t.Fatalf("Available err: %v", err)
+	}
+	if ok {
+		t.Errorf("admin-exists probe should yield Available=false; got true")
+	}
+}
+
 type addedEntry struct {
 	name  string
 	hash  string
