@@ -66,6 +66,7 @@ You're running certctl in production and need operational guidance.
 | [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation, RBAC primitive (Bundle 1), bootstrap |
 | [RBAC operator reference](operator/rbac.md) | Roles, permissions, scopes, scope-down + bootstrap flow (Bundle 1) |
 | [Auth threat model](operator/auth-threat-model.md) | API-key compromise, role-grant abuse, bootstrap-token leak, audit-mutation, compliance mapping (Bundle 1) |
+| [OIDC / SSO runbooks](operator/oidc-runbooks/index.md) | Per-IdP setup guides — Keycloak, Authentik, Okta, Auth0, Entra ID, Google Workspace (Bundle 2) |
 | [Control plane TLS](operator/tls.md) | Self-signed bootstrap, operator-supplied Secret, cert-manager Certificate CR |
 | [Database TLS](operator/database-tls.md) | PostgreSQL transport encryption |
 | [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance + Phase 9 profile-edit closure |
