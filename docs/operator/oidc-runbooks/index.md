@@ -45,7 +45,7 @@ These show up in every runbook; understand them once and skim the rest.
 
 ## When you finish a runbook
 
-Each per-IdP runbook ends with a **validation checklist** the operator runs against a real production-tier deployment. Per the merge-gate criterion in `cowork/auth-bundle-2-prompt.md`, each runbook must be validated end-to-end by either the operator or an external tester before Bundle 2 ships. Mark your sign-off in the runbook's footer when you've completed the matrix.
+Each per-IdP runbook ends with a **validation checklist** the operator runs against a real production-tier deployment. Run through the matrix end-to-end against your IdP and mark your sign-off in the runbook's footer — that gives the next operator (or the next you) a dated record of what's been verified to work.
 
 ## Related docs
 
