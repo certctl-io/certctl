@@ -41,6 +41,11 @@ type stubOIDCSvc struct {
 	callbackRes *oidcsvc.CallbackResult
 	callbackErr error
 	refreshErr  error
+	// Audit 2026-05-10 MED-5 — stub for the TestDiscovery dry-run.
+	// When testResult is non-nil, the handler-level type assertion
+	// resolves and the response carries this verbatim.
+	testResult *oidcsvc.TestDiscoveryResult
+	testErr    error
 }
 
 func (s *stubOIDCSvc) HandleAuthRequest(_ context.Context, _, _, _ string) (string, string, string, error) {
@@ -50,6 +55,12 @@ func (s *stubOIDCSvc) HandleCallback(_ context.Context, _, _, _, _, _, _ string)
 	return s.callbackRes, s.callbackErr
 }
 func (s *stubOIDCSvc) RefreshKeys(_ context.Context, _ string) error { return s.refreshErr }
+
+// TestDiscovery satisfies the inline discoveryTester interface used by
+// the TestProvider HTTP handler. Audit 2026-05-10 MED-5.
+func (s *stubOIDCSvc) TestDiscovery(_ context.Context, _ string) (*oidcsvc.TestDiscoveryResult, error) {
+	return s.testResult, s.testErr
+}
 
 type stubSession struct {
 	createRes      *sessionsvc.CreateResult
@@ -1213,5 +1224,83 @@ func TestClassifyOIDCFailure(t *testing.T) {
 		if got != tc.want {
 			t.Errorf("classifyOIDCFailure(%v) = %q; want %q", tc.err, got, tc.want)
 		}
+	}
+}
+
+// =============================================================================
+// MED-5 regression tests — TestProvider dry-run endpoint.
+// =============================================================================
+
+func TestTestProvider_HappyPath(t *testing.T) {
+	o := &stubOIDCSvc{
+		testResult: &oidcsvc.TestDiscoveryResult{
+			DiscoverySucceeded: true,
+			JWKSReachable:      true,
+			SupportedAlgValues: []string{"RS256", "ES256"},
+			IssParamSupported:  true,
+			IssuerEcho:         "https://idp.example.com",
+		},
+	}
+	h, _, _, _, audit, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+
+	body := strings.NewReader(`{"issuer_url":"https://idp.example.com","client_id":"app","scopes":["openid"]}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/test", body)
+	req = withActor(req, "u-admin", "User")
+	w := httptest.NewRecorder()
+	h.TestProvider(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200; body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"discovery_succeeded":true`) {
+		t.Errorf("body missing discovery_succeeded:true; got %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"iss_param_supported":true`) {
+		t.Errorf("body missing iss_param_supported:true")
+	}
+	if !contains(audit.events, "auth.oidc_provider_tested") {
+		t.Errorf("expected auth.oidc_provider_tested audit event; got %v", audit.events)
+	}
+}
+
+func TestTestProvider_MissingIssuerURL_Returns400(t *testing.T) {
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, &stubSession{}, &stubBCLVerifier{})
+
+	body := strings.NewReader(`{"client_id":"app"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/test", body)
+	req = withActor(req, "u-admin", "User")
+	w := httptest.NewRecorder()
+	h.TestProvider(w, req)
+	if w.Code != http.StatusBadRequest {
+		t.Errorf("status = %d; want 400", w.Code)
+	}
+}
+
+// TestTestProvider_DiscoveryFailureReturns200WithErrors pins the
+// failure-shape contract: discovery failure is a per-leg failure
+// surfaced in the response body's `errors` array, NOT a 5xx — the
+// GUI renders the per-check status row from the response.
+func TestTestProvider_DiscoveryFailureReturns200WithErrors(t *testing.T) {
+	o := &stubOIDCSvc{
+		testResult: &oidcsvc.TestDiscoveryResult{
+			DiscoverySucceeded: false,
+			JWKSReachable:      false,
+			Errors:             []string{"discovery fetch failed: connection refused"},
+		},
+	}
+	h, _, _, _, _, _ := newPhase5Handler(t, o, &stubSession{}, &stubBCLVerifier{})
+
+	body := strings.NewReader(`{"issuer_url":"https://broken.example.com"}`)
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/oidc/test", body)
+	req = withActor(req, "u-admin", "User")
+	w := httptest.NewRecorder()
+	h.TestProvider(w, req)
+	if w.Code != http.StatusOK {
+		t.Fatalf("status = %d; want 200 (per-leg failure rides in body); body=%s", w.Code, w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), `"discovery_succeeded":false`) {
+		t.Errorf("expected discovery_succeeded:false in body; got %s", w.Body.String())
+	}
+	if !strings.Contains(w.Body.String(), "connection refused") {
+		t.Errorf("expected error detail in body; got %s", w.Body.String())
 	}
 }

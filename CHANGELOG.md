@@ -34,6 +34,17 @@
   RFC-9207 discovery. Providers that don't advertise support (the majority
   today) keep pre-fix behavior — back-compat is preserved.
 
+- **OIDC provider test endpoint (Audit 2026-05-10 MED-5).** New
+  `POST /api/v1/auth/oidc/test` dry-runs an OIDC provider configuration
+  without persisting: fetches the discovery doc, runs the alg-downgrade
+  defense, detects RFC 9207 iss-parameter advertisement, and confirms
+  JWKS reachability. Returns `TestDiscoveryResult{discovery_succeeded,
+  jwks_reachable, supported_alg_values, iss_param_supported, errors[]}`
+  so the GUI (forthcoming) can render per-check status rows. Per-leg
+  failures ride in the response body's `errors` array; only a malformed
+  request body trips 400. Gate: `auth.oidc.create`. Audit row
+  `auth.oidc_provider_tested` carries the success/failure summary.
+
 - **Pre-login UA / source-IP binding on OIDC callback (Audit 2026-05-10
   MED-16).** RFC 9700 §4.7.1 defense against stolen-pre-login-cookie replay
   by a different browser / source. Migration `000044_prelogin_uaip` adds

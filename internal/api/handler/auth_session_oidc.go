@@ -950,6 +950,71 @@ func (h *AuthSessionOIDCHandler) DeleteProvider(w http.ResponseWriter, r *http.R
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// TestProvider handles POST /api/v1/auth/oidc/test.
+//
+// Audit 2026-05-10 MED-5 closure. Dry-run validator for an OIDC
+// provider config: runs OIDC discovery, the alg-downgrade defense,
+// the RFC 9207 iss-parameter detection, and a JWKS fetch — without
+// persisting anything. Body: `{issuer_url, client_id, scopes}`
+// (client_secret accepted but ignored — discovery + JWKS don't
+// require it). Response: TestDiscoveryResult; HTTP 200 even when
+// individual checks fail (the response Errors field carries them so
+// the GUI can render per-check status rows).
+//
+// Permission gate: `auth.oidc.create` (the operator is dry-running a
+// provider they're about to create; the lookup endpoints have their
+// own .list gate so this can't be used as a roundabout reconnaissance
+// vector beyond what those already permit).
+func (h *AuthSessionOIDCHandler) TestProvider(w http.ResponseWriter, r *http.Request) {
+	caller, err := callerFromRequest(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	var req struct {
+		IssuerURL    string   `json:"issuer_url"`
+		ClientID     string   `json:"client_id"`
+		ClientSecret string   `json:"client_secret"`
+		Scopes       []string `json:"scopes"`
+	}
+	if derr := json.NewDecoder(r.Body).Decode(&req); derr != nil {
+		Error(w, http.StatusBadRequest, "invalid JSON body")
+		return
+	}
+	if strings.TrimSpace(req.IssuerURL) == "" {
+		Error(w, http.StatusBadRequest, "issuer_url is required")
+		return
+	}
+	// Type-assert to the concrete service so we can reach the
+	// TestDiscovery method. The OIDCAuthHandshaker interface is
+	// intentionally narrow; rather than widening it (which would force
+	// every test stub to implement TestDiscovery) we accept the
+	// concrete reference for this single endpoint. Production code
+	// always supplies *oidcsvc.Service.
+	type discoveryTester interface {
+		TestDiscovery(ctx context.Context, issuerURL string) (*oidcsvc.TestDiscoveryResult, error)
+	}
+	tester, ok := h.oidcSvc.(discoveryTester)
+	if !ok {
+		Error(w, http.StatusInternalServerError, "OIDC service does not support discovery test")
+		return
+	}
+	res, terr := tester.TestDiscovery(r.Context(), strings.TrimSpace(req.IssuerURL))
+	if terr != nil {
+		Error(w, http.StatusInternalServerError, "discovery test execution failed")
+		return
+	}
+	h.recordAudit(r.Context(), "auth.oidc_provider_tested", caller.ActorID, caller.ActorType, "",
+		map[string]interface{}{
+			"issuer_url":           req.IssuerURL,
+			"discovery_succeeded":  res.DiscoverySucceeded,
+			"jwks_reachable":       res.JWKSReachable,
+			"iss_param_supported":  res.IssParamSupported,
+			"error_count":          len(res.Errors),
+		})
+	writeJSON(w, http.StatusOK, res)
+}
+
 // RefreshProvider handles POST /api/v1/auth/oidc/providers/{id}/refresh.
 // Forces re-fetch of the IdP discovery doc + JWKS, re-runs the IdP
 // downgrade-attack defense.

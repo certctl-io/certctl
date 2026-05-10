@@ -459,6 +459,10 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		r.Register("PUT /api/v1/auth/oidc/providers/{id}", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.UpdateProvider))
 		r.Register("DELETE /api/v1/auth/oidc/providers/{id}", rbacGate(reg.Checker, "auth.oidc.delete", reg.AuthSessionOIDC.DeleteProvider))
 		r.Register("POST /api/v1/auth/oidc/providers/{id}/refresh", rbacGate(reg.Checker, "auth.oidc.edit", reg.AuthSessionOIDC.RefreshProvider))
+		// Audit 2026-05-10 MED-5 — dry-run validator for OIDC provider
+		// config. Returns discovery + JWKS + alg-downgrade + iss-param
+		// reachability without persisting.
+		r.Register("POST /api/v1/auth/oidc/test", rbacGate(reg.Checker, "auth.oidc.create", reg.AuthSessionOIDC.TestProvider))
 
 		// Group-mapping CRUD.
 		r.Register("GET /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListGroupMappings))
