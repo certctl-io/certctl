@@ -92,6 +92,14 @@ type SessionGarbageCollector interface {
 	GarbageCollect(ctx context.Context) (int, error)
 }
 
+// BCLReplayGarbageCollector sweeps expired rows from the BCL consumed-jti
+// table. Audit 2026-05-10 HIGH-3 closure — the scheduler invokes this
+// alongside the session-GC tick so a single ticker drives both. Concrete
+// impl is repository.BCLReplayRepository.SweepExpired.
+type BCLReplayGarbageCollector interface {
+	SweepExpired(ctx context.Context, now time.Time) (int, error)
+}
+
 // JobReaperService defines the interface for job timeout reaping used by the scheduler.
 type JobReaperService interface {
 	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
@@ -118,6 +126,7 @@ type Scheduler struct {
 	crlCacheService       CRLCacheServicer
 	acmeGC                ACMEGarbageCollector
 	sessionGC             SessionGarbageCollector
+	bclReplayGC           BCLReplayGarbageCollector
 	jobReaper             JobReaperService
 	logger                *slog.Logger
 
@@ -334,6 +343,13 @@ func (s *Scheduler) SetACMEGCInterval(d time.Duration) {
 // still run pre-Phase-4 behavior).
 func (s *Scheduler) SetSessionGarbageCollector(gc SessionGarbageCollector) {
 	s.sessionGC = gc
+}
+
+// SetBCLReplayGarbageCollector wires the BCL consumed-jti GC. Audit
+// 2026-05-10 HIGH-3 closure. The sweep runs on the same ticker as the
+// session GC loop (no separate interval; replay rows are short-lived).
+func (s *Scheduler) SetBCLReplayGarbageCollector(gc BCLReplayGarbageCollector) {
+	s.bclReplayGC = gc
 }
 
 // SetSessionGCInterval configures the interval at which the session GC
@@ -1213,6 +1229,16 @@ func (s *Scheduler) sessionGCLoop(ctx context.Context) {
 				defer cancel()
 				if _, err := s.sessionGC.GarbageCollect(opCtx); err != nil {
 					s.logger.Warn("session gc sweep failed (next tick will retry)", "error", err)
+				}
+				// Audit 2026-05-10 HIGH-3 — sweep expired BCL consumed-jti
+				// rows on the same tick. Best-effort; failure logs at WARN
+				// (the next tick retries).
+				if s.bclReplayGC != nil {
+					if n, err := s.bclReplayGC.SweepExpired(opCtx, time.Now().UTC()); err != nil {
+						s.logger.Warn("bcl replay gc sweep failed (next tick will retry)", "error", err)
+					} else if n > 0 {
+						s.logger.Debug("bcl replay gc swept rows", "rows", n)
+					}
 				}
 			}()
 		}

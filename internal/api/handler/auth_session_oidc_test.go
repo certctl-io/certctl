@@ -83,11 +83,13 @@ type stubBCLVerifier struct {
 	issuer string
 	sub    string
 	sid    string
+	jti    string
+	iat    int64
 	err    error
 }
 
-func (s *stubBCLVerifier) Verify(_ context.Context, _ string) (string, string, string, error) {
-	return s.issuer, s.sub, s.sid, s.err
+func (s *stubBCLVerifier) Verify(_ context.Context, _ string) (string, string, string, string, int64, error) {
+	return s.issuer, s.sub, s.sid, s.jti, s.iat, s.err
 }
 
 // stubProviderRepo implements just enough of repository.OIDCProviderRepository.
@@ -973,7 +975,7 @@ func TestDefaultBCLVerifier_NoMatchingProviderRejected(t *testing.T) {
 	// JWT with iss=https://idp (which doesn't match any registered provider).
 	// header={"alg":"RS256"}, payload={"iss":"https://idp"}.
 	jwt := "eyJhbGciOiJSUzI1NiJ9.eyJpc3MiOiJodHRwczovL2lkcCJ9.AAAA"
-	_, _, _, err := v.Verify(context.Background(), jwt)
+	_, _, _, _, _, err := v.Verify(context.Background(), jwt)
 	if err == nil {
 		t.Errorf("expected error when iss doesn't match any registered provider")
 	}

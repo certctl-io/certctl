@@ -422,10 +422,16 @@ func main() {
 	if strings.EqualFold(cfg.Auth.Session.SameSite, "Strict") {
 		sameSiteMode = http.SameSiteStrictMode
 	}
+	// Audit 2026-05-10 HIGH-3 — BCL iat-skew window + jti consumed-set.
+	bclMaxAge := time.Duration(cfg.Auth.OIDCBCLMaxAgeSeconds) * time.Second
+	if bclMaxAge <= 0 {
+		bclMaxAge = handler.DefaultBCLVerifierMaxAge
+	}
+	bclReplayRepo := postgres.NewBCLReplayRepository(db)
 	authSessionOIDCHandler := handler.NewAuthSessionOIDCHandler(
 		oidcService,
 		sessionService,
-		handler.NewDefaultBCLVerifier(oidcProviderRepo, authdomainAlias.DefaultTenantID, nil),
+		handler.NewDefaultBCLVerifier(oidcProviderRepo, authdomainAlias.DefaultTenantID, nil).WithMaxAge(bclMaxAge),
 		oidcProviderRepo,
 		oidcMappingRepo,
 		sessionRepo,
@@ -438,7 +444,7 @@ func main() {
 			SameSite: sameSiteMode,
 			Secure:   true,
 		},
-	)
+	).WithBCLReplayConsumer(bclReplayRepo, bclMaxAge) // HIGH-3 jti consumed-set.
 
 	// =========================================================================
 	// Auth Bundle 2 Phase 7 — OIDC first-admin bootstrap hook.
@@ -1145,6 +1151,7 @@ func main() {
 	// register it with the scheduler so the loop fires every
 	// CERTCTL_SESSION_GC_INTERVAL.
 	sched.SetSessionGarbageCollector(sessionService)
+	sched.SetBCLReplayGarbageCollector(bclReplayRepo) // Audit 2026-05-10 HIGH-3.
 	sched.SetSessionGCInterval(cfg.Auth.Session.GCInterval)
 	logger.Info("session GC sweep enabled",
 		"interval", cfg.Auth.Session.GCInterval.String(),

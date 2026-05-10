@@ -1596,6 +1596,17 @@ type AuthConfig struct {
 	// legacy `api-key` auth type ignore this struct entirely.
 	Session SessionConfig
 
+	// OIDCBCLMaxAgeSeconds is the iat-freshness skew window for OIDC
+	// back-channel-logout tokens. logout_tokens with iat outside the
+	// window are rejected with audit outcome=iat_stale (in the past)
+	// or iat_future (in the future). Audit 2026-05-10 HIGH-3 closure.
+	// Default 60s matches the ID-token skew tolerance in
+	// internal/auth/oidc/service.go. Range: 10-300; values outside
+	// this window indicate IdP clock misconfiguration that warrants
+	// operator attention.
+	// Setting: CERTCTL_OIDC_BCL_MAX_AGE_SECONDS environment variable.
+	OIDCBCLMaxAgeSeconds int
+
 	// Breakglass holds the Auth Bundle 2 Phase 7.5 break-glass admin
 	// tunables. Default-OFF; the entire surface is invisible (404
 	// instead of 403) when CERTCTL_BREAKGLASS_ENABLED is not true.
@@ -1866,6 +1877,8 @@ func Load() (*Config, error) {
 				BindIP:              getEnvBool("CERTCTL_SESSION_BIND_IP", false),
 				BindUserAgent:       getEnvBool("CERTCTL_SESSION_BIND_USER_AGENT", false),
 			},
+			// Audit 2026-05-10 HIGH-3 — BCL iat-skew window.
+			OIDCBCLMaxAgeSeconds: getEnvInt("CERTCTL_OIDC_BCL_MAX_AGE_SECONDS", 60),
 			// Bundle 2 Phase 7.5: break-glass admin tunables. Default-
 			// OFF; the entire surface is invisible (404 NOT 403) when
 			// Enabled=false. Threat model + recommendation in the

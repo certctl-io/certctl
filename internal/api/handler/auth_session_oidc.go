@@ -76,7 +76,15 @@ type BackChannelLogoutVerifier interface {
 	// valid logout token; an error mapped to HTTP 400 otherwise. Spec
 	// references: §2.4 nonce-MUST-be-absent, §2.5 events-MUST-contain-
 	// the-back-channel-logout URI, §2.6 fail-400-on-any-validation-fail.
-	Verify(ctx context.Context, logoutTokenJWT string) (issuer, sub, sid string, err error)
+	//
+	// Audit 2026-05-10 HIGH-3 closure — the iat+jti return values let
+	// the handler enforce the iat-skew window + the jti consumed-set.
+	// Pre-fix the verifier only checked iat != 0 and jti != ""; it
+	// never enforced freshness nor replay. The verifier itself now
+	// enforces the iat-window per its configured max-age; the handler
+	// owns the jti consumed-set (so the audit-row outcome category
+	// can distinguish first-receive from replay).
+	Verify(ctx context.Context, logoutTokenJWT string) (issuer, sub, sid, jti string, iat int64, err error)
 }
 
 // =============================================================================
@@ -104,6 +112,8 @@ type AuthSessionOIDCHandler struct {
 	mappingRepo   repository.GroupRoleMappingRepository
 	sessionRepo   repository.SessionRepository
 	userRepo      repository.UserRepository // CRIT-2: BCL sub→actor_id lookup
+	bclReplay     BCLReplayConsumer         // HIGH-3: BCL jti consumed-set
+	bclMaxAge     time.Duration             // HIGH-3: matches verifier window for TTL
 	audit         AuditRecorder
 	encryptionKey string
 	cookieAttrs   SessionCookieAttrs
@@ -111,9 +121,33 @@ type AuthSessionOIDCHandler struct {
 	postLoginURL  string // 302 target after successful callback (default: /)
 }
 
+// BCLReplayConsumer is the projection of repository.BCLReplayRepository
+// the handler uses to record consumed (jti, iss) pairs. Audit 2026-05-10
+// HIGH-3 closure. Nil-safe: when unset the handler skips the consume
+// step (back-compat for pre-Bundle-2 tests).
+type BCLReplayConsumer interface {
+	ConsumeJTI(ctx context.Context, jti, issuerURL string, ttl time.Duration) error
+}
+
 // AuditRecorder is the slice of *service.AuditService used here.
 type AuditRecorder interface {
 	RecordEventWithCategory(ctx context.Context, actor string, actorType domain.ActorType, action, category, resourceType, resourceID string, details map[string]interface{}) error
+}
+
+// WithBCLReplayConsumer installs the BCL jti consumed-set + TTL on the
+// handler. Audit 2026-05-10 HIGH-3 closure. Pre-fix the handler accepted
+// any logout_token whose iat + jti were syntactically present;
+// captured tokens were replayable indefinitely. Pass nil maxAge to use
+// the verifier default (DefaultBCLVerifierMaxAge); the consumed-set
+// TTL is set to max(24h, 2 * maxAge) so the replay window covers
+// reasonable IdP retry semantics.
+func (h *AuthSessionOIDCHandler) WithBCLReplayConsumer(c BCLReplayConsumer, maxAge time.Duration) *AuthSessionOIDCHandler {
+	h.bclReplay = c
+	if maxAge <= 0 {
+		maxAge = DefaultBCLVerifierMaxAge
+	}
+	h.bclMaxAge = maxAge
+	return h
 }
 
 // NewAuthSessionOIDCHandler constructs the handler.
@@ -299,14 +333,43 @@ func (h *AuthSessionOIDCHandler) BackChannelLogout(w http.ResponseWriter, r *htt
 		Error(w, http.StatusBadRequest, "missing logout_token in form body")
 		return
 	}
-	issuer, sub, sid, err := h.bclVerifier.Verify(r.Context(), logoutToken)
+	issuer, sub, sid, jti, _, err := h.bclVerifier.Verify(r.Context(), logoutToken)
 	if err != nil {
 		// Per spec §2.6 — uniform 400 on any validation failure. The
 		// audit row carries the specific reason; the wire stays uniform.
+		// iat-skew rejections (Audit 2026-05-10 HIGH-3 iat-window check)
+		// land here too — the reason string distinguishes them.
 		h.recordAudit(r.Context(), "auth.oidc_back_channel_logout_failed", "anonymous", domain.ActorTypeSystem, "",
 			map[string]interface{}{"failure_reason": err.Error()})
 		Error(w, http.StatusBadRequest, "logout_token validation failed")
 		return
+	}
+
+	// Audit 2026-05-10 HIGH-3 — jti consumed-set. Atomic single-use
+	// semantics via the postgres ON CONFLICT DO NOTHING path. On
+	// replay return 200 + audit outcome=jti_replayed (RFC 9700 §2.7).
+	// On transient repo error return 503 so the IdP follows its retry
+	// semantics. When the consumer is nil (test path / pre-fix
+	// deployments) the consume step is skipped.
+	if h.bclReplay != nil && jti != "" {
+		ttl := h.bclMaxAge * 2
+		if ttl < 24*time.Hour {
+			ttl = 24 * time.Hour
+		}
+		if cerr := h.bclReplay.ConsumeJTI(r.Context(), jti, issuer, ttl); cerr != nil {
+			if errors.Is(cerr, repository.ErrBCLJTIAlreadyConsumed) {
+				h.recordAudit(r.Context(), "auth.oidc_back_channel_logout", "anonymous", domain.ActorTypeSystem, sub,
+					map[string]interface{}{"issuer": issuer, "subject": sub, "jti": jti, "outcome": "jti_replayed"})
+				w.Header().Set("Cache-Control", "no-store")
+				w.WriteHeader(http.StatusOK)
+				return
+			}
+			// Transient — let the IdP retry.
+			h.recordAudit(r.Context(), "auth.oidc_back_channel_logout_failed", "anonymous", domain.ActorTypeSystem, sub,
+				map[string]interface{}{"issuer": issuer, "subject": sub, "jti": jti, "outcome": "jti_consume_failed", "err": cerr.Error()})
+			http.Error(w, "transient", http.StatusServiceUnavailable)
+			return
+		}
 	}
 
 	// Resolve target sessions:
@@ -1049,10 +1112,22 @@ func defaultIntIfZero(v, def int) int {
 // resolves the IdP by issuer (matched against the OIDCProviderRepository),
 // fetches the IdP's JWKS via gooidc.Provider, and validates the
 // logout_token JWT signature + required claims.
+// DefaultBCLVerifierMaxAge is the default iat-freshness skew window
+// (60 seconds; tokens older or newer than this are rejected). Override
+// per-server via CERTCTL_OIDC_BCL_MAX_AGE_SECONDS. Audit 2026-05-10
+// HIGH-3 closure.
+const DefaultBCLVerifierMaxAge = 60 * time.Second
+
 type DefaultBCLVerifier struct {
 	providerRepo repository.OIDCProviderRepository
 	tenantID     string
 	allowedAlgs  []string
+	// maxAge is the iat-freshness skew window. Tokens with iat in the
+	// past beyond this OR in the future beyond this are rejected. Set
+	// via WithMaxAge; defaults to DefaultBCLVerifierMaxAge.
+	maxAge time.Duration
+	// nowFn is the clock seam (test injection).
+	nowFn func() time.Time
 
 	// Injectable for tests so unit tests don't hit a real IdP.
 	verifyOverride func(ctx context.Context, providerIssuer, rawIDToken string) (*gooidc.IDToken, error)
@@ -1070,21 +1145,31 @@ func NewDefaultBCLVerifier(providerRepo repository.OIDCProviderRepository, tenan
 		providerRepo: providerRepo,
 		tenantID:     tenantID,
 		allowedAlgs:  allowedAlgs,
+		maxAge:       DefaultBCLVerifierMaxAge,
+		nowFn:        time.Now,
 	}
 }
 
+// WithMaxAge returns a copy of the verifier with the iat-skew window
+// overridden. Audit 2026-05-10 HIGH-3 — operator-configurable via
+// CERTCTL_OIDC_BCL_MAX_AGE_SECONDS at cmd/server/main.go.
+func (v *DefaultBCLVerifier) WithMaxAge(d time.Duration) *DefaultBCLVerifier {
+	v.maxAge = d
+	return v
+}
+
 // Verify implements BackChannelLogoutVerifier.
-func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (issuer, sub, sid string, err error) {
+func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (issuer, sub, sid, jti string, iat int64, err error) {
 	// We don't know which provider the logout_token came from until we
 	// peek at the iss claim. Parse-without-verify, look up the matching
 	// provider, then verify against that provider's JWKS.
 	iss, peekErr := peekIssuer(logoutToken)
 	if peekErr != nil {
-		return "", "", "", fmt.Errorf("peek issuer: %w", peekErr)
+		return "", "", "", "", 0, fmt.Errorf("peek issuer: %w", peekErr)
 	}
 	provs, lerr := v.providerRepo.List(ctx, v.tenantID)
 	if lerr != nil {
-		return "", "", "", fmt.Errorf("list providers: %w", lerr)
+		return "", "", "", "", 0, fmt.Errorf("list providers: %w", lerr)
 	}
 	var matched *oidcdomain.OIDCProvider
 	for _, p := range provs {
@@ -1094,7 +1179,7 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 		}
 	}
 	if matched == nil {
-		return "", "", "", fmt.Errorf("no provider configured for issuer %q", iss)
+		return "", "", "", "", 0, fmt.Errorf("no provider configured for issuer %q", iss)
 	}
 
 	var idToken *gooidc.IDToken
@@ -1103,7 +1188,7 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 	} else {
 		provider, perr := gooidc.NewProvider(ctx, matched.IssuerURL)
 		if perr != nil {
-			return "", "", "", fmt.Errorf("provider discovery: %w", perr)
+			return "", "", "", "", 0, fmt.Errorf("provider discovery: %w", perr)
 		}
 		verifier := provider.Verifier(&gooidc.Config{
 			ClientID:             matched.ClientID,
@@ -1113,7 +1198,7 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 		idToken, err = verifier.Verify(ctx, logoutToken)
 	}
 	if err != nil {
-		return "", "", "", fmt.Errorf("verify: %w", err)
+		return "", "", "", "", 0, fmt.Errorf("verify: %w", err)
 	}
 
 	// Required claims per spec §2.4.
@@ -1128,28 +1213,43 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 		Nonce  string                 `json:"nonce"`
 	}
 	if cerr := idToken.Claims(&claims); cerr != nil {
-		return "", "", "", fmt.Errorf("claims unmarshal: %w", cerr)
+		return "", "", "", "", 0, fmt.Errorf("claims unmarshal: %w", cerr)
 	}
 	if claims.Iat == 0 {
-		return "", "", "", errors.New("missing iat claim")
+		return "", "", "", "", 0, errors.New("missing iat claim")
+	}
+	// Audit 2026-05-10 HIGH-3 — iat freshness check. Reject tokens
+	// whose iat is outside the skew window. RFC 9700 §2.7 + the
+	// existing ID-token-path skew tolerance (oidc/service.go:463).
+	maxAge := v.maxAge
+	if maxAge <= 0 {
+		maxAge = DefaultBCLVerifierMaxAge
+	}
+	now := v.nowFn().UTC()
+	iatTime := time.Unix(claims.Iat, 0).UTC()
+	if iatTime.After(now.Add(maxAge)) {
+		return "", "", "", "", 0, fmt.Errorf("iat is in the future beyond max-age %s", maxAge)
+	}
+	if now.Sub(iatTime) > maxAge {
+		return "", "", "", "", 0, fmt.Errorf("iat is stale (age %s > max-age %s)", now.Sub(iatTime), maxAge)
 	}
 	if claims.Jti == "" {
-		return "", "", "", errors.New("missing jti claim")
+		return "", "", "", "", 0, errors.New("missing jti claim")
 	}
 	if claims.Events == nil {
-		return "", "", "", errors.New("missing events claim")
+		return "", "", "", "", 0, errors.New("missing events claim")
 	}
 	if _, ok := claims.Events["http://schemas.openid.net/event/backchannel-logout"]; !ok {
-		return "", "", "", errors.New("events claim missing back-channel-logout URI")
+		return "", "", "", "", 0, errors.New("events claim missing back-channel-logout URI")
 	}
 	if claims.Nonce != "" {
 		// Spec §2.4: nonce MUST NOT be present.
-		return "", "", "", errors.New("nonce claim must be absent in logout_token")
+		return "", "", "", "", 0, errors.New("nonce claim must be absent in logout_token")
 	}
 	if claims.Sub == "" && claims.Sid == "" {
-		return "", "", "", errors.New("logout_token must carry sub or sid")
+		return "", "", "", "", 0, errors.New("logout_token must carry sub or sid")
 	}
-	return claims.Iss, claims.Sub, claims.Sid, nil
+	return claims.Iss, claims.Sub, claims.Sid, claims.Jti, claims.Iat, nil
 }
 
 // peekIssuer base64-decodes the JWT payload (segment 1 after the `.`)
