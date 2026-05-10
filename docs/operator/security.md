@@ -41,10 +41,10 @@ For certificates issued to systems where revocation correctness matters:
    ignore it.
 3. **Confirm the deployment target is configured for OCSP stapling** so the
    server can actually deliver the stapled response in the handshake.
-   - **nginx:** `ssl_stapling on; ssl_stapling_verify on;`
-   - **Apache:** `SSLUseStapling on`
-   - **HAProxy:** `set ssl ocsp-response /path/to/response.der`
-   - **Envoy:** `ocsp_staple_policy: must_staple`
+ - **nginx:** `ssl_stapling on; ssl_stapling_verify on;`
+ - **Apache:** `SSLUseStapling on`
+ - **HAProxy:** `set ssl ocsp-response /path/to/response.der`
+ - **Envoy:** `ocsp_staple_policy: must_staple`
 
 ### What this does NOT cover
 
@@ -67,7 +67,7 @@ Bundle B / M-001. PBKDF2-SHA256 at 600,000 rounds (OWASP 2024 Password
 Storage Cheat Sheet floor) for the operator-supplied passphrase that
 derives the AES-256-GCM key for sensitive config columns. v3 blob format
 with a per-ciphertext random salt; v1/v2 read fallback for legacy rows.
-See [internal/crypto/encryption.go](../internal/crypto/encryption.go) and
+See [internal/crypto/encryption.go](../../internal/crypto/encryption.go) and
 the accompanying tests for the format spec.
 
 ## Authentication surface
@@ -75,12 +75,12 @@ the accompanying tests for the format spec.
 Bundle B / M-002. Two layers decide auth-exempt status:
 
 1. **Router layer:** `internal/api/router/router.go::AuthExemptRouterRoutes`
-   — the endpoints registered via direct `r.mux.Handle` without going
+ - the endpoints registered via direct `r.mux.Handle` without going
    through the middleware chain (`/health`, `/ready`, `/api/v1/auth/info`,
    `/api/v1/version`, plus `/api/v1/auth/bootstrap` GET + POST per
    Bundle 1 Phase 6).
 2. **Dispatch layer:** `internal/api/router/router.go::AuthExemptDispatchPrefixes`
-   — URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
+ - URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
    `/.well-known/pki/*`, `/.well-known/est/*`, `/.well-known/est-mtls`,
    and `/scep[/...]*` (incl. `/scep-mtls`).
 
@@ -109,7 +109,7 @@ flow from a pre-Bundle-1 deployment, see
 ### Day-0 admin bootstrap (Bundle 1 Phase 6)
 
 Fresh deployments where no admin actor exists yet can mint the
-first admin via `POST /api/v1/auth/bootstrap` — set
+first admin via `POST /api/v1/auth/bootstrap` - set
 `CERTCTL_BOOTSTRAP_TOKEN`, POST a single curl with the token, and
 the server returns the plaintext key value once. The token is
 constant-time-compared; the strategy is one-shot via mutex; the
@@ -140,12 +140,12 @@ budget when set non-zero.
 
 ## API key rotation
 
-**Audit reference:** L-004. CWE-924 (improper enforcement of message integrity during transmission in a communication channel) — operator UX variant.
+**Audit reference:** L-004. CWE-924 (improper enforcement of message integrity during transmission in a communication channel) - operator UX variant.
 
 certctl's API keys are configured via the `CERTCTL_API_KEYS_NAMED` env var
 (format `name1:key1,name2:key2:admin`) and parsed at startup into an
 in-memory list. There is no DB-resident key store, no GUI, no `/api/v1/keys`
-endpoint — the env var IS the key inventory.
+endpoint - the env var IS the key inventory.
 
 Pre-Bundle-G the env var rejected duplicate names, so rotating a key
 required: stop accepting OLDKEY → restart → roll NEWKEY out. Any client
@@ -163,7 +163,7 @@ rotation as:
    ```
    CERTCTL_API_KEYS_NAMED="alice:OLDKEY:admin,alice:NEWKEY:admin"
    ```
-   Both entries MUST carry the same admin flag — startup fails loud if
+   Both entries MUST carry the same admin flag - startup fails loud if
    they don't (a non-admin shouldn't share an identity with an admin).
 
 3. **Restart certctl.** A startup INFO log confirms the rotation window
@@ -184,7 +184,7 @@ rotation as:
 
 6. **Restart certctl.** OLDKEY now fails with 401. Rotation complete.
 
-The rotation window has no operator-set timeout — it lasts for as long
+The rotation window has no operator-set timeout - it lasts for as long
 as both entries are in the env var. Best practice is a 24-72h window
 covering a full deploy cadence; if a client hasn't rolled to NEWKEY by
 the end of step 4, extend the window before step 5.
@@ -196,7 +196,7 @@ the end of step 4, extend the window before step 5.
 - Two entries with the same `name` but mismatched admin: **rejected at
   startup** (privilege escalation guard).
 - Two entries with the same `(name, key)` pair: **rejected at startup**
-  (typo guard — rotation requires DIFFERENT keys under the same name).
+  (typo guard - rotation requires DIFFERENT keys under the same name).
 - Single-entry steady state: unchanged from pre-Bundle-G behavior.
 
 ### What the contract does NOT do

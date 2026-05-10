@@ -44,7 +44,7 @@ that resolves "actor → permissions" lives at
 | Auditor | `r-auditor` | Compliance reviewer | `audit.read` + `audit.export` ONLY |
 
 The auditor split is the load-bearing one: an auditor cannot read
-certificates, profiles, or issuers — only audit events. That makes the
+certificates, profiles, or issuers - only audit events. That makes the
 role legitimate to hand to a SOC 2 / FedRAMP / PCI auditor without
 giving them the keys to the kingdom. The
 `internal/domain/auth/auditor_test.go` invariants pin this set going
@@ -53,11 +53,11 @@ forward.
 The five **admin-only fine-grained perms** seeded by migration
 000030 (Phase 3.5 conversion) gate the high-blast-radius endpoints:
 
-- `cert.bulk_revoke` — `POST /api/v1/certificates/bulk-revoke` and the EST sibling
-- `crl.admin` — `/api/v1/admin/crl/cache`
-- `scep.admin` — `/api/v1/admin/scep/intune/*`
-- `est.admin` — `/api/v1/admin/est/*`
-- `ca.hierarchy.manage` — `/api/v1/issuers/{id}/intermediates`, `/api/v1/intermediates/{id}`
+- `cert.bulk_revoke` - `POST /api/v1/certificates/bulk-revoke` and the EST sibling
+- `crl.admin` - `/api/v1/admin/crl/cache`
+- `scep.admin` - `/api/v1/admin/scep/intune/*`
+- `est.admin` - `/api/v1/admin/est/*`
+- `ca.hierarchy.manage` - `/api/v1/issuers/{id}/intermediates`, `/api/v1/intermediates/{id}`
 
 Only `r-admin` holds these by default. To delegate one, create a
 custom role with the specific perm and grant it to the right actor.
@@ -87,19 +87,19 @@ for the live catalogue.
 
 Permissions are granted at one of three scopes:
 
-- **`global`** — applies to every resource in the tenant. The
+- **`global`** - applies to every resource in the tenant. The
   default for the seeded role grants. A `cert.read` grant at global
   scope lets the actor read any certificate.
-- **`profile`** — applies only to the named `CertificateProfile`
+- **`profile`** - applies only to the named `CertificateProfile`
   (matched by ID). `cert.issue` at scope `profile`/`p-corp-cdn` lets
   the actor issue against `p-corp-cdn` only.
-- **`issuer`** — applies only to the named issuer. Lets you grant
+- **`issuer`** - applies only to the named issuer. Lets you grant
   `issuer.edit` on the production issuer to a senior operator
   without giving them edit on every issuer.
 
 Global beats specific: an actor with `cert.read` at global scope
 passes a `cert.read` check against any specific profile or issuer
-even if no scoped grant exists. The reverse is also true — a
+even if no scoped grant exists. The reverse is also true - a
 scoped grant doesn't satisfy a request against a different scope.
 The Authorizer's `CheckPermission` is the single point of truth.
 
@@ -122,13 +122,13 @@ permission. `/auth/keys` lists every actor with role grants;
 click "Assign role" to grant, click the × on a role tag to revoke.
 
 The synthetic `actor-demo-anon` row is shown but flagged
-"system-managed" with the mutation buttons hidden — the server-side
+"system-managed" with the mutation buttons hidden - the server-side
 reserved-actor guard rejects mutations against it regardless.
 
 ### From the CLI
 
 ```bash
-# Identity probe — what can the current API key actually do?
+# Identity probe - what can the current API key actually do?
 certctl-cli auth me
 
 # Roles
@@ -166,7 +166,7 @@ tag. Quick reference:
 
 | Endpoint | Permission |
 |---|---|
-| `GET /v1/auth/me` | (none — own data) |
+| `GET /v1/auth/me` | (none - own data) |
 | `GET /v1/auth/roles` | `auth.role.list` |
 | `GET /v1/auth/roles/{id}` | `auth.role.list` |
 | `POST /v1/auth/roles` | `auth.role.create` |
@@ -197,13 +197,13 @@ HTTP surface above; permission gates fire server-side.
 
 Hand the auditor key to compliance reviewers. They get:
 
-- `GET /api/v1/audit?category=auth` — every auth/authz mutation
+- `GET /api/v1/audit?category=auth` - every auth/authz mutation
   in the system (role creates, role grants on actors, bootstrap
   consumption, etc.).
-- `GET /api/v1/audit?category=cert_lifecycle` — every cert event.
-- `GET /api/v1/audit?category=config` — every issuer / target /
+- `GET /api/v1/audit?category=cert_lifecycle` - every cert event.
+- `GET /api/v1/audit?category=config` - every issuer / target /
   settings edit.
-- `GET /api/v1/audit/export` — bulk export.
+- `GET /api/v1/audit/export` - bulk export.
 
 They do NOT get cert read, profile read, issuer read, or any
 mutating permission. The categorization is enforced by the database
@@ -216,7 +216,7 @@ To create an auditor key:
 2. (Optional) Revoke any other roles the key holds with
    `certctl-cli auth keys revoke <key-id> --role r-...`
 3. Confirm via `certctl-cli auth me` while authenticated as the
-   auditor key — the response should show only `audit.read` and
+   auditor key - the response should show only `audit.read` and
    `audit.export` in `effective_permissions`.
 
 ## Day-0 bootstrap (first-admin path)
@@ -227,7 +227,7 @@ deployments where no admin actor exists yet.
 1. Set `CERTCTL_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)` in the
    server environment.
 2. Boot the server. Logs include
-   "bootstrap endpoint enabled — POST /api/v1/auth/bootstrap to
+   "bootstrap endpoint enabled - POST /api/v1/auth/bootstrap to
    mint the first admin key (one-shot)" when the path is callable.
 3. Run a single curl:
 
@@ -259,22 +259,22 @@ gated route resolves with a populated actor and admin grants. The
 synthetic actor is reserved: the API rejects any mutation that
 targets it (HTTP 409 with `ErrAuthReservedActor`).
 
-Production deployments MUST NOT use demo mode — there is no
+Production deployments MUST NOT use demo mode - there is no
 per-request actor identity for the audit trail, and every request
 flows as admin. Use it for the `docker compose up` demo + the five
 example folders only.
 
 ## Where to look next
 
-- [Threat model](auth-threat-model.md) — what attacks this primitive
+- [Threat model](auth-threat-model.md) - what attacks this primitive
   defends against and which it does not
-- [Migration guide](../migration/api-keys-to-rbac.md) — moving
+- [Migration guide](../migration/api-keys-to-rbac.md) - moving
   pre-Bundle-1 deployments onto RBAC
-- [Profiles](../reference/profiles.md) — the `RequiresApproval=true`
+- [Profiles](../reference/profiles.md) - the `RequiresApproval=true`
   flow that Bundle 1 Phase 9 closure protects from flip-flop
-- [Approval workflow](approval-workflow.md) — the Rank 7 Infisical
+- [Approval workflow](approval-workflow.md) - the Rank 7 Infisical
   deep-research deliverable that the Phase 9 closure piggybacks on
-- `internal/auth/` — the middleware + keystore + RequirePermission
-- `internal/service/auth/` — the service-layer Authorizer
-- `cowork/auth-bundle-1-prompt.md` — the design + phase plan
-- `cowork/auth-bundles-index.md` — the per-phase status tracker
+- `internal/auth/` - the middleware + keystore + RequirePermission
+- `internal/service/auth/` - the service-layer Authorizer
+- `cowork/auth-bundle-1-prompt.md` - the design + phase plan
+- `cowork/auth-bundles-index.md` - the per-phase status tracker

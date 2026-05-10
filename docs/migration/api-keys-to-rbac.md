@@ -4,7 +4,7 @@
 
 This is the upgrade guide for an existing certctl deployment moving
 from v2.0.x's "every API key is admin or not" model to v2.1.0's
-RBAC primitive. Everything keeps working through the upgrade — the
+RBAC primitive. Everything keeps working through the upgrade - the
 Bundle 1 migration backfills every existing API key to the
 `r-admin` role on first boot, so the pre-existing automation that
 was using those keys does not change behavior. **However**, most
@@ -16,8 +16,8 @@ through the post-upgrade scope-down flow.
 Bundle 1 maps **every** existing `CERTCTL_API_KEYS_NAMED` entry
 (and every legacy `CERTCTL_AUTH_SECRET`-synthesized key) to the
 `r-admin` role on the first boot after migration 000029 applies.
-This is the safe-for-back-compat default — your CI / agents / scripts
-keep working without changes — but if you don't downgrade keys, every
+This is the safe-for-back-compat default - your CI / agents / scripts
+keep working without changes - but if you don't downgrade keys, every
 key in your fleet has full admin permissions including bulk-revoke,
 CRL admin, and CA hierarchy management.
 
@@ -115,7 +115,7 @@ walks the actor's audit events and emits one of:
 | `agent` | All observed actions are agent-shaped (`agent.*`, `cert.read`, `cert.issue`) |
 | `operator` | Cert / profile / target lifecycle mutations without admin signals |
 
-The classifier is conservative — when in doubt, it prefers the
+The classifier is conservative - when in doubt, it prefers the
 narrower role. The operator confirms each suggestion before any
 mutation lands (unless `--apply` is set).
 
@@ -155,7 +155,7 @@ through the `rbacGate` helper in
 unchanged: `r-admin`-roled callers reach the handler, anyone else
 gets HTTP 403 BEFORE the body runs.
 
-If your code consumed `auth.IsAdmin` directly (it shouldn't —
+If your code consumed `auth.IsAdmin` directly (it shouldn't - 
 the helper is internal), the new convention is:
 
 1. Wrap the route in `rbacGate(reg.Checker, "<perm>", handler)`
@@ -182,7 +182,7 @@ helm upgrade certctl certctl/certctl \
 
 Post-upgrade, the boot loader runs the named-key actor-role
 backfill against the `CERTCTL_API_KEYS_NAMED` env-var-injected
-into the deployment. The "AUDIT YOUR API KEYS" callout applies —
+into the deployment. The "AUDIT YOUR API KEYS" callout applies - 
 add a post-upgrade Job to your release pipeline that runs
 `certctl-cli auth keys scope-down --non-interactive` against a
 checked-in JSON config, so the role narrowing is deterministic
@@ -199,23 +199,23 @@ spec:
   template:
     spec:
       containers:
-      - name: scope-down
+ - name: scope-down
         image: ghcr.io/certctl-io/certctl-cli:<tag>
         command:
-          - certctl-cli
-          - auth
-          - keys
-          - scope-down
-          - --non-interactive
-          - /config/scope-down.json
+ - certctl-cli
+ - auth
+ - keys
+ - scope-down
+ - --non-interactive
+ - /config/scope-down.json
         envFrom:
-          - secretRef:
+ - secretRef:
               name: certctl-cli-credentials
         volumeMounts:
-          - name: scope-down-config
+ - name: scope-down-config
             mountPath: /config
       volumes:
-        - name: scope-down-config
+ - name: scope-down-config
           configMap:
             name: certctl-scope-down-config
       restartPolicy: OnFailure
@@ -231,7 +231,7 @@ For `deploy/docker-compose.yml` deployments:
 1. Pull the new images: `docker compose pull`
 2. Verify your `CERTCTL_AUTH_TYPE` value before restarting. If it
    was `none` (the demo path), the post-upgrade server will boot
-   in demo mode again — the synthetic `actor-demo-anon` admin
+   in demo mode again - the synthetic `actor-demo-anon` admin
    covers every request, no scope-down is meaningful. If you're
    moving from `none` to `api-key` mode, set
    `CERTCTL_API_KEYS_NAMED` first, then restart.
@@ -245,7 +245,7 @@ For `deploy/docker-compose.yml` deployments:
 The five examples in `examples/` (acme-nginx, private-ca-traefik,
 step-ca-haproxy, multi-issuer, acme-wildcard-dns01) all run in
 demo mode (`CERTCTL_AUTH_TYPE=none`) and are unaffected by the
-RBAC migration — the synthetic actor-demo-anon admin grant covers
+RBAC migration - the synthetic actor-demo-anon admin grant covers
 every request.
 
 ## Verifying the upgrade landed
@@ -259,7 +259,7 @@ After the scope-down flow completes:
 3. The audit trail
    (`GET /api/v1/audit?category=auth`)
    shows the `auth.role.assign` and `auth.role.revoke` rows for
-   every change you made — confirm via the GUI's
+   every change you made - confirm via the GUI's
    `/audit?category=auth` view.
 4. Read the updated [`docs/operator/rbac.md`](../operator/rbac.md)
    for day-2 RBAC management.
@@ -283,14 +283,14 @@ boot regardless of schema version).
 
 ## Cross-references
 
-- [`docs/operator/rbac.md`](../operator/rbac.md) — the operator
+- [`docs/operator/rbac.md`](../operator/rbac.md) - the operator
   how-to for the new RBAC primitive
-- [`docs/operator/auth-threat-model.md`](../operator/auth-threat-model.md) —
+- [`docs/operator/auth-threat-model.md`](../operator/auth-threat-model.md) - 
   what the new controls defend against
-- [`docs/reference/profiles.md`](../reference/profiles.md) — the
+- [`docs/reference/profiles.md`](../reference/profiles.md) - the
   Phase 9 approval-bypass closure
-- [`docs/operator/security.md`](../operator/security.md) — the
+- [`docs/operator/security.md`](../operator/security.md) - the
   full security posture
-- `cowork/auth-bundle-1-prompt.md` — the design + phase plan
-- `cowork/auth-bundles-index.md` — the per-phase status tracker
-- `CHANGELOG.md` — the v2.1.0 release notes lead with this guide
+- `cowork/auth-bundle-1-prompt.md` - the design + phase plan
+- `cowork/auth-bundles-index.md` - the per-phase status tracker
+- `CHANGELOG.md` - the v2.1.0 release notes lead with this guide

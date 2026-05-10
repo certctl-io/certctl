@@ -4,7 +4,7 @@
 
 This document describes the attack surface around authentication and
 authorization in certctl after Bundle 1 (the RBAC primitive) lands.
-It complements [`rbac.md`](rbac.md) — that doc explains how to use
+It complements [`rbac.md`](rbac.md) - that doc explains how to use
 the controls; this one explains what those controls defend against
 and which threats they explicitly do NOT close.
 
@@ -16,19 +16,19 @@ Bundle 2 scope.
 
 ## Threat actors
 
-1. **External attacker with no credential** — probing the public
+1. **External attacker with no credential** - probing the public
    HTTP surface. The default trust boundary for everything except
    the protocol-level endpoints (ACME / SCEP / EST / OCSP / CRL,
    which authenticate via embedded credentials per their own RFCs).
-2. **Authenticated caller with the wrong role** — has a valid API
+2. **Authenticated caller with the wrong role** - has a valid API
    key but the role doesn't grant the requested operation. The
    primary RBAC threat model.
-3. **Compromised API key** — attacker holds a valid Bearer token
+3. **Compromised API key** - attacker holds a valid Bearer token
    that an honest operator originally provisioned. The key may
    carry any role.
-4. **Insider operator** — legitimate access; potentially trying
+4. **Insider operator** - legitimate access; potentially trying
    to escalate privilege or bypass the approval workflow.
-5. **Compromised audit reviewer (auditor role)** — read-only
+5. **Compromised audit reviewer (auditor role)** - read-only
    access to audit events but otherwise untrusted.
 
 ## Defenses Bundle 1 ships
@@ -140,35 +140,35 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
 These are NOT defended; some are deferred to Bundle 2, others
 are out-of-scope for the project entirely.
 
-1. **OIDC / SAML / WebAuthn federation** — Bundle 2.
-2. **Session management** — there is no session cookie, no
+1. **OIDC / SAML / WebAuthn federation** - Bundle 2.
+2. **Session management** - there is no session cookie, no
    server-side revocation list. Each Bearer token is the bearer
    credential. To revoke a key, delete the `actor_roles` rows or
    remove the env-var entry; there is no "log out everywhere"
    button. Bundle 2.
-3. **Local password accounts (break-glass)** — Bundle 2.
-4. **Time-bound role grants / JIT elevation** — the schema
+3. **Local password accounts (break-glass)** - Bundle 2.
+4. **Time-bound role grants / JIT elevation** - the schema
    reserves `actor_roles.expires_at` but no UI/API to set it.
    Bundle 2 or v3.
-5. **MFA / hardware tokens for the operator console** —
+5. **MFA / hardware tokens for the operator console** - 
    Bundle 2.
-6. **Rate limiting on the bootstrap endpoint** — the endpoint
+6. **Rate limiting on the bootstrap endpoint** - the endpoint
    is one-shot by construction (consumed flag + admin-existence
    probe), so a brute-force attack on the token has at most the
    single attempt before the path closes. Per-IP rate limiting
    on the broader API is still in place via Bundle C's
    `middleware.NewRateLimiter`.
-7. **`scope_id` FK enforcement** — operators can grant a
+7. **`scope_id` FK enforcement** - operators can grant a
    permission at scope `profile`/`p-bogus` without the bogus
    profile existing. The gate still works (no rows match at
    request time) but a strict 404 on grant would be cleaner. See
    `RoleRepository.AddPermission` `TODO(bundle-2)` comment in
    `internal/repository/postgres/auth.go`.
-8. **OIDC-first-admin bootstrap** — Bundle 1 ships only the
+8. **OIDC-first-admin bootstrap** - Bundle 1 ships only the
    env-var-token strategy. Bundle 2 adds the OIDC-group-claim
    strategy alongside (the `Strategy` interface in
    `internal/auth/bootstrap/` is already in place).
-9. **GUI E2E suite via Playwright** — the prompt asked for
+9. **GUI E2E suite via Playwright** - the prompt asked for
    nine end-to-end flow tests. Bundle 1 ships 19 React Testing
    Library + Vitest tests covering the same surface; full
    Playwright land in Phase 12-extended work.
@@ -179,23 +179,23 @@ The control set in this document supports the following
 framework requirements. This is a mapping; it is not a claim of
 formal certification.
 
-- **SOC 2 CC6.1** (logical access controls) — RBAC primitive
+- **SOC 2 CC6.1** (logical access controls) - RBAC primitive
   with role-based gating on every mutating endpoint.
-- **SOC 2 CC6.3** (privileged access management) — `r-admin`
+- **SOC 2 CC6.3** (privileged access management) - `r-admin`
   role separation + role-grant audit trail with two-person
   integrity on approval-tier profile edits.
-- **HIPAA §164.312(b)** (audit controls) — `event_category`
+- **HIPAA §164.312(b)** (audit controls) - `event_category`
   column lets the auditor role review authentication / authorization
   changes specifically. WORM trigger keeps the audit table
   append-only at the database layer.
-- **NIST SSDF PO.5.2** (separation of duties) — two-person
+- **NIST SSDF PO.5.2** (separation of duties) - two-person
   integrity for compliance-tier issuance via the
   `RequiresApproval` flow + Bundle 1 Phase 9's closure of the
   flip-flop bypass.
-- **FedRAMP AU-9** (audit information protection) — WORM
+- **FedRAMP AU-9** (audit information protection) - WORM
   enforcement + auditor-only read access (the auditor role
   cannot mutate, the WORM trigger blocks UPDATE/DELETE).
-- **PCI-DSS §10** (audit logging) — every mutating operation
+- **PCI-DSS §10** (audit logging) - every mutating operation
   emits an audit row with actor + action + resource + timestamp +
   category. The audit table is append-only.
 
@@ -203,42 +203,42 @@ formal certification.
 
 Run these periodically to verify the controls are working.
 
-1. `certctl-cli auth keys list` — confirm no unexpected actor
+1. `certctl-cli auth keys list` - confirm no unexpected actor
    holds `r-admin`. Audit any new admin grants against the audit
    log.
 2. `SELECT actor, action, COUNT(*) FROM audit_events WHERE
    action LIKE 'approval_%' AND timestamp > NOW() - INTERVAL '7
-   days' GROUP BY actor, action;` — confirm approvals are
+   days' GROUP BY actor, action;` - confirm approvals are
    happening and not concentrated in a single approver.
 3. `SELECT COUNT(*) FROM audit_events WHERE actor =
-   'system-bypass';` — MUST return 0 in production. A non-zero
+   'system-bypass';` - MUST return 0 in production. A non-zero
    count means `CERTCTL_APPROVAL_BYPASS=true` was set; production
    deploys MUST leave it unset.
 4. `SELECT actor, COUNT(*) FROM audit_events WHERE action =
-   'bootstrap.consume';` — MUST return at most one row per
+   'bootstrap.consume';` - MUST return at most one row per
    tenant. Multiple rows means the bootstrap endpoint was called
    more than once, which the strategy's one-shot guard should
    have prevented; investigate.
 5. `certctl-cli auth me` while authenticated as the auditor
-   key — `effective_permissions` must contain `audit.read` +
+   key - `effective_permissions` must contain `audit.read` +
    `audit.export` ONLY. Any other permission means a role grant
    widened the auditor's surface; revoke immediately.
 
 ## Cross-references
 
-- [`rbac.md`](rbac.md) — the operator how-to
-- [`security.md`](security.md) — the wider security posture
-- [`approval-workflow.md`](approval-workflow.md) — the two-person
+- [`rbac.md`](rbac.md) - the operator how-to
+- [`security.md`](security.md) - the wider security posture
+- [`approval-workflow.md`](approval-workflow.md) - the two-person
   integrity gate
-- [`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md) —
+- [`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md) - 
   upgrade flow
-- `internal/auth/` — middleware + keystore + RequirePermission +
+- `internal/auth/` - middleware + keystore + RequirePermission +
   bootstrap
-- `internal/service/auth/` — Authorizer + privilege-escalation
+- `internal/service/auth/` - Authorizer + privilege-escalation
   guard + reserved-actor guard
-- `migrations/000029_rbac.up.sql` — schema + seed
-- `migrations/000030_rbac_admin_perms.up.sql` — five admin-only
+- `migrations/000029_rbac.up.sql` - schema + seed
+- `migrations/000030_rbac_admin_perms.up.sql` - five admin-only
   fine-grained perms
-- `migrations/000032_audit_category.up.sql` — auditor surface
-- `migrations/000033_approval_kinds.up.sql` — approval-bypass
+- `migrations/000032_audit_category.up.sql` - auditor surface
+- `migrations/000033_approval_kinds.up.sql` - approval-bypass
   closure

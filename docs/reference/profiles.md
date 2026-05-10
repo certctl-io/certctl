@@ -28,7 +28,7 @@ see `api/openapi.yaml` under `/api/v1/profiles`.
 | `allowed_key_algorithms` | RSA 2048+, ECDSA P-256+ | Validates incoming CSRs at issuance time. |
 | `allowed_ekus` | server, client | RFC 5280 §4.2.1.12 EKU set. |
 | `must_staple` | false | Per-profile RFC 7633 `id-pe-tlsfeature` extension toggle (Phase 5.6 of the SCEP master bundle). |
-| `requires_approval` | false | Bundle 1 Phase 9 — gates issuance + renewal AND profile edits behind a four-eyes approval workflow. See below. |
+| `requires_approval` | false | Bundle 1 Phase 9 - gates issuance + renewal AND profile edits behind a four-eyes approval workflow. See below. |
 
 ## RequiresApproval and the approval workflow
 
@@ -42,18 +42,18 @@ Setting `requires_approval=true` on a profile does two things:
    → `Cancelled`). Same actor cannot self-approve.
 2. **Edits to the profile itself gate on a non-requester admin's
    approval.** This is the Bundle 1 Phase 9 closure for the flip-flop
-   loophole — without it an admin could set `requires_approval=false`,
+   loophole - without it an admin could set `requires_approval=false`,
    mutate any other field, set `requires_approval=true`, and the
    approval workflow would only have been bypassed during the
    "off" window. The Phase 9 gate fires under three conditions:
-   - The live profile has `requires_approval=true` AND the operator
+ - The live profile has `requires_approval=true` AND the operator
      submits any edit (regardless of whether the edit changes the
      flag).
-   - The live profile has `requires_approval=false` AND the operator
+ - The live profile has `requires_approval=false` AND the operator
      submits an edit that would set it to `true` (the flag-flip
      direction is gated too because otherwise the gate could be
      enabled by anyone and have no review).
-   - Both arms route through `ApprovalService.RequestProfileEditApproval`
+ - Both arms route through `ApprovalService.RequestProfileEditApproval`
      which writes a row to `issuance_approval_requests` with
      `approval_kind=profile_edit`. The pending profile diff is
      serialized to `payload` (JSONB).
@@ -105,7 +105,7 @@ audit-only view. Each row carries the approval ID + the requester
 
 - `migrations/000027_approval_workflow.up.sql` (initial approval
   schema, Rank 7 of the 2026-05-03 deep-research deliverable)
-- `migrations/000033_approval_kinds.up.sql` (Phase 9 — adds
+- `migrations/000033_approval_kinds.up.sql` (Phase 9 - adds
   `approval_kind` + `payload` + nullable cert/job FKs)
 - `internal/service/approval.go::RequestProfileEditApproval`
 - `internal/service/profile.go::UpdateProfile` (gate)
