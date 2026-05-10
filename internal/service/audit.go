@@ -247,6 +247,44 @@ func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCateg
 	return result, total, nil
 }
 
+// ExportEventsByFilter returns audit events matching a date-range +
+// optional category filter without pagination — the export handler
+// uses this to stream NDJSON for compliance evidence collection.
+//
+// Audit 2026-05-10 HIGH-11 closure: pre-fix, the `audit.export`
+// permission was seeded into r-admin and r-auditor (migration 000031)
+// but no endpoint enforced it — misleading capability advertisement.
+// This method is the service-layer building block for the new
+// GET /api/v1/audit/export endpoint.
+//
+// Bounded callers: the handler enforces a max 90-day range + max-rows
+// cap before invoking this; the service-layer method itself is
+// permissive so future callers (compliance-job runner, MCP tool) can
+// reuse the helper without duplicating the bound enforcement.
+func (s *AuditService) ExportEventsByFilter(ctx context.Context, from, to time.Time, eventCategory string, maxRows int) ([]domain.AuditEvent, error) {
+	if maxRows <= 0 {
+		maxRows = 50000
+	}
+	filter := &repository.AuditFilter{
+		EventCategory: eventCategory,
+		From:          from,
+		To:            to,
+		Page:          1,
+		PerPage:       maxRows,
+	}
+	events, err := s.auditRepo.List(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list audit events for export: %w", err)
+	}
+	out := make([]domain.AuditEvent, 0, len(events))
+	for _, e := range events {
+		if e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out, nil
+}
+
 // GetAuditEvent returns a single audit event (handler interface method).
 func (s *AuditService) GetAuditEvent(ctx context.Context, id string) (*domain.AuditEvent, error) {
 	filter := &repository.AuditFilter{

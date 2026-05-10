@@ -144,6 +144,15 @@ var SpecParityExceptions = map[string]string{
 	"POST /api/v1/auth/breakglass/credentials":                   "Auth Bundle 2 Phase 7.5 — set/rotate password; gated auth.breakglass.admin.",
 	"POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock": "Auth Bundle 2 Phase 7.5 — clear lockout state; gated auth.breakglass.admin.",
 	"DELETE /api/v1/auth/breakglass/credentials/{actor_id}":      "Auth Bundle 2 Phase 7.5 — remove credential; gated auth.breakglass.admin.",
+
+	// Audit 2026-05-10 HIGH-11 — streaming NDJSON audit export. Like
+	// other streaming wire-protocol surfaces (ACME, SCEP, EST), the
+	// response is line-oriented application/x-ndjson rather than a
+	// single JSON object; documenting it as a regular OpenAPI operation
+	// would misrepresent the streaming shape. The contract is documented
+	// in docs/operator/security.md::audit-export and the handler doc
+	// comment.
+	"GET /api/v1/audit/export": "Audit 2026-05-10 HIGH-11 — streaming NDJSON audit export; gated audit.export. Documented inline at internal/api/handler/audit.go::ExportAudit.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

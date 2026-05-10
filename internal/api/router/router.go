@@ -627,6 +627,14 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 
 	// Audit routes: /api/v1/audit
 	r.Register("GET /api/v1/audit", rbacGate(reg.Checker, "audit.read", reg.Audit.ListAuditEvents))
+	// Audit 2026-05-10 HIGH-11 closure — `audit.export` permission was
+	// already seeded into r-admin + r-auditor (migration 000031), but
+	// no endpoint enforced it pre-fix; r-auditor's claim was misleading
+	// capability advertisement. The export endpoint makes the grant
+	// load-bearing. Register `/audit/export` BEFORE `/audit/{id}` so
+	// Go's net/http stdlib routing gives the more specific path
+	// precedence over the catch-all.
+	r.Register("GET /api/v1/audit/export", rbacGate(reg.Checker, "audit.export", reg.Audit.ExportAudit))
 	r.Register("GET /api/v1/audit/{id}", rbacGate(reg.Checker, "audit.read", reg.Audit.GetAuditEvent))
 
 	// Bundle CRL/OCSP-Responder Phase 5: admin observability for the
