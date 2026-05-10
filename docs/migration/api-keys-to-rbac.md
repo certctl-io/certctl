@@ -29,8 +29,8 @@ release notes for v2.1.0 lead with this callout for a reason.
 ### 1. Apply the migration
 
 The migration runner is idempotent. Re-applying is a no-op if the
-schema is already at the target version. The Bundle 1 migrations
-that ship with v2.1.0:
+schema is already at the target version. Migrations that ship in
+the Bundle 1 slice of v2.1.0:
 
 | Migration | What it does |
 |---|---|
