@@ -68,19 +68,43 @@ type SessionSigningKey struct {
 const (
 	// PostLoginCookieName is the post-authentication session cookie.
 	// Set HttpOnly + Secure + SameSite=Lax (or Strict via env var).
-	PostLoginCookieName = "certctl_session"
+	//
+	// Audit 2026-05-10 MED-14 closure — `__Host-` prefix prevents
+	// subdomain takeover (sibling subdomain can't set a cookie that
+	// rides through with our origin's requests). The prefix requires:
+	//   - Path=/ (already)
+	//   - Secure (already; HTTPS-only control plane)
+	//   - No Domain attribute (already)
+	// Existing sessions invalidate on the rolling deploy that lands
+	// this rename — operators must re-authenticate once. Documented in
+	// docs/migration/oidc-enable.md + CHANGELOG.md under BREAKING.
+	PostLoginCookieName = "__Host-certctl_session"
 
 	// PreLoginCookieName is the pre-authentication session cookie that
 	// holds the OIDC state + nonce + PKCE verifier across the IdP
 	// redirect. 10-minute lifetime, separate from the post-login
-	// cookie, Path=/auth/oidc/.
-	PreLoginCookieName = "certctl_oidc_pending"
+	// cookie.
+	//
+	// Audit 2026-05-10 MED-14 — pre-login cookies historically used
+	// Path=/auth/oidc/ which is INCOMPATIBLE with the `__Host-` prefix
+	// (which requires Path=/). Path is widened to / here; the cookie
+	// only lives for 10 minutes (the pre-login TTL), and is only
+	// consumed by the callback handler, so the wider path scope is
+	// harmless. The `__Host-` protection (subdomain-takeover defense)
+	// is the more valuable property.
+	PreLoginCookieName = "__Host-certctl_oidc_pending"
 
 	// CSRFCookieName is the JS-readable cookie holding the CSRF token
 	// plaintext. Mirrors the SHA-256 hash on the session row. The GUI
 	// reads this and echoes the value into the X-CSRF-Token header on
 	// every state-changing request.
-	CSRFCookieName = "certctl_csrf"
+	//
+	// Audit 2026-05-10 MED-14 — `__Host-` prefix applied; the CSRF
+	// cookie satisfies the requirements identically to the session
+	// cookie (Path=/, Secure, no Domain). Note this is HttpOnly=false
+	// (the GUI must read it) — but `__Host-` still applies regardless
+	// of HttpOnly; the prefix is about scope, not visibility.
+	CSRFCookieName = "__Host-certctl_csrf"
 
 	// CookieFormatVersion is the prefix on every session cookie value.
 	// Format: `v1.<session_id>.<signing_key_id>.<base64url-no-pad

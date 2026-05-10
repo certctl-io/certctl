@@ -1,5 +1,27 @@
 # Changelog
 
+## Unreleased
+
+### Security (BREAKING)
+
+- **`__Host-` cookie prefix on all three auth cookies (Audit 2026-05-10 MED-14).**
+  The session cookie, CSRF cookie, and OIDC pre-login cookie are renamed from
+  `certctl_session` / `certctl_csrf` / `certctl_oidc_pending` to
+  `__Host-certctl_session` / `__Host-certctl_csrf` / `__Host-certctl_oidc_pending`
+  to gain browser-enforced subdomain-takeover protection (a `__Host-*` cookie can
+  only be set with `Path=/` + `Secure` + no `Domain` attribute, and the browser
+  rejects subdomain attempts to overwrite it). **Active sessions invalidate on
+  the rolling deploy that lands this change** — operators must re-authenticate
+  once after upgrading. The GUI's CSRF cookie reader was updated in lockstep.
+  See `docs/migration/oidc-enable.md` for operator-facing detail.
+
+### Security
+
+- **Pre-login cookie Path widened from `/auth/oidc/` to `/` (Audit MED-14
+  follow-on).** Required to satisfy the `__Host-` prefix's `Path=/` rule. The
+  cookie lifetime is unchanged (10 minutes) and only the callback handler
+  consumes it; the wider path scope is harmless.
+
 ## v2.1.0 - Auth Bundles 1 + 2: RBAC primitive + OIDC SSO + sessions ⚠️
 
 > **SECURITY: AUDIT YOUR API KEYS.**

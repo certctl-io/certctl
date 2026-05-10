@@ -55,17 +55,21 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
-// Bundle 2 Phase 8 — read the certctl_csrf cookie value (set by the
-// OIDC-callback / break-glass-login flows; JS-readable by design so
-// the GUI can echo it into the X-CSRF-Token header on every state-
-// changing request). Returns empty string when the cookie isn't set
-// (Bearer-mode deployments don't need CSRF; the server's middleware
+// Bundle 2 Phase 8 — read the __Host-certctl_csrf cookie value (set
+// by the OIDC-callback / break-glass-login flows; JS-readable by
+// design so the GUI can echo it into the X-CSRF-Token header on every
+// state-changing request). Returns empty string when the cookie isn't
+// set (Bearer-mode deployments don't need CSRF; the server's middleware
 // short-circuits CSRF for Bearer-authenticated requests).
+//
+// Audit 2026-05-10 MED-14 — cookie name carries the `__Host-` prefix
+// (subdomain-takeover defense). The browser includes the prefix in
+// document.cookie verbatim; the comparison below matches that.
 function readCSRFCookie(): string {
   if (typeof document === 'undefined' || !document.cookie) return '';
   for (const part of document.cookie.split(';')) {
     const [k, ...rest] = part.trim().split('=');
-    if (k === 'certctl_csrf') {
+    if (k === '__Host-certctl_csrf') {
       return decodeURIComponent(rest.join('='));
     }
   }

@@ -234,6 +234,22 @@ All ten of these tables are tenant-scoped (`tenant_id` column); single-tenant de
 - Review the [`auth-threat-model.md`](../operator/auth-threat-model.md) Bundle 2 sections to understand the failure modes the OIDC + sessions surface defends against.
 - Schedule a rotation reminder for the OIDC `client_secret` (typically 6-12 months; the IdP doesn't auto-rotate it). Edit the provider via the GUI when the time comes; leaving `client_secret` blank in the edit form preserves the existing ciphertext, providing a value rotates.
 
+## `__Host-` cookie rename (Audit 2026-05-10 MED-14, BREAKING)
+
+Post-Bundle-2 deploys carrying the 2026-05-10 audit-fix wave include a wire-format change to the three auth cookies: they now carry the `__Host-` prefix. The cookie names are:
+
+- `__Host-certctl_session` (was `certctl_session`)
+- `__Host-certctl_csrf` (was `certctl_csrf`)
+- `__Host-certctl_oidc_pending` (was `certctl_oidc_pending`)
+
+The rename gains browser-enforced subdomain-takeover defense: a `__Host-*` cookie can only be set with `Path=/` + `Secure` + no `Domain` attribute, and the browser rejects any subdomain attempt to overwrite it. The protection is free (the existing cookies already met the prerequisites) but the wire-format change means:
+
+- **Every active session is invalidated by the deploy that lands this change.** Operators see one re-authentication prompt; subsequent logins issue the new `__Host-*`-prefixed cookie.
+- **The pre-login cookie's Path widens from `/auth/oidc/` to `/`** — required by the `__Host-` prefix. The cookie lifetime is unchanged (10 minutes) and is only ever consumed by the callback handler; the wider path scope is harmless.
+- **No operator action required beyond accepting the one-time re-login window.** The GUI's CSRF cookie reader was updated in lockstep; existing bookmarked deep links work without modification.
+
+If you have GUI customizations that read `document.cookie` directly, update them to look for `__Host-certctl_csrf` (the lookup in `web/src/api/client.ts` is the in-tree reference).
+
 ## Cross-references
 
 - [`docs/operator/oidc-runbooks/index.md`](../operator/oidc-runbooks/index.md) — per-IdP setup guides.

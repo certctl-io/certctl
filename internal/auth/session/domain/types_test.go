@@ -200,14 +200,20 @@ func TestCookieNamingConstants(t *testing.T) {
 	// `certctl_csrf` by name and the back-channel handlers reference
 	// `certctl_session` directly. A rename without coordinated GUI
 	// updates would silently break login.
-	if PostLoginCookieName != "certctl_session" {
-		t.Errorf("PostLoginCookieName = %q; want certctl_session", PostLoginCookieName)
+	// Audit 2026-05-10 MED-14 — `__Host-` prefix on all three auth
+	// cookies. Subdomain-takeover defense: a cookie named `__Host-*`
+	// can ONLY be set with Path=/ + Secure + no Domain attribute, and
+	// the browser will reject any subdomain attempt to overwrite. The
+	// rename is a BREAKING change on the wire — existing sessions
+	// invalidate on the rolling deploy.
+	if PostLoginCookieName != "__Host-certctl_session" {
+		t.Errorf("PostLoginCookieName = %q; want __Host-certctl_session", PostLoginCookieName)
 	}
-	if PreLoginCookieName != "certctl_oidc_pending" {
-		t.Errorf("PreLoginCookieName = %q; want certctl_oidc_pending", PreLoginCookieName)
+	if PreLoginCookieName != "__Host-certctl_oidc_pending" {
+		t.Errorf("PreLoginCookieName = %q; want __Host-certctl_oidc_pending", PreLoginCookieName)
 	}
-	if CSRFCookieName != "certctl_csrf" {
-		t.Errorf("CSRFCookieName = %q; want certctl_csrf", CSRFCookieName)
+	if CSRFCookieName != "__Host-certctl_csrf" {
+		t.Errorf("CSRFCookieName = %q; want __Host-certctl_csrf", CSRFCookieName)
 	}
 	if CookieFormatVersion != "v1" {
 		t.Errorf("CookieFormatVersion = %q; want v1", CookieFormatVersion)

@@ -243,9 +243,12 @@ func (h *AuthSessionOIDCHandler) LoginInitiate(w http.ResponseWriter, r *http.Re
 		return
 	}
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessiondomain.PreLoginCookieName,
-		Value:    cookieValue,
-		Path:     "/auth/oidc/",
+		Name:  sessiondomain.PreLoginCookieName,
+		Value: cookieValue,
+		// Audit 2026-05-10 MED-14 — `__Host-` prefix requires Path=/.
+		// The cookie lives 10 minutes and is only ever consumed by the
+		// callback handler; the wider path scope is harmless.
+		Path:     "/",
 		MaxAge:   int((10 * time.Minute).Seconds()),
 		Secure:   h.cookieAttrs.Secure,
 		HttpOnly: true,
@@ -1104,9 +1107,12 @@ func (h *AuthSessionOIDCHandler) recordAudit(ctx context.Context, action, actor 
 
 func (h *AuthSessionOIDCHandler) clearPreLoginCookie(w http.ResponseWriter) {
 	http.SetCookie(w, &http.Cookie{
-		Name:     sessiondomain.PreLoginCookieName,
-		Value:    "",
-		Path:     "/auth/oidc/",
+		Name:  sessiondomain.PreLoginCookieName,
+		Value: "",
+		// Audit 2026-05-10 MED-14 — Path=/ matches the write site
+		// post-`__Host-` rename. The browser only clears cookies that
+		// match the original Set-Cookie's Name+Path+Domain triple.
+		Path:     "/",
 		MaxAge:   -1,
 		Secure:   h.cookieAttrs.Secure,
 		HttpOnly: true,
