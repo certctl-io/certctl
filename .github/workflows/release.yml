@@ -15,7 +15,7 @@ on:
 env:
   REGISTRY: ghcr.io
   # Keep in lock-step with .github/workflows/ci.yml (M-3).
-  GO_VERSION: '1.25.9'
+  GO_VERSION: '1.25.10'
   IMAGE_NAMESPACE: certctl-io
 
 jobs:

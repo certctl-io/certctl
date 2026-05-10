@@ -665,7 +665,7 @@ paths:
                   go_version:
                     type: string
                     description: Go toolchain version that compiled the binary (runtime.Version())
-                    example: go1.25.9
+                    example: go1.25.10
 
   # ─── Certificates ────────────────────────────────────────────────────
   /api/v1/certificates:

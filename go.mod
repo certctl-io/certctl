@@ -1,6 +1,6 @@
 module github.com/certctl-io/certctl
 
-go 1.25.9
+go 1.25.10
 
 require (
 	github.com/google/uuid v1.6.0
@@ -22,8 +22,8 @@ require (
 	github.com/leanovate/gopter v0.2.11
 	github.com/masterzen/winrm v0.0.0-20250927112105-5f8e6c707321
 	github.com/pkg/sftp v1.13.10
-	golang.org/x/crypto v0.48.0
-	golang.org/x/sync v0.19.0
+	golang.org/x/crypto v0.50.0
+	golang.org/x/sync v0.20.0
 	software.sslmate.com/src/go-pkcs12 v0.7.0
 )
 
@@ -111,9 +111,9 @@ require (
 	go.opentelemetry.io/otel v1.41.0 // indirect
 	go.opentelemetry.io/otel/metric v1.41.0 // indirect
 	go.opentelemetry.io/otel/trace v1.41.0 // indirect
-	golang.org/x/net v0.49.0 // indirect
+	golang.org/x/net v0.53.0 // indirect
 	golang.org/x/oauth2 v0.34.0 // indirect
-	golang.org/x/sys v0.42.0 // indirect
-	golang.org/x/text v0.34.0 // indirect
+	golang.org/x/sys v0.43.0 // indirect
+	golang.org/x/text v0.36.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

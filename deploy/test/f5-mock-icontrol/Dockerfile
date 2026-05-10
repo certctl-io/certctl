@@ -6,8 +6,8 @@
 # Per H-001 guard: every FROM is digest-pinned. Operator re-pins
 # quarterly per docs/deployment-vendor-matrix.md.
 
-# golang:1.25.9-bookworm digest pinned per H-001.
-FROM golang:1.25.9-bookworm@sha256:1a1408bf8d2d3077f9508880caf0e8bb0fde195fe3c890e7ea480dfb66dc7827 AS builder
+# golang:1.25.10-bookworm digest pinned per H-001.
+FROM golang:1.25.10-bookworm@sha256:e3a54b77385b4f8a31c1db4d12429ffb3718ea76865731a787c497755d409547 AS builder
 WORKDIR /src
 COPY deploy/test/f5-mock-icontrol/ ./
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build -trimpath -ldflags "-s -w" -o /out/f5-mock-icontrol .

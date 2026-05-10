@@ -86,7 +86,7 @@ type VersionInfo struct {
 	BuildTime string `json:"build_time"`
 
 	// GoVersion is the Go toolchain version that compiled the binary
-	// (runtime.Version, e.g. "go1.25.9"). Useful when triaging stdlib
+	// (runtime.Version, e.g. "go1.25.10"). Useful when triaging stdlib
 	// behavior differences ("the deploy that broke was on 1.24, this one
 	// is on 1.25").
 	GoVersion string `json:"go_version"`

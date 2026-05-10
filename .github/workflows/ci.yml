@@ -19,7 +19,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
 
       - name: Go Build
         run: |
@@ -343,7 +343,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
           cache: true
 
       - name: Build f5-mock-icontrol sidecar
@@ -440,7 +440,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@v5
         with:
-          go-version: '1.25.9'
+          go-version: '1.25.10'
           cache: true
 
       - name: Digest validity (every @sha256 ref must resolve)

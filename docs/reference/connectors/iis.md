@@ -157,7 +157,7 @@ The real IIS connector validation lives in:
 - Windows Server 2019 or 2022 host (or Windows 10/11 Pro with Hyper-V)
 - Docker Desktop in Windows containers mode
   (Settings → "Switch to Windows containers")
-- Go 1.25.9 + git
+- Go 1.25.10 + git
 
 ### Procedure
 

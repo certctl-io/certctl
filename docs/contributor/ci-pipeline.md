@@ -53,7 +53,7 @@ Runs the Go build/test suite + 18 of 20 regression guards.
 
 Steps:
 1. `actions/checkout@v4`
-2. `actions/setup-go@v5` (Go 1.25.9)
+2. `actions/setup-go@v5` (Go 1.25.10)
 3. `go build ./cmd/...` (server, agent, mcp-server, cli)
 4. **gofmt drift** — `gofmt -l .` must be empty (Makefile::verify parity)
 5. **go mod tidy drift** — `go mod tidy && git diff --exit-code go.mod go.sum`
@@ -97,7 +97,7 @@ Single-job collapse of the prior 12-job matrix (per ci-pipeline-cleanup Phase 5 
 
 Steps:
 1. `actions/checkout@v5`
-2. `actions/setup-go@v5` (Go 1.25.9, cache: true)
+2. `actions/setup-go@v5` (Go 1.25.10, cache: true)
 3. **Build f5-mock-icontrol sidecar** — only sidecar without published image
 4. **Bring up all vendor sidecars** — `docker compose --profile deploy-e2e up -d` (11 sidecars)
 5. **Run all vendor-edge e2e** — `go test -tags integration -race -count=1 -run 'VendorEdge_'`; output captured to `test-output.log`

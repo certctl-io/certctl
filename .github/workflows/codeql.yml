@@ -60,7 +60,7 @@ jobs:
         uses: actions/setup-go@v5
         with:
           # Match ci.yml + release.yml + security-deep-scan.yml.
-          go-version: '1.25.9'
+          go-version: '1.25.10'
 
       - name: Initialize CodeQL
         uses: github/codeql-action/init@v3
