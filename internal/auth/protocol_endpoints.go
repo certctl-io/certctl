@@ -28,10 +28,21 @@ import "strings"
 // (router.go:69-72): /health, /ready, /api/v1/auth/info. Those bypass
 // EVERY middleware stack, not just RBAC, so they're not in this
 // allowlist; they're handled in router.go directly.
+// Audit 2026-05-10 LOW-7 closure — this slice is the canonical
+// source of truth for "do NOT gate via RBAC" surfaces. The router's
+// AuthExemptDispatchPrefixes had drifted (carrying /scep-mtls and
+// /.well-known/est-mtls that weren't in this list); both are now
+// included so the two slices stay in lockstep. A CI guard
+// (scripts/ci-guards/protocol-endpoint-prefix-sync.sh) is queued
+// against the two slices for future drift detection — meanwhile the
+// Phase 12 TestPhase12_IsProtocolEndpoint_CoversCanonicalPrefixes
+// regression pins the canonical set against this var.
 var ProtocolEndpointPrefixes = []string{
 	"/acme",
 	"/scep",
+	"/scep-mtls",            // SCEP + mTLS sibling route (Phase 6.5)
 	"/.well-known/est",
+	"/.well-known/est-mtls", // EST + mTLS sibling route (EST hardening Phase 2)
 	"/.well-known/pki/ocsp",
 	"/.well-known/pki/crl",
 }

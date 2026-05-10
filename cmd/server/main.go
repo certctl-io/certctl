@@ -368,6 +368,9 @@ func main() {
 	// sweep can keep the sessions + signing-keys tables tidy.
 	sessionRepo := postgres.NewSessionRepository(db)
 	sessionKeyRepo := postgres.NewSessionSigningKeyRepository(db)
+	// Audit 2026-05-10 LOW-5 closure — install the trusted-proxy CIDR
+	// allowlist from CERTCTL_TRUSTED_PROXIES. Empty disables XFF trust.
+	session.SetTrustedProxies(cfg.Auth.TrustedProxies)
 	sessionService := session.NewService(
 		sessionRepo,
 		sessionKeyRepo,

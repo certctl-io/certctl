@@ -160,6 +160,22 @@ func (s *Service) ValidateAndMint(ctx context.Context, token, actorName string) 
 		CreatedAt: now,
 	}
 	if err := s.keys.Create(ctx, apiKey); err != nil {
+		// Audit 2026-05-10 LOW-2 closure — emit a consume_failed audit row
+		// before bubbling the error. Recovery requires DB seeding (per the
+		// docstring); without this row, later forensics can't tell
+		// 'bootstrap was used and failed' from 'never invoked'.
+		if s.audit != nil {
+			if aerr := s.audit.RecordEventWithCategory(ctx, "bootstrap-token", domain.ActorTypeSystem,
+				"bootstrap.consume_failed", domain.EventCategoryAuth, "api_key", apiKey.ID,
+				map[string]interface{}{
+					"actor_name": actorName,
+					"stage":      "persist_key",
+					"error":      err.Error(),
+				}); aerr != nil {
+				slog.WarnContext(ctx, "bootstrap.consume_failed audit write failed",
+					"actor_name", actorName, "err", aerr)
+			}
+		}
 		return nil, fmt.Errorf("bootstrap: persist key: %w", err)
 	}
 	if err := s.roles.Grant(ctx, &authdomain.ActorRole{
@@ -169,6 +185,19 @@ func (s *Service) ValidateAndMint(ctx context.Context, token, actorName string) 
 		TenantID:  authdomain.DefaultTenantID,
 		GrantedBy: "bootstrap",
 	}); err != nil {
+		// LOW-2 — same audit-on-failure pattern as the persist-key branch.
+		if s.audit != nil {
+			if aerr := s.audit.RecordEventWithCategory(ctx, "bootstrap-token", domain.ActorTypeSystem,
+				"bootstrap.consume_failed", domain.EventCategoryAuth, "api_key", apiKey.ID,
+				map[string]interface{}{
+					"actor_name": actorName,
+					"stage":      "grant_role",
+					"error":      err.Error(),
+				}); aerr != nil {
+				slog.WarnContext(ctx, "bootstrap.consume_failed audit write failed",
+					"actor_name", actorName, "err", aerr)
+			}
+		}
 		return nil, fmt.Errorf("bootstrap: grant admin role: %w", err)
 	}
 	if s.keyStore != nil {

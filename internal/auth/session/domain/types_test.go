@@ -21,6 +21,10 @@ func validSession() *Session {
 		IPAddress:         "10.0.0.1",
 		UserAgent:         "Mozilla/5.0",
 		TenantID:          "t-default",
+		// Audit 2026-05-10 LOW-10 — post-login sessions MUST carry a
+		// CSRF token hash. Pin a valid 64-hex value so the happy-path
+		// fixture stays valid.
+		CSRFTokenHash: strings.Repeat("a", 64),
 	}
 }
 

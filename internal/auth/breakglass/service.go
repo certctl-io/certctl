@@ -532,7 +532,14 @@ func verifyPassword(plaintext, encoded string) (bool, error) {
 // paths take statistically indistinguishable time. The result is
 // discarded.
 func (s *Service) verifyDummy(plaintext string) bool {
-	dummySalt := make([]byte, argon2SaltSize) // all-zeros — fine for timing parity
+	// Audit 2026-05-10 LOW-4 closure — was an all-zeros salt; while the
+	// wall-clock cost matched a real verify (the 64MiB Argon2id
+	// allocation dominates), cache/branch behavior differed enough to
+	// give a subtle timing side channel. Use crypto/rand for the dummy
+	// salt too. If RNG fails, fall back to all-zeros (the timing parity
+	// is still preserved by the dominant Argon2id memory cost).
+	dummySalt := make([]byte, argon2SaltSize)
+	_, _ = s.readRand(dummySalt)
 	_ = argon2.IDKey([]byte(plaintext), dummySalt,
 		uint32(argon2Iterations), uint32(argon2Memory),
 		uint8(argon2Parallelism), uint32(argon2OutputSize))

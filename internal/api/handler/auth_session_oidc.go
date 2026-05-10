@@ -27,6 +27,7 @@ package handler
 
 import (
 	"context"
+	cryptorand "crypto/rand"
 	"encoding/base64"
 	"encoding/json"
 	"errors"
@@ -1192,13 +1193,19 @@ func classifyOIDCFailure(err error) string {
 }
 
 func randomB64URLForHandler(n int) string {
-	// Cheap counter+time fallback; provider/mapping ids don't need
-	// crypto-strong entropy (they're not security tokens). We still
-	// use base64url-no-pad for URL safety.
-	now := time.Now().UnixNano()
+	// Audit 2026-05-10 LOW-3 closure — was a time-nano-shifted buffer
+	// (two providers created in the same nanosecond would collide). Now
+	// crypto/rand: provider/mapping IDs aren't security tokens, but
+	// collision-freedom matters for primary keys and entropy is free.
 	buf := make([]byte, n)
-	for i := 0; i < n; i++ {
-		buf[i] = byte(now >> (uint(i) * 8))
+	if _, err := cryptorand.Read(buf); err != nil {
+		// Fall back to time-nano if crypto/rand is broken (extremely
+		// unlikely; logged at WARN by the caller's audit row if the ID
+		// turns out to clash).
+		now := time.Now().UnixNano()
+		for i := 0; i < n; i++ {
+			buf[i] = byte(now >> (uint(i) * 8))
+		}
 	}
 	return base64.RawURLEncoding.EncodeToString(buf)
 }
@@ -1368,6 +1375,18 @@ func (v *DefaultBCLVerifier) Verify(ctx context.Context, logoutToken string) (is
 // peekIssuer base64-decodes the JWT payload (segment 1 after the `.`)
 // and pulls the `iss` claim out without verifying the signature. Used
 // to find the matching provider before we know which JWKS to use.
+// peekIssuer extracts the `iss` claim from an unsigned JWT payload —
+// used by the BCL handler to route the logout_token to the right
+// provider for verification.
+//
+// Audit 2026-05-10 Nit-3 — peekIssuer is INTENTIONALLY unsigned-permissive.
+// The returned issuer is used ONLY to select the verifier; the full
+// signature + claim verification happens in DefaultBCLVerifier.Verify
+// (which re-checks the `iss` claim against the matched provider's
+// IssuerURL after JWS signature validation). Callers MUST NOT trust
+// peekIssuer output for any access-control decision before the verify
+// step completes; the pin is encoded in the BCL handler's call shape
+// (peek → match provider → verify-against-provider → consume).
 func peekIssuer(jwt string) (string, error) {
 	parts := strings.Split(jwt, ".")
 	if len(parts) != 3 {

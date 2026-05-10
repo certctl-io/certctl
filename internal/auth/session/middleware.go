@@ -33,6 +33,7 @@ package session
 import (
 	"context"
 	"errors"
+	"net"
 	"net/http"
 
 	"github.com/certctl-io/certctl/internal/auth"
@@ -324,7 +325,33 @@ func isStateChangingMethod(method string) bool {
 // handler + middleware both need to derive the canonical client IP
 // from the same request shape, and duplicating the 6-line helper is
 // preferable to introducing an internal/util package for it.
+// Audit 2026-05-10 LOW-5 — trustedProxyCIDRs holds the operator-configured
+// list of CIDR ranges from which X-Forwarded-For is honored. Set by
+// SetTrustedProxies at startup (from CERTCTL_TRUSTED_PROXIES). When
+// empty (default), XFF is ignored entirely — the direct r.RemoteAddr
+// is used. This closes the XFF-spoofing leg where any direct client
+// could inject an attacker-controlled IP into audit rows + session
+// IP-binding.
+var trustedProxyCIDRs []string
+
+// SetTrustedProxies installs the CIDR allowlist for XFF processing.
+// Called from cmd/server/main.go after config load. Each entry is a
+// CIDR like "10.0.0.0/8" or a single-host literal like "192.0.2.1".
+func SetTrustedProxies(cidrs []string) {
+	trustedProxyCIDRs = cidrs
+}
+
 func clientIPFromRequest(r *http.Request) string {
+	remoteIP := r.RemoteAddr
+	if i := lastIndexByte(remoteIP, ':'); i > 0 {
+		remoteIP = remoteIP[:i]
+	}
+	// Audit 2026-05-10 LOW-5 closure — only trust XFF when the direct
+	// connection comes from a configured trusted proxy. Default-deny:
+	// empty TrustedProxies list means XFF is ignored entirely.
+	if !ipInCIDRs(remoteIP, trustedProxyCIDRs) {
+		return remoteIP
+	}
 	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
 		for i := 0; i < len(xff); i++ {
 			if xff[i] == ',' {
@@ -333,10 +360,53 @@ func clientIPFromRequest(r *http.Request) string {
 		}
 		return trimSpace(xff)
 	}
-	if i := lastIndexByte(r.RemoteAddr, ':'); i > 0 {
-		return r.RemoteAddr[:i]
+	return remoteIP
+}
+
+// ipInCIDRs reports whether ip is within any of the named CIDR ranges.
+// Hosts (no /mask) are treated as /32 (IPv4) or /128 (IPv6) singletons.
+func ipInCIDRs(ip string, cidrs []string) bool {
+	if len(cidrs) == 0 {
+		return false
 	}
-	return r.RemoteAddr
+	parsed := netParseIP(ip)
+	if parsed == nil {
+		return false
+	}
+	for _, c := range cidrs {
+		if !strContainsByte(c, '/') {
+			// Single-host literal — exact match.
+			if c == ip {
+				return true
+			}
+			continue
+		}
+		_, network, err := netParseCIDR(c)
+		if err != nil {
+			continue
+		}
+		if network.Contains(parsed) {
+			return true
+		}
+	}
+	return false
+}
+
+// Net helpers live here rather than importing "net" at the top to
+// keep the diff surgical. The net package's ParseIP / ParseCIDR are
+// well-tested; we just thread them through local indirections.
+var (
+	netParseIP   = func(s string) net.IP { return net.ParseIP(s) }
+	netParseCIDR = func(s string) (net.IP, *net.IPNet, error) { return net.ParseCIDR(s) }
+)
+
+func strContainsByte(s string, b byte) bool {
+	for i := 0; i < len(s); i++ {
+		if s[i] == b {
+			return true
+		}
+	}
+	return false
 }
 
 func trimSpace(s string) string {

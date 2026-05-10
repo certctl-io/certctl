@@ -1597,6 +1597,17 @@ type AuthConfig struct {
 	// legacy `api-key` auth type ignore this struct entirely.
 	Session SessionConfig
 
+	// TrustedProxies is the comma-separated list of CIDR ranges from
+	// which X-Forwarded-For is honored. Empty (default) disables XFF
+	// trust entirely — every request's source IP is read from
+	// r.RemoteAddr regardless of XFF headers. Audit 2026-05-10 LOW-5
+	// closure: pre-fix the audit subsystem trusted any caller-supplied
+	// XFF for IP attribution, letting an attacker inject arbitrary IPs
+	// into audit rows + session IP-binding. Post-fix XFF is read only
+	// when the direct connection's RemoteAddr is in this allowlist.
+	// Setting: CERTCTL_TRUSTED_PROXIES (e.g. "10.0.0.0/8,192.168.0.0/16").
+	TrustedProxies []string
+
 	// DemoModeAck must be true to allow CERTCTL_AUTH_TYPE=none with a
 	// non-loopback listen address. Default false. Audit 2026-05-10
 	// HIGH-12 closure: pre-fix, an operator who flipped Type=none
@@ -1869,6 +1880,8 @@ func Load() (*Config, error) {
 			// Audit 2026-05-10 HIGH-12 closure: required-true to allow
 			// CERTCTL_AUTH_TYPE=none with a non-loopback listen address.
 			DemoModeAck: getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
+			// LOW-5: XFF trust allowlist (CIDRs). Empty = ignore XFF.
+			TrustedProxies: getEnvList("CERTCTL_TRUSTED_PROXIES", nil),
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
 			// can surface parse errors alongside other config errors.
 

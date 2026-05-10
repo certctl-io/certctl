@@ -301,19 +301,36 @@ func TestIsStateChangingMethod(t *testing.T) {
 }
 
 func TestClientIPFromRequest_Variants(t *testing.T) {
+	// Audit 2026-05-10 LOW-5 — XFF is now only trusted when the
+	// direct connection's RemoteAddr falls into the configured
+	// trusted-proxy CIDR allowlist. Reset to a known state before/after.
+	prev := trustedProxyCIDRs
+	t.Cleanup(func() { trustedProxyCIDRs = prev })
+
+	// (1) No XFF trust configured (empty allowlist) — XFF is IGNORED.
+	trustedProxyCIDRs = nil
 	r := httptest.NewRequest(http.MethodGet, "/", nil)
 	r.RemoteAddr = "1.2.3.4:5555"
 	if ip := clientIPFromRequest(r); ip != "1.2.3.4" {
 		t.Errorf("RemoteAddr: got %q; want 1.2.3.4", ip)
 	}
 	r.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
+	if ip := clientIPFromRequest(r); ip != "1.2.3.4" {
+		t.Errorf("XFF without trusted proxy: got %q; want 1.2.3.4 (ignored)", ip)
+	}
+
+	// (2) Trusted-proxy CIDR matches RemoteAddr — XFF IS honored.
+	trustedProxyCIDRs = []string{"1.2.3.0/24"}
+	r.Header.Set("X-Forwarded-For", "10.0.0.1, 10.0.0.2")
 	if ip := clientIPFromRequest(r); ip != "10.0.0.1" {
-		t.Errorf("XFF first hop: got %q; want 10.0.0.1", ip)
+		t.Errorf("XFF first hop (trusted): got %q; want 10.0.0.1", ip)
 	}
 	r.Header.Set("X-Forwarded-For", "10.0.0.99")
 	if ip := clientIPFromRequest(r); ip != "10.0.0.99" {
-		t.Errorf("XFF single: got %q; want 10.0.0.99", ip)
+		t.Errorf("XFF single (trusted): got %q; want 10.0.0.99", ip)
 	}
+
+	// (3) No-port RemoteAddr unchanged.
 	r2 := httptest.NewRequest(http.MethodGet, "/", nil)
 	r2.RemoteAddr = "no-port"
 	if ip := clientIPFromRequest(r2); ip != "no-port" {

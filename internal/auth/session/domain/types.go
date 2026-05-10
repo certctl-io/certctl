@@ -132,6 +132,13 @@ func (s *Session) Validate() error {
 	if !s.CreatedAt.IsZero() && !s.IdleExpiresAt.After(s.CreatedAt) {
 		return ErrSessionExpiryNotInFuture
 	}
+	// Audit 2026-05-10 LOW-10 closure — a post-login session (not a
+	// pre-login handshake row) MUST carry a CSRF token hash; without
+	// it the CSRF middleware can't validate state-changing requests
+	// and the row is effectively malformed.
+	if !s.IsPreLogin && strings.TrimSpace(s.CSRFTokenHash) == "" {
+		return ErrSessionInvalidCSRFHash
+	}
 	if s.CSRFTokenHash != "" {
 		// SHA-256 is 32 bytes => 64 lowercase hex chars.
 		if len(s.CSRFTokenHash) != 64 || !isHex(s.CSRFTokenHash) {

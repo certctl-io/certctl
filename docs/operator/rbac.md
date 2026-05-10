@@ -43,6 +43,18 @@ that resolves "actor → permissions" lives at
 | CLI | `r-cli` | Day-to-day operator CLI | Like Operator + `auth.key.list` / `auth.key.create` / `auth.key.rotate` |
 | Auditor | `r-auditor` | Compliance reviewer | `audit.read` + `audit.export` ONLY |
 
+**Note on actor-type binding (Audit 2026-05-10 LOW-8):** Roles in
+the catalogue are NOT bound to a specific `actor_type`. `r-mcp` is
+named for clarity ("the role MCP service accounts hold") but the
+schema permits granting it to any actor — including a human OIDC
+user. Same goes for `r-cli` and `r-agent`. The role-grant API accepts
+`{actor_id, actor_type, role_id}` tuples; the `actor_type` constraint
+lives on the grant row, not the role definition. Operators who want
+to enforce "only API-key actors hold r-mcp" should write that as an
+operator-side policy + verify via a periodic audit query against
+`actor_roles` joined to `api_keys` / `users`. Native role-to-
+actor-type binding is on the v2 roadmap.
+
 The auditor split is the load-bearing one: an auditor cannot read
 certificates, profiles, or issuers - only audit events. That makes the
 role legitimate to hand to a SOC 2 / FedRAMP / PCI auditor without
