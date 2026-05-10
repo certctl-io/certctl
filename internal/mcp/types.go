@@ -689,3 +689,49 @@ type AuthListSessionsInput struct {
 type AuthRevokeSessionInput struct {
 	ID string `json:"id" jsonschema:"Session ID (e.g. ses-abc123). Server-side own-bypass: caller may revoke their own session even without auth.session.revoke."`
 }
+
+// =============================================================================
+// Audit 2026-05-10 MED-13 — input shapes for the 11 new MCP tools
+// (approvals + breakglass + bootstrap + audit category filter).
+// =============================================================================
+
+// ApprovalIDInput is the id-only input for approval get/approve/reject.
+type ApprovalIDInput struct {
+	ID string `json:"id" jsonschema:"Approval request ID (e.g. aprq-abc123). Returned by certctl_approval_list."`
+}
+
+// BreakglassActorIDInput is the actor-id-only input for the unlock + remove tools.
+type BreakglassActorIDInput struct {
+	ActorID string `json:"actor_id" jsonschema:"Break-glass actor ID (e.g. bg-admin1). Listed by certctl_breakglass_list."`
+}
+
+// BreakglassSetPasswordInput is the body for certctl_breakglass_set_password.
+//
+// SECURITY: the password field crosses the MCP transport in
+// plaintext. The server-side handler hashes with Argon2id before
+// persisting; the audit row redacts the password column. Never log
+// this payload at the client side.
+type BreakglassSetPasswordInput struct {
+	ActorID  string `json:"actor_id" jsonschema:"Break-glass actor ID (e.g. bg-admin1). New row created if not present."`
+	Password string `json:"password" jsonschema:"Plaintext password (hashed server-side with Argon2id). Choose >=14 chars from a strong-entropy source; this is the SSO-bypass credential."`
+	RoleID   string `json:"role_id" jsonschema:"Role ID granted on successful break-glass login (e.g. r-admin). Typically r-admin for production break-glass."`
+}
+
+// BootstrapConsumeInput is the body for certctl_bootstrap_consume.
+//
+// SECURITY: NEVER wire this tool into autonomous operation. A leaked
+// bootstrap token mints a fresh admin API key bypassing every other
+// access-control gate. Run manually, once, from a trusted shell.
+type BootstrapConsumeInput struct {
+	Token   string `json:"token" jsonschema:"The pre-shared CERTCTL_BOOTSTRAP_TOKEN value (one-shot, constant-time-compared server-side, never logged)."`
+	KeyName string `json:"key_name" jsonschema:"Human-readable name for the new admin API key (e.g. 'day-zero-admin'). Subsequently visible in certctl_auth_list_keys."`
+}
+
+// AuditListWithCategoryInput is the input for the category-filtered audit list.
+type AuditListWithCategoryInput struct {
+	Category string `json:"category,omitempty" jsonschema:"Audit category filter. One of: auth, pki, config, system, security. Empty returns unfiltered (equivalent to GET /v1/audit)."`
+	Limit    int    `json:"limit,omitempty" jsonschema:"Maximum rows to return. Server default applies when 0."`
+	Since    string `json:"since,omitempty" jsonschema:"RFC3339 timestamp lower bound (inclusive). Optional."`
+	Until    string `json:"until,omitempty" jsonschema:"RFC3339 timestamp upper bound (exclusive). Optional."`
+	ActorID  string `json:"actor_id,omitempty" jsonschema:"Filter by originating actor ID. Optional."`
+}

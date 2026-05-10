@@ -452,6 +452,19 @@ var allHappyPathCases = []toolCase{
 	{"certctl_auth_remove_group_mapping", map[string]any{"id": "gm-1"}, http.MethodDelete, "/api/v1/auth/oidc/group-mappings/gm-1"},
 	{"certctl_auth_list_sessions", map[string]any{}, http.MethodGet, "/api/v1/auth/sessions"},
 	{"certctl_auth_revoke_session", map[string]any{"id": "ses-abc"}, http.MethodDelete, "/api/v1/auth/sessions/ses-abc"},
+
+	// Audit 2026-05-10 MED-13 — 11 tools (approvals + breakglass + bootstrap + audit-category).
+	{"certctl_approval_list", map[string]any{}, http.MethodGet, "/api/v1/approvals"},
+	{"certctl_approval_get", map[string]any{"id": "aprq-1"}, http.MethodGet, "/api/v1/approvals/aprq-1"},
+	{"certctl_approval_approve", map[string]any{"id": "aprq-1"}, http.MethodPost, "/api/v1/approvals/aprq-1/approve"},
+	{"certctl_approval_reject", map[string]any{"id": "aprq-1"}, http.MethodPost, "/api/v1/approvals/aprq-1/reject"},
+	{"certctl_breakglass_list", map[string]any{}, http.MethodGet, "/api/v1/auth/breakglass/credentials"},
+	{"certctl_breakglass_set_password", map[string]any{"actor_id": "bg-admin1", "password": "test-pass-strong-1", "role_id": "r-admin"}, http.MethodPost, "/api/v1/auth/breakglass/credentials"},
+	{"certctl_breakglass_unlock", map[string]any{"actor_id": "bg-admin1"}, http.MethodPost, "/api/v1/auth/breakglass/credentials/bg-admin1/unlock"},
+	{"certctl_breakglass_remove", map[string]any{"actor_id": "bg-admin1"}, http.MethodDelete, "/api/v1/auth/breakglass/credentials/bg-admin1"},
+	{"certctl_bootstrap_status", map[string]any{}, http.MethodGet, "/api/v1/auth/bootstrap"},
+	{"certctl_bootstrap_consume", map[string]any{"token": "test-token", "key_name": "day-zero-admin"}, http.MethodPost, "/api/v1/auth/bootstrap"},
+	{"certctl_audit_list_with_category", map[string]any{"category": "auth"}, http.MethodGet, "/api/v1/audit"},
 }
 
 // TestMCP_AllTools_HappyPath dispatches every tool against the mock API in

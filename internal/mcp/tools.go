@@ -51,6 +51,13 @@ func RegisterTools(s *gomcp.Server, client *Client) {
 	// existing HTTP client; permission gates fire server-side via the
 	// Phase-5 rbacGate wrappers. See internal/mcp/tools_auth_bundle2.go.
 	registerAuthBundle2Tools(s, client)
+	// Audit 2026-05-10 MED-13 — 11 tools rounding out the operator
+	// surface: approvals (4) + break-glass admin (4) + bootstrap
+	// status/consume (2) + audit category filter (1). See
+	// internal/mcp/tools_audit_fix.go for the per-tool wiring + the
+	// security comment on certctl_bootstrap_consume (never wire to
+	// autonomous operation; one-shot token-minting primitive).
+	registerAuditFixTools(s, client)
 	// Phase G P1-33 (POST /api/v1/agents/{id}/discoveries) is
 	// intentionally NOT exposed via MCP — it is a machine-to-machine
 	// channel for agents to push filesystem-scan reports, not an

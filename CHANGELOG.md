@@ -34,6 +34,19 @@
   RFC-9207 discovery. Providers that don't advertise support (the majority
   today) keep pre-fix behavior — back-compat is preserved.
 
+- **11 new MCP tools (Audit 2026-05-10 MED-13).** Approval workflow
+  (`certctl_approval_list` / `_get` / `_approve` / `_reject`), break-glass
+  credential admin (`certctl_breakglass_list` / `_set_password` /
+  `_unlock` / `_remove`), bootstrap status + consume
+  (`certctl_bootstrap_status` / `_consume`), and audit category filter
+  (`certctl_audit_list_with_category`). All route through the existing
+  HTTP client so server-side permission gates fire unchanged.
+  `certctl_bootstrap_consume`'s tool description carries an explicit
+  "NEVER WIRE THIS TO AUTONOMOUS OPERATION" warning — a leaked
+  bootstrap token mints a fresh admin API key bypassing every other
+  access-control gate, so the tool is for one-shot manual operator
+  invocation only.
+
 - **JWKS auto-refresh on cache-miss (Audit 2026-05-10 MED-6).** When
   the IdP rotates its signing key between pre-login + callback, the
   cached JWKS no longer contains the kid referenced by the inbound ID
