@@ -56,7 +56,11 @@ import (
 // consumes. Phase 3's *oidc.Service satisfies this directly.
 type OIDCAuthHandshaker interface {
 	HandleAuthRequest(ctx context.Context, providerID string) (authURL, cookieValue, preLoginID string, err error)
-	HandleCallback(ctx context.Context, preLoginCookie, code, callbackState, ip, userAgent string) (*oidcsvc.CallbackResult, error)
+	// Audit 2026-05-10 MED-17 — callbackIss carries the value of the
+	// RFC 9207 `iss` query parameter on /auth/oidc/callback (empty
+	// string when the IdP doesn't send it). The service enforces the
+	// check only when the provider's discovery doc advertised support.
+	HandleCallback(ctx context.Context, preLoginCookie, code, callbackState, callbackIss, ip, userAgent string) (*oidcsvc.CallbackResult, error)
 	RefreshKeys(ctx context.Context, providerID string) error
 }
 
@@ -272,6 +276,12 @@ func (h *AuthSessionOIDCHandler) LoginCallback(w http.ResponseWriter, r *http.Re
 	q := r.URL.Query()
 	code := strings.TrimSpace(q.Get("code"))
 	state := strings.TrimSpace(q.Get("state"))
+	// Audit 2026-05-10 MED-17 — RFC 9207 iss URL parameter. NOT
+	// trimmed; preserved exactly as sent so the service-layer compare
+	// against the matched provider's IssuerURL is byte-strict. The IdP
+	// emits this only when advertised in its discovery doc; the
+	// service-layer check is a no-op otherwise.
+	callbackIss := q.Get("iss")
 	if code == "" || state == "" {
 		Error(w, http.StatusBadRequest, "missing code or state query parameter")
 		return
@@ -286,7 +296,7 @@ func (h *AuthSessionOIDCHandler) LoginCallback(w http.ResponseWriter, r *http.Re
 	clientIP := clientIPFromRequest(r)
 	userAgent := r.UserAgent()
 
-	res, err := h.oidcSvc.HandleCallback(r.Context(), preLoginCookie.Value, code, state, clientIP, userAgent)
+	res, err := h.oidcSvc.HandleCallback(r.Context(), preLoginCookie.Value, code, state, callbackIss, clientIP, userAgent)
 	if err != nil {
 		// Audit 2026-05-10 HIGH-7 — instead of a blank 400, redirect
 		// to /login?error=oidc_failed&reason=<category>. The LoginPage
@@ -1152,9 +1162,29 @@ func clientIPFromRequest(r *http.Request) string {
 // classifyOIDCFailure maps an OIDC service error to a stable audit
 // category string. Used for the failure_category audit detail; the
 // wire stays uniform 400.
+//
+// Audit 2026-05-10 MED-17 — the three iss-related sentinel errors are
+// dispatched via errors.Is BEFORE the substring fall-through so they
+// stay distinguishable in the audit row:
+//   - ErrIssParamMissing  → iss_param_missing
+//   - ErrIssParamMismatch → iss_param_mismatch
+//   - ErrIssuerMismatch   → id_token_iss_mismatch
+//
+// errors.Is is used for the iss family because all three error
+// strings contain "iss" and substring matching would either collapse
+// them or order-dependently mis-classify.
 func classifyOIDCFailure(err error) string {
 	if err == nil {
 		return "ok"
+	}
+	// Audit 2026-05-10 MED-17 — typed dispatch for the iss family.
+	switch {
+	case errors.Is(err, oidcsvc.ErrIssParamMissing):
+		return "iss_param_missing"
+	case errors.Is(err, oidcsvc.ErrIssParamMismatch):
+		return "iss_param_mismatch"
+	case errors.Is(err, oidcsvc.ErrIssuerMismatch):
+		return "id_token_iss_mismatch"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

@@ -22,6 +22,18 @@
   cookie lifetime is unchanged (10 minutes) and only the callback handler
   consumes it; the wider path scope is harmless.
 
+- **RFC 9207 `iss` URL parameter check on OIDC callback (Audit 2026-05-10
+  MED-17).** When the matched IdP's discovery doc advertises
+  `authorization_response_iss_parameter_supported: true`, certctl now requires
+  the `iss` query parameter on `/auth/oidc/callback` and enforces a
+  constant-time compare against the configured provider's `IssuerURL`. Mismatch
+  rejects with HTTP 400; the audit row's `failure_category` distinguishes
+  `iss_param_missing` / `iss_param_mismatch` (RFC 9207 leg) from the existing
+  `id_token_iss_mismatch` (in-token iss claim leg). Closes the mix-up-attack
+  defense for modern Keycloak, Authentik, and public-trust CAs that ship
+  RFC-9207 discovery. Providers that don't advertise support (the majority
+  today) keep pre-fix behavior — back-compat is preserved.
+
 ## v2.1.0 - Auth Bundles 1 + 2: RBAC primitive + OIDC SSO + sessions ⚠️
 
 > **SECURITY: AUDIT YOUR API KEYS.**

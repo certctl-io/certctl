@@ -46,7 +46,7 @@ type stubOIDCSvc struct {
 func (s *stubOIDCSvc) HandleAuthRequest(_ context.Context, _ string) (string, string, string, error) {
 	return s.authURL, s.cookie, s.preLoginID, s.authReqErr
 }
-func (s *stubOIDCSvc) HandleCallback(_ context.Context, _, _, _, _, _ string) (*oidcsvc.CallbackResult, error) {
+func (s *stubOIDCSvc) HandleCallback(_ context.Context, _, _, _, _, _, _ string) (*oidcsvc.CallbackResult, error) {
 	return s.callbackRes, s.callbackErr
 }
 func (s *stubOIDCSvc) RefreshKeys(_ context.Context, _ string) error { return s.refreshErr }
@@ -1197,6 +1197,15 @@ func TestClassifyOIDCFailure(t *testing.T) {
 		{errors.New("oidc: groups did not match any configured mapping"), "unmapped_groups"},
 		{errors.New("oidc: configured groups claim missing or malformed"), "groups_missing"},
 		{errors.New("oidc: jwks unreachable"), "jwks_unreachable"},
+		// Audit 2026-05-10 MED-17 — typed dispatch beats the substring
+		// fallthrough because all three iss-family sentinels contain
+		// "iss" in their message and would otherwise mis-classify.
+		{oidcsvc.ErrIssParamMissing, "iss_param_missing"},
+		{oidcsvc.ErrIssParamMismatch, "iss_param_mismatch"},
+		{oidcsvc.ErrIssuerMismatch, "id_token_iss_mismatch"},
+		// Wrapped variants must round-trip through errors.Is.
+		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMissing), "iss_param_missing"},
+		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMismatch), "iss_param_mismatch"},
 		{errors.New("some other error"), "unspecified"},
 	}
 	for _, tc := range cases {

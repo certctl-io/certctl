@@ -100,7 +100,7 @@ func BenchmarkOIDC_SteadyState(b *testing.B) {
 		}
 
 		start := time.Now()
-		_, err = svc.HandleCallback(ctx, cookie, "bench-code", "bench-state", "10.0.0.1", "bench/1.0")
+		_, err = svc.HandleCallback(ctx, cookie, "bench-code", "bench-state", "", "10.0.0.1", "bench/1.0")
 		elapsed := time.Since(start)
 		if err != nil {
 			b.Fatalf("HandleCallback: %v", err)

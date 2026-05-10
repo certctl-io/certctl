@@ -92,7 +92,7 @@ func TestLoggingHygiene_HandleCallback_LeaksNothing(t *testing.T) {
 	defer restore()
 
 	authCode := "secret-auth-code-do-not-leak"
-	res, err := svc.HandleCallback(context.Background(), cookie, authCode, "the-state", "10.0.0.1", "Mozilla")
+	res, err := svc.HandleCallback(context.Background(), cookie, authCode, "the-state", "", "10.0.0.1", "Mozilla")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}

@@ -67,6 +67,12 @@ type mockIdP struct {
 	// downgrade-attack defense.
 	advertisedAlgs []string
 
+	// advertiseIssParameterSupported controls whether the discovery
+	// doc emits `authorization_response_iss_parameter_supported: true`.
+	// Audit 2026-05-10 MED-17 — drives the RFC 9207 iss URL parameter
+	// check in HandleCallback.
+	advertiseIssParameterSupported bool
+
 	// omitUserinfoEndpoint suppresses listing the userinfo endpoint in
 	// the discovery doc. Used to test the "userinfo fallback configured
 	// but provider has no userinfo endpoint" branch in fetchUserinfoGroups.
@@ -139,6 +145,12 @@ func newMockIdPWithTB(t testing.TB) *mockIdP {
 		}
 		if !idp.omitUserinfoEndpoint {
 			doc["userinfo_endpoint"] = base + "/userinfo"
+		}
+		// Audit 2026-05-10 MED-17 — only emit the iss-parameter claim
+		// when explicitly requested so default tests stay back-compat
+		// with pre-fix behavior.
+		if idp.advertiseIssParameterSupported {
+			doc["authorization_response_iss_parameter_supported"] = true
 		}
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(doc)
@@ -469,7 +481,7 @@ func TestService_StateReplayDeniedByConsumeOnce(t *testing.T) {
 // Test 3: forged pre-login cookie returns ErrPreLoginNotFound.
 func TestService_HandleCallback_RejectsForgedPreLoginCookie(t *testing.T) {
 	svc := newServiceForUnitTest(t)
-	_, err := svc.HandleCallback(context.Background(), "bogus-cookie", "any-code", "any-state", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), "bogus-cookie", "any-code", "any-state", "", "ip", "ua")
 	if !errors.Is(err, ErrPreLoginNotFound) {
 		t.Errorf("err = %v; want ErrPreLoginNotFound", err)
 	}
@@ -479,7 +491,7 @@ func TestService_HandleCallback_RejectsForgedPreLoginCookie(t *testing.T) {
 func TestService_HandleCallback_RejectsStateMismatch(t *testing.T) {
 	svc, pl := newServiceForUnitTestWithPL(t)
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-test", "real-state", "real-nonce", "verifier-xxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "wrong-state", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "wrong-state", "", "ip", "ua")
 	if !errors.Is(err, ErrStateMismatch) {
 		t.Errorf("err = %v; want ErrStateMismatch", err)
 	}
@@ -635,7 +647,7 @@ func TestService_HandleCallback_HappyPath(t *testing.T) {
 		t.Fatalf("CreatePreLogin: %v", err)
 	}
 
-	res, err := svc.HandleCallback(context.Background(), cookie, "test-code", "happy-state", "10.0.0.1", "Mozilla/5.0")
+	res, err := svc.HandleCallback(context.Background(), cookie, "test-code", "happy-state", "", "10.0.0.1", "Mozilla/5.0")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -657,7 +669,7 @@ func TestService_HandleCallback_RejectsWrongAudience(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-aud")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-aud", "s", "test-nonce-fixed", "v-aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	// gooidc.Verify catches this first; its wrap reaches us as a wrapped error.
 	// Either ErrAudienceMismatch (our re-check) OR a wrapped verify error is acceptable.
 	if err == nil {
@@ -673,7 +685,7 @@ func TestService_HandleCallback_RejectsNonceMismatch(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-nonce")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-nonce", "s", "expected-nonce", "v-bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrNonceMismatch) {
 		t.Errorf("err = %v; want ErrNonceMismatch", err)
 	}
@@ -686,7 +698,7 @@ func TestService_HandleCallback_RejectsExpiredToken(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-exp")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-exp", "s", "test-nonce-fixed", "v-cccccccccccccccccccccccccccccccccccccccccc")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	// Either ErrTokenExpired (our re-check) or a wrapped verify error is fine.
 	if err == nil {
 		t.Errorf("expected non-nil err for expired token")
@@ -703,7 +715,7 @@ func TestService_HandleCallback_RejectsIATTooOld(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iat")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-iat", "s", "test-nonce-fixed", "v-dddddddddddddddddddddddddddddddddddddddddd")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrIATTooOld) {
 		t.Errorf("err = %v; want ErrIATTooOld", err)
 	}
@@ -716,7 +728,7 @@ func TestService_HandleCallback_RejectsGroupsMissing(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-grp")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-grp", "s", "test-nonce-fixed", "v-eeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsMissing) {
 		t.Errorf("err = %v; want ErrGroupsMissing", err)
 	}
@@ -729,7 +741,7 @@ func TestService_HandleCallback_RejectsGroupsUnmapped(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPLNoMappings(t, idp.URL(), "op-unmap")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-unmap", "s", "test-nonce-fixed", "v-ffffffffffffffffffffffffffffffffffffffffff")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsUnmapped) {
 		t.Errorf("err = %v; want ErrGroupsUnmapped", err)
 	}
@@ -889,7 +901,7 @@ func TestService_UpsertUser_UpdateExistingPath(t *testing.T) {
 
 	// First login creates the user.
 	cookie1, _, _ := pl.CreatePreLogin(context.Background(), "op-upd", "s1", "test-nonce-fixed", "v-1aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
-	res1, err := svc.HandleCallback(context.Background(), cookie1, "code", "s1", "ip", "ua")
+	res1, err := svc.HandleCallback(context.Background(), cookie1, "code", "s1", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("first HandleCallback: %v", err)
 	}
@@ -903,7 +915,7 @@ func TestService_UpsertUser_UpdateExistingPath(t *testing.T) {
 	// Second login by same subject: update path, no new user row.
 	cookie2, _, _ := pl.CreatePreLogin(context.Background(), "op-upd", "s2", "test-nonce-fixed", "v-2aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")
 	idp.overrideEmail = "user-renamed@example.com"
-	res2, err := svc.HandleCallback(context.Background(), cookie2, "code2", "s2", "ip", "ua")
+	res2, err := svc.HandleCallback(context.Background(), cookie2, "code2", "s2", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("second HandleCallback: %v", err)
 	}
@@ -1171,7 +1183,7 @@ func TestService_BootstrapHook_GrantsAdminOnMatch(t *testing.T) {
 	})
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-bootstrap", "s", "test-nonce-fixed", "v-bootstrapxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "10.0.0.1", "Mozilla/5.0")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "10.0.0.1", "Mozilla/5.0")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -1194,7 +1206,7 @@ func TestService_BootstrapHook_NoMatchPreservesEmptyMappingFailClosed(t *testing
 	})
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-no-match", "s", "test-nonce-fixed", "v-nomatchxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsUnmapped) {
 		t.Errorf("err = %v; want ErrGroupsUnmapped (no bootstrap match + empty mappings)", err)
 	}
@@ -1215,7 +1227,7 @@ func TestService_BootstrapHook_AdminAlreadyExistsFallsThroughToNormalMapping(t *
 	})
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-existing-admin", "s", "test-nonce-fixed", "v-existingxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -1237,7 +1249,7 @@ func TestService_BootstrapHook_ErrorWraps(t *testing.T) {
 		return false, fmt.Errorf("simulated AdminExists probe failure")
 	})
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-hook-err", "s", "test-nonce-fixed", "v-errxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "admin bootstrap") {
 		t.Errorf("err = %v; want admin bootstrap wrap", err)
 	}
@@ -1258,7 +1270,7 @@ func TestService_BootstrapHook_IdempotentWhenAdminAlreadyMapped(t *testing.T) {
 	})
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-idem", "s", "test-nonce-fixed", "v-idempxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -1313,7 +1325,7 @@ func TestService_HandleCallback_AZPRequired_OnMultiAud(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-azp-req")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-azp-req", "s", "test-nonce-fixed", "v-azpreqxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrAZPRequired) {
 		t.Errorf("err = %v; want ErrAZPRequired", err)
 	}
@@ -1327,7 +1339,7 @@ func TestService_HandleCallback_AZPMismatch(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-azp-mis")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-azp-mis", "s", "test-nonce-fixed", "v-azpmisxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrAZPMismatch) {
 		t.Errorf("err = %v; want ErrAZPMismatch", err)
 	}
@@ -1345,7 +1357,7 @@ func TestService_HandleCallback_ATHashMismatch(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-ath-mis")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ath-mis", "s", "test-nonce-fixed", "v-athmisxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrATHashMismatch) {
 		t.Errorf("err = %v; want ErrATHashMismatch", err)
 	}
@@ -1362,7 +1374,7 @@ func TestService_HandleCallback_ATHashRequired_WhenAccessTokenPresent(t *testing
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-ath-req")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ath-req", "s", "test-nonce-fixed", "v-athreqxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrATHashRequired) {
 		t.Errorf("err = %v; want ErrATHashRequired", err)
 	}
@@ -1378,7 +1390,7 @@ func TestService_HandleCallback_IATInFuture(t *testing.T) {
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iat-fut")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-iat-fut", "s", "test-nonce-fixed", "v-iatfutxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrIATInFuture) {
 		t.Errorf("err = %v; want ErrIATInFuture", err)
 	}
@@ -1396,7 +1408,7 @@ func TestService_HandleCallback_MappingsMapError(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-map-err", "s", "test-nonce-fixed", "v-mapxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "group-role mapping") {
 		t.Errorf("err = %v; want group-role mapping wrap", err)
 	}
@@ -1414,7 +1426,7 @@ func TestService_HandleCallback_SessionMintError(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-mint-err", "s", "test-nonce-fixed", "v-mintxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "session mint") {
 		t.Errorf("err = %v; want session mint wrap", err)
 	}
@@ -1433,7 +1445,7 @@ func TestService_HandleCallback_UserCreateError(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-uc-err", "s", "test-nonce-fixed", "v-ucxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "upsert user") {
 		t.Errorf("err = %v; want upsert user wrap", err)
 	}
@@ -1453,7 +1465,7 @@ func TestService_HandleCallback_GetByOIDCSubjectNonNotFoundError(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-get-err", "s", "test-nonce-fixed", "v-getxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "simulated query failure") {
 		t.Errorf("err = %v; want simulated query failure unwrap", err)
 	}
@@ -1474,7 +1486,7 @@ func TestService_UpsertUser_DisplayNameFallsBackToEmail(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-name-fb", "s", "test-nonce-fixed", "v-namxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -1500,7 +1512,7 @@ func TestService_FetchUserinfoGroups_HappyPath_OnEmptyIDTokenGroups(t *testing.T
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ui-ok", "s", "test-nonce-fixed", "v-uioxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -1525,7 +1537,7 @@ func TestService_FetchUserinfoGroups_ReturnsErrGroupsMissing_WhenUserinfoAlsoEmp
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ui-empty", "s", "test-nonce-fixed", "v-uixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsMissing) {
 		t.Errorf("err = %v; want ErrGroupsMissing", err)
 	}
@@ -1547,7 +1559,7 @@ func TestService_FetchUserinfoGroups_ReturnsErrGroupsMissing_WhenEndpointMissing
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ui-noendpoint", "s", "test-nonce-fixed", "v-uixxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsMissing) {
 		t.Errorf("err = %v; want ErrGroupsMissing", err)
 	}
@@ -1691,7 +1703,7 @@ func TestService_HandleCallback_RejectsTokenResponseMissingIDToken(t *testing.T)
 	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-no-idtok")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-no-idtok", "s", "test-nonce-fixed", "v-noidxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "missing id_token") {
 		t.Errorf("err = %v; want missing id_token error", err)
 	}
@@ -1714,7 +1726,7 @@ func TestService_FetchUserinfoGroups_ReturnsErrGroupsMissing_WhenUserinfoFails(t
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-ui-500", "s", "test-nonce-fixed", "v-uifxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if !errors.Is(err, ErrGroupsMissing) {
 		t.Errorf("err = %v; want ErrGroupsMissing", err)
 	}
@@ -1760,6 +1772,103 @@ func TestService_AlgPinning_HeaderAlgValueUnterminatedString(t *testing.T) {
 	}
 }
 
+// =============================================================================
+// MED-17 regression tests — RFC 9207 iss URL parameter check.
+//
+// HandleCallback REQUIRES the `iss` callback URL parameter when the
+// provider's discovery doc advertises
+// authorization_response_iss_parameter_supported=true. Pre-fix the
+// parameter was ignored; mix-up attacks could route the auth code to
+// the wrong relying-party endpoint without detection.
+// =============================================================================
+
+// TestService_HandleCallback_MED17_NoSupport_AnyIssAccepted pins the
+// back-compat case: providers that don't advertise iss-parameter
+// support (the majority today) get the same behavior as before —
+// callback iss is not required and an arbitrary value is ignored.
+func TestService_HandleCallback_MED17_NoSupport_AnyIssAccepted(t *testing.T) {
+	idp := newMockIdP(t)
+	// advertiseIssParameterSupported deliberately left false.
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iss-back-compat")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-iss-back-compat", "iss-bc-state", "test-nonce-fixed", "v-issbcxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+
+	// Pass a callbackIss value the provider didn't advertise support
+	// for — the service must ignore it.
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "iss-bc-state", "https://malicious.example/", "ip", "ua")
+	if err != nil {
+		t.Fatalf("HandleCallback (no-support, arbitrary callbackIss): %v; want nil (parameter must be ignored)", err)
+	}
+	if res == nil {
+		t.Fatalf("CallbackResult nil for back-compat happy path")
+	}
+}
+
+// TestService_HandleCallback_MED17_SupportButMissing rejects with
+// ErrIssParamMissing when the provider advertised support but the
+// callback URL omitted the iss query parameter.
+func TestService_HandleCallback_MED17_SupportButMissing(t *testing.T) {
+	idp := newMockIdP(t)
+	idp.advertiseIssParameterSupported = true
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iss-missing")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-iss-missing", "iss-miss-state", "test-nonce-fixed", "v-issmsxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	_, err = svc.HandleCallback(context.Background(), cookie, "code", "iss-miss-state", "", "ip", "ua")
+	if !errors.Is(err, ErrIssParamMissing) {
+		t.Fatalf("err = %v; want ErrIssParamMissing", err)
+	}
+}
+
+// TestService_HandleCallback_MED17_SupportButMismatch rejects with
+// ErrIssParamMismatch when the provider advertised support and the
+// callback URL supplied an iss query parameter but the value doesn't
+// match the matched provider's IssuerURL. This is the load-bearing
+// mix-up-attack defense.
+func TestService_HandleCallback_MED17_SupportButMismatch(t *testing.T) {
+	idp := newMockIdP(t)
+	idp.advertiseIssParameterSupported = true
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iss-mismatch")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-iss-mismatch", "iss-mm-state", "test-nonce-fixed", "v-issmmxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	// Supply an honest-looking but wrong iss — the impersonator's URL
+	// instead of the matched provider's IssuerURL.
+	_, err = svc.HandleCallback(context.Background(), cookie, "code", "iss-mm-state", "https://attacker.example/", "ip", "ua")
+	if !errors.Is(err, ErrIssParamMismatch) {
+		t.Fatalf("err = %v; want ErrIssParamMismatch", err)
+	}
+}
+
+// TestService_HandleCallback_MED17_SupportAndCorrect succeeds when the
+// callback iss exactly matches the matched provider's IssuerURL —
+// the success path that proves the gate isn't over-eager.
+func TestService_HandleCallback_MED17_SupportAndCorrect(t *testing.T) {
+	idp := newMockIdP(t)
+	idp.advertiseIssParameterSupported = true
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-iss-ok")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-iss-ok", "iss-ok-state", "test-nonce-fixed", "v-issokxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	// The matched provider's IssuerURL is the mockIdP server URL.
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "iss-ok-state", idp.URL(), "ip", "ua")
+	if err != nil {
+		t.Fatalf("HandleCallback (correct iss): %v", err)
+	}
+	if res == nil {
+		t.Fatalf("CallbackResult nil for happy iss path")
+	}
+}
+
 // TestService_UpsertUser_ValidateErrorOnEmptyEmail pins the
 // User.Validate failure path. The IdP returns an empty email (missing
 // claim); the upsertUser display-name fallback resolves to "" too;
@@ -1776,7 +1885,7 @@ func TestService_UpsertUser_ValidateErrorOnEmptyEmail(t *testing.T) {
 	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
 
 	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-validate-err", "s", "test-nonce-fixed", "v-valxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
-	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "ip", "ua")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "s", "", "ip", "ua")
 	if err == nil || !strings.Contains(err.Error(), "validate") {
 		t.Errorf("err = %v; want validate wrap", err)
 	}

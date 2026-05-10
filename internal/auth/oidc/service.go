@@ -98,6 +98,15 @@ type providerEntry struct {
 	oauthConfig *oauth2.Config
 	allowedAlgs []string // intersected: domain config ∩ allow-list ∩ IdP-advertised
 	plaintext   []byte   // decrypted client secret; held for token exchange
+
+	// Audit 2026-05-10 MED-17 — RFC 9207 iss-URL-parameter support.
+	// Populated from the discovery doc's
+	// `authorization_response_iss_parameter_supported` claim during
+	// getOrLoad. When true, HandleCallback REQUIRES a non-empty
+	// callback iss URL param and compares it against the provider's
+	// IssuerURL. When false (the default for most IdPs that haven't
+	// rolled RFC 9207 yet), the check is skipped.
+	issParamSupported bool
 }
 
 // OIDCProviderLookup is a narrow read-side projection of
@@ -160,7 +169,29 @@ var (
 
 	// ErrIssuerMismatch: ID token `iss` doesn't match the configured
 	// provider issuer_url. HTTP 400.
+	//
+	// Audit 2026-05-10 MED-17 — also returned when the RFC 9207 iss
+	// URL parameter check fails (provider advertises
+	// authorization_response_iss_parameter_supported=true but the
+	// callback iss is missing or mismatched). The handler's
+	// classifyOIDCFailure breaks the two cases apart by audit
+	// failure_category (iss_param_missing / iss_param_mismatch /
+	// id_token_iss_mismatch).
 	ErrIssuerMismatch = errors.New("oidc: issuer mismatch")
+
+	// ErrIssParamMissing: provider's discovery doc advertises
+	// authorization_response_iss_parameter_supported=true but the
+	// callback URL had no `iss` query parameter. Per RFC 9207 §2.4 the
+	// client MUST reject the response in this case. HTTP 400. Pre-fix,
+	// the callback path ignored the parameter entirely.
+	ErrIssParamMissing = errors.New("oidc: provider advertises iss-parameter support but callback omitted it")
+
+	// ErrIssParamMismatch: provider's discovery doc advertises
+	// authorization_response_iss_parameter_supported=true and the
+	// callback supplied an `iss` query parameter, but it doesn't match
+	// the matched provider's issuer URL. Mixed-up attack defense per
+	// RFC 9207 §2.3. HTTP 400.
+	ErrIssParamMismatch = errors.New("oidc: callback iss parameter does not match provider issuer URL")
 
 	// ErrAudienceMismatch: ID token `aud` doesn't include the
 	// configured client_id. HTTP 400.
@@ -383,9 +414,18 @@ type CallbackResult struct {
 }
 
 // HandleCallback completes the OIDC flow.
+//
+// Audit 2026-05-10 MED-17 — `callbackIss` is the value of the `iss`
+// query parameter on /auth/oidc/callback, exactly as sent by the IdP.
+// When the matched provider's discovery doc advertises
+// authorization_response_iss_parameter_supported=true (RFC 9207 §3),
+// we require this parameter and verify it equals the provider's
+// IssuerURL. When the provider doesn't advertise support (the default
+// for most IdPs that haven't rolled RFC 9207 yet), the parameter is
+// ignored — preserving back-compat with the pre-fix call path.
 func (s *Service) HandleCallback(
 	ctx context.Context,
-	preLoginCookie, code, callbackState, ip, userAgent string,
+	preLoginCookie, code, callbackState, callbackIss, ip, userAgent string,
 ) (*CallbackResult, error) {
 	// Step 1: consume the pre-login row (single-use).
 	providerID, storedState, storedNonce, verifier, err := s.preLogin.LookupAndConsume(ctx, preLoginCookie)
@@ -401,6 +441,23 @@ func (s *Service) HandleCallback(
 	entry, err := s.getOrLoad(ctx, providerID)
 	if err != nil {
 		return nil, err
+	}
+
+	// Step 2.5 — Audit 2026-05-10 MED-17 — RFC 9207 iss URL parameter
+	// check. Only enforced when the provider advertised support in its
+	// discovery doc. Compares against the matched provider's
+	// IssuerURL (which is what go-oidc's gooidc.NewProvider verified
+	// the discovery doc's own iss against during getOrLoad). Mismatch
+	// is the load-bearing defense against mix-up attacks where the
+	// honest IdP returns the auth code to the wrong endpoint because
+	// of a malicious co-tenant relying-party.
+	if entry.issParamSupported {
+		if callbackIss == "" {
+			return nil, ErrIssParamMissing
+		}
+		if subtle.ConstantTimeCompare([]byte(callbackIss), []byte(entry.cfgRow.IssuerURL)) != 1 {
+			return nil, ErrIssParamMismatch
+		}
 	}
 
 	// Step 3: exchange the auth code for tokens (with PKCE verifier).
@@ -755,8 +812,14 @@ func (s *Service) getOrLoad(ctx context.Context, providerID string) (*providerEn
 	// IdP downgrade-attack defense. The discovery doc's
 	// id_token_signing_alg_values_supported MUST NOT include any
 	// disallowed alg.
+	//
+	// Audit 2026-05-10 MED-17 — we also read
+	// `authorization_response_iss_parameter_supported` from the same
+	// claims call to drive the RFC 9207 iss-URL-parameter check in
+	// HandleCallback.
 	var advertised struct {
-		IDTokenSigningAlgValuesSupported []string `json:"id_token_signing_alg_values_supported"`
+		IDTokenSigningAlgValuesSupported       []string `json:"id_token_signing_alg_values_supported"`
+		AuthorizationResponseIssParamSupported bool     `json:"authorization_response_iss_parameter_supported"`
 	}
 	if cerr := provider.Claims(&advertised); cerr != nil {
 		return nil, fmt.Errorf("oidc: discovery claims: %w", cerr)
@@ -794,12 +857,13 @@ func (s *Service) getOrLoad(ctx context.Context, providerID string) (*providerEn
 	}
 
 	entry = &providerEntry{
-		cfgRow:      cfgRow,
-		provider:    provider,
-		verifier:    verifier,
-		oauthConfig: oauthConfig,
-		allowedAlgs: allowed,
-		plaintext:   plaintext,
+		cfgRow:            cfgRow,
+		provider:          provider,
+		verifier:          verifier,
+		oauthConfig:       oauthConfig,
+		allowedAlgs:       allowed,
+		plaintext:         plaintext,
+		issParamSupported: advertised.AuthorizationResponseIssParamSupported,
 	}
 
 	s.mu.Lock()

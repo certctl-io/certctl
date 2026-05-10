@@ -432,7 +432,7 @@ func TestKeycloakIntegration_AuthCodeFlow_HappyPath(t *testing.T) {
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
 
 	// Complete the OIDC handshake.
-	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "10.0.0.1", "integration-test/1.0")
+	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "", "10.0.0.1", "integration-test/1.0")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -491,7 +491,7 @@ func TestKeycloakIntegration_LogoutRevokesSession(t *testing.T) {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "ip", "ua")
+	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "", "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -534,7 +534,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 		t.Fatalf("pre-rotate HandleAuthRequest: %v", err)
 	}
 	preCode, preState := driveAuthCodeFlow(t, preAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, "ip", "ua"); err != nil {
+	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, "", "ip", "ua"); err != nil {
 		t.Fatalf("pre-rotate HandleCallback: %v", err)
 	}
 
@@ -553,7 +553,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 		t.Fatalf("post-rotate HandleAuthRequest: %v", err)
 	}
 	postCode, postState := driveAuthCodeFlow(t, postAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	if _, err := svc.HandleCallback(ctx, postCookie, postCode, postState, "ip", "ua"); err != nil {
+	if _, err := svc.HandleCallback(ctx, postCookie, postCode, postState, "", "ip", "ua"); err != nil {
 		t.Fatalf("post-rotate HandleCallback: %v (rotation broke validation?)", err)
 	}
 }
@@ -578,7 +578,7 @@ func TestKeycloakIntegration_UnmappedGroupsFailsClosed(t *testing.T) {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.ViewerUser, testfixtures.ViewerPassword)
-	_, err = svc.HandleCallback(ctx, preCookie, code, state, "ip", "ua")
+	_, err = svc.HandleCallback(ctx, preCookie, code, state, "", "ip", "ua")
 	if !errors.Is(err, oidc.ErrGroupsUnmapped) {
 		t.Errorf("HandleCallback err = %v, want ErrGroupsUnmapped (fail-closed for unmapped groups)", err)
 	}
