@@ -19,6 +19,11 @@ import type { ReactNode } from 'react';
 //   1. The login form renders.
 //   2. An auth error containing a literal <script> tag does NOT execute.
 //   3. The literal payload text appears as escaped content.
+//
+// Bundle 2 Phase 8 add:
+//   4. When /auth/info returns oidc_providers[], a "Sign in with X" button
+//      renders per provider linking to the provider's login_url.
+//   5. When /auth/info returns no providers, the OIDC block does NOT render.
 // -----------------------------------------------------------------------------
 
 const xssError = '<script data-xss="login-error">window.__xss_pwned__=1;</script>';
@@ -38,7 +43,12 @@ vi.mock('../components/AuthProvider', () => ({
   }),
 }));
 
+vi.mock('../api/client', () => ({
+  getAuthInfo: vi.fn(),
+}));
+
 import LoginPage from './LoginPage';
+import * as client from '../api/client';
 
 function renderWithRouter(ui: ReactNode) {
   return render(<MemoryRouter>{ui}</MemoryRouter>);
@@ -50,6 +60,11 @@ describe('LoginPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     cleanup();
     mockError = null;
     delete (window as unknown as { __xss_pwned__?: number }).__xss_pwned__;
+    // Default: no providers configured.
+    vi.mocked(client.getAuthInfo).mockResolvedValue({
+      auth_type: 'api-key',
+      required: true,
+    });
   });
 
   it('renders the login form', () => {
@@ -91,5 +106,39 @@ describe('LoginPage — render + XSS hardening (M-026 / M-029 Pass 3)', () => {
     await waitFor(() => {
       expect(screen.getByRole('button', { name: /Sign In/i })).toBeDisabled();
     });
+  });
+
+  it('renders OIDC "Sign in with X" buttons when /auth/info returns providers (Bundle 2 Phase 8)', async () => {
+    vi.mocked(client.getAuthInfo).mockResolvedValue({
+      auth_type: 'api-key',
+      required: true,
+      oidc_providers: [
+        { id: 'op-okta', display_name: 'Okta', login_url: '/auth/oidc/login?provider_id=op-okta' },
+        { id: 'op-google', display_name: 'Google', login_url: '/auth/oidc/login?provider_id=op-google' },
+      ],
+    });
+    renderWithRouter(<LoginPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('login-oidc-providers')).toBeTruthy();
+    });
+    const oktaBtn = screen.getByTestId('login-oidc-button-op-okta') as HTMLAnchorElement;
+    expect(oktaBtn.href).toContain('/auth/oidc/login?provider_id=op-okta');
+    expect(oktaBtn.textContent).toContain('Okta');
+    const googleBtn = screen.getByTestId('login-oidc-button-op-google') as HTMLAnchorElement;
+    expect(googleBtn.textContent).toContain('Google');
+    // API-key form remains as fallback.
+    expect(screen.getByTestId('login-api-key-form')).toBeTruthy();
+  });
+
+  it('omits the OIDC block when /auth/info returns no providers (Bundle 2 Phase 8)', async () => {
+    vi.mocked(client.getAuthInfo).mockResolvedValue({
+      auth_type: 'api-key',
+      required: true,
+    });
+    renderWithRouter(<LoginPage />);
+    await waitFor(() => {
+      expect(screen.getByTestId('login-api-key-form')).toBeTruthy();
+    });
+    expect(screen.queryByTestId('login-oidc-providers')).toBeNull();
   });
 });

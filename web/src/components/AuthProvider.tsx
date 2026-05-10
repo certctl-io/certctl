@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { getAuthInfo, checkAuth, setApiKey } from '../api/client';
+import { getAuthInfo, checkAuth, setApiKey, logout as apiLogout } from '../api/client';
 
 interface AuthState {
   loading: boolean;
@@ -96,6 +96,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Bundle 2 Phase 8 — fire POST /auth/logout so the server can revoke the
+    // session row + clear the HttpOnly session cookie. The API logout helper
+    // sends `credentials: 'include'`. Errors are swallowed (the user's intent
+    // is still to be logged out locally; e.g. cookie already expired).
+    void apiLogout().catch(() => undefined);
     setApiKey(null);
     setAuthenticated(false);
     setUser('');
