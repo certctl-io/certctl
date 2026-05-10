@@ -203,23 +203,27 @@ func (s *itestSessionMinter) Revoke(cookieValue string) {
 type itestPreLogin struct {
 	rows map[string]itestPreLoginRow
 }
-type itestPreLoginRow struct{ providerID, state, nonce, verifier string }
+type itestPreLoginRow struct {
+	providerID, state, nonce, verifier string
+	// Audit 2026-05-10 MED-16 — UA/IP binding capture.
+	clientIP, userAgent string
+}
 
 func newItestPreLogin() *itestPreLogin {
 	return &itestPreLogin{rows: make(map[string]itestPreLoginRow)}
 }
-func (s *itestPreLogin) CreatePreLogin(_ context.Context, providerID, state, nonce, verifier string) (string, string, error) {
+func (s *itestPreLogin) CreatePreLogin(_ context.Context, providerID, state, nonce, verifier, clientIP, userAgent string) (string, string, error) {
 	cookieVal := fmt.Sprintf("pl-keycloak-itest-%d", len(s.rows)+1)
-	s.rows[cookieVal] = itestPreLoginRow{providerID, state, nonce, verifier}
+	s.rows[cookieVal] = itestPreLoginRow{providerID, state, nonce, verifier, clientIP, userAgent}
 	return cookieVal, "ses-" + cookieVal, nil
 }
-func (s *itestPreLogin) LookupAndConsume(_ context.Context, cookie string) (string, string, string, string, error) {
+func (s *itestPreLogin) LookupAndConsume(_ context.Context, cookie string) (string, string, string, string, string, string, error) {
 	r, ok := s.rows[cookie]
 	if !ok {
-		return "", "", "", "", oidc.ErrPreLoginNotFound
+		return "", "", "", "", "", "", oidc.ErrPreLoginNotFound
 	}
 	delete(s.rows, cookie)
-	return r.providerID, r.state, r.nonce, r.verifier, nil
+	return r.providerID, r.state, r.nonce, r.verifier, r.clientIP, r.userAgent, nil
 }
 
 // ---------------------------------------------------------------------------
