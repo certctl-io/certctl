@@ -396,7 +396,10 @@ func main() {
 	oidcProviderRepo := postgres.NewOIDCProviderRepository(db)
 	oidcMappingRepo := postgres.NewGroupRoleMappingRepository(db)
 	oidcUserRepo := postgres.NewUserRepository(db)
-	oidcPreLoginRepo := postgres.NewPreLoginRepository(db)
+	// Audit 2026-05-10 HIGH-5: thread CERTCTL_CONFIG_ENCRYPTION_KEY into the
+	// pre-login repo so state/nonce/PKCE-verifier are encrypted at rest. Same
+	// key already protects OIDC client secrets and session signing keys.
+	oidcPreLoginRepo := postgres.NewPreLoginRepository(db, cfg.Encryption.ConfigEncryptionKey)
 	preLoginAdapter := oidcsvc.NewPreLoginAdapter(
 		oidcPreLoginRepo,
 		sessionKeyRepo, // Phase 4 SessionSigningKeyRepository
