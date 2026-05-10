@@ -49,6 +49,7 @@ import (
 	"encoding/base64"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strings"
 	"time"
 
@@ -142,9 +143,13 @@ type AuditRecorder interface {
 
 // SessionMinter is the slice of *session.Service the Authenticate path
 // uses to mint a post-login session after a successful break-glass
-// password verify.
+// password verify. Audit 2026-05-10 HIGH-1 closure: SetPassword and
+// RemoveCredential now also call RevokeAllForActor on the same
+// session.Service so a phished-then-rotated password no longer leaves
+// stale sessions alive (CWE-613). The interface gains RevokeAllForActor.
 type SessionMinter interface {
 	Create(ctx context.Context, actorID, actorType, ip, userAgent string) (cookieValue, csrfToken string, err error)
+	RevokeAllForActor(ctx context.Context, actorID, actorType string) error
 }
 
 // =============================================================================
@@ -253,6 +258,25 @@ func (s *Service) SetPassword(ctx context.Context, callerActorID, targetActorID,
 
 	s.recordAudit(ctx, "auth.breakglass_password_set", callerActorID, domain.ActorTypeUser, targetActorID,
 		map[string]interface{}{"caller_actor_id": callerActorID, "target_actor_id": targetActorID})
+
+	// Audit 2026-05-10 HIGH-1 closure — revoke every active session for
+	// the target actor. A phished-then-rotated password must NOT leave
+	// the attacker's session alive. Best-effort: failure here is logged
+	// + audited but DOES NOT roll back the password rotation (the
+	// operator rotated for a reason, and forcing rollback opens a worse
+	// window). The audit row distinguishes outcome=session_revoke_failed.
+	if s.sessions != nil {
+		if rerr := s.sessions.RevokeAllForActor(ctx, targetActorID, string(domain.ActorTypeUser)); rerr != nil {
+			slog.WarnContext(ctx, "breakglass: session revoke after password rotation failed",
+				"target_actor_id", targetActorID, "err", rerr)
+			s.recordAudit(ctx, "auth.breakglass_password_set", callerActorID, domain.ActorTypeUser, targetActorID,
+				map[string]interface{}{
+					"caller_actor_id": callerActorID,
+					"target_actor_id": targetActorID,
+					"outcome":         "session_revoke_failed",
+				})
+		}
+	}
 
 	return &SetPasswordResult{
 		ActorID:   targetActorID,
@@ -405,6 +429,23 @@ func (s *Service) RemoveCredential(ctx context.Context, callerActorID, targetAct
 	}
 	s.recordAudit(ctx, "auth.breakglass_credential_removed", callerActorID, domain.ActorTypeUser, targetActorID,
 		map[string]interface{}{"caller_actor_id": callerActorID, "target_actor_id": targetActorID})
+
+	// Audit 2026-05-10 HIGH-1 closure — credential removal must also
+	// revoke every active break-glass session for the target actor.
+	// Best-effort with WARN on failure; the credential removal already
+	// succeeded so we don't roll back.
+	if s.sessions != nil {
+		if rerr := s.sessions.RevokeAllForActor(ctx, targetActorID, string(domain.ActorTypeUser)); rerr != nil {
+			slog.WarnContext(ctx, "breakglass: session revoke after credential remove failed",
+				"target_actor_id", targetActorID, "err", rerr)
+			s.recordAudit(ctx, "auth.breakglass_credential_removed", callerActorID, domain.ActorTypeUser, targetActorID,
+				map[string]interface{}{
+					"caller_actor_id": callerActorID,
+					"target_actor_id": targetActorID,
+					"outcome":         "session_revoke_failed",
+				})
+		}
+	}
 	return nil
 }
 

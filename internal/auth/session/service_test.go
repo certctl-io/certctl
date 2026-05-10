@@ -67,6 +67,19 @@ func (r *stubSessionRepo) Get(_ context.Context, id string) (*sessiondomain.Sess
 	return &clone, nil
 }
 
+func (r *stubSessionRepo) ListByActor(_ context.Context, actorID, actorType, _ string) ([]*sessiondomain.Session, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	var out []*sessiondomain.Session
+	for _, row := range r.rows {
+		if row.ActorID == actorID && row.ActorType == actorType {
+			clone := *row
+			out = append(out, &clone)
+		}
+	}
+	return out, nil
+}
+
 func (r *stubSessionRepo) UpdateLastSeen(_ context.Context, id string) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()

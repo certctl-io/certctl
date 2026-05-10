@@ -30,6 +30,22 @@ type AuthHandler struct {
 	perms   AuthPermissionService
 	actors  AuthActorRoleService
 	checker auth.PermissionChecker
+	// csrfRotator is the optional session-CSRF-rotation hook called
+	// post-role-mutation. Audit 2026-05-10 HIGH-2 closure — when an
+	// actor's role set changes, every active session's CSRF token is
+	// rotated as defense-in-depth against token leak preceding the
+	// privilege change. Nil-safe: when unset (pre-Bundle-2 wiring,
+	// tests that don't care about CSRF), the wires are no-ops.
+	csrfRotator CSRFRotator
+}
+
+// CSRFRotator is the projection of *session.Service used by AuthHandler
+// to rotate CSRF tokens across an actor's active sessions after a role
+// mutation. RotateCSRFTokenForActor returns the count of rotated rows
+// and NEVER errors out — rotation is defense-in-depth and must not
+// block the role mutation that triggered it.
+type CSRFRotator interface {
+	RotateCSRFTokenForActor(ctx context.Context, actorID, actorType string) int
 }
 
 // AuthRoleService is the service-layer dependency the AuthHandler uses
@@ -80,6 +96,16 @@ func NewAuthHandler(
 		actors:  actors,
 		checker: checker,
 	}
+}
+
+// WithCSRFRotator returns a copy of the handler with the CSRF-rotation
+// hook installed. Audit 2026-05-10 HIGH-2 closure — production wiring
+// in cmd/server/main.go calls this with the post-Bundle-2
+// session.Service; pre-Bundle-2 deployments + tests can leave the
+// rotator nil and the role-mutation handlers simply skip rotation.
+func (h AuthHandler) WithCSRFRotator(r CSRFRotator) AuthHandler {
+	h.csrfRotator = r
+	return h
 }
 
 // =============================================================================
@@ -410,6 +436,14 @@ func (h AuthHandler) AssignRoleToKey(w http.ResponseWriter, r *http.Request) {
 		writeAuthError(w, err)
 		return
 	}
+	// Audit 2026-05-10 HIGH-2 closure — rotate CSRF across every
+	// active session of the target actor. Non-blocking (per-row
+	// failures are logged inside RotateCSRFTokenForActor but the
+	// return value isn't an error). API-key actors typically have no
+	// sessions (Bearer-only) so this is a no-op for them.
+	if h.csrfRotator != nil {
+		_ = h.csrfRotator.RotateCSRFTokenForActor(r.Context(), keyID, string(domain.ActorTypeAPIKey))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
@@ -425,6 +459,10 @@ func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 	if err := h.actors.Revoke(r.Context(), caller, keyID, domain.ActorTypeAPIKey, roleID); err != nil {
 		writeAuthError(w, err)
 		return
+	}
+	// Audit 2026-05-10 HIGH-2 closure — rotate CSRF post-revoke.
+	if h.csrfRotator != nil {
+		_ = h.csrfRotator.RotateCSRFTokenForActor(r.Context(), keyID, string(domain.ActorTypeAPIKey))
 	}
 	w.WriteHeader(http.StatusNoContent)
 }

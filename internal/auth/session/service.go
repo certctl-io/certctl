@@ -72,6 +72,7 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
+	"log/slog"
 	"strconv"
 	"strings"
 	"time"
@@ -173,6 +174,11 @@ var (
 type SessionRepo interface {
 	Create(ctx context.Context, s *sessiondomain.Session) error
 	Get(ctx context.Context, id string) (*sessiondomain.Session, error)
+	// ListByActor returns every session row for the (actor_id, actor_type)
+	// pair in the tenant. Used by RotateCSRFTokenForActor (Audit
+	// 2026-05-10 HIGH-2). Order is implementation-defined; the caller
+	// filters revoked/expired rows post-fetch.
+	ListByActor(ctx context.Context, actorID, actorType, tenantID string) ([]*sessiondomain.Session, error)
 	UpdateLastSeen(ctx context.Context, id string) error
 	UpdateCSRFTokenHash(ctx context.Context, id, csrfTokenHash string) error
 	Revoke(ctx context.Context, id string) error
@@ -551,6 +557,44 @@ func (s *Service) RotateCSRFToken(ctx context.Context, sessionID string) (string
 	s.recordAudit(ctx, "auth.session_csrf_rotated", "system", domain.ActorTypeSystem, sessionID,
 		map[string]interface{}{"session_id": sessionID})
 	return csrfToken, nil
+}
+
+// RotateCSRFTokenForActor rotates the CSRF token across every active
+// (non-revoked) session of the given actor. Returns the count of
+// successfully rotated rows. Per-row failures are logged + skipped —
+// the function NEVER returns an error to the caller, because rotation
+// is defense-in-depth and must not block the role-mutation that
+// triggered it.
+//
+// Audit 2026-05-10 HIGH-2 closure — wires the documented "any actor-
+// role mutation rotates this actor's CSRF tokens" contract (see
+// RotateCSRFToken doc block). Pre-fix the rotate primitive existed
+// but the only call site was Service.Create (login mint).
+func (s *Service) RotateCSRFTokenForActor(ctx context.Context, actorID, actorType string) int {
+	rows, err := s.sessions.ListByActor(ctx, actorID, actorType, s.tenantID)
+	if err != nil {
+		slog.WarnContext(ctx, "session: list-by-actor for csrf rotate failed",
+			"actor_id", actorID, "actor_type", actorType, "err", err)
+		return 0
+	}
+	rotated := 0
+	now := s.clockNow().UTC()
+	for _, sess := range rows {
+		// Skip revoked / expired rows — they're not consultable anyway.
+		if sess.RevokedAt != nil {
+			continue
+		}
+		if sess.AbsoluteExpiresAt.Before(now) || sess.IdleExpiresAt.Before(now) {
+			continue
+		}
+		if _, rerr := s.RotateCSRFToken(ctx, sess.ID); rerr != nil {
+			slog.WarnContext(ctx, "session: csrf rotate per-row failed",
+				"actor_id", actorID, "session_id", sess.ID, "err", rerr)
+			continue
+		}
+		rotated++
+	}
+	return rotated
 }
 
 // =============================================================================

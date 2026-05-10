@@ -115,6 +115,10 @@ func (r *slowSessionRepo) Get(ctx context.Context, id string) (*sessiondomain.Se
 	time.Sleep(r.delay)
 	return r.inner.Get(ctx, id)
 }
+func (r *slowSessionRepo) ListByActor(ctx context.Context, actorID, actorType, tenantID string) ([]*sessiondomain.Session, error) {
+	time.Sleep(r.delay)
+	return r.inner.ListByActor(ctx, actorID, actorType, tenantID)
+}
 func (r *slowSessionRepo) UpdateLastSeen(ctx context.Context, id string) error {
 	time.Sleep(r.delay)
 	return r.inner.UpdateLastSeen(ctx, id)

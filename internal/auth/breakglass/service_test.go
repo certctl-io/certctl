@@ -146,6 +146,13 @@ type stubSessions struct {
 	cookieValue string
 	csrfToken   string
 	createErr   error
+	// Audit 2026-05-10 HIGH-1 wire — track RevokeAllForActor calls so
+	// the new TestService_SetPassword_RevokesExistingSessions /
+	// TestService_RemoveCredential_RevokesExistingSessions tests can
+	// assert the wire.
+	revokeAllIDs   []string
+	revokeAllTypes []string
+	revokeAllErr   error
 }
 
 func (s *stubSessions) Create(_ context.Context, _, _, _, _ string) (string, string, error) {
@@ -159,6 +166,12 @@ func (s *stubSessions) Create(_ context.Context, _, _, _, _ string) (string, str
 		s.csrfToken = "csrf-default"
 	}
 	return s.cookieValue, s.csrfToken, nil
+}
+
+func (s *stubSessions) RevokeAllForActor(_ context.Context, actorID, actorType string) error {
+	s.revokeAllIDs = append(s.revokeAllIDs, actorID)
+	s.revokeAllTypes = append(s.revokeAllTypes, actorType)
+	return s.revokeAllErr
 }
 
 // =============================================================================

@@ -1324,7 +1324,7 @@ func main() {
 			authsvc.NewPermissionService(authPermRepo),
 			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
 			authCheckerAdapter,
-		),
+		).WithCSRFRotator(sessionService), // Audit 2026-05-10 HIGH-2 — CSRF rotation on role mutation.
 		// Bundle 1 Phase 6 — bootstrap day-0 admin endpoint. The
 		// service is wired above; handler is auth-exempt at the
 		// router (gated by the bootstrap.Strategy itself).
@@ -2722,6 +2722,14 @@ func (a breakglassSessionMinterAdapter) Create(ctx context.Context, actorID, act
 		return "", "", err
 	}
 	return res.CookieValue, res.CSRFToken, nil
+}
+
+// RevokeAllForActor — Audit 2026-05-10 HIGH-1 wire. After a break-glass
+// password rotation or credential removal, every active session for the
+// target actor must be revoked so a phished-then-rotated credential
+// doesn't leave the attacker's session live.
+func (a breakglassSessionMinterAdapter) RevokeAllForActor(ctx context.Context, actorID, actorType string) error {
+	return a.svc.RevokeAllForActor(ctx, actorID, actorType)
 }
 
 // oidcProvidersListAdapter bridges the postgres OIDCProviderRepository
