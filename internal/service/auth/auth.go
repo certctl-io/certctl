@@ -22,6 +22,7 @@ import (
 
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
+	"github.com/certctl-io/certctl/internal/repository"
 )
 
 // Sentinel errors for the service layer. Handler / middleware code
@@ -63,6 +64,19 @@ type AuditService interface {
 	) error
 	RecordEventWithCategory(
 		ctx context.Context,
+		actor string,
+		actorType domain.ActorType,
+		action, eventCategory, resourceType, resourceID string,
+		details map[string]interface{},
+	) error
+	// RecordEventWithCategoryWithTx records the audit row using the
+	// supplied repository.Querier so it commits atomically with the
+	// caller's transaction. Audit 2026-05-10 HIGH-6 closure — closes
+	// the gap where auth-mutation paths used a non-transactional audit
+	// emit, leaving orphan action rows on partial failure.
+	RecordEventWithCategoryWithTx(
+		ctx context.Context,
+		q repository.Querier,
 		actor string,
 		actorType domain.ActorType,
 		action, eventCategory, resourceType, resourceID string,

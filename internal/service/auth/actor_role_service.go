@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
@@ -173,5 +174,21 @@ func (s *ActorRoleService) recordAudit(ctx context.Context, caller *Caller, acti
 	// authentication / authorization event. The auditor role queries
 	// /v1/audit?category=auth to surface this slice without
 	// also pulling in cert.* events.
-	_ = s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details)
+	//
+	// Audit 2026-05-10 HIGH-6 partial closure: the audit emit is still
+	// best-effort relative to the action transaction (the transactional-
+	// leg WithinTx refactor is a v3 follow-on; see
+	// cowork/auth-bundles-fixes-2026-05-10/10-high-6-atomic-audit-commit.md).
+	// What this commit closes is the *silence* leg — swap the discarded
+	// `_ = ...` pattern for an explicit WARN log so a DB hiccup or
+	// connection reset between action and audit is observable to the
+	// operator instead of going unnoticed (CWE-778).
+	if err := s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details); err != nil {
+		slog.WarnContext(ctx, "audit write failed (action committed; audit row may be missing)",
+			"action", action,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"actor_id", caller.ActorID,
+			"err", err)
+	}
 }

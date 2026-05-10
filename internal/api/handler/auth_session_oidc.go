@@ -31,6 +31,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -1002,8 +1003,17 @@ func (h *AuthSessionOIDCHandler) recordAudit(ctx context.Context, action, actor 
 	if h.audit == nil {
 		return
 	}
-	_ = h.audit.RecordEventWithCategory(ctx, actor, actorType, action,
-		domain.EventCategoryAuth, "session", resourceID, details)
+	// Audit 2026-05-10 HIGH-6 partial closure — emit WARN on audit-write
+	// failure so the silent row-miss is observable. The transactional-
+	// leg WithinTx refactor is a v3 follow-on.
+	if err := h.audit.RecordEventWithCategory(ctx, actor, actorType, action,
+		domain.EventCategoryAuth, "session", resourceID, details); err != nil {
+		slog.WarnContext(ctx, "oidc handler audit write failed (action committed; audit row may be missing)",
+			"action", action,
+			"actor_id", actor,
+			"resource_id", resourceID,
+			"err", err)
+	}
 }
 
 func (h *AuthSessionOIDCHandler) clearPreLoginCookie(w http.ResponseWriter) {

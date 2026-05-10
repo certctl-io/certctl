@@ -221,6 +221,16 @@ func (f *fakeAudit) RecordEventWithCategory(_ context.Context, actor string, act
 	return nil
 }
 
+// RecordEventWithCategoryWithTx satisfies the Audit 2026-05-10 HIGH-6
+// interface extension. The test stub stores into the same calls slice;
+// no transactional semantics needed because the fake doesn't have a DB.
+func (f *fakeAudit) RecordEventWithCategoryWithTx(_ context.Context, _ repository.Querier, actor string, actorType domain.ActorType, action, eventCategory, resourceType, resourceID string, _ map[string]interface{}) error {
+	f.calls = append(f.calls, struct{ Actor, ActorType, Action, Category, ResourceID string }{
+		actor, string(actorType), action, eventCategory, resourceID,
+	})
+	return nil
+}
+
 // =============================================================================
 // Authorizer tests
 // =============================================================================

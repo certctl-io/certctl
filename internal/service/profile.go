@@ -165,13 +165,21 @@ func (s *ProfileService) UpdateProfile(ctx context.Context, id string, profile d
 				return nil, fmt.Errorf("approval gate: %w", gerr)
 			}
 			if s.auditService != nil {
-				_ = s.auditService.RecordEventWithCategory(
+				// Audit 2026-05-10 HIGH-6 partial closure — emit WARN on
+				// audit-write failure so the silent row-miss is observable.
+				if err := s.auditService.RecordEventWithCategory(
 					context.WithoutCancel(ctx),
 					requester, domain.ActorTypeUser,
 					"profile.edit_request", domain.EventCategoryAuth,
 					"certificate_profile", id,
 					map[string]interface{}{"approval_id": approvalID},
-				)
+				); err != nil {
+					slog.WarnContext(ctx, "profile.edit_request audit write failed (approval requested; audit row may be missing)",
+						"profile_id", id,
+						"approval_id", approvalID,
+						"requester", requester,
+						"err", err)
+				}
 			}
 			return nil, fmt.Errorf("%w: approval=%s", ErrProfileEditPendingApproval, approvalID)
 		}

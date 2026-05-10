@@ -917,6 +917,15 @@ func (s *Service) recordAudit(ctx context.Context, action, actor string, actorTy
 	if s.audit == nil {
 		return
 	}
-	_ = s.audit.RecordEventWithCategory(ctx, actor, actorType, action,
-		"auth", "session", resourceID, details)
+	// Audit 2026-05-10 HIGH-6 partial closure — emit WARN on audit-write
+	// failure so the silent row-miss is observable. The transactional-
+	// leg WithinTx refactor (action + audit row atomic) is a v3 follow-on.
+	if err := s.audit.RecordEventWithCategory(ctx, actor, actorType, action,
+		"auth", "session", resourceID, details); err != nil {
+		slog.WarnContext(ctx, "session audit write failed (action committed; audit row may be missing)",
+			"action", action,
+			"actor_id", actor,
+			"resource_id", resourceID,
+			"err", err)
+	}
 }

@@ -5,6 +5,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"fmt"
+	"log/slog"
 	"regexp"
 	"time"
 
@@ -182,12 +183,20 @@ func (s *Service) ValidateAndMint(ctx context.Context, token, actorName string) 
 		// already landed in the DB. The audit-row gap is detectable
 		// in monitoring (every successful mint should have a paired
 		// bootstrap.consume row).
-		_ = s.audit.RecordEventWithCategory(ctx, "bootstrap-token", domain.ActorTypeSystem,
+		// Audit 2026-05-10 HIGH-6 partial closure — emit WARN on audit-
+		// write failure so the silent-row-miss is observable. The
+		// transactional-leg WithinTx refactor is a v3 follow-on.
+		if err := s.audit.RecordEventWithCategory(ctx, "bootstrap-token", domain.ActorTypeSystem,
 			"bootstrap.consume", domain.EventCategoryAuth, "api_key", apiKey.ID,
 			map[string]interface{}{
 				"actor_name": actorName,
 				"role_id":    authdomain.RoleIDAdmin,
-			})
+			}); err != nil {
+			slog.WarnContext(ctx, "bootstrap.consume audit write failed (admin key minted; audit row may be missing)",
+				"actor_name", actorName,
+				"api_key_id", apiKey.ID,
+				"err", err)
+		}
 	}
 	return &MintResult{APIKey: apiKey, KeyValue: keyValue}, nil
 }
