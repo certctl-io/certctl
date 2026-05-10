@@ -180,6 +180,27 @@ func (r *SessionRepository) RevokeAllForActor(ctx context.Context, actorID, acto
 	return nil
 }
 
+// RevokeAllExceptForActor sets revoked_at = NOW() on every active
+// session for an actor EXCEPT the named exceptSessionID. Returns the
+// count of rows revoked. Audit 2026-05-10 MED-3 closure — backs the
+// "Sign out all other sessions" flow on SessionsPage. exceptSessionID
+// is the caller's current session ID (read from context); passing
+// empty exceptID falls through to RevokeAllForActor semantics
+// (revoke literally all).
+func (r *SessionRepository) RevokeAllExceptForActor(ctx context.Context, actorID, actorType, tenantID, exceptSessionID string) (int, error) {
+	res, err := r.db.ExecContext(ctx, `
+		UPDATE sessions SET revoked_at = NOW()
+		WHERE actor_id = $1 AND actor_type = $2 AND tenant_id = $3
+		  AND revoked_at IS NULL
+		  AND id != $4`,
+		actorID, actorType, tenantID, exceptSessionID)
+	if err != nil {
+		return 0, fmt.Errorf("sessions revoke_all_except_for_actor: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	return int(n), nil
+}
+
 // GarbageCollectExpired deletes:
 //   - Sessions whose absolute_expires_at < NOW() (post-login expired).
 //   - Pre-login sessions older than 10 minutes.

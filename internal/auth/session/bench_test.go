@@ -135,6 +135,10 @@ func (r *slowSessionRepo) RevokeAllForActor(ctx context.Context, actorID, actorT
 	time.Sleep(r.delay)
 	return r.inner.RevokeAllForActor(ctx, actorID, actorType, exceptID)
 }
+func (r *slowSessionRepo) RevokeAllExceptForActor(ctx context.Context, actorID, actorType, tenantID, exceptID string) (int, error) {
+	time.Sleep(r.delay)
+	return r.inner.RevokeAllExceptForActor(ctx, actorID, actorType, tenantID, exceptID)
+}
 func (r *slowSessionRepo) GarbageCollectExpired(ctx context.Context) (int, error) {
 	time.Sleep(r.delay)
 	return r.inner.GarbageCollectExpired(ctx)

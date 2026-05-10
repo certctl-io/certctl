@@ -183,6 +183,11 @@ type SessionRepo interface {
 	UpdateCSRFTokenHash(ctx context.Context, id, csrfTokenHash string) error
 	Revoke(ctx context.Context, id string) error
 	RevokeAllForActor(ctx context.Context, actorID, actorType, tenantID string) error
+	// RevokeAllExceptForActor revokes every active session for the
+	// actor except the named exceptSessionID; returns the count revoked.
+	// Audit 2026-05-10 MED-3 closure — the bench-test stub forwards to
+	// this method on the inner *Service.
+	RevokeAllExceptForActor(ctx context.Context, actorID, actorType, tenantID, exceptSessionID string) (int, error)
 	GarbageCollectExpired(ctx context.Context) (int, error)
 }
 

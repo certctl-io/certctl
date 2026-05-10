@@ -77,6 +77,12 @@ type SessionRepository interface {
 	// the back-channel logout endpoint (Phase 5).
 	RevokeAllForActor(ctx context.Context, actorID, actorType, tenantID string) error
 
+	// RevokeAllExceptForActor sets revoked_at = NOW() on every active
+	// session for an actor EXCEPT the named exceptSessionID. Returns
+	// the count of rows revoked. Audit 2026-05-10 MED-3 closure —
+	// backs the "Sign out all other sessions" SessionsPage button.
+	RevokeAllExceptForActor(ctx context.Context, actorID, actorType, tenantID, exceptSessionID string) (int, error)
+
 	// GarbageCollectExpired deletes sessions whose absolute expiry
 	// has passed AND whose revoked_at is older than the configurable
 	// retention window (default 24h). Pre-login rows older than the

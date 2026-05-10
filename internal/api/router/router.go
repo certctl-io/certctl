@@ -446,6 +446,12 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		// handler layer per Phase 5 spec.
 		r.Register("GET /api/v1/auth/sessions", rbacGate(reg.Checker, "auth.session.list", reg.AuthSessionOIDC.ListSessions))
 		r.Register("DELETE /api/v1/auth/sessions/{id}", rbacGate(reg.Checker, "auth.session.revoke", reg.AuthSessionOIDC.RevokeSession))
+		// Audit 2026-05-10 MED-3 closure — DELETE /api/v1/auth/sessions?except=current
+		// is the "Sign out all other sessions" flow. Gated by
+		// auth.session.revoke (any authenticated caller with the perm
+		// can revoke their OWN remaining sessions; the handler reads
+		// the current session ID from context and excludes it).
+		r.Register("DELETE /api/v1/auth/sessions", rbacGate(reg.Checker, "auth.session.revoke", reg.AuthSessionOIDC.RevokeAllExceptCurrent))
 
 		// OIDC provider CRUD.
 		r.Register("GET /api/v1/auth/oidc/providers", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListProviders))

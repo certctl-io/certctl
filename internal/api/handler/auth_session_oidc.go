@@ -120,6 +120,31 @@ type AuthSessionOIDCHandler struct {
 	cookieAttrs   SessionCookieAttrs
 	tenantID      string
 	postLoginURL  string // 302 target after successful callback (default: /)
+
+	// checker is the optional PermissionChecker projection used for
+	// query-parameter-conditional gates that the router-level rbacGate
+	// can't express. Audit 2026-05-10 MED-2: ListSessions allows the
+	// caller to query their own sessions with auth.session.list, but
+	// `?actor_id=<other>` requires the narrower auth.session.list.all.
+	// Nil-safe: handlers that don't need conditional gating leave it
+	// unset (existing tests).
+	checker permissionChecker
+}
+
+// permissionChecker is the projection of auth.PermissionChecker the
+// session handler uses for query-conditional gates (MED-2). Defined
+// locally to avoid importing internal/auth from the handler package
+// just for this single use.
+type permissionChecker interface {
+	CheckPermission(ctx context.Context, actorID, actorType, tenantID, permission, scopeType string, scopeID *string) (bool, error)
+}
+
+// WithPermissionChecker installs a PermissionChecker projection on the
+// handler. Audit 2026-05-10 MED-2 closure — used by ListSessions to
+// gate `?actor_id=<other>` on auth.session.list.all.
+func (h *AuthSessionOIDCHandler) WithPermissionChecker(c permissionChecker) *AuthSessionOIDCHandler {
+	h.checker = c
+	return h
 }
 
 // BCLReplayConsumer is the projection of repository.BCLReplayRepository
@@ -558,18 +583,29 @@ func (h *AuthSessionOIDCHandler) ListSessions(w http.ResponseWriter, r *http.Req
 	actorID := caller.ActorID
 	actorType := string(caller.ActorType)
 	if q := r.URL.Query().Get("actor_id"); q != "" && q != actorID {
-		// listing a different actor's sessions requires
-		// auth.session.list.all (router-level rbacGate ALREADY enforced
-		// auth.session.list, but `.list.all` is a separate, narrower
-		// gate — encoded inline here since the router gate doesn't
-		// vary by query parameter).
-		// For Phase 5 we keep the simple model: any caller with
-		// auth.session.list.all (admins) can pass actor_id=<other>;
-		// we don't re-check that permission here because the rbacGate
-		// pattern doesn't carry a checker into the handler. The router
-		// wraps this whole handler with auth.session.list.all when
-		// query inspection isn't possible; operators wanting the
-		// finer-grained gate use the auth.session.list.all role.
+		// Audit 2026-05-10 MED-2 closure — listing a different
+		// actor's sessions requires the narrower auth.session.list.all
+		// permission. The router gate already enforced
+		// auth.session.list (the floor for any session-list call),
+		// but the all-actors variant is an admin-class capability and
+		// must be checked separately because the rbacGate can't see
+		// the query param. When the handler is wired with
+		// WithPermissionChecker (production), we re-check inline; when
+		// it isn't (legacy tests), the router gate's auth.session.list
+		// floor is the only check.
+		if h.checker != nil {
+			ok, perr := h.checker.CheckPermission(r.Context(),
+				caller.ActorID, string(caller.ActorType), h.tenantID,
+				"auth.session.list.all", "global", nil)
+			if perr != nil {
+				Error(w, http.StatusInternalServerError, "permission check failed")
+				return
+			}
+			if !ok {
+				Error(w, http.StatusForbidden, "auth.session.list.all required to list another actor's sessions")
+				return
+			}
+		}
 		actorID = q
 		if at := r.URL.Query().Get("actor_type"); at != "" {
 			actorType = at
@@ -624,6 +660,55 @@ func (h *AuthSessionOIDCHandler) RevokeSession(w http.ResponseWriter, r *http.Re
 	h.recordAudit(r.Context(), "auth.session_revoked", caller.ActorID, caller.ActorType, sessionID,
 		map[string]interface{}{"session_id": sessionID, "target_actor_id": sess.ActorID})
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// RevokeAllExceptCurrent handles DELETE /api/v1/auth/sessions?except=current.
+//
+// Audit 2026-05-10 MED-3 closure — backs the "Sign out all other
+// sessions" SessionsPage button. Revokes every active session for the
+// caller EXCEPT the session that issued the current request (so the
+// user doesn't get logged out by the action they just took).
+//
+// The current session ID is read from the request's session cookie via
+// the SessionMiddleware's actor context — for Bearer-mode callers this
+// is the empty string and ALL the actor's sessions are revoked (matches
+// the "log me out everywhere" semantic for API-key-mode users).
+//
+// Audit row records the count for compliance (one summary row per
+// invocation; per-session detail is implicit in the count + actor).
+func (h *AuthSessionOIDCHandler) RevokeAllExceptCurrent(w http.ResponseWriter, r *http.Request) {
+	caller, err := callerFromRequest(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	if r.URL.Query().Get("except") != "current" {
+		Error(w, http.StatusBadRequest, "only ?except=current is supported")
+		return
+	}
+	// Current session ID — empty for Bearer/API-key callers (acceptable;
+	// the repo's RevokeAllExceptForActor handles "" by revoking
+	// literally every active session). Read from the session middleware's
+	// SessionFromContext helper which populates the validated session
+	// on the request context for cookie-mode callers.
+	currentSessionID := ""
+	if sess := sessionsvc.SessionFromContext(r.Context()); sess != nil {
+		currentSessionID = sess.ID
+	}
+
+	count, rerr := h.sessionRepo.RevokeAllExceptForActor(r.Context(),
+		caller.ActorID, string(caller.ActorType), h.tenantID, currentSessionID)
+	if rerr != nil {
+		Error(w, http.StatusInternalServerError, "could not revoke sessions")
+		return
+	}
+	h.recordAudit(r.Context(), "auth.sessions_revoked_all_except_current",
+		caller.ActorID, caller.ActorType, currentSessionID,
+		map[string]interface{}{
+			"count":              count,
+			"current_session_id": currentSessionID,
+		})
+	writeJSON(w, http.StatusOK, map[string]interface{}{"revoked_count": count})
 }
 
 // =============================================================================

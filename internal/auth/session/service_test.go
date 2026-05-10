@@ -138,6 +138,20 @@ func (r *stubSessionRepo) RevokeAllForActor(_ context.Context, actorID, actorTyp
 	return nil
 }
 
+func (r *stubSessionRepo) RevokeAllExceptForActor(_ context.Context, actorID, actorType, _, exceptID string) (int, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	now := time.Now().UTC()
+	count := 0
+	for id, row := range r.rows {
+		if row.ActorID == actorID && row.ActorType == actorType && row.RevokedAt == nil && id != exceptID {
+			row.RevokedAt = &now
+			count++
+		}
+	}
+	return count, nil
+}
+
 func (r *stubSessionRepo) GarbageCollectExpired(_ context.Context) (int, error) {
 	r.mu.Lock()
 	defer r.mu.Unlock()

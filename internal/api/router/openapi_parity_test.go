@@ -153,6 +153,14 @@ var SpecParityExceptions = map[string]string{
 	// in docs/operator/security.md::audit-export and the handler doc
 	// comment.
 	"GET /api/v1/audit/export": "Audit 2026-05-10 HIGH-11 — streaming NDJSON audit export; gated audit.export. Documented inline at internal/api/handler/audit.go::ExportAudit.",
+
+	// Audit 2026-05-10 MED-3 — `DELETE /api/v1/auth/sessions?except=current`
+	// is the "sign out all other sessions" flow. Distinct from the
+	// per-session DELETE /api/v1/auth/sessions/{id} (already in OpenAPI);
+	// this variant operates on the caller's whole session set minus the
+	// current. Documented inline at
+	// internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.
+	"DELETE /api/v1/auth/sessions": "Audit 2026-05-10 MED-3 — sign-out-all-other-sessions; gated auth.session.revoke. Documented inline at internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

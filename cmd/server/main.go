@@ -447,7 +447,8 @@ func main() {
 			SameSite: sameSiteMode,
 			Secure:   true,
 		},
-	).WithBCLReplayConsumer(bclReplayRepo, bclMaxAge) // HIGH-3 jti consumed-set.
+	).WithBCLReplayConsumer(bclReplayRepo, bclMaxAge). // HIGH-3 jti consumed-set.
+														WithPermissionChecker(authCheckerAdapter)      // MED-2 auth.session.list.all gate.
 
 	// =========================================================================
 	// Auth Bundle 2 Phase 7 — OIDC first-admin bootstrap hook.

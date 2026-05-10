@@ -193,8 +193,11 @@ func (s *stubSessionRepo) Revoke(_ context.Context, id string) error {
 	return nil
 }
 func (s *stubSessionRepo) RevokeAllForActor(_ context.Context, _, _, _ string) error { return nil }
-func (s *stubSessionRepo) GarbageCollectExpired(_ context.Context) (int, error)      { return 0, nil }
-func (s *stubSessionRepo) Delete(_ context.Context, _ string) error                  { return nil }
+func (s *stubSessionRepo) RevokeAllExceptForActor(_ context.Context, _, _, _, _ string) (int, error) {
+	return 0, nil
+}
+func (s *stubSessionRepo) GarbageCollectExpired(_ context.Context) (int, error) { return 0, nil }
+func (s *stubSessionRepo) Delete(_ context.Context, _ string) error             { return nil }
 
 // stubUserRepo implements just enough of repository.UserRepository for
 // the BCL sub→actor_id resolution path (CRIT-2 closure). Lookups by
