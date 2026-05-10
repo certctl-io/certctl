@@ -228,9 +228,13 @@ func TestAuditLog_HashesRequestBody(t *testing.T) {
 	if len(calls) != 1 {
 		t.Fatalf("expected 1 audit call, got %d", len(calls))
 	}
-	// Body hash should be a 16-char hex string (truncated SHA-256)
-	if len(calls[0].BodyHash) != 16 {
-		t.Errorf("expected 16-char body hash, got %q (len=%d)", calls[0].BodyHash, len(calls[0].BodyHash))
+	// Audit 2026-05-10 MED-15 closure — body hash is now the full
+	// 64-char hex SHA-256 (was [:16] truncated). The body_hash schema
+	// column is CHAR(64); the truncation was an integrity-collision
+	// hole that allowed an attacker to craft tampered audit payloads
+	// matching the 16-hex prefix.
+	if len(calls[0].BodyHash) != 64 {
+		t.Errorf("expected 64-char SHA-256 body hash, got %q (len=%d)", calls[0].BodyHash, len(calls[0].BodyHash))
 	}
 	if calls[0].Status != 201 {
 		t.Errorf("expected status 201, got %d", calls[0].Status)

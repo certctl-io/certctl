@@ -840,6 +840,18 @@ func computeHMAC(sessionID, signingKeyID string, hmacKey []byte) []byte {
 // parts plus the decoded HMAC. Any format/version/decode failure
 // returns an error; the caller maps to ErrSessionInvalidCookie without
 // surfacing which check failed (no information leak).
+// maxCookieSegmentLen caps any single segment of a parsed cookie at
+// 4 KiB — well above the wire shape of any legitimate certctl cookie
+// (id1 prefix `ses-` or `pl-` + 22 base64 chars; sk-id ~30 chars; HMAC
+// base64 of 32 bytes = 43 chars; v1 version tag = 2 chars). Audit
+// 2026-05-10 Nit-4 closure — pre-fix, an attacker could send a 10MB
+// cookie segment to amplify HMAC compute cost; the constant-time
+// compare on the back end would chew through the input regardless of
+// outcome. The cap is loose enough that no legitimate client trips
+// it, but tight enough to bound the work an attacker can extract per
+// failed request.
+const maxCookieSegmentLen = 4096
+
 func parseCookie(cookieValue string) (sessionID, signingKeyID string, hmacBytes []byte, err error) {
 	if cookieValue == "" {
 		return "", "", nil, errors.New("empty cookie")
@@ -847,6 +859,12 @@ func parseCookie(cookieValue string) (sessionID, signingKeyID string, hmacBytes 
 	parts := strings.Split(cookieValue, ".")
 	if len(parts) != 4 {
 		return "", "", nil, errors.New("expected 4 segments")
+	}
+	// Audit 2026-05-10 Nit-4 — per-segment length cap.
+	for i, seg := range parts {
+		if len(seg) > maxCookieSegmentLen {
+			return "", "", nil, fmt.Errorf("cookie segment %d exceeds %d-byte cap", i, maxCookieSegmentLen)
+		}
 	}
 	if parts[0] != sessiondomain.CookieFormatVersion {
 		return "", "", nil, errors.New("unsupported version prefix")

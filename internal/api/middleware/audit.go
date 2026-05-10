@@ -109,7 +109,15 @@ func (a *AuditMiddleware) Middleware(next http.Handler) http.Handler {
 			body, err := io.ReadAll(r.Body)
 			if err == nil && len(body) > 0 {
 				hasher.Write(body)
-				bodyHash = hex.EncodeToString(hasher.Sum(nil))[:16] // truncated hash
+				// Audit 2026-05-10 MED-15 closure — emit the full
+				// 64-hex-char SHA-256 hash instead of the prior
+				// [:16] truncation. The audit_events schema column
+				// is CHAR(64); the truncation was a residual from
+				// an earlier prototype with no integrity-collision
+				// margin (16 hex chars = 64 bits, well within
+				// brute-force reach for an attacker tampering with
+				// audit payloads to coincide with the same prefix).
+				bodyHash = hex.EncodeToString(hasher.Sum(nil))
 				// Restore the body for downstream handlers
 				r.Body = io.NopCloser(strings.NewReader(string(body)))
 			}
