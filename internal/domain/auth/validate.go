@@ -30,22 +30,31 @@ const (
 // actor: the API rejects mutations / deletions targeting this id.
 const DemoAnonActorID = "actor-demo-anon"
 
-// CanonicalPermissions is the canonical Bundle 1 permission catalog,
-// seeded by migration 000029_rbac.up.sql. Bundle 2 extends with
-// auth.session.* and auth.oidc.* permissions (those land in Bundle 2
-// Phase 5's migration).
+// CanonicalPermissions is the canonical permission catalog seeded by
+// migrations 000029 / 000030 / 000037 / 000038 / 000039. Bundle 2
+// extended with auth.session.* and auth.oidc.* permissions; the
+// 2026-05-10 audit (CRIT-1 closure) seeded the legacy-CRUD perms
+// (policy/team/owner/job/approval/notification/discovery/network_scan/
+// healthcheck/digest/verification/stats/metrics + cert.edit) via
+// migration 000039.
 //
 // Naming convention: <namespace>.<verb>. Read permissions use
 // `<resource>.read`; mutations use `.create`, `.edit`, `.delete`,
 // `.assign`, `.revoke`, `.use`, `.export`, etc. The catalog is the
 // single source of truth referenced by:
-//   - migration 000029_rbac.up.sql (seeds the rows)
+//   - migration 000029_rbac.up.sql + 000030 + 000037 + 000038 + 000039 (seed the rows)
 //   - service layer (RoleService.Create rejects unknown permissions)
 //   - handler layer (auth.RequirePermission perm string)
+//   - router layer (rbacGate(reg.Checker, "<perm>", ...) at every
+//     state-changing route + read endpoints)
+//
+// TestRouterRBACGateCoverage in internal/api/router/router_test.go is
+// the AST-level CI guard that pins router enforcement to this catalogue.
 var CanonicalPermissions = []string{
 	// Certificate lifecycle
 	"cert.read",
 	"cert.issue",
+	"cert.edit", // metadata updates, deploy triggers, bulk-reassign (Audit CRIT-1)
 	"cert.revoke",
 	"cert.delete",
 
@@ -129,22 +138,101 @@ var CanonicalPermissions = []string{
 	// (Service.Enabled() short-circuits every operation when false).
 	"auth.breakglass.admin",
 	"auth.breakglass.login",
+
+	// Audit 2026-05-10 CRIT-1 closure — legacy-CRUD permission set.
+	// Seeded by migration 000039 + wrapped at the router level by
+	// rbacGate / rbacGateScoped on every state-changing + read route.
+	// Job lifecycle.
+	"job.read",
+	"job.cancel",
+
+	// Approval workflow (Rank 7 primitive — was previously ungated).
+	"approval.read",
+	"approval.approve",
+	"approval.reject",
+
+	// Policy management (compliance rules).
+	"policy.read",
+	"policy.edit",
+	"policy.delete",
+
+	// Team management.
+	"team.read",
+	"team.edit",
+	"team.delete",
+
+	// Owner management.
+	"owner.read",
+	"owner.edit",
+	"owner.delete",
+
+	// Notifications.
+	"notification.read",
+	"notification.edit", // mark-read, requeue
+
+	// Discovery (agent-submitted + cloud-secret-store scans).
+	"discovery.read",
+	"discovery.run",   // agents submit discovery reports
+	"discovery.claim", // claim/dismiss discovered certs
+
+	// Network scan + SCEP probing.
+	"network_scan.read",
+	"network_scan.edit",
+	"network_scan.run",
+
+	// Health checks (uptime monitors).
+	"healthcheck.read",
+	"healthcheck.edit",
+	"healthcheck.delete",
+	"healthcheck.acknowledge",
+
+	// Digest (operator-summary emails).
+	"digest.read",
+	"digest.send",
+
+	// Verification (post-deploy probe).
+	"verification.read",
+	"verification.run",
+
+	// Read-only observability.
+	"stats.read",
+	"metrics.read",
 }
 
 // DefaultRoles describes the seven default roles seeded by the
 // migration, mapped to the permissions each role holds at global
 // scope. Permissions not in CanonicalPermissions cause the migration
 // to fail-closed.
+//
+// r-auditor is invariant: exactly {audit.read, audit.export} per the
+// auditor_test.go pin. Adding a new permission here that ends up in
+// r-auditor breaks the pin — by design.
 var DefaultRoles = map[string][]string{
 	RoleIDAdmin: CanonicalPermissions, // admin gets every permission
 
 	RoleIDOperator: {
-		"cert.read", "cert.issue", "cert.revoke", "cert.delete",
+		// Cert lifecycle (full)
+		"cert.read", "cert.issue", "cert.edit", "cert.revoke", "cert.delete",
+		// Profile / issuer / target / agent — read + edit (no delete on issuer)
 		"profile.read", "profile.edit",
 		"issuer.read", "issuer.edit",
 		"target.read", "target.edit", "target.delete",
 		"agent.read", "agent.edit",
+		// Audit read
 		"audit.read",
+		// New CRIT-1 perms — operator-level CRUD
+		"job.read", "job.cancel",
+		"approval.read", "approval.approve", "approval.reject",
+		"policy.read", "policy.edit", "policy.delete",
+		"team.read", "team.edit", "team.delete",
+		"owner.read", "owner.edit", "owner.delete",
+		"notification.read", "notification.edit",
+		"discovery.read", "discovery.run", "discovery.claim",
+		"network_scan.read", "network_scan.edit", "network_scan.run",
+		"healthcheck.read", "healthcheck.edit", "healthcheck.delete", "healthcheck.acknowledge",
+		"digest.read", "digest.send",
+		"verification.read", "verification.run",
+		"stats.read", "metrics.read",
 	},
 
 	RoleIDViewer: {
@@ -154,6 +242,20 @@ var DefaultRoles = map[string][]string{
 		"target.read",
 		"agent.read",
 		"audit.read",
+		// New CRIT-1 read-only perms
+		"job.read",
+		"approval.read",
+		"policy.read",
+		"team.read",
+		"owner.read",
+		"notification.read",
+		"discovery.read",
+		"network_scan.read",
+		"healthcheck.read",
+		"digest.read",
+		"verification.read",
+		"stats.read",
+		"metrics.read",
 	},
 
 	RoleIDAgent: {
@@ -162,37 +264,66 @@ var DefaultRoles = map[string][]string{
 		"agent.job.poll",
 		"agent.job.complete",
 		"agent.job.report",
+		// Agents submit discovery reports.
+		"discovery.run",
 	},
 
 	RoleIDMCP: {
 		// MCP gets operator-equivalent minus destructive ops.
 		// Defense in depth for Claude / IDE integrations where
 		// destructive verbs warrant additional scrutiny.
-		"cert.read", "cert.issue", "cert.revoke",
+		"cert.read", "cert.issue", "cert.edit", "cert.revoke",
 		"profile.read", "profile.edit",
 		"issuer.read", "issuer.edit",
 		"target.read", "target.edit",
 		"agent.read",
 		"audit.read",
+		// New CRIT-1 — read + non-destructive verbs
+		"job.read", "job.cancel",
+		"approval.read", "approval.approve", "approval.reject",
+		"policy.read",
+		"team.read", "owner.read",
+		"notification.read", "notification.edit",
+		"discovery.read", "discovery.claim",
+		"network_scan.read", "network_scan.run",
+		"healthcheck.read", "healthcheck.acknowledge",
+		"digest.read",
+		"verification.read", "verification.run",
+		"stats.read", "metrics.read",
 	},
 
 	RoleIDCLI: {
 		// CLI = operator-equivalent. Operators can scope down via
 		// `certctl auth keys scope-down` if they want narrower CLI
 		// access in production.
-		"cert.read", "cert.issue", "cert.revoke", "cert.delete",
+		"cert.read", "cert.issue", "cert.edit", "cert.revoke", "cert.delete",
 		"profile.read", "profile.edit",
 		"issuer.read", "issuer.edit",
 		"target.read", "target.edit", "target.delete",
 		"agent.read", "agent.edit",
 		"audit.read",
 		"auth.key.list", "auth.key.create", "auth.key.rotate",
+		// New CRIT-1 — CLI gets operator-tier
+		"job.read", "job.cancel",
+		"approval.read", "approval.approve", "approval.reject",
+		"policy.read", "policy.edit", "policy.delete",
+		"team.read", "team.edit",
+		"owner.read", "owner.edit",
+		"notification.read", "notification.edit",
+		"discovery.read", "discovery.run", "discovery.claim",
+		"network_scan.read", "network_scan.edit", "network_scan.run",
+		"healthcheck.read", "healthcheck.edit", "healthcheck.acknowledge",
+		"digest.read", "digest.send",
+		"verification.read", "verification.run",
+		"stats.read", "metrics.read",
 	},
 
 	RoleIDAuditor: {
 		// Phase 8 ships the auditor split. Phase 1 reserves the
 		// role id + the read-only permission set so subsequent
-		// phases don't have to renumber.
+		// phases don't have to renumber. Audit 2026-05-10 CRIT-1
+		// closure intentionally adds NOTHING here — auditor pins
+		// stay invariant at audit.read + audit.export.
 		"audit.read",
 		"audit.export",
 	},

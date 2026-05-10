@@ -82,6 +82,26 @@ for the live catalogue.
 | `auth.key.*` | `auth.key.list`, `auth.key.create`, `auth.key.rotate`, `auth.key.delete` | API key management |
 | `auth.bootstrap.*` | `auth.bootstrap.use` | Day-0 first-admin path |
 | `crl.admin`, `scep.admin`, `est.admin`, `ca.hierarchy.manage` | (single perms) | The five admin-only fine-grained perms (see above) |
+| `job.*` | `job.read`, `job.cancel` | Deployment job lifecycle |
+| `approval.*` | `approval.read`, `approval.approve`, `approval.reject` | Two-person approval workflow (cert-issuance + profile-edit) |
+| `policy.*` | `policy.read`, `policy.edit`, `policy.delete` | Compliance policies + renewal policies |
+| `team.*`, `owner.*` | `team.read`, `team.edit`, `team.delete`, `owner.*` | Organizational metadata |
+| `notification.*` | `notification.read`, `notification.edit` | Notification queue + requeue |
+| `discovery.*` | `discovery.read`, `discovery.run`, `discovery.claim` | Agent + cloud-secret-store discovery |
+| `network_scan.*` | `network_scan.read`, `network_scan.edit`, `network_scan.run` | TLS network scanning + SCEP probing |
+| `healthcheck.*` | `healthcheck.read`, `healthcheck.edit`, `healthcheck.delete`, `healthcheck.acknowledge` | Uptime monitors |
+| `digest.*` | `digest.read`, `digest.send` | Operator-summary digest emails |
+| `verification.*` | `verification.read`, `verification.run` | Post-deploy verification |
+| `stats.read`, `metrics.read` | (single perms) | Dashboard summary + Prometheus exposition |
+
+The full catalogue lives in
+[`internal/domain/auth/validate.go`](../../internal/domain/auth/validate.go).
+The router-level enforcement sits in
+[`internal/api/router/router.go`](../../internal/api/router/router.go);
+the AST-level CI guard
+[`TestRouterRBACGateCoverage`](../../internal/api/router/router_rbac_coverage_test.go)
+pins the contract — adding a new state-changing or read endpoint
+without an `rbacGate` / `rbacGateScoped` wrap fails CI.
 
 ## Scope semantics
 

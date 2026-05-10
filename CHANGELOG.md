@@ -34,6 +34,27 @@
 
 What else changed in v2.1.0:
 
+- **Audit 2026-05-10 CRIT-1 closure — wire-layer RBAC enforcement.**
+  The Bundle 1 + Bundle 2 audit surfaced that the permission catalogue
+  was enforced on ~24 admin-only routes only; the bulk of state-changing
+  routes (`POST /api/v1/certificates`, `PUT /api/v1/profiles/{id}`,
+  `DELETE /api/v1/issuers/{id}`, `POST /api/v1/agents/{id}/csr`, even
+  `POST /api/v1/auth/roles` + `POST /api/v1/auth/keys/{id}/roles`) had
+  no `rbacGate` wrap. A `r-viewer` Bearer was essentially `r-admin`
+  minus five fine-grained verbs at the wire layer (CWE-862). This
+  release wraps every state-changing + read endpoint with
+  `rbacGate` (global scope) or `rbacGateScoped` (per-profile / per-
+  issuer scope-bound grants), and adds an AST-level CI guard
+  (`TestRouterRBACGateCoverage`) that fails when a new route is
+  registered without enforcement. Catalogue extended via migration
+  000039 with 30 permissions covering `cert.edit`, `job.*`,
+  `approval.*`, `policy.*`, `team.*`, `owner.*`, `notification.*`,
+  `discovery.*`, `network_scan.*`, `healthcheck.*`, `digest.*`,
+  `verification.*`, `stats.read`, `metrics.read`. **AUDIT YOUR
+  KEYS** (the scope-down call-out above) now translates to real
+  reduction in blast radius. Auditor pin preserved at exactly
+  `{audit.read, audit.export}`.
+
 - **RBAC primitive shipped.** `tenants`, `roles`, `permissions`,
   `role_permissions`, `actor_roles` tables (migration 000029); 33-permission
   canonical catalogue; 7 default roles (`admin`, `operator`, `viewer`,

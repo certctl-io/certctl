@@ -9,14 +9,56 @@ import (
 )
 
 // rbacGate wraps a handler with auth.RequirePermission(checker, perm,
-// nil). Used by RegisterHandlers to gate the legacy admin routes
-// (Bundle 1 Phase 3.5). When checker is nil the wrap is a no-op so
-// tests / demo deployments without the RBAC stack continue to work.
+// nil) — i.e. a GLOBAL-SCOPE permission check. Used by RegisterHandlers
+// to gate every state-changing + read endpoint. When checker is nil the
+// wrap is a no-op so tests / demo deployments without the RBAC stack
+// continue to work.
+//
+// Every state-changing handler in this file MUST be wrapped by either
+// rbacGate or rbacGateScoped (or appear in the AuthExemptRouterRoutes
+// allowlist). The TestRouterRBACGateCoverage AST-level CI guard pins
+// this contract; adding a new POST/PUT/PATCH/DELETE without an rbacGate
+// wrap fails CI. See cowork/auth-bundles-audit-2026-05-10.md CRIT-1 for
+// the closure history.
 func rbacGate(checker auth.PermissionChecker, perm string, h http.HandlerFunc) http.Handler {
 	if checker == nil {
 		return h
 	}
 	return auth.RequirePermission(checker, perm, nil)(h)
+}
+
+// rbacGateScoped wraps a handler with a per-request scope-resolving
+// permission check. The scopeFn extracts a scope identifier from the
+// *http.Request (typically a path value, e.g. r.PathValue("id")) so
+// the underlying permission check can match a profile- or issuer-
+// scoped role-permission grant. When scopeFn returns an empty scope
+// id the gate falls back to global checking — consistent with the
+// rbacGate semantics — so unscoped grants continue to authorize.
+//
+// Used for path-bound state-changing routes such as
+// PUT /api/v1/profiles/{id} (scope_type=profile, scope_id=<path id>)
+// and PUT /api/v1/issuers/{id} (scope_type=issuer, scope_id=<path id>).
+//
+// When checker is nil the wrap is a no-op (test / demo path).
+func rbacGateScoped(checker auth.PermissionChecker, perm, scopeType string,
+	scopeFn func(*http.Request) string, h http.HandlerFunc) http.Handler {
+	if checker == nil {
+		return h
+	}
+	return auth.RequirePermission(checker, perm, func(r *http.Request) (string, *string) {
+		id := scopeFn(r)
+		if id == "" {
+			return "global", nil
+		}
+		return scopeType, &id
+	})(h)
+}
+
+// pathScope returns a scope extractor that reads a path parameter
+// directly. Helper to keep the route registration block readable:
+// rbacGateScoped(checker, "profile.edit", "profile", pathScope("id"), h).
+func pathScope(param string) func(*http.Request) string {
+	return func(r *http.Request) string { return r.PathValue(param) }
 }
 
 // Router wraps http.ServeMux and manages route registration with middleware.
@@ -307,23 +349,25 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		middleware.ContentType,
 	))
 
-	// RBAC management routes (Bundle 1 Phase 4). Permission gates are
-	// enforced inside each handler via the service layer; the Phase 3
-	// auth.RequirePermission middleware factory will wrap these in a
-	// Phase 3.5 router-level pass once the legacy admin handlers are
-	// converted in lockstep.
+	// RBAC management routes (Bundle 1 Phase 4 + audit 2026-05-10 CRIT-1
+	// closure). Permission gates are now ALSO enforced at the router
+	// level via rbacGate — Bundle 1 Phase 4 left these handler-only
+	// (service-layer Authorizer check), which was a defense-in-depth
+	// gap (HIGH-9 of the 2026-05-10 audit). /api/v1/auth/me and
+	// /api/v1/auth/permissions remain ungated because every authenticated
+	// caller is allowed to read their own identity / catalogue.
 	r.Register("GET /api/v1/auth/me", http.HandlerFunc(reg.Auth.Me))
 	r.Register("GET /api/v1/auth/permissions", http.HandlerFunc(reg.Auth.ListPermissions))
-	r.Register("GET /api/v1/auth/roles", http.HandlerFunc(reg.Auth.ListRoles))
-	r.Register("POST /api/v1/auth/roles", http.HandlerFunc(reg.Auth.CreateRole))
-	r.Register("GET /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.GetRole))
-	r.Register("PUT /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.UpdateRole))
-	r.Register("DELETE /api/v1/auth/roles/{id}", http.HandlerFunc(reg.Auth.DeleteRole))
-	r.Register("POST /api/v1/auth/roles/{id}/permissions", http.HandlerFunc(reg.Auth.AddRolePermission))
-	r.Register("DELETE /api/v1/auth/roles/{id}/permissions/{perm}", http.HandlerFunc(reg.Auth.RemoveRolePermission))
-	r.Register("GET /api/v1/auth/keys", http.HandlerFunc(reg.Auth.ListKeys))
-	r.Register("POST /api/v1/auth/keys/{id}/roles", http.HandlerFunc(reg.Auth.AssignRoleToKey))
-	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", http.HandlerFunc(reg.Auth.RevokeRoleFromKey))
+	r.Register("GET /api/v1/auth/roles", rbacGate(reg.Checker, "auth.role.list", reg.Auth.ListRoles))
+	r.Register("POST /api/v1/auth/roles", rbacGate(reg.Checker, "auth.role.create", reg.Auth.CreateRole))
+	r.Register("GET /api/v1/auth/roles/{id}", rbacGate(reg.Checker, "auth.role.list", reg.Auth.GetRole))
+	r.Register("PUT /api/v1/auth/roles/{id}", rbacGate(reg.Checker, "auth.role.edit", reg.Auth.UpdateRole))
+	r.Register("DELETE /api/v1/auth/roles/{id}", rbacGate(reg.Checker, "auth.role.delete", reg.Auth.DeleteRole))
+	r.Register("POST /api/v1/auth/roles/{id}/permissions", rbacGate(reg.Checker, "auth.role.edit", reg.Auth.AddRolePermission))
+	r.Register("DELETE /api/v1/auth/roles/{id}/permissions/{perm}", rbacGate(reg.Checker, "auth.role.edit", reg.Auth.RemoveRolePermission))
+	r.Register("GET /api/v1/auth/keys", rbacGate(reg.Checker, "auth.key.list", reg.Auth.ListKeys))
+	r.Register("POST /api/v1/auth/keys/{id}/roles", rbacGate(reg.Checker, "auth.role.assign", reg.Auth.AssignRoleToKey))
+	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", rbacGate(reg.Checker, "auth.role.revoke", reg.Auth.RevokeRoleFromKey))
 
 	// =========================================================================
 	// Auth Bundle 2 Phase 5 — OIDC + session HTTP surface.
@@ -434,22 +478,23 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// Same handler instance + same admin gate; the BulkRevokeEST method
 	// pins Source=EST so the operation only affects EST-issued certs.
 	r.Register("POST /api/v1/est/certificates/bulk-revoke", rbacGate(reg.Checker, "cert.bulk_revoke", reg.BulkRevocation.BulkRevokeEST))
-	r.Register("POST /api/v1/certificates/bulk-renew", http.HandlerFunc(reg.BulkRenewal.BulkRenew))
-	r.Register("POST /api/v1/certificates/bulk-reassign", http.HandlerFunc(reg.BulkReassignment.BulkReassign))
-	r.Register("GET /api/v1/certificates", http.HandlerFunc(reg.Certificates.ListCertificates))
-	r.Register("POST /api/v1/certificates", http.HandlerFunc(reg.Certificates.CreateCertificate))
-	r.Register("GET /api/v1/certificates/{id}", http.HandlerFunc(reg.Certificates.GetCertificate))
-	r.Register("PUT /api/v1/certificates/{id}", http.HandlerFunc(reg.Certificates.UpdateCertificate))
-	r.Register("DELETE /api/v1/certificates/{id}", http.HandlerFunc(reg.Certificates.ArchiveCertificate))
-	r.Register("GET /api/v1/certificates/{id}/versions", http.HandlerFunc(reg.Certificates.GetCertificateVersions))
-	r.Register("GET /api/v1/certificates/{id}/deployments", http.HandlerFunc(reg.Certificates.GetCertificateDeployments))
-	r.Register("POST /api/v1/certificates/{id}/renew", http.HandlerFunc(reg.Certificates.TriggerRenewal))
-	r.Register("POST /api/v1/certificates/{id}/deploy", http.HandlerFunc(reg.Certificates.TriggerDeployment))
-	r.Register("POST /api/v1/certificates/{id}/revoke", http.HandlerFunc(reg.Certificates.RevokeCertificate))
+	r.Register("POST /api/v1/certificates/bulk-renew", rbacGate(reg.Checker, "cert.issue", reg.BulkRenewal.BulkRenew))
+	r.Register("POST /api/v1/certificates/bulk-reassign", rbacGate(reg.Checker, "cert.edit", reg.BulkReassignment.BulkReassign))
+	r.Register("GET /api/v1/certificates", rbacGate(reg.Checker, "cert.read", reg.Certificates.ListCertificates))
+	r.Register("POST /api/v1/certificates", rbacGate(reg.Checker, "cert.issue", reg.Certificates.CreateCertificate))
+	r.Register("GET /api/v1/certificates/{id}", rbacGate(reg.Checker, "cert.read", reg.Certificates.GetCertificate))
+	r.Register("PUT /api/v1/certificates/{id}", rbacGate(reg.Checker, "cert.edit", reg.Certificates.UpdateCertificate))
+	r.Register("DELETE /api/v1/certificates/{id}", rbacGate(reg.Checker, "cert.delete", reg.Certificates.ArchiveCertificate))
+	r.Register("GET /api/v1/certificates/{id}/versions", rbacGate(reg.Checker, "cert.read", reg.Certificates.GetCertificateVersions))
+	r.Register("GET /api/v1/certificates/{id}/deployments", rbacGate(reg.Checker, "cert.read", reg.Certificates.GetCertificateDeployments))
+	r.Register("POST /api/v1/certificates/{id}/renew", rbacGate(reg.Checker, "cert.issue", reg.Certificates.TriggerRenewal))
+	r.Register("POST /api/v1/certificates/{id}/deploy", rbacGate(reg.Checker, "cert.edit", reg.Certificates.TriggerDeployment))
+	r.Register("POST /api/v1/certificates/{id}/revoke", rbacGate(reg.Checker, "cert.revoke", reg.Certificates.RevokeCertificate))
 
-	// Export endpoints: /api/v1/certificates/{id}/export/{format}
-	r.Register("GET /api/v1/certificates/{id}/export/pem", http.HandlerFunc(reg.Export.ExportPEM))
-	r.Register("POST /api/v1/certificates/{id}/export/pkcs12", http.HandlerFunc(reg.Export.ExportPKCS12))
+	// Export endpoints: /api/v1/certificates/{id}/export/{format}.
+	// Reading bytes — gated by cert.read.
+	r.Register("GET /api/v1/certificates/{id}/export/pem", rbacGate(reg.Checker, "cert.read", reg.Export.ExportPEM))
+	r.Register("POST /api/v1/certificates/{id}/export/pkcs12", rbacGate(reg.Checker, "cert.read", reg.Export.ExportPKCS12))
 
 	// NOTE: RFC 5280 CRL and RFC 6960 OCSP endpoints are registered separately
 	// via RegisterPKIHandlers under /.well-known/pki/ so relying parties can
@@ -457,20 +502,24 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// /api/v1/crl and /api/v1/ocsp paths have been retired (see M-006).
 
 	// Issuers routes: /api/v1/issuers
-	r.Register("GET /api/v1/issuers", http.HandlerFunc(reg.Issuers.ListIssuers))
-	r.Register("POST /api/v1/issuers", http.HandlerFunc(reg.Issuers.CreateIssuer))
-	r.Register("GET /api/v1/issuers/{id}", http.HandlerFunc(reg.Issuers.GetIssuer))
-	r.Register("PUT /api/v1/issuers/{id}", http.HandlerFunc(reg.Issuers.UpdateIssuer))
-	r.Register("DELETE /api/v1/issuers/{id}", http.HandlerFunc(reg.Issuers.DeleteIssuer))
-	r.Register("POST /api/v1/issuers/{id}/test", http.HandlerFunc(reg.Issuers.TestConnection))
+	// Path-scoped: PUT / DELETE / test on /{id} honor per-issuer
+	// scope-bound role-permission grants. Operators who grant
+	// issuer.edit scope_type=issuer scope_id=iss-internal-ca only
+	// authorize edits to that specific issuer.
+	r.Register("GET /api/v1/issuers", rbacGate(reg.Checker, "issuer.read", reg.Issuers.ListIssuers))
+	r.Register("POST /api/v1/issuers", rbacGate(reg.Checker, "issuer.edit", reg.Issuers.CreateIssuer))
+	r.Register("GET /api/v1/issuers/{id}", rbacGateScoped(reg.Checker, "issuer.read", "issuer", pathScope("id"), reg.Issuers.GetIssuer))
+	r.Register("PUT /api/v1/issuers/{id}", rbacGateScoped(reg.Checker, "issuer.edit", "issuer", pathScope("id"), reg.Issuers.UpdateIssuer))
+	r.Register("DELETE /api/v1/issuers/{id}", rbacGateScoped(reg.Checker, "issuer.delete", "issuer", pathScope("id"), reg.Issuers.DeleteIssuer))
+	r.Register("POST /api/v1/issuers/{id}/test", rbacGateScoped(reg.Checker, "issuer.edit", "issuer", pathScope("id"), reg.Issuers.TestConnection))
 
 	// Targets routes: /api/v1/targets
-	r.Register("GET /api/v1/targets", http.HandlerFunc(reg.Targets.ListTargets))
-	r.Register("POST /api/v1/targets", http.HandlerFunc(reg.Targets.CreateTarget))
-	r.Register("GET /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.GetTarget))
-	r.Register("PUT /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.UpdateTarget))
-	r.Register("DELETE /api/v1/targets/{id}", http.HandlerFunc(reg.Targets.DeleteTarget))
-	r.Register("POST /api/v1/targets/{id}/test", http.HandlerFunc(reg.Targets.TestTargetConnection))
+	r.Register("GET /api/v1/targets", rbacGate(reg.Checker, "target.read", reg.Targets.ListTargets))
+	r.Register("POST /api/v1/targets", rbacGate(reg.Checker, "target.edit", reg.Targets.CreateTarget))
+	r.Register("GET /api/v1/targets/{id}", rbacGate(reg.Checker, "target.read", reg.Targets.GetTarget))
+	r.Register("PUT /api/v1/targets/{id}", rbacGate(reg.Checker, "target.edit", reg.Targets.UpdateTarget))
+	r.Register("DELETE /api/v1/targets/{id}", rbacGate(reg.Checker, "target.delete", reg.Targets.DeleteTarget))
+	r.Register("POST /api/v1/targets/{id}/test", rbacGate(reg.Checker, "target.edit", reg.Targets.TestTargetConnection))
 
 	// Agents routes: /api/v1/agents
 	//
@@ -483,31 +532,31 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	//   * DELETE /api/v1/agents/{id} — RetireAgent. Replaces the pre-I-004
 	//     hard-delete; the underlying repo does a soft-retire with
 	//     optional cascade.
-	r.Register("GET /api/v1/agents", http.HandlerFunc(reg.Agents.ListAgents))
-	r.Register("POST /api/v1/agents", http.HandlerFunc(reg.Agents.RegisterAgent))
-	r.Register("GET /api/v1/agents/retired", http.HandlerFunc(reg.Agents.ListRetiredAgents))
-	r.Register("GET /api/v1/agents/{id}", http.HandlerFunc(reg.Agents.GetAgent))
-	r.Register("DELETE /api/v1/agents/{id}", http.HandlerFunc(reg.Agents.RetireAgent))
-	r.Register("POST /api/v1/agents/{id}/heartbeat", http.HandlerFunc(reg.Agents.Heartbeat))
-	r.Register("POST /api/v1/agents/{id}/csr", http.HandlerFunc(reg.Agents.AgentCSRSubmit))
-	r.Register("GET /api/v1/agents/{id}/certificates/{cert_id}", http.HandlerFunc(reg.Agents.AgentCertificatePickup))
-	r.Register("GET /api/v1/agents/{id}/work", http.HandlerFunc(reg.Agents.AgentGetWork))
-	r.Register("POST /api/v1/agents/{id}/jobs/{job_id}/status", http.HandlerFunc(reg.Agents.AgentReportJobStatus))
+	r.Register("GET /api/v1/agents", rbacGate(reg.Checker, "agent.read", reg.Agents.ListAgents))
+	r.Register("POST /api/v1/agents", rbacGate(reg.Checker, "agent.edit", reg.Agents.RegisterAgent))
+	r.Register("GET /api/v1/agents/retired", rbacGate(reg.Checker, "agent.read", reg.Agents.ListRetiredAgents))
+	r.Register("GET /api/v1/agents/{id}", rbacGate(reg.Checker, "agent.read", reg.Agents.GetAgent))
+	r.Register("DELETE /api/v1/agents/{id}", rbacGate(reg.Checker, "agent.retire", reg.Agents.RetireAgent))
+	r.Register("POST /api/v1/agents/{id}/heartbeat", rbacGate(reg.Checker, "agent.heartbeat", reg.Agents.Heartbeat))
+	r.Register("POST /api/v1/agents/{id}/csr", rbacGate(reg.Checker, "agent.job.poll", reg.Agents.AgentCSRSubmit))
+	r.Register("GET /api/v1/agents/{id}/certificates/{cert_id}", rbacGate(reg.Checker, "cert.read", reg.Agents.AgentCertificatePickup))
+	r.Register("GET /api/v1/agents/{id}/work", rbacGate(reg.Checker, "agent.job.poll", reg.Agents.AgentGetWork))
+	r.Register("POST /api/v1/agents/{id}/jobs/{job_id}/status", rbacGate(reg.Checker, "agent.job.complete", reg.Agents.AgentReportJobStatus))
 
 	// Jobs routes: /api/v1/jobs
-	r.Register("GET /api/v1/jobs", http.HandlerFunc(reg.Jobs.ListJobs))
-	r.Register("GET /api/v1/jobs/{id}", http.HandlerFunc(reg.Jobs.GetJob))
-	r.Register("POST /api/v1/jobs/{id}/cancel", http.HandlerFunc(reg.Jobs.CancelJob))
-	r.Register("POST /api/v1/jobs/{id}/approve", http.HandlerFunc(reg.Jobs.ApproveJob))
-	r.Register("POST /api/v1/jobs/{id}/reject", http.HandlerFunc(reg.Jobs.RejectJob))
+	r.Register("GET /api/v1/jobs", rbacGate(reg.Checker, "job.read", reg.Jobs.ListJobs))
+	r.Register("GET /api/v1/jobs/{id}", rbacGate(reg.Checker, "job.read", reg.Jobs.GetJob))
+	r.Register("POST /api/v1/jobs/{id}/cancel", rbacGate(reg.Checker, "job.cancel", reg.Jobs.CancelJob))
+	r.Register("POST /api/v1/jobs/{id}/approve", rbacGate(reg.Checker, "approval.approve", reg.Jobs.ApproveJob))
+	r.Register("POST /api/v1/jobs/{id}/reject", rbacGate(reg.Checker, "approval.reject", reg.Jobs.RejectJob))
 
 	// Policies routes: /api/v1/policies
-	r.Register("GET /api/v1/policies", http.HandlerFunc(reg.Policies.ListPolicies))
-	r.Register("POST /api/v1/policies", http.HandlerFunc(reg.Policies.CreatePolicy))
-	r.Register("GET /api/v1/policies/{id}", http.HandlerFunc(reg.Policies.GetPolicy))
-	r.Register("PUT /api/v1/policies/{id}", http.HandlerFunc(reg.Policies.UpdatePolicy))
-	r.Register("DELETE /api/v1/policies/{id}", http.HandlerFunc(reg.Policies.DeletePolicy))
-	r.Register("GET /api/v1/policies/{id}/violations", http.HandlerFunc(reg.Policies.ListViolations))
+	r.Register("GET /api/v1/policies", rbacGate(reg.Checker, "policy.read", reg.Policies.ListPolicies))
+	r.Register("POST /api/v1/policies", rbacGate(reg.Checker, "policy.edit", reg.Policies.CreatePolicy))
+	r.Register("GET /api/v1/policies/{id}", rbacGate(reg.Checker, "policy.read", reg.Policies.GetPolicy))
+	r.Register("PUT /api/v1/policies/{id}", rbacGate(reg.Checker, "policy.edit", reg.Policies.UpdatePolicy))
+	r.Register("DELETE /api/v1/policies/{id}", rbacGate(reg.Checker, "policy.delete", reg.Policies.DeletePolicy))
+	r.Register("GET /api/v1/policies/{id}/violations", rbacGate(reg.Checker, "policy.read", reg.Policies.ListViolations))
 
 	// Renewal Policies routes: /api/v1/renewal-policies
 	// G-1: fixes frontend FK drift — OnboardingWizard + CertificatesPage dropdowns
@@ -515,44 +564,52 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	// rules, pol-* IDs), violating FK managed_certificates.renewal_policy_id →
 	// renewal_policies(id) ON DELETE RESTRICT. This block is the backend half; the
 	// frontend half swaps getPolicies → getRenewalPolicies at 3 call sites.
-	r.Register("GET /api/v1/renewal-policies", http.HandlerFunc(reg.RenewalPolicies.ListRenewalPolicies))
-	r.Register("POST /api/v1/renewal-policies", http.HandlerFunc(reg.RenewalPolicies.CreateRenewalPolicy))
-	r.Register("GET /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.GetRenewalPolicy))
-	r.Register("PUT /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.UpdateRenewalPolicy))
-	r.Register("DELETE /api/v1/renewal-policies/{id}", http.HandlerFunc(reg.RenewalPolicies.DeleteRenewalPolicy))
+	// Reuses the policy.* permission catalogue entry (renewal policies are a
+	// subtype of policy from the operator's perspective).
+	r.Register("GET /api/v1/renewal-policies", rbacGate(reg.Checker, "policy.read", reg.RenewalPolicies.ListRenewalPolicies))
+	r.Register("POST /api/v1/renewal-policies", rbacGate(reg.Checker, "policy.edit", reg.RenewalPolicies.CreateRenewalPolicy))
+	r.Register("GET /api/v1/renewal-policies/{id}", rbacGate(reg.Checker, "policy.read", reg.RenewalPolicies.GetRenewalPolicy))
+	r.Register("PUT /api/v1/renewal-policies/{id}", rbacGate(reg.Checker, "policy.edit", reg.RenewalPolicies.UpdateRenewalPolicy))
+	r.Register("DELETE /api/v1/renewal-policies/{id}", rbacGate(reg.Checker, "policy.delete", reg.RenewalPolicies.DeleteRenewalPolicy))
 
 	// Profiles routes: /api/v1/profiles
-	r.Register("GET /api/v1/profiles", http.HandlerFunc(reg.Profiles.ListProfiles))
-	r.Register("POST /api/v1/profiles", http.HandlerFunc(reg.Profiles.CreateProfile))
-	r.Register("GET /api/v1/profiles/{id}", http.HandlerFunc(reg.Profiles.GetProfile))
-	r.Register("PUT /api/v1/profiles/{id}", http.HandlerFunc(reg.Profiles.UpdateProfile))
-	r.Register("DELETE /api/v1/profiles/{id}", http.HandlerFunc(reg.Profiles.DeleteProfile))
+	// Path-scoped: PUT / DELETE on /{id} honor per-profile scope-bound
+	// role-permission grants. Operators who grant profile.edit
+	// scope_type=profile scope_id=p-finance only authorize edits to
+	// that specific profile.
+	r.Register("GET /api/v1/profiles", rbacGate(reg.Checker, "profile.read", reg.Profiles.ListProfiles))
+	r.Register("POST /api/v1/profiles", rbacGate(reg.Checker, "profile.edit", reg.Profiles.CreateProfile))
+	r.Register("GET /api/v1/profiles/{id}", rbacGateScoped(reg.Checker, "profile.read", "profile", pathScope("id"), reg.Profiles.GetProfile))
+	r.Register("PUT /api/v1/profiles/{id}", rbacGateScoped(reg.Checker, "profile.edit", "profile", pathScope("id"), reg.Profiles.UpdateProfile))
+	r.Register("DELETE /api/v1/profiles/{id}", rbacGateScoped(reg.Checker, "profile.delete", "profile", pathScope("id"), reg.Profiles.DeleteProfile))
 
 	// Teams routes: /api/v1/teams
-	r.Register("GET /api/v1/teams", http.HandlerFunc(reg.Teams.ListTeams))
-	r.Register("POST /api/v1/teams", http.HandlerFunc(reg.Teams.CreateTeam))
-	r.Register("GET /api/v1/teams/{id}", http.HandlerFunc(reg.Teams.GetTeam))
-	r.Register("PUT /api/v1/teams/{id}", http.HandlerFunc(reg.Teams.UpdateTeam))
-	r.Register("DELETE /api/v1/teams/{id}", http.HandlerFunc(reg.Teams.DeleteTeam))
+	r.Register("GET /api/v1/teams", rbacGate(reg.Checker, "team.read", reg.Teams.ListTeams))
+	r.Register("POST /api/v1/teams", rbacGate(reg.Checker, "team.edit", reg.Teams.CreateTeam))
+	r.Register("GET /api/v1/teams/{id}", rbacGate(reg.Checker, "team.read", reg.Teams.GetTeam))
+	r.Register("PUT /api/v1/teams/{id}", rbacGate(reg.Checker, "team.edit", reg.Teams.UpdateTeam))
+	r.Register("DELETE /api/v1/teams/{id}", rbacGate(reg.Checker, "team.delete", reg.Teams.DeleteTeam))
 
 	// Owners routes: /api/v1/owners
-	r.Register("GET /api/v1/owners", http.HandlerFunc(reg.Owners.ListOwners))
-	r.Register("POST /api/v1/owners", http.HandlerFunc(reg.Owners.CreateOwner))
-	r.Register("GET /api/v1/owners/{id}", http.HandlerFunc(reg.Owners.GetOwner))
-	r.Register("PUT /api/v1/owners/{id}", http.HandlerFunc(reg.Owners.UpdateOwner))
-	r.Register("DELETE /api/v1/owners/{id}", http.HandlerFunc(reg.Owners.DeleteOwner))
+	r.Register("GET /api/v1/owners", rbacGate(reg.Checker, "owner.read", reg.Owners.ListOwners))
+	r.Register("POST /api/v1/owners", rbacGate(reg.Checker, "owner.edit", reg.Owners.CreateOwner))
+	r.Register("GET /api/v1/owners/{id}", rbacGate(reg.Checker, "owner.read", reg.Owners.GetOwner))
+	r.Register("PUT /api/v1/owners/{id}", rbacGate(reg.Checker, "owner.edit", reg.Owners.UpdateOwner))
+	r.Register("DELETE /api/v1/owners/{id}", rbacGate(reg.Checker, "owner.delete", reg.Owners.DeleteOwner))
 
 	// Agent Groups routes: /api/v1/agent-groups
-	r.Register("GET /api/v1/agent-groups", http.HandlerFunc(reg.AgentGroups.ListAgentGroups))
-	r.Register("POST /api/v1/agent-groups", http.HandlerFunc(reg.AgentGroups.CreateAgentGroup))
-	r.Register("GET /api/v1/agent-groups/{id}", http.HandlerFunc(reg.AgentGroups.GetAgentGroup))
-	r.Register("PUT /api/v1/agent-groups/{id}", http.HandlerFunc(reg.AgentGroups.UpdateAgentGroup))
-	r.Register("DELETE /api/v1/agent-groups/{id}", http.HandlerFunc(reg.AgentGroups.DeleteAgentGroup))
-	r.Register("GET /api/v1/agent-groups/{id}/members", http.HandlerFunc(reg.AgentGroups.ListAgentGroupMembers))
+	// Reuses agent.* permissions (agent-groups are an organizational
+	// view on top of the agent resource).
+	r.Register("GET /api/v1/agent-groups", rbacGate(reg.Checker, "agent.read", reg.AgentGroups.ListAgentGroups))
+	r.Register("POST /api/v1/agent-groups", rbacGate(reg.Checker, "agent.edit", reg.AgentGroups.CreateAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}", rbacGate(reg.Checker, "agent.read", reg.AgentGroups.GetAgentGroup))
+	r.Register("PUT /api/v1/agent-groups/{id}", rbacGate(reg.Checker, "agent.edit", reg.AgentGroups.UpdateAgentGroup))
+	r.Register("DELETE /api/v1/agent-groups/{id}", rbacGate(reg.Checker, "agent.edit", reg.AgentGroups.DeleteAgentGroup))
+	r.Register("GET /api/v1/agent-groups/{id}/members", rbacGate(reg.Checker, "agent.read", reg.AgentGroups.ListAgentGroupMembers))
 
 	// Audit routes: /api/v1/audit
-	r.Register("GET /api/v1/audit", http.HandlerFunc(reg.Audit.ListAuditEvents))
-	r.Register("GET /api/v1/audit/{id}", http.HandlerFunc(reg.Audit.GetAuditEvent))
+	r.Register("GET /api/v1/audit", rbacGate(reg.Checker, "audit.read", reg.Audit.ListAuditEvents))
+	r.Register("GET /api/v1/audit/{id}", rbacGate(reg.Checker, "audit.read", reg.Audit.GetAuditEvent))
 
 	// Bundle CRL/OCSP-Responder Phase 5: admin observability for the
 	// scheduler-driven CRL pre-generation cache. Admin-gated inside
@@ -571,23 +628,24 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("POST /api/v1/admin/est/reload-trust", rbacGate(reg.Checker, "est.admin", reg.AdminEST.ReloadTrust))
 
 	// Notifications routes: /api/v1/notifications
-	r.Register("GET /api/v1/notifications", http.HandlerFunc(reg.Notifications.ListNotifications))
-	r.Register("GET /api/v1/notifications/{id}", http.HandlerFunc(reg.Notifications.GetNotification))
-	r.Register("POST /api/v1/notifications/{id}/read", http.HandlerFunc(reg.Notifications.MarkAsRead))
+	r.Register("GET /api/v1/notifications", rbacGate(reg.Checker, "notification.read", reg.Notifications.ListNotifications))
+	r.Register("GET /api/v1/notifications/{id}", rbacGate(reg.Checker, "notification.read", reg.Notifications.GetNotification))
+	r.Register("POST /api/v1/notifications/{id}/read", rbacGate(reg.Checker, "notification.read", reg.Notifications.MarkAsRead))
 	// I-005: requeue a dead notification back to pending so the retry sweep
 	// picks it up again. Go 1.22 ServeMux resolves the literal /requeue segment
 	// before falling back to the {id} path-variable route above.
-	r.Register("POST /api/v1/notifications/{id}/requeue", http.HandlerFunc(reg.Notifications.RequeueNotification))
+	r.Register("POST /api/v1/notifications/{id}/requeue", rbacGate(reg.Checker, "notification.edit", reg.Notifications.RequeueNotification))
 
 	// Approvals routes: /api/v1/approvals (Rank 7).
 	// Same Go 1.22 ServeMux precedence as the notifications block — literal
 	// /approve and /reject segments resolve before the {id} pattern-var
 	// route. Same-actor RBAC enforced at the service layer; the handler
-	// surfaces ErrApproveBySameActor as HTTP 403.
-	r.Register("GET /api/v1/approvals", http.HandlerFunc(reg.Approvals.ListApprovals))
-	r.Register("GET /api/v1/approvals/{id}", http.HandlerFunc(reg.Approvals.GetApproval))
-	r.Register("POST /api/v1/approvals/{id}/approve", http.HandlerFunc(reg.Approvals.Approve))
-	r.Register("POST /api/v1/approvals/{id}/reject", http.HandlerFunc(reg.Approvals.Reject))
+	// surfaces ErrApproveBySameActor as HTTP 403. Router-level gates
+	// added in the 2026-05-10 audit CRIT-1 closure (defense in depth).
+	r.Register("GET /api/v1/approvals", rbacGate(reg.Checker, "approval.read", reg.Approvals.ListApprovals))
+	r.Register("GET /api/v1/approvals/{id}", rbacGate(reg.Checker, "approval.read", reg.Approvals.GetApproval))
+	r.Register("POST /api/v1/approvals/{id}/approve", rbacGate(reg.Checker, "approval.approve", reg.Approvals.Approve))
+	r.Register("POST /api/v1/approvals/{id}/reject", rbacGate(reg.Checker, "approval.reject", reg.Approvals.Reject))
 
 	// IntermediateCA hierarchy routes (Rank 8). Admin-gated inside the
 	// handler (M-003 pattern); non-admin Bearer callers get 403. The
@@ -600,57 +658,55 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/intermediates/{id}", rbacGate(reg.Checker, "ca.hierarchy.manage", reg.IntermediateCAs.Get))
 
 	// Stats routes: /api/v1/stats
-	r.Register("GET /api/v1/stats/summary", http.HandlerFunc(reg.Stats.GetDashboardSummary))
-	r.Register("GET /api/v1/stats/certificates-by-status", http.HandlerFunc(reg.Stats.GetCertificatesByStatus))
-	r.Register("GET /api/v1/stats/expiration-timeline", http.HandlerFunc(reg.Stats.GetExpirationTimeline))
-	r.Register("GET /api/v1/stats/job-trends", http.HandlerFunc(reg.Stats.GetJobTrends))
-	r.Register("GET /api/v1/stats/issuance-rate", http.HandlerFunc(reg.Stats.GetIssuanceRate))
+	r.Register("GET /api/v1/stats/summary", rbacGate(reg.Checker, "stats.read", reg.Stats.GetDashboardSummary))
+	r.Register("GET /api/v1/stats/certificates-by-status", rbacGate(reg.Checker, "stats.read", reg.Stats.GetCertificatesByStatus))
+	r.Register("GET /api/v1/stats/expiration-timeline", rbacGate(reg.Checker, "stats.read", reg.Stats.GetExpirationTimeline))
+	r.Register("GET /api/v1/stats/job-trends", rbacGate(reg.Checker, "stats.read", reg.Stats.GetJobTrends))
+	r.Register("GET /api/v1/stats/issuance-rate", rbacGate(reg.Checker, "stats.read", reg.Stats.GetIssuanceRate))
 
 	// Metrics routes: /api/v1/metrics
-	r.Register("GET /api/v1/metrics", http.HandlerFunc(reg.Metrics.GetMetrics))
-	r.Register("GET /api/v1/metrics/prometheus", http.HandlerFunc(reg.Metrics.GetPrometheusMetrics))
+	r.Register("GET /api/v1/metrics", rbacGate(reg.Checker, "metrics.read", reg.Metrics.GetMetrics))
+	r.Register("GET /api/v1/metrics/prometheus", rbacGate(reg.Checker, "metrics.read", reg.Metrics.GetPrometheusMetrics))
 
 	// Discovery routes: /api/v1/discovered-certificates, /api/v1/discovery-scans
-	r.Register("POST /api/v1/agents/{id}/discoveries", http.HandlerFunc(reg.Discovery.SubmitDiscoveryReport))
-	r.Register("GET /api/v1/discovered-certificates", http.HandlerFunc(reg.Discovery.ListDiscovered))
-	r.Register("GET /api/v1/discovered-certificates/{id}", http.HandlerFunc(reg.Discovery.GetDiscovered))
-	r.Register("POST /api/v1/discovered-certificates/{id}/claim", http.HandlerFunc(reg.Discovery.ClaimDiscovered))
-	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", http.HandlerFunc(reg.Discovery.DismissDiscovered))
-	r.Register("GET /api/v1/discovery-scans", http.HandlerFunc(reg.Discovery.ListScans))
-	r.Register("GET /api/v1/discovery-summary", http.HandlerFunc(reg.Discovery.GetDiscoverySummary))
+	r.Register("POST /api/v1/agents/{id}/discoveries", rbacGate(reg.Checker, "discovery.run", reg.Discovery.SubmitDiscoveryReport))
+	r.Register("GET /api/v1/discovered-certificates", rbacGate(reg.Checker, "discovery.read", reg.Discovery.ListDiscovered))
+	r.Register("GET /api/v1/discovered-certificates/{id}", rbacGate(reg.Checker, "discovery.read", reg.Discovery.GetDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/claim", rbacGate(reg.Checker, "discovery.claim", reg.Discovery.ClaimDiscovered))
+	r.Register("POST /api/v1/discovered-certificates/{id}/dismiss", rbacGate(reg.Checker, "discovery.claim", reg.Discovery.DismissDiscovered))
+	r.Register("GET /api/v1/discovery-scans", rbacGate(reg.Checker, "discovery.read", reg.Discovery.ListScans))
+	r.Register("GET /api/v1/discovery-summary", rbacGate(reg.Checker, "discovery.read", reg.Discovery.GetDiscoverySummary))
 
 	// Network scan routes: /api/v1/network-scan-targets
-	r.Register("GET /api/v1/network-scan-targets", http.HandlerFunc(reg.NetworkScan.ListNetworkScanTargets))
-	r.Register("POST /api/v1/network-scan-targets", http.HandlerFunc(reg.NetworkScan.CreateNetworkScanTarget))
-	r.Register("GET /api/v1/network-scan-targets/{id}", http.HandlerFunc(reg.NetworkScan.GetNetworkScanTarget))
-	r.Register("PUT /api/v1/network-scan-targets/{id}", http.HandlerFunc(reg.NetworkScan.UpdateNetworkScanTarget))
-	r.Register("DELETE /api/v1/network-scan-targets/{id}", http.HandlerFunc(reg.NetworkScan.DeleteNetworkScanTarget))
-	r.Register("POST /api/v1/network-scan-targets/{id}/scan", http.HandlerFunc(reg.NetworkScan.TriggerNetworkScan))
+	r.Register("GET /api/v1/network-scan-targets", rbacGate(reg.Checker, "network_scan.read", reg.NetworkScan.ListNetworkScanTargets))
+	r.Register("POST /api/v1/network-scan-targets", rbacGate(reg.Checker, "network_scan.edit", reg.NetworkScan.CreateNetworkScanTarget))
+	r.Register("GET /api/v1/network-scan-targets/{id}", rbacGate(reg.Checker, "network_scan.read", reg.NetworkScan.GetNetworkScanTarget))
+	r.Register("PUT /api/v1/network-scan-targets/{id}", rbacGate(reg.Checker, "network_scan.edit", reg.NetworkScan.UpdateNetworkScanTarget))
+	r.Register("DELETE /api/v1/network-scan-targets/{id}", rbacGate(reg.Checker, "network_scan.edit", reg.NetworkScan.DeleteNetworkScanTarget))
+	r.Register("POST /api/v1/network-scan-targets/{id}/scan", rbacGate(reg.Checker, "network_scan.run", reg.NetworkScan.TriggerNetworkScan))
 	// SCEP RFC 8894 + Intune master bundle Phase 11.5 — SCEP probe.
-	// Bearer-auth gated by the standard middleware chain; not admin-
-	// only because the probe is read-only against operator-supplied
-	// URLs and reuses the existing SafeHTTPDialContext SSRF defense.
-	r.Register("POST /api/v1/network-scan/scep-probe", http.HandlerFunc(reg.NetworkScan.ProbeSCEP))
-	r.Register("GET /api/v1/network-scan/scep-probes", http.HandlerFunc(reg.NetworkScan.ListSCEPProbes))
+	// Now RBAC-gated by network_scan.run (was Bearer-only pre-audit).
+	r.Register("POST /api/v1/network-scan/scep-probe", rbacGate(reg.Checker, "network_scan.run", reg.NetworkScan.ProbeSCEP))
+	r.Register("GET /api/v1/network-scan/scep-probes", rbacGate(reg.Checker, "network_scan.read", reg.NetworkScan.ListSCEPProbes))
 
 	// Verification routes: /api/v1/jobs/{id}/verify and /api/v1/jobs/{id}/verification
-	r.Register("POST /api/v1/jobs/{id}/verify", http.HandlerFunc(reg.Verification.VerifyDeployment))
-	r.Register("GET /api/v1/jobs/{id}/verification", http.HandlerFunc(reg.Verification.GetVerificationStatus))
+	r.Register("POST /api/v1/jobs/{id}/verify", rbacGate(reg.Checker, "verification.run", reg.Verification.VerifyDeployment))
+	r.Register("GET /api/v1/jobs/{id}/verification", rbacGate(reg.Checker, "verification.read", reg.Verification.GetVerificationStatus))
 
 	// Digest routes: /api/v1/digest
-	r.Register("GET /api/v1/digest/preview", http.HandlerFunc(reg.Digest.PreviewDigest))
-	r.Register("POST /api/v1/digest/send", http.HandlerFunc(reg.Digest.SendDigest))
+	r.Register("GET /api/v1/digest/preview", rbacGate(reg.Checker, "digest.read", reg.Digest.PreviewDigest))
+	r.Register("POST /api/v1/digest/send", rbacGate(reg.Checker, "digest.send", reg.Digest.SendDigest))
 
 	// Health check routes: /api/v1/health-checks
 	// Summary endpoint must be registered before {id} routes
-	r.Register("GET /api/v1/health-checks/summary", http.HandlerFunc(reg.HealthChecks.GetHealthCheckSummary))
-	r.Register("GET /api/v1/health-checks", http.HandlerFunc(reg.HealthChecks.ListHealthChecks))
-	r.Register("POST /api/v1/health-checks", http.HandlerFunc(reg.HealthChecks.CreateHealthCheck))
-	r.Register("GET /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.GetHealthCheck))
-	r.Register("PUT /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.UpdateHealthCheck))
-	r.Register("DELETE /api/v1/health-checks/{id}", http.HandlerFunc(reg.HealthChecks.DeleteHealthCheck))
-	r.Register("GET /api/v1/health-checks/{id}/history", http.HandlerFunc(reg.HealthChecks.GetHealthCheckHistory))
-	r.Register("POST /api/v1/health-checks/{id}/acknowledge", http.HandlerFunc(reg.HealthChecks.AcknowledgeHealthCheck))
+	r.Register("GET /api/v1/health-checks/summary", rbacGate(reg.Checker, "healthcheck.read", reg.HealthChecks.GetHealthCheckSummary))
+	r.Register("GET /api/v1/health-checks", rbacGate(reg.Checker, "healthcheck.read", reg.HealthChecks.ListHealthChecks))
+	r.Register("POST /api/v1/health-checks", rbacGate(reg.Checker, "healthcheck.edit", reg.HealthChecks.CreateHealthCheck))
+	r.Register("GET /api/v1/health-checks/{id}", rbacGate(reg.Checker, "healthcheck.read", reg.HealthChecks.GetHealthCheck))
+	r.Register("PUT /api/v1/health-checks/{id}", rbacGate(reg.Checker, "healthcheck.edit", reg.HealthChecks.UpdateHealthCheck))
+	r.Register("DELETE /api/v1/health-checks/{id}", rbacGate(reg.Checker, "healthcheck.delete", reg.HealthChecks.DeleteHealthCheck))
+	r.Register("GET /api/v1/health-checks/{id}/history", rbacGate(reg.Checker, "healthcheck.read", reg.HealthChecks.GetHealthCheckHistory))
+	r.Register("POST /api/v1/health-checks/{id}/acknowledge", rbacGate(reg.Checker, "healthcheck.acknowledge", reg.HealthChecks.AcknowledgeHealthCheck))
 
 	// ACME (RFC 8555 + RFC 9773 ARI) server endpoints. Phase 1a wires
 	// directory + new-nonce only; Phases 1b-4 extend with the JWS-
