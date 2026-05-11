@@ -64,6 +64,25 @@
 
 ### Security
 
+- **OIDC `allowed_email_domains` now editable in the GUI (Audit 2026-05-11 A-3).**
+  The backend gate that rejects logins whose email domain is outside the
+  configured allowlist landed in v2.1.0 (CRIT-5 closure, 2026-05-10), but the
+  GUI never exposed the field — GUI-driven operators had to use the API
+  directly to configure tenant isolation against multi-tenant IdPs (Auth0,
+  Azure AD common endpoint, Google Workspace). The OIDCProvidersPage create
+  modal and OIDCProviderDetailPage detail view now render a chip-style
+  multi-input with client-side validation that mirrors the backend rules
+  (no `@`, no whitespace, no wildcards, lowercase-only FQDNs). The read-only
+  view renders an explicit "any (no gate configured)" sentinel when the list
+  is empty so operators can tell "not configured" apart from "field is
+  invisible." A "Clear all" button on the edit form is gated by a confirm
+  dialog that warns about removing the tenant gate. **Operator advisory: if
+  you provisioned OIDC providers via the GUI between v2.1.0 and this fix,
+  verify `allowed_email_domains` matches your tenant policy — the field was
+  configurable only via API / MCP / direct SQL during that window.** Per-IdP
+  runbooks for multi-tenant IdPs in `docs/operator/oidc-runbooks/` already
+  documented the field; the GUI now matches.
+
 - **Pre-login cookie Path widened from `/auth/oidc/` to `/` (Audit MED-14
   follow-on).** Required to satisfy the `__Host-` prefix's `Path=/` rule. The
   cookie lifetime is unchanged (10 minutes) and only the callback handler
