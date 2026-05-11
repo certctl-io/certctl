@@ -2063,6 +2063,132 @@ func TestService_HandleCallback_MED16_RequireUAFalse_AllowsMismatch(t *testing.T
 	}
 }
 
+// =============================================================================
+// Audit 2026-05-11 A-6 — strict-when-stored. The MED-16 closure short-
+// circuited the UA/IP compare when the request-side value was empty,
+// which was an attacker-controllable bypass (omit User-Agent → check
+// skipped). The strict-when-stored fix rejects request-empty when the
+// pre-login row carries a binding, distinguishing the new reject path
+// from the existing mismatch leg via dedicated sentinels:
+// ErrPreLoginUAMissing + ErrPreLoginIPMissing.
+// =============================================================================
+
+// TestService_HandleCallback_MED16_A6_UAStoredButRequestEmpty_Rejects
+// pins the load-bearing bypass-closure leg. Pre-login row has a stored
+// User-Agent; the callback request omits the User-Agent header. Pre-A-6
+// this passed silently (the `userAgent != ""` short-circuit). Post-A-6
+// it rejects with ErrPreLoginUAMissing.
+func TestService_HandleCallback_MED16_A6_UAStoredButRequestEmpty_Rejects(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-a6-ua-empty")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-a6-ua-empty", "a6-ua-state", "test-nonce-fixed",
+		"verifier-a6uaemptyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"10.0.0.1", "MozillaLogin/1.0")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	// Empty userAgent on the consume-side mirrors an attacker forging
+	// a callback request without a User-Agent header (curl default).
+	_, err = svc.HandleCallback(context.Background(), cookie, "code", "a6-ua-state", "", "10.0.0.1", "")
+	if !errors.Is(err, ErrPreLoginUAMissing) {
+		t.Fatalf("err = %v; want ErrPreLoginUAMissing (the A-6 bypass closure)", err)
+	}
+}
+
+// TestService_HandleCallback_MED16_A6_IPStoredButRequestEmpty_Rejects
+// is symmetric for source IP. Reachable when XFF-trust gating zeros the
+// resolved IP for a request whose pre-login row captured one.
+func TestService_HandleCallback_MED16_A6_IPStoredButRequestEmpty_Rejects(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-a6-ip-empty")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-a6-ip-empty", "a6-ip-state", "test-nonce-fixed",
+		"verifier-a6ipemptyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	_, err = svc.HandleCallback(context.Background(), cookie, "code", "a6-ip-state", "", "", "Mozilla/5.0")
+	if !errors.Is(err, ErrPreLoginIPMissing) {
+		t.Fatalf("err = %v; want ErrPreLoginIPMissing", err)
+	}
+}
+
+// TestService_HandleCallback_MED16_A6_LegacyRowEmptyStoredStillPasses
+// pins the legacy-row compat: pre-migration rows (storedUA / storedIP
+// both empty) still pass through unchecked, irrespective of what the
+// callback request supplies. Within 10 minutes of the MED-16 deploy
+// every legacy row expires; afterwards the strict path is universal.
+func TestService_HandleCallback_MED16_A6_LegacyRowEmptyStoredStillPasses(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-a6-legacy")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-a6-legacy", "a6-leg-state", "test-nonce-fixed",
+		"verifier-a6legacyxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"", "") // legacy: pre-migration row has no binding
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	// Request supplies a UA + IP — these are NOT compared because the
+	// stored row has nothing to compare against.
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "a6-leg-state", "", "10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("HandleCallback (legacy empty stored): %v", err)
+	}
+	if res == nil {
+		t.Fatal("CallbackResult nil on legacy-row compat path")
+	}
+}
+
+// TestService_HandleCallback_MED16_A6_ToggleOff_AllowsBypass pins
+// the operator escape hatch. With CERTCTL_OIDC_PRELOGIN_REQUIRE_UA=false,
+// even an A-6-bypass attempt (stored UA, empty request UA) passes
+// silently. The persistence side still captures the binding so
+// retroactive audit forensics remain possible.
+func TestService_HandleCallback_MED16_A6_ToggleOff_AllowsBypass(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-a6-toggle-ua")
+	svc.SetPreLoginBindingRequirements(false, true) // UA off, IP on
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-a6-toggle-ua", "a6-tog-state", "test-nonce-fixed",
+		"verifier-a6togglexxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	// UA gate disabled → empty request UA passes despite stored UA.
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "a6-tog-state", "", "10.0.0.1", "")
+	if err != nil {
+		t.Fatalf("HandleCallback (UA toggle off, empty request UA): %v", err)
+	}
+	if res == nil {
+		t.Fatal("CallbackResult nil with UA toggle off")
+	}
+}
+
+// TestService_HandleCallback_MED16_A6_ToggleOff_IP_AllowsBypass is
+// the symmetric IP-side escape-hatch pin.
+func TestService_HandleCallback_MED16_A6_ToggleOff_IP_AllowsBypass(t *testing.T) {
+	idp := newMockIdP(t)
+	svc, pl := newServiceWithProviderAndPL(t, idp.URL(), "op-a6-toggle-ip")
+	svc.SetPreLoginBindingRequirements(true, false) // UA on, IP off
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-a6-toggle-ip", "a6-togip-state", "test-nonce-fixed",
+		"verifier-a6togipxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+		"10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "a6-togip-state", "", "", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("HandleCallback (IP toggle off, empty request IP): %v", err)
+	}
+	if res == nil {
+		t.Fatal("CallbackResult nil with IP toggle off")
+	}
+}
+
 // TestService_UpsertUser_ValidateErrorOnEmptyEmail pins the
 // User.Validate failure path. The IdP returns an empty email (missing
 // claim); the upsertUser display-name fallback resolves to "" too;

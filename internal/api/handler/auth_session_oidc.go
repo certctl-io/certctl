@@ -1006,11 +1006,11 @@ func (h *AuthSessionOIDCHandler) TestProvider(w http.ResponseWriter, r *http.Req
 	}
 	h.recordAudit(r.Context(), "auth.oidc_provider_tested", caller.ActorID, caller.ActorType, "",
 		map[string]interface{}{
-			"issuer_url":           req.IssuerURL,
-			"discovery_succeeded":  res.DiscoverySucceeded,
-			"jwks_reachable":       res.JWKSReachable,
-			"iss_param_supported":  res.IssParamSupported,
-			"error_count":          len(res.Errors),
+			"issuer_url":          req.IssuerURL,
+			"discovery_succeeded": res.DiscoverySucceeded,
+			"jwks_reachable":      res.JWKSReachable,
+			"iss_param_supported": res.IssParamSupported,
+			"error_count":         len(res.Errors),
 		})
 	writeJSON(w, http.StatusOK, res)
 }
@@ -1267,6 +1267,14 @@ func classifyOIDCFailure(err error) string {
 		return "prelogin_ua_mismatch"
 	case errors.Is(err, oidcsvc.ErrPreLoginIPMismatch):
 		return "prelogin_ip_mismatch"
+	// Audit 2026-05-11 A-6 — strict-when-stored. Distinguishes the
+	// new "request omitted the bound header" reject path from the
+	// existing "header was supplied but didn't match" path so SIEM
+	// rules can alert specifically on attempted bypasses.
+	case errors.Is(err, oidcsvc.ErrPreLoginUAMissing):
+		return "prelogin_ua_missing"
+	case errors.Is(err, oidcsvc.ErrPreLoginIPMissing):
+		return "prelogin_ip_missing"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

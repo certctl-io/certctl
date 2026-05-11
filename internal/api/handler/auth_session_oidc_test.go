@@ -1217,6 +1217,17 @@ func TestClassifyOIDCFailure(t *testing.T) {
 		// Wrapped variants must round-trip through errors.Is.
 		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMissing), "iss_param_missing"},
 		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMismatch), "iss_param_mismatch"},
+		// Audit 2026-05-11 A-6 — strict-when-stored. Distinguishes the
+		// new request-omitted-binding reject path from the existing
+		// mismatch leg. Wrapped variants must round-trip through
+		// errors.Is so the audit category remains stable even when
+		// the service layer adds context wrapping.
+		{oidcsvc.ErrPreLoginUAMismatch, "prelogin_ua_mismatch"},
+		{oidcsvc.ErrPreLoginIPMismatch, "prelogin_ip_mismatch"},
+		{oidcsvc.ErrPreLoginUAMissing, "prelogin_ua_missing"},
+		{oidcsvc.ErrPreLoginIPMissing, "prelogin_ip_missing"},
+		{fmt.Errorf("upstream: %w", oidcsvc.ErrPreLoginUAMissing), "prelogin_ua_missing"},
+		{fmt.Errorf("upstream: %w", oidcsvc.ErrPreLoginIPMissing), "prelogin_ip_missing"},
 		{errors.New("some other error"), "unspecified"},
 	}
 	for _, tc := range cases {
