@@ -190,9 +190,21 @@ func registerAuthTools(s *gomcp.Server, c *Client) {
 
 	gomcp.AddTool(s, &gomcp.Tool{
 		Name:        "certctl_auth_revoke_role_from_key",
-		Description: "Revoke a role from an API key actor (DELETE /v1/auth/keys/{id}/roles/{role_id}). Rejects revocations against the reserved actor-demo-anon (HTTP 409). Permission: auth.role.assign.",
+		Description: "Revoke a role from an API key actor (DELETE /v1/auth/keys/{id}/roles/{role_id}). Rejects revocations against the reserved actor-demo-anon (HTTP 409). Audit 2026-05-11 A-4: pass scope_type=global / profile / issuer (with scope_id for the latter two) to selectively revoke ONE variant when the actor holds the same role at multiple scopes; omit both for the legacy 'revoke every variant' behaviour. Permission: auth.role.assign.",
 	}, func(ctx context.Context, req *gomcp.CallToolRequest, input AuthRevokeKeyRoleInput) (*gomcp.CallToolResult, any, error) {
-		data, err := c.Delete("/api/v1/auth/keys/" + input.KeyID + "/roles/" + input.RoleID)
+		// Audit 2026-05-11 A-4 — append the optional scope filter when
+		// the caller supplied scope_type. The handler validates the
+		// pair shape (scope_id required vs forbidden) so we don't
+		// duplicate that here.
+		path := "/api/v1/auth/keys/" + input.KeyID + "/roles/" + input.RoleID
+		if input.ScopeType != "" {
+			q := "?scope_type=" + url.QueryEscape(input.ScopeType)
+			if input.ScopeID != "" {
+				q += "&scope_id=" + url.QueryEscape(input.ScopeID)
+			}
+			path += q
+		}
+		data, err := c.Delete(path)
 		if err != nil {
 			return errorResult(err)
 		}

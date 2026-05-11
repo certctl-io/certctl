@@ -100,6 +100,95 @@ var SpecParityExceptions = map[string]string{
 	// `[Auth]`. Shared shapes: AuthRole + AuthRolePermission in the
 	// schemas section. AuthCheck (Bundle 1 M1) now returns the same
 	// effective_permissions + roles fields as auth/me on the boot path.
+
+	// Auth Bundle 2 Phase 5 — OIDC + session HTTP surface (13 routes).
+	// The `cookieAuth` security scheme is documented in api/openapi.yaml
+	// under components.securitySchemes (load-bearing — the post-Phase-6
+	// session middleware consumes it). Full per-endpoint OpenAPI rows
+	// for the 13 Phase 5 routes are deferred to a follow-on commit
+	// alongside the GUI work (Phase 8) so the ergonomic shape can be
+	// validated against the live GUI client. Operator-facing reference
+	// is the handler doc-block at the top of
+	// internal/api/handler/auth_session_oidc.go and the Phase 5 spec at
+	// cowork/auth-bundle-2-prompt.md.
+	//
+	// Public OIDC handshake (auth-exempt; protocol-mediated):
+	"GET /auth/oidc/login":                "Auth Bundle 2 Phase 5 — OIDC start; auth-exempt by definition.",
+	"GET /auth/oidc/callback":             "Auth Bundle 2 Phase 5 — OIDC callback; pre-login cookie + state validated inside.",
+	"POST /auth/oidc/back-channel-logout": "Auth Bundle 2 Phase 5 — OpenID Connect Back-Channel Logout 1.0; auth via IdP-signed logout_token JWT in body. security: [] when documented.",
+	"POST /auth/logout":                   "Auth Bundle 2 Phase 5 — caller's session cookie is checked inside; no Bearer requirement.",
+	// Session management (RBAC-gated auth.session.*):
+	"GET /api/v1/auth/sessions":         "Auth Bundle 2 Phase 5 — list sessions; gated auth.session.list; cookieAuth+bearerAuth.",
+	"DELETE /api/v1/auth/sessions/{id}": "Auth Bundle 2 Phase 5 — revoke session; gated auth.session.revoke (own-session bypass at handler).",
+	// OIDC provider CRUD + refresh (RBAC-gated auth.oidc.*):
+	"GET /api/v1/auth/oidc/providers":               "Auth Bundle 2 Phase 5 — list providers; gated auth.oidc.list.",
+	"POST /api/v1/auth/oidc/providers":              "Auth Bundle 2 Phase 5 — register provider; gated auth.oidc.create; client_secret encrypted at rest.",
+	"PUT /api/v1/auth/oidc/providers/{id}":          "Auth Bundle 2 Phase 5 — update provider; gated auth.oidc.edit.",
+	"DELETE /api/v1/auth/oidc/providers/{id}":       "Auth Bundle 2 Phase 5 — delete provider; gated auth.oidc.delete; refused when users authenticated.",
+	"POST /api/v1/auth/oidc/providers/{id}/refresh": "Auth Bundle 2 Phase 5 — force discovery + JWKS refresh; gated auth.oidc.edit; re-runs IdP downgrade defense.",
+	// Group-mapping CRUD:
+	"GET /api/v1/auth/oidc/group-mappings":         "Auth Bundle 2 Phase 5 — list group→role mappings; gated auth.oidc.list.",
+	"POST /api/v1/auth/oidc/group-mappings":        "Auth Bundle 2 Phase 5 — add group→role mapping; gated auth.oidc.edit.",
+	"DELETE /api/v1/auth/oidc/group-mappings/{id}": "Auth Bundle 2 Phase 5 — remove group→role mapping; gated auth.oidc.edit.",
+
+	// Auth Bundle 2 Phase 7.5 — break-glass admin HTTP surface (4 routes).
+	// Operator-toggleable local-password recovery for the SSO-broken case
+	// (Decision 4). Default-OFF; the entire surface returns 404 (not 403)
+	// when CERTCTL_BREAKGLASS_ENABLED=false so it is invisible to scanners.
+	// Threat model + operator runbook live in docs/operator/breakglass.md
+	// (deferred to the Phase 12 doc bundle alongside the auth threat-model
+	// extension). Full per-endpoint OpenAPI rows ride along with that
+	// commit; until then the surface is tracked here.
+	"POST /auth/breakglass/login":                                "Auth Bundle 2 Phase 7.5 — local-password login; auth-exempt; 404 when disabled (surface invisibility per spec).",
+	"GET /api/v1/auth/breakglass/credentials":                    "Audit 2026-05-10 CRIT-4 — list credentialed actors (metadata only; no password hash on the wire); gated auth.breakglass.admin.",
+	"POST /api/v1/auth/breakglass/credentials":                   "Auth Bundle 2 Phase 7.5 — set/rotate password; gated auth.breakglass.admin.",
+	"POST /api/v1/auth/breakglass/credentials/{actor_id}/unlock": "Auth Bundle 2 Phase 7.5 — clear lockout state; gated auth.breakglass.admin.",
+	"DELETE /api/v1/auth/breakglass/credentials/{actor_id}":      "Auth Bundle 2 Phase 7.5 — remove credential; gated auth.breakglass.admin.",
+
+	// Audit 2026-05-10 HIGH-11 — streaming NDJSON audit export. Like
+	// other streaming wire-protocol surfaces (ACME, SCEP, EST), the
+	// response is line-oriented application/x-ndjson rather than a
+	// single JSON object; documenting it as a regular OpenAPI operation
+	// would misrepresent the streaming shape. The contract is documented
+	// in docs/operator/security.md::audit-export and the handler doc
+	// comment.
+	"GET /api/v1/audit/export": "Audit 2026-05-10 HIGH-11 — streaming NDJSON audit export; gated audit.export. Documented inline at internal/api/handler/audit.go::ExportAudit.",
+
+	// Audit 2026-05-10 MED-3 — `DELETE /api/v1/auth/sessions?except=current`
+	// is the "sign out all other sessions" flow. Distinct from the
+	// per-session DELETE /api/v1/auth/sessions/{id} (already in OpenAPI);
+	// this variant operates on the caller's whole session set minus the
+	// current. Documented inline at
+	// internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.
+	"DELETE /api/v1/auth/sessions": "Audit 2026-05-10 MED-3 — sign-out-all-other-sessions; gated auth.session.revoke. Documented inline at internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.",
+
+	// =========================================================================
+	// Pre-existing parity debt — routes that shipped on dev/auth-bundle-2
+	// without their OpenAPI rows. Each entry below is tracked here as an
+	// exception with a pointer to the origin commit + the handler file that
+	// already carries the contract docstring. A follow-on pass should
+	// promote each into a full operationId entry under api/openapi.yaml.
+	//
+	// Each entry MUST list the origin commit (git blame router.go for the
+	// r.Register call) so the parity-debt cleanup pass can group routes
+	// by author + topic.
+	// =========================================================================
+	"POST /api/v1/auth/oidc/test":                      "Audit 2026-05-10 MED-5 (Item 2; commit 00bbef7) — POST /api/v1/auth/oidc/test dry-run endpoint; gated auth.oidc.edit. Contract at internal/auth/oidc/test_discovery.go; OpenAPI row pending.",
+	"GET /api/v1/auth/oidc/providers/{id}/jwks-status": "Audit 2026-05-10 MED-6 follow-on (Item 3) — JWKS auto-refresh cache-status endpoint; gated auth.oidc.list. OpenAPI row pending.",
+	"GET /api/v1/auth/users":                           "Audit 2026-05-10 MED-7 / Bundle 2 Phase 13 Fix D — federated user list; gated auth.user.list. OpenAPI row pending.",
+	"DELETE /api/v1/auth/users/{id}":                   "Audit 2026-05-10 MED-7 / Bundle 2 Phase 13 Fix D — soft-delete a federated user (sets deactivated_at); gated auth.user.delete. Audit 2026-05-11 A-2 closure layered the login-time enforcement. OpenAPI row pending.",
+	"POST /api/v1/auth/users/{id}/reactivate":          "Audit 2026-05-11 A-2 closure (commit a980e4c) — clears deactivated_at so a soft-deleted federated user can log in again; gated auth.user.edit. OpenAPI row pending.",
+	"GET /api/v1/auth/runtime-config":                  "Audit 2026-05-10 MED-12 / Bundle 2 Phase 13 Fix D — admin-only inspector for the live auth-related env vars; gated auth.role.assign. Handler at internal/api/handler/auth_runtime_config.go. OpenAPI row pending.",
+
+	// Audit 2026-05-11 A-8 closure — demo-mode residual-grants cleanup.
+	// The endpoint removes residual actor-demo-anon role grants from a
+	// production deploy that previously ran (or installed alongside)
+	// demo mode. Admin-class (auth.role.assign) gated at the router.
+	// Refuses to run when Auth.Type=none (503). Wire-shape is a plain
+	// JSON POST → {removed: int64}. Handler doc-block at
+	// internal/api/handler/demo_residual.go::Cleanup; operator
+	// runbook at docs/operator/security.md::demo-to-production-cutover.
+	"POST /api/v1/auth/demo-residual/cleanup": "Audit 2026-05-11 A-8 closure — demo-mode residual-grants cleanup; gated auth.role.assign. Refuses when Auth.Type=none. Handler at internal/api/handler/demo_residual.go. OpenAPI row pending — endpoint shape is minimal (POST → {removed: int64}).",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

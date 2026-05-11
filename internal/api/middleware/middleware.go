@@ -371,9 +371,25 @@ func ContentType(next http.Handler) http.Handler {
 	})
 }
 
-// CORS middleware adds CORS headers to allow cross-origin requests.
-// Deprecated: Use NewCORS for configurable origins. Kept for health endpoints.
-func CORS(next http.Handler) http.Handler {
+// CORSWildcard emits Access-Control-Allow-Origin: * unconditionally. ONLY use
+// for endpoints that (a) carry no credentials and (b) must be reachable from
+// any origin (e.g. K8s/Docker health probes, Prometheus scrapers, the GUI's
+// pre-login auth-info probe). Every call site MUST appear in
+// scripts/ci-guards/cors-wildcard-allowlist.sh — adding a new call site
+// without listing it in the allowlist fails CI.
+//
+// For credentialed endpoints (sessions, OIDC handshake, BCL, bootstrap,
+// breakglass-login, every /api/v1/* mutation route) use
+// middleware.NewCORS(corsCfg) which honors CERTCTL_CORS_ORIGINS and emits
+// per-origin headers (with Vary: Origin for cache correctness).
+//
+// History: this function was named `CORS` pre-2026-05-10 and was applied as
+// the default CORS middleware on the OIDC handshake, BCL, logout, bootstrap,
+// and breakglass-login routes — CRIT-3 of the 2026-05-10 audit
+// (cowork/auth-bundles-audit-2026-05-10.md). The fix narrowed those call
+// sites to NewCORS(corsCfg) and renamed the wildcard form to make the
+// security tradeoff explicit at every remaining call site.
+func CORSWildcard(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Access-Control-Allow-Origin", "*")
 		w.Header().Set("Access-Control-Allow-Methods", "GET, POST, PUT, DELETE, PATCH, OPTIONS")

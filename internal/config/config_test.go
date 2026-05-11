@@ -423,8 +423,14 @@ func TestValidate_ValidConfig(t *testing.T) {
 }
 
 func TestValidate_AuthTypeNone(t *testing.T) {
+	srv := validServerConfig(t)
+	// Audit 2026-05-10 HIGH-12: Type=none with non-loopback host now
+	// fails closed unless DemoModeAck=true. Bind the unit-test config
+	// to 127.0.0.1 so the legitimate "demo on loopback" path stays
+	// green (the existing test predates the HIGH-12 guard).
+	srv.Host = "127.0.0.1"
 	cfg := &Config{
-		Server:   validServerConfig(t),
+		Server:   srv,
 		Database: DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
 		Log:      LogConfig{Level: "info", Format: "json"},
 		Auth:     AuthConfig{Type: "none", Secret: ""},
@@ -442,7 +448,117 @@ func TestValidate_AuthTypeNone(t *testing.T) {
 		},
 	}
 	if err := cfg.Validate(); err != nil {
-		t.Errorf("Validate() returned error for auth type 'none': %v", err)
+		t.Errorf("Validate() returned error for auth type 'none' on loopback: %v", err)
+	}
+}
+
+// Audit 2026-05-10 HIGH-12 closure — pin the demo-mode listen-address
+// guard. Pre-fix, an operator who flipped CERTCTL_AUTH_TYPE=none on a
+// non-loopback bind exposed admin functions to anyone reachable on
+// port 8443 (the synthetic actor `actor-demo-anon` is wired with
+// AdminKey=true). Post-fix, Validate() refuses to start unless
+// CERTCTL_DEMO_MODE_ACK=true acknowledges the bypass.
+func TestValidate_AuthTypeNone_NonLoopback_FailsClosed(t *testing.T) {
+	srv := validServerConfig(t)
+	srv.Host = "0.0.0.0"
+	cfg := &Config{
+		Server:    srv,
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "none", Secret: ""},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; want HIGH-12 demo-mode guard to fail closed on Host=0.0.0.0 with Type=none and DemoModeAck=false")
+	}
+	if !strings.Contains(err.Error(), "CERTCTL_DEMO_MODE_ACK=true") {
+		t.Errorf("Validate() error = %q; want it to mention CERTCTL_DEMO_MODE_ACK=true", err.Error())
+	}
+}
+
+func TestValidate_AuthTypeNone_NonLoopback_AckPasses(t *testing.T) {
+	srv := validServerConfig(t)
+	srv.Host = "0.0.0.0"
+	cfg := &Config{
+		Server:    srv,
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "none", Secret: "", DemoModeAck: true},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with DemoModeAck=true returned error: %v", err)
+	}
+}
+
+func TestValidate_AuthTypeAPIKey_NonLoopback_NotAffected(t *testing.T) {
+	// Real authn types are unaffected by the HIGH-12 guard — it only
+	// fires when Type=none.
+	srv := validServerConfig(t)
+	srv.Host = "0.0.0.0"
+	cfg := &Config{
+		Server:    srv,
+		Database:  DatabaseConfig{URL: "postgres://localhost/certctl", MaxConnections: 25},
+		Log:       LogConfig{Level: "info", Format: "json"},
+		Auth:      AuthConfig{Type: "api-key", Secret: "real-secret"},
+		Keygen:    KeygenConfig{Mode: "agent"},
+		Scheduler: validSchedulerConfig(),
+	}
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() with Type=api-key on 0.0.0.0 returned error: %v", err)
+	}
+}
+
+func TestIsLoopbackAddr(t *testing.T) {
+	cases := []struct {
+		host string
+		want bool
+	}{
+		// Loopback positives.
+		{"127.0.0.1", true},
+		{"::1", true},
+		{"localhost", true},
+		{"127.0.0.5", true}, // any 127.0.0.0/8
+		// Non-loopback negatives — the cases the HIGH-12 guard catches.
+		{"", false},
+		{"0.0.0.0", false},
+		{"::", false},
+		{"[::]", false},
+		{"10.0.0.1", false},
+		{"192.168.1.1", false},
+		{"203.0.113.42", false},
+		{"example.com", false}, // hostname → fail closed
+		{"my-cert-server.internal", false},
+		// Defensive: host:port form should still classify the host part.
+		{"127.0.0.1:8443", true},
+		{"0.0.0.0:8443", false},
+	}
+	for _, tc := range cases {
+		got := isLoopbackAddr(tc.host)
+		if got != tc.want {
+			t.Errorf("isLoopbackAddr(%q) = %v; want %v", tc.host, got, tc.want)
+		}
+	}
+}
+
+// validSchedulerConfig returns a SchedulerConfig with all required
+// fields set so Validate() doesn't fail for unrelated reasons in the
+// HIGH-12 test cases. Mirrors the inline initialization in the
+// pre-existing TestValidate_* tests.
+func validSchedulerConfig() SchedulerConfig {
+	return SchedulerConfig{
+		RenewalCheckInterval:        1 * time.Hour,
+		JobProcessorInterval:        30 * time.Second,
+		AgentHealthCheckInterval:    2 * time.Minute,
+		NotificationProcessInterval: 1 * time.Minute,
+		NotificationRetryInterval:   2 * time.Minute,
+		RetryInterval:               5 * time.Minute,
+		JobTimeoutInterval:          10 * time.Minute,
+		AwaitingCSRTimeout:          24 * time.Hour,
+		AwaitingApprovalTimeout:     168 * time.Hour,
 	}
 }
 
@@ -553,17 +669,23 @@ func TestValidAuthTypesDoesNotContainJWT(t *testing.T) {
 	}
 }
 
-// TestValidAuthTypesIsExactly_APIKey_None pins the current allowed set.
-// If a future change adds a new auth type, this test must be updated
-// alongside the validator and the helm-chart `validateAuthType` helper —
-// keeping all three surfaces in sync.
-func TestValidAuthTypesIsExactly_APIKey_None(t *testing.T) {
+// TestValidAuthTypesIsExactly_APIKey_None_OIDC pins the current allowed
+// set. If a future change adds a new auth type, this test must be
+// updated alongside the validator and the helm-chart `validateAuthType`
+// helper — keeping all three surfaces in sync.
+//
+// Bundle 2 Phase 0: extended from {api-key, none} to {api-key, none,
+// oidc}. The G-1 closure test (TestValidAuthTypesDoesNotContainJWT)
+// stays passing because "jwt" is never added back. ID tokens are JWTs
+// internally but the auth-type literal is "oidc", so the silent
+// auth-downgrade that drove G-1 cannot regress through this addition.
+func TestValidAuthTypesIsExactly_APIKey_None_OIDC(t *testing.T) {
 	t.Parallel()
 	got := ValidAuthTypes()
-	if len(got) != 2 {
-		t.Fatalf("ValidAuthTypes() returned %d entries, want 2: %v", len(got), got)
+	if len(got) != 3 {
+		t.Fatalf("ValidAuthTypes() returned %d entries, want 3: %v", len(got), got)
 	}
-	want := map[AuthType]bool{AuthTypeAPIKey: true, AuthTypeNone: true}
+	want := map[AuthType]bool{AuthTypeAPIKey: true, AuthTypeNone: true, AuthTypeOIDC: true}
 	for _, at := range got {
 		if !want[at] {
 			t.Errorf("unexpected auth type in ValidAuthTypes: %q", at)
@@ -577,7 +699,7 @@ func TestValidAuthTypesIsExactly_APIKey_None(t *testing.T) {
 // rejection didn't accidentally swallow non-jwt typos.
 func TestValidate_GenericInvalidAuthType(t *testing.T) {
 	t.Parallel()
-	for _, badType := range []string{"", "garbage", "oidc", "mtls", "API-KEY"} {
+	for _, badType := range []string{"", "garbage", "saml", "mtls", "API-KEY"} {
 		t.Run("type="+badType, func(t *testing.T) {
 			cfg := &Config{
 				Server:   validServerConfig(t),

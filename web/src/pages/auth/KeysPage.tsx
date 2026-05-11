@@ -188,14 +188,30 @@ function AssignRoleModal({ actor, roles, onClose, onSuccess }: AssignProps) {
   const [roleID, setRoleID] = useState('');
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
+  // Audit 2026-05-10 HIGH-10 GUI half — scope + expiry inputs.
+  const [scopeType, setScopeType] = useState<'global' | 'profile' | 'issuer'>('global');
+  const [scopeID, setScopeID] = useState('');
+  const [expiresAt, setExpiresAt] = useState(''); // <input type="datetime-local"> value
 
   const submit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!roleID) return;
+    if (scopeType !== 'global' && !scopeID.trim()) {
+      setError(`scope_id is required when scope_type is ${scopeType}`);
+      return;
+    }
     setBusy(true);
     setError(null);
     try {
-      await authAssignKeyRole(actor.actor_id, roleID);
+      // datetime-local emits "YYYY-MM-DDTHH:MM"; promote to RFC3339 by
+      // appending :00Z (UTC). Operators wanting a non-UTC expiry can
+      // submit via curl; the GUI keeps the UX simple.
+      const expiry = expiresAt ? `${expiresAt}:00Z` : undefined;
+      await authAssignKeyRole(actor.actor_id, roleID, {
+        scope_type: scopeType,
+        scope_id: scopeType === 'global' ? undefined : scopeID.trim(),
+        expires_at: expiry,
+      });
       onSuccess();
     } catch (err) {
       setError(err instanceof Error ? err.message : String(err));
@@ -232,6 +248,49 @@ function AssignRoleModal({ actor, roles, onClose, onSuccess }: AssignProps) {
                 </option>
               ))}
           </select>
+          {/* Audit 2026-05-10 HIGH-10 GUI half — scope picker. */}
+          <div>
+            <label className="block text-xs text-ink-muted mb-1">Scope</label>
+            <select
+              value={scopeType}
+              onChange={(e) => setScopeType(e.target.value as 'global' | 'profile' | 'issuer')}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm"
+              data-testid="assign-role-scope-type"
+            >
+              <option value="global">Global (no scope)</option>
+              <option value="profile">Per profile</option>
+              <option value="issuer">Per issuer</option>
+            </select>
+          </div>
+          {scopeType !== 'global' && (
+            <div>
+              <label className="block text-xs text-ink-muted mb-1">
+                Scope ID ({scopeType})
+              </label>
+              <input
+                type="text"
+                value={scopeID}
+                onChange={(e) => setScopeID(e.target.value)}
+                placeholder={scopeType === 'profile' ? 'p-acme-corp' : 'iss-internal-pki'}
+                className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm"
+                data-testid="assign-role-scope-id"
+                required
+              />
+            </div>
+          )}
+          {/* Audit 2026-05-10 HIGH-10 GUI half — expiry input. */}
+          <div>
+            <label className="block text-xs text-ink-muted mb-1">
+              Expires at (optional; UTC)
+            </label>
+            <input
+              type="datetime-local"
+              value={expiresAt}
+              onChange={(e) => setExpiresAt(e.target.value)}
+              className="w-full bg-white border border-surface-border rounded px-3 py-2 text-sm"
+              data-testid="assign-role-expires-at"
+            />
+          </div>
           <div className="flex gap-2 pt-2">
             <button
               type="submit"

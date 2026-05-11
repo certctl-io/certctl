@@ -30,6 +30,20 @@ import ErrorState from '../../components/ErrorState';
 // server still 403s an end-run; client-side hide is UX, not security.
 // =============================================================================
 
+// Audit 2026-05-10 LOW-11 — default role ids the server seeds via
+// migrations 000029 + 000039. The backend rejects DELETE on any of
+// these with HTTP 409; this set mirrors the seed so the GUI hides
+// the Delete button on system roles. Keep in sync with the migrations.
+const DEFAULT_ROLE_IDS = new Set([
+  'r-admin',
+  'r-operator',
+  'r-viewer',
+  'r-agent',
+  'r-mcp',
+  'r-cli',
+  'r-auditor',
+]);
+
 export default function RoleDetailPage() {
   const { id = '' } = useParams<{ id: string }>();
   const me = useAuthMe();
@@ -83,11 +97,14 @@ export default function RoleDetailPage() {
     }
   };
 
-  const handleAddPermission = async (perm: string) => {
+  // Audit 2026-05-10 MED-8 — extended permission grant body with
+  // scope_type + scope_id. The select dropdown drives `perm`; scope
+  // inputs are read from inline state hoisted from the form below.
+  const handleAddPermission = async (perm: string, scope?: { scope_type?: string; scope_id?: string }) => {
     setSubmitting(true);
     setActionError(null);
     try {
-      await authAddRolePermission(role.id, { permission: perm });
+      await authAddRolePermission(role.id, { permission: perm, ...(scope ?? {}) });
       qc.invalidateQueries({ queryKey: ['auth', 'role', role.id] });
     } catch (err) {
       setActionError(err instanceof Error ? err.message : String(err));
@@ -132,14 +149,29 @@ export default function RoleDetailPage() {
               </button>
             )}
             {canDelete && (
-              <button
-                className="btn btn-danger"
-                onClick={handleDelete}
-                disabled={submitting}
-                data-testid="role-delete-button"
-              >
-                Delete
-              </button>
+              // Audit 2026-05-10 LOW-11 closure — hide Delete on
+              // default roles. The backend already rejects deletion of
+              // default roles (DELETE returns 409 with
+              // 'cannot delete default role'); this is pure UX so
+              // operators don't click a button that's destined to fail.
+              DEFAULT_ROLE_IDS.has(role.id) ? (
+                <span
+                  className="text-xs text-ink-muted"
+                  title="System role; cannot be deleted."
+                  data-testid="role-delete-disabled-tooltip"
+                >
+                  System role (cannot be deleted)
+                </span>
+              ) : (
+                <button
+                  className="btn btn-danger"
+                  onClick={handleDelete}
+                  disabled={submitting}
+                  data-testid="role-delete-button"
+                >
+                  Delete
+                </button>
+              )
             )}
           </div>
         }
@@ -166,24 +198,10 @@ export default function RoleDetailPage() {
             </div>
           </div>
           {canEdit && availablePerms.length > 0 && (
-            <select
-              className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm"
-              defaultValue=""
-              onChange={e => {
-                if (e.target.value) {
-                  void handleAddPermission(e.target.value);
-                  e.target.value = '';
-                }
-              }}
-              data-testid="role-add-permission-select"
-            >
-              <option value="">Add permission…</option>
-              {availablePerms.map(p => (
-                <option key={p.id} value={p.name}>
-                  {p.name}
-                </option>
-              ))}
-            </select>
+            <AddPermissionForm
+              availablePerms={availablePerms.map((p) => p.name)}
+              onSubmit={(perm, scope) => void handleAddPermission(perm, scope)}
+            />
           )}
         </div>
         {permissions.length === 0 ? (
@@ -336,6 +354,74 @@ function EditRoleModal({ roleId, initialName, initialDescription, onClose, onSuc
           </div>
         </form>
       </div>
+    </div>
+  );
+}
+
+// =============================================================================
+// Audit 2026-05-10 MED-8 closure — Add-permission form with scope picker.
+// =============================================================================
+
+interface AddPermissionFormProps {
+  availablePerms: string[];
+  onSubmit: (perm: string, scope?: { scope_type?: string; scope_id?: string }) => void;
+}
+
+function AddPermissionForm({ availablePerms, onSubmit }: AddPermissionFormProps) {
+  const [perm, setPerm] = useState('');
+  const [scopeType, setScopeType] = useState<'global' | 'profile' | 'issuer'>('global');
+  const [scopeID, setScopeID] = useState('');
+  return (
+    <div className="flex items-center gap-2">
+      <select
+        className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm"
+        value={perm}
+        onChange={(e) => setPerm(e.target.value)}
+        data-testid="role-add-permission-select"
+      >
+        <option value="">Add permission…</option>
+        {availablePerms.map((p) => (
+          <option key={p} value={p}>{p}</option>
+        ))}
+      </select>
+      <select
+        className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm"
+        value={scopeType}
+        onChange={(e) => setScopeType(e.target.value as 'global' | 'profile' | 'issuer')}
+        data-testid="role-add-permission-scope-type"
+      >
+        <option value="global">Global</option>
+        <option value="profile">Profile</option>
+        <option value="issuer">Issuer</option>
+      </select>
+      {scopeType !== 'global' && (
+        <input
+          type="text"
+          placeholder={scopeType === 'profile' ? 'p-acme-corp' : 'iss-internal-pki'}
+          value={scopeID}
+          onChange={(e) => setScopeID(e.target.value)}
+          className="bg-white border border-surface-border rounded px-3 py-1.5 text-sm"
+          data-testid="role-add-permission-scope-id"
+        />
+      )}
+      <button
+        type="button"
+        className="btn btn-primary"
+        disabled={!perm || (scopeType !== 'global' && !scopeID.trim())}
+        onClick={() => {
+          if (!perm) return;
+          if (scopeType === 'global') {
+            onSubmit(perm);
+          } else {
+            onSubmit(perm, { scope_type: scopeType, scope_id: scopeID.trim() });
+          }
+          setPerm('');
+          setScopeID('');
+        }}
+        data-testid="role-add-permission-submit"
+      >
+        Add
+      </button>
     </div>
   );
 }

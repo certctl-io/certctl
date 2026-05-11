@@ -4,6 +4,7 @@ import (
 	"crypto/tls"
 	"fmt"
 	"log/slog"
+	"net"
 	"os"
 	"strconv"
 	"strings"
@@ -1507,6 +1508,22 @@ const (
 	// and set this value on the upstream certctl process. See
 	// docs/architecture.md "Authenticating-gateway pattern".
 	AuthTypeNone AuthType = "none"
+
+	// AuthTypeOIDC (Auth Bundle 2 Phase 0) reserves the literal that the
+	// OIDC handler chain (Bundle 2 Phase 5+6) consumes. Pre-Bundle-2
+	// behavior: the literal is allowed by the validator but the handler
+	// chain is not yet wired, so the runtime guard in cmd/server/main.go
+	// surfaces a clear "oidc auth-type configured but Bundle 2 handlers
+	// not registered" error rather than silently falling back to api-key
+	// (the failure mode that drove G-1's jwt-literal removal). Once
+	// Bundle 2's session middleware + OIDC service ship, the runtime
+	// guard relaxes and CERTCTL_AUTH_TYPE=oidc routes through them.
+	//
+	// Note: this is the AUTH-TYPE literal value, NOT the JWT alg literal.
+	// ID tokens are JWTs internally but the auth-type config string is
+	// "oidc". The G-1 closure test (TestValidAuthTypesDoesNotContainJWT)
+	// stays passing because "jwt" is never added back to the slice.
+	AuthTypeOIDC AuthType = "oidc"
 )
 
 // ValidAuthTypes returns the allowed CERTCTL_AUTH_TYPE values. The set is
@@ -1515,8 +1532,14 @@ const (
 // validator below, the runtime guard in cmd/server/main.go, the helm
 // chart template (`certctl.validateAuthType`), and the property test in
 // config_test.go that pins "jwt" out of the slice forever.
+//
+// Bundle 2 Phase 0 adds AuthTypeOIDC to the slice. The G-1 invariant
+// remains: "jwt" stays out of the allowed set forever; OIDC ID tokens
+// are JWTs internally but the auth-type literal is "oidc", so the
+// silent-downgrade attack surface that "jwt" represented does not
+// regress.
 func ValidAuthTypes() []AuthType {
-	return []AuthType{AuthTypeAPIKey, AuthTypeNone}
+	return []AuthType{AuthTypeAPIKey, AuthTypeNone, AuthTypeOIDC}
 }
 
 // AuthConfig contains authentication configuration.
@@ -1567,6 +1590,114 @@ type AuthConfig struct {
 	// Setting: CERTCTL_AGENT_BOOTSTRAP_TOKEN environment variable.
 	AgentBootstrapToken string
 
+	// Session holds the Auth Bundle 2 Phase 4 session-service tunables.
+	// Defaults are documented on the SessionConfig fields. The session
+	// service is wired into cmd/server/main.go alongside the OIDC
+	// service in Phase 5; pre-Phase-5 deployments that run with the
+	// legacy `api-key` auth type ignore this struct entirely.
+	Session SessionConfig
+
+	// TrustedProxies is the comma-separated list of CIDR ranges from
+	// which X-Forwarded-For is honored. Empty (default) disables XFF
+	// trust entirely — every request's source IP is read from
+	// r.RemoteAddr regardless of XFF headers. Audit 2026-05-10 LOW-5
+	// closure: pre-fix the audit subsystem trusted any caller-supplied
+	// XFF for IP attribution, letting an attacker inject arbitrary IPs
+	// into audit rows + session IP-binding. Post-fix XFF is read only
+	// when the direct connection's RemoteAddr is in this allowlist.
+	// Setting: CERTCTL_TRUSTED_PROXIES (e.g. "10.0.0.0/8,192.168.0.0/16").
+	TrustedProxies []string
+
+	// DemoModeAck must be true to allow CERTCTL_AUTH_TYPE=none with a
+	// non-loopback listen address. Default false. Audit 2026-05-10
+	// HIGH-12 closure: pre-fix, an operator who flipped Type=none
+	// "temporarily" or via misconfig exposed admin functions to anyone
+	// reachable on port 8443 — the demo-mode synthetic actor
+	// `actor-demo-anon` is wired with `AdminKey=true`, so every
+	// request was served as a full admin. The control plane is
+	// HTTPS-only but a misconfigured ingress / public bind meant
+	// unauthenticated full admin. Post-fix: Validate() refuses to
+	// start when Type=none AND the listener binds to a non-loopback
+	// address (0.0.0.0, ::, or a routable IP) UNLESS the operator
+	// also sets DemoModeAck=true to acknowledge the bypass. Production
+	// deployments MUST set Type to a real authn type (api-key | oidc).
+	// Setting: CERTCTL_DEMO_MODE_ACK environment variable.
+	DemoModeAck bool
+
+	// DemoModeResidualStrict refuses startup when Auth.Type != none
+	// and `actor-demo-anon` has residual role grants in actor_roles.
+	// Default false (emit WARN log + audit row instead). Audit
+	// 2026-05-11 A-8 closure — closes the deferred Phase 2 leg of
+	// HIGH-12 (cowork/auth-bundles-fixes-2026-05-10/11-high-12-...).
+	//
+	// Note: migration 000029 unconditionally seeds the
+	// `ar-demo-anon-admin` grant of `r-admin` to `actor-demo-anon`
+	// for every install, so production deploys will see this WARN
+	// out of the box. The intended workflow at production cutover is:
+	//   1. POST /api/v1/auth/demo-residual/cleanup (or run the
+	//      DELETE FROM actor_roles WHERE actor_id='actor-demo-anon'
+	//      SQL emitted by the WARN).
+	//   2. Optionally set this flag for subsequent boots to refuse
+	//      startup if the rows somehow get re-seeded.
+	//
+	// Setting: CERTCTL_DEMO_MODE_RESIDUAL_STRICT environment variable.
+	DemoModeResidualStrict bool
+
+	// OIDCBCLMaxAgeSeconds is the iat-freshness skew window for OIDC
+	// back-channel-logout tokens. logout_tokens with iat outside the
+	// window are rejected with audit outcome=iat_stale (in the past)
+	// or iat_future (in the future). Audit 2026-05-10 HIGH-3 closure.
+	// Default 60s matches the ID-token skew tolerance in
+	// internal/auth/oidc/service.go. Range: 10-300; values outside
+	// this window indicate IdP clock misconfiguration that warrants
+	// operator attention.
+	// Setting: CERTCTL_OIDC_BCL_MAX_AGE_SECONDS environment variable.
+	OIDCBCLMaxAgeSeconds int
+
+	// OIDCPreLoginRequireUA enables the RFC 9700 §4.7.1 user-agent
+	// binding check on /auth/oidc/callback. Audit 2026-05-10 MED-16.
+	// Default true. Operators on enterprise proxies that rewrite the
+	// UA header set this false; the binding value is still persisted
+	// + audited even when enforcement is off so retroactive forensics
+	// remain possible.
+	// Setting: CERTCTL_OIDC_PRELOGIN_REQUIRE_UA environment variable.
+	OIDCPreLoginRequireUA bool
+
+	// OIDCPreLoginRequireIP enables the RFC 9700 §4.7.1 source-IP
+	// binding check on /auth/oidc/callback. Audit 2026-05-10 MED-16.
+	// Default true. Operators on dual-stack v4/v6 or mobile
+	// carrier-grade NAT where source IP routinely flips set this
+	// false; persistence + audit behave the same as UA above.
+	// Setting: CERTCTL_OIDC_PRELOGIN_REQUIRE_IP environment variable.
+	OIDCPreLoginRequireIP bool
+
+	// Breakglass holds the Auth Bundle 2 Phase 7.5 break-glass admin
+	// tunables. Default-OFF; the entire surface is invisible (404
+	// instead of 403) when CERTCTL_BREAKGLASS_ENABLED is not true.
+	// Threat model: enabling break-glass is a deliberate bypass of
+	// the SSO security boundary; operators turn it on during SSO
+	// incidents and turn it off after recovery.
+	Breakglass BreakglassConfig
+
+	// BootstrapAdminGroups is the comma-separated list of IdP group
+	// names that grant the FIRST OIDC-authenticated user the r-admin
+	// role. Auth Bundle 2 Phase 7 / Decision 3. Empty (default)
+	// disables the OIDC-first-admin bootstrap path; the env-var-token
+	// path (BootstrapToken below) remains the fallback for fresh
+	// deployments without OIDC. When both are configured, OIDC wins
+	// on group match.
+	// Setting: CERTCTL_BOOTSTRAP_ADMIN_GROUPS environment variable.
+	BootstrapAdminGroups []string
+
+	// BootstrapOIDCProviderID restricts the OIDC-first-admin bootstrap
+	// path to a specific provider id (matches the seeded provider
+	// name in oidc_providers.id). Empty (default) accepts a match
+	// from any configured provider. Useful when an operator
+	// configures multiple IdPs and wants only the corporate IdP to
+	// be eligible for bootstrap.
+	// Setting: CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID environment variable.
+	BootstrapOIDCProviderID string
+
 	// BootstrapToken is the one-shot pre-shared secret that gates the
 	// Bundle 1 Phase 6 bootstrap endpoint (POST /v1/auth/bootstrap). When
 	// set at server startup AND no admin-roled actors exist, the
@@ -1585,6 +1716,88 @@ type AuthConfig struct {
 	// Generation guidance: `openssl rand -hex 32` (256-bit entropy).
 	// Setting: CERTCTL_BOOTSTRAP_TOKEN environment variable.
 	BootstrapToken string
+}
+
+// SessionConfig contains the Auth Bundle 2 Phase 4 session-service
+// tunables. Every field is operator-overridable via the documented
+// CERTCTL_SESSION_* env var; defaults are the conservative values from
+// the Phase 4 spec.
+//
+// Bundle 2 Phase 4 / OWASP ASVS V3 (Session Management). The defaults
+// (1h idle / 8h absolute / 24h key retention / 1h GC / Lax cookies /
+// no IP-or-UA bind) are the conservative starting point that matches
+// the prompt; tightening to Strict + IP/UA bind suits high-security
+// environments at the cost of breaking inbound deep-links from external
+// apps and login-from-mobile-on-cellular flows.
+type SessionConfig struct {
+	// IdleTimeout: maximum time between authenticated requests on a
+	// session before re-auth is required. Default 1h. Wire:
+	// CERTCTL_SESSION_IDLE_TIMEOUT.
+	IdleTimeout time.Duration
+
+	// AbsoluteTimeout: maximum lifetime of a session regardless of
+	// activity. Default 8h. Wire: CERTCTL_SESSION_ABSOLUTE_TIMEOUT.
+	AbsoluteTimeout time.Duration
+
+	// SigningKeyRetention: time a retired signing key stays valid for
+	// verification before being purged from the keys table. Default
+	// 24h. Wire: CERTCTL_SESSION_SIGNING_KEY_RETENTION.
+	SigningKeyRetention time.Duration
+
+	// GCInterval: scheduler tick interval for the session-GC sweep.
+	// Default 1h. Wire: CERTCTL_SESSION_GC_INTERVAL.
+	GCInterval time.Duration
+
+	// SameSite: SameSite cookie attribute. Valid values: "Lax"
+	// (default) or "Strict". Strict is recommended for high-security
+	// environments at the cost of breaking inbound deep-links from
+	// external apps. Wire: CERTCTL_SESSION_SAMESITE.
+	SameSite string
+
+	// BindIP: when true, the session middleware compares the request's
+	// client IP to the session row's recorded IP on every Validate.
+	// Mismatch -> 401, audit row, session NOT auto-revoked (user may
+	// have legitimate IP change). Default false. Wire:
+	// CERTCTL_SESSION_BIND_IP.
+	BindIP bool
+
+	// BindUserAgent: when true, the session middleware compares the
+	// request's User-Agent to the session row's recorded UA on every
+	// Validate. Default false; useful only in tightly-controlled
+	// environments. Wire: CERTCTL_SESSION_BIND_USER_AGENT.
+	BindUserAgent bool
+}
+
+// BreakglassConfig contains the Auth Bundle 2 Phase 7.5 break-glass
+// admin tunables. Decision 4: operator-toggleable local-password
+// admin for the SSO-broken case. Default-OFF; the entire surface is
+// invisible (404 NOT 403) when Enabled=false.
+//
+// Threat model (load-bearing): enabling break-glass is a deliberate
+// bypass of the SSO security boundary. An attacker who phishes the
+// password OR finds it in a compromised password manager bypasses
+// MFA, OIDC, and every group-claim gate. Recommendation: keep
+// CERTCTL_BREAKGLASS_ENABLED=false in steady-state. Enable only
+// during SSO-broken incidents. Disable after recovery. WebAuthn
+// pairing (v3 per Decision 12) is the load-bearing second factor.
+type BreakglassConfig struct {
+	// Enabled gates the entire service surface. Default false.
+	// Wire: CERTCTL_BREAKGLASS_ENABLED.
+	Enabled bool
+
+	// LockoutThreshold is the failure count that trips the lockout.
+	// Default 5. Wire: CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD.
+	LockoutThreshold int
+
+	// LockoutDuration is how long the account stays locked after the
+	// threshold trips. Default 15m.
+	// Wire: CERTCTL_BREAKGLASS_LOCKOUT_DURATION.
+	LockoutDuration time.Duration
+
+	// LockoutResetInterval is the idle time after last_failure_at
+	// before the failure counter resets to 0 on next attempt.
+	// Default 1h. Wire: CERTCTL_BREAKGLASS_LOCKOUT_RESET_INTERVAL.
+	LockoutResetInterval time.Duration
 }
 
 // RateLimitConfig contains rate limiting configuration.
@@ -1700,6 +1913,15 @@ func Load() (*Config, error) {
 		Auth: AuthConfig{
 			Type:   getEnv("CERTCTL_AUTH_TYPE", "api-key"),
 			Secret: getEnv("CERTCTL_AUTH_SECRET", ""),
+			// Audit 2026-05-10 HIGH-12 closure: required-true to allow
+			// CERTCTL_AUTH_TYPE=none with a non-loopback listen address.
+			DemoModeAck: getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
+			// Audit 2026-05-11 A-8 closure: when true, the preflight
+			// residual-grants detector refuses startup if actor-demo-anon
+			// has any actor_roles rows. Default false (WARN-only).
+			DemoModeResidualStrict: getEnvBool("CERTCTL_DEMO_MODE_RESIDUAL_STRICT", false),
+			// LOW-5: XFF trust allowlist (CIDRs). Empty = ignore XFF.
+			TrustedProxies: getEnvList("CERTCTL_TRUSTED_PROXIES", nil),
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()
 			// can surface parse errors alongside other config errors.
 
@@ -1710,6 +1932,40 @@ func Load() (*Config, error) {
 			// /v1/auth/bootstrap endpoint that mints the first admin
 			// key. Empty = bootstrap endpoint disabled (default).
 			BootstrapToken: getEnv("CERTCTL_BOOTSTRAP_TOKEN", ""),
+			// Bundle 2 Phase 7: OIDC-first-admin bootstrap. When the
+			// configured group list is non-empty, the first OIDC
+			// login that carries any of those groups is auto-granted
+			// r-admin. Coexists with BootstrapToken.
+			BootstrapAdminGroups:    getEnvList("CERTCTL_BOOTSTRAP_ADMIN_GROUPS", nil),
+			BootstrapOIDCProviderID: getEnv("CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID", ""),
+			// Bundle 2 Phase 4: session-service tunables. Defaults match
+			// the prompt; high-security deployments tighten via the env
+			// vars documented on SessionConfig fields.
+			Session: SessionConfig{
+				IdleTimeout:         getEnvDuration("CERTCTL_SESSION_IDLE_TIMEOUT", 1*time.Hour),
+				AbsoluteTimeout:     getEnvDuration("CERTCTL_SESSION_ABSOLUTE_TIMEOUT", 8*time.Hour),
+				SigningKeyRetention: getEnvDuration("CERTCTL_SESSION_SIGNING_KEY_RETENTION", 24*time.Hour),
+				GCInterval:          getEnvDuration("CERTCTL_SESSION_GC_INTERVAL", 1*time.Hour),
+				SameSite:            getEnv("CERTCTL_SESSION_SAMESITE", "Lax"),
+				BindIP:              getEnvBool("CERTCTL_SESSION_BIND_IP", false),
+				BindUserAgent:       getEnvBool("CERTCTL_SESSION_BIND_USER_AGENT", false),
+			},
+			// Audit 2026-05-10 HIGH-3 — BCL iat-skew window.
+			OIDCBCLMaxAgeSeconds: getEnvInt("CERTCTL_OIDC_BCL_MAX_AGE_SECONDS", 60),
+
+			// Audit 2026-05-10 MED-16 — pre-login UA/IP binding toggles.
+			OIDCPreLoginRequireUA: getEnvBool("CERTCTL_OIDC_PRELOGIN_REQUIRE_UA", true),
+			OIDCPreLoginRequireIP: getEnvBool("CERTCTL_OIDC_PRELOGIN_REQUIRE_IP", true),
+			// Bundle 2 Phase 7.5: break-glass admin tunables. Default-
+			// OFF; the entire surface is invisible (404 NOT 403) when
+			// Enabled=false. Threat model + recommendation in the
+			// BreakglassConfig docstring.
+			Breakglass: BreakglassConfig{
+				Enabled:              getEnvBool("CERTCTL_BREAKGLASS_ENABLED", false),
+				LockoutThreshold:     getEnvInt("CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD", 5),
+				LockoutDuration:      getEnvDuration("CERTCTL_BREAKGLASS_LOCKOUT_DURATION", 15*time.Minute),
+				LockoutResetInterval: getEnvDuration("CERTCTL_BREAKGLASS_LOCKOUT_RESET_INTERVAL", 1*time.Hour),
+			},
 		},
 		RateLimit: RateLimitConfig{
 			Enabled:          getEnvBool("CERTCTL_RATE_LIMIT_ENABLED", true),
@@ -2347,6 +2603,36 @@ func (c *Config) Validate() error {
 		return fmt.Errorf("auth secret is required for auth type %s", c.Auth.Type)
 	}
 
+	// Audit 2026-05-10 HIGH-12 closure: refuse to start when
+	// CERTCTL_AUTH_TYPE=none is bound to a non-loopback address unless
+	// the operator explicitly acknowledges the bypass via
+	// CERTCTL_DEMO_MODE_ACK=true.
+	//
+	// Rationale: demo mode wires the synthetic actor `actor-demo-anon`
+	// with `AdminKey=true` on every request. The control plane is
+	// HTTPS-only, but a misconfigured ingress / public listen-bind
+	// means any reachable client gets full admin without authentication.
+	// The fail-closed guard converts what was a documentation-only
+	// warning into a hard runtime check operators cannot ignore.
+	//
+	// Localhost / loopback (127.0.0.1, ::1, "localhost") is exempt
+	// because the demo `docker compose up` flow legitimately serves
+	// the dashboard to the operator's own browser; binding to
+	// 0.0.0.0 / :: / a routable IP is what surfaces the admin to the
+	// network and triggers the guard.
+	if c.Auth.Type == string(AuthTypeNone) {
+		if !isLoopbackAddr(c.Server.Host) && !c.Auth.DemoModeAck {
+			return fmt.Errorf(
+				"CERTCTL_AUTH_TYPE=none with non-loopback CERTCTL_SERVER_HOST=%q "+
+					"requires CERTCTL_DEMO_MODE_ACK=true to acknowledge that every "+
+					"request will be served as the synthetic admin actor `actor-demo-anon`. "+
+					"This is INSECURE — operators must explicitly opt in. Production "+
+					"deployments MUST set CERTCTL_AUTH_TYPE to a real authn type "+
+					"(api-key | oidc); see docs/operator/security.md for guidance.",
+				c.Server.Host)
+		}
+	}
+
 	// Validate keygen mode
 	validKeygenModes := map[string]bool{
 		"agent":  true,
@@ -2853,4 +3139,45 @@ func isValidKeyName(s string) bool {
 		}
 	}
 	return true
+}
+
+// isLoopbackAddr returns true when host is bound to a loopback
+// interface only (127.0.0.1, ::1, or "localhost"). Used by the
+// HIGH-12 demo-mode startup guard to refuse non-loopback binds when
+// CERTCTL_AUTH_TYPE=none is in effect.
+//
+// "" (unset) AND "0.0.0.0" / "::" / "[::]" return false because those
+// surface the listener to every interface — exactly the misconfiguration
+// the guard is designed to catch.
+//
+// Hostnames other than "localhost" return false defensively: a hostname
+// could resolve to a non-loopback IP at runtime; we don't perform DNS
+// here because the guard runs at startup before any network state is
+// available, and we don't want a misconfigured /etc/hosts to silently
+// pass the guard. Operators wanting to bind to a non-default loopback
+// alias must either use 127.0.0.1 / ::1 directly or set
+// CERTCTL_DEMO_MODE_ACK=true.
+func isLoopbackAddr(host string) bool {
+	switch host {
+	case "":
+		// Empty / unset host — Go's net/http.Server treats this as
+		// "all interfaces" (equivalent to 0.0.0.0). Surface it to the
+		// network → not loopback.
+		return false
+	case "0.0.0.0", "::", "[::]":
+		return false
+	case "localhost":
+		return true
+	}
+	// Strip a trailing :port if the operator passed a host:port pair
+	// rather than a bare host (defensive — Server.Host is documented
+	// as host-only, but be lenient).
+	if h, _, err := net.SplitHostPort(host); err == nil {
+		host = h
+	}
+	if ip := net.ParseIP(host); ip != nil {
+		return ip.IsLoopback()
+	}
+	// Hostname that isn't "localhost" — fail closed.
+	return false
 }

@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
@@ -121,6 +122,13 @@ type fakeAuthActorSvc struct {
 	revokeErr error
 	roles     []*authdomain.ActorRole
 	effective []repository.EffectivePermission
+	// Audit 2026-05-11 A-4 — capture Revoke opts so tests can assert
+	// that the handler forwards scope_type / scope_id correctly.
+	revokeOpts repository.ActorRoleRevokeOptions
+	revokeCall struct {
+		actorID, roleID string
+		called          bool
+	}
 }
 
 func newFakeAuthActorSvc() *fakeAuthActorSvc {
@@ -133,7 +141,11 @@ func (f *fakeAuthActorSvc) Grant(_ context.Context, _ *authsvc.Caller, ar *authd
 	f.roles = append(f.roles, ar)
 	return nil
 }
-func (f *fakeAuthActorSvc) Revoke(_ context.Context, _ *authsvc.Caller, _ string, _ domain.ActorType, _ string) error {
+func (f *fakeAuthActorSvc) Revoke(_ context.Context, _ *authsvc.Caller, actorID string, _ domain.ActorType, roleID string, opts repository.ActorRoleRevokeOptions) error {
+	f.revokeCall.called = true
+	f.revokeCall.actorID = actorID
+	f.revokeCall.roleID = roleID
+	f.revokeOpts = opts
 	return f.revokeErr
 }
 func (f *fakeAuthActorSvc) ListForActor(_ context.Context, _ *authsvc.Caller, _ string, _ domain.ActorType) ([]*authdomain.ActorRole, error) {
@@ -304,6 +316,125 @@ func TestAuthHandler_AssignRoleToKey(t *testing.T) {
 	}
 }
 
+// Audit 2026-05-10 HIGH-10 regression matrix — pin the new
+// scope_type / scope_id / expires_at fields on assignRoleRequest.
+// Pre-fix, the request body accepted only `{role_id}` so per-actor
+// scope-bound grants and time-bound grants weren't expressible via
+// the API even though the schema reserved the columns. Post-fix,
+// validation rules:
+//
+//   - scope_type ∈ {global, profile, issuer}; defaults to global.
+//   - scope_id required when scope_type != global; rejected when
+//     scope_type == global.
+//   - expires_at must be in the future when present.
+func TestAssignRoleToKey_HIGH10_ProfileScopeBoundGrantPersists(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	scopeID := "p-finance"
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "profile",
+		ScopeID:   &scopeID,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(actorSvc.roles) != 1 {
+		t.Fatalf("expected 1 grant; got %d", len(actorSvc.roles))
+	}
+	if got := string(actorSvc.roles[0].ScopeType); got != "profile" {
+		t.Errorf("ScopeType = %q; want profile", got)
+	}
+	if actorSvc.roles[0].ScopeID == nil || *actorSvc.roles[0].ScopeID != "p-finance" {
+		t.Errorf("ScopeID = %v; want p-finance", actorSvc.roles[0].ScopeID)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_TimeBoundGrantPersists(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	future := time.Now().Add(24 * time.Hour).UTC()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ExpiresAt: &future,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; body=%s", rec.Code, rec.Body.String())
+	}
+	if len(actorSvc.roles) != 1 || actorSvc.roles[0].ExpiresAt == nil {
+		t.Fatalf("expected 1 grant with ExpiresAt; got %+v", actorSvc.roles)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsScopeIDWithGlobalScope(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	bad := "p-finance"
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "global",
+		ScopeID:   &bad,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("scope_id with scope_type=global should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsMissingScopeIDOnProfile(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "profile",
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("missing scope_id on scope_type=profile should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsPastExpiry(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	past := time.Now().Add(-1 * time.Hour).UTC()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ExpiresAt: &past,
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("past expires_at should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAssignRoleToKey_HIGH10_RejectsInvalidScopeType(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	body, _ := json.Marshal(assignRoleRequest{
+		RoleID:    "r-operator",
+		ScopeType: "tenant", // not a valid scope_type
+	})
+	req := withAuthCtx(httptest.NewRequest(http.MethodPost, "/api/v1/auth/keys/alice/roles", bytes.NewReader(body)), "admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	rec := httptest.NewRecorder()
+	h.AssignRoleToKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("invalid scope_type should be 400; got %d", rec.Code)
+	}
+}
+
 func TestAuthHandler_AssignRoleSelfRoleAssignReturns403(t *testing.T) {
 	h, _, _, actorSvc := newAuthHandlerWithFakes()
 	actorSvc.grantErr = errors.New("auth.role.assign required: " + authsvc.ErrSelfRoleAssignment.Error())
@@ -320,7 +451,7 @@ func TestAuthHandler_AssignRoleSelfRoleAssignReturns403(t *testing.T) {
 }
 
 func TestAuthHandler_RevokeRoleFromKey(t *testing.T) {
-	h, _, _, _ := newAuthHandlerWithFakes()
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
 	req := withAuthCtx(httptest.NewRequest(http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-viewer", nil), "admin", auth.ActorTypeAPIKey)
 	req.SetPathValue("id", "alice")
 	req.SetPathValue("role_id", "r-viewer")
@@ -328,6 +459,136 @@ func TestAuthHandler_RevokeRoleFromKey(t *testing.T) {
 	h.RevokeRoleFromKey(rec, req)
 	if rec.Code != http.StatusNoContent {
 		t.Errorf("revoke should be 204; got %d", rec.Code)
+	}
+	// Audit 2026-05-11 A-4 — no scope params → legacy "revoke all
+	// variants" semantic propagates as the zero-value
+	// ActorRoleRevokeOptions to the service layer.
+	if actorSvc.revokeOpts.ScopeType != "" {
+		t.Errorf("legacy DELETE forwarded a scope filter: ScopeType=%q", actorSvc.revokeOpts.ScopeType)
+	}
+	if actorSvc.revokeOpts.ScopeID != nil {
+		t.Errorf("legacy DELETE forwarded a scope_id: %v", actorSvc.revokeOpts.ScopeID)
+	}
+}
+
+// =============================================================================
+// Audit 2026-05-11 A-4 — scope-aware revoke handler tests.
+// =============================================================================
+
+func TestAuthHandler_RevokeRoleFromKey_A4_ScopedProfile(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-acme", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("scoped revoke should be 204; got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if actorSvc.revokeOpts.ScopeType != authdomain.ScopeTypeProfile {
+		t.Errorf("ScopeType = %q; want profile", actorSvc.revokeOpts.ScopeType)
+	}
+	if actorSvc.revokeOpts.ScopeID == nil || *actorSvc.revokeOpts.ScopeID != "p-acme" {
+		t.Errorf("ScopeID = %v; want p-acme", actorSvc.revokeOpts.ScopeID)
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_ScopedGlobal(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=global", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusNoContent {
+		t.Fatalf("scoped revoke (global) should be 204; got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if actorSvc.revokeOpts.ScopeType != authdomain.ScopeTypeGlobal {
+		t.Errorf("ScopeType = %q; want global", actorSvc.revokeOpts.ScopeType)
+	}
+	if actorSvc.revokeOpts.ScopeID != nil {
+		t.Errorf("ScopeID must be nil for scope_type=global; got %v", actorSvc.revokeOpts.ScopeID)
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_RejectsScopeIDWithGlobal(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=global&scope_id=p-acme", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("global+scope_id should be 400; got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if actorSvc.revokeCall.called {
+		t.Error("service should NOT have been called on validation error")
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_RejectsMissingScopeID(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("profile-without-scope_id should be 400; got %d body=%s", rec.Code, rec.Body.String())
+	}
+	if actorSvc.revokeCall.called {
+		t.Error("service should NOT have been called on validation error")
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_RejectsScopeIDWithoutScopeType(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_id=p-acme", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("scope_id-without-scope_type should be 400; got %d body=%s", rec.Code, rec.Body.String())
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_RejectsInvalidScopeType(t *testing.T) {
+	h, _, _, _ := newAuthHandlerWithFakes()
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=bogus", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusBadRequest {
+		t.Errorf("bogus scope_type should be 400; got %d", rec.Code)
+	}
+}
+
+func TestAuthHandler_RevokeRoleFromKey_A4_ScopedNotFoundReturns404(t *testing.T) {
+	h, _, _, actorSvc := newAuthHandlerWithFakes()
+	actorSvc.revokeErr = repository.ErrActorRoleNotFound
+	req := withAuthCtx(httptest.NewRequest(http.MethodDelete,
+		"/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-globex", nil),
+		"admin", auth.ActorTypeAPIKey)
+	req.SetPathValue("id", "alice")
+	req.SetPathValue("role_id", "r-operator")
+	rec := httptest.NewRecorder()
+	h.RevokeRoleFromKey(rec, req)
+	if rec.Code != http.StatusNotFound {
+		t.Errorf("ErrActorRoleNotFound should be 404; got %d", rec.Code)
 	}
 }
 

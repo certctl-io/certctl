@@ -1,6 +1,12 @@
 # RBAC operator reference
 
-> Last reviewed: 2026-05-09
+> Last reviewed: 2026-05-11
+>
+> Audit 2026-05-11 A-8 follow-on: demo-mode residual-grants detector
+> + cleanup endpoint shipped. New env var:
+> `CERTCTL_DEMO_MODE_RESIDUAL_STRICT` (default `false`). Operator
+> workflow at
+> [`security.md#demo-to-production-cutover-audit-2026-05-11-a-8`](security.md#demo-to-production-cutover-audit-2026-05-11-a-8).
 
 This is the operator-facing reference for the role-based access
 control primitive that ships with Bundle 1 (auth bundle 1) of certctl.
@@ -43,6 +49,18 @@ that resolves "actor → permissions" lives at
 | CLI | `r-cli` | Day-to-day operator CLI | Like Operator + `auth.key.list` / `auth.key.create` / `auth.key.rotate` |
 | Auditor | `r-auditor` | Compliance reviewer | `audit.read` + `audit.export` ONLY |
 
+**Note on actor-type binding (Audit 2026-05-10 LOW-8):** Roles in
+the catalogue are NOT bound to a specific `actor_type`. `r-mcp` is
+named for clarity ("the role MCP service accounts hold") but the
+schema permits granting it to any actor — including a human OIDC
+user. Same goes for `r-cli` and `r-agent`. The role-grant API accepts
+`{actor_id, actor_type, role_id}` tuples; the `actor_type` constraint
+lives on the grant row, not the role definition. Operators who want
+to enforce "only API-key actors hold r-mcp" should write that as an
+operator-side policy + verify via a periodic audit query against
+`actor_roles` joined to `api_keys` / `users`. Native role-to-
+actor-type binding is on the v2 roadmap.
+
 The auditor split is the load-bearing one: an auditor cannot read
 certificates, profiles, or issuers - only audit events. That makes the
 role legitimate to hand to a SOC 2 / FedRAMP / PCI auditor without
@@ -82,6 +100,26 @@ for the live catalogue.
 | `auth.key.*` | `auth.key.list`, `auth.key.create`, `auth.key.rotate`, `auth.key.delete` | API key management |
 | `auth.bootstrap.*` | `auth.bootstrap.use` | Day-0 first-admin path |
 | `crl.admin`, `scep.admin`, `est.admin`, `ca.hierarchy.manage` | (single perms) | The five admin-only fine-grained perms (see above) |
+| `job.*` | `job.read`, `job.cancel` | Deployment job lifecycle |
+| `approval.*` | `approval.read`, `approval.approve`, `approval.reject` | Two-person approval workflow (cert-issuance + profile-edit) |
+| `policy.*` | `policy.read`, `policy.edit`, `policy.delete` | Compliance policies + renewal policies |
+| `team.*`, `owner.*` | `team.read`, `team.edit`, `team.delete`, `owner.*` | Organizational metadata |
+| `notification.*` | `notification.read`, `notification.edit` | Notification queue + requeue |
+| `discovery.*` | `discovery.read`, `discovery.run`, `discovery.claim` | Agent + cloud-secret-store discovery |
+| `network_scan.*` | `network_scan.read`, `network_scan.edit`, `network_scan.run` | TLS network scanning + SCEP probing |
+| `healthcheck.*` | `healthcheck.read`, `healthcheck.edit`, `healthcheck.delete`, `healthcheck.acknowledge` | Uptime monitors |
+| `digest.*` | `digest.read`, `digest.send` | Operator-summary digest emails |
+| `verification.*` | `verification.read`, `verification.run` | Post-deploy verification |
+| `stats.read`, `metrics.read` | (single perms) | Dashboard summary + Prometheus exposition |
+
+The full catalogue lives in
+[`internal/domain/auth/validate.go`](../../internal/domain/auth/validate.go).
+The router-level enforcement sits in
+[`internal/api/router/router.go`](../../internal/api/router/router.go);
+the AST-level CI guard
+[`TestRouterRBACGateCoverage`](../../internal/api/router/router_rbac_coverage_test.go)
+pins the contract — adding a new state-changing or read endpoint
+without an `rbacGate` / `rbacGateScoped` wrap fails CI.
 
 ## Scope semantics
 
@@ -177,9 +215,46 @@ tag. Quick reference:
 | `DELETE /v1/auth/roles/{id}/permissions/{perm}` | `auth.role.edit` |
 | `GET /v1/auth/keys` | `auth.role.list` |
 | `POST /v1/auth/keys/{id}/roles` | `auth.role.assign` |
-| `DELETE /v1/auth/keys/{id}/roles/{role_id}` | `auth.role.assign` |
+| `DELETE /v1/auth/keys/{id}/roles/{role_id}` (+ optional `?scope_type=` / `?scope_id=`) | `auth.role.assign` |
 | `GET /v1/auth/check` | (authenticated; surfaces effective perms) |
 | `GET /v1/auth/bootstrap` + `POST /v1/auth/bootstrap` | (auth-exempt; gated by env-var token) |
+
+#### Revoke: legacy "all variants" vs scope-selective (Audit 2026-05-11 A-4)
+
+`DELETE /v1/auth/keys/{id}/roles/{role_id}` runs in one of two modes,
+selected by presence of the optional query parameters:
+
+- **No query params (legacy "revoke all variants")** — every scoped grant of
+  this role held by this actor is dropped. Idempotent: zero-row deletes
+  return 204 (no error). This is the pre-A-4 behaviour and remains the
+  default for the CLI / GUI buttons that don't know about scope.
+
+  ```bash
+  # Drop EVERY variant of r-operator from alice (global, profile-scoped,
+  # issuer-scoped — all gone).
+  curl -X DELETE https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator
+  ```
+
+- **`?scope_type=` (+ optional `?scope_id=`)** — drop ONE variant. Used
+  when an actor holds the same role at multiple scopes (HIGH-10 made
+  that representable; A-4 makes it selectively revocable).
+  `scope_type=global` requires `scope_id` to be absent; `scope_type=profile`
+  / `issuer` require `scope_id`. No match returns 404 so operators get
+  feedback when they target a scope variant the actor doesn't hold.
+
+  ```bash
+  # Alice holds r-operator scoped to p-acme AND p-globex.
+  # Drop ONLY the p-acme grant; the p-globex grant stays.
+  curl -X DELETE 'https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-acme'
+
+  # Drop ONLY the global grant of r-operator (keeps any profile / issuer variants):
+  curl -X DELETE 'https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator?scope_type=global'
+  ```
+
+The audit row's `details` payload records which mode fired —
+`scope: "all_variants"` for the legacy path, or the explicit
+`scope_type` + `scope_id` for selective revoke — so SOC / SIEM can
+distinguish wide cleanups from targeted demotions in the access log.
 
 ### From the MCP server
 

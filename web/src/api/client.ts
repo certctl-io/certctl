@@ -55,14 +55,94 @@ function authHeaders(): Record<string, string> {
   return headers;
 }
 
+// Bundle 2 Phase 8 — read the __Host-certctl_csrf cookie value (set
+// by the OIDC-callback / break-glass-login flows; JS-readable by
+// design so the GUI can echo it into the X-CSRF-Token header on every
+// state-changing request). Returns empty string when the cookie isn't
+// set (Bearer-mode deployments don't need CSRF; the server's middleware
+// short-circuits CSRF for Bearer-authenticated requests).
+//
+// Audit 2026-05-10 MED-14 — cookie name carries the `__Host-` prefix
+// (subdomain-takeover defense). The browser includes the prefix in
+// document.cookie verbatim; the comparison below matches that.
+function readCSRFCookie(): string {
+  if (typeof document === 'undefined' || !document.cookie) return '';
+  for (const part of document.cookie.split(';')) {
+    const [k, ...rest] = part.trim().split('=');
+    if (k === '__Host-certctl_csrf') {
+      return decodeURIComponent(rest.join('='));
+    }
+  }
+  return '';
+}
+
+// Audit 2026-05-10 HIGH-8 — extract the session-failure cause from the
+// WWW-Authenticate header the server emits on 401. The server format
+// (RFC 6750 §3) is: `Bearer realm="certctl", error="invalid_token",
+// error_description="<cause>"` where <cause> is one of the stable
+// categories `idle_timeout` / `absolute_timeout` /
+// `back_channel_revoked` / `invalid_token`. Returns "" when the
+// header is missing, malformed, or carries an unrecognised cause —
+// the AuthProvider falls back to the generic "Session expired" UX
+// in that case (forward-compat with future categories).
+function parseWWWAuthenticateCause(header: string | null): string {
+  if (!header) return '';
+  const m = header.match(/error_description="([^"]+)"/i);
+  if (!m) return '';
+  const cause = m[1];
+  switch (cause) {
+    case 'idle_timeout':
+    case 'absolute_timeout':
+    case 'back_channel_revoked':
+    case 'invalid_token':
+      return cause;
+    default:
+      return '';
+  }
+}
+
+// isStateChangingMethod mirrors the server-side
+// internal/auth/session/middleware.go::isStateChangingMethod predicate.
+// State-changing requests get the X-CSRF-Token header auto-attached
+// when in session-cookie mode; safe methods don't need it.
+function isStateChangingMethod(method?: string): boolean {
+  switch ((method || 'GET').toUpperCase()) {
+    case 'POST':
+    case 'PUT':
+    case 'DELETE':
+    case 'PATCH':
+      return true;
+    default:
+      return false;
+  }
+}
+
 async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
+  // Bundle 2 Phase 8 — credentials:'include' lets the certctl_session
+  // cookie ride along on every request. Bearer-mode deployments work
+  // unchanged (the cookie just isn't there). Auto-attach X-CSRF-Token
+  // header on state-changing methods when the cookie is present.
+  const headers: Record<string, string> = { ...authHeaders(), ...(init?.headers as Record<string, string> | undefined) };
+  if (isStateChangingMethod(init?.method)) {
+    const csrf = readCSRFCookie();
+    if (csrf && !headers['X-CSRF-Token']) {
+      headers['X-CSRF-Token'] = csrf;
+    }
+  }
   const res = await fetch(url, {
-    headers: { ...authHeaders(), ...init?.headers },
     ...init,
+    credentials: 'include',
+    headers, // intentional: spread init first, then override headers with the merged map (init.headers already merged into `headers` above)
   });
   if (res.status === 401) {
-    // Trigger re-auth
-    const event = new CustomEvent('certctl:auth-required');
+    // Audit 2026-05-10 HIGH-8 — propagate the WWW-Authenticate
+    // error_description so the AuthProvider can route the user into
+    // OIDC-aware re-login UX instead of generic "session expired."
+    // Stable cause categories: idle_timeout, absolute_timeout,
+    // back_channel_revoked, invalid_token. Anything else is treated
+    // as invalid_token by the server-side classifier.
+    const cause = parseWWWAuthenticateCause(res.headers.get('WWW-Authenticate'));
+    const event = new CustomEvent('certctl:auth-required', { detail: { cause } });
     window.dispatchEvent(event);
     throw new Error('Authentication required');
   }
@@ -81,9 +161,27 @@ async function fetchJSON<T>(url: string, init?: RequestInit): Promise<T> {
 }
 
 // Auth
+//
+// Bundle 2 Phase 6 / Category E — /auth/info now optionally returns
+// the list of configured OIDC providers (id + display_name + login_url)
+// when the server has any configured. The Login page renders the
+// "Sign in with X" buttons from this list; older servers (pre-Phase-6)
+// just return {auth_type, required} and the GUI falls back to the
+// API-key form. Both shapes are valid; oidc_providers is an
+// optional field on the wire.
+export interface AuthInfoOIDCProvider {
+  id: string;
+  display_name: string;
+  login_url: string;
+}
+export interface AuthInfoResponse {
+  auth_type: string;
+  required: boolean;
+  oidc_providers?: AuthInfoOIDCProvider[];
+}
 export const getAuthInfo = () =>
   fetch(`${BASE}/auth/info`, { headers: { 'Content-Type': 'application/json' } })
-    .then(r => r.json() as Promise<{ auth_type: string; required: boolean }>);
+    .then(r => r.json() as Promise<AuthInfoResponse>);
 
 // AuthCheckResponse mirrors the /auth/check handler payload. Post-M-003 it
 // surfaces `user` (named-key identity) and `admin` (named-key admin flag) so
@@ -203,16 +301,113 @@ export const authRemoveRolePermission = (roleId: string, perm: string) =>
 export const authListKeys = () =>
   fetchJSON<{ keys: AuthKeyEntry[] }>(`${BASE}/auth/keys`).then(r => r.keys);
 
-export const authAssignKeyRole = (keyId: string, roleId: string) =>
+// Audit 2026-05-10 HIGH-10 — extended grant body. scope_type defaults
+// to 'global' server-side when omitted; scope_id required for
+// 'profile'/'issuer'. expires_at is RFC3339; omitted = no expiry.
+export interface AssignKeyRoleOptions {
+  scope_type?: 'global' | 'profile' | 'issuer';
+  scope_id?: string;
+  expires_at?: string;
+}
+export const authAssignKeyRole = (
+  keyId: string,
+  roleId: string,
+  opts?: AssignKeyRoleOptions,
+) =>
   fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles`, {
     method: 'POST',
-    body: JSON.stringify({ role_id: roleId }),
+    body: JSON.stringify({ role_id: roleId, ...(opts ?? {}) }),
   });
 
-export const authRevokeKeyRole = (keyId: string, roleId: string) =>
-  fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles/${roleId}`, {
-    method: 'DELETE',
+// =============================================================================
+// Audit 2026-05-10 — GUI batch additions.
+// =============================================================================
+
+// MED-11 — federated users.
+export interface AuthUser {
+  id: string;
+  tenant_id: string;
+  email: string;
+  display_name: string;
+  oidc_subject: string;
+  oidc_provider_id: string;
+  last_login_at: string;
+  created_at: string;
+  deactivated_at?: string;
+}
+export const authListUsers = (providerID?: string) => {
+  const q = providerID ? `?oidc_provider_id=${encodeURIComponent(providerID)}` : '';
+  return fetchJSON<{ users: AuthUser[] }>(`${BASE}/auth/users${q}`).then(r => r.users);
+};
+export const authDeactivateUser = (id: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/users/${id}`, { method: 'DELETE' });
+// Audit 2026-05-11 A-2 — inverse of authDeactivateUser. Clears
+// users.deactivated_at; next OIDC login proceeds normally.
+export const authReactivateUser = (id: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/users/${id}/reactivate`, { method: 'POST' });
+
+// MED-12 — runtime config.
+export const authRuntimeConfig = () =>
+  fetchJSON<{ runtime_config: Record<string, string> }>(`${BASE}/auth/runtime-config`)
+    .then(r => r.runtime_config);
+
+// MED-7 — JWKS status.
+export interface JWKSStatusSnapshot {
+  last_refresh_at?: string;
+  current_kids: string[];
+  refresh_count: number;
+  last_error?: string;
+  rejected_jws_count: number;
+  iss_param_supported: boolean;
+}
+export const authOIDCJWKSStatus = (providerID: string) =>
+  fetchJSON<JWKSStatusSnapshot>(`${BASE}/auth/oidc/providers/${providerID}/jwks-status`);
+
+// MED-5 — OIDC provider test (dry-run).
+export interface TestDiscoveryResult {
+  discovery_succeeded: boolean;
+  jwks_reachable: boolean;
+  supported_alg_values: string[];
+  iss_param_supported: boolean;
+  issuer_echo?: string;
+  authorization_url?: string;
+  token_url?: string;
+  jwks_uri?: string;
+  userinfo_endpoint?: string;
+  errors?: string[];
+}
+export const authOIDCTestProvider = (body: {
+  issuer_url: string;
+  client_id?: string;
+  client_secret?: string;
+  scopes?: string[];
+}) =>
+  fetchJSON<TestDiscoveryResult>(`${BASE}/auth/oidc/test`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
+
+// Audit 2026-05-11 A-4 — optional scope filter. When opts is omitted
+// or scope_type is empty, the server runs the legacy "revoke every
+// scope variant of this role" semantic (preserves pre-A-4 GUI
+// behaviour). When scope_type is set, only the matching variant is
+// dropped; server enforces scope_id presence vs absence per
+// scope_type. Useful when one actor holds the same role scoped to
+// multiple profiles / issuers and the operator wants to drop one
+// without touching the others.
+export const authRevokeKeyRole = (
+  keyId: string,
+  roleId: string,
+  opts?: { scope_type?: string; scope_id?: string },
+) => {
+  let path = `${BASE}/auth/keys/${keyId}/roles/${roleId}`;
+  if (opts?.scope_type) {
+    const params = new URLSearchParams({ scope_type: opts.scope_type });
+    if (opts.scope_id) params.set('scope_id', opts.scope_id);
+    path += `?${params.toString()}`;
+  }
+  return fetchJSON<unknown>(path, { method: 'DELETE' });
+};
 
 export interface BootstrapAvailability {
   available: boolean;
@@ -222,6 +417,190 @@ export const authBootstrapAvailable = () =>
   fetch(`${BASE}/auth/bootstrap`, {
     headers: { 'Content-Type': 'application/json' },
   }).then(r => r.json() as Promise<BootstrapAvailability>);
+
+// =============================================================================
+// Bundle 2 Phase 8 — OIDC providers + group mappings + sessions +
+// break-glass admin API surface. Backs:
+//   - LoginPage (OIDC provider buttons + breakglass form)
+//   - OIDCProvidersPage + OIDCProviderDetailPage
+//   - GroupMappingsPage
+//   - SessionsPage (own + admin)
+//   - ProfilePage session-list panel
+//
+// Every function maps 1:1 to a Phase 5 / Phase 7.5 server endpoint;
+// permission gates fire server-side, the GUI's permission-aware
+// renders are a UX layer on top.
+// =============================================================================
+
+export interface OIDCProvider {
+  id: string;
+  tenant_id: string;
+  name: string;
+  issuer_url: string;
+  client_id: string;
+  redirect_uri: string;
+  groups_claim_path: string;
+  groups_claim_format: string;
+  fetch_userinfo: boolean;
+  scopes: string[];
+  allowed_email_domains?: string[];
+  iat_window_seconds: number;
+  jwks_cache_ttl_seconds: number;
+  created_at: string;
+  updated_at: string;
+}
+
+export interface OIDCProviderRequest {
+  name: string;
+  issuer_url: string;
+  client_id: string;
+  client_secret?: string; // sent on create + rotate; omitted on edit-without-rotate
+  redirect_uri: string;
+  groups_claim_path?: string;
+  groups_claim_format?: string;
+  fetch_userinfo?: boolean;
+  scopes?: string[];
+  allowed_email_domains?: string[];
+  iat_window_seconds?: number;
+  jwks_cache_ttl_seconds?: number;
+}
+
+export interface GroupRoleMapping {
+  id: string;
+  provider_id: string;
+  group_name: string;
+  role_id: string;
+  tenant_id: string;
+  created_at: string;
+}
+
+export interface SessionInfo {
+  id: string;
+  actor_id: string;
+  actor_type: string;
+  ip_address?: string;
+  user_agent?: string;
+  created_at: string;
+  last_seen_at: string;
+  idle_expires_at: string;
+  absolute_expires_at: string;
+  revoked: boolean;
+}
+
+// OIDC provider CRUD (auth.oidc.list / .create / .edit / .delete).
+export const listOIDCProviders = () =>
+  fetchJSON<{ providers: OIDCProvider[] }>(`${BASE}/auth/oidc/providers`);
+
+export const createOIDCProvider = (req: OIDCProviderRequest) =>
+  fetchJSON<OIDCProvider>(`${BASE}/auth/oidc/providers`, {
+    method: 'POST',
+    body: JSON.stringify(req),
+  });
+
+export const updateOIDCProvider = (id: string, req: OIDCProviderRequest) =>
+  fetchJSON<OIDCProvider>(`${BASE}/auth/oidc/providers/${encodeURIComponent(id)}`, {
+    method: 'PUT',
+    body: JSON.stringify(req),
+  });
+
+export const deleteOIDCProvider = (id: string) =>
+  fetchJSON<void>(`${BASE}/auth/oidc/providers/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+export const refreshOIDCProvider = (id: string) =>
+  fetchJSON<{ refreshed: boolean }>(`${BASE}/auth/oidc/providers/${encodeURIComponent(id)}/refresh`, {
+    method: 'POST',
+  });
+
+// Group→role mapping CRUD (auth.oidc.list / .edit).
+export const listGroupMappings = (providerID: string) =>
+  fetchJSON<{ mappings: GroupRoleMapping[] }>(
+    `${BASE}/auth/oidc/group-mappings?provider_id=${encodeURIComponent(providerID)}`,
+  );
+
+export const addGroupMapping = (providerID: string, groupName: string, roleID: string) =>
+  fetchJSON<GroupRoleMapping>(`${BASE}/auth/oidc/group-mappings`, {
+    method: 'POST',
+    body: JSON.stringify({ provider_id: providerID, group_name: groupName, role_id: roleID }),
+  });
+
+export const removeGroupMapping = (id: string) =>
+  fetchJSON<void>(`${BASE}/auth/oidc/group-mappings/${encodeURIComponent(id)}`, {
+    method: 'DELETE',
+  });
+
+// Session list + revoke. The GET also accepts ?actor_id=<other>
+// for the admin all-actors view (auth.session.list.all gated server-
+// side; see internal/api/router::router.go).
+export const listSessions = (actorID?: string, actorType?: string) => {
+  const q = actorID ? `?actor_id=${encodeURIComponent(actorID)}${actorType ? '&actor_type=' + encodeURIComponent(actorType) : ''}` : '';
+  return fetchJSON<{ sessions: SessionInfo[] }>(`${BASE}/auth/sessions${q}`);
+};
+
+export const revokeSession = (sessionID: string) =>
+  fetchJSON<void>(`${BASE}/auth/sessions/${encodeURIComponent(sessionID)}`, {
+    method: 'DELETE',
+  });
+
+// Logout — POST /auth/logout. Auth-exempt (the handler accepts the
+// caller's session cookie OR a missing cookie; both 204).
+export const logout = () =>
+  fetch(`/auth/logout`, { method: 'POST', credentials: 'include' }).then(r => {
+    if (!r.ok && r.status !== 204) throw new Error(`logout failed: ${r.status}`);
+  });
+
+// =============================================================================
+// Bundle 2 Phase 7.5 — break-glass admin surface. The login endpoint
+// is auth-exempt; the admin endpoints require auth.breakglass.admin.
+// All four endpoints return 404 when CERTCTL_BREAKGLASS_ENABLED=false
+// (surface invisibility).
+// =============================================================================
+
+export const breakglassLogin = (actorID: string, password: string) =>
+  fetch(`/auth/breakglass/login`, {
+    method: 'POST',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ actor_id: actorID, password }),
+  }).then(async r => {
+    if (r.status === 204) return;
+    if (r.status === 404) throw new Error('break-glass admin not enabled on this server');
+    if (!r.ok) throw new Error('invalid credentials');
+  });
+
+export const breakglassSetPassword = (targetActorID: string, password: string) =>
+  fetchJSON<{ actor_id: string; created_at: string }>(`${BASE}/auth/breakglass/credentials`, {
+    method: 'POST',
+    body: JSON.stringify({ actor_id: targetActorID, password }),
+  });
+
+export const breakglassUnlock = (targetActorID: string) =>
+  fetchJSON<void>(`${BASE}/auth/breakglass/credentials/${encodeURIComponent(targetActorID)}/unlock`, {
+    method: 'POST',
+  });
+
+export const breakglassRemove = (targetActorID: string) =>
+  fetchJSON<void>(`${BASE}/auth/breakglass/credentials/${encodeURIComponent(targetActorID)}`, {
+    method: 'DELETE',
+  });
+
+export type BreakglassCredentialRow = {
+  actor_id: string;
+  created_at: string;
+  last_password_change_at: string;
+  failure_count: number;
+  locked_until?: string;
+  last_failure_at?: string;
+};
+
+// Audit 2026-05-10 CRIT-4 closure — admin GUI Break-glass page. The
+// password hash is never returned by the server; this lists only the
+// metadata operators need to render the credentialed-actor table.
+// Returns 404 when CERTCTL_BREAKGLASS_ENABLED=false (surface invisibility).
+export const breakglassListCredentials = () =>
+  fetchJSON<{ credentials: BreakglassCredentialRow[] }>(`${BASE}/auth/breakglass/credentials`)
+    .then(r => r.credentials);
 
 // =============================================================================
 // Bundle 1 Phase 10 — approvals queue.
@@ -580,7 +959,9 @@ export const retireAgent = async (
   });
 
   if (res.status === 401) {
-    window.dispatchEvent(new CustomEvent('certctl:auth-required'));
+    // Audit 2026-05-10 HIGH-8 — see fetchAPI() for the cause-extraction rationale.
+    const cause = parseWWWAuthenticateCause(res.headers.get('WWW-Authenticate'));
+    window.dispatchEvent(new CustomEvent('certctl:auth-required', { detail: { cause } }));
     throw new Error('Authentication required');
   }
 

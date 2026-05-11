@@ -27,9 +27,22 @@ const nav = [
   { to: '/est',           label: 'EST Admin',      icon: 'M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z' },
   { to: '/audit',         label: 'Audit Trail',   icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
   // Bundle 1 Phase 10 — RBAC management (Roles / Keys / Settings).
+  // Bundle 2 Phase 8 — OIDC + Sessions.
+  { to: '/auth/oidc/providers', label: 'OIDC Providers', icon: 'M12 11c0 3.517-1.009 6.799-2.753 9.571m-3.44-2.04l.054-.09A13.916 13.916 0 008 11a4 4 0 118 0c0 1.017-.07 2.019-.203 3m-2.118 6.844A21.88 21.88 0 0015.171 17m3.839 1.132c.645-2.266.99-4.659.99-7.132A8 8 0 008 4.07M3 15.364c.64-1.319 1-2.8 1-4.364 0-1.457.39-2.823 1.07-4' },
+  { to: '/auth/sessions',       label: 'Sessions',       icon: 'M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z' },
+  // Audit 2026-05-11 Fix 11 — UsersPage sidebar entry (MED-11 discoverability).
+  // The MED-11 closure wired UsersPage but no nav entry; operators had to know
+  // the URL /auth/users to reach the federated-user-management surface. This
+  // entry sits adjacent to Sessions because the two share the same mental
+  // model (federated identity admin). UsersPage handles its own 403 state for
+  // callers without auth.user.read so we don't need to gate the nav entry;
+  // every other entry in this array uses the same unconditional pattern.
+  { to: '/auth/users',     label: 'Users',         icon: 'M17 20h5v-2a3 3 0 00-5.356-1.857M17 20H7m10 0v-2c0-.656-.126-1.283-.356-1.857M7 20H2v-2a3 3 0 015.356-1.857M7 20v-2c0-.656.126-1.283.356-1.857m0 0a5.002 5.002 0 019.288 0M15 7a3 3 0 11-6 0 3 3 0 016 0zm6 3a2 2 0 11-4 0 2 2 0 014 0zM7 10a2 2 0 11-4 0 2 2 0 014 0z', testID: 'nav-auth-users' },
   { to: '/auth/roles',    label: 'Roles',         icon: 'M16 7a4 4 0 11-8 0 4 4 0 018 0zM12 14a7 7 0 00-7 7h14a7 7 0 00-7-7z' },
   { to: '/auth/keys',      label: 'API Keys',      icon: 'M15 7a2 2 0 012 2m4 0a6 6 0 01-7.743 5.743L11 17H9v2H7v2H4a1 1 0 01-1-1v-2.586a1 1 0 01.293-.707l5.964-5.964A6 6 0 1121 9z' },
   { to: '/auth/approvals', label: 'Approvals',     icon: 'M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z' },
+  // Audit 2026-05-10 CRIT-4 closure — break-glass admin surface.
+  { to: '/auth/breakglass', label: 'Break-glass',  icon: 'M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z' },
   { to: '/auth/settings',  label: 'Auth Settings', icon: 'M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.066 2.573c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.573 1.066c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.066-2.573c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z M15 12a3 3 0 11-6 0 3 3 0 016 0z' },
 ];
 
@@ -71,6 +84,7 @@ export default function Layout() {
               key={item.to}
               to={item.to}
               end={item.to === '/'}
+              data-testid={'testID' in item ? item.testID : undefined}
               className={({ isActive }) =>
                 `flex items-center gap-3 px-3 py-2 text-[13px] rounded transition-all duration-150 ${
                   isActive

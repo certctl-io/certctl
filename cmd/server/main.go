@@ -24,6 +24,11 @@ import (
 	"github.com/certctl-io/certctl/internal/api/router"
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/auth/bootstrap"
+	"github.com/certctl-io/certctl/internal/auth/breakglass"
+	oidcsvc "github.com/certctl-io/certctl/internal/auth/oidc"
+	oidcdomain "github.com/certctl-io/certctl/internal/auth/oidc/domain"
+	"github.com/certctl-io/certctl/internal/auth/session"
+	userdomain "github.com/certctl-io/certctl/internal/auth/user/domain"
 	"github.com/certctl-io/certctl/internal/config"
 	discoveryawssm "github.com/certctl-io/certctl/internal/connector/discovery/awssm"
 	discoveryazurekv "github.com/certctl-io/certctl/internal/connector/discovery/azurekv"
@@ -64,9 +69,22 @@ func main() {
 	// unsupported auth shape. The error path uses fmt.Fprintf because
 	// the slog logger is constructed from cfg below this point; we want
 	// the failure to be visible regardless of log-level configuration.
+	//
+	// Auth Bundle 2 Phase 0: AuthTypeOIDC is in ValidAuthTypes() but the
+	// session middleware + OIDC handler chain ship in later phases. An
+	// operator who sets CERTCTL_AUTH_TYPE=oidc on a Bundle-2-incomplete
+	// deployment must NOT silently fall back to api-key (the silent
+	// auth-downgrade failure mode that drove G-1 in the first place).
+	// The OIDC case below refuses-to-start with an actionable message.
+	// Phase 6 of Bundle 2 (session middleware wiring) relaxes this case
+	// to fall through alongside the api-key + none cases.
 	switch config.AuthType(cfg.Auth.Type) {
 	case config.AuthTypeAPIKey, config.AuthTypeNone:
 		// ok — fall through
+	case config.AuthTypeOIDC:
+		fmt.Fprintf(os.Stderr,
+			"CERTCTL_AUTH_TYPE=oidc: the OIDC auth chain is not yet wired in this build (Auth Bundle 2 Phase 6 ships the session middleware that consumes this auth-type literal). Set CERTCTL_AUTH_TYPE=api-key or run an authenticating gateway with CERTCTL_AUTH_TYPE=none until Bundle 2 lands. See cowork/auth-bundle-2-prompt.md.\n")
+		os.Exit(1)
 	default:
 		fmt.Fprintf(os.Stderr,
 			"unsupported auth type at runtime: %q (valid: %v) — config validation should have caught this; refusing to start\n",
@@ -258,6 +276,21 @@ func main() {
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
 
+	// Audit 2026-05-11 A-8 closure: detect residual actor-demo-anon
+	// grants under non-`none` auth types. Defaults to WARN-only; flip
+	// CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true to fail-closed. Closes
+	// the deferred Phase 2 leg of the 2026-05-10 HIGH-12 closure.
+	{
+		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := preflightDemoModeResidual(preflightCtx, cfg, db, auditService, logger); err != nil {
+			preflightCancel()
+			logger.Error("startup refused: actor-demo-anon residual grants present + CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true",
+				"error", err)
+			os.Exit(1)
+		}
+		preflightCancel()
+	}
+
 	// RBAC primitive (Bundle 1 Phase 4). Wires the postgres auth repos
 	// + service-layer Authorizer that the AuthHandler / RequirePermission
 	// middleware uses. Migration 000029_rbac.up.sql provides the schema
@@ -328,6 +361,215 @@ func main() {
 		}
 	}
 	bootstrapHandler := handler.NewBootstrapHandler(bootstrapService)
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 4 — session service.
+	//
+	// Wired AFTER migrations + RBAC backfill, BEFORE the HTTP listener
+	// binds (per the prompt's "fail-fatal on bootstrap key mint failure"
+	// requirement). EnsureInitialSigningKey is idempotent: if a non-
+	// retired signing key already exists for the tenant the call is a
+	// no-op; otherwise it mints a fresh 32-byte HMAC key, persists it,
+	// and emits an auth.session_signing_key_bootstrap audit row with
+	// event_category=auth.
+	//
+	// Failure here is fatal — the server refuses to boot rather than
+	// serve session-less.
+	//
+	// The session service is wired into the scheduler below (sessionGCLoop)
+	// so the GC sweep runs every CERTCTL_SESSION_GC_INTERVAL tick. The
+	// HTTP middleware that consumes ValidateInput / ValidateCSRF lands
+	// in Phase 5; pre-Phase-5 deployments boot the service so the GC
+	// sweep can keep the sessions + signing-keys tables tidy.
+	sessionRepo := postgres.NewSessionRepository(db)
+	sessionKeyRepo := postgres.NewSessionSigningKeyRepository(db)
+	// Audit 2026-05-10 LOW-5 closure — install the trusted-proxy CIDR
+	// allowlist from CERTCTL_TRUSTED_PROXIES. Empty disables XFF trust.
+	session.SetTrustedProxies(cfg.Auth.TrustedProxies)
+	sessionService := session.NewService(
+		sessionRepo,
+		sessionKeyRepo,
+		auditService,
+		authdomainAlias.DefaultTenantID,
+		session.Config{
+			IdleTimeout:         cfg.Auth.Session.IdleTimeout,
+			AbsoluteTimeout:     cfg.Auth.Session.AbsoluteTimeout,
+			SigningKeyRetention: cfg.Auth.Session.SigningKeyRetention,
+			BindIP:              cfg.Auth.Session.BindIP,
+			BindUserAgent:       cfg.Auth.Session.BindUserAgent,
+		},
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	if err := sessionService.EnsureInitialSigningKey(bootCtx); err != nil {
+		logger.Error("FATAL: session signing key bootstrap failed; refusing to boot", "err", err)
+		os.Exit(1)
+	}
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 5 — OIDC service + pre-login store + Phase 5 handler.
+	//
+	// Wired AFTER sessionService (Phase 4) so the OIDC PreLoginAdapter
+	// can sign pre-login cookies under the active SessionSigningKey.
+	// =========================================================================
+	oidcProviderRepo := postgres.NewOIDCProviderRepository(db)
+	oidcMappingRepo := postgres.NewGroupRoleMappingRepository(db)
+	oidcUserRepo := postgres.NewUserRepository(db)
+	// Audit 2026-05-10 HIGH-5: thread CERTCTL_CONFIG_ENCRYPTION_KEY into the
+	// pre-login repo so state/nonce/PKCE-verifier are encrypted at rest. Same
+	// key already protects OIDC client secrets and session signing keys.
+	oidcPreLoginRepo := postgres.NewPreLoginRepository(db, cfg.Encryption.ConfigEncryptionKey)
+	preLoginAdapter := oidcsvc.NewPreLoginAdapter(
+		oidcPreLoginRepo,
+		sessionKeyRepo, // Phase 4 SessionSigningKeyRepository
+		authdomainAlias.DefaultTenantID,
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	// SessionMinter port for the OIDC service. The OIDC HandleCallback
+	// uses this to mint the post-login session after successful token
+	// validation + group→role mapping.
+	oidcSessionMinter := &sessionMinterAdapter{svc: sessionService}
+	oidcService := oidcsvc.NewService(
+		oidcProviderRepo,
+		oidcMappingRepo,
+		oidcUserRepo,
+		oidcSessionMinter,
+		preLoginAdapter,
+		cfg.Encryption.ConfigEncryptionKey,
+	)
+	// Audit 2026-05-10 MED-16 — apply per-leg pre-login UA / IP
+	// binding enforcement toggles from config.
+	oidcService.SetPreLoginBindingRequirements(
+		cfg.Auth.OIDCPreLoginRequireUA,
+		cfg.Auth.OIDCPreLoginRequireIP,
+	)
+	// SameSite resolution from CERTCTL_SESSION_SAMESITE (default Lax;
+	// "Strict" for high-security environments at the cost of breaking
+	// inbound deep-links from external apps).
+	sameSiteMode := http.SameSiteLaxMode
+	if strings.EqualFold(cfg.Auth.Session.SameSite, "Strict") {
+		sameSiteMode = http.SameSiteStrictMode
+	}
+	// Audit 2026-05-10 HIGH-3 — BCL iat-skew window + jti consumed-set.
+	bclMaxAge := time.Duration(cfg.Auth.OIDCBCLMaxAgeSeconds) * time.Second
+	if bclMaxAge <= 0 {
+		bclMaxAge = handler.DefaultBCLVerifierMaxAge
+	}
+	bclReplayRepo := postgres.NewBCLReplayRepository(db)
+	authSessionOIDCHandler := handler.NewAuthSessionOIDCHandler(
+		oidcService,
+		sessionService,
+		handler.NewDefaultBCLVerifier(oidcProviderRepo, authdomainAlias.DefaultTenantID, nil).WithMaxAge(bclMaxAge),
+		oidcProviderRepo,
+		oidcMappingRepo,
+		sessionRepo,
+		oidcUserRepo, // CRIT-2: BCL sub→actor_id lookup via users.GetByOIDCSubject
+		auditService,
+		cfg.Encryption.ConfigEncryptionKey,
+		authdomainAlias.DefaultTenantID,
+		"/", // post-login redirect target; GUI dashboard
+		handler.SessionCookieAttrs{
+			SameSite: sameSiteMode,
+			Secure:   true,
+		},
+	).WithBCLReplayConsumer(bclReplayRepo, bclMaxAge). // HIGH-3 jti consumed-set.
+								WithPermissionChecker(authCheckerAdapter) // MED-2 auth.session.list.all gate.
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 7 — OIDC first-admin bootstrap hook.
+	//
+	// Wired AFTER oidcService is constructed. The hook closure consults
+	// the configured CERTCTL_BOOTSTRAP_ADMIN_GROUPS + the AdminExists
+	// probe; on first match it grants r-admin via the ActorRoleRepository
+	// + emits a bootstrap.oidc_first_admin audit row. Subsequent
+	// admin-already-exists logins return grantAdmin=false silently.
+	// Disabled (no-op) when CERTCTL_BOOTSTRAP_ADMIN_GROUPS is empty.
+	if len(cfg.Auth.BootstrapAdminGroups) > 0 {
+		bootstrapGroups := make(map[string]struct{}, len(cfg.Auth.BootstrapAdminGroups))
+		for _, g := range cfg.Auth.BootstrapAdminGroups {
+			bootstrapGroups[strings.TrimSpace(g)] = struct{}{}
+		}
+		bootstrapProviderID := cfg.Auth.BootstrapOIDCProviderID
+		oidcService.SetAdminBootstrapHook(func(ctx context.Context, providerID string, groups []string, userID string) (bool, error) {
+			// Provider-specificity: when configured, only the named
+			// provider is eligible for bootstrap.
+			if bootstrapProviderID != "" && providerID != bootstrapProviderID {
+				return false, nil
+			}
+			// Admin-already-exists: bootstrap mode is disabled once
+			// any actor in the tenant holds r-admin.
+			adminExists, probeErr := authActorRoleRepo.AdminExists(ctx, authdomainAlias.DefaultTenantID)
+			if probeErr != nil {
+				return false, fmt.Errorf("admin existence probe: %w", probeErr)
+			}
+			if adminExists {
+				return false, nil
+			}
+			// Group intersection check.
+			matched := false
+			for _, g := range groups {
+				if _, ok := bootstrapGroups[g]; ok {
+					matched = true
+					break
+				}
+			}
+			if !matched {
+				return false, nil
+			}
+			// Match. Grant r-admin via the actor-role repo.
+			grant := &authdomainAlias.ActorRole{
+				ActorID:   userID,
+				ActorType: authdomainAlias.ActorTypeValue("User"),
+				RoleID:    authdomainAlias.RoleIDAdmin,
+				TenantID:  authdomainAlias.DefaultTenantID,
+				GrantedBy: "oidc-bootstrap",
+			}
+			if gerr := authActorRoleRepo.Grant(ctx, grant); gerr != nil {
+				return false, fmt.Errorf("grant r-admin: %w", gerr)
+			}
+			// Emit audit row with event_category=auth.
+			_ = auditService.RecordEventWithCategory(ctx, userID, domain.ActorTypeUser,
+				"bootstrap.oidc_first_admin", domain.EventCategoryAuth,
+				"users", userID,
+				map[string]interface{}{
+					"user_id":     userID,
+					"provider_id": providerID,
+					"trigger":     "oidc_group_match",
+				})
+			logger.Info("OIDC first-admin bootstrap fired — user granted r-admin",
+				"user_id", userID, "provider_id", providerID)
+			return true, nil
+		})
+		logger.Info("OIDC first-admin bootstrap enabled",
+			"groups", cfg.Auth.BootstrapAdminGroups,
+			"provider_id_filter", bootstrapProviderID)
+	}
+
+	// =========================================================================
+	// Auth Bundle 2 Phase 7.5 — break-glass admin service + handler.
+	// =========================================================================
+	breakglassRepo := postgres.NewBreakglassCredentialRepository(db)
+	breakglassService := breakglass.NewService(
+		breakglassRepo,
+		auditService,
+		breakglassSessionMinterAdapter{svc: sessionService},
+		breakglass.Config{
+			Enabled:              cfg.Auth.Breakglass.Enabled,
+			LockoutThreshold:     cfg.Auth.Breakglass.LockoutThreshold,
+			LockoutDuration:      cfg.Auth.Breakglass.LockoutDuration,
+			LockoutResetInterval: cfg.Auth.Breakglass.LockoutResetInterval,
+		},
+		authdomainAlias.DefaultTenantID,
+	)
+	breakglassHandler := handler.NewAuthBreakglassHandler(breakglassService, handler.SessionCookieAttrs{
+		SameSite: sameSiteMode,
+		Secure:   true,
+	})
+	if cfg.Auth.Breakglass.Enabled {
+		logger.Warn("CERTCTL_BREAKGLASS_ENABLED=true — break-glass admin path is ACTIVE; this bypasses SSO. Disable in steady-state.",
+			"lockout_threshold", cfg.Auth.Breakglass.LockoutThreshold,
+			"lockout_duration", cfg.Auth.Breakglass.LockoutDuration.String())
+	}
+
 	policyService := service.NewPolicyService(policyRepo, auditService)
 	policyService.SetCertRepo(certificateRepo) // D-008: CertificateLifetime arm needs CertificateVersion.NotBefore/NotAfter
 	// G-1: RenewalPolicyService — distinct from PolicyService (compliance rules).
@@ -774,6 +1016,12 @@ func main() {
 	// erasure wrap around the repo so the handler layer doesn't have to
 	// import internal/domain/auth or internal/repository/postgres.
 	healthHandler.Resolver = authCheckResolverAdapter{repo: authActorRoleRepo}
+	// Bundle 2 Phase 6 / Category E — wire the OIDC providers resolver
+	// so GET /api/v1/auth/info returns the configured provider list
+	// (id + display_name + login_url) for the GUI's Login page button
+	// rendering. The shim adapts the postgres OIDCProviderRepository
+	// to the handler's narrow OIDCProvidersListResolver projection.
+	healthHandler.OIDCProvidersResolver = oidcProvidersListAdapter{repo: oidcProviderRepo}
 	// U-3 ride-along (cat-u-no_version_endpoint, P2): the version handler
 	// answers GET /api/v1/version with build identity (ldflags Version,
 	// VCS commit/dirty/timestamp, Go runtime version). Wired through the
@@ -924,6 +1172,19 @@ func main() {
 	sched.SetJobTimeoutInterval(cfg.Scheduler.JobTimeoutInterval)
 	sched.SetAwaitingCSRTimeout(cfg.Scheduler.AwaitingCSRTimeout)
 	sched.SetAwaitingApprovalTimeout(cfg.Scheduler.AwaitingApprovalTimeout)
+
+	// Auth Bundle 2 Phase 4 — wire the session-GC sweep. The service
+	// itself was constructed (with the EnsureInitialSigningKey fail-
+	// fatal call) above the policy/cert-service block; here we just
+	// register it with the scheduler so the loop fires every
+	// CERTCTL_SESSION_GC_INTERVAL.
+	sched.SetSessionGarbageCollector(sessionService)
+	sched.SetBCLReplayGarbageCollector(bclReplayRepo) // Audit 2026-05-10 HIGH-3.
+	sched.SetSessionGCInterval(cfg.Auth.Session.GCInterval)
+	logger.Info("session GC sweep enabled",
+		"interval", cfg.Auth.Session.GCInterval.String(),
+		"absolute_timeout", cfg.Auth.Session.AbsoluteTimeout.String(),
+		"signing_key_retention", cfg.Auth.Session.SigningKeyRetention.String())
 	logger.Info("job timeout reaper enabled",
 		"interval", cfg.Scheduler.JobTimeoutInterval.String(),
 		"csr_timeout", cfg.Scheduler.AwaitingCSRTimeout.String(),
@@ -1074,6 +1335,49 @@ func main() {
 		// Rank 8 of the 2026-05-03 deep-research deliverable. See
 		// docs/intermediate-ca-hierarchy.md.
 		IntermediateCAs: intermediateCAHandler,
+		// AuthSessionOIDC — Auth Bundle 2 Phase 5 OIDC + session HTTP
+		// surface. 13 endpoints across login flow + session management
+		// + OIDC provider CRUD + group-mapping CRUD.
+		AuthSessionOIDC: authSessionOIDCHandler,
+
+		// AuthBreakglass — Auth Bundle 2 Phase 7.5 break-glass admin
+		// HTTP surface. 4 endpoints (1 public login + 3 admin CRUD).
+		// All endpoints return 404 when CERTCTL_BREAKGLASS_ENABLED=false.
+		AuthBreakglass: breakglassHandler,
+
+		// Audit 2026-05-10 MED-11 — federated-user admin surface.
+		AuthUsers: handler.NewAuthUsersHandler(
+			oidcUserRepo,
+			sessionService, // satisfies UserSessionsRevoker via RevokeAllForActor
+			auditService,
+			authdomainAlias.DefaultTenantID,
+		),
+
+		// Audit 2026-05-10 MED-12 — runtime config read endpoint.
+		AuthRuntimeConfig: handler.NewAuthRuntimeConfigHandler(
+			func() map[string]string {
+				// Lazy build — re-read cfg.Auth.* values on every call so
+				// post-startup re-evaluation reflects any (future) mutation.
+				return map[string]string{
+					"CERTCTL_AUTH_TYPE":                    string(cfg.Auth.Type),
+					"CERTCTL_SESSION_SAMESITE":             cfg.Auth.Session.SameSite,
+					"CERTCTL_OIDC_BCL_MAX_AGE_SECONDS":     strconv.Itoa(cfg.Auth.OIDCBCLMaxAgeSeconds),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_UA":     strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireUA),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_IP":     strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireIP),
+					"CERTCTL_BREAKGLASS_ENABLED":           strconv.FormatBool(cfg.Auth.Breakglass.Enabled),
+					"CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD": strconv.Itoa(cfg.Auth.Breakglass.LockoutThreshold),
+					"CERTCTL_DEMO_MODE_ACK":                strconv.FormatBool(cfg.Auth.DemoModeAck),
+					"CERTCTL_TRUSTED_PROXIES_COUNT":        strconv.Itoa(len(cfg.Auth.TrustedProxies)),
+					"CERTCTL_BOOTSTRAP_TOKEN_SET":          strconv.FormatBool(cfg.Auth.BootstrapToken != ""),
+					"CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID":   cfg.Auth.BootstrapOIDCProviderID,
+					"CERTCTL_BOOTSTRAP_ADMIN_GROUPS_COUNT": strconv.Itoa(len(cfg.Auth.BootstrapAdminGroups)),
+				}
+			},
+			auditService,
+		),
+
+		// Audit 2026-05-10 MED-7 — per-provider JWKS health surface.
+		AuthOIDCJWKSStatus: handler.NewAuthOIDCJWKSStatusHandler(oidcService, auditService),
 		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
 		// auth repos + service-layer Authorizer / RoleService /
 		// ActorRoleService / PermissionService into the HTTP surface
@@ -1089,17 +1393,32 @@ func main() {
 			authsvc.NewPermissionService(authPermRepo),
 			authsvc.NewActorRoleService(authActorRoleRepo, authRoleRepo, authAuthorizer, auditService),
 			authCheckerAdapter,
-		),
+		).WithCSRFRotator(sessionService), // Audit 2026-05-10 HIGH-2 — CSRF rotation on role mutation.
 		// Bundle 1 Phase 6 — bootstrap day-0 admin endpoint. The
 		// service is wired above; handler is auth-exempt at the
 		// router (gated by the bootstrap.Strategy itself).
 		Bootstrap: bootstrapHandler,
+		// Audit 2026-05-11 A-8 closure — demo-mode residual cleanup.
+		// The cleanup closure captures the live *sql.DB pool so the
+		// handler doesn't pull repository.* / database/sql into the
+		// internal/api/handler import set. authType is a closure over
+		// cfg so the live config value is always read at request time.
+		DemoResidual: handler.NewDemoResidualHandler(
+			func(ctx context.Context) (int64, error) { return deleteDemoAnonResidue(ctx, db) },
+			func() string { return cfg.Auth.Type },
+			auditService,
+		),
 		// Checker is the load-bearing auth.PermissionChecker that
 		// auth.RequirePermission middleware uses to gate the legacy admin
 		// handlers (Bundle 1 Phase 3.5: bulk_revocation, admin_crl_cache,
 		// admin_scep_intune, admin_est, intermediate_ca). Wraps live in
 		// router.go via rbacGate(reg.Checker, perm, handler).
 		Checker: authCheckerAdapter,
+		// Audit 2026-05-10 CRIT-3 closure — operator-configured CORS
+		// applied to the credentialed auth-exempt routes (OIDC handshake,
+		// BCL, logout, bootstrap, breakglass-login). Health probes
+		// continue to use middleware.CORSWildcard.
+		CorsCfg: middleware.CORSConfig{AllowedOrigins: cfg.CORS.AllowedOrigins},
 	})
 	// Register EST (RFC 7030) handlers if enabled.
 	//
@@ -1621,13 +1940,25 @@ func main() {
 	// HandlerRegistry can wire the bootstrap handler. The auth
 	// middleware below reads from the same authKeyStore reference, so
 	// runtime additions from bootstrap propagate without restart.
-	var authMiddleware func(http.Handler) http.Handler
+	var bearerMiddleware func(http.Handler) http.Handler
 	switch config.AuthType(cfg.Auth.Type) {
 	case config.AuthTypeNone:
-		authMiddleware = auth.NewDemoModeAuth()
+		bearerMiddleware = auth.NewDemoModeAuth()
 	default:
-		authMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
+		bearerMiddleware = auth.NewAuthWithKeyStore(authKeyStore)
 	}
+	// Auth Bundle 2 Phase 6 — chained-auth middleware. Tries the
+	// `certctl_session` cookie first (sessionMW); on miss / invalid,
+	// falls back to the API-key Bearer middleware. If neither
+	// authenticates, 401. The session middleware is a pass-through
+	// when sessionService is nil (pre-Bundle-2 builds).
+	sessionMW := session.NewSessionMiddleware(sessionService)
+	authMiddleware := session.ChainAuthSessionThenBearer(sessionMW, bearerMiddleware)
+	// CSRF middleware — gates state-changing methods (POST/PUT/DELETE/
+	// PATCH) for session-authenticated requests. API-key actors are
+	// CSRF-exempt (not browser-driven). Pass-through when
+	// sessionService is nil.
+	csrfMiddleware := session.NewCSRFMiddleware(sessionService)
 	_ = bootstrapHandler // referenced by HandlerRegistry above
 	corsMiddleware := middleware.NewCORS(middleware.CORSConfig{
 		AllowedOrigins: cfg.CORS.AllowedOrigins,
@@ -1676,7 +2007,10 @@ func main() {
 		bodyLimitMiddleware,
 		securityHeadersMiddleware,
 		corsMiddleware,
+		// Phase 6 chain: Auth (session-then-Bearer fallback) → CSRF
+		// (state-changing only; API-key actors exempt) → Audit.
 		authMiddleware,
+		csrfMiddleware,
 		auditMiddleware.Middleware,
 	}
 
@@ -1698,7 +2032,10 @@ func main() {
 			bodyLimitMiddleware,
 			rateLimiter,
 			corsMiddleware,
+			// Phase 6 chain: Auth (session-then-Bearer fallback) → CSRF
+			// (state-changing only; API-key actors exempt) → Audit.
 			authMiddleware,
+			csrfMiddleware,
 			auditMiddleware.Middleware,
 		}
 		logger.Info("rate limiting enabled", "rps", cfg.RateLimit.RPS, "burst", cfg.RateLimit.BurstSize)
@@ -2403,4 +2740,108 @@ func (ad authCheckResolverAdapter) EffectivePermissions(
 	tenantID string,
 ) ([]repository.EffectivePermission, error) {
 	return ad.repo.EffectivePermissions(ctx, actorID, authdomainAlias.ActorTypeValue(actorType), tenantID)
+}
+
+// =============================================================================
+// sessionMinterAdapter — bridge from *session.Service to oidcsvc.SessionMinter.
+//
+// The OIDC service's SessionMinter port (Phase 3) takes a *userdomain.User
+// + role IDs and returns (cookie, csrf, err). The session.Service's
+// Create method takes (actorID, actorType, ip, ua) -> *CreateResult.
+// This adapter unwraps the User into actorID/actorType + reshapes the
+// return tuple. Lives in cmd/server so the session package doesn't have
+// to know about user.User and the user package doesn't have to know
+// about session.CreateResult.
+// =============================================================================
+
+type sessionMinterAdapter struct {
+	svc *session.Service
+}
+
+func (a *sessionMinterAdapter) MintForUser(
+	ctx context.Context,
+	user *userdomain.User,
+	_ []string, // roleIDs unused at the session-mint layer; the rbac middleware looks them up at request time
+	ip, userAgent string,
+) (cookieValue, csrfToken string, err error) {
+	if user == nil {
+		return "", "", fmt.Errorf("session mint: user is nil")
+	}
+	res, err := a.svc.Create(ctx, user.ID, string(domain.ActorTypeUser), ip, userAgent)
+	if err != nil {
+		return "", "", err
+	}
+	return res.CookieValue, res.CSRFToken, nil
+}
+
+// silenceUnusedImports keeps the new oidcsvc + oidcdomain imports load-
+// bearing in case any file shuffles. Linker dead-code elimination handles
+// the runtime cost.
+var (
+	_ = oidcdomain.OIDCProvider{}
+)
+
+// =============================================================================
+// breakglassSessionMinterAdapter — bridge from *session.Service to
+// breakglass.SessionMinter.
+//
+// The break-glass service's SessionMinter port (Phase 7.5) returns
+// (cookie, csrf, err); the underlying *session.Service.Create returns
+// *CreateResult. This adapter unwraps the result. Lives in cmd/server
+// so the breakglass package doesn't have to know about session.Service.
+// =============================================================================
+
+type breakglassSessionMinterAdapter struct {
+	svc *session.Service
+}
+
+func (a breakglassSessionMinterAdapter) Create(ctx context.Context, actorID, actorType, ip, userAgent string) (string, string, error) {
+	res, err := a.svc.Create(ctx, actorID, actorType, ip, userAgent)
+	if err != nil {
+		return "", "", err
+	}
+	return res.CookieValue, res.CSRFToken, nil
+}
+
+// RevokeAllForActor — Audit 2026-05-10 HIGH-1 wire. After a break-glass
+// password rotation or credential removal, every active session for the
+// target actor must be revoked so a phished-then-rotated credential
+// doesn't leave the attacker's session live.
+func (a breakglassSessionMinterAdapter) RevokeAllForActor(ctx context.Context, actorID, actorType string) error {
+	return a.svc.RevokeAllForActor(ctx, actorID, actorType)
+}
+
+// oidcProvidersListAdapter bridges the postgres OIDCProviderRepository
+// to handler.OIDCProvidersListResolver. The handler returns
+// []*OIDCProviderInfo (id + display_name + login_url) for the public-
+// safe GUI Login-page payload; the repo returns the full OIDCProvider
+// row. The adapter projects + maps the login_url shape that
+// /auth/oidc/login?provider=<id> expects. Auth Bundle 2 Phase 6 /
+// Category E.
+type oidcProvidersListAdapter struct {
+	repo repository.OIDCProviderRepository
+}
+
+func (a oidcProvidersListAdapter) List(ctx context.Context, tenantID string) ([]*handler.OIDCProviderInfo, error) {
+	provs, err := a.repo.List(ctx, tenantID)
+	if err != nil {
+		return nil, err
+	}
+	out := make([]*handler.OIDCProviderInfo, 0, len(provs))
+	for _, p := range provs {
+		// Audit 2026-05-10 MED-9 closure — filter disabled providers
+		// at the adapter so the LoginPage's "Sign in with X" buttons
+		// don't render for offline IdPs. The HandleAuthRequest
+		// service-layer ErrProviderDisabled check is the
+		// defense-in-depth guard for direct API / MCP / CLI callers.
+		if !p.Enabled {
+			continue
+		}
+		out = append(out, &handler.OIDCProviderInfo{
+			ID:          p.ID,
+			DisplayName: p.Name,
+			LoginURL:    "/auth/oidc/login?provider=" + p.ID,
+		})
+	}
+	return out, nil
 }

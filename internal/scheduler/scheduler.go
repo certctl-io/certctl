@@ -84,6 +84,22 @@ type ACMEGarbageCollector interface {
 	GarbageCollect(ctx context.Context) error
 }
 
+// SessionGarbageCollector is the interface the scheduler's sessionGCLoop
+// invokes once per CERTCTL_SESSION_GC_INTERVAL tick. Concrete impl is
+// *session.Service. Sweeps expired post-login + pre-login session rows
+// AND retired-past-retention signing-key rows. Auth Bundle 2 Phase 4.
+type SessionGarbageCollector interface {
+	GarbageCollect(ctx context.Context) (int, error)
+}
+
+// BCLReplayGarbageCollector sweeps expired rows from the BCL consumed-jti
+// table. Audit 2026-05-10 HIGH-3 closure — the scheduler invokes this
+// alongside the session-GC tick so a single ticker drives both. Concrete
+// impl is repository.BCLReplayRepository.SweepExpired.
+type BCLReplayGarbageCollector interface {
+	SweepExpired(ctx context.Context, now time.Time) (int, error)
+}
+
 // JobReaperService defines the interface for job timeout reaping used by the scheduler.
 type JobReaperService interface {
 	ReapTimedOutJobs(ctx context.Context, csrTTL, approvalTTL time.Duration) error
@@ -109,6 +125,8 @@ type Scheduler struct {
 	cloudDiscoveryService CloudDiscoveryServicer
 	crlCacheService       CRLCacheServicer
 	acmeGC                ACMEGarbageCollector
+	sessionGC             SessionGarbageCollector
+	bclReplayGC           BCLReplayGarbageCollector
 	jobReaper             JobReaperService
 	logger                *slog.Logger
 
@@ -127,6 +145,7 @@ type Scheduler struct {
 	crlGenerationInterval         time.Duration
 	jobTimeoutInterval            time.Duration
 	acmeGCInterval                time.Duration
+	sessionGCInterval             time.Duration
 	// agentOfflineJobTTL: per-tick threshold for reaping Running jobs whose
 	// owning agent has been silent. Bundle C / Audit M-016. Defaults below.
 	agentOfflineJobTTL      time.Duration
@@ -148,6 +167,7 @@ type Scheduler struct {
 	crlGenerationRunning         atomic.Bool
 	jobTimeoutRunning            atomic.Bool
 	acmeGCRunning                atomic.Bool
+	sessionGCRunning             atomic.Bool
 
 	// Graceful shutdown: wait for in-flight work to complete
 	wg sync.WaitGroup
@@ -185,6 +205,7 @@ func NewScheduler(
 		crlGenerationInterval:         1 * time.Hour,
 		jobTimeoutInterval:            10 * time.Minute,
 		acmeGCInterval:                1 * time.Minute,
+		sessionGCInterval:             1 * time.Hour,
 		// 5 minutes is 5×agentHealthCheckInterval default of 1m; an agent
 		// must miss multiple heartbeats before its in-flight jobs are reaped.
 		agentOfflineJobTTL: 5 * time.Minute,
@@ -317,6 +338,30 @@ func (s *Scheduler) SetACMEGCInterval(d time.Duration) {
 	s.acmeGCInterval = d
 }
 
+// SetSessionGarbageCollector wires the Auth Bundle 2 Phase 4 session GC
+// service. Optional; nil disables the loop (Bundle-2-disabled deployments
+// still run pre-Phase-4 behavior).
+func (s *Scheduler) SetSessionGarbageCollector(gc SessionGarbageCollector) {
+	s.sessionGC = gc
+}
+
+// SetBCLReplayGarbageCollector wires the BCL consumed-jti GC. Audit
+// 2026-05-10 HIGH-3 closure. The sweep runs on the same ticker as the
+// session GC loop (no separate interval; replay rows are short-lived).
+func (s *Scheduler) SetBCLReplayGarbageCollector(gc BCLReplayGarbageCollector) {
+	s.bclReplayGC = gc
+}
+
+// SetSessionGCInterval configures the interval at which the session GC
+// sweep runs. Default 1h. Wire: CERTCTL_SESSION_GC_INTERVAL. Zero or
+// negative values are ignored.
+func (s *Scheduler) SetSessionGCInterval(d time.Duration) {
+	if d <= 0 {
+		return
+	}
+	s.sessionGCInterval = d
+}
+
 // SetAgentOfflineJobTTL sets the threshold past which a Running job whose
 // owning agent has gone silent is reaped to Failed. Bundle C / Audit M-016.
 // Zero or negative values are ignored (the default of 5 minutes is kept).
@@ -375,6 +420,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		if s.acmeGC != nil {
 			loopCount++
 		}
+		if s.sessionGC != nil {
+			loopCount++
+		}
 		s.wg.Add(loopCount)
 
 		go func() { defer s.wg.Done(); s.renewalCheckLoop(ctx) }()
@@ -402,6 +450,9 @@ func (s *Scheduler) Start(ctx context.Context) <-chan struct{} {
 		}
 		if s.acmeGC != nil {
 			go func() { defer s.wg.Done(); s.acmeGCLoop(ctx) }()
+		}
+		if s.sessionGC != nil {
+			go func() { defer s.wg.Done(); s.sessionGCLoop(ctx) }()
 		}
 
 		// Signal that all loops are launched
@@ -1141,6 +1192,53 @@ func (s *Scheduler) acmeGCLoop(ctx context.Context) {
 				defer cancel()
 				if err := s.acmeGC.GarbageCollect(opCtx); err != nil {
 					s.logger.Warn("acme gc sweep failed (next tick will retry)", "error", err)
+				}
+			}()
+		}
+	}
+}
+
+// sessionGCLoop runs every sessionGCInterval and invokes
+// SessionGarbageCollector.GarbageCollect, which sweeps:
+//   - sessions whose absolute_expires_at is in the past (post-login expired);
+//   - pre-login session rows older than 10 minutes;
+//   - retired-past-retention session_signing_keys rows.
+//
+// Auth Bundle 2 Phase 4. The atomic.Bool guard + the per-tick
+// context.WithTimeout match the pattern of every other loop in this
+// file: a stuck Postgres can't block the next tick, and concurrent
+// sweeps are skipped not queued.
+func (s *Scheduler) sessionGCLoop(ctx context.Context) {
+	ticker := time.NewTicker(s.sessionGCInterval)
+	defer ticker.Stop()
+
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			if !s.sessionGCRunning.CompareAndSwap(false, true) {
+				s.logger.Warn("session GC sweep still running, skipping tick")
+				continue
+			}
+			s.wg.Add(1)
+			go func() {
+				defer s.wg.Done()
+				defer s.sessionGCRunning.Store(false)
+				opCtx, cancel := context.WithTimeout(ctx, time.Minute)
+				defer cancel()
+				if _, err := s.sessionGC.GarbageCollect(opCtx); err != nil {
+					s.logger.Warn("session gc sweep failed (next tick will retry)", "error", err)
+				}
+				// Audit 2026-05-10 HIGH-3 — sweep expired BCL consumed-jti
+				// rows on the same tick. Best-effort; failure logs at WARN
+				// (the next tick retries).
+				if s.bclReplayGC != nil {
+					if n, err := s.bclReplayGC.SweepExpired(opCtx, time.Now().UTC()); err != nil {
+						s.logger.Warn("bcl replay gc sweep failed (next tick will retry)", "error", err)
+					} else if n > 0 {
+						s.logger.Debug("bcl replay gc swept rows", "rows", n)
+					}
 				}
 			}()
 		}

@@ -18,6 +18,10 @@ type mockAuditService struct {
 	listFunc      func(page, perPage int) ([]domain.AuditEvent, int64, error)
 	listByCatFunc func(category string, page, perPage int) ([]domain.AuditEvent, int64, error)
 	getFunc       func(id string) (*domain.AuditEvent, error)
+	// HIGH-11 self-audit trace — last RecordEventWithCategory call.
+	lastAuditActor    string
+	lastAuditAction   string
+	lastAuditCategory string
 }
 
 func (m *mockAuditService) ListAuditEvents(_ context.Context, page, perPage int) ([]domain.AuditEvent, int64, error) {
@@ -42,6 +46,32 @@ func (m *mockAuditService) GetAuditEvent(_ context.Context, id string) (*domain.
 		return m.getFunc(id)
 	}
 	return nil, nil
+}
+
+// ExportEventsByFilter satisfies the Audit 2026-05-10 HIGH-11 interface
+// extension. The test mock just defers to the existing list helpers
+// (no separate export-specific test fixture needed for the bundles that
+// don't exercise export).
+func (m *mockAuditService) ExportEventsByFilter(_ context.Context, _, _ time.Time, eventCategory string, _ int) ([]domain.AuditEvent, error) {
+	if m.listFunc != nil {
+		events, _, err := m.listFunc(1, 50000)
+		if err != nil {
+			return nil, err
+		}
+		return events, nil
+	}
+	return nil, nil
+}
+
+// RecordEventWithCategory satisfies the Audit 2026-05-10 HIGH-11
+// interface extension (the export handler self-audits each call).
+// Tests that don't care about the audit row trace can leave the field
+// nil; tests that do can read m.lastAuditAction etc. after the call.
+func (m *mockAuditService) RecordEventWithCategory(_ context.Context, actor string, _ domain.ActorType, action, eventCategory, _, _ string, _ map[string]interface{}) error {
+	m.lastAuditActor = actor
+	m.lastAuditAction = action
+	m.lastAuditCategory = eventCategory
+	return nil
 }
 
 func TestListAuditEvents_Success(t *testing.T) {

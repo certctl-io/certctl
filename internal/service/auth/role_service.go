@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"fmt"
+	"log/slog"
 
 	"github.com/certctl-io/certctl/internal/domain"
 	authdomain "github.com/certctl-io/certctl/internal/domain/auth"
@@ -199,7 +200,18 @@ func (s *RoleService) recordAudit(ctx context.Context, caller *Caller, action, r
 	if s.audit == nil || caller == nil {
 		return
 	}
-	_ = s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details)
+	// Audit 2026-05-10 HIGH-6 partial closure — see
+	// actor_role_service.go::recordAudit for the rationale. Silence-leg
+	// closed by emitting WARN on audit-write failure; transactional-leg
+	// (action + audit atomic via WithinTx) is a v3 follow-on.
+	if err := s.audit.RecordEventWithCategory(ctx, caller.ActorID, caller.ActorType, action, domain.EventCategoryAuth, resourceType, resourceID, details); err != nil {
+		slog.WarnContext(ctx, "audit write failed (action committed; audit row may be missing)",
+			"action", action,
+			"resource_type", resourceType,
+			"resource_id", resourceID,
+			"actor_id", caller.ActorID,
+			"err", err)
+	}
 }
 
 // Ensure the compile-time pin: domain.ActorType is convertible to

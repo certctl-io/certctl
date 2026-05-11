@@ -1,0 +1,47 @@
+-- =============================================================================
+-- 2026-05-10 Audit / MED-16 closure
+-- =============================================================================
+--
+-- Pre-login rows in oidc_pre_login_sessions used to carry only the OIDC state,
+-- nonce, and PKCE verifier — the binding to the user agent that initiated the
+-- handshake was implicit (the pre-login cookie's HMAC, scoped to the active
+-- SessionSigningKey, only verifies that *some* caller of /auth/oidc/login is
+-- talking to /auth/oidc/callback; it does not verify that the SAME browser /
+-- HTTP client is on both sides).
+--
+-- RFC 9700 §4.7.1 (security best current practice for OAuth 2.0) recommends
+-- binding state to a user-agent fingerprint + source IP so that a pre-login
+-- cookie leaked in transit (CSRF / XSS / TLS termination on a shared proxy)
+-- cannot be replayed by a different browser. Even with HMAC integrity, the
+-- attacker who steals the bytes could otherwise complete the handshake.
+--
+-- This migration adds:
+--   - client_ip        TEXT — captured at /auth/oidc/login from the request's
+--                             clientIPFromRequest result (post LOW-5 XFF
+--                             trusted-proxy gating, so the value is honest).
+--   - user_agent       TEXT — captured at /auth/oidc/login from r.UserAgent().
+--                             Stored verbatim; the consume path compares with
+--                             constant-time equality.
+--
+-- Both columns are nullable so in-flight pre-login rows from pre-deploy code
+-- paths still consume cleanly (the consume-side check only enforces when both
+-- the row AND the request carry non-empty values; legacy rows pass through
+-- because the row's binding columns are NULL).
+--
+-- The audit failure_category distinguishes:
+--   - prelogin_ua_mismatch  — UA changed across the redirect (most common
+--                             real-world false-positive: aggressive UA
+--                             rewriters on enterprise proxies).
+--   - prelogin_ip_mismatch  — source IP changed across the redirect (mobile
+--                             carrier-grade NAT, dual-stack v4/v6 hops, VPN
+--                             toggle).
+--   - prelogin_uaip_mismatch — both differ.
+--
+-- Operators wanting to disable the gate (e.g. dual-stack v4/v6 environments
+-- where source IP routinely flips) set the CERTCTL_OIDC_PRELOGIN_REQUIRE_UA
+-- or CERTCTL_OIDC_PRELOGIN_REQUIRE_IP env var to "false". Default true.
+-- =============================================================================
+
+ALTER TABLE oidc_pre_login_sessions
+    ADD COLUMN IF NOT EXISTS client_ip   TEXT,
+    ADD COLUMN IF NOT EXISTS user_agent  TEXT;

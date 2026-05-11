@@ -125,3 +125,58 @@ describe('Layout — UX-001 Setup guide sidebar button', () => {
     }
   });
 });
+
+// -----------------------------------------------------------------------------
+// Audit 2026-05-11 Fix 11 — UsersPage sidebar nav entry (MED-11 discoverability)
+//
+// The MED-11 closure shipped UsersPage + wired the /auth/users route but left
+// the sidebar without a nav entry. Operators had to know the URL to reach the
+// federated-user-management surface. This test pins the link's presence + the
+// expected destination + the data-testid (so future E2E coverage can target it
+// without depending on visible label text — operators may rename "Users" to
+// "Federated users" later).
+//
+// We do NOT mock useAuthMe here because Layout doesn't gate nav entries on
+// permission today; every entry in the nav array renders unconditionally and
+// the target page handles its own 403 state. If Layout starts gating nav
+// entries in the future, these tests will fail at the visibility check and
+// the new gate's mock needs to be added to renderLayout().
+// -----------------------------------------------------------------------------
+
+describe('Layout — Fix 11 UsersPage nav entry', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+  });
+
+  it('renders a "Users" link in the sidebar with the nav-auth-users testid', () => {
+    renderLayout();
+    const link = screen.getByTestId('nav-auth-users');
+    expect(link).toBeInTheDocument();
+    // The accessible name doubles as the operator-facing label and is what
+    // future testing-library `getByRole('link', { name: /Users/i })` queries
+    // will key off; pin it so a label rename surfaces in the diff.
+    expect(link.textContent).toContain('Users');
+  });
+
+  it('the Users link points at /auth/users', () => {
+    renderLayout();
+    const link = screen.getByTestId('nav-auth-users') as HTMLAnchorElement;
+    // NavLink renders an <a href=...>; assert the destination matches the
+    // route wired in web/src/main.tsx so a future re-keying of either side
+    // surfaces here. We don't assert the full URL because MemoryRouter
+    // prepends nothing.
+    expect(link.getAttribute('href')).toBe('/auth/users');
+  });
+
+  it('the Users link sits adjacent to the Sessions link (federated-identity grouping)', () => {
+    renderLayout();
+    const sessions = screen.getByRole('link', { name: /Sessions/i });
+    const users = screen.getByTestId('nav-auth-users');
+    // DOM order: Sessions immediately precedes Users. The placement matters
+    // for the operator's mental model — both surfaces operate on the
+    // federated-identity stack. If the order flips, the diff should be
+    // intentional, not accidental.
+    expect(sessions.compareDocumentPosition(users) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+  });
+});

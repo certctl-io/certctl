@@ -4,8 +4,10 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/certctl-io/certctl/internal/auth"
 	"github.com/certctl-io/certctl/internal/domain"
@@ -30,6 +32,22 @@ type AuthHandler struct {
 	perms   AuthPermissionService
 	actors  AuthActorRoleService
 	checker auth.PermissionChecker
+	// csrfRotator is the optional session-CSRF-rotation hook called
+	// post-role-mutation. Audit 2026-05-10 HIGH-2 closure — when an
+	// actor's role set changes, every active session's CSRF token is
+	// rotated as defense-in-depth against token leak preceding the
+	// privilege change. Nil-safe: when unset (pre-Bundle-2 wiring,
+	// tests that don't care about CSRF), the wires are no-ops.
+	csrfRotator CSRFRotator
+}
+
+// CSRFRotator is the projection of *session.Service used by AuthHandler
+// to rotate CSRF tokens across an actor's active sessions after a role
+// mutation. RotateCSRFTokenForActor returns the count of rotated rows
+// and NEVER errors out — rotation is defense-in-depth and must not
+// block the role mutation that triggered it.
+type CSRFRotator interface {
+	RotateCSRFTokenForActor(ctx context.Context, actorID, actorType string) int
 }
 
 // AuthRoleService is the service-layer dependency the AuthHandler uses
@@ -55,7 +73,11 @@ type AuthPermissionService interface {
 // effective-permissions query the GUI's /v1/auth/me handler uses.
 type AuthActorRoleService interface {
 	Grant(ctx context.Context, caller *authsvc.Caller, ar *authdomain.ActorRole) error
-	Revoke(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType, roleID string) error
+	// Audit 2026-05-11 A-4 — Revoke takes optional scope filtering so
+	// callers that hold multiple scoped variants of the same role can
+	// drop one variant selectively. opts.ScopeType == "" preserves the
+	// legacy "revoke all" semantic.
+	Revoke(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType, roleID string, opts repository.ActorRoleRevokeOptions) error
 	ListForActor(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]*authdomain.ActorRole, error)
 	EffectivePermissions(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]repository.EffectivePermission, error)
 	// ListKeys (Bundle 1 Phase 7) returns every actor in the tenant
@@ -80,6 +102,16 @@ func NewAuthHandler(
 		actors:  actors,
 		checker: checker,
 	}
+}
+
+// WithCSRFRotator returns a copy of the handler with the CSRF-rotation
+// hook installed. Audit 2026-05-10 HIGH-2 closure — production wiring
+// in cmd/server/main.go calls this with the post-Bundle-2
+// session.Service; pre-Bundle-2 deployments + tests can leave the
+// rotator nil and the role-mutation handlers simply skip rotation.
+func (h AuthHandler) WithCSRFRotator(r CSRFRotator) AuthHandler {
+	h.csrfRotator = r
+	return h
 }
 
 // =============================================================================
@@ -148,8 +180,26 @@ type addPermissionRequest struct {
 	ScopeID    *string `json:"scope_id,omitempty"`
 }
 
+// assignRoleRequest is the POST /api/v1/auth/keys/{id}/roles body.
+//
+// Audit 2026-05-10 HIGH-10 closure — extended with scope_type /
+// scope_id / expires_at so per-actor scoped + time-bound grants are
+// expressible via the API. Pre-fix, the only path was creating a
+// scoped role and granting that; now operators can scope a standing
+// role to a specific resource on a per-actor basis.
+//
+// Validation rules:
+//   - role_id is required.
+//   - scope_type defaults to "global"; allowed values are global /
+//     profile / issuer.
+//   - scope_id is required when scope_type != "global"; rejected
+//     (must be empty) when scope_type == "global".
+//   - expires_at must be in the future when present; nil = standing.
 type assignRoleRequest struct {
-	RoleID string `json:"role_id"`
+	RoleID    string     `json:"role_id"`
+	ScopeType string     `json:"scope_type,omitempty"`
+	ScopeID   *string    `json:"scope_id,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 }
 
 type meResponse struct {
@@ -401,19 +451,72 @@ func (h AuthHandler) AssignRoleToKey(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "role_id is required")
 		return
 	}
+
+	// Audit 2026-05-10 HIGH-10 validation.
+	scopeType := authdomain.ScopeType(req.ScopeType)
+	if scopeType == "" {
+		scopeType = authdomain.ScopeTypeGlobal
+	}
+	switch scopeType {
+	case authdomain.ScopeTypeGlobal:
+		if req.ScopeID != nil && *req.ScopeID != "" {
+			Error(w, http.StatusBadRequest, "scope_id must be empty when scope_type=global")
+			return
+		}
+	case authdomain.ScopeTypeProfile, authdomain.ScopeTypeIssuer:
+		if req.ScopeID == nil || strings.TrimSpace(*req.ScopeID) == "" {
+			Error(w, http.StatusBadRequest, "scope_id is required when scope_type is profile or issuer")
+			return
+		}
+	default:
+		Error(w, http.StatusBadRequest, "invalid scope_type — must be global, profile, or issuer")
+		return
+	}
+	if req.ExpiresAt != nil && !req.ExpiresAt.After(time.Now().UTC()) {
+		Error(w, http.StatusBadRequest, "expires_at must be in the future")
+		return
+	}
+
 	ar := &authdomain.ActorRole{
 		ActorID:   keyID,
 		ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey),
 		RoleID:    req.RoleID,
+		ScopeType: scopeType,
+		ScopeID:   req.ScopeID,
+		ExpiresAt: req.ExpiresAt,
 	}
 	if err := h.actors.Grant(r.Context(), caller, ar); err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	// Audit 2026-05-10 HIGH-2 closure — rotate CSRF across every
+	// active session of the target actor. Non-blocking (per-row
+	// failures are logged inside RotateCSRFTokenForActor but the
+	// return value isn't an error). API-key actors typically have no
+	// sessions (Bearer-only) so this is a no-op for them.
+	if h.csrfRotator != nil {
+		_ = h.csrfRotator.RotateCSRFTokenForActor(r.Context(), keyID, string(domain.ActorTypeAPIKey))
+	}
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // RevokeRoleFromKey handles DELETE /api/v1/auth/keys/{id}/roles/{role_id}.
+//
+// Audit 2026-05-11 A-4 — two operating modes selected by presence of
+// the optional `?scope_type=` / `?scope_id=` query parameters:
+//
+//   - No query params: legacy "revoke every scope variant of this role
+//     from this actor" semantic. Preserves pre-A-4 GUI behaviour
+//     (KeysPage before Fix 12 fires plain DELETE with no scope; one
+//     button per role row).
+//
+//   - `scope_type=global` (no scope_id) or
+//     `scope_type=profile&scope_id=<id>` /
+//     `scope_type=issuer&scope_id=<id>`: drop ONLY the matching variant.
+//     Returns HTTP 404 when no row matches the scope (operator
+//     feedback for typos). Validation mirrors AssignRoleToKey:
+//     `scope_id` MUST be empty with `scope_type=global`, MUST be
+//     present with `profile` / `issuer`, anything else → 400.
 func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 	caller, err := callerFromRequest(r)
 	if err != nil {
@@ -422,11 +525,61 @@ func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 	}
 	keyID := r.PathValue("id")
 	roleID := r.PathValue("role_id")
-	if err := h.actors.Revoke(r.Context(), caller, keyID, domain.ActorTypeAPIKey, roleID); err != nil {
+
+	// Parse + validate optional scope filter. Empty query string is
+	// the legacy path; mismatched filter is rejected before the call
+	// reaches the service.
+	scopeTypeRaw := r.URL.Query().Get("scope_type")
+	scopeIDRaw := r.URL.Query().Get("scope_id")
+	opts, derr := parseRevokeScope(scopeTypeRaw, scopeIDRaw)
+	if derr != nil {
+		Error(w, http.StatusBadRequest, derr.Error())
+		return
+	}
+
+	if err := h.actors.Revoke(r.Context(), caller, keyID, domain.ActorTypeAPIKey, roleID, opts); err != nil {
 		writeAuthError(w, err)
 		return
 	}
+	// Audit 2026-05-10 HIGH-2 closure — rotate CSRF post-revoke.
+	if h.csrfRotator != nil {
+		_ = h.csrfRotator.RotateCSRFTokenForActor(r.Context(), keyID, string(domain.ActorTypeAPIKey))
+	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseRevokeScope translates the (scope_type, scope_id) query string
+// into an ActorRoleRevokeOptions. Empty inputs → legacy "revoke all"
+// option (zero value); any combination missing required halves →
+// validation error. Audit 2026-05-11 A-4 — mirrors AssignRoleToKey's
+// scope validation so the assign / revoke pair stays symmetric.
+func parseRevokeScope(scopeType, scopeID string) (repository.ActorRoleRevokeOptions, error) {
+	scopeType = strings.TrimSpace(scopeType)
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeType == "" {
+		if scopeID != "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id requires scope_type")
+		}
+		return repository.ActorRoleRevokeOptions{}, nil
+	}
+	switch authdomain.ScopeType(scopeType) {
+	case authdomain.ScopeTypeGlobal:
+		if scopeID != "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id must be empty when scope_type=global")
+		}
+		return repository.ActorRoleRevokeOptions{ScopeType: authdomain.ScopeTypeGlobal}, nil
+	case authdomain.ScopeTypeProfile, authdomain.ScopeTypeIssuer:
+		if scopeID == "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id is required when scope_type is profile or issuer")
+		}
+		sid := scopeID
+		return repository.ActorRoleRevokeOptions{
+			ScopeType: authdomain.ScopeType(scopeType),
+			ScopeID:   &sid,
+		}, nil
+	default:
+		return repository.ActorRoleRevokeOptions{}, fmt.Errorf("invalid scope_type — must be global, profile, or issuer")
+	}
 }
 
 // Me handles GET /api/v1/auth/me. Returns the current actor's effective
@@ -510,7 +663,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, authsvc.ErrInvalidPermission):
 		Error(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, repository.ErrAuthNotFound):
+	case errors.Is(err, repository.ErrAuthNotFound), errors.Is(err, repository.ErrActorRoleNotFound):
 		Error(w, http.StatusNotFound, "Not found")
 	case errors.Is(err, repository.ErrAuthDuplicateName), errors.Is(err, repository.ErrAuthRoleInUse), errors.Is(err, repository.ErrAuthReservedActor):
 		Error(w, http.StatusConflict, err.Error())

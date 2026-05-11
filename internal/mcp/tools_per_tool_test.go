@@ -90,6 +90,14 @@ func newHarness(t *testing.T) *mcpHarness {
 		w.Header().Set("Content-Type", "application/json")
 
 		switch {
+		// Bundle 2 Phase 9 — auth_get_oidc_provider tool calls the list
+		// endpoint and filters in-process; the canned default
+		// {"data":[...]} shape doesn't match providersListEnvelope's
+		// `providers` field. Return the right envelope shape with the
+		// id the tool's args target so the happy path resolves.
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/auth/oidc/providers":
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"providers":[{"id":"op-okta","name":"Okta"}]}`))
 		case r.Method == http.MethodDelete:
 			w.WriteHeader(http.StatusNoContent)
 		case strings.HasSuffix(r.URL.Path, "/renew") ||
@@ -431,6 +439,36 @@ var allHappyPathCases = []toolCase{
 	{"certctl_auth_list_keys", map[string]any{}, http.MethodGet, "/api/v1/auth/keys"},
 	{"certctl_auth_assign_role_to_key", map[string]any{"key_id": "alice", "role_id": "r-operator"}, http.MethodPost, "/api/v1/auth/keys/alice/roles"},
 	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-admin"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-admin"},
+	// Audit 2026-05-11 A-4 — scoped revoke append both query params.
+	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-operator", "scope_type": "profile", "scope_id": "p-acme"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-acme"},
+	// Audit 2026-05-11 A-4 — scoped revoke with global emits only scope_type.
+	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-operator", "scope_type": "global"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-operator?scope_type=global"},
+
+	// Bundle 2 Phase 9 — OIDC + session tools (11 tools).
+	{"certctl_auth_list_oidc_providers", map[string]any{}, http.MethodGet, "/api/v1/auth/oidc/providers"},
+	{"certctl_auth_get_oidc_provider", map[string]any{"id": "op-okta"}, http.MethodGet, "/api/v1/auth/oidc/providers"},
+	{"certctl_auth_create_oidc_provider", map[string]any{"name": "Okta", "issuer_url": "https://example.okta.com", "client_id": "certctl", "client_secret": "s3cret", "redirect_uri": "https://certctl.example.com/auth/oidc/callback"}, http.MethodPost, "/api/v1/auth/oidc/providers"},
+	{"certctl_auth_update_oidc_provider", map[string]any{"id": "op-okta", "name": "Okta-renamed", "issuer_url": "https://example.okta.com", "client_id": "certctl", "redirect_uri": "https://certctl.example.com/auth/oidc/callback"}, http.MethodPut, "/api/v1/auth/oidc/providers/op-okta"},
+	{"certctl_auth_delete_oidc_provider", map[string]any{"id": "op-okta"}, http.MethodDelete, "/api/v1/auth/oidc/providers/op-okta"},
+	{"certctl_auth_refresh_oidc_provider", map[string]any{"id": "op-okta"}, http.MethodPost, "/api/v1/auth/oidc/providers/op-okta/refresh"},
+	{"certctl_auth_list_group_mappings", map[string]any{"provider_id": "op-okta"}, http.MethodGet, "/api/v1/auth/oidc/group-mappings"},
+	{"certctl_auth_add_group_mapping", map[string]any{"provider_id": "op-okta", "group_name": "engineers", "role_id": "r-operator"}, http.MethodPost, "/api/v1/auth/oidc/group-mappings"},
+	{"certctl_auth_remove_group_mapping", map[string]any{"id": "gm-1"}, http.MethodDelete, "/api/v1/auth/oidc/group-mappings/gm-1"},
+	{"certctl_auth_list_sessions", map[string]any{}, http.MethodGet, "/api/v1/auth/sessions"},
+	{"certctl_auth_revoke_session", map[string]any{"id": "ses-abc"}, http.MethodDelete, "/api/v1/auth/sessions/ses-abc"},
+
+	// Audit 2026-05-10 MED-13 — 11 tools (approvals + breakglass + bootstrap + audit-category).
+	{"certctl_approval_list", map[string]any{}, http.MethodGet, "/api/v1/approvals"},
+	{"certctl_approval_get", map[string]any{"id": "aprq-1"}, http.MethodGet, "/api/v1/approvals/aprq-1"},
+	{"certctl_approval_approve", map[string]any{"id": "aprq-1"}, http.MethodPost, "/api/v1/approvals/aprq-1/approve"},
+	{"certctl_approval_reject", map[string]any{"id": "aprq-1"}, http.MethodPost, "/api/v1/approvals/aprq-1/reject"},
+	{"certctl_breakglass_list", map[string]any{}, http.MethodGet, "/api/v1/auth/breakglass/credentials"},
+	{"certctl_breakglass_set_password", map[string]any{"actor_id": "bg-admin1", "password": "test-pass-strong-1", "role_id": "r-admin"}, http.MethodPost, "/api/v1/auth/breakglass/credentials"},
+	{"certctl_breakglass_unlock", map[string]any{"actor_id": "bg-admin1"}, http.MethodPost, "/api/v1/auth/breakglass/credentials/bg-admin1/unlock"},
+	{"certctl_breakglass_remove", map[string]any{"actor_id": "bg-admin1"}, http.MethodDelete, "/api/v1/auth/breakglass/credentials/bg-admin1"},
+	{"certctl_bootstrap_status", map[string]any{}, http.MethodGet, "/api/v1/auth/bootstrap"},
+	{"certctl_bootstrap_consume", map[string]any{"token": "test-token", "key_name": "day-zero-admin"}, http.MethodPost, "/api/v1/auth/bootstrap"},
+	{"certctl_audit_list_with_category", map[string]any{"category": "auth"}, http.MethodGet, "/api/v1/audit"},
 }
 
 // TestMCP_AllTools_HappyPath dispatches every tool against the mock API in

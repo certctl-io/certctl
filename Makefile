@@ -1,4 +1,4 @@
-.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
+.PHONY: help build run test lint verify verify-docs verify-deploy loadtest acme-cert-manager-test acme-rfc-conformance-test keycloak-integration-test okta-smoke-test benchmark-auth benchmark-auth-coldcache clean docker-up docker-down migrate-up migrate-down generate test-cover frontend-build qa-stats
 
 # Default target - show help
 help:
@@ -170,6 +170,54 @@ loadtest:
 	@echo ""
 	@echo "==> results landed in deploy/test/loadtest/results/"
 	@if [ -f deploy/test/loadtest/results/summary.txt ]; then cat deploy/test/loadtest/results/summary.txt; fi
+
+# Auth Bundle 2 Phase 10 — Keycloak end-to-end OIDC integration test.
+# Boots a Keycloak container via testcontainers-go (quay.io/keycloak:25.0),
+# imports a canned realm with two groups + two users, and drives the
+# full OIDC flow against the certctl service: discovery + JWKS,
+# auth-code login, group-claim parsing, group-role mapping, session
+# mint, and JWKS rotation.
+#
+# Build-tag-gated under `integration` so `make verify` (which runs
+# go test -short) NEVER pulls in the 60-90s Keycloak boot. Requires a
+# local Docker daemon. Skips cleanly with t.Skip() when -short is set.
+keycloak-integration-test:
+	@echo "==> running Keycloak OIDC integration test (requires Docker)"
+	@go test -tags=integration -count=1 -timeout=10m \
+	  ./internal/auth/oidc/...
+
+# Auth Bundle 2 Phase 10 — optional Okta smoke test. Gated behind TWO
+# build tags (integration + okta_smoke) so it only runs when invoked
+# manually against the operator's own Okta dev tenant. Requires the
+# OKTA_ISSUER + OKTA_CLIENT_ID + OKTA_CLIENT_SECRET env vars; the test
+# t.Skip's with a clear message when any are missing. Documented in
+# internal/auth/oidc/integration_okta_smoke_test.go.
+okta-smoke-test:
+	@echo "==> running Okta smoke test (requires OKTA_ISSUER / _CLIENT_ID / _CLIENT_SECRET env vars)"
+	@go test -tags='integration okta_smoke' -count=1 -timeout=2m \
+	  ./internal/auth/oidc/...
+
+# Auth Bundle 2 Phase 14 — auth performance benchmarks. Three default-
+# tag benchmarks (session steady-state + session cold-process + oidc
+# steady-state) producing p50/p95/p99/max numbers per the auth-
+# benchmarks.md operator-doc table.
+benchmark-auth:
+	@echo "==> running auth performance benchmarks (session + oidc steady-state)"
+	@go test -bench='BenchmarkSession_|BenchmarkOIDC_SteadyState' -benchmem \
+	  -benchtime=2000x -run='^$$' \
+	  ./internal/auth/session/ ./internal/auth/oidc/
+
+# Auth Bundle 2 Phase 14 — OIDC cold-cache benchmark against a live
+# Keycloak container (requires Docker). Build-tag-gated so the
+# default-tag benchmarks above never pull in the 60-90s container
+# boot. Runs the integration test FIRST to populate the
+# sharedKeycloak fixture, then runs the benchmark.
+benchmark-auth-coldcache:
+	@echo "==> running OIDC cold-cache benchmark against live Keycloak (requires Docker)"
+	@go test -tags integration -count=1 -timeout=10m \
+	  -run TestKeycloakIntegration_RefreshKeysFetchesDiscoveryAndJWKS \
+	  -bench BenchmarkOIDC_ColdCache -benchmem -benchtime=10x \
+	  ./internal/auth/oidc/
 
 # Phase 5 — kind-driven cert-manager integration test. Requires
 # `kind`, `kubectl`, `helm`, and a local Docker daemon. Sets

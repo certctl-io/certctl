@@ -77,6 +77,35 @@ type HealthHandler struct {
 	// the legacy {status, user, admin} payload (preserves test fixtures
 	// and the no-db deploy path).
 	Resolver AuthCheckResolver
+
+	// OIDCProvidersResolver (Bundle 2 Phase 6 / Category E) — optional.
+	// When set, AuthInfo additionally returns the list of configured
+	// OIDC providers (id, display_name, login_url) so the GUI Login
+	// page can render the correct buttons. Wired in cmd/server/main.go
+	// from the postgres OIDCProviderRepository. The endpoint stays
+	// auth-exempt; the providers list is public configuration (provider
+	// name + IdP URL — same info present in the IdP's discovery doc).
+	// Nil resolver preserves the pre-Phase-6 minimal payload shape so
+	// existing test fixtures + no-db deploys keep compiling.
+	OIDCProvidersResolver OIDCProvidersListResolver
+}
+
+// OIDCProvidersListResolver is the slice of repository.OIDCProviderRepository
+// the AuthInfo handler consumes for the Phase 6 GUI-facing providers
+// list. Defining the projection here keeps the handler decoupled from
+// the wider repo surface.
+type OIDCProvidersListResolver interface {
+	List(ctx context.Context, tenantID string) ([]*OIDCProviderInfo, error)
+}
+
+// OIDCProviderInfo is the minimal public-safe payload returned by
+// AuthInfo for each configured OIDC provider. The login_url is the
+// `/auth/oidc/login?provider=<id>` redirect target the GUI navigates
+// to when the user clicks the corresponding "Sign in with X" button.
+type OIDCProviderInfo struct {
+	ID          string `json:"id"`
+	DisplayName string `json:"display_name"`
+	LoginURL    string `json:"login_url"`
 }
 
 // NewHealthHandler creates a new HealthHandler.
@@ -165,10 +194,30 @@ func (h HealthHandler) Ready(w http.ResponseWriter, r *http.Request) {
 // AuthInfo responds with the server's authentication configuration.
 // This lets the GUI know whether to show a login screen.
 // GET /api/v1/auth/info (served without auth middleware)
+//
+// Bundle 2 Phase 6 / Category E: when h.OIDCProvidersResolver is wired,
+// the response is extended with the list of configured OIDC providers
+// (id, display_name, login_url) so the GUI's Login page can render the
+// correct "Sign in with X" buttons. The endpoint stays auth-exempt;
+// the providers list is public configuration. Resolver lookups are
+// best-effort: failures fall back to the minimal payload rather than
+// 500-ing the GUI's auth probe.
 func (h HealthHandler) AuthInfo(w http.ResponseWriter, r *http.Request) {
 	response := map[string]interface{}{
 		"auth_type": h.AuthType,
 		"required":  h.AuthType != "none",
+	}
+	if h.OIDCProvidersResolver != nil {
+		// Audit 2026-05-10 MED-9 closure — the adapter
+		// (cmd/server/main.go::oidcProvidersListAdapter.List) filters
+		// disabled providers before constructing OIDCProviderInfo, so
+		// the LoginPage never sees a button for an offline IdP. The
+		// HandleAuthRequest service-layer ErrProviderDisabled check
+		// is the defense-in-depth guard for direct API / MCP / CLI
+		// callers that bypass the GUI.
+		if provs, err := h.OIDCProvidersResolver.List(r.Context(), authdomain.DefaultTenantID); err == nil {
+			response["oidc_providers"] = provs
+		}
 	}
 	JSON(w, http.StatusOK, response)
 }

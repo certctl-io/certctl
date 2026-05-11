@@ -1,6 +1,6 @@
 # certctl Security Posture & Operator Guidance
 
-> Last reviewed: 2026-05-09
+> Last reviewed: 2026-05-11
 
 This document collects the operator-facing security guidance that the source
 code's per-finding comment blocks reference. Each section names the audit
@@ -129,6 +129,204 @@ re-enable). Same-actor self-approve is rejected at the service
 layer with `ErrApproveBySameActor`. See
 [`docs/reference/profiles.md`](../reference/profiles.md) for the
 full gate semantics.
+
+### OIDC federation (Bundle 2 Phases 1-7)
+
+Bundle 2 adds OIDC SSO on top of the API-key + RBAC foundation.
+Operators configure one or more identity providers (Keycloak,
+Authentik, Okta, Auth0, Entra ID, or Google Workspace via Keycloak
+broker); end users sign in at the IdP, certctl validates the
+returned ID token, and a session cookie is minted.
+
+The token-validation pipeline pins:
+
+- Algorithm allow-list: RS256 / RS512 / ES256 / ES384 / EdDSA only.
+  HS256 / HS384 / HS512 / `none` are rejected at the service-layer
+  sentinel level.
+- IdP-downgrade-attack defense at provider creation AND every
+  RefreshKeys: the IdP's advertised
+  `id_token_signing_alg_values_supported` is intersected with the
+  allow-list; a provider that advertises HS-family is rejected
+  before any token is signed under the weak alg.
+- Exact `iss` match (`ErrIssuerMismatch`).
+- `aud` membership + `azp` for multi-aud tokens (per OIDC core
+  §3.1.3.7 step 5).
+- `at_hash` REQUIRED-when-access_token-present (Phase 3 tightening
+  of the spec MAY → MUST so a substituted access token cannot
+  ride alongside a clean ID token).
+- Single-use state + nonce (32-byte random server-generated;
+  atomic `DELETE...RETURNING` on consume).
+- PKCE-S256 mandatory; `plain` rejected.
+- Configurable `iat` window (default 300s, capped 600s).
+- JWKS cache with operator-triggered RefreshKeys + auto-refresh on
+  TTL expiry (default 3600s); JWKS-fetch failure during a key
+  rotation returns 503 to the in-flight login (existing sessions
+  untouched).
+
+OIDC `client_secret` is encrypted at rest via AES-256-GCM (v3 blob
+format: magic 0x03 + salt(16) + nonce(12) + ciphertext+tag) using
+the `CERTCTL_CONFIG_ENCRYPTION_KEY` passphrase. The encryption
+invariant is pinned by an integration test
+(`internal/repository/postgres/oidc_encryption_invariant_test.go`)
+that asserts ciphertext != plaintext + correct blob shape +
+round-trip recovery + wrong-passphrase fails.
+
+Per-IdP setup guides at
+[`oidc-runbooks/index.md`](oidc-runbooks/index.md) cover Keycloak,
+Authentik, Okta, Auth0, Entra ID, and Google Workspace.
+
+### Sessions + back-channel logout (Bundle 2 Phases 4-6)
+
+Successful OIDC login mints a session cookie:
+`v1.<session_id>.<signing_key_id>.<base64url-no-pad(HMAC-SHA256)>`.
+The HMAC input is **length-prefixed** as `len:sid:len:kid` to defeat
+concatenation-collision attacks on bare-concat designs. Cookie
+attributes:
+
+- `HttpOnly=true` (no JS access; defends XSS cookie theft).
+- `Secure=true` (HTTPS-only; defends network MITM).
+- `SameSite=Lax` default (configurable to Strict via
+  `CERTCTL_SESSION_SAMESITE`).
+- `Path=/`, host-only.
+
+Idle timeout default 1h; absolute timeout default 8h; both
+configurable via `CERTCTL_SESSION_IDLE_TIMEOUT` and
+`CERTCTL_SESSION_ABSOLUTE_TIMEOUT`. The scheduler's
+`sessionGCLoop` (default 1h interval) sweeps expired rows.
+
+CSRF defense: plaintext CSRF token in the JS-readable
+`certctl_csrf` cookie (intentionally `HttpOnly=false` for the GUI
+to echo into the `X-CSRF-Token` header); SHA-256 hash on the
+session row; `subtle.ConstantTimeCompare` in `CSRFMiddleware`.
+API-key actors are CSRF-exempt (no session row in context).
+
+Session signing keys rotate via `RotateSigningKey`; the old key
+stays valid for `CERTCTL_SESSION_SIGNING_KEY_RETENTION` (default
+24h) so existing cookies validate during rollover. Past retention,
+the old key's row is dropped and any cookie still signed under it
+returns `ErrSigningKeyNotFound`. `EnsureInitialSigningKey` is
+fail-fatal at server boot.
+
+Back-channel logout per **OpenID Connect Back-Channel Logout 1.0**
+(NOT RFC 8414): `POST /auth/oidc/back-channel-logout` accepts a
+JWT-signed logout token from the IdP, validates the JWT against
+the IdP's JWKS (same alg allow-list as login), pins required
+claims (`iss` / `aud` / `iat` / `jti` / `events`; exactly one of
+`sub` / `sid`; `nonce` MUST be absent), defeats replay via
+`jti`-based deduplication, and revokes matching sessions.
+
+For threat-model coverage of these surfaces, see
+[`auth-threat-model.md`](auth-threat-model.md). For the
+operator-runnable performance baselines, see
+[`auth-benchmarks.md`](auth-benchmarks.md).
+
+### OIDC first-admin bootstrap (Bundle 2 Phase 7)
+
+Coexists with Bundle 1's env-var-token bootstrap. When the
+operator sets `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` + (optionally)
+`CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID`, the first user with one of
+those IdP groups becomes admin on first login per tenant.
+Subsequent users go through normal mapping. The admin-existence
+probe ensures only one wins between the two bootstrap paths;
+once any actor holds `r-admin`, the OIDC bootstrap hook silently
+falls through to normal mapping. Audit row on every grant
+(`bootstrap.oidc_first_admin`, `event_category=auth`).
+
+### Break-glass admin (Bundle 2 Phase 7.5)
+
+Default-OFF (`CERTCTL_BREAKGLASS_ENABLED=false`). When enabled,
+the local-password admin path bypasses OIDC + group-claim layers;
+intended ONLY for SSO-broken incidents.
+
+- Argon2id with OWASP 2024 params (m=64 MiB, t=3, p=4, 16-byte
+  salt, 32-byte output, per-password random salt, PHC-format
+  hash). Hash column is `json:"-"` so handlers cannot wire-leak.
+- Lockout state machine: 5 failures (default; configurable via
+  `CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD`) within 1h reset window
+  (`_LOCKOUT_RESET_INTERVAL`) trips a 30s lockout (`_LOCKOUT_DURATION`).
+  Atomic single-statement IncrementFailure defeats concurrent
+  racing attempts.
+- Constant-time across all failure paths via `verifyDummy()` —
+  wrong-password / locked-account / no-actor all take statistically
+  indistinguishable time.
+- Surface invisibility: when disabled, ALL four endpoints return
+  HTTP 404 (NOT 403). Scanners cannot distinguish "endpoint
+  disabled" from "endpoint doesn't exist".
+- WARN log at server boot when `ENABLED=true`; audit row on every
+  break-glass login (`auth.breakglass_login_*`,
+  `event_category=auth`); WebAuthn/FIDO2 second factor pairing
+  on the v3 roadmap (Decision 12).
+
+Operator should DISABLE break-glass within 24h of SSO recovery
+to avoid a permanent backdoor; the runbook at
+[`auth-threat-model.md#break-glass-risks-phase-75`](auth-threat-model.md)
+documents the full state machine.
+
+### Demo-to-production cutover (Audit 2026-05-11 A-8)
+
+Migration `000029_rbac.up.sql` unconditionally seeds an
+`actor-demo-anon → r-admin` row into `actor_roles`. This row is the
+runtime principal injected by the demo-mode middleware when
+`CERTCTL_AUTH_TYPE=none`. Under any non-`none` auth type the row is
+DORMANT — the middleware chain never resolves to it. But its existence
+is a footgun: a future regression that resolves an unauthenticated
+request to `actor-demo-anon` (a misrouted CORS preflight, a fallback in
+a new auth-exempt route) would silently re-elevate to admin.
+
+certctl-server detects this residue at startup and emits a WARN log +
+an `auth.demo_residual_grants_detected` audit row listing every grant
+present on `actor-demo-anon`. **Every production deploy will see this
+WARN on first boot** — the migration baseline is part of the install,
+not a side effect of running demo mode.
+
+Operator workflow at production cutover:
+
+1. Drain the WARN by calling the cleanup endpoint with an admin API key:
+
+   ```bash
+   curl -X POST --cacert deploy/test/certs/ca.crt \
+        -H "Authorization: Bearer $ADMIN_KEY" \
+        https://certctl.example.com:8443/api/v1/auth/demo-residual/cleanup
+   # → {"removed": 1}
+   ```
+
+   The endpoint is gated `auth.role.assign` (admin-class) and refuses
+   to run when `CERTCTL_AUTH_TYPE=none` (HTTP 503 — the residue IS the
+   active runtime state at that auth type). The cleanup is idempotent;
+   a second call returns `{"removed": 0}` and still leaves an audit row.
+
+   Equivalent SQL for operators preferring direct DB access:
+
+   ```sql
+   DELETE FROM actor_roles WHERE actor_id = 'actor-demo-anon';
+   ```
+
+2. To make subsequent boots refuse startup if the row reappears (the
+   most paranoid stance), set:
+
+   ```
+   CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true
+   ```
+
+   With the flag set, any `actor-demo-anon` row under a non-`none`
+   auth type causes certctl-server to log the WARN AND exit non-zero
+   before binding the HTTPS listener. Default is `false` (WARN only).
+
+3. The CI guard `scripts/ci-guards/no-new-synthetic-admin.sh` pins the
+   set of source files that may reference the `actor-demo-anon` literal.
+   New runtime code paths that resolve to the synthetic actor are
+   rejected at PR time so the credibility gap stays closed.
+
+### Migrating an existing deployment to OIDC
+
+A Bundle-1-merged deployment that wants to add OIDC follows the
+step-by-step at
+[`docs/migration/oidc-enable.md`](../migration/oidc-enable.md):
+configure CERTCTL_CONFIG_ENCRYPTION_KEY, pick + configure an IdP
+per the relevant runbook, configure the certctl-side OIDCProvider
++ group→role mappings, verify the login flow against a single
+test user, then announce the SSO endpoint to the rest of the
+organization.
 
 ## Per-user rate limiting
 

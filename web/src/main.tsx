@@ -41,6 +41,14 @@ import RoleDetailPage from './pages/auth/RoleDetailPage';
 import KeysPage from './pages/auth/KeysPage';
 import AuthSettingsPage from './pages/auth/AuthSettingsPage';
 import ApprovalsPage from './pages/auth/ApprovalsPage';
+// Bundle 2 Phase 8 — OIDC + session management pages.
+import OIDCProvidersPage from './pages/auth/OIDCProvidersPage';
+import OIDCProviderDetailPage from './pages/auth/OIDCProviderDetailPage';
+import GroupMappingsPage from './pages/auth/GroupMappingsPage';
+import SessionsPage from './pages/auth/SessionsPage';
+import BreakglassPage from './pages/auth/BreakglassPage';
+// Audit 2026-05-10 MED-11 closure — federated-user admin page.
+import UsersPage from './pages/auth/UsersPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -117,11 +125,20 @@ createRoot(document.getElementById('root')!).render(
                       cached effective_permissions slice. Server-side
                       enforcement is the load-bearing layer; client-side
                       hide/disable is UX. */}
+                  {/* Bundle 2 Phase 8 — OIDC + session management surface. */}
+                  <Route path="auth/oidc/providers" element={<OIDCProvidersPage />} />
+                  <Route path="auth/oidc/providers/:id" element={<OIDCProviderDetailPage />} />
+                  <Route path="auth/oidc/providers/:id/mappings" element={<GroupMappingsPage />} />
+                  <Route path="auth/sessions" element={<SessionsPage />} />
                   <Route path="auth/roles" element={<RolesPage />} />
                   <Route path="auth/roles/:id" element={<RoleDetailPage />} />
                   <Route path="auth/keys" element={<KeysPage />} />
                   <Route path="auth/settings" element={<AuthSettingsPage />} />
                   <Route path="auth/approvals" element={<ApprovalsPage />} />
+                  {/* Audit 2026-05-10 CRIT-4 closure — break-glass admin surface. */}
+                  <Route path="auth/breakglass" element={<BreakglassPage />} />
+                  {/* Audit 2026-05-10 MED-11 closure — federated-user admin. */}
+                  <Route path="auth/users" element={<UsersPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

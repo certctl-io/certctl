@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
-import { getAuthInfo, checkAuth, setApiKey } from '../api/client';
+import { getAuthInfo, checkAuth, setApiKey, logout as apiLogout } from '../api/client';
 
 interface AuthState {
   loading: boolean;
@@ -66,14 +66,35 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
       .finally(() => setLoading(false));
   }, []);
 
-  // Listen for 401 events from the API client
+  // Listen for 401 events from the API client.
+  //
+  // Audit 2026-05-10 HIGH-8 — the API client now attaches a cause
+  // category to the event detail (parsed from the WWW-Authenticate
+  // header). When a cause is recognised, redirect to
+  // /login?session_expired=<cause> so the LoginPage renders OIDC-aware
+  // re-login wording instead of the generic "session expired" + API-key
+  // copy. Cookie-mode (OIDC) and Bearer-mode (API-key) callers share
+  // the same wire shape; the LoginPage banner is purely UX.
   useEffect(() => {
-    const handler = () => {
+    const handler = (e: Event) => {
+      const detail = (e as CustomEvent<{ cause?: string }>).detail;
+      const cause = detail?.cause || '';
       setAuthenticated(false);
       setApiKey(null);
       setUser('');
       setAdmin(false);
+      // Generic copy; the LoginPage will overlay a cause-specific
+      // banner when ?session_expired=<cause> is present.
       setError('Session expired. Please re-enter your API key.');
+      // Forward the cause to the LoginPage. window.location is used
+      // (not React Router's navigate) because this listener fires
+      // outside any route component's render and we want a hard
+      // navigation that clears any stale state.
+      if (cause && cause !== 'invalid_token' &&
+          window.location.pathname !== '/login') {
+        const params = new URLSearchParams({ session_expired: cause });
+        window.location.href = '/login?' + params.toString();
+      }
     };
     window.addEventListener('certctl:auth-required', handler);
     return () => window.removeEventListener('certctl:auth-required', handler);
@@ -96,6 +117,11 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
   }, []);
 
   const logout = useCallback(() => {
+    // Bundle 2 Phase 8 — fire POST /auth/logout so the server can revoke the
+    // session row + clear the HttpOnly session cookie. The API logout helper
+    // sends `credentials: 'include'`. Errors are swallowed (the user's intent
+    // is still to be logged out locally; e.g. cookie already expired).
+    void apiLogout().catch(() => undefined);
     setApiKey(null);
     setAuthenticated(false);
     setUser('');
@@ -105,6 +131,33 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ loading, authRequired, authenticated, authType, user, admin, login, logout, error }}>
+      {/*
+        Audit 2026-05-10 LOW-1 closure — demo-mode banner. When the
+        server reports auth_type=none, every caller is the anonymous
+        admin. Rendering a sticky red banner above the layout makes
+        sure operators see this on every page; HIGH-12's startup
+        check already fails closed for unsafe binds (0.0.0.0 / ::
+        without CERTCTL_DEMO_MODE_ACK=true), so reaching this banner
+        means the operator either ran on loopback or acknowledged
+        the bypass — but the GUI still surfaces the state plainly.
+      */}
+      {authType === 'none' && !loading && (
+        <div
+          data-testid="demo-mode-banner"
+          role="alert"
+          style={{
+            background: '#b91c1c',
+            color: '#fff',
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 600,
+            textAlign: 'center',
+          }}
+        >
+          ⚠️ Demo mode active (CERTCTL_AUTH_TYPE=none). Every caller is anonymous admin.
+          Production deployments MUST set CERTCTL_AUTH_TYPE=api-key or oidc.
+        </div>
+      )}
       {children}
     </AuthContext.Provider>
   );

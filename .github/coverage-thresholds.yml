@@ -105,3 +105,125 @@ internal/service/auth:
     (ErrUnauthenticated / ErrForbidden / ErrSelfRoleAssignment /
     ErrAuthReservedActor / ErrAuthUnknownPermission /
     ErrAuthRoleInUse).
+
+internal/auth/oidc:
+  floor: 90
+  why: |
+    Bundle 2 Phase 3 — OIDC service coverage gate. Phase 3 spec
+    pins the floor at 90 explicitly because every fail-closed
+    branch is load-bearing for the security posture: alg pinning
+    (deny-list HS*/none + allow-list RS*/ES*/EdDSA), audience
+    re-check, azp enforcement on multi-aud tokens, at_hash
+    REQUIRED-when-access-token-present (Phase 3 lifts the OIDC
+    core "MAY" to a service-level "MUST"), iat-window window,
+    nonce constant-time-compare, single-use state replay defense,
+    PKCE-S256 mandatory, IdP downgrade-attack defense at
+    provider-load + RefreshKeys time, JWKS-fail-closed semantics,
+    group-claim resolution + userinfo-fallback fail-closed
+    semantics, token-leak hygiene. A regression in any one of
+    these branches is a security incident; the floor catches it
+    before the commit lands. The mock-IdP fixture in
+    service_test.go is the load-bearing harness.
+
+internal/auth/oidc/groupclaim:
+  floor: 95
+  why: |
+    Bundle 2 Phase 3 — group-claim resolver. Hand-rolled (no
+    JSON-path dep per Decision 10); ~150 LOC, every branch
+    exercised by 19 unit tests covering the documented IdP shapes
+    (Okta string array, Keycloak realm_access.roles, Auth0
+    namespaced URL claim, single-string normalization,
+    deeply-nested 3-segment walks) plus every fail-closed branch
+    (empty path, missing key, missing nested key, non-object
+    intermediate, bool/number/object/nil values, array with
+    non-string element, URL-shape with dots-in-path treated as
+    literal). Resolver should be at 100%; floor at 95 leaves a
+    1-statement margin for future error-message refactors.
+
+internal/auth/oidc/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — OIDCProvider + GroupRoleMapping domain.
+    Validation-heavy package; constructors + Validate methods
+    cover all canonical IdP shapes (Okta / Azure AD / Google
+    Workspace / Keycloak / Authentik / Auth0). Floor at 90 to
+    catch any future field that ships without a validator.
+
+internal/auth/session:
+  floor: 90
+  why: |
+    Bundle 2 Phase 4 — session lifecycle service. Phase 4 spec
+    pins the floor at 90 because every fail-closed branch carries
+    a security invariant: HMAC-SHA256 cookie signing with a
+    LENGTH-PREFIXED canonical input (defeats the
+    `<a, bc>`-vs-`<ab, c>` concatenation collision attack on the
+    bare-concat form), v1. version-prefix lock, idle expiry,
+    absolute expiry, revocation, retired-but-in-retention key
+    success path, retired-past-retention failure path, CSRF
+    constant-time compare against the SHA-256-hashed copy on the
+    session row, optional IP/UA-bind defense-in-depth gates,
+    fail-fatal initial-key bootstrap. A regression in any one of
+    these branches is a security incident; the floor catches it
+    before the commit lands. The 15-case negative-test matrix in
+    service_test.go is the load-bearing harness; the in-memory
+    stubs of SessionRepo + SigningKeyRepo + AuditRecorder let the
+    state machine be exercised without the postgres testcontainer
+    overhead (which Phase 2's integration tests already cover).
+
+internal/auth/session/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — Session + SessionSigningKey domain. Both
+    types ship Validate() with full invariant coverage: ID prefix
+    enforcement (ses-/sk-), expiry-order CHECK (absolute > idle >
+    created), CSRFTokenHash format pin (64 lowercase hex chars),
+    KeyMaterialEncrypted non-empty, retired-before-created
+    rejection, TenantID defaulting. Cookie naming constants are
+    pinned by TestCookieNamingConstants because the GUI's
+    web/src/api/client.ts will read `certctl_csrf` by string.
+    Floor at 90 to catch any future field that ships without a
+    validator.
+
+internal/auth/breakglass:
+  floor: 90
+  why: |
+    Bundle 2 Phase 7.5 — break-glass admin service (Argon2id +
+    lockout state machine + constant-time-via-verifyDummy). Phase
+    13 Pre-merge audit: floor at 90 with no carve-out. Phase 7.5
+    spec ships the package at 91.5%, validated by 8 mandated
+    negatives + ~12 coverage-lift tests. Every fail-closed branch
+    is load-bearing for the security surface (default-OFF posture
+    only matters if every "disabled" path returns ErrDisabled
+    BEFORE any DB lookup; constant-time defense only matters if
+    every path goes through verifyDummy on the no-credential leg).
+    A regression that drops a fail-closed branch's coverage below
+    90 is a real security risk — gate trips, operator audits.
+
+internal/auth/breakglass/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — BreakglassCredential domain. Argon2id PHC
+    format pinned ($argon2id$ prefix), MinPasswordLengthBytes (12)
+    + MaxPasswordLengthBytes (256) constants pinned by dedicated
+    test, IsLocked(now) state machine helper. The package ships
+    at 100% coverage; floor at 90 is the standing-room floor for
+    any future field added without a validator.
+
+internal/auth/user/domain:
+  floor: 90
+  why: |
+    Bundle 2 Phase 1 — User domain (federated-human identity).
+    OIDCSubject + OIDCProviderID unique-index per the Phase 2
+    schema, WebAuthnCredentials JSONB reserved for v3, Validate()
+    enforces every on-disk invariant. The package ships at 96.4%
+    coverage. Floor at 90 to catch any future field added without
+    a validator.
+
+    Phase 13 prompt explicitly enumerates internal/auth/user/ at
+    floor 90. The parent (non-domain) directory has no Go source —
+    the user upsert lives in internal/auth/oidc/service.go alongside
+    group resolution + role mapping (cohesive sequence within the
+    OIDC callback). Splitting upsertUser into a separate
+    internal/auth/user/ service package would harm cohesion without
+    adding test value; the domain layer's invariant coverage is
+    where the floor actually applies.

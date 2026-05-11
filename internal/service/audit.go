@@ -106,6 +106,45 @@ func (s *AuditService) RecordEventWithTx(ctx context.Context, q repository.Queri
 	return nil
 }
 
+// RecordEventWithCategoryWithTx records a categorized audit event using
+// the supplied repository.Querier so the row is committed in the same
+// transaction as the underlying action. Mirrors RecordEventWithCategory
+// but takes the Querier (typically *sql.Tx from postgres.WithinTx).
+//
+// Audit 2026-05-10 HIGH-6 closure — closes the gap where Bundle-1+2
+// auth-mutation paths emitted the audit row via a separate, non-
+// transactional connection. A DB hiccup or connection reset between
+// the action and the audit-row INSERT used to leave the action
+// committed with no audit trail (CWE-778). With this method, the
+// audit row participates in the action's transaction: rollback on
+// any failure removes both the action row AND any audit row that the
+// caller wrote inside the tx.
+func (s *AuditService) RecordEventWithCategoryWithTx(ctx context.Context, q repository.Querier, actor string, actorType domain.ActorType, action, eventCategory, resourceType, resourceID string, details map[string]interface{}) error {
+	redacted := RedactDetailsForAudit(details)
+	detailsJSON, err := json.Marshal(redacted)
+	if err != nil {
+		detailsJSON = []byte("{}")
+	}
+
+	event := &domain.AuditEvent{
+		ID:            generateID("audit"),
+		Timestamp:     time.Now(),
+		Actor:         actor,
+		ActorType:     actorType,
+		Action:        action,
+		ResourceType:  resourceType,
+		ResourceID:    resourceID,
+		Details:       json.RawMessage(detailsJSON),
+		EventCategory: eventCategory,
+	}
+
+	if err := s.auditRepo.CreateWithTx(ctx, q, event); err != nil {
+		return fmt.Errorf("failed to record audit event: %w", err)
+	}
+
+	return nil
+}
+
 // List returns audit events matching filter criteria.
 func (s *AuditService) List(ctx context.Context, filter *repository.AuditFilter) ([]*domain.AuditEvent, error) {
 	events, err := s.auditRepo.List(ctx, filter)
@@ -206,6 +245,44 @@ func (s *AuditService) ListAuditEventsByCategory(ctx context.Context, eventCateg
 	total := int64(len(result))
 
 	return result, total, nil
+}
+
+// ExportEventsByFilter returns audit events matching a date-range +
+// optional category filter without pagination — the export handler
+// uses this to stream NDJSON for compliance evidence collection.
+//
+// Audit 2026-05-10 HIGH-11 closure: pre-fix, the `audit.export`
+// permission was seeded into r-admin and r-auditor (migration 000031)
+// but no endpoint enforced it — misleading capability advertisement.
+// This method is the service-layer building block for the new
+// GET /api/v1/audit/export endpoint.
+//
+// Bounded callers: the handler enforces a max 90-day range + max-rows
+// cap before invoking this; the service-layer method itself is
+// permissive so future callers (compliance-job runner, MCP tool) can
+// reuse the helper without duplicating the bound enforcement.
+func (s *AuditService) ExportEventsByFilter(ctx context.Context, from, to time.Time, eventCategory string, maxRows int) ([]domain.AuditEvent, error) {
+	if maxRows <= 0 {
+		maxRows = 50000
+	}
+	filter := &repository.AuditFilter{
+		EventCategory: eventCategory,
+		From:          from,
+		To:            to,
+		Page:          1,
+		PerPage:       maxRows,
+	}
+	events, err := s.auditRepo.List(ctx, filter)
+	if err != nil {
+		return nil, fmt.Errorf("failed to list audit events for export: %w", err)
+	}
+	out := make([]domain.AuditEvent, 0, len(events))
+	for _, e := range events {
+		if e != nil {
+			out = append(out, *e)
+		}
+	}
+	return out, nil
 }
 
 // GetAuditEvent returns a single audit event (handler interface method).
