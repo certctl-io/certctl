@@ -13,6 +13,7 @@ import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import { validateEmailDomain } from './OIDCProvidersPage';
 import OIDCTestConnectionPanel from './OIDCTestConnectionPanel';
+import OIDCJWKSStatusPanel from './OIDCJWKSStatusPanel';
 
 // =============================================================================
 // Bundle 2 Phase 8 — OIDCProviderDetailPage.
@@ -609,6 +610,19 @@ export default function OIDCProviderDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Audit 2026-05-11 Fix 10 — JWKS health panel (MED-7 GUI half).
+          Reads GET .../jwks-status and renders the per-provider verifier
+          counters (last_refresh_at, refresh_count, last_error,
+          rejected_jws_count, iss_param_supported, current_kids) so
+          operators can debug "why is login failing for this IdP?"
+          without dropping to curl. "Refresh now" button invokes the
+          existing RefreshKeys path and invalidates the local query so
+          the freshly-updated counters render immediately. Panel
+          self-hides for callers without auth.oidc.list (server returns
+          403). The refresh button is hidden for callers without
+          auth.oidc.edit so non-admins can still observe the cache. */}
+      <OIDCJWKSStatusPanel providerID={provider.id} canRefresh={canEdit} />
 
       <div className="bg-surface border border-surface-border rounded p-5 space-y-3">
         <h2 className="text-base font-semibold text-ink">Actions</h2>
