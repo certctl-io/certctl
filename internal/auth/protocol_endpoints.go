@@ -40,7 +40,7 @@ import "strings"
 var ProtocolEndpointPrefixes = []string{
 	"/acme",
 	"/scep",
-	"/scep-mtls",            // SCEP + mTLS sibling route (Phase 6.5)
+	"/scep-mtls", // SCEP + mTLS sibling route (Phase 6.5)
 	"/.well-known/est",
 	"/.well-known/est-mtls", // EST + mTLS sibling route (EST hardening Phase 2)
 	"/.well-known/pki/ocsp",

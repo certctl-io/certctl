@@ -457,7 +457,7 @@ func main() {
 			Secure:   true,
 		},
 	).WithBCLReplayConsumer(bclReplayRepo, bclMaxAge). // HIGH-3 jti consumed-set.
-														WithPermissionChecker(authCheckerAdapter)      // MED-2 auth.session.list.all gate.
+								WithPermissionChecker(authCheckerAdapter) // MED-2 auth.session.list.all gate.
 
 	// =========================================================================
 	// Auth Bundle 2 Phase 7 — OIDC first-admin bootstrap hook.
@@ -1344,17 +1344,17 @@ func main() {
 				// Lazy build — re-read cfg.Auth.* values on every call so
 				// post-startup re-evaluation reflects any (future) mutation.
 				return map[string]string{
-					"CERTCTL_AUTH_TYPE":                  string(cfg.Auth.Type),
-					"CERTCTL_SESSION_SAMESITE":           cfg.Auth.Session.SameSite,
-					"CERTCTL_OIDC_BCL_MAX_AGE_SECONDS":   strconv.Itoa(cfg.Auth.OIDCBCLMaxAgeSeconds),
-					"CERTCTL_OIDC_PRELOGIN_REQUIRE_UA":   strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireUA),
-					"CERTCTL_OIDC_PRELOGIN_REQUIRE_IP":   strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireIP),
-					"CERTCTL_BREAKGLASS_ENABLED":         strconv.FormatBool(cfg.Auth.Breakglass.Enabled),
+					"CERTCTL_AUTH_TYPE":                    string(cfg.Auth.Type),
+					"CERTCTL_SESSION_SAMESITE":             cfg.Auth.Session.SameSite,
+					"CERTCTL_OIDC_BCL_MAX_AGE_SECONDS":     strconv.Itoa(cfg.Auth.OIDCBCLMaxAgeSeconds),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_UA":     strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireUA),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_IP":     strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireIP),
+					"CERTCTL_BREAKGLASS_ENABLED":           strconv.FormatBool(cfg.Auth.Breakglass.Enabled),
 					"CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD": strconv.Itoa(cfg.Auth.Breakglass.LockoutThreshold),
-					"CERTCTL_DEMO_MODE_ACK":              strconv.FormatBool(cfg.Auth.DemoModeAck),
-					"CERTCTL_TRUSTED_PROXIES_COUNT":      strconv.Itoa(len(cfg.Auth.TrustedProxies)),
-					"CERTCTL_BOOTSTRAP_TOKEN_SET":        strconv.FormatBool(cfg.Auth.BootstrapToken != ""),
-					"CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID": cfg.Auth.BootstrapOIDCProviderID,
+					"CERTCTL_DEMO_MODE_ACK":                strconv.FormatBool(cfg.Auth.DemoModeAck),
+					"CERTCTL_TRUSTED_PROXIES_COUNT":        strconv.Itoa(len(cfg.Auth.TrustedProxies)),
+					"CERTCTL_BOOTSTRAP_TOKEN_SET":          strconv.FormatBool(cfg.Auth.BootstrapToken != ""),
+					"CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID":   cfg.Auth.BootstrapOIDCProviderID,
 					"CERTCTL_BOOTSTRAP_ADMIN_GROUPS_COUNT": strconv.Itoa(len(cfg.Auth.BootstrapAdminGroups)),
 				}
 			},

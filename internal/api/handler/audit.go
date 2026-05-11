@@ -284,5 +284,3 @@ func (h AuditHandler) ExportAudit(w http.ResponseWriter, r *http.Request) {
 			"actor_id", actorID, "rows", len(events), "err", err)
 	}
 }
-
-

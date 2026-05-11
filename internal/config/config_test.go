@@ -530,7 +530,7 @@ func TestIsLoopbackAddr(t *testing.T) {
 		{"10.0.0.1", false},
 		{"192.168.1.1", false},
 		{"203.0.113.42", false},
-		{"example.com", false},          // hostname → fail closed
+		{"example.com", false}, // hostname → fail closed
 		{"my-cert-server.internal", false},
 		// Defensive: host:port form should still classify the host part.
 		{"127.0.0.1:8443", true},
