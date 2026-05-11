@@ -209,9 +209,46 @@ tag. Quick reference:
 | `DELETE /v1/auth/roles/{id}/permissions/{perm}` | `auth.role.edit` |
 | `GET /v1/auth/keys` | `auth.role.list` |
 | `POST /v1/auth/keys/{id}/roles` | `auth.role.assign` |
-| `DELETE /v1/auth/keys/{id}/roles/{role_id}` | `auth.role.assign` |
+| `DELETE /v1/auth/keys/{id}/roles/{role_id}` (+ optional `?scope_type=` / `?scope_id=`) | `auth.role.assign` |
 | `GET /v1/auth/check` | (authenticated; surfaces effective perms) |
 | `GET /v1/auth/bootstrap` + `POST /v1/auth/bootstrap` | (auth-exempt; gated by env-var token) |
+
+#### Revoke: legacy "all variants" vs scope-selective (Audit 2026-05-11 A-4)
+
+`DELETE /v1/auth/keys/{id}/roles/{role_id}` runs in one of two modes,
+selected by presence of the optional query parameters:
+
+- **No query params (legacy "revoke all variants")** — every scoped grant of
+  this role held by this actor is dropped. Idempotent: zero-row deletes
+  return 204 (no error). This is the pre-A-4 behaviour and remains the
+  default for the CLI / GUI buttons that don't know about scope.
+
+  ```bash
+  # Drop EVERY variant of r-operator from alice (global, profile-scoped,
+  # issuer-scoped — all gone).
+  curl -X DELETE https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator
+  ```
+
+- **`?scope_type=` (+ optional `?scope_id=`)** — drop ONE variant. Used
+  when an actor holds the same role at multiple scopes (HIGH-10 made
+  that representable; A-4 makes it selectively revocable).
+  `scope_type=global` requires `scope_id` to be absent; `scope_type=profile`
+  / `issuer` require `scope_id`. No match returns 404 so operators get
+  feedback when they target a scope variant the actor doesn't hold.
+
+  ```bash
+  # Alice holds r-operator scoped to p-acme AND p-globex.
+  # Drop ONLY the p-acme grant; the p-globex grant stays.
+  curl -X DELETE 'https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-acme'
+
+  # Drop ONLY the global grant of r-operator (keeps any profile / issuer variants):
+  curl -X DELETE 'https://certctl.example.com/api/v1/auth/keys/alice/roles/r-operator?scope_type=global'
+  ```
+
+The audit row's `details` payload records which mode fired —
+`scope: "all_variants"` for the legacy path, or the explicit
+`scope_type` + `scope_id` for selective revoke — so SOC / SIEM can
+distinguish wide cleanups from targeted demotions in the access log.
 
 ### From the MCP server
 

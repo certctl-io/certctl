@@ -2,6 +2,28 @@
 
 ## Unreleased
 
+### Security
+
+- **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
+  HIGH-10 made it possible to grant the same role to the same actor at
+  multiple scopes (e.g. `r-operator` on `profile=p-acme` AND `profile=p-globex`)
+  via the unique constraint extension on `actor_roles`, but
+  `ActorRoleRepository.Revoke` ignored `(scope_type, scope_id)` and
+  unconditionally deleted every variant. Operators who wanted to drop
+  one scoped grant had to nuke them all and re-grant the remainder —
+  a race window where the actor's access was briefly different. The
+  `DELETE /v1/auth/keys/{id}/roles/{role_id}` endpoint now accepts
+  optional `?scope_type=` / `?scope_id=` query params that narrow the
+  revoke to a single variant; no-match returns 404. The legacy "revoke
+  every variant" semantic is preserved when the query params are
+  absent, so existing CLI / GUI buttons keep working unchanged. The
+  audit row's `details` payload records which mode fired so SOC / SIEM
+  can distinguish wide cleanups from targeted demotions. MCP tool
+  `certctl_auth_revoke_role_from_key` gains optional `scope_type` +
+  `scope_id` input fields with matching semantics. Documented in
+  `docs/operator/rbac.md` under "Revoke: legacy 'all variants' vs
+  scope-selective."
+
 ### Security (BREAKING — silent-elevation closure)
 
 - **HIGH-10 actor-role scope is now enforced (Audit 2026-05-11 A-1).**

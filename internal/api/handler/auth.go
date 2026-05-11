@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"net/http"
 	"strings"
 	"time"
@@ -72,7 +73,11 @@ type AuthPermissionService interface {
 // effective-permissions query the GUI's /v1/auth/me handler uses.
 type AuthActorRoleService interface {
 	Grant(ctx context.Context, caller *authsvc.Caller, ar *authdomain.ActorRole) error
-	Revoke(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType, roleID string) error
+	// Audit 2026-05-11 A-4 — Revoke takes optional scope filtering so
+	// callers that hold multiple scoped variants of the same role can
+	// drop one variant selectively. opts.ScopeType == "" preserves the
+	// legacy "revoke all" semantic.
+	Revoke(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType, roleID string, opts repository.ActorRoleRevokeOptions) error
 	ListForActor(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]*authdomain.ActorRole, error)
 	EffectivePermissions(ctx context.Context, caller *authsvc.Caller, actorID string, actorType domain.ActorType) ([]repository.EffectivePermission, error)
 	// ListKeys (Bundle 1 Phase 7) returns every actor in the tenant
@@ -496,6 +501,22 @@ func (h AuthHandler) AssignRoleToKey(w http.ResponseWriter, r *http.Request) {
 }
 
 // RevokeRoleFromKey handles DELETE /api/v1/auth/keys/{id}/roles/{role_id}.
+//
+// Audit 2026-05-11 A-4 — two operating modes selected by presence of
+// the optional `?scope_type=` / `?scope_id=` query parameters:
+//
+//   - No query params: legacy "revoke every scope variant of this role
+//     from this actor" semantic. Preserves pre-A-4 GUI behaviour
+//     (KeysPage before Fix 12 fires plain DELETE with no scope; one
+//     button per role row).
+//
+//   - `scope_type=global` (no scope_id) or
+//     `scope_type=profile&scope_id=<id>` /
+//     `scope_type=issuer&scope_id=<id>`: drop ONLY the matching variant.
+//     Returns HTTP 404 when no row matches the scope (operator
+//     feedback for typos). Validation mirrors AssignRoleToKey:
+//     `scope_id` MUST be empty with `scope_type=global`, MUST be
+//     present with `profile` / `issuer`, anything else → 400.
 func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 	caller, err := callerFromRequest(r)
 	if err != nil {
@@ -504,7 +525,19 @@ func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 	}
 	keyID := r.PathValue("id")
 	roleID := r.PathValue("role_id")
-	if err := h.actors.Revoke(r.Context(), caller, keyID, domain.ActorTypeAPIKey, roleID); err != nil {
+
+	// Parse + validate optional scope filter. Empty query string is
+	// the legacy path; mismatched filter is rejected before the call
+	// reaches the service.
+	scopeTypeRaw := r.URL.Query().Get("scope_type")
+	scopeIDRaw := r.URL.Query().Get("scope_id")
+	opts, derr := parseRevokeScope(scopeTypeRaw, scopeIDRaw)
+	if derr != nil {
+		Error(w, http.StatusBadRequest, derr.Error())
+		return
+	}
+
+	if err := h.actors.Revoke(r.Context(), caller, keyID, domain.ActorTypeAPIKey, roleID, opts); err != nil {
 		writeAuthError(w, err)
 		return
 	}
@@ -513,6 +546,40 @@ func (h AuthHandler) RevokeRoleFromKey(w http.ResponseWriter, r *http.Request) {
 		_ = h.csrfRotator.RotateCSRFTokenForActor(r.Context(), keyID, string(domain.ActorTypeAPIKey))
 	}
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// parseRevokeScope translates the (scope_type, scope_id) query string
+// into an ActorRoleRevokeOptions. Empty inputs → legacy "revoke all"
+// option (zero value); any combination missing required halves →
+// validation error. Audit 2026-05-11 A-4 — mirrors AssignRoleToKey's
+// scope validation so the assign / revoke pair stays symmetric.
+func parseRevokeScope(scopeType, scopeID string) (repository.ActorRoleRevokeOptions, error) {
+	scopeType = strings.TrimSpace(scopeType)
+	scopeID = strings.TrimSpace(scopeID)
+	if scopeType == "" {
+		if scopeID != "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id requires scope_type")
+		}
+		return repository.ActorRoleRevokeOptions{}, nil
+	}
+	switch authdomain.ScopeType(scopeType) {
+	case authdomain.ScopeTypeGlobal:
+		if scopeID != "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id must be empty when scope_type=global")
+		}
+		return repository.ActorRoleRevokeOptions{ScopeType: authdomain.ScopeTypeGlobal}, nil
+	case authdomain.ScopeTypeProfile, authdomain.ScopeTypeIssuer:
+		if scopeID == "" {
+			return repository.ActorRoleRevokeOptions{}, fmt.Errorf("scope_id is required when scope_type is profile or issuer")
+		}
+		sid := scopeID
+		return repository.ActorRoleRevokeOptions{
+			ScopeType: authdomain.ScopeType(scopeType),
+			ScopeID:   &sid,
+		}, nil
+	default:
+		return repository.ActorRoleRevokeOptions{}, fmt.Errorf("invalid scope_type — must be global, profile, or issuer")
+	}
 }
 
 // Me handles GET /api/v1/auth/me. Returns the current actor's effective
@@ -596,7 +663,7 @@ func writeAuthError(w http.ResponseWriter, err error) {
 		Error(w, http.StatusForbidden, err.Error())
 	case errors.Is(err, authsvc.ErrInvalidPermission):
 		Error(w, http.StatusBadRequest, err.Error())
-	case errors.Is(err, repository.ErrAuthNotFound):
+	case errors.Is(err, repository.ErrAuthNotFound), errors.Is(err, repository.ErrActorRoleNotFound):
 		Error(w, http.StatusNotFound, "Not found")
 	case errors.Is(err, repository.ErrAuthDuplicateName), errors.Is(err, repository.ErrAuthRoleInUse), errors.Is(err, repository.ErrAuthReservedActor):
 		Error(w, http.StatusConflict, err.Error())

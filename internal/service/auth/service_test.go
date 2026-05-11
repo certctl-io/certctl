@@ -159,15 +159,53 @@ func (f *fakeActorRoleRepo) Grant(_ context.Context, ar *authdomain.ActorRole) e
 	f.grants = append(f.grants, ar)
 	return nil
 }
-func (f *fakeActorRoleRepo) Revoke(_ context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, _ string) error {
+func (f *fakeActorRoleRepo) Revoke(_ context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, _ string, opts repository.ActorRoleRevokeOptions) error {
+	// Audit 2026-05-11 A-4 — mirror the postgres semantics: when
+	// opts.ScopeType is empty, remove every (actor,type,role) match
+	// regardless of scope (legacy). When set, narrow to the single
+	// matching scope variant; zero-match returns ErrActorRoleNotFound.
+	wantScopedSpecific := opts.ScopeType != ""
+	matched := 0
 	out := f.grants[:0]
 	for _, g := range f.grants {
 		if g.ActorID == actorID && g.ActorType == actorType && g.RoleID == roleID {
+			if wantScopedSpecific {
+				// Match by (scope_type, scope_id).
+				gScope := g.ScopeType
+				if gScope == "" {
+					gScope = authdomain.ScopeTypeGlobal
+				}
+				if gScope != opts.ScopeType {
+					out = append(out, g)
+					continue
+				}
+				// scope_id IS NOT DISTINCT FROM:
+				gSID := ""
+				if g.ScopeID != nil {
+					gSID = *g.ScopeID
+				}
+				wSID := ""
+				if opts.ScopeID != nil {
+					wSID = *opts.ScopeID
+				}
+				if gSID != wSID {
+					out = append(out, g)
+					continue
+				}
+				// Drop this row.
+				matched++
+				continue
+			}
+			// Legacy "revoke all variants" path.
+			matched++
 			continue
 		}
 		out = append(out, g)
 	}
 	f.grants = out
+	if wantScopedSpecific && matched == 0 {
+		return repository.ErrActorRoleNotFound
+	}
 	return nil
 }
 func (f *fakeActorRoleRepo) AdminExists(_ context.Context, _ string) (bool, error) {
@@ -439,7 +477,7 @@ func TestActorRoleService_GrantRejectsReservedDemoActor(t *testing.T) {
 
 func TestActorRoleService_RevokeRejectsReservedDemoActor(t *testing.T) {
 	svc, _, _ := newActorRoleServiceWithFakes()
-	err := svc.Revoke(context.Background(), AsSystemCaller(), authdomain.DemoAnonActorID, domain.ActorTypeAnonymous, "r-admin")
+	err := svc.Revoke(context.Background(), AsSystemCaller(), authdomain.DemoAnonActorID, domain.ActorTypeAnonymous, "r-admin", repository.ActorRoleRevokeOptions{})
 	if !errors.Is(err, repository.ErrAuthReservedActor) {
 		t.Errorf("Revoke against actor-demo-anon should be rejected; got %v", err)
 	}
@@ -848,19 +886,19 @@ func TestActorRoleService_ListKeysGates(t *testing.T) {
 func TestActorRoleService_RevokeGatesAndSucceeds(t *testing.T) {
 	svc, repo, audit := newActorRoleServiceWithFakes()
 	// nil caller
-	if err := svc.Revoke(context.Background(), nil, "alice", domain.ActorTypeAPIKey, "r-admin"); !errors.Is(err, ErrUnauthenticated) {
+	if err := svc.Revoke(context.Background(), nil, "alice", domain.ActorTypeAPIKey, "r-admin", repository.ActorRoleRevokeOptions{}); !errors.Is(err, ErrUnauthenticated) {
 		t.Errorf("Revoke(nil) err = %v; want ErrUnauthenticated", err)
 	}
 	// caller without auth.role.assign
 	caller := &Caller{ActorID: "bob", ActorType: domain.ActorTypeAPIKey}
-	if err := svc.Revoke(context.Background(), caller, "alice", domain.ActorTypeAPIKey, "r-admin"); !errors.Is(err, ErrSelfRoleAssignment) {
+	if err := svc.Revoke(context.Background(), caller, "alice", domain.ActorTypeAPIKey, "r-admin", repository.ActorRoleRevokeOptions{}); !errors.Is(err, ErrSelfRoleAssignment) {
 		t.Errorf("Revoke(no perm) err = %v; want ErrSelfRoleAssignment", err)
 	}
 	// system caller success
 	repo.grants = []*authdomain.ActorRole{
 		{ID: "ar-1", ActorID: "alice", ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey), RoleID: "r-admin", TenantID: authdomain.DefaultTenantID},
 	}
-	if err := svc.Revoke(context.Background(), AsSystemCaller(), "alice", domain.ActorTypeAPIKey, "r-admin"); err != nil {
+	if err := svc.Revoke(context.Background(), AsSystemCaller(), "alice", domain.ActorTypeAPIKey, "r-admin", repository.ActorRoleRevokeOptions{}); err != nil {
 		t.Fatalf("Revoke(system) err: %v", err)
 	}
 	if len(audit.calls) != 1 || audit.calls[0].Action != "actor_role.revoke" {
@@ -878,7 +916,7 @@ func TestActorRoleService_RevokeSucceedsWithAuthRoleAssign(t *testing.T) {
 		{ID: "ar-1", ActorID: "carol", ActorType: authdomain.ActorTypeValue(domain.ActorTypeAPIKey), RoleID: "r-viewer", TenantID: authdomain.DefaultTenantID},
 	}
 	caller := &Caller{ActorID: "alice", ActorType: domain.ActorTypeAPIKey}
-	if err := svc.Revoke(context.Background(), caller, "carol", domain.ActorTypeAPIKey, "r-viewer"); err != nil {
+	if err := svc.Revoke(context.Background(), caller, "carol", domain.ActorTypeAPIKey, "r-viewer", repository.ActorRoleRevokeOptions{}); err != nil {
 		t.Fatalf("Revoke(perm) err: %v", err)
 	}
 	if len(audit.calls) != 1 || audit.calls[0].Action != "actor_role.revoke" {

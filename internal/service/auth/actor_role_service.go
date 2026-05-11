@@ -72,7 +72,15 @@ func (s *ActorRoleService) Grant(ctx context.Context, caller *Caller, ar *authdo
 // privilege guard as Grant: caller needs `auth.role.assign` to mutate
 // role membership. Reserved actor `actor-demo-anon` is rejected so the
 // demo path stays alive even after a misclick.
-func (s *ActorRoleService) Revoke(ctx context.Context, caller *Caller, actorID string, actorType domain.ActorType, roleID string) error {
+//
+// Audit 2026-05-11 A-4 — opts narrows the revoke to a specific
+// (scope_type, scope_id) variant. Zero value preserves the legacy
+// "revoke all variants" behaviour. When opts.ScopeType is set the
+// repository returns repository.ErrActorRoleNotFound if no row matches;
+// the handler maps it to HTTP 404. The audit row records the scope so
+// operators can distinguish "wide revoke" from "selective revoke" in
+// the SIEM.
+func (s *ActorRoleService) Revoke(ctx context.Context, caller *Caller, actorID string, actorType domain.ActorType, roleID string, opts repository.ActorRoleRevokeOptions) error {
 	if caller == nil {
 		return ErrUnauthenticated
 	}
@@ -89,14 +97,23 @@ func (s *ActorRoleService) Revoke(ctx context.Context, caller *Caller, actorID s
 		return fmt.Errorf("%w: actor-demo-anon is reserved", repository.ErrAuthReservedActor)
 	}
 	tenantID := s.tenantOf(caller)
-	if err := s.repo.Revoke(ctx, actorID, authdomain.ActorTypeValue(actorType), roleID, tenantID); err != nil {
+	if err := s.repo.Revoke(ctx, actorID, authdomain.ActorTypeValue(actorType), roleID, tenantID, opts); err != nil {
 		return err
 	}
-	s.recordAudit(ctx, caller, "actor_role.revoke", "actor_role", roleID, map[string]interface{}{
+	details := map[string]interface{}{
 		"actor_id":   actorID,
 		"actor_type": string(actorType),
 		"role_id":    roleID,
-	})
+	}
+	if opts.ScopeType != "" {
+		details["scope_type"] = string(opts.ScopeType)
+		if opts.ScopeID != nil {
+			details["scope_id"] = *opts.ScopeID
+		}
+	} else {
+		details["scope"] = "all_variants"
+	}
+	s.recordAudit(ctx, caller, "actor_role.revoke", "actor_role", roleID, details)
 	return nil
 }
 

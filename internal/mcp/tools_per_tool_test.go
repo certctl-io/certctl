@@ -439,6 +439,10 @@ var allHappyPathCases = []toolCase{
 	{"certctl_auth_list_keys", map[string]any{}, http.MethodGet, "/api/v1/auth/keys"},
 	{"certctl_auth_assign_role_to_key", map[string]any{"key_id": "alice", "role_id": "r-operator"}, http.MethodPost, "/api/v1/auth/keys/alice/roles"},
 	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-admin"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-admin"},
+	// Audit 2026-05-11 A-4 — scoped revoke append both query params.
+	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-operator", "scope_type": "profile", "scope_id": "p-acme"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-operator?scope_type=profile&scope_id=p-acme"},
+	// Audit 2026-05-11 A-4 — scoped revoke with global emits only scope_type.
+	{"certctl_auth_revoke_role_from_key", map[string]any{"key_id": "alice", "role_id": "r-operator", "scope_type": "global"}, http.MethodDelete, "/api/v1/auth/keys/alice/roles/r-operator?scope_type=global"},
 
 	// Bundle 2 Phase 9 — OIDC + session tools (11 tools).
 	{"certctl_auth_list_oidc_providers", map[string]any{}, http.MethodGet, "/api/v1/auth/oidc/providers"},
