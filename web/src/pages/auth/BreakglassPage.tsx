@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { useQuery, useMutation, useQueryClient } from '@tanstack/react-query';
+import { useQuery } from '@tanstack/react-query';
+import { useTrackedMutation } from '../../hooks/useTrackedMutation';
 import {
   breakglassListCredentials,
   breakglassSetPassword,
@@ -36,7 +37,6 @@ import ErrorState from '../../components/ErrorState';
 
 export default function BreakglassPage() {
   const { isLoading: meLoading, hasPerm } = useAuthMe();
-  const qc = useQueryClient();
 
   // Permission gate. If meLoading, render nothing (avoid flicker).
   const canAdmin = hasPerm('auth.breakglass.admin');
@@ -52,18 +52,18 @@ export default function BreakglassPage() {
     retry: false,
   });
 
-  const setPwd = useMutation({
+  const setPwd = useTrackedMutation({
     mutationFn: ({ actorID, password }: { actorID: string; password: string }) =>
       breakglassSetPassword(actorID, password),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['breakglass'] }),
+    invalidates: [['breakglass']],
   });
-  const unlock = useMutation({
+  const unlock = useTrackedMutation({
     mutationFn: (actorID: string) => breakglassUnlock(actorID),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['breakglass'] }),
+    invalidates: [['breakglass']],
   });
-  const remove = useMutation({
+  const remove = useTrackedMutation({
     mutationFn: (actorID: string) => breakglassRemove(actorID),
-    onSuccess: () => qc.invalidateQueries({ queryKey: ['breakglass'] }),
+    invalidates: [['breakglass']],
   });
 
   // Modal state.

@@ -82,6 +82,30 @@ For the full deploy contract see
 |---|---|---|
 | `CERTCTL_AGENT_ID` | (none — required) | The agent's unique ID, issued by `POST /api/v1/agents/register` and bundled into the agent's registration response. Pass via this env var when the agent runs as a systemd unit / container without the `-agent-id` CLI flag. |
 
+## Auth (Bundle 1 + Bundle 2)
+
+Configuration knobs for the RBAC + OIDC + sessions + break-glass
+auth surface. Full operator guidance lives in
+[`operator/rbac.md`](../operator/rbac.md),
+[`operator/oidc-runbooks/`](../operator/oidc-runbooks/index.md), and
+[`operator/auth-threat-model.md`](../operator/auth-threat-model.md).
+
+| Variable | Default | Description |
+|---|---|---|
+| `CERTCTL_SESSION_BIND_USER_AGENT` | `false` | Bind every session cookie to the User-Agent header captured at login; mismatch -> 401. Defense in depth against stolen cookies on the same network. |
+| `CERTCTL_SESSION_GC_INTERVAL` | `1h` | How often the scheduler's session-GC loop sweeps expired/revoked rows out of `sessions`. Trade-off: shorter = smaller table, more DB churn; longer = pile-up. |
+| `CERTCTL_OIDC_BCL_MAX_AGE_SECONDS` | `60` | Back-channel logout `iat` freshness window. Tokens older or newer than this skew (in either direction) are rejected. |
+| `CERTCTL_OIDC_PRELOGIN_REQUIRE_UA` | `false` | Reject the OIDC callback if the User-Agent at callback differs from the UA captured at pre-login. RFC 9700 §4.7.1 defense-in-depth. |
+| `CERTCTL_OIDC_PRELOGIN_REQUIRE_IP` | `false` | Same as `_UA` but for client IP. Set carefully — corporate networks with carrier-grade NAT can change apparent IP mid-flow. |
+| `CERTCTL_DEMO_MODE_ACK` | `false` | Operator acknowledgement that demo mode is intentional in this deploy. Required when `CERTCTL_AUTH_TYPE=none` to allow server startup; safety net against demo-mode-in-production leakage. |
+| `CERTCTL_TRUSTED_PROXIES` | (empty) | Comma-separated list of trusted-proxy CIDRs (e.g. `10.0.0.0/8,192.0.2.1`). XFF is consulted for client-IP derivation only when the immediate peer sits in this allowlist. |
+| `CERTCTL_TRUSTED_PROXIES_COUNT` | (synthesised) | Read-only counter exposed by `/api/v1/auth/runtime-config`; mirrors `len(CERTCTL_TRUSTED_PROXIES)`. Not operator-settable; documented here so the G-3 env-docs-drift guard catches drift. |
+| `CERTCTL_BOOTSTRAP_TOKEN` | (empty) | One-shot token used to mint the first admin role binding via `POST /api/v1/auth/bootstrap`. Once consumed, deletes itself from memory and unsets the bootstrap endpoint. |
+| `CERTCTL_BOOTSTRAP_TOKEN_SET` | (synthesised) | Boolean exposed by `/api/v1/auth/runtime-config`; `true` when `CERTCTL_BOOTSTRAP_TOKEN` was set at server start. Not operator-settable; documented here so the G-3 guard catches drift. |
+| `CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID` | (empty) | When OIDC is enabled, restricts the first-admin OIDC strategy to the named provider only — any other provider's tokens won't trigger the bootstrap hook. |
+| `CERTCTL_BOOTSTRAP_ADMIN_GROUPS_COUNT` | (synthesised) | Read-only counter exposed by `/api/v1/auth/runtime-config`; mirrors `len(CERTCTL_BOOTSTRAP_ADMIN_GROUPS)`. Documented here so the G-3 guard catches drift. |
+| `CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD` | `5` | Number of consecutive failed `/auth/breakglass/login` attempts that lock the credential. |
+
 ## SCEP profile binding (single-profile back-compat)
 
 | Variable | Default | Description |
