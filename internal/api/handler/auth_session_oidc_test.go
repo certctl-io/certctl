@@ -1217,6 +1217,11 @@ func TestClassifyOIDCFailure(t *testing.T) {
 		// Wrapped variants must round-trip through errors.Is.
 		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMissing), "iss_param_missing"},
 		{fmt.Errorf("upstream: %w", oidcsvc.ErrIssParamMismatch), "iss_param_mismatch"},
+		// Audit 2026-05-11 A-2 — deactivated-user rejection is its own
+		// audit category (typed dispatch; wrapped variant must also
+		// round-trip).
+		{oidcsvc.ErrUserDeactivated, "user_deactivated"},
+		{fmt.Errorf("upstream: %w", oidcsvc.ErrUserDeactivated), "user_deactivated"},
 		{errors.New("some other error"), "unspecified"},
 	}
 	for _, tc := range cases {

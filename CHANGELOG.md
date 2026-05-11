@@ -4,6 +4,33 @@
 
 ### Security (BREAKING)
 
+- **Federated-user deactivation now actually blocks login (Audit 2026-05-11 A-2).**
+  The MED-11 closure shipped `users.deactivated_at` + `DELETE /api/v1/auth/users/{id}`
+  + cascade-session-revoke, but the column was a "lying field" three legs over: the
+  postgres user repository never SELECTed it (so `User.DeactivatedAt` always read
+  nil), the `Update` SQL never wrote it (so the handler's mutation was a no-op),
+  and the OIDC `upsertUser` path never checked it (so the next login under the
+  same `(provider, subject)` tuple re-minted a session and re-elevated the user).
+  The cascade-revoke remained correct for the current cookie only. **Operator
+  advisory: if you deactivated a federated user between the MED-11 closure
+  (Bundle 2 merge `dea5053`) and the v2.1.0 release tag, verify the user cannot
+  OIDC-log-in after upgrading — the column took no effect at login time before
+  this fix. If needed, re-run the deactivation against the upgraded server.**
+  Closure: `userColumns` + `scanUser` now read `deactivated_at` via `sql.NullTime`;
+  `Create` + `Update` write it explicitly; `upsertUser` returns the new
+  `ErrUserDeactivated` sentinel before mutating fields (preserves `last_login_at`
+  forensics on rejected logins); `classifyOIDCFailure` surfaces the rejection
+  as audit category `user_deactivated`. Self-deactivate guard on
+  `DELETE /api/v1/auth/users/{id}` returns HTTP 409 + audit row
+  `auth.user_deactivate_self_rejected` (prevents an admin from one-way-door
+  locking themselves out via the standard handler — break-glass remains the
+  recovery path). New inverse endpoint `POST /api/v1/auth/users/{id}/reactivate`
+  (gated `auth.user.deactivate` — reactivation is the inverse op, not a separate
+  privilege) clears `deactivated_at`; emits audit row `auth.user_reactivated`.
+  Sessions revoked at deactivation stay revoked across reactivation — the user
+  must complete a fresh OIDC login. GUI: `UsersPage.tsx` now renders a Reactivate
+  button on deactivated rows. CWE-862 (missing authorization at the user-state
+  boundary). SOC 2 CC6.3 + ISO 27001 A.9.2.6 compliance-table-flipping fix.
 - **`__Host-` cookie prefix on all three auth cookies (Audit 2026-05-10 MED-14).**
   The session cookie, CSRF cookie, and OIDC pre-login cookie are renamed from
   `certctl_session` / `certctl_csrf` / `certctl_oidc_pending` to

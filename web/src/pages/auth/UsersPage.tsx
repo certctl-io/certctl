@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useQuery, useQueryClient } from '@tanstack/react-query';
-import { authListUsers, authDeactivateUser, type AuthUser } from '../../api/client';
+import { authListUsers, authDeactivateUser, authReactivateUser, type AuthUser } from '../../api/client';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 
@@ -39,6 +39,29 @@ export default function UsersPage() {
     setErr(null);
     try {
       await authDeactivateUser(u.id);
+      await qc.invalidateQueries({ queryKey: ['auth', 'users'] });
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : String(e));
+    } finally {
+      setPending(null);
+    }
+  }
+
+  // Audit 2026-05-11 A-2 — Reactivate inverse. Clears deactivated_at;
+  // the next OIDC login under the same (provider, subject) tuple
+  // proceeds normally. Sessions revoked at deactivation stay revoked
+  // (the cascade is irreversible by design — the user must complete
+  // a fresh login).
+  async function reactivate(u: AuthUser) {
+    if (!confirm(`Reactivate user ${u.email} (${u.id})?\n\n` +
+      `This clears deactivated_at. The user can OIDC-login again. ` +
+      `Previously-revoked sessions stay revoked.`)) {
+      return;
+    }
+    setPending(u.id);
+    setErr(null);
+    try {
+      await authReactivateUser(u.id);
       await qc.invalidateQueries({ queryKey: ['auth', 'users'] });
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
@@ -95,6 +118,15 @@ export default function UsersPage() {
                         style={{ padding: '4px 12px' }}
                       >
                         {pending === u.id ? 'Deactivating…' : 'Deactivate'}
+                      </button>
+                    )}
+                    {deactivated && (
+                      <button
+                        onClick={() => reactivate(u)}
+                        disabled={pending === u.id}
+                        style={{ padding: '4px 12px' }}
+                      >
+                        {pending === u.id ? 'Reactivating…' : 'Reactivate'}
                       </button>
                     )}
                   </td>

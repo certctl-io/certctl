@@ -486,11 +486,16 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		}
 
 		// Audit 2026-05-10 MED-11 — federated-user admin surface.
+		// Audit 2026-05-11 A-2 — added reactivate route. Same permission
+		// gate as Deactivate (reactivation is the inverse op, not a
+		// separate privilege).
 		if reg.AuthUsers != nil {
 			r.Register("GET /api/v1/auth/users",
 				rbacGate(reg.Checker, "auth.user.read", reg.AuthUsers.List))
 			r.Register("DELETE /api/v1/auth/users/{id}",
 				rbacGate(reg.Checker, "auth.user.deactivate", reg.AuthUsers.Deactivate))
+			r.Register("POST /api/v1/auth/users/{id}/reactivate",
+				rbacGate(reg.Checker, "auth.user.deactivate", reg.AuthUsers.Reactivate))
 		}
 
 		// Audit 2026-05-10 MED-12 — auth runtime config read.

@@ -115,6 +115,24 @@ func (h *AuthUsersHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 		Error(w, http.StatusBadRequest, "missing user id")
 		return
 	}
+	// Audit 2026-05-11 A-2 — self-deactivate guard. An admin that
+	// deactivates their own User row immediately invalidates their next
+	// login (upsertUser at internal/auth/oidc/service.go rejects with
+	// ErrUserDeactivated); the cascade-revoke then kicks them out of the
+	// active session, leaving the tenant without an admin able to
+	// reactivate themselves. Break-glass credentials (Bundle 2 Phase 7.5)
+	// remain the recovery path, but the operator should not be able to
+	// trip the foot-gun through the standard handler. 409 (not 403) —
+	// the request is well-formed and authenticated; the conflict is
+	// between the action and the actor's own identity. Audit row records
+	// the rejection so an upstream SIEM can spot accidental triggers.
+	if caller.ActorType == domain.ActorTypeUser && caller.ActorID == id {
+		_ = h.audit.RecordEventWithCategory(r.Context(), caller.ActorID, caller.ActorType, "auth.user_deactivate_self_rejected",
+			domain.EventCategoryAuth, "user", id,
+			map[string]interface{}{"user_id": id, "reason": "self_deactivate_blocked"})
+		Error(w, http.StatusConflict, "cannot deactivate your own account; use break-glass recovery or have another admin act")
+		return
+	}
 	u, gerr := h.users.Get(r.Context(), id)
 	if gerr != nil {
 		if errors.Is(gerr, repository.ErrUserNotFound) {
@@ -153,6 +171,67 @@ func (h *AuthUsersHandler) Deactivate(w http.ResponseWriter, r *http.Request) {
 			"user_id":               u.ID,
 			"oidc_provider_id":      u.OIDCProviderID,
 			"session_revoke_status": revokeStatus,
+		})
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// Reactivate clears users.deactivated_at, allowing the federated user
+// to log in again via their OIDC provider. The next OIDC callback for
+// the (provider_id, subject) tuple goes through upsertUser, which now
+// passes the DeactivatedAt == nil gate, and the user's account
+// information (email, display_name, last_login_at) updates normally.
+//
+// Audit 2026-05-11 A-2 — Reactivate is the inverse of Deactivate. The
+// original MED-11 closure only shipped Deactivate; with A-2 closure the
+// DeactivatedAt field now actually gates login, so the operator needs a
+// supported way to undo a soft-delete without hand-editing the database.
+//
+// Gate: same auth.user.deactivate permission. Reactivation is the
+// inverse op, not a separate privilege — anyone who can deactivate must
+// be able to undo their own mistake.
+//
+// Idempotent: reactivating an already-active user returns 204 with no
+// row write.
+//
+// No session-side-effect: reactivation does NOT mint a session. The
+// user must complete a fresh OIDC login through their provider; sessions
+// from before the deactivation stay revoked (the cascade-revoke in
+// Deactivate is irreversible by design).
+func (h *AuthUsersHandler) Reactivate(w http.ResponseWriter, r *http.Request) {
+	caller, err := callerFromRequest(r)
+	if err != nil {
+		writeAuthError(w, err)
+		return
+	}
+	id := r.PathValue("id")
+	if id == "" {
+		Error(w, http.StatusBadRequest, "missing user id")
+		return
+	}
+	u, gerr := h.users.Get(r.Context(), id)
+	if gerr != nil {
+		if errors.Is(gerr, repository.ErrUserNotFound) {
+			Error(w, http.StatusNotFound, "user not found")
+			return
+		}
+		Error(w, http.StatusInternalServerError, "could not load user")
+		return
+	}
+	// Idempotent: reactivating an already-active user is a no-op.
+	if u.DeactivatedAt == nil {
+		w.WriteHeader(http.StatusNoContent)
+		return
+	}
+	u.DeactivatedAt = nil
+	if uerr := h.users.Update(r.Context(), u); uerr != nil {
+		Error(w, http.StatusInternalServerError, "could not reactivate user")
+		return
+	}
+	_ = h.audit.RecordEventWithCategory(r.Context(), caller.ActorID, caller.ActorType, "auth.user_reactivated",
+		domain.EventCategoryAuth, "user", u.ID,
+		map[string]interface{}{
+			"user_id":          u.ID,
+			"oidc_provider_id": u.OIDCProviderID,
 		})
 	w.WriteHeader(http.StatusNoContent)
 }

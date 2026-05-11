@@ -317,6 +317,21 @@ var (
 	// Audit 2026-05-10 MED-9 closure.
 	ErrProviderDisabled = errors.New("oidc: provider is disabled")
 
+	// ErrUserDeactivated signals the federated user row's
+	// `deactivated_at` is non-NULL. Audit 2026-05-11 A-2 closure —
+	// the deactivate flow at internal/api/handler/auth_users.go::Deactivate
+	// sets the column + cascade-revokes sessions, but pre-fix the OIDC
+	// login path never consulted it, so the very next login re-elevated
+	// the deactivated user. The check fires inside upsertUser before
+	// Update bumps last_login_at; an attempt to log in via OIDC after
+	// deactivation surfaces as audit `failure_category=user_deactivated`
+	// and the LoginPage's reason-aware error rendering shows the
+	// operator-friendly message.
+	//
+	// Reactivation surface: admin POSTs /api/v1/auth/users/{id}/reactivate
+	// (auth.user.deactivate perm) to clear the column.
+	ErrUserDeactivated = errors.New("oidc: user account is deactivated")
+
 	// ErrGroupsUnmapped: the user's groups don't match any of the
 	// operator's group_role_mappings for this provider. No session
 	// minted; audit row records auth.oidc_login_unmapped_groups.
@@ -809,6 +824,19 @@ func (s *Service) upsertUser(
 
 	existing, err := s.users.GetByOIDCSubject(ctx, provider.ID, subject)
 	if err == nil {
+		// Audit 2026-05-11 A-2 — refuse login for deactivated users.
+		// The admin `DELETE /api/v1/auth/users/{id}` flow sets
+		// `users.deactivated_at` + cascade-revokes existing sessions.
+		// Without this gate the very next OIDC login mints a fresh
+		// session and re-elevates. Compliance-table-flipping bug.
+		//
+		// Defense order: the check runs BEFORE the email / display-name
+		// mutation + last_login_at bump so a deactivated user's
+		// last_login_at field isn't silently updated by a rejected
+		// login attempt (forensics value).
+		if existing.DeactivatedAt != nil {
+			return nil, ErrUserDeactivated
+		}
 		// Update last_login_at, email, display_name (per the Phase 1
 		// mutable-field contract).
 		existing.Email = email

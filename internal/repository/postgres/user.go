@@ -23,18 +23,32 @@ func NewUserRepository(db *sql.DB) *UserRepository {
 	return &UserRepository{db: db}
 }
 
+// Audit 2026-05-11 A-2 — deactivated_at column added in migration
+// 000045 (MED-11 foundation) but pre-fix never read here. The
+// federated-user soft-delete flow at
+// internal/api/handler/auth_users.go::Deactivate set the column on
+// Update, but Get / GetByOIDCSubject / ListAll all returned User
+// with zero-value DeactivatedAt regardless. The OIDC login path
+// trusts the returned struct, so a deactivated user's next login
+// re-elevated them. Adding the column to userColumns + scanUser
+// closes the read leg; service.go's upsertUser closes the enforce leg.
 const userColumns = `id, tenant_id, email, display_name, oidc_subject,
 		oidc_provider_id, last_login_at, webauthn_credentials,
-		created_at, updated_at`
+		created_at, updated_at, deactivated_at`
 
 func scanUser(row interface{ Scan(...interface{}) error }) (*userdomain.User, error) {
 	var u userdomain.User
+	var deactivatedAt sql.NullTime
 	if err := row.Scan(
 		&u.ID, &u.TenantID, &u.Email, &u.DisplayName, &u.OIDCSubject,
 		&u.OIDCProviderID, &u.LastLoginAt, &u.WebAuthnCredentials,
-		&u.CreatedAt, &u.UpdatedAt,
+		&u.CreatedAt, &u.UpdatedAt, &deactivatedAt,
 	); err != nil {
 		return nil, err
+	}
+	if deactivatedAt.Valid {
+		t := deactivatedAt.Time
+		u.DeactivatedAt = &t
 	}
 	return &u, nil
 }
@@ -74,14 +88,26 @@ func (r *UserRepository) GetByOIDCSubject(ctx context.Context, providerID, subje
 // Create persists a new user. Translates SQLSTATE 23505 into
 // ErrUserDuplicateOIDCSubject (the unique constraint on
 // (oidc_provider_id, oidc_subject)).
+//
+// Audit 2026-05-11 A-2 — deactivated_at written explicitly. New rows
+// pre-fix had deactivated_at NULL by schema default; the explicit
+// write makes forward-compat with future seed-data paths that
+// pre-populate the column (e.g. migration of an external user roster
+// where some entries land deactivated). nil → NULL via sql.NullTime.
 func (r *UserRepository) Create(ctx context.Context, u *userdomain.User) error {
+	var deactivatedAt sql.NullTime
+	if u.DeactivatedAt != nil {
+		deactivatedAt = sql.NullTime{Time: *u.DeactivatedAt, Valid: true}
+	}
 	_, err := r.db.ExecContext(ctx, `
 		INSERT INTO users (
 			id, tenant_id, email, display_name, oidc_subject,
-			oidc_provider_id, last_login_at, webauthn_credentials
-		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8)`,
+			oidc_provider_id, last_login_at, webauthn_credentials,
+			deactivated_at
+		) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)`,
 		u.ID, u.TenantID, u.Email, u.DisplayName, u.OIDCSubject,
-		u.OIDCProviderID, u.LastLoginAt, u.WebAuthnCredentials)
+		u.OIDCProviderID, u.LastLoginAt, u.WebAuthnCredentials,
+		deactivatedAt)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
@@ -93,18 +119,31 @@ func (r *UserRepository) Create(ctx context.Context, u *userdomain.User) error {
 }
 
 // Update writes the mutable fields (email, display_name, last_login_at,
-// webauthn_credentials) back to the row. Immutable: id, tenant_id,
-// oidc_subject, oidc_provider_id, created_at. updated_at = NOW().
+// webauthn_credentials, deactivated_at) back to the row. Immutable:
+// id, tenant_id, oidc_subject, oidc_provider_id, created_at.
+// updated_at = NOW().
+//
+// Audit 2026-05-11 A-2 — deactivated_at is now in the mutable set so
+// the federated-user soft-delete flow at
+// internal/api/handler/auth_users.go::Deactivate persists. Pre-fix the
+// Update SQL omitted it; the handler set u.DeactivatedAt = now on the
+// in-memory struct, called Update, the SQL ignored the field, and the
+// row was unchanged. nil DeactivatedAt → NULL (supports reactivation).
 func (r *UserRepository) Update(ctx context.Context, u *userdomain.User) error {
+	var deactivatedAt sql.NullTime
+	if u.DeactivatedAt != nil {
+		deactivatedAt = sql.NullTime{Time: *u.DeactivatedAt, Valid: true}
+	}
 	res, err := r.db.ExecContext(ctx, `
 		UPDATE users SET
 			email = $2,
 			display_name = $3,
 			last_login_at = $4,
 			webauthn_credentials = $5,
+			deactivated_at = $6,
 			updated_at = NOW()
 		WHERE id = $1`,
-		u.ID, u.Email, u.DisplayName, u.LastLoginAt, u.WebAuthnCredentials)
+		u.ID, u.Email, u.DisplayName, u.LastLoginAt, u.WebAuthnCredentials, deactivatedAt)
 	if err != nil {
 		return fmt.Errorf("users update: %w", err)
 	}

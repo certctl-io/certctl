@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	userdomain "github.com/certctl-io/certctl/internal/auth/user/domain"
 	"github.com/certctl-io/certctl/internal/repository"
@@ -190,6 +191,178 @@ func TestUserRepository_ListAll(t *testing.T) {
 	}
 	if len(out) != 3 {
 		t.Errorf("ListAll count = %d; want 3", len(out))
+	}
+}
+
+// TestUserRepository_DeactivatedAt_RoundTrip pins the A-2 closure at
+// the SQL layer. Pre-fix scanUser did not include deactivated_at in
+// userColumns, Update did not write it, and Create did not write it.
+// Result: a non-nil DeactivatedAt set in the in-memory User by the
+// handler was lost on persist + always nil on read. This test
+// exercises both legs.
+//
+// Audit 2026-05-11 A-2 — round-trip a non-nil DeactivatedAt through
+// Update and verify Get + GetByOIDCSubject + ListAll all return it
+// non-nil. Then clear it (reactivate path) and verify the nil
+// round-trips back.
+func TestUserRepository_DeactivatedAt_RoundTrip(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test in short mode")
+	}
+	db := getTestDB(t).freshSchema(t)
+	providerRepo := postgres.NewOIDCProviderRepository(db)
+	userRepo := postgres.NewUserRepository(db)
+	ctx := context.Background()
+
+	p := newValidProvider("deact-rt")
+	if err := providerRepo.Create(ctx, p); err != nil {
+		t.Fatalf("Create provider: %v", err)
+	}
+	u := newValidUser("deactivated-user", p.ID)
+	if err := userRepo.Create(ctx, u); err != nil {
+		t.Fatalf("Create user: %v", err)
+	}
+
+	// Sanity: a freshly-created row reads back nil.
+	got, err := userRepo.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Get (fresh): %v", err)
+	}
+	if got.DeactivatedAt != nil {
+		t.Errorf("freshly-created user has non-nil DeactivatedAt: %v", got.DeactivatedAt)
+	}
+
+	// Soft-delete: set DeactivatedAt and Update.
+	now := time.Now().UTC().Truncate(time.Microsecond) // pg precision
+	got.DeactivatedAt = &now
+	if err := userRepo.Update(ctx, got); err != nil {
+		t.Fatalf("Update (deactivate): %v", err)
+	}
+
+	// Read via Get.
+	rb, err := userRepo.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Get (post-deactivate): %v", err)
+	}
+	if rb.DeactivatedAt == nil {
+		t.Fatal("Get returned nil DeactivatedAt after Update set it (A-2 regression)")
+	}
+	if !rb.DeactivatedAt.Equal(now) {
+		t.Errorf("Get round-trip DeactivatedAt mismatch: got %v want %v", *rb.DeactivatedAt, now)
+	}
+
+	// Read via GetByOIDCSubject.
+	rs, err := userRepo.GetByOIDCSubject(ctx, p.ID, u.OIDCSubject)
+	if err != nil {
+		t.Fatalf("GetByOIDCSubject (post-deactivate): %v", err)
+	}
+	if rs.DeactivatedAt == nil {
+		t.Error("GetByOIDCSubject returned nil DeactivatedAt after Update set it (A-2 regression — OIDC login path leak)")
+	}
+
+	// Read via ListAll.
+	rows, err := userRepo.ListAll(ctx, "t-default")
+	if err != nil {
+		t.Fatalf("ListAll: %v", err)
+	}
+	if len(rows) != 1 || rows[0].DeactivatedAt == nil {
+		t.Errorf("ListAll: expected 1 row with non-nil DeactivatedAt; got %d rows, first DeactivatedAt=%v",
+			len(rows), func() interface{} {
+				if len(rows) == 0 {
+					return "no rows"
+				}
+				return rows[0].DeactivatedAt
+			}())
+	}
+
+	// Reactivate: clear DeactivatedAt and verify the nil round-trips.
+	rb.DeactivatedAt = nil
+	if err := userRepo.Update(ctx, rb); err != nil {
+		t.Fatalf("Update (reactivate): %v", err)
+	}
+	rfin, err := userRepo.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Get (post-reactivate): %v", err)
+	}
+	if rfin.DeactivatedAt != nil {
+		t.Errorf("Get returned non-nil DeactivatedAt after reactivate Update cleared it: %v", *rfin.DeactivatedAt)
+	}
+}
+
+// TestUserRepository_DeactivatedAt_CreateWritesNullForActive pins
+// the Create path's behavior for the common case (active user).
+// Pre-fix Create omitted deactivated_at entirely so the column took
+// the schema default (NULL). Now Create writes it explicitly; the
+// observable behavior is unchanged for nil, but a regression would
+// flip new users to deactivated.
+//
+// Audit 2026-05-11 A-2.
+func TestUserRepository_DeactivatedAt_CreateWritesNullForActive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test in short mode")
+	}
+	db := getTestDB(t).freshSchema(t)
+	providerRepo := postgres.NewOIDCProviderRepository(db)
+	userRepo := postgres.NewUserRepository(db)
+	ctx := context.Background()
+
+	p := newValidProvider("create-nil")
+	if err := providerRepo.Create(ctx, p); err != nil {
+		t.Fatalf("Create provider: %v", err)
+	}
+	u := newValidUser("active-user", p.ID)
+	u.DeactivatedAt = nil // explicit: new user is active
+	if err := userRepo.Create(ctx, u); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := userRepo.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DeactivatedAt != nil {
+		t.Errorf("active user has non-nil DeactivatedAt after Create: %v", *got.DeactivatedAt)
+	}
+}
+
+// TestUserRepository_DeactivatedAt_CreatePersistsPreDeactivated
+// covers the forward-compat path where a future seed-data flow
+// (e.g. migration of an external user roster where some entries
+// land deactivated) pre-populates the column on insert. Pre-fix
+// Create omitted the column entirely, so this case wasn't
+// representable; the A-2 closure makes the explicit write part of
+// the Create contract.
+//
+// Audit 2026-05-11 A-2.
+func TestUserRepository_DeactivatedAt_CreatePersistsPreDeactivated(t *testing.T) {
+	if testing.Short() {
+		t.Skip("integration test in short mode")
+	}
+	db := getTestDB(t).freshSchema(t)
+	providerRepo := postgres.NewOIDCProviderRepository(db)
+	userRepo := postgres.NewUserRepository(db)
+	ctx := context.Background()
+
+	p := newValidProvider("create-deact")
+	if err := providerRepo.Create(ctx, p); err != nil {
+		t.Fatalf("Create provider: %v", err)
+	}
+	u := newValidUser("seed-deactivated", p.ID)
+	pre := time.Now().UTC().Add(-1 * time.Hour).Truncate(time.Microsecond)
+	u.DeactivatedAt = &pre
+	if err := userRepo.Create(ctx, u); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	got, err := userRepo.Get(ctx, u.ID)
+	if err != nil {
+		t.Fatalf("Get: %v", err)
+	}
+	if got.DeactivatedAt == nil {
+		t.Fatal("DeactivatedAt nil after Create persisted a pre-deactivated user")
+	}
+	if !got.DeactivatedAt.Equal(pre) {
+		t.Errorf("Create round-trip DeactivatedAt: got %v want %v", *got.DeactivatedAt, pre)
 	}
 }
 
