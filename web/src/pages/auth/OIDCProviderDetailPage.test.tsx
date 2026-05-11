@@ -320,4 +320,178 @@ describe('OIDCProviderDetailPage', () => {
       expect(screen.getByTestId('oidc-provider-edit-allowed-email-domains-error')).toBeTruthy();
     });
   });
+
+  // =============================================================================
+  // Audit 2026-05-11 A-7 — Advanced fields are editable (MED-4 closure).
+  // =============================================================================
+
+  async function openEditFormWithEditPerms() {
+    vi.mocked(client.listOIDCProviders).mockResolvedValue({ providers: [sampleProvider] });
+    vi.mocked(client.updateOIDCProvider).mockResolvedValue(sampleProvider);
+    vi.mocked(client.authMe).mockResolvedValue({
+      actor_id: 'u-admin',
+      actor_type: 'User',
+      tenant_id: 't-default',
+      admin: true,
+      roles: ['r-admin'],
+      effective_permissions: [
+        { permission: 'auth.oidc.list', scope_type: 'global' },
+        { permission: 'auth.oidc.edit', scope_type: 'global' },
+      ],
+    });
+    renderRoute(<OIDCProviderDetailPage />);
+    await waitFor(() => screen.getByTestId('oidc-provider-edit-button'));
+    fireEvent.click(screen.getByTestId('oidc-provider-edit-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-edit-advanced'));
+  }
+
+  it('A-7 Advanced details section is collapsed by default and visible in edit mode', async () => {
+    await openEditFormWithEditPerms();
+    const details = screen.getByTestId('oidc-provider-edit-advanced') as HTMLDetailsElement;
+    expect(details).toBeTruthy();
+    // <details> with no `open` attribute = collapsed.
+    expect(details.open).toBe(false);
+  });
+
+  it('A-7 Advanced fields pre-populate from the live provider', async () => {
+    vi.mocked(client.listOIDCProviders).mockResolvedValue({
+      providers: [{
+        ...sampleProvider,
+        scopes: ['openid', 'profile', 'email', 'groups'],
+        groups_claim_path: 'realm_access.roles',
+        groups_claim_format: 'json-path',
+        iat_window_seconds: 120,
+        jwks_cache_ttl_seconds: 600,
+      }],
+    });
+    vi.mocked(client.authMe).mockResolvedValue({
+      actor_id: 'u-admin',
+      actor_type: 'User',
+      tenant_id: 't-default',
+      admin: true,
+      roles: ['r-admin'],
+      effective_permissions: [
+        { permission: 'auth.oidc.list', scope_type: 'global' },
+        { permission: 'auth.oidc.edit', scope_type: 'global' },
+      ],
+    });
+    renderRoute(<OIDCProviderDetailPage />);
+    await waitFor(() => screen.getByTestId('oidc-provider-edit-button'));
+    fireEvent.click(screen.getByTestId('oidc-provider-edit-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-edit-advanced'));
+
+    expect((screen.getByTestId('oidc-provider-edit-scopes') as HTMLInputElement).value)
+      .toBe('openid profile email groups');
+    expect((screen.getByTestId('oidc-provider-edit-groups-claim-path') as HTMLInputElement).value)
+      .toBe('realm_access.roles');
+    expect((screen.getByTestId('oidc-provider-edit-groups-claim-format') as HTMLSelectElement).value)
+      .toBe('json-path');
+    expect((screen.getByTestId('oidc-provider-edit-iat-window-seconds') as HTMLInputElement).valueAsNumber)
+      .toBe(120);
+    expect((screen.getByTestId('oidc-provider-edit-jwks-cache-ttl-seconds') as HTMLInputElement).valueAsNumber)
+      .toBe(600);
+  });
+
+  it('A-7 all five Advanced fields round-trip into the PUT body', async () => {
+    await openEditFormWithEditPerms();
+
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-scopes'), {
+      target: { value: '  openid   profile   email   groups  ' },
+    });
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-groups-claim-path'), {
+      target: { value: 'realm_access.roles' },
+    });
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-groups-claim-format'), {
+      target: { value: 'json-path' },
+    });
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-iat-window-seconds'), {
+      target: { value: '120' },
+    });
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-jwks-cache-ttl-seconds'), {
+      target: { value: '600' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+
+    await waitFor(() => expect(client.updateOIDCProvider).toHaveBeenCalledTimes(1));
+    const [, body] = vi.mocked(client.updateOIDCProvider).mock.calls[0];
+    // Whitespace normalization: collapsed runs, no empty strings.
+    expect(body.scopes).toEqual(['openid', 'profile', 'email', 'groups']);
+    expect(body.groups_claim_path).toBe('realm_access.roles');
+    expect(body.groups_claim_format).toBe('json-path');
+    expect(body.iat_window_seconds).toBe(120);
+    expect(body.jwks_cache_ttl_seconds).toBe(600);
+  });
+
+  it('A-7 IAT window above 600 rejects with inline error and does NOT POST', async () => {
+    await openEditFormWithEditPerms();
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-iat-window-seconds'), {
+      target: { value: '601' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-detail-error'));
+    expect(screen.getByTestId('oidc-provider-detail-error').textContent).toContain('IAT window');
+    expect(client.updateOIDCProvider).not.toHaveBeenCalled();
+  });
+
+  it('A-7 IAT window <= 0 rejects with inline error', async () => {
+    await openEditFormWithEditPerms();
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-iat-window-seconds'), {
+      target: { value: '0' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-detail-error'));
+    expect(client.updateOIDCProvider).not.toHaveBeenCalled();
+  });
+
+  it('A-7 JWKS cache TTL below 60 rejects with inline error', async () => {
+    await openEditFormWithEditPerms();
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-jwks-cache-ttl-seconds'), {
+      target: { value: '30' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-detail-error'));
+    expect(screen.getByTestId('oidc-provider-detail-error').textContent).toContain('JWKS');
+    expect(client.updateOIDCProvider).not.toHaveBeenCalled();
+  });
+
+  it('A-7 empty scopes input rejects (operator can\'t accidentally wipe the array)', async () => {
+    await openEditFormWithEditPerms();
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-scopes'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-detail-error'));
+    expect(screen.getByTestId('oidc-provider-detail-error').textContent).toContain('Scopes');
+    expect(client.updateOIDCProvider).not.toHaveBeenCalled();
+  });
+
+  it('A-7 empty groups-claim-path rejects', async () => {
+    await openEditFormWithEditPerms();
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-groups-claim-path'), {
+      target: { value: '   ' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => screen.getByTestId('oidc-provider-detail-error'));
+    expect(screen.getByTestId('oidc-provider-detail-error').textContent).toContain('Groups claim path');
+    expect(client.updateOIDCProvider).not.toHaveBeenCalled();
+  });
+
+  it('A-7 unchanged Advanced fields still round-trip as the existing values (no lying field)', async () => {
+    await openEditFormWithEditPerms();
+    // Operator only changes Display name; advanced section is untouched.
+    fireEvent.change(screen.getByTestId('oidc-provider-edit-name'), {
+      target: { value: 'Okta Rename' },
+    });
+    fireEvent.click(screen.getByTestId('oidc-provider-save-button'));
+    await waitFor(() => expect(client.updateOIDCProvider).toHaveBeenCalledTimes(1));
+    const [, body] = vi.mocked(client.updateOIDCProvider).mock.calls[0];
+    // Pre-A-7 these would have been the provider's pass-through; now
+    // they come from state pre-populated by startEdit. Either way the
+    // wire value should be the live provider's existing config.
+    expect(body.scopes).toEqual(sampleProvider.scopes);
+    expect(body.groups_claim_path).toBe(sampleProvider.groups_claim_path);
+    expect(body.groups_claim_format).toBe(sampleProvider.groups_claim_format);
+    expect(body.iat_window_seconds).toBe(sampleProvider.iat_window_seconds);
+    expect(body.jwks_cache_ttl_seconds).toBe(sampleProvider.jwks_cache_ttl_seconds);
+  });
 });
