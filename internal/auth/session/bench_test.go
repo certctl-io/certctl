@@ -47,13 +47,11 @@ import (
 // The full Phase 14 result table lives at docs/operator/auth-benchmarks.md.
 // =============================================================================
 
-// benchSessionConfig caps b.N to keep the benchmark tractable; for
-// p99 we want at least ~1000 samples but not so many that the
-// benchmark takes >10s on a CI runner. Go's default benchmark scaling
-// already handles this.
-const (
-	benchSessionMinSamples = 1000
-)
+// Bench config: Go's default benchmark scaling caps b.N to keep the
+// benchmark tractable. For p99 we want at least ~1000 samples but not
+// so many that the benchmark takes >10s on a CI runner. We let the
+// runtime handle it rather than enforcing a const that lint can't
+// trace through to a use site.
 
 // setupBenchSession boots a session.Service with a warm in-memory
 // repo + a single active signing key, mints one session row, and

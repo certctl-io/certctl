@@ -1393,16 +1393,16 @@ func defaultIntIfZero(v, def int) int {
 // Default BackChannelLogoutVerifier — wraps go-oidc/v3.
 // =============================================================================
 
-// DefaultBCLVerifier is the production BackChannelLogoutVerifier. It
-// resolves the IdP by issuer (matched against the OIDCProviderRepository),
-// fetches the IdP's JWKS via gooidc.Provider, and validates the
-// logout_token JWT signature + required claims.
 // DefaultBCLVerifierMaxAge is the default iat-freshness skew window
 // (60 seconds; tokens older or newer than this are rejected). Override
 // per-server via CERTCTL_OIDC_BCL_MAX_AGE_SECONDS. Audit 2026-05-10
 // HIGH-3 closure.
 const DefaultBCLVerifierMaxAge = 60 * time.Second
 
+// DefaultBCLVerifier is the production BackChannelLogoutVerifier. It
+// resolves the IdP by issuer (matched against the OIDCProviderRepository),
+// fetches the IdP's JWKS via gooidc.Provider, and validates the
+// logout_token JWT signature + required claims.
 type DefaultBCLVerifier struct {
 	providerRepo repository.OIDCProviderRepository
 	tenantID     string

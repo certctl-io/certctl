@@ -406,12 +406,13 @@ func (r *ActorRoleRepository) Grant(ctx context.Context, ar *authdomain.ActorRol
 	return nil
 }
 
-// Audit 2026-05-11 A-4 — scope-aware revoke. The pre-fix SQL omitted
-// (scope_type, scope_id) from the WHERE clause; combined with HIGH-10's
-// UNIQUE (actor_id, actor_type, role_id, scope_type, scope_id, tenant_id)
-// uniqueness extension, an operator who granted the same role to the
-// same actor at two different scopes had no selective-revoke path —
-// every Revoke call nuked both rows. The new behaviour:
+// Revoke drops actor_roles rows. Audit 2026-05-11 A-4 — scope-aware
+// revoke. The pre-fix SQL omitted (scope_type, scope_id) from the
+// WHERE clause; combined with HIGH-10's UNIQUE (actor_id, actor_type,
+// role_id, scope_type, scope_id, tenant_id) uniqueness extension, an
+// operator who granted the same role to the same actor at two
+// different scopes had no selective-revoke path — every Revoke call
+// nuked both rows. The new behaviour:
 //
 //   - opts.ScopeType == "" (legacy call shape): drop the scope from the
 //     WHERE clause; delete every variant. Zero-row delete is NOT an

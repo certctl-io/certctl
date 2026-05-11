@@ -290,7 +290,7 @@ func newMockIdPWithTB(t testing.TB) *mockIdP {
 	mux.HandleFunc("/authorize", func(w http.ResponseWriter, r *http.Request) {
 		// Tests call HandleCallback directly; this endpoint exists for
 		// completeness but the test never round-trips through it.
-		http.Error(w, "test fixture: not implemented", 501)
+		http.Error(w, "test fixture: not implemented", http.StatusNotImplemented)
 	})
 
 	idp.server = httptest.NewServer(mux)

@@ -11,7 +11,7 @@ import (
 // wire-leak the Argon2id hash. Test-only.
 func reflectJSONTag(v interface{}, fieldName string) string {
 	rv := reflect.ValueOf(v)
-	if rv.Kind() == reflect.Ptr {
+	if rv.Kind() == reflect.Pointer {
 		rv = rv.Elem()
 	}
 	if rv.Kind() != reflect.Struct {
