@@ -216,6 +216,13 @@ func StartKeycloak(t *testing.T) *KeycloakFixture {
 		Name:      "Keycloak (integration test)",
 		IssuerURL: issuerURL,
 		ClientID:  ClientID,
+		// Enabled=true is required for HandleAuthRequest to reach the
+		// IdP discovery + redirect path. The field was added by Audit
+		// 2026-05-11 MED-9 (Bundle 2 Fix 13 Phase B); pre-fix providers
+		// had no enable-flag and HandleAuthRequest always proceeded.
+		// Default zero-value false would gate all integration tests
+		// behind ErrProviderDisabled.
+		Enabled: true,
 		// ClientSecretEncrypted intentionally left zero-length: the
 		// integration test invokes the service with encryptionKey="",
 		// which the Phase-3 service treats as plaintext-passthrough.
