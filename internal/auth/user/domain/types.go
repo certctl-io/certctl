@@ -38,6 +38,10 @@ type User struct {
 	WebAuthnCredentials []byte    `json:"webauthn_credentials,omitempty"` // JSONB; reserved for v3, always `[]` in Bundle 2
 	CreatedAt           time.Time `json:"created_at"`
 	UpdatedAt           time.Time `json:"updated_at"`
+	// Audit 2026-05-10 MED-11 — soft-delete column.
+	// Non-nil = deactivated; nil = active. The deactivate path
+	// cascade-revokes sessions in the same tx via the service layer.
+	DeactivatedAt *time.Time `json:"deactivated_at,omitempty"`
 }
 
 // Validation errors. Service layer maps these to HTTP 400.
