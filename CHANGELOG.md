@@ -93,6 +93,20 @@
   exposed-sentinel, last-error-red-treatment, and canRefresh=false-
   hides-the-button.
 
+- **UsersPage sidebar nav entry (Audit 2026-05-11 Fix 11 — MED-11
+  discoverability).** The MED-11 closure shipped `UsersPage.tsx` + wired
+  the `/auth/users` route in `web/src/main.tsx`, but the sidebar
+  navigation never gained a corresponding entry. Operators reached the
+  federated-user-admin surface (used during compliance audits — "show
+  me last login for every IdP-federated user") only by knowing the URL.
+  A page that exists but isn't navigable is a half-finished page. New
+  Users entry under the Auth section in `web/src/components/Layout.tsx`
+  sits between Sessions and Roles (federated-identity grouping). Three
+  Vitest tests in `Layout.test.tsx` pin the link's presence, the
+  `/auth/users` destination, and the DOM ordering relative to Sessions
+  so a future refactor that re-orders or removes the entry surfaces in
+  the diff.
+
 - **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
   HIGH-10 made it possible to grant the same role to the same actor at
   multiple scopes (e.g. `r-operator` on `profile=p-acme` AND `profile=p-globex`)
