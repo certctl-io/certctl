@@ -15,23 +15,11 @@ The CA/Browser Forum's [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-
 
 > **Status: Early-access — actively looking for design partners.**
 
-> The certificate lifecycle core is production-quality today: Local CA, ACME, agent deployment, audit, [role-based access control](docs/operator/rbac.md) with auditor split and four-eyes approval.
+> The certificate lifecycle core is production-quality today: Local CA, ACME, agent deployment, audit, [role-based access control](docs/operator/rbac.md) with auditor split and four-eyes approval. v2.1.0 adds federated identity on top — [OIDC SSO](docs/operator/oidc-runbooks/index.md), server-side sessions, back-channel logout, and a break-glass admin path for SSO-outage recovery.
 
-> v2.1.0 adds federated identity on top — [OIDC SSO](docs/operator/oidc-runbooks/index.md), server-side sessions, back-channel logout, and a break-glass admin path for SSO-outage recovery.
+> If your team runs PKI infrastructure that could use real automation, we'd love to have you on certctl. Lab and dev deployments are great. Production is welcome too — especially on the federated-identity surface, where real-world IdP shapes are exactly the exposure we can't manufacture in CI. Battle-testing certctl in your environment is genuinely valuable to us.
 
-> If your team runs PKI infrastructure that could use real automation, we'd love to have you on certctl.
-
-> Lab and dev deployments are great.
-
-> Production is welcome too — especially on the federated-identity surface, where real-world IdP shapes are exactly the exposure we can't manufacture in CI.
-
-> Battle-testing certctl in your environment is genuinely valuable to us.
-
-> [File issues](https://github.com/certctl-io/certctl/issues) liberally.
-
-> Every IdP quirk, every connector edge, every doc gap you hit — that's how the platform earns the right to drop the "early-access" label.
-
-> The faster the loop, the faster everyone benefits.
+> [File issues](https://github.com/certctl-io/certctl/issues) liberally. Every IdP quirk, every connector edge, every doc gap you hit — that's how the platform earns the right to drop the "early-access" label. The faster the loop, the faster everyone benefits.
 
 > **Actively maintained, shipping weekly.** [Open an issue](https://github.com/certctl-io/certctl/issues) if something breaks. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
 
