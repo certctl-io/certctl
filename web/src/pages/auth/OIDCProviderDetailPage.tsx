@@ -11,6 +11,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import { validateEmailDomain } from './OIDCProvidersPage';
 
 // =============================================================================
 // Bundle 2 Phase 8 — OIDCProviderDetailPage.
@@ -49,6 +50,11 @@ export default function OIDCProviderDetailPage() {
   const [editClientSecret, setEditClientSecret] = useState('');
   const [editRedirectURI, setEditRedirectURI] = useState('');
   const [editFetchUserinfo, setEditFetchUserinfo] = useState(false);
+  // Audit 2026-05-11 A-3 — pre-populated from provider.allowed_email_domains
+  // at startEdit time; saved back through the PUT body. Empty list ↔ no gate.
+  const [editAllowedEmailDomains, setEditAllowedEmailDomains] = useState<string[]>([]);
+  const [emailDomainInput, setEmailDomainInput] = useState('');
+  const [emailDomainErr, setEmailDomainErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -94,6 +100,12 @@ export default function OIDCProviderDetailPage() {
     setEditClientSecret('');
     setEditRedirectURI(provider.redirect_uri);
     setEditFetchUserinfo(provider.fetch_userinfo || false);
+    // Audit 2026-05-11 A-3 — clone so chip-mutations don't reach
+    // through into the cached query data and re-render every row that
+    // shares the reference.
+    setEditAllowedEmailDomains([...(provider.allowed_email_domains || [])]);
+    setEmailDomainInput('');
+    setEmailDomainErr(null);
     setError(null);
     setSuccess(null);
     setEditing(true);
@@ -101,7 +113,41 @@ export default function OIDCProviderDetailPage() {
 
   const cancelEdit = () => {
     setEditing(false);
+    setEmailDomainInput('');
+    setEmailDomainErr(null);
     setError(null);
+  };
+
+  // Audit 2026-05-11 A-3 — mirror of OIDCProvidersPage::addEmailDomain.
+  const addEmailDomain = () => {
+    const trimmed = emailDomainInput.trim().toLowerCase();
+    setEmailDomainErr(null);
+    const v = validateEmailDomain(trimmed);
+    if (v !== '') {
+      setEmailDomainErr(v);
+      return;
+    }
+    if (editAllowedEmailDomains.includes(trimmed)) {
+      setEmailDomainErr('Already in the list');
+      return;
+    }
+    setEditAllowedEmailDomains([...editAllowedEmailDomains, trimmed]);
+    setEmailDomainInput('');
+  };
+
+  const removeEmailDomain = (d: string) => {
+    setEditAllowedEmailDomains(editAllowedEmailDomains.filter(x => x !== d));
+  };
+
+  const clearAllEmailDomains = () => {
+    if (editAllowedEmailDomains.length === 0) return;
+    if (!window.confirm(
+      'Clear ALL allowed email domains?\n\n' +
+      'After saving, ANY user with a valid OIDC token from this provider can log in. ' +
+      'For multi-tenant IdPs (Auth0, Azure AD common, Google Workspace) this means cross-tenant ' +
+      'logins are no longer blocked. Confirm only if that is intended.',
+    )) return;
+    setEditAllowedEmailDomains([]);
   };
 
   const saveEdit = async () => {
@@ -118,6 +164,9 @@ export default function OIDCProviderDetailPage() {
         groups_claim_format: provider.groups_claim_format,
         fetch_userinfo: editFetchUserinfo,
         scopes: provider.scopes,
+        // Audit 2026-05-11 A-3 — wire the chip-list value into the PUT
+        // body. Backend persists [] as no-gate; the field is honest now.
+        allowed_email_domains: editAllowedEmailDomains,
         iat_window_seconds: provider.iat_window_seconds,
         jwks_cache_ttl_seconds: provider.jwks_cache_ttl_seconds,
       };
@@ -200,6 +249,25 @@ export default function OIDCProviderDetailPage() {
             <dd className="col-span-2">{provider.fetch_userinfo ? 'enabled' : 'disabled'}</dd>
             <dt className="text-ink-muted col-span-1">Scopes</dt>
             <dd className="col-span-2 font-mono text-xs">{(provider.scopes || []).join(', ')}</dd>
+            {/* Audit 2026-05-11 A-3 — tenant-isolation gate. Was lying-field
+                pre-fix: persisted + enforced, but never shown in the GUI. */}
+            <dt className="text-ink-muted col-span-1">Allowed email domains</dt>
+            <dd className="col-span-2" data-testid="oidc-provider-detail-allowed-email-domains">
+              {(provider.allowed_email_domains || []).length === 0 ? (
+                <span className="text-ink-muted italic">any (no gate configured)</span>
+              ) : (
+                <div className="flex flex-wrap gap-1">
+                  {(provider.allowed_email_domains || []).map(d => (
+                    <span
+                      key={d}
+                      className="inline-flex items-center px-2 py-0.5 text-xs bg-page border border-surface-border rounded text-ink font-mono"
+                    >
+                      {d}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </dd>
             <dt className="text-ink-muted col-span-1">IAT window</dt>
             <dd className="col-span-2">{provider.iat_window_seconds}s</dd>
           </dl>
@@ -262,6 +330,91 @@ export default function OIDCProviderDetailPage() {
               />
               <span>Fetch groups from userinfo endpoint when ID token claim is empty</span>
             </label>
+            {/* Audit 2026-05-11 A-3 — Edit form chip control. Mirrors the
+                create-modal copy; pre-populates from
+                provider.allowed_email_domains at startEdit time. */}
+            <div>
+              <div className="flex items-center justify-between mb-1">
+                <label className="block text-sm font-medium text-ink">
+                  Allowed email domains
+                </label>
+                {editAllowedEmailDomains.length > 0 && (
+                  <button
+                    type="button"
+                    onClick={clearAllEmailDomains}
+                    className="text-xs text-red-700 hover:underline"
+                    data-testid="oidc-provider-edit-allowed-email-domains-clear-all"
+                  >
+                    Clear all
+                  </button>
+                )}
+              </div>
+              <p className="text-xs text-ink-muted mb-2">
+                When non-empty, only users whose email domain exactly matches one of these entries
+                can log in. Subdomains are NOT auto-accepted — list each one explicitly. Empty list
+                means any domain. Case-insensitive exact match.
+              </p>
+              {editAllowedEmailDomains.length > 0 && (
+                <div
+                  className="flex flex-wrap gap-1 mb-2"
+                  data-testid="oidc-provider-edit-allowed-email-domains-chips"
+                >
+                  {editAllowedEmailDomains.map(d => (
+                    <span
+                      key={d}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-page border border-surface-border rounded text-ink font-mono"
+                      data-testid={`oidc-provider-edit-allowed-email-domain-chip-${d}`}
+                    >
+                      {d}
+                      <button
+                        type="button"
+                        onClick={() => removeEmailDomain(d)}
+                        className="text-ink-muted hover:text-red-600 leading-none"
+                        aria-label={`Remove ${d}`}
+                        data-testid={`oidc-provider-edit-allowed-email-domain-chip-remove-${d}`}
+                      >
+                        ×
+                      </button>
+                    </span>
+                  ))}
+                </div>
+              )}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={emailDomainInput}
+                  onChange={e => {
+                    setEmailDomainInput(e.target.value);
+                    if (emailDomainErr) setEmailDomainErr(null);
+                  }}
+                  onKeyDown={e => {
+                    if (e.key === 'Enter') {
+                      e.preventDefault();
+                      addEmailDomain();
+                    }
+                  }}
+                  placeholder="acme.com"
+                  className="flex-1 px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink"
+                  data-testid="oidc-provider-edit-allowed-email-domains-input"
+                />
+                <button
+                  type="button"
+                  onClick={addEmailDomain}
+                  className="px-3 py-1.5 text-sm border border-surface-border rounded bg-page hover:bg-surface text-ink"
+                  data-testid="oidc-provider-edit-allowed-email-domains-add"
+                >
+                  Add
+                </button>
+              </div>
+              {emailDomainErr && (
+                <p
+                  className="mt-1 text-xs text-red-700"
+                  data-testid="oidc-provider-edit-allowed-email-domains-error"
+                >
+                  {emailDomainErr}
+                </p>
+              )}
+            </div>
           </div>
         )}
       </div>

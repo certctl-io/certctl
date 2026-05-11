@@ -35,6 +35,23 @@ interface CreateProviderModalProps {
   onSuccess: () => void;
 }
 
+// Audit 2026-05-11 A-3 — validateEmailDomain mirrors the backend
+// validator at internal/auth/oidc/domain/types.go (CRIT-5 closure).
+// Rejects entries containing `@` / whitespace / `*` / mixed-case, and
+// empties. Returns "" on success; a non-empty string on failure (used
+// directly as the inline error message). The server is still the
+// source of truth; this is the fast-feedback layer.
+export function validateEmailDomain(input: string): string {
+  if (!input) return 'Empty entry';
+  if (input !== input.trim()) return 'Leading or trailing whitespace';
+  if (input !== input.toLowerCase()) return 'Must be all lowercase';
+  if (input.includes('@')) return 'Entries are domains, not email addresses — drop the "@" and the local part';
+  if (input.includes(' ') || /\s/.test(input)) return 'No whitespace';
+  if (input.includes('*')) return 'No wildcards — list each subdomain explicitly';
+  if (!input.includes('.')) return 'Must be a fully-qualified domain (e.g. acme.com)';
+  return '';
+}
+
 function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModalProps) {
   const [form, setForm] = useState<OIDCProviderRequest>({
     name: '',
@@ -46,9 +63,16 @@ function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModal
     groups_claim_format: 'string-array',
     fetch_userinfo: false,
     scopes: ['openid', 'profile', 'email'],
+    allowed_email_domains: [],
     iat_window_seconds: 300,
     jwks_cache_ttl_seconds: 3600,
   });
+  // Audit 2026-05-11 A-3 — chip-input scratch state for the
+  // allowed_email_domains tenant-isolation gate. Operators add domains
+  // one at a time; each goes through validateEmailDomain before being
+  // appended to form.allowed_email_domains.
+  const [emailDomainInput, setEmailDomainInput] = useState('');
+  const [emailDomainErr, setEmailDomainErr] = useState<string | null>(null);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
@@ -58,6 +82,30 @@ function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModal
   const update = <K extends keyof OIDCProviderRequest>(k: K, v: OIDCProviderRequest[K]) => {
     setForm(prev => ({ ...prev, [k]: v }));
     setDirty(true);
+  };
+
+  const addEmailDomain = () => {
+    const trimmed = emailDomainInput.trim().toLowerCase();
+    setEmailDomainErr(null);
+    const v = validateEmailDomain(trimmed);
+    if (v !== '') {
+      setEmailDomainErr(v);
+      return;
+    }
+    const current = form.allowed_email_domains || [];
+    if (current.includes(trimmed)) {
+      setEmailDomainErr('Already in the list');
+      return;
+    }
+    update('allowed_email_domains', [...current, trimmed]);
+    setEmailDomainInput('');
+  };
+
+  const removeEmailDomain = (d: string) => {
+    update(
+      'allowed_email_domains',
+      (form.allowed_email_domains || []).filter(x => x !== d),
+    );
   };
 
   const handleSubmit = async (e: React.FormEvent) => {
@@ -80,6 +128,8 @@ function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModal
     if (dirty && !window.confirm('Discard unsaved changes?')) return;
     setDirty(false);
     setError(null);
+    setEmailDomainInput('');
+    setEmailDomainErr(null);
     onClose();
   };
 
@@ -189,6 +239,80 @@ function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModal
             />
             <span>Fetch groups from userinfo endpoint when ID token claim is empty</span>
           </label>
+          {/* Audit 2026-05-11 A-3 — Allowed email domains chip control.
+              When the list is non-empty, only users whose email-domain
+              matches one of these entries can complete OIDC login. For
+              multi-tenant IdPs (Auth0, Azure AD common endpoint, Google
+              Workspace) this is the only thing preventing cross-tenant
+              logins; the CRIT-5 backend gate is load-bearing but the GUI
+              never exposed it until this fix. */}
+          <div>
+            <label className="block text-sm font-medium text-ink mb-1">
+              Allowed email domains (optional)
+            </label>
+            <p className="text-xs text-ink-muted mb-2">
+              When non-empty, only users whose email domain exactly matches one of these entries
+              can log in. Subdomains are NOT auto-accepted — list each one explicitly. Empty list
+              means any domain. Case-insensitive exact match.
+            </p>
+            {(form.allowed_email_domains || []).length > 0 && (
+              <div className="flex flex-wrap gap-1 mb-2" data-testid="oidc-create-allowed-email-domains-chips">
+                {(form.allowed_email_domains || []).map(d => (
+                  <span
+                    key={d}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 text-xs bg-page border border-surface-border rounded text-ink font-mono"
+                    data-testid={`oidc-create-allowed-email-domain-chip-${d}`}
+                  >
+                    {d}
+                    <button
+                      type="button"
+                      onClick={() => removeEmailDomain(d)}
+                      className="text-ink-muted hover:text-red-600 leading-none"
+                      aria-label={`Remove ${d}`}
+                      data-testid={`oidc-create-allowed-email-domain-chip-remove-${d}`}
+                    >
+                      ×
+                    </button>
+                  </span>
+                ))}
+              </div>
+            )}
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={emailDomainInput}
+                onChange={e => {
+                  setEmailDomainInput(e.target.value);
+                  if (emailDomainErr) setEmailDomainErr(null);
+                }}
+                onKeyDown={e => {
+                  if (e.key === 'Enter') {
+                    e.preventDefault();
+                    addEmailDomain();
+                  }
+                }}
+                placeholder="acme.com"
+                className="flex-1 px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink"
+                data-testid="oidc-create-allowed-email-domains-input"
+              />
+              <button
+                type="button"
+                onClick={addEmailDomain}
+                className="px-3 py-1.5 text-sm border border-surface-border rounded bg-page hover:bg-surface text-ink"
+                data-testid="oidc-create-allowed-email-domains-add"
+              >
+                Add
+              </button>
+            </div>
+            {emailDomainErr && (
+              <p
+                className="mt-1 text-xs text-red-700"
+                data-testid="oidc-create-allowed-email-domains-error"
+              >
+                {emailDomainErr}
+              </p>
+            )}
+          </div>
           <div className="flex justify-end gap-2 pt-3">
             <button
               type="button"
