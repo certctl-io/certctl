@@ -153,6 +153,23 @@ func StartKeycloak(t *testing.T) *KeycloakFixture {
 		Image:        KeycloakImage,
 		ExposedPorts: []string{"8080/tcp"},
 		Env: map[string]string{
+			// Keycloak 26.x has TWO sets of admin-bootstrap env vars
+			// and the right pair depends on the launch command:
+			//   - `start` (production): KC_BOOTSTRAP_ADMIN_USERNAME +
+			//     KC_BOOTSTRAP_ADMIN_PASSWORD
+			//   - `start-dev`: KEYCLOAK_ADMIN + KEYCLOAK_ADMIN_PASSWORD
+			//
+			// This fixture runs `start-dev` (see the Cmd line below).
+			// Pre-fix only the KC_BOOTSTRAP_ADMIN_* names were set —
+			// they're silently ignored in dev-mode, leaving the
+			// master-realm with no admin user. The auth-code flow tests
+			// passed (they authenticate test users in the certctl
+			// realm), but the RotateRealmKeys path 401's on the
+			// admin-cli token endpoint because there's no admin to
+			// authenticate as. Set BOTH pairs as belt-and-braces so a
+			// future flip to `start` doesn't re-introduce the same gap.
+			"KEYCLOAK_ADMIN":              AdminUser,
+			"KEYCLOAK_ADMIN_PASSWORD":     AdminPass,
 			"KC_BOOTSTRAP_ADMIN_USERNAME": AdminUser,
 			"KC_BOOTSTRAP_ADMIN_PASSWORD": AdminPass,
 			// Disable HTTPS in dev mode; the integration test runs
