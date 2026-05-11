@@ -105,6 +105,24 @@
   runbooks for multi-tenant IdPs in `docs/operator/oidc-runbooks/` already
   documented the field; the GUI now matches.
 
+- **Approval payload preview (Audit 2026-05-11 A-5).**
+  The MED-10 closure claim ("PARTIAL: raw JSON preview; diff library
+  deferred") was inaccurate — `ApprovalsPage.tsx` rendered no payload
+  at all, so approvers were clicking Approve / Reject without seeing
+  the change they were authorizing. That defeats the entire four-eyes
+  primitive: an approver who can't see what they're approving is
+  rubber-stamping. Each row now carries a Preview toggle that expands
+  an inline panel dispatching by kind: `profile_edit` shows a
+  field-level before/after diff (changed-only rows, red/green cells,
+  `(unset)` sentinel for added/removed fields); `cert_issuance` shows
+  a definition list of CN / SANs / profile / key algo / must-staple /
+  validity (catches the wildcard-against-corp-internal-profile attack
+  at review time); unknown kinds render a generic JSON preview for
+  forward-compat with future approval kinds. The base64-encoded JSON
+  payload is decoded via the new `decodePayload` helper; malformed
+  inputs render an explicit decode-error fallback — silent failure on
+  the payload preview is what produced this bug in the first place.
+
 - **Pre-login cookie Path widened from `/auth/oidc/` to `/` (Audit MED-14
   follow-on).** Required to satisfy the `__Host-` prefix's `Path=/` rule. The
   cookie lifetime is unchanged (10 minutes) and only the callback handler
