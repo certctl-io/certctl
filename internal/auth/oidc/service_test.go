@@ -576,32 +576,40 @@ func TestService_ATHash_UnknownAlgReturnsFalse(t *testing.T) {
 	}
 }
 
-// Test 11: IdP downgrade-attack defense. A provider whose discovery doc
-// advertises HS256 in id_token_signing_alg_values_supported is REJECTED
-// by the cache load with ErrIdPDowngradeAdvertised.
-func TestService_IdPDowngradeDefense_RejectsHSAdvertised(t *testing.T) {
+// Test 11: IdP downgrade-attack defense (v2.1.0-relaxed semantics).
+// Pre-v2.1.0 ANY HS* advertisement refused. Real IdPs like Keycloak
+// 26.x advertise the full alg list (HS+RS+ES+PS) but actually sign
+// with RS256 — they failed the old check + caused legitimate-IdP
+// integration tests to red. New contract: bind when the intersection
+// of advertised vs DefaultAllowedAlgs is non-empty; reject only when
+// the IdP advertises NO acceptable alg. Per-token alg pin at sig-verify
+// (isDisallowedAlg) still catches an actual algorithm-confusion attack.
+func TestService_IdPDowngradeDefense_RS256PlusHS256_BindsSuccessfully(t *testing.T) {
 	idp := newMockIdP(t)
-	idp.advertisedAlgs = []string{"RS256", "HS256"} // HS256 is the downgrade vector
+	idp.advertisedAlgs = []string{"RS256", "HS256"} // Keycloak-shape — both advertised
 
-	svc, _ := newServiceWithProvider(t, idp.URL(), "op-bad-idp")
+	svc, _ := newServiceWithProvider(t, idp.URL(), "op-keycloak-shape")
 
-	_, err := svc.getOrLoad(context.Background(), "op-bad-idp")
-	if !errors.Is(err, ErrIdPDowngradeAdvertised) {
-		t.Errorf("err = %v; want ErrIdPDowngradeAdvertised", err)
+	entry, err := svc.getOrLoad(context.Background(), "op-keycloak-shape")
+	if err != nil {
+		t.Fatalf("RS256+HS256 advertisement must bind successfully (v2.1.0 relaxation); got %v", err)
+	}
+	if entry.provider == nil || entry.verifier == nil {
+		t.Errorf("expected non-nil provider+verifier on successful bind")
 	}
 }
 
-// Test 12: IdP downgrade-attack defense — `none` advertisement also
-// triggers rejection.
-func TestService_IdPDowngradeDefense_RejectsNoneAdvertised(t *testing.T) {
+// Test 12: IdP downgrade-attack defense — HS-only advertisement is
+// still rejected (the pathological case the defense protects against).
+func TestService_IdPDowngradeDefense_RejectsHSOnlyAdvertised(t *testing.T) {
 	idp := newMockIdP(t)
-	idp.advertisedAlgs = []string{"RS256", "none"}
+	idp.advertisedAlgs = []string{"HS256", "HS384", "HS512"} // no RS/ES — pathological
 
-	svc, _ := newServiceWithProvider(t, idp.URL(), "op-none-idp")
+	svc, _ := newServiceWithProvider(t, idp.URL(), "op-hs-only-idp")
 
-	_, err := svc.getOrLoad(context.Background(), "op-none-idp")
+	_, err := svc.getOrLoad(context.Background(), "op-hs-only-idp")
 	if !errors.Is(err, ErrIdPDowngradeAdvertised) {
-		t.Errorf("err = %v; want ErrIdPDowngradeAdvertised", err)
+		t.Errorf("err = %v; want ErrIdPDowngradeAdvertised (intersection is empty)", err)
 	}
 }
 
@@ -624,7 +632,9 @@ func TestService_GetOrLoad_AcceptsCleanIdP(t *testing.T) {
 
 // Test 14: RefreshKeys evicts the cache + re-fetches discovery, which
 // re-runs the downgrade defense. If the IdP rotated to advertising
-// HS256 between loads, RefreshKeys catches it.
+// ONLY weak algs between loads (intersection-empty case), RefreshKeys
+// catches it. Pre-v2.1.0 this test asserted the strict-deny "any HS*"
+// behavior; v2.1.0-relaxed asserts the intersection-empty behavior.
 func TestService_RefreshKeys_CatchesPostLoadDowngrade(t *testing.T) {
 	idp := newMockIdP(t)
 	svc, _ := newServiceWithProvider(t, idp.URL(), "op-rotate")
@@ -633,11 +643,11 @@ func TestService_RefreshKeys_CatchesPostLoadDowngrade(t *testing.T) {
 		t.Fatalf("initial load: %v", err)
 	}
 
-	// IdP rotates to advertising HS256.
-	idp.advertisedAlgs = []string{"RS256", "HS256"}
+	// IdP rotates to advertising ONLY HS algs — pathological case.
+	idp.advertisedAlgs = []string{"HS256", "HS384"}
 	err := svc.RefreshKeys(context.Background(), "op-rotate")
 	if !errors.Is(err, ErrIdPDowngradeAdvertised) {
-		t.Errorf("RefreshKeys err = %v; want ErrIdPDowngradeAdvertised", err)
+		t.Errorf("RefreshKeys err = %v; want ErrIdPDowngradeAdvertised (intersection-empty)", err)
 	}
 }
 

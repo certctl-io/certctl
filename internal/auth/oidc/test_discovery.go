@@ -76,14 +76,37 @@ func (s *Service) TestDiscovery(ctx context.Context, issuerURL string) (*TestDis
 	res.JWKSURI = advertised.JWKSURI
 	res.UserInfoEndpoint = advertised.UserInfoEndpoint
 
-	// Step 3 — alg-downgrade defense. The IdP MUST NOT advertise HS*
-	// or none in the signing-alg list (operators that bind certctl to
-	// an IdP advertising these are at risk of a forged-token attack).
-	// Same check applied in getOrLoad's production path.
+	// Step 3 — alg-downgrade defense (v2.1.0-relaxed semantics).
+	// Pre-v2.1.0 this loop appended an error for ANY HS*/none in the
+	// IdP's advertised list. That was strict-deny but incompatible with
+	// real IdPs like Keycloak 26.x which list every alg they're capable
+	// of, even though the realm only signs with RS256.
+	// New semantics: only flag the IdP if the intersection of advertised
+	// vs DefaultAllowedAlgs is empty (a pathological all-weak IdP). Each
+	// HS*/none advertisement is still surfaced as an informational note
+	// so operators can ask their IdP team to tighten the list, but it's
+	// no longer a hard fail. The per-token alg check at sig-verify time
+	// (isDisallowedAlg in service.go ~L1177) is the load-bearing defense.
+	allowedSet := make(map[string]struct{}, len(DefaultAllowedAlgs))
+	for _, a := range DefaultAllowedAlgs {
+		allowedSet[a] = struct{}{}
+	}
+	hasAcceptable := false
+	weak := []string{}
 	for _, a := range advertised.IDTokenSigningAlgValuesSupported {
-		if _, deny := disallowedAlgs[a]; deny {
-			res.Errors = append(res.Errors, fmt.Sprintf("alg-downgrade defense tripped: IdP advertises %s in id_token_signing_alg_values_supported", a))
+		if _, ok := allowedSet[a]; ok {
+			hasAcceptable = true
 		}
+		if _, deny := disallowedAlgs[a]; deny {
+			weak = append(weak, a)
+		}
+	}
+	if len(advertised.IDTokenSigningAlgValuesSupported) > 0 && !hasAcceptable {
+		res.Errors = append(res.Errors, fmt.Sprintf("alg-downgrade defense tripped: IdP advertises only weak algorithms (%v) — no acceptable alg from %v present", advertised.IDTokenSigningAlgValuesSupported, DefaultAllowedAlgs))
+	} else if len(weak) > 0 {
+		// Informational only — RS/ES present alongside HS, so the
+		// IdP binds successfully but the operator should know.
+		res.Errors = append(res.Errors, fmt.Sprintf("note: IdP advertises weak algorithms %v alongside acceptable ones — verifier-side alg pin prevents downgrade, but tightening the IdP's advertised list is recommended", weak))
 	}
 
 	// Step 4 — JWKS reachability. The go-oidc Verifier defers JWKS

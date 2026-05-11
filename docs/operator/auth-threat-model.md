@@ -169,17 +169,27 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
 
 - **Algorithm allow-list, never `none`, never HMAC.** The service-
   layer pinning lives in `internal/auth/oidc/service.go::disallowedAlgs`
-  and the IdP-downgrade-attack defense in
-  `Service.guardAdvertisedAlgs`. At provider creation AND on every
-  `RefreshKeys`, the IdP's advertised
-  `id_token_signing_alg_values_supported` is intersected with the
-  allow-list (RS256 / RS512 / ES256 / ES384 / EdDSA). If the IdP
-  advertises HS256/HS384/HS512 or `none` AT ALL, provider creation
-  is rejected - the IdP has not yet signed a single token, but the
-  service refuses to trust an IdP that COULD sign one with a weak
-  alg. coreos/go-oidc additionally enforces the allow-list per-token
-  at verify time as defense-in-depth against an upstream library
-  regression.
+  + `isDisallowedAlg`. The per-token alg check at sig-verify time
+  (`isDisallowedAlg`, line ~1177) is the load-bearing defense — every
+  ID token whose JWS header carries an alg outside the allow-list
+  (RS256 / RS512 / ES256 / ES384 / EdDSA) is rejected with
+  `ErrAlgRejected`. coreos/go-oidc additionally enforces the allow-list
+  per-token at verify time as defense-in-depth against an upstream
+  library regression. The IdP-downgrade-attack secondary defense at
+  provider creation / `RefreshKeys` (v2.1.0-relaxed semantics)
+  intersects the IdP's advertised `id_token_signing_alg_values_supported`
+  with the allow-list and rejects only when the intersection is EMPTY
+  — i.e., the IdP advertises NO acceptable alg. Pre-v2.1.0 the check
+  strict-denied on ANY HS*/`none` advertisement; that broke against
+  Keycloak 26.x (which lists every alg it's capable of in its discovery
+  doc, including HS*, even when the realm only signs with RS256). The
+  relaxation is safe because the per-token alg pin already prevents
+  a real algorithm-confusion attack — a forged HS256 token using the
+  IdP's RS256 pubkey as HMAC secret is rejected at sig-verify regardless
+  of what the discovery doc advertises. Operators worried about a
+  compromised IdP rotating to weak algs without rotating its certctl
+  provider config get defense-in-depth from `JWKSStatus` + the alert
+  hooks in the GUI panel.
 - **Exact `iss` match.** ID-token `iss` claim must equal the
   configured `OIDCProvider.IssuerURL` byte-for-byte (sentinel
   `ErrIssuerMismatch`). A token from a different IdP - even one

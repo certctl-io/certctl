@@ -2,6 +2,40 @@
 
 ## Unreleased
 
+### Security
+
+- **Alg-downgrade defense relaxed for Keycloak-shape IdPs (v2.1.0 pre-tag fix).**
+  Pre-fix, the IdP-bind alg-downgrade check at `internal/auth/oidc/service.go`
+  refused to load any OIDC provider whose discovery doc advertised HS256 /
+  HS384 / HS512 / `none` in `id_token_signing_alg_values_supported` —
+  even if RS256 was ALSO advertised. This broke binding against
+  Keycloak 26.x (and a handful of other real IdPs) which list every alg
+  the codebase is capable of in their discovery doc, regardless of which
+  one the realm actually signs with. The v2.1.0 Phase-10 live-IdP smoke
+  surfaced the regression: 6 testcontainers-Keycloak integration tests
+  failed with `oidc: IdP advertises weak signing algorithms (HS*/none); refusing to use as defense against downgrade attacks: HS256`.
+  **Fix:** the check now refuses only when the intersection of advertised
+  vs `DefaultAllowedAlgs` is EMPTY — an IdP advertising HS256 alongside
+  RS256 binds successfully, but an IdP advertising HS-only / none-only
+  still fails closed. The per-token alg pin at sig-verify time
+  (`isDisallowedAlg`, service.go ~L1177) remains the load-bearing defense
+  against the actual algorithm-confusion attack (forged HS256 token
+  signed with the IdP's RS256 pubkey as HMAC secret) — go-oidc/v3's
+  verifier rejects any token whose `alg` header isn't in the configured
+  allow-list, regardless of what the discovery doc claims. Updates:
+  `Service.getOrLoad` alg-check loop rewritten to compute intersection;
+  `ErrIdPDowngradeAdvertised` docstring reflects new semantics;
+  `TestDiscovery` dry-run validator surfaces HS*/none alongside RS* as
+  an informational note (not a hard fail); `docs/operator/auth-threat-model.md`
+  alg-allow-list section updated to call out the load-bearing-defense
+  hierarchy. Tests: `TestService_IdPDowngradeDefense_RS256PlusHS256_BindsSuccessfully`
+  (positive — Keycloak-shape) + `TestService_IdPDowngradeDefense_RejectsHSOnlyAdvertised`
+  (negative — pathological intersection-empty case) +
+  `TestService_RefreshKeys_CatchesPostLoadDowngrade` updated to assert
+  intersection-empty post-rotation; `TestTestDiscovery_AlgDowngrade_HS256AlongsideRS256_BindsWithNote`
+  + `TestTestDiscovery_AlgDowngrade_HSOnly_StillTrips_HardFail` pin the
+  dry-run validator's new behavior.
+
 ### Tests
 
 - **Vitest coverage for the 2026-05-10/11 GUI batch (Audit 2026-05-11 Fix 12).**

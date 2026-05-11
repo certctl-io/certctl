@@ -124,11 +124,13 @@ func TestTestDiscovery_HappyPath_AgainstMockIdP(t *testing.T) {
 	}
 }
 
-// TestTestDiscovery_AlgDowngradeDetected runs against a stub IdP that
-// advertises HS256 in id_token_signing_alg_values_supported. The
-// function MUST flag the downgrade attack vector in res.Errors but
-// MUST NOT short-circuit (per-leg observability is the contract).
-func TestTestDiscovery_AlgDowngradeDetected(t *testing.T) {
+// TestTestDiscovery_AlgDowngrade_HS256AlongsideRS256_BindsWithNote runs
+// against a stub IdP that advertises both HS256 + RS256 (Keycloak-shape).
+// Under v2.1.0-relaxed semantics this must SUCCEED (DiscoverySucceeded=true,
+// JWKSReachable=true) and surface only an informational note about the
+// weak-alg advertisement — NOT a hard "alg-downgrade defense tripped" error.
+// The per-token alg pin at sig-verify time remains the load-bearing defense.
+func TestTestDiscovery_AlgDowngrade_HS256AlongsideRS256_BindsWithNote(t *testing.T) {
 	svc := newServiceForUnitTest(t)
 	mux := http.NewServeMux()
 	srv := httptest.NewServer(mux)
@@ -156,15 +158,60 @@ func TestTestDiscovery_AlgDowngradeDetected(t *testing.T) {
 	if !res.DiscoverySucceeded {
 		t.Errorf("expected DiscoverySucceeded=true; got Errors=%v", res.Errors)
 	}
+	// The Keycloak-shape advertisement must NOT trip the hard fail.
+	for _, e := range res.Errors {
+		if strings.Contains(e, "alg-downgrade defense tripped") {
+			t.Errorf("v2.1.0-relaxed semantics: HS256+RS256 must NOT trip hard fail; got %q", e)
+		}
+	}
+	// Informational note must be present.
+	noteFound := false
+	for _, e := range res.Errors {
+		if strings.Contains(e, "note:") && strings.Contains(e, "HS256") {
+			noteFound = true
+		}
+	}
+	if !noteFound {
+		t.Errorf("expected informational note about HS256 in errors; got %v", res.Errors)
+	}
+}
+
+// TestTestDiscovery_AlgDowngrade_HSOnly_StillTrips_HardFail asserts the
+// pathological intersection-empty case still hard-fails.
+func TestTestDiscovery_AlgDowngrade_HSOnly_StillTrips_HardFail(t *testing.T) {
+	svc := newServiceForUnitTest(t)
+	mux := http.NewServeMux()
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
+
+	mux.HandleFunc("/.well-known/openid-configuration", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]interface{}{
+			"issuer":                                srv.URL,
+			"authorization_endpoint":                srv.URL + "/authorize",
+			"token_endpoint":                        srv.URL + "/token",
+			"jwks_uri":                              srv.URL + "/jwks",
+			"id_token_signing_alg_values_supported": []string{"HS256", "HS384"}, // no RS
+		})
+	})
+	mux.HandleFunc("/jwks", func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"keys":[]}`))
+	})
+
+	res, err := svc.TestDiscovery(context.Background(), srv.URL)
+	if err != nil {
+		t.Fatalf("TestDiscovery: %v", err)
+	}
 	found := false
 	for _, e := range res.Errors {
-		if strings.Contains(e, "alg-downgrade defense tripped") && strings.Contains(e, "HS256") {
+		if strings.Contains(e, "alg-downgrade defense tripped") && strings.Contains(e, "only weak algorithms") {
 			found = true
 			break
 		}
 	}
 	if !found {
-		t.Errorf("expected alg-downgrade-tripped:HS256 in errors; got %v", res.Errors)
+		t.Errorf("expected hard-fail for HS-only IdP; got %v", res.Errors)
 	}
 }
 

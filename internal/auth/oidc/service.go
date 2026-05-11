@@ -52,9 +52,16 @@ import (
 //  6. IdP downgrade-attack defense: at provider creation /
 //     RefreshKeys, the discovery doc's
 //     `id_token_signing_alg_values_supported` is intersected with
-//     the allow-list. If the IdP advertises HS* / none AT ALL, the
-//     provider is rejected with an actionable error so a future
-//     compromised IdP can't downgrade.
+//     the allow-list. The provider is rejected only when the
+//     intersection is EMPTY (i.e., the IdP advertises NO acceptable
+//     signing alg). Real IdPs like Keycloak advertise the full list
+//     of algorithms they're capable of including HS*, but actually
+//     sign with RS256; the per-token alg check at sig-verify time
+//     (line ~1177 `isDisallowedAlg`) is the load-bearing defense
+//     against an actual algorithm-confusion attack. Pre-v2.1.0 this
+//     check was strict-deny on any HS* advertisement; v2.1.0 relaxed
+//     to the intersection-empty form so Keycloak / other real IdPs
+//     bind successfully.
 //  7. JWKS handling delegated to coreos/go-oidc/v3; on JWKS fetch
 //     failure during a key rotation the service returns
 //     ErrJWKSUnreachable (HTTP 503), existing sessions untouched,
@@ -299,10 +306,16 @@ var (
 	// allow-list. HTTP 400.
 	ErrAlgRejected = errors.New("oidc: ID token signed with disallowed algorithm")
 
-	// ErrIdPDowngradeAdvertised: provider's discovery doc advertises
-	// HS* or `none` algorithms. Provider creation / refresh rejects.
-	// HTTP 400.
-	ErrIdPDowngradeAdvertised = errors.New("oidc: IdP advertises weak signing algorithms (HS*/none); refusing to use as defense against downgrade attacks")
+	// ErrIdPDowngradeAdvertised: provider's discovery doc lists NO
+	// alg from DefaultAllowedAlgs in `id_token_signing_alg_values_
+	// supported`. v2.1.0-relaxed semantics: an IdP that advertises
+	// HS* / none ALONGSIDE RS256+ binds successfully; only an IdP
+	// that advertises ZERO acceptable algs fails closed. The
+	// per-token alg check at sig-verify time (isDisallowedAlg) is
+	// the load-bearing defense against an actual algorithm-confusion
+	// attack. Provider creation / refresh rejects only when the
+	// intersection is empty. HTTP 400.
+	ErrIdPDowngradeAdvertised = errors.New("oidc: IdP advertises no acceptable signing algorithms (intersection of advertised vs DefaultAllowedAlgs is empty)")
 
 	// ErrJWKSUnreachable: JWKS endpoint fetch failed during a
 	// rotation. The in-flight login fails 503; existing sessions
@@ -367,8 +380,11 @@ var (
 // DefaultAllowedAlgs is the operator-default ID-token signing algorithm
 // allow-list. Configurable per-provider but the union must be a subset
 // of this set. HMAC algorithms (HS256/HS384/HS512) and `none` are
-// NEVER in the default set; the IdP downgrade defense rejects any
-// provider that advertises them in discovery.
+// NEVER in the default set; sig-verify rejects any token whose `alg`
+// header is outside this list. v2.1.0-relaxed: the IdP downgrade defense
+// at provider creation only rejects a provider whose advertised list
+// intersects this allow-list to the EMPTY set — Keycloak / Auth0 / etc.
+// that advertise HS* alongside RS* bind successfully.
 var DefaultAllowedAlgs = []string{
 	gooidc.RS256, gooidc.RS512,
 	gooidc.ES256, gooidc.ES384,
@@ -1064,10 +1080,35 @@ func (s *Service) getOrLoad(ctx context.Context, providerID string) (*providerEn
 	if cerr := provider.Claims(&advertised); cerr != nil {
 		return nil, fmt.Errorf("oidc: discovery claims: %w", cerr)
 	}
+	// Alg-downgrade defense (v2.1.0 relaxation — keycloak-compat).
+	// Pre-v2.1.0 this loop refused to bind if the IdP advertised ANY
+	// HS*/none in `id_token_signing_alg_values_supported`. That was
+	// too strict for real-world IdPs: Keycloak 26.x (and several others)
+	// list every alg they're CAPABLE of, not the ones the realm is
+	// actively signing with — so a realm signing exclusively with RS256
+	// still advertises HS256/HS384/HS512/PS*/etc. in its discovery doc.
+	// The actual algorithm-confusion attack (forged HS256 token with the
+	// RS256 pubkey as HMAC secret) is caught at sig-verify time by the
+	// per-token alg check (isDisallowedAlg, ~L1177) AND by go-oidc/v3's
+	// verifier-side allow-list pin to DefaultAllowedAlgs. So a Keycloak
+	// that *says* it supports HS256 but only ever signs with RS256 is
+	// safe to bind to.
+	// New semantics: refuse only if the IdP advertises NO acceptable alg
+	// (intersection of advertised vs DefaultAllowedAlgs is empty). A
+	// pathological HS-only IdP still fails closed.
+	allowedSet := make(map[string]struct{}, len(DefaultAllowedAlgs))
+	for _, a := range DefaultAllowedAlgs {
+		allowedSet[a] = struct{}{}
+	}
+	hasAcceptable := false
 	for _, a := range advertised.IDTokenSigningAlgValuesSupported {
-		if _, deny := disallowedAlgs[a]; deny {
-			return nil, fmt.Errorf("%w: %s", ErrIdPDowngradeAdvertised, a)
+		if _, ok := allowedSet[a]; ok {
+			hasAcceptable = true
+			break
 		}
+	}
+	if len(advertised.IDTokenSigningAlgValuesSupported) > 0 && !hasAcceptable {
+		return nil, fmt.Errorf("%w: advertised=%v", ErrIdPDowngradeAdvertised, advertised.IDTokenSigningAlgValuesSupported)
 	}
 
 	// Compute the effective allow-list: intersection of the default
