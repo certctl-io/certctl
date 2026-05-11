@@ -72,6 +72,12 @@ type stubSession struct {
 	revokedIDs     []string
 	revokeAllIDs   []string
 	revokeAllTypes []string
+	// Audit 2026-05-11 Fix 13 — record RotateCSRFTokenForActor calls so
+	// the Logout test can assert HIGH-2's fourth call site fires.
+	rotateCSRFCalls       int
+	rotateCSRFActorIDs    []string
+	rotateCSRFActorTypes  []string
+	rotateCSRFReturnCount int
 }
 
 func (s *stubSession) Create(_ context.Context, _, _, _, _ string) (*sessionsvc.CreateResult, error) {
@@ -88,6 +94,12 @@ func (s *stubSession) RevokeAllForActor(_ context.Context, actorID, actorType st
 	s.revokeAllIDs = append(s.revokeAllIDs, actorID)
 	s.revokeAllTypes = append(s.revokeAllTypes, actorType)
 	return s.revokeAllErr
+}
+func (s *stubSession) RotateCSRFTokenForActor(_ context.Context, actorID, actorType string) int {
+	s.rotateCSRFCalls++
+	s.rotateCSRFActorIDs = append(s.rotateCSRFActorIDs, actorID)
+	s.rotateCSRFActorTypes = append(s.rotateCSRFActorTypes, actorType)
+	return s.rotateCSRFReturnCount
 }
 
 type stubBCLVerifier struct {
@@ -245,10 +257,17 @@ func (s *stubUserRepo) ListAll(_ context.Context, _ string) ([]*userdomain.User,
 
 type phase5StubAudit struct {
 	events []string
+	// Audit 2026-05-11 Fix 13 — capture the details map so the
+	// TestLogout_RotatesCSRFForActor case can assert the rotated
+	// count carried by the auth.session_revoked row. Existing tests
+	// only consume `events`; details is append-aligned 1:1 with
+	// events for easy index-based correlation.
+	details []map[string]interface{}
 }
 
-func (s *phase5StubAudit) RecordEventWithCategory(_ context.Context, _ string, _ domain.ActorType, action, _, _, _ string, _ map[string]interface{}) error {
+func (s *phase5StubAudit) RecordEventWithCategory(_ context.Context, _ string, _ domain.ActorType, action, _, _, _ string, details map[string]interface{}) error {
 	s.events = append(s.events, action)
+	s.details = append(s.details, details)
 	return nil
 }
 
@@ -737,6 +756,104 @@ func TestLogout_NoCookie_Returns204(t *testing.T) {
 	h.Logout(w, req)
 	if w.Code != http.StatusNoContent {
 		t.Errorf("status = %d; want 204", w.Code)
+	}
+}
+
+// TestLogout_RotatesCSRFForActor pins the HIGH-2 fourth call site
+// (Audit 2026-05-11 Fix 13). After Revoke succeeds, the handler must
+// call RotateCSRFTokenForActor with the caller's (actorID, actorType)
+// pair so a token captured pre-logout (browser DevTools, malicious
+// extension) can't be replayed against a sibling session after the
+// user logged out here. The audit row must record the rotated count
+// so SOC / SIEM can correlate logout events with CSRF churn.
+func TestLogout_RotatesCSRFForActor(t *testing.T) {
+	sess := &stubSession{
+		validateRes:           &sessiondomain.Session{ID: "ses-abc", ActorID: "u-x", ActorType: "User"},
+		rotateCSRFReturnCount: 2, // caller has 2 active sessions before logout
+	}
+	h, _, _, _, audit, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, &stubBCLVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req = withActor(req, "u-x", "User")
+	req.AddCookie(&http.Cookie{Name: sessiondomain.PostLoginCookieName, Value: "v1.ses-abc.sk-xyz.mac"})
+	w := httptest.NewRecorder()
+	h.Logout(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; want 204", w.Code)
+	}
+
+	// Rotation MUST fire exactly once with the caller's (actor_id, actor_type).
+	if sess.rotateCSRFCalls != 1 {
+		t.Errorf("RotateCSRFTokenForActor call count = %d; want 1", sess.rotateCSRFCalls)
+	}
+	if len(sess.rotateCSRFActorIDs) != 1 || sess.rotateCSRFActorIDs[0] != "u-x" {
+		t.Errorf("rotateCSRF actor_ids = %v; want [u-x]", sess.rotateCSRFActorIDs)
+	}
+	if len(sess.rotateCSRFActorTypes) != 1 || sess.rotateCSRFActorTypes[0] != "User" {
+		t.Errorf("rotateCSRF actor_types = %v; want [User]", sess.rotateCSRFActorTypes)
+	}
+
+	// Revoke must still fire BEFORE rotation — pin the ordering by
+	// asserting the revokedIDs collection has been populated.
+	if len(sess.revokedIDs) != 1 || sess.revokedIDs[0] != "ses-abc" {
+		t.Errorf("expected Revoke(ses-abc) to fire; got revokedIDs=%v", sess.revokedIDs)
+	}
+
+	// Audit row carries the rotated count so SOC / SIEM can correlate
+	// logout events with CSRF churn on sibling sessions.
+	if !contains(audit.events, "auth.session_revoked") {
+		t.Fatalf("expected auth.session_revoked audit; got %v", audit.events)
+	}
+	last := audit.details[len(audit.details)-1]
+	if got, _ := last["csrf_rotated"].(int); got != 2 {
+		t.Errorf("audit details csrf_rotated = %v; want 2", last["csrf_rotated"])
+	}
+}
+
+// TestLogout_NoCookie_SkipsCSRFRotation pins the "no session →
+// short-circuit" path. When the caller has no session cookie, Logout
+// returns 204 immediately without touching Revoke OR the rotator —
+// rotating CSRF for a caller who's already logged out (or never logged
+// in) would do nothing useful and pollutes the audit log.
+func TestLogout_NoCookie_SkipsCSRFRotation(t *testing.T) {
+	sess := &stubSession{}
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, &stubBCLVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req = withActor(req, "u-x", "User")
+	w := httptest.NewRecorder()
+	h.Logout(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; want 204", w.Code)
+	}
+	if sess.rotateCSRFCalls != 0 {
+		t.Errorf("RotateCSRFTokenForActor called %d times on the no-cookie path; want 0",
+			sess.rotateCSRFCalls)
+	}
+}
+
+// TestLogout_InvalidCookie_SkipsCSRFRotation pins the "invalid cookie
+// → 204 + clear" path. Same rationale as the no-cookie test — there's
+// no session row to rotate against, and the caller is already
+// unauthenticated.
+func TestLogout_InvalidCookie_SkipsCSRFRotation(t *testing.T) {
+	sess := &stubSession{validateErr: errors.New("invalid session")}
+	h, _, _, _, _, _ := newPhase5Handler(t, &stubOIDCSvc{}, sess, &stubBCLVerifier{})
+
+	req := httptest.NewRequest(http.MethodPost, "/auth/logout", nil)
+	req = withActor(req, "u-x", "User")
+	req.AddCookie(&http.Cookie{Name: sessiondomain.PostLoginCookieName, Value: "v1.junk.sk.mac"})
+	w := httptest.NewRecorder()
+	h.Logout(w, req)
+
+	if w.Code != http.StatusNoContent {
+		t.Fatalf("status = %d; want 204", w.Code)
+	}
+	if sess.rotateCSRFCalls != 0 {
+		t.Errorf("RotateCSRFTokenForActor called %d times on the invalid-cookie path; want 0",
+			sess.rotateCSRFCalls)
 	}
 }
 
