@@ -282,6 +282,56 @@ func TestAuthorizer_SpecificScopeMatchesExactID(t *testing.T) {
 	}
 }
 
+// Audit 2026-05-11 A-1 — pin that when the SQL narrowed effective set
+// reflects an actor-role-scope-narrowed permission, CheckPermission
+// authorizes only the narrowed scope. This is the unit-level
+// counterpart to TestEffectivePermissions_ActorRoleProfile_RolePermGlobal_A1Closure
+// in internal/repository/postgres/auth_scope_test.go which exercises
+// the actual SQL.
+//
+// Pre-fix, the SQL ignored ar.scope_*, so a profile-scoped grant
+// produced a row with rp.scope (global), and CheckPermission would
+// pass for ANY profile. Post-fix, the SQL narrows the row to
+// (profile, p-prod), and CheckPermission only passes when the
+// request scope matches.
+func TestAuthorizer_ActorRoleProfileScope_OnlyNarrowedScopeAuthorizes_A1(t *testing.T) {
+	r := newFakeActorRoleRepo()
+	scope := "p-prod"
+	// Simulate the post-A-1 SQL emission: actor-role scoped to
+	// profile=p-prod + role-permission scoped global → narrowed
+	// effective row at profile=p-prod.
+	r.perms[actorKey("alice", authdomain.ActorTypeValue(domain.ActorTypeAPIKey))] = []repository.EffectivePermission{
+		{PermissionName: "cert.read", ScopeType: authdomain.ScopeTypeProfile, ScopeID: &scope},
+	}
+	az := NewAuthorizer(r)
+
+	// Request scope matches narrowed grant → authorize.
+	matchID := "p-prod"
+	ok, err := az.CheckPermission(context.Background(), "alice", authdomain.ActorTypeValue(domain.ActorTypeAPIKey), authdomain.DefaultTenantID, "cert.read", authdomain.ScopeTypeProfile, &matchID)
+	if err != nil {
+		t.Fatalf("CheckPermission (matching scope): %v", err)
+	}
+	if !ok {
+		t.Error("A-1: profile-scoped grant must authorize matching profile request")
+	}
+
+	// Different profile → reject (the load-bearing post-fix
+	// behavior). Pre-fix this would have returned true silently.
+	wrongID := "p-acme"
+	ok, _ = az.CheckPermission(context.Background(), "alice", authdomain.ActorTypeValue(domain.ActorTypeAPIKey), authdomain.DefaultTenantID, "cert.read", authdomain.ScopeTypeProfile, &wrongID)
+	if ok {
+		t.Error("A-1 regression: profile-scoped grant must NOT authorize a different profile (the canonical CRIT-5 shape)")
+	}
+
+	// Global request → also reject. A profile-scoped actor-role
+	// grant doesn't elevate to global; same shape as RFC 9700
+	// least-privilege.
+	ok, _ = az.CheckPermission(context.Background(), "alice", authdomain.ActorTypeValue(domain.ActorTypeAPIKey), authdomain.DefaultTenantID, "cert.read", authdomain.ScopeTypeGlobal, nil)
+	if ok {
+		t.Error("A-1: profile-scoped grant must NOT authorize a global request")
+	}
+}
+
 // =============================================================================
 // RoleService tests
 // =============================================================================

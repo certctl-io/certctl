@@ -335,8 +335,13 @@ func NewActorRoleRepository(db *sql.DB) *ActorRoleRepository {
 }
 
 func (r *ActorRoleRepository) ListByActor(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, tenantID string) ([]*authdomain.ActorRole, error) {
+	// Audit 2026-05-11 A-1 — include scope_type + scope_id in the
+	// SELECT so the GUI / MCP surface can render which scope an
+	// actor's grant is bound to. Pre-fix, these columns were
+	// persisted by Grant (HIGH-10 closure) but never surfaced on
+	// read — operators couldn't see what they configured.
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id
+		SELECT id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id, scope_type, scope_id
 		FROM actor_roles
 		WHERE actor_id = $1 AND actor_type = $2 AND tenant_id = $3
 		ORDER BY granted_at
@@ -349,7 +354,7 @@ func (r *ActorRoleRepository) ListByActor(ctx context.Context, actorID string, a
 
 func (r *ActorRoleRepository) ListByRole(ctx context.Context, roleID string) ([]*authdomain.ActorRole, error) {
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id
+		SELECT id, actor_id, actor_type, role_id, granted_at, expires_at, granted_by, tenant_id, scope_type, scope_id
 		FROM actor_roles
 		WHERE role_id = $1
 		ORDER BY granted_at
@@ -468,15 +473,55 @@ func (r *ActorRoleRepository) AdminExists(ctx context.Context, tenantID string) 
 }
 
 func (r *ActorRoleRepository) EffectivePermissions(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, tenantID string) ([]repository.EffectivePermission, error) {
+	// Audit 2026-05-11 A-1 — effective scope is the intersection of
+	// the actor-role's scope (ar.scope_*) AND the role-permission's
+	// scope (rp.scope_*). Pre-fix, only rp.scope_* was read; an
+	// actor granted r-operator scoped to profile=p-prod silently
+	// got every r-operator permission at every scope rp emitted
+	// (typically global), defeating HIGH-10's per-actor scope knob.
+	//
+	// Matching rules (the inner CASE encodes them):
+	//
+	//   ar.scope    rp.scope    effective_scope
+	//   ─────────   ─────────   ──────────────────────
+	//   global      global      global / NULL
+	//   global      profile=X   profile=X      (rp narrows)
+	//   profile=X   global      profile=X      (ar narrows)
+	//   profile=X   profile=X   profile=X      (both agree)
+	//   profile=X   profile=Y   ROW DROPPED    (disjoint scopes — no permission flows)
+	//   profile=X   issuer=*    ROW DROPPED    (scope-type mismatch)
+	//
+	// The HAVING-style filter is implemented via a subquery — Postgres
+	// doesn't allow referencing a CASE alias from HAVING in a SELECT
+	// DISTINCT context without a wrapping CTE.
 	rows, err := r.db.QueryContext(ctx, `
-		SELECT DISTINCT p.name, rp.scope_type, rp.scope_id
-		FROM actor_roles ar
-		JOIN role_permissions rp ON rp.role_id = ar.role_id
-		JOIN permissions p ON p.id = rp.permission_id
-		WHERE ar.actor_id = $1
-		  AND ar.actor_type = $2
-		  AND ar.tenant_id = $3
-		  AND (ar.expires_at IS NULL OR ar.expires_at > NOW())
+		SELECT DISTINCT permission_name, effective_scope_type, effective_scope_id
+		FROM (
+			SELECT
+				p.name AS permission_name,
+				CASE
+					WHEN ar.scope_type = 'global' AND rp.scope_type = 'global' THEN 'global'
+					WHEN ar.scope_type = 'global' THEN rp.scope_type
+					WHEN rp.scope_type = 'global' THEN ar.scope_type
+					WHEN ar.scope_type = rp.scope_type AND ar.scope_id IS NOT DISTINCT FROM rp.scope_id THEN ar.scope_type
+					ELSE NULL
+				END AS effective_scope_type,
+				CASE
+					WHEN ar.scope_type = 'global' AND rp.scope_type = 'global' THEN NULL
+					WHEN ar.scope_type = 'global' THEN rp.scope_id
+					WHEN rp.scope_type = 'global' THEN ar.scope_id
+					WHEN ar.scope_type = rp.scope_type AND ar.scope_id IS NOT DISTINCT FROM rp.scope_id THEN ar.scope_id
+					ELSE NULL
+				END AS effective_scope_id
+			FROM actor_roles ar
+			JOIN role_permissions rp ON rp.role_id = ar.role_id
+			JOIN permissions p ON p.id = rp.permission_id
+			WHERE ar.actor_id = $1
+			  AND ar.actor_type = $2
+			  AND ar.tenant_id = $3
+			  AND (ar.expires_at IS NULL OR ar.expires_at > NOW())
+		) AS intersected
+		WHERE effective_scope_type IS NOT NULL
 	`, actorID, string(actorType), tenantID)
 	if err != nil {
 		return nil, fmt.Errorf("actorRole.effective: %w", err)
@@ -505,15 +550,27 @@ func scanActorRoles(rows *sql.Rows) ([]*authdomain.ActorRole, error) {
 	var out []*authdomain.ActorRole
 	for rows.Next() {
 		var ar authdomain.ActorRole
-		var actorType string
+		var actorType, scopeType string
 		var expires sql.NullTime
-		if err := rows.Scan(&ar.ID, &ar.ActorID, &actorType, &ar.RoleID, &ar.GrantedAt, &expires, &ar.GrantedBy, &ar.TenantID); err != nil {
+		var scopeID sql.NullString
+		// Audit 2026-05-11 A-1 — scope_type + scope_id are persisted
+		// by Grant (HIGH-10 closure, migration 000043). Pre-fix they
+		// were never scanned, so callers received ActorRole with
+		// zero-value scope fields regardless of what the row held.
+		// EffectivePermissions narrowing depends on these being
+		// populated correctly.
+		if err := rows.Scan(&ar.ID, &ar.ActorID, &actorType, &ar.RoleID, &ar.GrantedAt, &expires, &ar.GrantedBy, &ar.TenantID, &scopeType, &scopeID); err != nil {
 			return nil, fmt.Errorf("actorRole scan: %w", err)
 		}
 		ar.ActorType = authdomain.ActorTypeValue(actorType)
 		if expires.Valid {
 			t := expires.Time
 			ar.ExpiresAt = &t
+		}
+		ar.ScopeType = authdomain.ScopeType(scopeType)
+		if scopeID.Valid {
+			s := scopeID.String
+			ar.ScopeID = &s
 		}
 		out = append(out, &ar)
 	}

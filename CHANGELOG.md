@@ -2,6 +2,26 @@
 
 ## Unreleased
 
+### Security (BREAKING — silent-elevation closure)
+
+- **HIGH-10 actor-role scope is now enforced (Audit 2026-05-11 A-1).**
+  Pre-fix, `actor_roles.scope_type` / `scope_id` (added in migration 000043
+  by the HIGH-10 closure) were persisted by Grant + accepted on the handler
+  body + surfaced through the GUI/MCP — but the load-bearing
+  `EffectivePermissions` SQL never read them. A profile-scoped grant
+  silently elevated to global at authorization time. Canonical CRIT-5
+  lying-field shape, replicated. **The post-fix authorization narrows
+  correctly**: every existing `actor_roles` row with `scope_type != 'global'`
+  now takes effect.
+
+  > **Operator advisory:** if you used the HIGH-10 scope-bound role-grant
+  > API between commit `551812b` and the v2.1.0 tag (the column was
+  > populated but ignored), the grants were silently global. After
+  > upgrading, audit `SELECT actor_id, role_id, scope_type, scope_id FROM
+  > actor_roles WHERE scope_type != 'global'` and confirm the narrowing
+  > reflects intent. If an actor was granted a scoped role but expected
+  > global behavior, re-grant with `scope_type=global`.
+
 ### Security (BREAKING)
 
 - **`__Host-` cookie prefix on all three auth cookies (Audit 2026-05-10 MED-14).**
