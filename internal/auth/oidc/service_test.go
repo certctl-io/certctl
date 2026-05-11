@@ -934,6 +934,172 @@ func TestService_UpsertUser_UpdateExistingPath(t *testing.T) {
 	}
 }
 
+// TestService_HandleCallback_RejectsDeactivatedUser pins the A-2
+// CRIT closure. A federated user whose `users.deactivated_at` is
+// non-nil must NOT be able to log in via OIDC; HandleCallback must
+// return ErrUserDeactivated BEFORE the email/display-name mutation
+// and last_login_at bump, and BEFORE the session mint.
+//
+// Audit 2026-05-11 A-2 — pre-fix, the deactivate handler set
+// `users.deactivated_at` on the in-memory struct, but: (a) the SQL
+// Update omitted the column so the write was a no-op; (b) the
+// postgres SELECT didn't include the column so even if (a) were
+// fixed scanUser returned DeactivatedAt = nil; (c) upsertUser never
+// looked at DeactivatedAt. The lying-field chain meant the very
+// next OIDC login re-elevated the user. This test pins the
+// service-layer leg of the closure (the SQL legs are pinned by
+// postgres/user_test.go).
+func TestService_HandleCallback_RejectsDeactivatedUser(t *testing.T) {
+	idp := newMockIdP(t)
+	users := newStubUsers()
+
+	// Pre-seed the user as deactivated. The default mockIdP subject
+	// is "test-subject"; the provider ID is "op-deact".
+	deactivatedAt := time.Now().UTC().Add(-1 * time.Hour)
+	prov := makeProvider(idp.URL(), "op-deact")
+	seeded := &userdomain.User{
+		ID:                  "u-deactivated",
+		TenantID:            prov.TenantID,
+		Email:               "deactivated@example.com",
+		DisplayName:         "Deactivated User",
+		OIDCSubject:         "test-subject",
+		OIDCProviderID:      "op-deact",
+		LastLoginAt:         time.Now().UTC().Add(-2 * time.Hour),
+		WebAuthnCredentials: []byte("[]"),
+		CreatedAt:           time.Now().UTC().Add(-24 * time.Hour),
+		UpdatedAt:           time.Now().UTC().Add(-1 * time.Hour),
+		DeactivatedAt:       &deactivatedAt,
+	}
+	users.byID[seeded.ID] = seeded
+	users.bySubject["op-deact:test-subject"] = seeded
+	originalLastLogin := seeded.LastLoginAt
+
+	pl := newStubPreLogin()
+	mappings := &stubMappings{roleIDs: []string{"r-operator"}}
+	sessions := &stubSessions{}
+	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
+
+	cookie, _, err := pl.CreatePreLogin(context.Background(), "op-deact", "deact-state", "test-nonce-fixed",
+		"v-deactiveeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "", "")
+	if err != nil {
+		t.Fatalf("CreatePreLogin: %v", err)
+	}
+
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "deact-state", "", "10.0.0.1", "Mozilla/5.0")
+	if !errors.Is(err, ErrUserDeactivated) {
+		t.Fatalf("err = %v; want ErrUserDeactivated", err)
+	}
+	if res != nil {
+		t.Errorf("CallbackResult should be nil on rejection, got %+v", res)
+	}
+
+	// Defense order pin — the rejected attempt must NOT have touched
+	// the persisted row's mutable fields. (Pre-fix the upsertUser
+	// path would update email + last_login_at first and only catch
+	// later; A-2 closure moves the check to the head of the function.)
+	row := users.byID["u-deactivated"]
+	if row.LastLoginAt != originalLastLogin {
+		t.Errorf("last_login_at advanced on rejected login: %v -> %v", originalLastLogin, row.LastLoginAt)
+	}
+	if row.Email != "deactivated@example.com" {
+		t.Errorf("email mutated on rejected login: %q", row.Email)
+	}
+	if row.DeactivatedAt == nil {
+		t.Error("deactivated_at was cleared on rejected login")
+	}
+}
+
+// TestService_HandleCallback_AllowsReactivatedUser covers the
+// Reactivate handler's wire end: after `users.deactivated_at` is
+// cleared, the next OIDC login goes through the update path
+// normally. Pins the inverse of TestService_HandleCallback_RejectsDeactivatedUser.
+func TestService_HandleCallback_AllowsReactivatedUser(t *testing.T) {
+	idp := newMockIdP(t)
+	users := newStubUsers()
+
+	prov := makeProvider(idp.URL(), "op-react")
+	seeded := &userdomain.User{
+		ID:                  "u-reactivated",
+		TenantID:            prov.TenantID,
+		Email:               "reactivated@example.com",
+		DisplayName:         "Reactivated User",
+		OIDCSubject:         "test-subject",
+		OIDCProviderID:      "op-react",
+		LastLoginAt:         time.Now().UTC().Add(-2 * time.Hour),
+		WebAuthnCredentials: []byte("[]"),
+		CreatedAt:           time.Now().UTC().Add(-24 * time.Hour),
+		UpdatedAt:           time.Now().UTC().Add(-1 * time.Hour),
+		DeactivatedAt:       nil, // active again
+	}
+	users.byID[seeded.ID] = seeded
+	users.bySubject["op-react:test-subject"] = seeded
+
+	pl := newStubPreLogin()
+	mappings := &stubMappings{roleIDs: []string{"r-operator"}}
+	sessions := &stubSessions{}
+	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-react", "react-state", "test-nonce-fixed",
+		"v-reactiveeeeeeeeeeeeeeeeeeeeeeeeeeeeeeeee", "", "")
+	res, err := svc.HandleCallback(context.Background(), cookie, "code", "react-state", "", "10.0.0.1", "Mozilla/5.0")
+	if err != nil {
+		t.Fatalf("HandleCallback after reactivation: %v", err)
+	}
+	if res == nil || res.User == nil {
+		t.Fatal("expected non-nil callback result after reactivation")
+	}
+	if res.User.ID != "u-reactivated" {
+		t.Errorf("CallbackResult.User.ID = %q; want u-reactivated", res.User.ID)
+	}
+}
+
+// TestService_HandleCallback_DeactivatedUserPreservesForensics
+// makes the defense-in-depth claim explicit: a rejected login does
+// not bump last_login_at. This guards against a regression where
+// someone "fixes" upsertUser by re-ordering the assignments to set
+// LastLoginAt before checking DeactivatedAt.
+func TestService_HandleCallback_DeactivatedUserPreservesForensics(t *testing.T) {
+	idp := newMockIdP(t)
+	users := newStubUsers()
+
+	deactivatedAt := time.Now().UTC().Add(-30 * time.Minute)
+	prov := makeProvider(idp.URL(), "op-forensic")
+	seeded := &userdomain.User{
+		ID:                  "u-forensic",
+		TenantID:            prov.TenantID,
+		Email:               "forensic@example.com",
+		DisplayName:         "Forensic User",
+		OIDCSubject:         "test-subject",
+		OIDCProviderID:      "op-forensic",
+		LastLoginAt:         time.Now().UTC().Add(-48 * time.Hour),
+		WebAuthnCredentials: []byte("[]"),
+		CreatedAt:           time.Now().UTC().Add(-72 * time.Hour),
+		UpdatedAt:           time.Now().UTC().Add(-30 * time.Minute),
+		DeactivatedAt:       &deactivatedAt,
+	}
+	users.byID[seeded.ID] = seeded
+	users.bySubject["op-forensic:test-subject"] = seeded
+	frozenLastLogin := seeded.LastLoginAt
+
+	pl := newStubPreLogin()
+	mappings := &stubMappings{roleIDs: []string{"r-operator"}}
+	sessions := &stubSessions{}
+	svc := NewService(&stubProviderLookup{provider: prov}, mappings, users, sessions, pl, "")
+
+	cookie, _, _ := pl.CreatePreLogin(context.Background(), "op-forensic", "for-state", "test-nonce-fixed",
+		"v-forensiccccccccccccccccccccccccccccccccc", "", "")
+	_, err := svc.HandleCallback(context.Background(), cookie, "code", "for-state", "", "10.0.0.1", "Mozilla/5.0")
+	if !errors.Is(err, ErrUserDeactivated) {
+		t.Fatalf("err = %v; want ErrUserDeactivated", err)
+	}
+
+	row := users.byID["u-forensic"]
+	if row.LastLoginAt != frozenLastLogin {
+		t.Errorf("last_login_at advanced on rejected login (forensics tainted): %v -> %v",
+			frozenLastLogin, row.LastLoginAt)
+	}
+}
+
 // TestService_ATHash_CoversAllAllowedAlgs pins the at_hash alg dispatch
 // for every algorithm in DefaultAllowedAlgs.
 func TestService_ATHash_CoversAllAllowedAlgs(t *testing.T) {

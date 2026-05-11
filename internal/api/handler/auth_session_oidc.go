@@ -1006,11 +1006,11 @@ func (h *AuthSessionOIDCHandler) TestProvider(w http.ResponseWriter, r *http.Req
 	}
 	h.recordAudit(r.Context(), "auth.oidc_provider_tested", caller.ActorID, caller.ActorType, "",
 		map[string]interface{}{
-			"issuer_url":           req.IssuerURL,
-			"discovery_succeeded":  res.DiscoverySucceeded,
-			"jwks_reachable":       res.JWKSReachable,
-			"iss_param_supported":  res.IssParamSupported,
-			"error_count":          len(res.Errors),
+			"issuer_url":          req.IssuerURL,
+			"discovery_succeeded": res.DiscoverySucceeded,
+			"jwks_reachable":      res.JWKSReachable,
+			"iss_param_supported": res.IssParamSupported,
+			"error_count":         len(res.Errors),
 		})
 	writeJSON(w, http.StatusOK, res)
 }
@@ -1267,6 +1267,14 @@ func classifyOIDCFailure(err error) string {
 		return "prelogin_ua_mismatch"
 	case errors.Is(err, oidcsvc.ErrPreLoginIPMismatch):
 		return "prelogin_ip_mismatch"
+	// Audit 2026-05-11 A-2 — surface deactivated-user rejection as its
+	// own audit category so SOC / SIEM can alert on attempted logins by
+	// federated users that the admin has soft-deleted. Typed dispatch
+	// (not substring) because the sentinel is the only authoritative
+	// test for this condition; the message string is implementation
+	// detail subject to change.
+	case errors.Is(err, oidcsvc.ErrUserDeactivated):
+		return "user_deactivated"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

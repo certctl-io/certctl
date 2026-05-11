@@ -341,6 +341,10 @@ export const authListUsers = (providerID?: string) => {
 };
 export const authDeactivateUser = (id: string) =>
   fetchJSON<unknown>(`${BASE}/auth/users/${id}`, { method: 'DELETE' });
+// Audit 2026-05-11 A-2 — inverse of authDeactivateUser. Clears
+// users.deactivated_at; next OIDC login proceeds normally.
+export const authReactivateUser = (id: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/users/${id}/reactivate`, { method: 'POST' });
 
 // MED-12 — runtime config.
 export const authRuntimeConfig = () =>
