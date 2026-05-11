@@ -32,7 +32,45 @@ var (
 	// references a permission name not in the canonical catalog.
 	// Maps to HTTP 400.
 	ErrAuthUnknownPermission = errors.New("auth: permission not in canonical catalog")
+
+	// ErrActorRoleNotFound is returned by ActorRoleRepository.Revoke
+	// when the caller passes a non-empty `RevokeOptions.ScopeType` that
+	// doesn't match any persisted (actor, role, scope_type, scope_id)
+	// tuple. The legacy no-opts "revoke all variants" call never
+	// returns this — pre-A-4 callers cannot start seeing the error.
+	// Maps to HTTP 404. Audit 2026-05-11 A-4.
+	ErrActorRoleNotFound = errors.New("auth: no actor_role row matches the requested scope")
 )
+
+// ActorRoleRevokeOptions narrows ActorRoleRepository.Revoke to a
+// specific (scope_type, scope_id) variant when set. Audit 2026-05-11
+// A-4 — HIGH-10's UNIQUE (actor, role, scope_type, scope_id, tenant)
+// uniqueness extension allows multiple scoped grants of the same role
+// to the same actor; without scope plumbing on Revoke an operator who
+// granted Alice `r-operator` against both `profile=p-acme` and
+// `profile=p-globex` cannot selectively revoke one.
+//
+// Semantics:
+//
+//   - Zero value (ScopeType="") preserves the legacy "revoke all
+//     variants" behaviour. Every actor_roles row matching
+//     (actor_id, actor_type, role_id, tenant_id) is deleted regardless
+//     of scope. Pre-A-4 callers that don't pass options stay correct.
+//
+//   - Non-empty ScopeType filters to that one variant. `global`
+//     requires ScopeID==nil; `profile` / `issuer` require
+//     ScopeID!=nil. The SQL uses `scope_type = $5 AND scope_id IS NOT
+//     DISTINCT FROM $6` so the NULL case matches cleanly.
+//
+//   - If the filter doesn't match any row, the repository returns
+//     ErrActorRoleNotFound — the caller (service / handler) maps it
+//     to HTTP 404. The legacy "revoke all" semantic stays best-effort
+//     (deleting zero rows is not an error) because the GUI used to
+//     fire it as a clean-up and operators rely on the idempotence.
+type ActorRoleRevokeOptions struct {
+	ScopeType authdomain.ScopeType
+	ScopeID   *string
+}
 
 // TenantRepository wraps the tenants table. Bundle 1 ships single-tenant
 // (one seeded `t-default`); the future managed-service offering activates
@@ -89,10 +127,15 @@ type ActorRoleRepository interface {
 	// only if the operator explicitly wires that, which the API
 	// layer rejects.
 	Grant(ctx context.Context, ar *authdomain.ActorRole) error
-	// Revoke deletes an actor_roles row by (actor_id, actor_type,
-	// role_id, tenant_id). The API layer must reject revocations
-	// targeting `actor-demo-anon` to preserve the demo path.
-	Revoke(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, tenantID string) error
+	// Revoke deletes actor_roles row(s). Without opts (the legacy
+	// no-options call shape) every variant matching
+	// (actor_id, actor_type, role_id, tenant_id) is deleted regardless
+	// of (scope_type, scope_id). With opts.ScopeType set, only the
+	// matching variant is deleted; no-match returns
+	// ErrActorRoleNotFound. The API layer must reject revocations
+	// targeting `actor-demo-anon` to preserve the demo path. Audit
+	// 2026-05-11 A-4 — see ActorRoleRevokeOptions for semantics.
+	Revoke(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, tenantID string, opts ActorRoleRevokeOptions) error
 
 	// EffectivePermissions returns the deduplicated set of
 	// (permission_name, scope_type, scope_id) triples granted to the

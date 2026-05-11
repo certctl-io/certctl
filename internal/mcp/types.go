@@ -602,9 +602,18 @@ type AuthAssignKeyRoleInput struct {
 
 // AuthRevokeKeyRoleInput is the input for
 // certctl_auth_revoke_role_from_key.
+//
+// Audit 2026-05-11 A-4 — optional scope_type / scope_id fields narrow
+// the revoke to a single (scope_type, scope_id) variant when multiple
+// scoped grants of the same role exist. Empty scope_type fires the
+// legacy "revoke every variant" semantic. The handler enforces:
+// `scope_id` empty when scope_type=global; non-empty when
+// scope_type=profile / issuer.
 type AuthRevokeKeyRoleInput struct {
-	KeyID  string `json:"key_id" jsonschema:"API-key actor ID. Reserved actor-demo-anon is rejected server-side"`
-	RoleID string `json:"role_id" jsonschema:"Role ID to revoke"`
+	KeyID     string `json:"key_id" jsonschema:"API-key actor ID. Reserved actor-demo-anon is rejected server-side"`
+	RoleID    string `json:"role_id" jsonschema:"Role ID to revoke"`
+	ScopeType string `json:"scope_type,omitempty" jsonschema:"Optional scope filter: global / profile / issuer. Empty = revoke every scope variant of this role (legacy behaviour)"`
+	ScopeID   string `json:"scope_id,omitempty" jsonschema:"Required when scope_type=profile or issuer; must be empty when scope_type=global"`
 }
 
 // =============================================================================

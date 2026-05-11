@@ -406,13 +406,58 @@ func (r *ActorRoleRepository) Grant(ctx context.Context, ar *authdomain.ActorRol
 	return nil
 }
 
-func (r *ActorRoleRepository) Revoke(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, tenantID string) error {
-	_, err := r.db.ExecContext(ctx, `
+// Audit 2026-05-11 A-4 — scope-aware revoke. The pre-fix SQL omitted
+// (scope_type, scope_id) from the WHERE clause; combined with HIGH-10's
+// UNIQUE (actor_id, actor_type, role_id, scope_type, scope_id, tenant_id)
+// uniqueness extension, an operator who granted the same role to the
+// same actor at two different scopes had no selective-revoke path —
+// every Revoke call nuked both rows. The new behaviour:
+//
+//   - opts.ScopeType == "" (legacy call shape): drop the scope from the
+//     WHERE clause; delete every variant. Zero-row delete is NOT an
+//     error (preserves the GUI's pre-A-4 idempotence contract).
+//
+//   - opts.ScopeType != "": narrow WHERE with
+//     `scope_type = $5 AND scope_id IS NOT DISTINCT FROM $6` (the
+//     IS-NOT-DISTINCT-FROM handles the `global → scope_id IS NULL`
+//     case cleanly — Postgres `= NULL` would silently match nothing).
+//     Zero-row delete IS an error (ErrActorRoleNotFound, mapped to
+//     HTTP 404 upstream) so operators get feedback when they target a
+//     scope variant that doesn't exist.
+func (r *ActorRoleRepository) Revoke(ctx context.Context, actorID string, actorType authdomain.ActorTypeValue, roleID, tenantID string, opts repository.ActorRoleRevokeOptions) error {
+	if opts.ScopeType == "" {
+		// Legacy "revoke all variants" path. Zero-row delete = no-op.
+		_, err := r.db.ExecContext(ctx, `
+			DELETE FROM actor_roles
+			WHERE actor_id = $1 AND actor_type = $2 AND role_id = $3 AND tenant_id = $4
+		`, actorID, string(actorType), roleID, tenantID)
+		if err != nil {
+			return fmt.Errorf("actorRole.revoke: %w", err)
+		}
+		return nil
+	}
+	// Scoped path. `scope_id IS NOT DISTINCT FROM $6` makes
+	// (global, NULL) match (global, NULL) cleanly — vanilla `=` would
+	// drop on NULL ≠ NULL.
+	var scopeID interface{}
+	if opts.ScopeID != nil && *opts.ScopeID != "" {
+		scopeID = *opts.ScopeID
+	}
+	res, err := r.db.ExecContext(ctx, `
 		DELETE FROM actor_roles
-		WHERE actor_id = $1 AND actor_type = $2 AND role_id = $3 AND tenant_id = $4
-	`, actorID, string(actorType), roleID, tenantID)
+		WHERE actor_id = $1
+		  AND actor_type = $2
+		  AND role_id = $3
+		  AND tenant_id = $4
+		  AND scope_type = $5
+		  AND scope_id IS NOT DISTINCT FROM $6
+	`, actorID, string(actorType), roleID, tenantID, string(opts.ScopeType), scopeID)
 	if err != nil {
 		return fmt.Errorf("actorRole.revoke: %w", err)
+	}
+	n, _ := res.RowsAffected()
+	if n == 0 {
+		return repository.ErrActorRoleNotFound
 	}
 	return nil
 }

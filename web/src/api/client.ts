@@ -387,10 +387,27 @@ export const authOIDCTestProvider = (body: {
     body: JSON.stringify(body),
   });
 
-export const authRevokeKeyRole = (keyId: string, roleId: string) =>
-  fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles/${roleId}`, {
-    method: 'DELETE',
-  });
+// Audit 2026-05-11 A-4 — optional scope filter. When opts is omitted
+// or scope_type is empty, the server runs the legacy "revoke every
+// scope variant of this role" semantic (preserves pre-A-4 GUI
+// behaviour). When scope_type is set, only the matching variant is
+// dropped; server enforces scope_id presence vs absence per
+// scope_type. Useful when one actor holds the same role scoped to
+// multiple profiles / issuers and the operator wants to drop one
+// without touching the others.
+export const authRevokeKeyRole = (
+  keyId: string,
+  roleId: string,
+  opts?: { scope_type?: string; scope_id?: string },
+) => {
+  let path = `${BASE}/auth/keys/${keyId}/roles/${roleId}`;
+  if (opts?.scope_type) {
+    const params = new URLSearchParams({ scope_type: opts.scope_type });
+    if (opts.scope_id) params.set('scope_id', opts.scope_id);
+    path += `?${params.toString()}`;
+  }
+  return fetchJSON<unknown>(path, { method: 'DELETE' });
+};
 
 export interface BootstrapAvailability {
   available: boolean;
