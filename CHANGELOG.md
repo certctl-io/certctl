@@ -4,6 +4,37 @@
 
 ### Security
 
+- **OIDC JWKS health panel + Refresh-now button (Audit 2026-05-11 Fix 10 — MED-7 GUI half).**
+  MED-7's backend endpoint `GET /api/v1/auth/oidc/providers/{id}/jwks-status`
+  (commit `d85114f`) shipped the per-provider verifier counters on
+  `dev/auth-bundle-2` but the GUI never called it. The audit doc had
+  prematurely flipped the row to CLOSED; `authOIDCJWKSStatus` in the
+  API client was dead code. Operators investigating "why is login
+  failing for this IdP" couldn't see `last_refresh_at`,
+  `rejected_jws_count`, or `last_error` from the GUI — they had to
+  drop to curl. New shared component
+  `web/src/pages/auth/OIDCJWKSStatusPanel.tsx` queries the endpoint
+  via TanStack Query (30s `staleTime`, `retry: 0` so a 403 hides the
+  panel silently for callers without `auth.oidc.list`) and renders
+  six dt/dd rows: Last refresh (with `(never — cold cache)` sentinel
+  when the timestamp is empty), Refresh count, Rejected JWS count,
+  Last error (red treatment when non-empty, `(none)` sentinel
+  otherwise), RFC 9207 iss param ("supported by IdP" / "not
+  advertised"), and Current KIDs (`(not exposed — query jwks_uri
+  directly)` sentinel when the backend declines to expose the list).
+  A "Refresh now" button invokes the existing
+  `POST .../refresh` (RefreshKeys path) and invalidates the panel's
+  query so the freshly-updated counters render without a page
+  reload. The button is hidden for callers without `auth.oidc.edit`
+  via the panel's optional `canRefresh` prop. Mounted on
+  `OIDCProviderDetailPage.tsx` between the read-only field display
+  and the Actions section. 9 Vitest tests pin: loading state,
+  happy-path-all-six-rows, 403-hides-panel, refresh-invalidates-
+  query, refresh-failure-surfaces-inline-without-hiding-panel,
+  never-refreshed-cold-cache-sentinel, current-kids-empty-not-
+  exposed-sentinel, last-error-red-treatment, and canRefresh=false-
+  hides-the-button.
+
 - **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
   HIGH-10 made it possible to grant the same role to the same actor at
   multiple scopes (e.g. `r-operator` on `profile=p-acme` AND `profile=p-globex`)
