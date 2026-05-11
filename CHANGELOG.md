@@ -35,6 +35,31 @@
 
 ### Security
 
+- **CSRF rotation on logout closes HIGH-2 fourth call site (Audit 2026-05-11 Fix 13).**
+  The HIGH-2 closure (`dev/auth-bundle-2`) documented four
+  `RotateCSRFTokenForActor` call sites: login completion (fresh by
+  construction), Assign/RevokeRole on role-mutation (wired), Logout, and
+  an explicit operator endpoint. The 2026-05-11 review verified only 3
+  of the 4 — Logout did NOT rotate the actor's sibling sessions
+  post-revoke, leaving a window where a token captured pre-logout
+  (browser DevTools, malicious extension, session-storage leak) could
+  be replayed against the user's other-device/other-browser sessions
+  until those sessions hit their own idle/absolute expiry.
+  `SessionMinter` interface extended with `RotateCSRFTokenForActor`;
+  `Logout` invokes it after `Revoke(sess.ID)` succeeds. The
+  `auth.session_revoked` audit row gains a `csrf_rotated` detail key
+  carrying the rotated count so SOC / SIEM can correlate logout events
+  with CSRF churn. The no-cookie + invalid-cookie 204 short-circuit
+  paths skip rotation (no session row to rotate against). 3 regression
+  tests in `internal/api/handler/auth_session_oidc_test.go` pin the
+  happy path + the two short-circuit branches. The explicit operator
+  endpoint (4) remains intentionally unbuilt — the three automatic
+  triggers (login + role-mutation + logout) cover the threat model;
+  operators who want a nuclear option can use the existing
+  `RevokeAllForActor` flow which forces re-login → fresh session →
+  fresh CSRF. **HIGH-2 fully closed across all four documented call
+  sites.**
+
 - **Demo-mode residual-grants detector + cleanup endpoint + CI guard (Audit 2026-05-11 A-8).**
   HIGH-12 (closure `b81588e`) added a fail-closed bind-address guard
   that refuses startup when `CERTCTL_AUTH_TYPE=none` binds non-loopback

@@ -68,11 +68,31 @@ type OIDCAuthHandshaker interface {
 }
 
 // SessionMinter is the slice of *session.Service the OIDC handler uses.
+//
+// Audit 2026-05-11 Fix 13 closure — adds RotateCSRFTokenForActor so the
+// Logout handler can fire the HIGH-2 fourth call site. The HIGH-2 spec
+// at cowork/auth-bundles-fixes-2026-05-10/06-high-1-2-revoke-and-rotate.md
+// enumerated four CSRF-rotation triggers; three were wired (login mints
+// fresh by construction, AssignRoleToKey + RevokeRoleFromKey rotate
+// post-success), but Logout was missing. A token captured pre-logout
+// (browser DevTools, malicious extension) was reusable on the actor's
+// sibling sessions until those sessions hit their own idle/absolute
+// expiry. Rotation on logout defeats this. Nil-safe: when the wired
+// implementation isn't the production *session.Service (e.g. a future
+// minimal-config deployment), the Logout handler skips the rotation
+// instead of panic-ing.
 type SessionMinter interface {
 	Create(ctx context.Context, actorID, actorType, ip, userAgent string) (*sessionsvc.CreateResult, error)
 	Validate(ctx context.Context, in sessionsvc.ValidateInput) (*sessiondomain.Session, error)
 	Revoke(ctx context.Context, sessionID string) error
 	RevokeAllForActor(ctx context.Context, actorID, actorType string) error
+	// RotateCSRFTokenForActor mints a fresh CSRF token across every
+	// active session for the (actorID, actorType) pair. Returns the
+	// count rotated. NEVER errors — rotation is defense-in-depth and
+	// must not block the surrounding mutation that triggered it.
+	// Matches the signature on *session.Service so the production
+	// wiring satisfies the interface without an adapter.
+	RotateCSRFTokenForActor(ctx context.Context, actorID, actorType string) int
 }
 
 // BackChannelLogoutVerifier validates an OpenID Connect Back-Channel
@@ -553,8 +573,19 @@ func (h *AuthSessionOIDCHandler) Logout(w http.ResponseWriter, r *http.Request) 
 		Error(w, http.StatusInternalServerError, "could not revoke session")
 		return
 	}
+	// Audit 2026-05-11 Fix 13 — HIGH-2 fourth call site. Rotate the CSRF
+	// token on the actor's remaining sessions so a token captured in
+	// this device's browser pre-logout (DevTools, malicious extension,
+	// session-storage leak) can't be replayed against a sibling session
+	// (other browser, other device) after the user logged out here.
+	// The just-revoked session also rotates but its CSRF lookup will
+	// fail at the sessions table's revoked_at IS NOT NULL filter
+	// anyway; rotation on the revoked row is harmless. RotateCSRFTokenForActor
+	// returns the count rotated and NEVER errors — rotation is defense
+	// in depth and must not block the logout success.
+	rotated := h.sessionSvc.RotateCSRFTokenForActor(r.Context(), caller.ActorID, string(caller.ActorType))
 	h.recordAudit(r.Context(), "auth.session_revoked", caller.ActorID, caller.ActorType, sess.ID,
-		map[string]interface{}{"session_id": sess.ID, "self_initiated": true})
+		map[string]interface{}{"session_id": sess.ID, "self_initiated": true, "csrf_rotated": rotated})
 	h.clearSessionCookies(w)
 	w.WriteHeader(http.StatusNoContent)
 }
