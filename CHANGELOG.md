@@ -2,6 +2,37 @@
 
 ## Unreleased
 
+### Tests
+
+- **Vitest coverage for the 2026-05-10/11 GUI batch (Audit 2026-05-11 Fix 12).**
+  The original GUI-batch commit `661b6db` claimed `npx tsc --noEmit PASS`
+  but shipped no Vitest cases for the new surfaces. The regression-
+  prevention layer was missing — a future refactor of `KeysPage`'s
+  assign modal could silently drop scope_type handling, the LOW-1 demo
+  banner could be hidden by a stray predicate flip, the LOW-11 hide of
+  the delete button on default roles could disappear and let operators
+  click straight into a backend 409, and nothing would surface in CI.
+  This closure adds 35 new test cases across five files:
+  `web/src/pages/auth/UsersPage.test.tsx` (new, 8 cases pinning the
+  active/deactivated/reactivate flow + provider filter + empty state +
+  loading state), `web/src/pages/auth/AuthSettingsPage.test.tsx`
+  (extended +4 cases pinning the MED-12 runtime-config panel —
+  alphabetical sort, `(empty)` placeholder, 403 silent-hide),
+  `web/src/pages/auth/KeysPage.test.tsx` (extended +8 cases pinning
+  the HIGH-10 GUI half — scope_type=global/profile/issuer body shape,
+  expires_at omission vs RFC3339 promotion, whitespace-only scope_id
+  rejection, demo-anon row mutation-button hide),
+  `web/src/pages/auth/RoleDetailPage.test.tsx` (new, 9 cases pinning
+  the MED-8 scope picker + the LOW-11 default-role delete-button hide
+  via the `DEFAULT_ROLE_IDS` set against `r-admin` + `r-auditor`),
+  `web/src/components/AuthProvider.test.tsx` (new, 5 cases pinning the
+  LOW-1 demo-banner visibility predicate — `authType==='none' &&
+  !loading` — across happy/api-key/oidc/loading/rejected branches; the
+  rejected-fetch path keeps the banner visible because the catch
+  treats it as an old-server-fallback to demo-mode, and that behavior
+  is pinned here so a future change surfaces in the diff). 40/40
+  test-file-scoped pass; `tsc --noEmit` clean.
+
 ### Security
 
 - **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
