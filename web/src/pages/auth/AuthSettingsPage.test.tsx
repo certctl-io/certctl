@@ -12,6 +12,12 @@ import type { ReactNode } from 'react';
 vi.mock('../../api/client', () => ({
   authMe: vi.fn(),
   authBootstrapAvailable: vi.fn(),
+  // Audit 2026-05-11 Fix 12 — runtime-config panel coverage. The page
+  // calls authRuntimeConfig via TanStack Query (retry: false), so a
+  // rejected mock makes the panel quietly absent. Tests mock it as
+  // needed; the two pre-existing tests rely on the panel being absent
+  // (no positive assertion against it) so the rejected default works.
+  authRuntimeConfig: vi.fn(),
 }));
 
 import AuthSettingsPage from './AuthSettingsPage';
@@ -67,5 +73,106 @@ describe('AuthSettingsPage', () => {
     renderWithProviders(<AuthSettingsPage />);
     await waitFor(() => screen.getByTestId('auth-settings-bootstrap-status'));
     expect(screen.getByTestId('auth-settings-bootstrap-status').textContent).toMatch(/OPEN/);
+  });
+});
+
+// =============================================================================
+// Audit 2026-05-11 Fix 12 — AuthSettingsPage runtime-config panel coverage.
+//
+// The MED-12 closure added the auth-runtime-config panel
+// (`data-testid="auth-settings-runtime-config"`) but the pre-existing tests
+// don't exercise it. This block pins:
+//   - Happy path renders one <tr> per key in the flat map.
+//   - Sort is alphabetical by key — operators rely on stable ordering when
+//     correlating CERTCTL_* config across logs and the GUI.
+//   - Empty string values render the "(empty)" placeholder, NOT a blank cell
+//     (otherwise the row visually disappears).
+//   - 403 / rejected query hides the panel silently — non-admins shouldn't
+//     see a half-rendered shell.
+// =============================================================================
+
+function setupAuthMeAdmin() {
+  vi.mocked(client.authMe).mockResolvedValue({
+    actor_id: 'admin',
+    actor_type: 'APIKey',
+    tenant_id: 't-default',
+    admin: true,
+    roles: ['r-admin'],
+    effective_permissions: [{ permission: 'auth.role.assign', scope_type: 'global' }],
+  });
+  vi.mocked(client.authBootstrapAvailable).mockResolvedValue({ available: false });
+}
+
+describe('AuthSettingsPage — runtime config panel (MED-12)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+    cleanup();
+  });
+
+  it('renders one table row per runtime-config key', async () => {
+    setupAuthMeAdmin();
+    vi.mocked(client.authRuntimeConfig).mockResolvedValue({
+      CERTCTL_AUTH_TYPE: 'oidc',
+      CERTCTL_BREAKGLASS_ENABLED: 'false',
+      CERTCTL_TRUSTED_PROXIES_COUNT: '2',
+    });
+
+    renderWithProviders(<AuthSettingsPage />);
+    await waitFor(() => screen.getByTestId('auth-settings-runtime-config'));
+
+    const panel = screen.getByTestId('auth-settings-runtime-config');
+    expect(panel.textContent).toContain('CERTCTL_AUTH_TYPE');
+    expect(panel.textContent).toContain('oidc');
+    expect(panel.textContent).toContain('CERTCTL_BREAKGLASS_ENABLED');
+    expect(panel.textContent).toContain('false');
+    expect(panel.textContent).toContain('CERTCTL_TRUSTED_PROXIES_COUNT');
+    expect(panel.textContent).toContain('2');
+  });
+
+  it('sorts rows alphabetically by key (stable correlation with log scraping)', async () => {
+    setupAuthMeAdmin();
+    vi.mocked(client.authRuntimeConfig).mockResolvedValue({
+      // Intentionally out of order — the sort comparator should normalize.
+      CERTCTL_TRUSTED_PROXIES_COUNT: '0',
+      CERTCTL_AUTH_TYPE: 'api-key',
+      CERTCTL_BREAKGLASS_ENABLED: 'true',
+    });
+
+    renderWithProviders(<AuthSettingsPage />);
+    await waitFor(() => screen.getByTestId('auth-settings-runtime-config'));
+
+    const panel = screen.getByTestId('auth-settings-runtime-config');
+    const auth = panel.textContent!.indexOf('CERTCTL_AUTH_TYPE');
+    const bg = panel.textContent!.indexOf('CERTCTL_BREAKGLASS_ENABLED');
+    const tp = panel.textContent!.indexOf('CERTCTL_TRUSTED_PROXIES_COUNT');
+    expect(auth).toBeGreaterThan(-1);
+    expect(bg).toBeGreaterThan(auth);
+    expect(tp).toBeGreaterThan(bg);
+  });
+
+  it('empty value renders the "(empty)" placeholder, not a blank cell', async () => {
+    setupAuthMeAdmin();
+    vi.mocked(client.authRuntimeConfig).mockResolvedValue({
+      CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID: '',
+    });
+
+    renderWithProviders(<AuthSettingsPage />);
+    await waitFor(() => screen.getByTestId('auth-settings-runtime-config'));
+
+    expect(screen.getByTestId('auth-settings-runtime-config').textContent)
+      .toContain('(empty)');
+  });
+
+  it('rejected runtime-config query hides the panel silently (e.g. 403 for non-admins)', async () => {
+    setupAuthMeAdmin();
+    vi.mocked(client.authRuntimeConfig).mockRejectedValue(new Error('HTTP 403: forbidden'));
+
+    renderWithProviders(<AuthSettingsPage />);
+    // Wait for the identity surface so we know render completed.
+    await waitFor(() => screen.getByTestId('auth-settings-roles'));
+
+    // Panel never renders — non-admins must not see the shell of a
+    // surface they can't read.
+    expect(screen.queryByTestId('auth-settings-runtime-config')).toBeNull();
   });
 });
