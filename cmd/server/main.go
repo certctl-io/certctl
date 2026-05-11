@@ -276,6 +276,21 @@ func main() {
 	// Initialize services (following the dependency graph)
 	auditService := service.NewAuditService(auditRepo)
 
+	// Audit 2026-05-11 A-8 closure: detect residual actor-demo-anon
+	// grants under non-`none` auth types. Defaults to WARN-only; flip
+	// CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true to fail-closed. Closes
+	// the deferred Phase 2 leg of the 2026-05-10 HIGH-12 closure.
+	{
+		preflightCtx, preflightCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		if err := preflightDemoModeResidual(preflightCtx, cfg, db, auditService, logger); err != nil {
+			preflightCancel()
+			logger.Error("startup refused: actor-demo-anon residual grants present + CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true",
+				"error", err)
+			os.Exit(1)
+		}
+		preflightCancel()
+	}
+
 	// RBAC primitive (Bundle 1 Phase 4). Wires the postgres auth repos
 	// + service-layer Authorizer that the AuthHandler / RequirePermission
 	// middleware uses. Migration 000029_rbac.up.sql provides the schema
@@ -1383,6 +1398,16 @@ func main() {
 		// service is wired above; handler is auth-exempt at the
 		// router (gated by the bootstrap.Strategy itself).
 		Bootstrap: bootstrapHandler,
+		// Audit 2026-05-11 A-8 closure — demo-mode residual cleanup.
+		// The cleanup closure captures the live *sql.DB pool so the
+		// handler doesn't pull repository.* / database/sql into the
+		// internal/api/handler import set. authType is a closure over
+		// cfg so the live config value is always read at request time.
+		DemoResidual: handler.NewDemoResidualHandler(
+			func(ctx context.Context) (int64, error) { return deleteDemoAnonResidue(ctx, db) },
+			func() string { return cfg.Auth.Type },
+			auditService,
+		),
 		// Checker is the load-bearing auth.PermissionChecker that
 		// auth.RequirePermission middleware uses to gate the legacy admin
 		// handlers (Bundle 1 Phase 3.5: bulk_revocation, admin_crl_cache,

@@ -161,6 +161,34 @@ var SpecParityExceptions = map[string]string{
 	// current. Documented inline at
 	// internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.
 	"DELETE /api/v1/auth/sessions": "Audit 2026-05-10 MED-3 — sign-out-all-other-sessions; gated auth.session.revoke. Documented inline at internal/api/handler/auth_session_oidc.go::RevokeAllExceptCurrent.",
+
+	// =========================================================================
+	// Pre-existing parity debt — routes that shipped on dev/auth-bundle-2
+	// without their OpenAPI rows. Each entry below is tracked here as an
+	// exception with a pointer to the origin commit + the handler file that
+	// already carries the contract docstring. A follow-on pass should
+	// promote each into a full operationId entry under api/openapi.yaml.
+	//
+	// Each entry MUST list the origin commit (git blame router.go for the
+	// r.Register call) so the parity-debt cleanup pass can group routes
+	// by author + topic.
+	// =========================================================================
+	"POST /api/v1/auth/oidc/test":                      "Audit 2026-05-10 MED-5 (Item 2; commit 00bbef7) — POST /api/v1/auth/oidc/test dry-run endpoint; gated auth.oidc.edit. Contract at internal/auth/oidc/test_discovery.go; OpenAPI row pending.",
+	"GET /api/v1/auth/oidc/providers/{id}/jwks-status": "Audit 2026-05-10 MED-6 follow-on (Item 3) — JWKS auto-refresh cache-status endpoint; gated auth.oidc.list. OpenAPI row pending.",
+	"GET /api/v1/auth/users":                           "Audit 2026-05-10 MED-7 / Bundle 2 Phase 13 Fix D — federated user list; gated auth.user.list. OpenAPI row pending.",
+	"DELETE /api/v1/auth/users/{id}":                   "Audit 2026-05-10 MED-7 / Bundle 2 Phase 13 Fix D — soft-delete a federated user (sets deactivated_at); gated auth.user.delete. Audit 2026-05-11 A-2 closure layered the login-time enforcement. OpenAPI row pending.",
+	"POST /api/v1/auth/users/{id}/reactivate":          "Audit 2026-05-11 A-2 closure (commit a980e4c) — clears deactivated_at so a soft-deleted federated user can log in again; gated auth.user.edit. OpenAPI row pending.",
+	"GET /api/v1/auth/runtime-config":                  "Audit 2026-05-10 MED-12 / Bundle 2 Phase 13 Fix D — admin-only inspector for the live auth-related env vars; gated auth.role.assign. Handler at internal/api/handler/auth_runtime_config.go. OpenAPI row pending.",
+
+	// Audit 2026-05-11 A-8 closure — demo-mode residual-grants cleanup.
+	// The endpoint removes residual actor-demo-anon role grants from a
+	// production deploy that previously ran (or installed alongside)
+	// demo mode. Admin-class (auth.role.assign) gated at the router.
+	// Refuses to run when Auth.Type=none (503). Wire-shape is a plain
+	// JSON POST → {removed: int64}. Handler doc-block at
+	// internal/api/handler/demo_residual.go::Cleanup; operator
+	// runbook at docs/operator/security.md::demo-to-production-cutover.
+	"POST /api/v1/auth/demo-residual/cleanup": "Audit 2026-05-11 A-8 closure — demo-mode residual-grants cleanup; gated auth.role.assign. Refuses when Auth.Type=none. Handler at internal/api/handler/demo_residual.go. OpenAPI row pending — endpoint shape is minimal (POST → {removed: int64}).",
 }
 
 func TestRouter_OpenAPIParity(t *testing.T) {

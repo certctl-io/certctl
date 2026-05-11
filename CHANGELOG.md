@@ -4,6 +4,41 @@
 
 ### Security
 
+- **Demo-mode residual-grants detector + cleanup endpoint + CI guard (Audit 2026-05-11 A-8).**
+  HIGH-12 (closure `b81588e`) added a fail-closed bind-address guard
+  that refuses startup when `CERTCTL_AUTH_TYPE=none` binds non-loopback
+  without `CERTCTL_DEMO_MODE_ACK=true`. The Phase 2 leg of that spec —
+  production-startup banner when `actor-demo-anon` has residual role
+  grants in `actor_roles` plus a CI guard banning new synthetic-admin
+  code paths — was deferred. This closure lands all three deferred
+  legs. (1) `cmd/server/preflight_demo_residual.go` runs after the DB
+  is open + audit service is constructed, before the HTTPS listener
+  starts; under any non-`none` auth type it queries `actor_roles` for
+  `actor-demo-anon` and emits a WARN log + `auth.demo_residual_grants_detected`
+  audit row when the row is present. The migration 000029 baseline
+  unconditionally seeds the `ar-demo-anon-admin` row at install time,
+  so EVERY production deploy will see this WARN on first boot — the
+  intended cutover workflow is documented at `docs/operator/security.md`.
+  (2) `POST /api/v1/auth/demo-residual/cleanup` is an admin-class
+  (`auth.role.assign`) cleanup endpoint that removes every
+  `actor-demo-anon` row from `actor_roles` and returns
+  `{"removed": <int64>}`; idempotent (a second call returns
+  `removed:0`), refuses 503 under `Auth.Type=none` (deleting the row
+  would break the demo path), audit-logs every invocation. (3) New
+  env var `CERTCTL_DEMO_MODE_RESIDUAL_STRICT` (default `false`)
+  pivots the WARN to fail-closed startup refusal for operators who
+  want a paranoid hostile-environment posture. (4) CI guard
+  `scripts/ci-guards/no-new-synthetic-admin.sh` pins the 17-entry
+  allowlist of source files that may reference the `actor-demo-anon`
+  literal; new runtime code paths that resolve to the synthetic actor
+  are rejected at PR time so the credibility gap stays closed. The
+  closure was framed as "credibility gap, not exploitable
+  vulnerability" — the residue requires a regression elsewhere in the
+  middleware chain to be exploitable. After this fix, the canonical
+  acquisition-readiness narrative ("RBAC primitive with no
+  synthetic-admin fallback") is fully true. Operator runbook at
+  `docs/operator/security.md#demo-to-production-cutover-audit-2026-05-11-a-8`.
+
 - **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
   HIGH-10 made it possible to grant the same role to the same actor at
   multiple scopes (e.g. `r-operator` on `profile=p-acme` AND `profile=p-globex`)

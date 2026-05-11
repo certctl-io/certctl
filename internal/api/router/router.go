@@ -187,6 +187,13 @@ type HandlerRegistry struct {
 	// itself authenticates via the bootstrap token).
 	Bootstrap handler.BootstrapHandler
 
+	// DemoResidual (Audit 2026-05-11 A-8) handles
+	// POST /api/v1/auth/demo-residual/cleanup. Removes residual
+	// actor-demo-anon role grants from the actor_roles table. RBAC-
+	// gated at the router via auth.role.assign (admin-class).
+	// Refuses to run when the server is in demo mode (Auth.Type=none).
+	DemoResidual handler.DemoResidualHandler
+
 	// Checker is the load-bearing auth.PermissionChecker that
 	// auth.RequirePermission middleware uses to gate the legacy admin
 	// handlers (Bundle 1 Phase 3.5). cmd/server wires the postgres
@@ -400,6 +407,13 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 	r.Register("GET /api/v1/auth/keys", rbacGate(reg.Checker, "auth.key.list", reg.Auth.ListKeys))
 	r.Register("POST /api/v1/auth/keys/{id}/roles", rbacGate(reg.Checker, "auth.role.assign", reg.Auth.AssignRoleToKey))
 	r.Register("DELETE /api/v1/auth/keys/{id}/roles/{role_id}", rbacGate(reg.Checker, "auth.role.revoke", reg.Auth.RevokeRoleFromKey))
+
+	// Audit 2026-05-11 A-8 closure — demo-mode residual-grants cleanup.
+	// Gated auth.role.assign (admin-class) so non-admins can't wipe the
+	// synthetic actor's grants. The handler additionally refuses to run
+	// when the server is currently in demo mode (Auth.Type=none).
+	r.Register("POST /api/v1/auth/demo-residual/cleanup",
+		rbacGate(reg.Checker, "auth.role.assign", reg.DemoResidual.Cleanup))
 
 	// =========================================================================
 	// Auth Bundle 2 Phase 5 — OIDC + session HTTP surface.

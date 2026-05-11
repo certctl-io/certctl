@@ -1,6 +1,6 @@
 # certctl Security Posture & Operator Guidance
 
-> Last reviewed: 2026-05-10
+> Last reviewed: 2026-05-11
 
 This document collects the operator-facing security guidance that the source
 code's per-finding comment blocks reference. Each section names the audit
@@ -261,6 +261,61 @@ Operator should DISABLE break-glass within 24h of SSO recovery
 to avoid a permanent backdoor; the runbook at
 [`auth-threat-model.md#break-glass-risks-phase-75`](auth-threat-model.md)
 documents the full state machine.
+
+### Demo-to-production cutover (Audit 2026-05-11 A-8)
+
+Migration `000029_rbac.up.sql` unconditionally seeds an
+`actor-demo-anon → r-admin` row into `actor_roles`. This row is the
+runtime principal injected by the demo-mode middleware when
+`CERTCTL_AUTH_TYPE=none`. Under any non-`none` auth type the row is
+DORMANT — the middleware chain never resolves to it. But its existence
+is a footgun: a future regression that resolves an unauthenticated
+request to `actor-demo-anon` (a misrouted CORS preflight, a fallback in
+a new auth-exempt route) would silently re-elevate to admin.
+
+certctl-server detects this residue at startup and emits a WARN log +
+an `auth.demo_residual_grants_detected` audit row listing every grant
+present on `actor-demo-anon`. **Every production deploy will see this
+WARN on first boot** — the migration baseline is part of the install,
+not a side effect of running demo mode.
+
+Operator workflow at production cutover:
+
+1. Drain the WARN by calling the cleanup endpoint with an admin API key:
+
+   ```bash
+   curl -X POST --cacert deploy/test/certs/ca.crt \
+        -H "Authorization: Bearer $ADMIN_KEY" \
+        https://certctl.example.com:8443/api/v1/auth/demo-residual/cleanup
+   # → {"removed": 1}
+   ```
+
+   The endpoint is gated `auth.role.assign` (admin-class) and refuses
+   to run when `CERTCTL_AUTH_TYPE=none` (HTTP 503 — the residue IS the
+   active runtime state at that auth type). The cleanup is idempotent;
+   a second call returns `{"removed": 0}` and still leaves an audit row.
+
+   Equivalent SQL for operators preferring direct DB access:
+
+   ```sql
+   DELETE FROM actor_roles WHERE actor_id = 'actor-demo-anon';
+   ```
+
+2. To make subsequent boots refuse startup if the row reappears (the
+   most paranoid stance), set:
+
+   ```
+   CERTCTL_DEMO_MODE_RESIDUAL_STRICT=true
+   ```
+
+   With the flag set, any `actor-demo-anon` row under a non-`none`
+   auth type causes certctl-server to log the WARN AND exit non-zero
+   before binding the HTTPS listener. Default is `false` (WARN only).
+
+3. The CI guard `scripts/ci-guards/no-new-synthetic-admin.sh` pins the
+   set of source files that may reference the `actor-demo-anon` literal.
+   New runtime code paths that resolve to the synthetic actor are
+   rejected at PR time so the credibility gap stays closed.
 
 ### Migrating an existing deployment to OIDC
 
