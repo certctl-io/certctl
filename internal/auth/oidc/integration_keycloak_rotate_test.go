@@ -46,10 +46,10 @@ import (
 //  2. Rotate the realm's RSA key via the Keycloak admin API.
 //  3. Run a fresh /auth/oidc/login → /auth/oidc/callback flow.
 //     - Keycloak signs the new ID token under the new (higher-priority)
-//       key.
+//     key.
 //     - certctl's verifier holds the pre-rotate JWKS in cache.
 //     - The verify trips kid-not-in-cache → MED-6 auto-refresh fires →
-//       second verify succeeds.
+//     second verify succeeds.
 //  4. Assert the callback succeeded without the test having called
 //     RefreshKeys (which would mask the MED-6 path).
 //

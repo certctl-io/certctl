@@ -21,16 +21,16 @@ import (
 // (e.g. discovery OK but alg-downgrade tripped) returns
 // DiscoverySucceeded=true + a non-empty Errors slice.
 type TestDiscoveryResult struct {
-	DiscoverySucceeded  bool     `json:"discovery_succeeded"`
-	JWKSReachable       bool     `json:"jwks_reachable"`
-	SupportedAlgValues  []string `json:"supported_alg_values"`
-	IssParamSupported   bool     `json:"iss_param_supported"`
-	IssuerEcho          string   `json:"issuer_echo,omitempty"` // the iss value the IdP advertised
-	AuthorizationURL    string   `json:"authorization_url,omitempty"`
-	TokenURL            string   `json:"token_url,omitempty"`
-	JWKSURI             string   `json:"jwks_uri,omitempty"`
-	UserInfoEndpoint    string   `json:"userinfo_endpoint,omitempty"`
-	Errors              []string `json:"errors,omitempty"`
+	DiscoverySucceeded bool     `json:"discovery_succeeded"`
+	JWKSReachable      bool     `json:"jwks_reachable"`
+	SupportedAlgValues []string `json:"supported_alg_values"`
+	IssParamSupported  bool     `json:"iss_param_supported"`
+	IssuerEcho         string   `json:"issuer_echo,omitempty"` // the iss value the IdP advertised
+	AuthorizationURL   string   `json:"authorization_url,omitempty"`
+	TokenURL           string   `json:"token_url,omitempty"`
+	JWKSURI            string   `json:"jwks_uri,omitempty"`
+	UserInfoEndpoint   string   `json:"userinfo_endpoint,omitempty"`
+	Errors             []string `json:"errors,omitempty"`
 }
 
 // TestDiscovery runs the read-only subset of getOrLoad against a

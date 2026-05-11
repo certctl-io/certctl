@@ -33,20 +33,20 @@ import (
 // the field is non-empty + carries the v2 magic byte; actual
 // encryption / decryption happens in the service layer.
 type OIDCProvider struct {
-	ID                    string    `json:"id"` // prefix `op-`
-	TenantID              string    `json:"tenant_id"`
-	Name                  string    `json:"name"`
-	IssuerURL             string    `json:"issuer_url"`
-	ClientID              string    `json:"client_id"`
-	ClientSecretEncrypted []byte    `json:"-"` // v2 blob; never JSON-encoded
-	RedirectURI           string    `json:"redirect_uri"`
-	GroupsClaimPath       string    `json:"groups_claim_path"`
-	GroupsClaimFormat     string    `json:"groups_claim_format"`
-	FetchUserinfo         bool      `json:"fetch_userinfo"`
-	Scopes                []string  `json:"scopes"`
-	AllowedEmailDomains   []string  `json:"allowed_email_domains"`
-	IATWindowSeconds      int       `json:"iat_window_seconds"`
-	JWKSCacheTTLSeconds   int       `json:"jwks_cache_ttl_seconds"`
+	ID                    string   `json:"id"` // prefix `op-`
+	TenantID              string   `json:"tenant_id"`
+	Name                  string   `json:"name"`
+	IssuerURL             string   `json:"issuer_url"`
+	ClientID              string   `json:"client_id"`
+	ClientSecretEncrypted []byte   `json:"-"` // v2 blob; never JSON-encoded
+	RedirectURI           string   `json:"redirect_uri"`
+	GroupsClaimPath       string   `json:"groups_claim_path"`
+	GroupsClaimFormat     string   `json:"groups_claim_format"`
+	FetchUserinfo         bool     `json:"fetch_userinfo"`
+	Scopes                []string `json:"scopes"`
+	AllowedEmailDomains   []string `json:"allowed_email_domains"`
+	IATWindowSeconds      int      `json:"iat_window_seconds"`
+	JWKSCacheTTLSeconds   int      `json:"jwks_cache_ttl_seconds"`
 	// Enabled gates whether the provider is offered on the LoginPage and
 	// accepted at HandleAuthRequest. Audit 2026-05-10 MED-9 closure:
 	// pre-fix the only way to take a provider offline was DELETE (which
