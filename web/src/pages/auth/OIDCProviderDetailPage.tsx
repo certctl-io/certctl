@@ -49,6 +49,26 @@ export default function OIDCProviderDetailPage() {
   const [editClientSecret, setEditClientSecret] = useState('');
   const [editRedirectURI, setEditRedirectURI] = useState('');
   const [editFetchUserinfo, setEditFetchUserinfo] = useState(false);
+  // Audit 2026-05-11 A-7 — Advanced edit fields. Pre-fix, the saveEdit
+  // handler passed these through unchanged from the provider object,
+  // so the read-only `<dl>` claimed the value was editable but the
+  // PUT body never carried operator input. The 5 fields the backend
+  // validator accepts (internal/auth/oidc/domain/types.go::Validate):
+  //   - scopes (string array; min 1 entry; default openid profile email)
+  //   - groups_claim_path (string; default "groups")
+  //   - groups_claim_format (enum: string-array | json-path)
+  //   - iat_window_seconds (int, 1–600; default 300)
+  //   - jwks_cache_ttl_seconds (int, ≥60; default 3600)
+  // Scopes are rendered as a space-separated text input (single-line)
+  // because that's the operator's mental model — every OIDC IdP docs
+  // page shows scopes as space-separated. The submit handler splits on
+  // whitespace + filters empty strings; an empty input renders an
+  // inline error rather than wiping the array.
+  const [editScopesInput, setEditScopesInput] = useState('');
+  const [editGroupsClaimPath, setEditGroupsClaimPath] = useState('');
+  const [editGroupsClaimFormat, setEditGroupsClaimFormat] = useState('string-array');
+  const [editIATWindow, setEditIATWindow] = useState<number>(300);
+  const [editJWKSCacheTTL, setEditJWKSCacheTTL] = useState<number>(3600);
   const [submitting, setSubmitting] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [success, setSuccess] = useState<string | null>(null);
@@ -94,6 +114,14 @@ export default function OIDCProviderDetailPage() {
     setEditClientSecret('');
     setEditRedirectURI(provider.redirect_uri);
     setEditFetchUserinfo(provider.fetch_userinfo || false);
+    // Audit 2026-05-11 A-7 — pre-populate the Advanced fields from
+    // the live provider so the operator sees the current values when
+    // they expand the section.
+    setEditScopesInput((provider.scopes ?? []).join(' '));
+    setEditGroupsClaimPath(provider.groups_claim_path || 'groups');
+    setEditGroupsClaimFormat(provider.groups_claim_format || 'string-array');
+    setEditIATWindow(provider.iat_window_seconds || 300);
+    setEditJWKSCacheTTL(provider.jwks_cache_ttl_seconds || 3600);
     setError(null);
     setSuccess(null);
     setEditing(true);
@@ -109,17 +137,59 @@ export default function OIDCProviderDetailPage() {
     setError(null);
     setSuccess(null);
     try {
+      // Audit 2026-05-11 A-7 — client-side validation mirrors the
+      // backend's internal/auth/oidc/domain/types.go::Validate rules.
+      // Server is still the source of truth (we surface its 400 if
+      // anything slips past); the client validator is for fast
+      // feedback so operators don't round-trip just to learn that
+      // "iat_window_seconds=601" is rejected.
+      const trimmedPath = editGroupsClaimPath.trim();
+      if (trimmedPath === '') {
+        setError('Groups claim path cannot be empty (default: "groups").');
+        setSubmitting(false);
+        return;
+      }
+      if (editGroupsClaimFormat !== 'string-array' && editGroupsClaimFormat !== 'json-path') {
+        setError('Groups claim format must be "string-array" or "json-path".');
+        setSubmitting(false);
+        return;
+      }
+      const scopes = editScopesInput
+        .trim()
+        .split(/\s+/)
+        .filter(s => s.length > 0);
+      if (scopes.length === 0) {
+        setError('Scopes cannot be empty. At minimum include "openid".');
+        setSubmitting(false);
+        return;
+      }
+      if (!Number.isInteger(editIATWindow) || editIATWindow <= 0 || editIATWindow > 600) {
+        setError('IAT window must be a positive integer ≤ 600 seconds.');
+        setSubmitting(false);
+        return;
+      }
+      if (!Number.isInteger(editJWKSCacheTTL) || editJWKSCacheTTL < 60) {
+        setError('JWKS cache TTL must be an integer ≥ 60 seconds.');
+        setSubmitting(false);
+        return;
+      }
+
       const req: Parameters<typeof updateOIDCProvider>[1] = {
         name: editName,
         issuer_url: editIssuerURL,
         client_id: editClientID,
         redirect_uri: editRedirectURI,
-        groups_claim_path: provider.groups_claim_path,
-        groups_claim_format: provider.groups_claim_format,
+        // Audit 2026-05-11 A-7 — formerly pass-through from
+        // provider.*, now wired to the operator-edited state. Lying
+        // UX retired: the read-only `<dl>` no longer claims a value
+        // can be changed when the saveEdit handler ignores the
+        // change.
+        groups_claim_path: trimmedPath,
+        groups_claim_format: editGroupsClaimFormat,
         fetch_userinfo: editFetchUserinfo,
-        scopes: provider.scopes,
-        iat_window_seconds: provider.iat_window_seconds,
-        jwks_cache_ttl_seconds: provider.jwks_cache_ttl_seconds,
+        scopes,
+        iat_window_seconds: editIATWindow,
+        jwks_cache_ttl_seconds: editJWKSCacheTTL,
       };
       if (editClientSecret) req.client_secret = editClientSecret;
       await updateOIDCProvider(provider.id, req);
@@ -202,6 +272,11 @@ export default function OIDCProviderDetailPage() {
             <dd className="col-span-2 font-mono text-xs">{(provider.scopes || []).join(', ')}</dd>
             <dt className="text-ink-muted col-span-1">IAT window</dt>
             <dd className="col-span-2">{provider.iat_window_seconds}s</dd>
+            {/* Audit 2026-05-11 A-7 — JWKS cache TTL surfaced in
+                read-only view too (pre-fix the value was persisted but
+                invisible). */}
+            <dt className="text-ink-muted col-span-1">JWKS cache TTL</dt>
+            <dd className="col-span-2">{provider.jwks_cache_ttl_seconds}s</dd>
           </dl>
         ) : (
           <div className="space-y-3">
@@ -262,6 +337,121 @@ export default function OIDCProviderDetailPage() {
               />
               <span>Fetch groups from userinfo endpoint when ID token claim is empty</span>
             </label>
+
+            {/* Audit 2026-05-11 A-7 — Advanced section. Five fields the
+                read-only <dl> claimed were editable but the saveEdit
+                handler was passing through unchanged from the loaded
+                provider object. Each input has an inline help line that
+                links the operator's mental model to the backend
+                semantic (`internal/auth/oidc/domain/types.go::Validate`
+                rules). The section is collapsed by default — most
+                edits don't touch these fields, so they shouldn't
+                clutter the primary form. */}
+            <details
+              className="border border-surface-border rounded p-3 bg-page"
+              data-testid="oidc-provider-edit-advanced"
+            >
+              <summary className="cursor-pointer text-sm font-medium text-ink select-none">
+                Advanced (scopes, groups claim, IAT / JWKS TTL)
+              </summary>
+              <div className="mt-3 space-y-3">
+                <div>
+                  <label className="block text-sm font-medium text-ink mb-1">
+                    Scopes (space-separated)
+                  </label>
+                  <input
+                    type="text"
+                    value={editScopesInput}
+                    onChange={e => setEditScopesInput(e.target.value)}
+                    placeholder="openid profile email"
+                    className="w-full px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink font-mono"
+                    data-testid="oidc-provider-edit-scopes"
+                  />
+                  <p className="text-xs text-ink-muted mt-1">
+                    Default <code>openid profile email</code>. Some IdPs need <code>groups</code> for
+                    the group-claim path; Auth0 namespaces groups under a custom claim. Must include{' '}
+                    <code>openid</code>.
+                  </p>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-ink mb-1">
+                      Groups claim path
+                    </label>
+                    <input
+                      type="text"
+                      value={editGroupsClaimPath}
+                      onChange={e => setEditGroupsClaimPath(e.target.value)}
+                      placeholder="groups"
+                      className="w-full px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink font-mono"
+                      data-testid="oidc-provider-edit-groups-claim-path"
+                    />
+                    <p className="text-xs text-ink-muted mt-1">
+                      JSON path within the ID token (or userinfo if fallback enabled) that holds the
+                      group list. Common: <code>groups</code>, <code>realm_access.roles</code>
+                      {' '}(Keycloak), namespaced URLs (Auth0).
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-ink mb-1">
+                      Groups claim format
+                    </label>
+                    <select
+                      value={editGroupsClaimFormat}
+                      onChange={e => setEditGroupsClaimFormat(e.target.value)}
+                      className="w-full px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink"
+                      data-testid="oidc-provider-edit-groups-claim-format"
+                    >
+                      <option value="string-array">string-array (default)</option>
+                      <option value="json-path">json-path</option>
+                    </select>
+                    <p className="text-xs text-ink-muted mt-1">
+                      How the IdP encodes the group list. Most IdPs emit a JSON array — keep the
+                      default. Use <code>json-path</code> when the claim is a nested object the
+                      path needs to traverse.
+                    </p>
+                  </div>
+                </div>
+                <div className="grid grid-cols-2 gap-3">
+                  <div>
+                    <label className="block text-sm font-medium text-ink mb-1">
+                      IAT window (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={1}
+                      max={600}
+                      value={editIATWindow}
+                      onChange={e => setEditIATWindow(Number(e.target.value))}
+                      className="w-full px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink"
+                      data-testid="oidc-provider-edit-iat-window-seconds"
+                    />
+                    <p className="text-xs text-ink-muted mt-1">
+                      Maximum ID-token age at consume time (RFC 7519 §4.1.6). Default 300. Range
+                      1–600. Tighter = more replay-resistant; looser = more clock-skew-tolerant.
+                    </p>
+                  </div>
+                  <div>
+                    <label className="block text-sm font-medium text-ink mb-1">
+                      JWKS cache TTL (seconds)
+                    </label>
+                    <input
+                      type="number"
+                      min={60}
+                      value={editJWKSCacheTTL}
+                      onChange={e => setEditJWKSCacheTTL(Number(e.target.value))}
+                      className="w-full px-3 py-1.5 text-sm border border-surface-border rounded bg-page text-ink"
+                      data-testid="oidc-provider-edit-jwks-cache-ttl-seconds"
+                    />
+                    <p className="text-xs text-ink-muted mt-1">
+                      How long to cache the IdP's signing-key set before re-fetching. Default 3600
+                      (1h); floor 60. MED-6 auto-refresh-on-cache-miss covers most rotation events;
+                      this knob is for slow-rotation IdPs that want longer caching.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </details>
           </div>
         )}
       </div>

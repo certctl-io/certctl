@@ -17,6 +17,26 @@
 
 ### Security
 
+- **OIDC provider Advanced fields are now editable in the GUI (Audit 2026-05-11 A-7).**
+  The MED-4 row had been DEFERRED to v3 with the rationale "backend
+  already accepts these fields." The verifier hit the GUI and found
+  that the read-only display claimed the values were editable, but the
+  edit form had no inputs — the save handler passed `provider.scopes`
+  / `provider.groups_claim_path` / `provider.groups_claim_format` /
+  `provider.iat_window_seconds` / `provider.jwks_cache_ttl_seconds`
+  unchanged from the loaded object. Operators who wanted to bump the
+  IAT window or change the groups-claim path had to drop to curl /
+  MCP and trust the GUI's display matched what they'd set elsewhere.
+  Lying UX. The OIDCProviderDetailPage edit form now has a collapsible
+  Advanced section with five inputs (scopes as a space-separated text
+  field; groups-claim path; groups-claim format select with the
+  backend's `string-array` / `json-path` enum; IAT window number input
+  bounded 1–600; JWKS cache TTL number input with floor 60). Client-side
+  validation mirrors the backend `Validate` rules so common operator
+  mistakes (IAT > 600, JWKS TTL < 60, empty scopes, empty groups-claim-path)
+  reject inline instead of round-tripping a 400. The read-only `<dl>`
+  also gained the previously-invisible `jwks_cache_ttl_seconds` row.
+
 - **Pre-login cookie Path widened from `/auth/oidc/` to `/` (Audit MED-14
   follow-on).** Required to satisfy the `__Host-` prefix's `Path=/` rule. The
   cookie lifetime is unchanged (10 minutes) and only the callback handler
