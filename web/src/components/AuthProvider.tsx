@@ -131,6 +131,33 @@ export default function AuthProvider({ children }: { children: ReactNode }) {
 
   return (
     <AuthContext.Provider value={{ loading, authRequired, authenticated, authType, user, admin, login, logout, error }}>
+      {/*
+        Audit 2026-05-10 LOW-1 closure — demo-mode banner. When the
+        server reports auth_type=none, every caller is the anonymous
+        admin. Rendering a sticky red banner above the layout makes
+        sure operators see this on every page; HIGH-12's startup
+        check already fails closed for unsafe binds (0.0.0.0 / ::
+        without CERTCTL_DEMO_MODE_ACK=true), so reaching this banner
+        means the operator either ran on loopback or acknowledged
+        the bypass — but the GUI still surfaces the state plainly.
+      */}
+      {authType === 'none' && !loading && (
+        <div
+          data-testid="demo-mode-banner"
+          role="alert"
+          style={{
+            background: '#b91c1c',
+            color: '#fff',
+            padding: '8px 16px',
+            fontSize: 13,
+            fontWeight: 600,
+            textAlign: 'center',
+          }}
+        >
+          ⚠️ Demo mode active (CERTCTL_AUTH_TYPE=none). Every caller is anonymous admin.
+          Production deployments MUST set CERTCTL_AUTH_TYPE=api-key or oidc.
+        </div>
+      )}
       {children}
     </AuthContext.Provider>
   );

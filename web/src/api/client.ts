@@ -301,10 +301,86 @@ export const authRemoveRolePermission = (roleId: string, perm: string) =>
 export const authListKeys = () =>
   fetchJSON<{ keys: AuthKeyEntry[] }>(`${BASE}/auth/keys`).then(r => r.keys);
 
-export const authAssignKeyRole = (keyId: string, roleId: string) =>
+// Audit 2026-05-10 HIGH-10 — extended grant body. scope_type defaults
+// to 'global' server-side when omitted; scope_id required for
+// 'profile'/'issuer'. expires_at is RFC3339; omitted = no expiry.
+export interface AssignKeyRoleOptions {
+  scope_type?: 'global' | 'profile' | 'issuer';
+  scope_id?: string;
+  expires_at?: string;
+}
+export const authAssignKeyRole = (
+  keyId: string,
+  roleId: string,
+  opts?: AssignKeyRoleOptions,
+) =>
   fetchJSON<unknown>(`${BASE}/auth/keys/${keyId}/roles`, {
     method: 'POST',
-    body: JSON.stringify({ role_id: roleId }),
+    body: JSON.stringify({ role_id: roleId, ...(opts ?? {}) }),
+  });
+
+// =============================================================================
+// Audit 2026-05-10 — GUI batch additions.
+// =============================================================================
+
+// MED-11 — federated users.
+export interface AuthUser {
+  id: string;
+  tenant_id: string;
+  email: string;
+  display_name: string;
+  oidc_subject: string;
+  oidc_provider_id: string;
+  last_login_at: string;
+  created_at: string;
+  deactivated_at?: string;
+}
+export const authListUsers = (providerID?: string) => {
+  const q = providerID ? `?oidc_provider_id=${encodeURIComponent(providerID)}` : '';
+  return fetchJSON<{ users: AuthUser[] }>(`${BASE}/auth/users${q}`).then(r => r.users);
+};
+export const authDeactivateUser = (id: string) =>
+  fetchJSON<unknown>(`${BASE}/auth/users/${id}`, { method: 'DELETE' });
+
+// MED-12 — runtime config.
+export const authRuntimeConfig = () =>
+  fetchJSON<{ runtime_config: Record<string, string> }>(`${BASE}/auth/runtime-config`)
+    .then(r => r.runtime_config);
+
+// MED-7 — JWKS status.
+export interface JWKSStatusSnapshot {
+  last_refresh_at?: string;
+  current_kids: string[];
+  refresh_count: number;
+  last_error?: string;
+  rejected_jws_count: number;
+  iss_param_supported: boolean;
+}
+export const authOIDCJWKSStatus = (providerID: string) =>
+  fetchJSON<JWKSStatusSnapshot>(`${BASE}/auth/oidc/providers/${providerID}/jwks-status`);
+
+// MED-5 — OIDC provider test (dry-run).
+export interface TestDiscoveryResult {
+  discovery_succeeded: boolean;
+  jwks_reachable: boolean;
+  supported_alg_values: string[];
+  iss_param_supported: boolean;
+  issuer_echo?: string;
+  authorization_url?: string;
+  token_url?: string;
+  jwks_uri?: string;
+  userinfo_endpoint?: string;
+  errors?: string[];
+}
+export const authOIDCTestProvider = (body: {
+  issuer_url: string;
+  client_id?: string;
+  client_secret?: string;
+  scopes?: string[];
+}) =>
+  fetchJSON<TestDiscoveryResult>(`${BASE}/auth/oidc/test`, {
+    method: 'POST',
+    body: JSON.stringify(body),
   });
 
 export const authRevokeKeyRole = (keyId: string, roleId: string) =>

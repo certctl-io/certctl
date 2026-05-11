@@ -1,5 +1,5 @@
 import { useQuery } from '@tanstack/react-query';
-import { authBootstrapAvailable } from '../../api/client';
+import { authBootstrapAvailable, authRuntimeConfig } from '../../api/client';
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 
@@ -24,6 +24,15 @@ export default function AuthSettingsPage() {
   const bootstrapQuery = useQuery({
     queryKey: ['auth', 'bootstrap', 'available'],
     queryFn: authBootstrapAvailable,
+    staleTime: 60_000,
+    retry: 0,
+  });
+  // Audit 2026-05-10 MED-12 — Auth runtime config panel. Gated
+  // auth.role.assign server-side; query failure (403) is silently
+  // swallowed (panel hidden) for non-admin viewers.
+  const runtimeQuery = useQuery({
+    queryKey: ['auth', 'runtime-config'],
+    queryFn: authRuntimeConfig,
     staleTime: 60_000,
     retry: 0,
   });
@@ -121,6 +130,39 @@ export default function AuthSettingsPage() {
           )}
         </div>
       </section>
+
+      {/* Audit 2026-05-10 MED-12 — Auth runtime config panel. */}
+      {runtimeQuery.data && (
+        <section className="bg-surface border border-surface-border rounded" data-testid="auth-settings-runtime-config">
+          <header className="px-4 py-3 border-b border-surface-border">
+            <div className="text-sm font-semibold">Auth runtime config</div>
+            <div className="text-xs text-ink-muted">
+              Deployed CERTCTL_* values gated `auth.role.assign`. Sensitive values (tokens,
+              secrets, CIDRs) surface as <em>set/unset</em> or counts only — never raw bytes.
+            </div>
+          </header>
+          <div className="px-4 py-3 text-sm">
+            <table className="w-full text-xs font-mono">
+              <thead>
+                <tr className="text-ink-muted text-left">
+                  <th className="py-1 pr-4">Setting</th>
+                  <th className="py-1">Value</th>
+                </tr>
+              </thead>
+              <tbody>
+                {Object.entries(runtimeQuery.data)
+                  .sort(([a], [b]) => a.localeCompare(b))
+                  .map(([k, v]) => (
+                    <tr key={k} className="border-t border-surface-border">
+                      <td className="py-1 pr-4">{k}</td>
+                      <td className="py-1">{v || <span className="text-ink-muted">(empty)</span>}</td>
+                    </tr>
+                  ))}
+              </tbody>
+            </table>
+          </div>
+        </section>
+      )}
     </div>
   );
 }

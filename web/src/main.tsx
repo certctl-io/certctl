@@ -47,6 +47,8 @@ import OIDCProviderDetailPage from './pages/auth/OIDCProviderDetailPage';
 import GroupMappingsPage from './pages/auth/GroupMappingsPage';
 import SessionsPage from './pages/auth/SessionsPage';
 import BreakglassPage from './pages/auth/BreakglassPage';
+// Audit 2026-05-10 MED-11 closure — federated-user admin page.
+import UsersPage from './pages/auth/UsersPage';
 import './index.css';
 
 const queryClient = new QueryClient({
@@ -135,6 +137,8 @@ createRoot(document.getElementById('root')!).render(
                   <Route path="auth/approvals" element={<ApprovalsPage />} />
                   {/* Audit 2026-05-10 CRIT-4 closure — break-glass admin surface. */}
                   <Route path="auth/breakglass" element={<BreakglassPage />} />
+                  {/* Audit 2026-05-10 MED-11 closure — federated-user admin. */}
+                  <Route path="auth/users" element={<UsersPage />} />
                 </Route>
               </Routes>
             </BrowserRouter>

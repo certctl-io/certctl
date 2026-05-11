@@ -34,6 +34,27 @@
   RFC-9207 discovery. Providers that don't advertise support (the majority
   today) keep pre-fix behavior — back-compat is preserved.
 
+- **Auth GUI batch (Audit 2026-05-10 MED-4/7/8/10/11/12 + LOW-1/11/12 +
+  HIGH-10 GUI).** New backend endpoints land alongside their GUI
+  consumers: `GET /api/v1/auth/users` + `DELETE /api/v1/auth/users/{id}`
+  (auth.user.read / auth.user.deactivate; migration 000045 adds
+  `users.deactivated_at` plus the two new permissions); `GET
+  /api/v1/auth/runtime-config` (auth.role.assign) returning a sanitized
+  flat-map of deployed CERTCTL_* values (no secrets leaked — only
+  set/unset booleans and counts); `GET
+  /api/v1/auth/oidc/providers/{id}/jwks-status` (auth.oidc.list)
+  returning the per-provider verifier counters (refresh count, last
+  refresh / error timestamps, rejected JWS count, RFC 9207 iss-param
+  flag). New `UsersPage` lists federated identities + soft-deactivates.
+  `AuthSettingsPage` gains the runtime-config panel. `KeysPage`'s
+  assign-role modal now collects `scope_type` / `scope_id` /
+  `expires_at`. `RoleDetailPage`'s add-permission form gains the same
+  scope picker, and the Delete button is hidden on the 7 default
+  system roles (server already rejected, this is pure UX).
+  `AuthProvider` renders a sticky red demo-mode banner when
+  `auth_type=none`. `actor-demo-anon` rows on `KeysPage` already had
+  buttons disabled.
+
 - **11 new MCP tools (Audit 2026-05-10 MED-13).** Approval workflow
   (`certctl_approval_list` / `_get` / `_approve` / `_reject`), break-glass
   credential admin (`certctl_breakglass_list` / `_set_password` /
