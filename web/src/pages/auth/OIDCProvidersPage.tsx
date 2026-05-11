@@ -10,6 +10,7 @@ import {
 import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
+import OIDCTestConnectionPanel from './OIDCTestConnectionPanel';
 
 // =============================================================================
 // Bundle 2 Phase 8 — OIDCProvidersPage.
@@ -313,6 +314,16 @@ function CreateProviderModal({ isOpen, onClose, onSuccess }: CreateProviderModal
               </p>
             )}
           </div>
+          {/* Audit 2026-05-11 Fix 09 — Test Connection panel (MED-5 GUI half).
+              Dry-run the issuer URL + JWKS reachability + alg-downgrade defense
+              against MED-5's POST /api/v1/auth/oidc/test. Renders inline so the
+              operator sees the result before committing. */}
+          <OIDCTestConnectionPanel
+            issuerURL={form.issuer_url}
+            clientID={form.client_id}
+            scopes={form.scopes || []}
+            testIDSuffix="create"
+          />
           <div className="flex justify-end gap-2 pt-3">
             <button
               type="button"

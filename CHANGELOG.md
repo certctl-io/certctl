@@ -39,6 +39,29 @@
   synthetic-admin fallback") is fully true. Operator runbook at
   `docs/operator/security.md#demo-to-production-cutover-audit-2026-05-11-a-8`.
 
+- **OIDC provider "Test connection" panel (Audit 2026-05-11 Fix 09 — MED-5 GUI half).**
+  MED-5's backend dry-run endpoint (`POST /api/v1/auth/oidc/test`, gated
+  `auth.oidc.create`) shipped on `dev/auth-bundle-2` but had no GUI caller —
+  the `authOIDCTestProvider` function in `web/src/api/client.ts` was dead
+  code. Operators had to complete the create form blind, save, then click
+  "Refresh" to discover whether the issuer URL worked; failures left a
+  broken provider row in the database that had to be deleted before
+  retrying. New shared component
+  `web/src/pages/auth/OIDCTestConnectionPanel.tsx` calls the backend
+  against the live form state and renders a four-row status panel inline:
+  Discovery fetched, JWKS reachable, supported algs (warns when the IdP
+  advertises none), and RFC 9207 iss-parameter advertisement (informational
+  `·` glyph, not ✗, because the spec is SHOULD). Backend per-leg `errors[]`
+  flow into an inline bullet list. The panel is mounted in the
+  OIDCProvidersPage create modal AND the OIDCProviderDetailPage edit form —
+  the edit-form half is load-bearing for verifying IdP rotations (Keycloak
+  realm rename, Okta tenant move) without committing first. Run button is
+  disabled until the issuer URL is non-empty (whitespace-trimmed); the
+  component is read-only — safe to run repeatedly. 8 Vitest tests pin the
+  glyph-vs-glyph contract (✓/✗/⚠/·), the button-disabled-without-issuer
+  shape, and the test-id-suffix collision-prevention when the panel is
+  mounted twice on the same page.
+
 - **Scope-aware actor-role revoke (Audit 2026-05-11 A-4).**
   HIGH-10 made it possible to grant the same role to the same actor at
   multiple scopes (e.g. `r-operator` on `profile=p-acme` AND `profile=p-globex`)
