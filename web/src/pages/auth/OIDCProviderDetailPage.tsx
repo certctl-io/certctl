@@ -12,6 +12,7 @@ import { useAuthMe } from '../../hooks/useAuthMe';
 import PageHeader from '../../components/PageHeader';
 import ErrorState from '../../components/ErrorState';
 import { validateEmailDomain } from './OIDCProvidersPage';
+import OIDCTestConnectionPanel from './OIDCTestConnectionPanel';
 
 // =============================================================================
 // Bundle 2 Phase 8 — OIDCProviderDetailPage.
@@ -623,6 +624,17 @@ export default function OIDCProviderDetailPage() {
           )}
           {editing && (
             <>
+              {/* Audit 2026-05-11 Fix 09 — Test Connection panel (MED-5 GUI half).
+                  Lets the operator verify an issuer URL change post-rotation
+                  (e.g. Keycloak realm rename, Okta tenant move) without
+                  committing first. Reads from the live edit state so the
+                  scope of the test matches what Save would persist. */}
+              <OIDCTestConnectionPanel
+                issuerURL={editIssuerURL}
+                clientID={editClientID}
+                scopes={editScopesInput.split(/\s+/).filter(Boolean)}
+                testIDSuffix="edit"
+              />
               <button
                 onClick={saveEdit}
                 disabled={submitting}
