@@ -10,7 +10,7 @@ managed certificate references exactly one profile; changing a
 profile's policy retroactively affects renewal of every cert pointing
 at it.
 
-This file documents the profile lifecycle as it stands after Bundle 1.
+This file documents the profile lifecycle as it stands at v2.1.0.
 For the schema, see `migrations/000003_certificate_profiles.up.sql` +
 `migrations/000027_approval_workflow.up.sql` +
 `migrations/000033_approval_kinds.up.sql`. For the API surface,
@@ -27,8 +27,8 @@ see `api/openapi.yaml` under `/api/v1/profiles`.
 | `renewal_window_days` | 30 | Scheduler enqueues a renewal Job when `cert.NotAfter - now < renewal_window_days`. |
 | `allowed_key_algorithms` | RSA 2048+, ECDSA P-256+ | Validates incoming CSRs at issuance time. |
 | `allowed_ekus` | server, client | RFC 5280 §4.2.1.12 EKU set. |
-| `must_staple` | false | Per-profile RFC 7633 `id-pe-tlsfeature` extension toggle (Phase 5.6 of the SCEP master bundle). |
-| `requires_approval` | false | Bundle 1 Phase 9 - gates issuance + renewal AND profile edits behind a four-eyes approval workflow. See below. |
+| `must_staple` | false | Per-profile RFC 7633 `id-pe-tlsfeature` extension toggle. |
+| `requires_approval` | false | Gates issuance + renewal AND profile edits behind a four-eyes approval workflow. See below. |
 
 ## RequiresApproval and the approval workflow
 
@@ -41,11 +41,11 @@ Setting `requires_approval=true` on a profile does two things:
    approved (job → `Pending`, scheduler dispatches) or rejected (job
    → `Cancelled`). Same actor cannot self-approve.
 2. **Edits to the profile itself gate on a non-requester admin's
-   approval.** This is the Bundle 1 Phase 9 closure for the flip-flop
+   approval.** This is the closure for the flip-flop
    loophole - without it an admin could set `requires_approval=false`,
    mutate any other field, set `requires_approval=true`, and the
    approval workflow would only have been bypassed during the
-   "off" window. The Phase 9 gate fires under three conditions:
+   "off" window. The profile-edit gate fires under three conditions:
  - The live profile has `requires_approval=true` AND the operator
      submits any edit (regardless of whether the edit changes the
      flag).
@@ -105,9 +105,8 @@ audit-only view. Each row carries the approval ID + the requester
 
 - `migrations/000027_approval_workflow.up.sql` (initial approval
   schema, Rank 7 of the 2026-05-03 deep-research deliverable)
-- `migrations/000033_approval_kinds.up.sql` (Phase 9 - adds
+- `migrations/000033_approval_kinds.up.sql` (adds
   `approval_kind` + `payload` + nullable cert/job FKs)
 - `internal/service/approval.go::RequestProfileEditApproval`
 - `internal/service/profile.go::UpdateProfile` (gate)
 - `internal/api/handler/profiles.go::UpdateProfile` (202 mapping)
-- `cowork/auth-bundle-1-prompt.md` (Phase 9 spec)

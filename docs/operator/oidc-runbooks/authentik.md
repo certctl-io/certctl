@@ -14,7 +14,7 @@ For the canonical reference + mental model, read [keycloak.md](keycloak.md) firs
 - Admin access to the Authentik admin console at `https://<authentik-host>/if/admin/`.
 - Network reachability from certctl-server to `https://<authentik-host>/application/o/<application-slug>/.well-known/openid-configuration`.
 
-**On the certctl side:** same as Keycloak — `CERTCTL_CONFIG_ENCRYPTION_KEY` set, an admin actor holding `auth.oidc.create` + `auth.oidc.edit`, Bundle 2 server build.
+**On the certctl side:** same as Keycloak — `CERTCTL_CONFIG_ENCRYPTION_KEY` set, an admin actor holding `auth.oidc.create` + `auth.oidc.edit`, server build ≥ v2.1.0.
 
 ## IdP-side configuration
 

@@ -82,7 +82,7 @@ For the full deploy contract see
 |---|---|---|
 | `CERTCTL_AGENT_ID` | (none — required) | The agent's unique ID, issued by `POST /api/v1/agents/register` and bundled into the agent's registration response. Pass via this env var when the agent runs as a systemd unit / container without the `-agent-id` CLI flag. |
 
-## Auth (Bundle 1 + Bundle 2)
+## Auth (RBAC + OIDC + sessions + break-glass)
 
 Configuration knobs for the RBAC + OIDC + sessions + break-glass
 auth surface. Full operator guidance lives in

@@ -2,12 +2,11 @@
 
 > Last reviewed: 2026-05-05
 
-> **Status (this document):** Production hardening II Phase 10
-> deliverable. Codifies the fail-safe behaviors that already exist in
-> the codebase and the operator procedures for recovering from
-> common failure modes. Nothing in this runbook requires new code —
-> if a procedure here doesn't work as documented, that's a bug in
-> docs (file an issue).
+> **Status (this document):** Operator runbook codifying the
+> fail-safe behaviors that already exist in the codebase and the
+> procedures for recovering from common failure modes. Nothing in
+> this runbook requires new code — if a procedure here doesn't work
+> as documented, that's a bug in docs (file an issue).
 
 This runbook is the on-call deliverable: it tells reviewers and
 on-call operators what to do when a piece of certctl's state

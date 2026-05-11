@@ -9,16 +9,15 @@ any).
 
 ## OCSP responder availability
 
-**Audit reference:** Bundle C / M-020. CWE-770 (uncontrolled resource
-consumption); RFC 6960 (OCSP); RFC 7633 (Must-Staple).
+**Audit reference:** CWE-770 (uncontrolled resource consumption); RFC
+6960 (OCSP); RFC 7633 (Must-Staple).
 
 certctl ships an OCSP responder at `/.well-known/pki/ocsp/{issuer_id}/{serial}`
-that signs a fresh response per request. Pre-Bundle-C the unauth handler
-chain had no rate limit, so an attacker could DoS the responder and force
-fail-open relying parties to accept revoked certificates as valid. Bundle C
-adds the same per-key rate limiter to the unauth chain that the authenticated
-chain has used since Bundle B. Per-IP keying applies because OCSP traffic is
-unauthenticated.
+that signs a fresh response per request. The unauth handler chain
+applies the same per-key rate limiter the authenticated chain uses;
+per-IP keying applies because OCSP traffic is unauthenticated. Without
+this defense an attacker could DoS the responder and force fail-open
+relying parties to accept revoked certificates as valid.
 
 The rate limiter alone does not solve the underlying revocation-bypass risk.
 **The architectural fix is for issued certificates to carry the OCSP
@@ -59,11 +58,11 @@ For certificates issued to systems where revocation correctness matters:
 
 ## Postgres transport encryption
 
-See [docs/database-tls.md](database-tls.md). Bundle B / M-018.
+See [docs/database-tls.md](database-tls.md).
 
 ## Encryption at rest
 
-Bundle B / M-001. PBKDF2-SHA256 at 600,000 rounds (OWASP 2024 Password
+PBKDF2-SHA256 at 600,000 rounds (OWASP 2024 Password
 Storage Cheat Sheet floor) for the operator-supplied passphrase that
 derives the AES-256-GCM key for sensitive config columns. v3 blob format
 with a per-ciphertext random salt; v1/v2 read fallback for legacy rows.
@@ -72,13 +71,13 @@ the accompanying tests for the format spec.
 
 ## Authentication surface
 
-Bundle B / M-002. Two layers decide auth-exempt status:
+Two layers decide auth-exempt status:
 
 1. **Router layer:** `internal/api/router/router.go::AuthExemptRouterRoutes`
  - the endpoints registered via direct `r.mux.Handle` without going
    through the middleware chain (`/health`, `/ready`, `/api/v1/auth/info`,
-   `/api/v1/version`, plus `/api/v1/auth/bootstrap` GET + POST per
-   Bundle 1 Phase 6).
+   `/api/v1/version`, plus `/api/v1/auth/bootstrap` GET + POST for the
+   first-admin path).
 2. **Dispatch layer:** `internal/api/router/router.go::AuthExemptDispatchPrefixes`
  - URL-prefix routing in `cmd/server/main.go::buildFinalHandler` for
    `/.well-known/pki/*`, `/.well-known/est/*`, `/.well-known/est-mtls`,
@@ -87,26 +86,25 @@ Bundle B / M-002. Two layers decide auth-exempt status:
 Both lists have AST-walking regression tests (`auth_exempt_test.go`) that
 fail CI if a new bypass lands without updating the documented constant.
 
-### RBAC primitive (Bundle 1)
+### Role-based authorization
 
-Bundle 1 ships role-based authorization on top of API-key
-authentication. Every gated handler routes through the
-`auth.RequirePermission` middleware (or its router-level wrap
-`rbacGate`); the middleware resolves the actor's effective
-permissions via the service-layer `Authorizer.CheckPermission`
-and returns HTTP 403 BEFORE the handler body runs on miss. The
-seven default roles (`admin` / `operator` / `viewer` / `agent` /
-`mcp` / `cli` / `auditor`), 33-permission canonical catalogue,
-and the auditor split (`r-auditor` holds only `audit.read` +
-`audit.export`) are seeded by migration 000029.
+Role-based authorization runs on top of API-key authentication. Every
+gated handler routes through the `auth.RequirePermission` middleware
+(or its router-level wrap `rbacGate`); the middleware resolves the
+actor's effective permissions via the service-layer
+`Authorizer.CheckPermission` and returns HTTP 403 BEFORE the handler
+body runs on miss. The seven default roles (`admin` / `operator` /
+`viewer` / `agent` / `mcp` / `cli` / `auditor`), 33-permission
+canonical catalogue, and the auditor split (`r-auditor` holds only
+`audit.read` + `audit.export`) are seeded by migration 000029.
 
 For the operator how-to, see [`rbac.md`](rbac.md). For the
 threat model + compliance mapping, see
 [`auth-threat-model.md`](auth-threat-model.md). For the upgrade
-flow from a pre-Bundle-1 deployment, see
+flow from an API-key-only deployment, see
 [`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md).
 
-### Day-0 admin bootstrap (Bundle 1 Phase 6)
+### Day-0 admin bootstrap
 
 Fresh deployments where no admin actor exists yet can mint the
 first admin via `POST /api/v1/auth/bootstrap` - set
@@ -119,24 +117,25 @@ into the HTTP response body. See
 [`rbac.md`](rbac.md#day-0-bootstrap-first-admin-path) for the
 full flow.
 
-### Approval-bypass closure (Bundle 1 Phase 9)
+### Approval-bypass closure
 
 `CertificateProfile.RequiresApproval=true` profiles route both
 issuance/renewal AND profile edits through the
-`ApprovalService` two-person integrity gate (Phase 9 closes the
-flip-flop loophole where an admin could disable approval, mutate,
-re-enable). Same-actor self-approve is rejected at the service
-layer with `ErrApproveBySameActor`. See
+`ApprovalService` two-person integrity gate. The flip-flop loophole
+(an admin disabling approval, mutating, re-enabling) is closed by
+gating profile-edit through the same approval flow. Same-actor
+self-approve is rejected at the service layer with
+`ErrApproveBySameActor`. See
 [`docs/reference/profiles.md`](../reference/profiles.md) for the
 full gate semantics.
 
-### OIDC federation (Bundle 2 Phases 1-7)
+### OIDC federation
 
-Bundle 2 adds OIDC SSO on top of the API-key + RBAC foundation.
-Operators configure one or more identity providers (Keycloak,
-Authentik, Okta, Auth0, Entra ID, or Google Workspace via Keycloak
-broker); end users sign in at the IdP, certctl validates the
-returned ID token, and a session cookie is minted.
+OIDC SSO runs on top of the API-key + RBAC foundation. Operators
+configure one or more identity providers (Keycloak, Authentik, Okta,
+Auth0, Entra ID, or Google Workspace via Keycloak broker); end users
+sign in at the IdP, certctl validates the returned ID token, and a
+session cookie is minted.
 
 The token-validation pipeline pins:
 
@@ -151,9 +150,9 @@ The token-validation pipeline pins:
 - Exact `iss` match (`ErrIssuerMismatch`).
 - `aud` membership + `azp` for multi-aud tokens (per OIDC core
   §3.1.3.7 step 5).
-- `at_hash` REQUIRED-when-access_token-present (Phase 3 tightening
-  of the spec MAY → MUST so a substituted access token cannot
-  ride alongside a clean ID token).
+- `at_hash` REQUIRED-when-access_token-present (a tightening of the
+  spec MAY → MUST so a substituted access token cannot ride alongside
+  a clean ID token).
 - Single-use state + nonce (32-byte random server-generated;
   atomic `DELETE...RETURNING` on consume).
 - PKCE-S256 mandatory; `plain` rejected.
@@ -175,7 +174,7 @@ Per-IdP setup guides at
 [`oidc-runbooks/index.md`](oidc-runbooks/index.md) cover Keycloak,
 Authentik, Okta, Auth0, Entra ID, and Google Workspace.
 
-### Sessions + back-channel logout (Bundle 2 Phases 4-6)
+### Sessions + back-channel logout
 
 Successful OIDC login mints a session cookie:
 `v1.<session_id>.<signing_key_id>.<base64url-no-pad(HMAC-SHA256)>`.
@@ -220,9 +219,9 @@ For threat-model coverage of these surfaces, see
 operator-runnable performance baselines, see
 [`auth-benchmarks.md`](auth-benchmarks.md).
 
-### OIDC first-admin bootstrap (Bundle 2 Phase 7)
+### OIDC first-admin bootstrap
 
-Coexists with Bundle 1's env-var-token bootstrap. When the
+Coexists with the env-var-token bootstrap path. When the
 operator sets `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` + (optionally)
 `CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID`, the first user with one of
 those IdP groups becomes admin on first login per tenant.
@@ -232,7 +231,7 @@ once any actor holds `r-admin`, the OIDC bootstrap hook silently
 falls through to normal mapping. Audit row on every grant
 (`bootstrap.oidc_first_admin`, `event_category=auth`).
 
-### Break-glass admin (Bundle 2 Phase 7.5)
+### Break-glass admin
 
 Default-OFF (`CERTCTL_BREAKGLASS_ENABLED=false`). When enabled,
 the local-password admin path bypasses OIDC + group-claim layers;
@@ -319,8 +318,8 @@ Operator workflow at production cutover:
 
 ### Migrating an existing deployment to OIDC
 
-A Bundle-1-merged deployment that wants to add OIDC follows the
-step-by-step at
+An existing API-key-only deployment that wants to add OIDC follows
+the step-by-step at
 [`docs/migration/oidc-enable.md`](../migration/oidc-enable.md):
 configure CERTCTL_CONFIG_ENCRYPTION_KEY, pick + configure an IdP
 per the relevant runbook, configure the certctl-side OIDCProvider
@@ -330,7 +329,7 @@ organization.
 
 ## Per-user rate limiting
 
-Bundle B / M-025. Authenticated callers are bucketed by API-key name;
+Authenticated callers are bucketed by API-key name;
 unauthenticated callers (probes, OCSP relying parties, EST/SCEP enrollees)
 are bucketed by source IP. `RPS` and `BurstSize` are per-key budgets.
 `PerUserRPS` / `PerUserBurstSize` give authenticated clients a separate
@@ -345,11 +344,7 @@ certctl's API keys are configured via the `CERTCTL_API_KEYS_NAMED` env var
 in-memory list. There is no DB-resident key store, no GUI, no `/api/v1/keys`
 endpoint - the env var IS the key inventory.
 
-Pre-Bundle-G the env var rejected duplicate names, so rotating a key
-required: stop accepting OLDKEY → restart → roll NEWKEY out. Any client
-polling against OLDKEY during the restart window hit a 401.
-
-Bundle G adds a **double-key rotation window**: two entries can share a
+The env var supports a **double-key rotation window**: two entries can share a
 name during the rollover, and both keys validate. Operators run the
 rotation as:
 
@@ -395,7 +390,7 @@ the end of step 4, extend the window before step 5.
   startup** (privilege escalation guard).
 - Two entries with the same `(name, key)` pair: **rejected at startup**
   (typo guard - rotation requires DIFFERENT keys under the same name).
-- Single-entry steady state: unchanged from pre-Bundle-G behavior.
+- Single-entry steady state: the simple legacy behaviour.
 
 ### What the contract does NOT do
 

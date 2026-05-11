@@ -2,14 +2,15 @@
 
 > Last reviewed: 2026-05-05
 
-**Audit reference:** Bundle B / M-018. CWE-319 (Cleartext transmission of sensitive information).
+**Audit reference:** CWE-319 (Cleartext transmission of sensitive information).
 
 certctl talks to Postgres over a single connection-string URL controlled by the
 `CERTCTL_DATABASE_URL` env var. The `sslmode` query parameter on that URL
-selects the transport-encryption posture. Pre-Bundle-B all the bundled
-deployment artifacts (Helm chart, docker-compose) hard-coded `sslmode=disable`.
-Bundle B exposes that as an operator-facing knob with a documented default and
-explicit opt-in / opt-out paths for the four real-world deployment shapes.
+selects the transport-encryption posture. The bundled deployment artifacts
+(Helm chart, docker-compose) historically hard-coded `sslmode=disable`;
+current builds expose that as an operator-facing knob with a documented
+default and explicit opt-in / opt-out paths for the four real-world
+deployment shapes.
 
 ## Quick reference
 
@@ -26,9 +27,9 @@ explicit opt-in / opt-out paths for the four real-world deployment shapes.
 is the floor for systems exposed to spoofing risk (it adds hostname
 validation against the server cert's CN/SAN).
 
-## Helm chart (Bundle B)
+## Helm chart
 
-Bundle B adds two values under `postgresql.tls`:
+The chart exposes two values under `postgresql.tls`:
 
 ```yaml
 postgresql:

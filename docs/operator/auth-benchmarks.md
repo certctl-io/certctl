@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-10
 
-This document records the four Auth Bundle 2 / Phase 14 performance benchmarks: session validation (steady-state and cold-process) plus OIDC token validation (steady-state and cold-cache). Numbers below are the as-measured baseline at the Bundle 2 close; future regressions are caught when the operator re-runs `make benchmark-auth` and the per-quantile values move outside the documented bounds.
+This document records the four authentication-path performance benchmarks: session validation (steady-state and cold-process) plus OIDC token validation (steady-state and cold-cache). Numbers below are the as-measured baseline at v2.1.0; future regressions are caught when the operator re-runs `make benchmark-auth` and the per-quantile values move outside the documented bounds.
 
 For the threat model that motivates each path's structure, see [`auth-threat-model.md`](auth-threat-model.md). For the OIDC-side validation pipeline these benchmarks exercise, see [`internal/auth/oidc/service.go`](../../internal/auth/oidc/service.go) and [`internal/auth/session/service.go`](../../internal/auth/session/service.go).
 
@@ -18,7 +18,7 @@ The numbers below are bounded by this configuration. Operators on weaker hardwar
 | Go runtime | 1.25.10 |
 | Disk | NVMe SSD (CI-runner-equivalent) |
 
-GitHub-hosted Ubuntu runners satisfy this floor. The Phase 14 baselines below were captured on a `linux/arm64` 4-vCPU sandbox at 2026-05-10.
+GitHub-hosted Ubuntu runners satisfy this floor. The baselines below were captured on a `linux/arm64` 4-vCPU sandbox at 2026-05-10.
 
 ## Result table
 
@@ -29,7 +29,7 @@ GitHub-hosted Ubuntu runners satisfy this floor. The Phase 14 baselines below we
 | `BenchmarkOIDC_SteadyState` | < 5 ms | **1.5 ms** | 1.2 ms | 1.5 ms | 2.6 ms | ✓ 3× under target |
 | `BenchmarkOIDC_ColdCache` | < 200 ms | operator-run | — | — | — | ⚠️ requires Docker; see [Cold-cache OIDC: how to run](#cold-cache-oidc-how-to-run) below |
 
-The three default-tag benchmarks above were captured at `git rev-parse HEAD` = (Phase 14 close); re-run via `make benchmark-auth`. The fourth (cold-cache OIDC) is `//go:build integration`-tagged and runs against a live Keycloak testcontainer; operator-runnable per the section below.
+The three default-tag benchmarks above were captured at v2.1.0; re-run via `make benchmark-auth`. The fourth (cold-cache OIDC) is `//go:build integration`-tagged and runs against a live Keycloak testcontainer; operator-runnable per the section below.
 
 ## What each benchmark covers (and what it doesn't)
 
@@ -91,7 +91,7 @@ go test -tags integration \
   ./internal/auth/oidc/
 ```
 
-The `-run` flag is needed because `BenchmarkOIDC_ColdCache` reuses the `sharedKeycloak` package-level fixture set up by Phase 10's integration tests; running the benchmark in isolation (without the test's setup phase) skips with a clear message.
+The `-run` flag is needed because `BenchmarkOIDC_ColdCache` reuses the `sharedKeycloak` package-level fixture set up by the OIDC Keycloak integration test; running the benchmark in isolation (without that test's setup phase) skips with a clear message.
 
 Operator-recorded baselines welcome — append below as `Last measured: <date> / <hardware> / <operator>`:
 
@@ -122,7 +122,7 @@ So a "cold-cache p99 of 200 ms" reads as "the network round-trip dominates the b
 
 If the operator's measurement comes in significantly lower (say 50 ms), the IdP is on a fast same-region link; certctl's contribution is the same ~5-10 ms in-process work in either case.
 
-The Phase 14 prompt's exit criterion explicitly accepts "rationale must be measurable and falsifiable, not hand-waving." The 200 ms cap is operator-checkable: the operator runs `make benchmark-auth-coldcache` on their actual production hardware against their actual production IdP and either confirms the p99 is under 200 ms OR produces a measurement showing the cold path is bounded by something other than network (e.g. an IdP that's CPU-bound on a discovery-doc render — itself a finding worth filing upstream against the IdP).
+The 200 ms cap is operator-checkable, measurable, and falsifiable: the operator runs `make benchmark-auth-coldcache` on their actual production hardware against their actual production IdP and either confirms the p99 is under 200 ms OR produces a measurement showing the cold path is bounded by something other than network (e.g. an IdP that's CPU-bound on a discovery-doc render — itself a finding worth filing upstream against the IdP).
 
 ## Methodology
 
@@ -149,9 +149,9 @@ make benchmark-auth-coldcache      # oidc cold-cache (10x; requires Docker)
 
 Both targets are documented in the project [`Makefile`](../../Makefile).
 
-## Pre-merge audit (Phase 14 exit gate)
+## Pre-merge audit
 
-Per the Phase 14 prompt's exit criterion: **all four benchmarks ran, four numbers recorded.** Steady-state targets met (p99 < 1 ms for session, p99 < 5 ms for OIDC). Cold-process target met (p99 < 10 ms). Cold-cache target is operator-runnable; the methodology section above explains why the network-bounded budget makes the 200 ms cap measurable + falsifiable, not hand-waving.
+**All four benchmarks ran, four numbers recorded.** Steady-state targets met (p99 < 1 ms for session, p99 < 5 ms for OIDC). Cold-process target met (p99 < 10 ms). Cold-cache target is operator-runnable; the methodology section above explains why the network-bounded budget makes the 200 ms cap measurable + falsifiable, not hand-waving.
 
 ## Cross-references
 
@@ -159,4 +159,4 @@ Per the Phase 14 prompt's exit criterion: **all four benchmarks ran, four number
 - [`oidc-runbooks/index.md`](oidc-runbooks/index.md) — per-IdP setup that determines real-world JWKS-fetch latency.
 - `internal/auth/session/service.go` — session validation pipeline.
 - `internal/auth/oidc/service.go` — OIDC token validation pipeline.
-- `internal/auth/oidc/testfixtures/keycloak.go` — Phase 10 testcontainers fixture used by the cold-cache benchmark.
+- `internal/auth/oidc/testfixtures/keycloak.go` — testcontainers fixture used by the cold-cache benchmark.

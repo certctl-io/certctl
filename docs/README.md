@@ -27,14 +27,14 @@ You're operating certctl in production or building integrations and need authori
 | Doc | What it covers |
 |---|---|
 | [Architecture](reference/architecture.md) | System design, data flow, security model, deployment topologies |
-| [Profiles](reference/profiles.md) | CertificateProfile policy object — issuer wiring, EKUs, RequiresApproval gate (Phase 9 closure) |
+| [Profiles](reference/profiles.md) | CertificateProfile policy object — issuer wiring, EKUs, RequiresApproval gate (with profile-edit closure) |
 | [API](reference/api.md) | OpenAPI 3.1 spec, integration patterns, client SDK generation |
 | [CLI](reference/cli.md) | certctl-cli command reference and CI/CD integration patterns |
 | [Configuration](reference/configuration.md) | `CERTCTL_*` environment variable reference (scheduler, rate limits, deploy verify, audit, agent) |
 | [MCP server](reference/mcp.md) | Model Context Protocol integration for AI assistants |
 | [Release verification](reference/release-verification.md) | Cosign / SLSA / SBOM verification procedure |
 | [Intermediate CA hierarchy](reference/intermediate-ca-hierarchy.md) | Multi-level CA tree management — RFC 5280 §3.2/§4.2.1.9/§4.2.1.10 enforcement |
-| [Auth standards implemented](reference/auth-standards-implemented.md) | RFC + CWE evidence for the Auth Bundle 1 + 2 surface (NOT a compliance-mapping doc) |
+| [Auth standards implemented](reference/auth-standards-implemented.md) | RFC + CWE evidence for the API-key + RBAC + OIDC + sessions + break-glass surface (NOT a compliance-mapping doc) |
 | [Deployment model](reference/deployment-model.md) | Atomic write, post-deploy verify, rollback semantics across all targets |
 | [Vendor matrix](reference/vendor-matrix.md) | Tested vendor versions per target connector |
 
@@ -64,16 +64,16 @@ You're running certctl in production and need operational guidance.
 
 | Doc | What it covers |
 |---|---|
-| [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation, RBAC primitive (Bundle 1), bootstrap |
-| [RBAC operator reference](operator/rbac.md) | Roles, permissions, scopes, scope-down + bootstrap flow (Bundle 1) |
-| [Auth threat model](operator/auth-threat-model.md) | API-key compromise, role-grant abuse, bootstrap-token leak, audit-mutation, compliance mapping (Bundle 1) |
-| [OIDC / SSO runbooks](operator/oidc-runbooks/index.md) | Per-IdP setup guides — Keycloak, Authentik, Okta, Auth0, Entra ID, Google Workspace (Bundle 2) |
+| [Security posture](operator/security.md) | Auth, rate limits, encryption at rest, key rotation, RBAC + OIDC + sessions + break-glass, bootstrap |
+| [RBAC operator reference](operator/rbac.md) | Roles, permissions, scopes, scope-down + day-0 bootstrap |
+| [Auth threat model](operator/auth-threat-model.md) | API-key + RBAC + OIDC + sessions + break-glass — token forgery, session hijacking, IdP compromise, role-grant abuse, bootstrap-token leak, audit-mutation |
+| [OIDC / SSO runbooks](operator/oidc-runbooks/index.md) | Per-IdP setup guides — Keycloak, Authentik, Okta, Auth0, Entra ID, Google Workspace |
 | [Control plane TLS](operator/tls.md) | Self-signed bootstrap, operator-supplied Secret, cert-manager Certificate CR |
 | [Database TLS](operator/database-tls.md) | PostgreSQL transport encryption |
-| [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance + Phase 9 profile-edit closure |
+| [Approval workflow](operator/approval-workflow.md) | Two-person integrity gate for high-stakes issuance + profile-edit closure |
 | [Helm deployment](operator/helm-deployment.md) | Kubernetes installation via the bundled chart |
 | [Performance baselines](operator/performance-baselines.md) | Operator-runnable benchmarks for regression spot checks |
-| [Auth benchmarks](operator/auth-benchmarks.md) | Session + OIDC validation p99 targets and measured baselines (Bundle 2 Phase 14) |
+| [Auth benchmarks](operator/auth-benchmarks.md) | Session + OIDC validation p99 targets and measured baselines |
 | [Legacy clients (TLS 1.2)](operator/legacy-clients-tls-1.2.md) | Reverse-proxy runbook for embedded EST/SCEP clients on TLS 1.2 |
 
 ### Runbooks
@@ -97,7 +97,7 @@ You're moving from another cert-management tool to certctl, or running both in p
 | cert-manager ACME (point cert-manager at certctl) | [migration/acme-from-cert-manager.md](migration/acme-from-cert-manager.md) |
 | Traefik ACME (point Traefik at certctl) | [migration/acme-from-traefik.md](migration/acme-from-traefik.md) |
 | **API keys → RBAC (v2.0.x → v2.1.0)** | [migration/api-keys-to-rbac.md](migration/api-keys-to-rbac.md) — **AUDIT YOUR API KEYS** post-upgrade |
-| **Enable OIDC SSO on a Bundle-1-merged deployment** | [migration/oidc-enable.md](migration/oidc-enable.md) — step-by-step Bundle 2 OIDC onboarding |
+| **Enable OIDC SSO** | [migration/oidc-enable.md](migration/oidc-enable.md) — step-by-step OIDC onboarding for an existing API-key + RBAC deployment |
 
 ## Contributor
 

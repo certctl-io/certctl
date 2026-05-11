@@ -9,14 +9,14 @@
 > [`security.md#demo-to-production-cutover-audit-2026-05-11-a-8`](security.md#demo-to-production-cutover-audit-2026-05-11-a-8).
 
 This is the operator-facing reference for the role-based access
-control primitive that ships with Bundle 1 (auth bundle 1) of certctl.
+control primitive in certctl.
 Read this if you're running certctl in production and need to grant /
 revoke access to API keys, set up the auditor split, or onboard the
 first admin.
 
 For the threat model behind these controls, see
 [`auth-threat-model.md`](auth-threat-model.md). For the migration
-flow from a pre-Bundle-1 deployment, see
+flow from a pre-RBAC (v2.0.x) deployment, see
 [`docs/migration/api-keys-to-rbac.md`](../migration/api-keys-to-rbac.md).
 
 ## Mental model
@@ -69,7 +69,7 @@ giving them the keys to the kingdom. The
 forward.
 
 The five **admin-only fine-grained perms** seeded by migration
-000030 (Phase 3.5 conversion) gate the high-blast-radius endpoints:
+000030 gate the high-blast-radius endpoints:
 
 - `cert.bulk_revoke` - `POST /api/v1/certificates/bulk-revoke` and the EST sibling
 - `crl.admin` - `/api/v1/admin/crl/cache`
@@ -141,14 +141,14 @@ even if no scoped grant exists. The reverse is also true - a
 scoped grant doesn't satisfy a request against a different scope.
 The Authorizer's `CheckPermission` is the single point of truth.
 
-> **Note (Bundle 1 deferral):** the `scope_id` column is not
+> **Note (deferral):** the `scope_id` column is not
 > currently FK-constrained against the resource tables. An
 > operator can grant a permission at scope `profile`/`p-bogus`
 > without `p-bogus` existing; the gate still works (no rows match
-> at request time), but the API does not 404 the grant. Bundle 2
-> tracks the strict-FK closure. See
+> at request time), but the API does not 404 the grant. Strict-FK
+> closure is tracked for a follow-on release. See
 > `internal/repository/postgres/auth.go::AddPermission`'s
-> `TODO(bundle-2)` comment.
+> `TODO` comment.
 
 ## Granting + revoking access
 
@@ -194,7 +194,7 @@ certctl-cli auth keys scope-down --non-interactive ./scope-down.json
 
 The mutating role-lifecycle commands (`certctl-cli auth roles
 create / update / delete` + `roles add-permission / remove-permission`)
-are tracked as Bundle 1 Phase 5.5 follow-up; today, manage custom
+are tracked as a follow-on; today, manage custom
 roles via the HTTP API or GUI.
 
 ### From the HTTP API
@@ -258,7 +258,7 @@ distinguish wide cleanups from targeted demotions in the access log.
 
 ### From the MCP server
 
-Bundle 1 Phase 11 ships 12 RBAC tools:
+The MCP server ships 12 RBAC tools:
 `certctl_auth_me`, `certctl_auth_list_roles`, `certctl_auth_get_role`,
 `certctl_auth_create_role`, `certctl_auth_update_role`,
 `certctl_auth_delete_role`, `certctl_auth_list_permissions`,
@@ -296,7 +296,7 @@ To create an auditor key:
 
 ## Day-0 bootstrap (first-admin path)
 
-Bundle 1 Phase 6 ships a one-shot bootstrap endpoint for fresh
+certctl ships a one-shot bootstrap endpoint for fresh
 deployments where no admin actor exists yet.
 
 1. Set `CERTCTL_BOOTSTRAP_TOKEN=$(openssl rand -hex 32)` in the
@@ -321,9 +321,10 @@ deployments where no admin actor exists yet.
 
 The token is constant-time-compared. The server logs a startup
 warning if `CERTCTL_BOOTSTRAP_TOKEN` is set AND admin actors
-already exist (config-drift signal). For OIDC-first-admin (the
-"first user who signs in via SSO becomes admin" pattern), wait for
-Bundle 2.
+already exist (config-drift signal). For the OIDC-first-admin
+path (the "first user who signs in via SSO becomes admin"
+pattern), see
+[`docs/migration/oidc-enable.md`](../migration/oidc-enable.md).
 
 ## Demo mode (`CERTCTL_AUTH_TYPE=none`)
 
@@ -344,11 +345,11 @@ example folders only.
 - [Threat model](auth-threat-model.md) - what attacks this primitive
   defends against and which it does not
 - [Migration guide](../migration/api-keys-to-rbac.md) - moving
-  pre-Bundle-1 deployments onto RBAC
+  pre-RBAC (v2.0.x) deployments onto RBAC
 - [Profiles](../reference/profiles.md) - the `RequiresApproval=true`
-  flow that Bundle 1 Phase 9 closure protects from flip-flop
-- [Approval workflow](approval-workflow.md) - the Rank 7 Infisical
-  deep-research deliverable that the Phase 9 closure piggybacks on
+  flow with the flip-flop-bypass closure
+- [Approval workflow](approval-workflow.md) - the two-person
+  integrity primitive backing `RequiresApproval`
 - `internal/auth/` - the middleware + keystore + RequirePermission
 - `internal/service/auth/` - the service-layer Authorizer
 - `cowork/auth-bundle-1-prompt.md` - the design + phase plan

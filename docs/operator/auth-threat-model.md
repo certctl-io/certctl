@@ -3,20 +3,18 @@
 > Last reviewed: 2026-05-10
 
 This document describes the attack surface around authentication and
-authorization in certctl after Bundle 1 (the RBAC primitive) AND Bundle
-2 (OIDC + sessions + back-channel logout + break-glass) land. It
-complements [`rbac.md`](rbac.md) and the per-IdP runbooks at
+authorization in certctl. It complements [`rbac.md`](rbac.md) and the
+per-IdP runbooks at
 [`oidc-runbooks/index.md`](oidc-runbooks/index.md) - those docs
 explain how to USE the controls; this one explains what those controls
 defend against and which threats they explicitly do NOT close.
 
-The post-Bundle-2 attack surface is meaningfully wider than Bundle 1's:
-Bundle 1 closed the API-key axis (one credential type, one validation
-path); Bundle 2 adds OIDC-federated humans, session cookies with
-length-prefixed HMAC + CSRF, back-channel logout, OIDC first-admin
-bootstrap, and a default-OFF break-glass admin path. Each surface
-brings its own threat catalogue + mitigations, documented below
-alongside the Bundle 1 ones.
+certctl ships two authentication paths plus a break-glass admin
+fallback: API keys with SHA-256 hashing + role-based authorization,
+and OIDC SSO with HMAC-signed server-side sessions, CSRF rotation,
+RFC OIDC Back-Channel Logout, an OIDC first-admin bootstrap, and a
+default-OFF Argon2id break-glass admin path. Each surface brings its
+own threat catalogue + mitigations, documented below.
 
 ## Threat actors
 
@@ -35,7 +33,7 @@ alongside the Bundle 1 ones.
 5. **Compromised audit reviewer (auditor role)** - read-only
    access to audit events but otherwise untrusted.
 
-The following actors are NEW with Bundle 2:
+The following actors are added by the federated-identity surface:
 
 6. **OIDC-federated end user** - authenticates via the
    organization's IdP (Keycloak / Okta / Auth0 / Entra ID / Authentik
@@ -53,25 +51,25 @@ The following actors are NEW with Bundle 2:
    out of certctl's control; mitigations are bounded to "the audit
    trail records the source provider on every login, blast radius is
    bounded by group_role_mapping configured for that provider."
-9. **Break-glass-password holder (Phase 7.5 path)** - operator with
+9. **Break-glass-password holder** - operator with
    the local Argon2id password set up for SSO outages. Bypasses the
    OIDC + group-claim layer entirely. The default-OFF posture is the
    load-bearing mitigation; once enabled the password is the entire
    attack surface.
 
-## Defenses Bundle 1 ships
+## API-key + RBAC defenses
 
 ### API-key authentication
 
 - API keys live in `CERTCTL_API_KEYS_NAMED` (env-var) or
-  `api_keys` (DB row, written by Bundle 1 Phase 6 bootstrap and
+  `api_keys` (DB row, written by the day-0 admin bootstrap and
   the future role-management API). Keys hash via SHA-256; the
   middleware compares hashes via `crypto/subtle.ConstantTimeCompare`
   to defeat timing attacks.
 - The auth middleware populates `ActorIDKey` / `ActorTypeKey` /
   `TenantIDKey` on every authenticated request context. Audit rows
   attribute every action to the named-key actor instead of the
-  pre-Bundle-1 hardcoded `api-key-user` placeholder.
+  earlier hardcoded `api-key-user` placeholder.
 - Demo mode (`CERTCTL_AUTH_TYPE=none`) injects the synthetic
   `actor-demo-anon` actor with admin grants. Production deploys
   MUST NOT use demo mode.
@@ -79,7 +77,8 @@ The following actors are NEW with Bundle 2:
 ### Authorization (RBAC)
 
 - Every gated handler routes through `auth.RequirePermission` (or
-  the router-level `rbacGate` wrap from Phase 3.5). The middleware
+  the router-level `rbacGate` wrap in `internal/api/router/router.go`).
+  The middleware
   resolves the actor's effective permissions via the
   `Authorizer.CheckPermission` service-layer call; on miss, the
   handler returns HTTP 403 BEFORE the body runs. This is the
@@ -124,11 +123,11 @@ The following actors are NEW with Bundle 2:
   rotate via the regular RBAC API; the plaintext is not
   recoverable from the DB.
 
-### Approval workflow + Phase 9 loophole closure
+### Approval workflow + flip-flop loophole closure
 
 - `CertificateProfile.RequiresApproval=true` gates two surfaces:
   (a) issuance + renewal of every cert pointing at the profile,
-  (b) edits to the profile itself (Bundle 1 Phase 9). The Phase 9
+  (b) edits to the profile itself. The flip-flop loophole closure
   closure prevents the flip-flop bypass where an admin disables
   approval, mutates, re-enables.
 - Same-actor self-approve is rejected at the service layer with
@@ -140,7 +139,7 @@ The following actors are NEW with Bundle 2:
 ### Audit trail
 
 - Every mutating operation flows through `AuditService.RecordEvent`
-  or `RecordEventWithCategory`. Bundle 1 Phase 8 added the
+  or `RecordEventWithCategory`. The audit-category extension added the
   `event_category` column with a `CHECK` constraint enforcing
   the closed enum (`cert_lifecycle` / `auth` / `config`); the
   category surfaces the auth-mutation slice to the auditor view.
@@ -148,7 +147,7 @@ The following actors are NEW with Bundle 2:
   (`audit_events_worm_trigger`) blocks `UPDATE` and `DELETE` at
   the database layer. Even an admin DB user cannot tamper with
   audit history without dropping the trigger.
-- Bundle-6's redactor (`internal/service/audit_redact.go`)
+- The audit redactor (`internal/service/audit_redact.go`)
   scrubs credentials + PII from the `details` JSONB before
   persistence; an `_redacted_keys` field surfaces what the
   redactor took out for compliance review.
@@ -158,14 +157,14 @@ The following actors are NEW with Bundle 2:
 ACME / SCEP / EST / OCSP / CRL endpoints authenticate via
 embedded credentials defined by their own RFCs (JWS-signed,
 challenge passwords, mTLS, public-by-RFC). The auth middleware
-explicitly bypasses these via `IsProtocolEndpoint`. The Phase 12
-`internal/api/router/phase12_protocol_allowlist_test.go` pins
-the invariant at three layers (middleware bypass, allowlist
+explicitly bypasses these via `IsProtocolEndpoint`. The
+`internal/api/router/phase12_protocol_allowlist_test.go` regression
+test pins the invariant at three layers (middleware bypass, allowlist
 constant, router-level no-rbacGate-wraps-protocol-paths).
 
-## Defenses Bundle 2 ships
+## OIDC + sessions + break-glass defenses
 
-### OIDC token validation (Phase 3)
+### OIDC token validation
 
 - **Algorithm allow-list, never `none`, never HMAC.** The service-
   layer pinning lives in `internal/auth/oidc/service.go::disallowedAlgs`
@@ -233,7 +232,7 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
   is `json:"-"` on the domain type so a misconfigured handler
   cannot wire-leak.
 
-### Session minting + cookies (Phases 4 + 6)
+### Session minting + cookies
 
 - **Length-prefixed HMAC.** Cookie wire format is
   `v1.<session_id>.<signing_key_id>.<base64url-no-pad(HMAC-SHA256)>`.
@@ -284,7 +283,7 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
   stolen pre-login cookie cannot be replayed against the post-login
   gate.
 
-### Back-channel logout (Phase 5)
+### Back-channel logout
 
 - **OpenID Connect Back-Channel Logout 1.0** (NOT RFC 8414).
   Endpoint: `POST /auth/oidc/back-channel-logout`. The IdP signs a
@@ -295,15 +294,15 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
   `events` (with the spec-mandated logout event type); exactly
   one of `sub` / `sid`; `nonce` MUST be absent (per spec §2.4
   - logout tokens MUST NOT carry a nonce). All four pinned by
-  Phase 5 negative tests.
-- **`jti`-based replay defense.** The Phase 5 implementation
+  the back-channel-logout negative-test matrix.
+- **`jti`-based replay defense.** The handler
   tracks recently-seen `jti` values to defeat logout-token replay
   attacks where an attacker captures a logout JWT and replays it.
 - **Cache-Control: no-store** on the response per spec §2.5.
 
-### OIDC first-admin bootstrap (Phase 7)
+### OIDC first-admin bootstrap
 
-- **Coexists with Bundle 1's env-var-token bootstrap.** Both can be
+- **Coexists with the env-var-token bootstrap path.** Both can be
   configured; the admin-existence probe ensures only one wins.
 - **Group-scoped.** `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` is a comma-
   separated allowlist of IdP group names; users in any one of those
@@ -319,7 +318,7 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
 - **Audit row on every grant.** `bootstrap.oidc_first_admin` event
   with `event_category=auth` + INFO log; the auditor monitors.
 
-### Break-glass admin (Phase 7.5)
+### Break-glass admin
 
 - **Default-OFF.** `CERTCTL_BREAKGLASS_ENABLED=false` is the default;
   the entire surface (4 endpoints) is disabled. Operators flip it
@@ -355,10 +354,10 @@ constant, router-level no-rbacGate-wraps-protocol-paths).
 - **Rate limit on the public login endpoint.** 5 attempts/minute
   via the existing `middleware.NewRateLimiter`.
 
-## Bundle 2 threat catalogue
+## OIDC + sessions threat catalogue
 
 The following sub-sections enumerate the threat surface introduced by
-Bundle 2 and the mitigations the platform ships. They are deliberately
+the OIDC + sessions surface and the mitigations the platform ships. They are deliberately
 exhaustive - if a threat is listed here it has a concrete mitigation
 or a documented "operator-driven, out of scope" framing. New threats
 discovered post-2026-05-10 should be added here with a dated commit
@@ -370,10 +369,10 @@ note.
 |---|---|
 | Alg confusion (HS256 token signed with the IdP's public key) | Alg allow-list rejects HS256 / HS384 / HS512 / `none`. Service-layer + go-oidc enforce in two layers. IdP-downgrade-attack defense at provider-creation time. |
 | Audience injection (token issued for a different client) | Service-layer `aud` re-check post-go-oidc verify; multi-aud tokens require matching `azp`. Sentinels `ErrAudienceMismatch` / `ErrAZPRequired` / `ErrAZPMismatch`. |
-| Issuer mismatch (token from a different IdP with the same alg + key shape) | Exact `iss` string match (`ErrIssuerMismatch`). The 21-case Phase 3 negative-test matrix pins the byte-for-byte requirement. |
+| Issuer mismatch (token from a different IdP with the same alg + key shape) | Exact `iss` string match (`ErrIssuerMismatch`). The 21-case OIDC negative-test matrix pins the byte-for-byte requirement. |
 | Nonce replay (capturing a fresh token + replaying with the same nonce) | Single-use nonce stored in the pre-login row; `LookupAndConsume` is `DELETE...RETURNING` (atomic). Second use returns `ErrPreLoginNotFound`. |
 | State replay (CSRF on the IdP redirect) | Same single-use mechanism as nonce. State is `subtle.ConstantTimeCompare`d. |
-| `at_hash` substitution (clean ID token with a swapped access token) | `at_hash` REQUIRED when access_token present (Phase 3 tightening of OIDC core's MAY → MUST). `ErrATHashRequired` if missing; `ErrATHashMismatch` if non-matching. |
+| `at_hash` substitution (clean ID token with a swapped access token) | `at_hash` REQUIRED when access_token present (certctl tightens OIDC core's MAY → MUST). `ErrATHashRequired` if missing; `ErrATHashMismatch` if non-matching. |
 | `iat` window manipulation (stale token replay) | `iat_window_seconds` configurable per-provider (default 300, cap 600). Future `iat` returns `ErrIATInFuture`; older-than-window returns `ErrIATTooOld`. |
 | JWKS rotation mid-login | coreos/go-oidc's built-in cache + auto-refresh on TTL expiry. Operator-triggered `Service.RefreshKeys` for forced refresh. |
 | JWKS-fetch failure during a key rotation | `ErrJWKSUnreachable` (HTTP 503 to in-flight login). Existing sessions untouched. Operator clicks "Refresh discovery cache" once IdP recovers. No exponential backoff. |
@@ -382,7 +381,7 @@ note.
 
 | Vector | Mitigation |
 |---|---|
-| Cookie theft via XSS | `HttpOnly` on the session cookie; CSP headers from Bundle B's H-1 work prevent inline-script execution. |
+| Cookie theft via XSS | `HttpOnly` on the session cookie; CSP headers from the security-hardening middleware prevent inline-script execution. |
 | Cookie theft via network MITM | `Secure` flag + TLS 1.3-only control plane (HTTPS-Everywhere v2.2 milestone). |
 | CSRF on state-changing methods | `SameSite=Lax` default + double-submit-cookie pattern with hashed CSRF token on the session row. CSRFMiddleware fires on POST/PUT/PATCH/DELETE for session-authenticated callers; API-key actors are exempt. |
 | Session-cookie forgery via concatenation collision | Length-prefixed HMAC input (`len(sid):sid:len(kid):kid`). Pinned by two tests + a doc-block at the top of `service.go`. |
@@ -422,8 +421,8 @@ control - the trust root is the IdP. Documented behaviors:
 |---|---|---|
 | IdP unreachable | certctl never receives the logout signal; sessions persist until idle/absolute timeout (1h/8h defaults). | Operator keeps absolute timeout short relative to risk tolerance. Manual revoke via GUI is always available. |
 | Logout token signature invalid | certctl returns 400; no session revoked; `auth.oidc_back_channel_logout_failed` audit row. | Operator-monitored audit row surfaces forged-logout-token attempts. |
-| Logout token replay (attacker captures + replays a valid logout JWT) | `jti`-based deduplication rejects the replay; first delivery succeeds, second returns 400. | Pinned by Phase 5 negative tests. |
-| Logout token alg confusion | Same alg allow-list as the login flow; HS-family rejected. | Phase 3 alg allow-list applies to BCL too (same `Provider.RemoteKeySet`). |
+| Logout token replay (attacker captures + replays a valid logout JWT) | `jti`-based deduplication rejects the replay; first delivery succeeds, second returns 400. | Pinned by back-channel-logout negative tests. |
+| Logout token alg confusion | Same alg allow-list as the login flow; HS-family rejected. | The OIDC alg allow-list applies to BCL too (same `Provider.RemoteKeySet`). |
 | Missing `events` claim | Spec §2.4 requires the OIDC-defined logout event type; missing returns 400. | Pinned by negative test. |
 | `nonce` claim present | Spec §2.4 requires `nonce` MUST NOT appear in logout tokens; presence returns 400. | Pinned by negative test. |
 
@@ -440,19 +439,19 @@ threats:
 | IdP renames a group (e.g. `engineers → eng-team`) | Mappings silently break; users get fewer roles than expected. `auth.oidc_login_unmapped_groups` audit row fires on every such login; auditor monitors for unexpected spikes. |
 | IdP user maintainer adds a user to an unintended group | Group is mapped to a higher-privilege role than intended; user gets the role on next login. Bounded blast radius: the group→role mapping is what they got, not arbitrary admin. Defense-in-depth: review mappings periodically; the auditor role can pull `auth.oidc_login_succeeded` rows by `details.subject` to spot drift. |
 
-### Bootstrap phase risks (post-Bundle-2)
+### Bootstrap phase risks
 
-This section extends Bundle 1's bootstrap section with the OIDC
+This section extends the day-0 bootstrap section with the OIDC
 first-admin path.
 
 | Vector | Mitigation |
 |---|---|
-| `CERTCTL_BOOTSTRAP_TOKEN` (Bundle 1 fallback) leaks | One-shot via `consumed` bool + admin-existence probe. Both arms close the path the moment any admin lands. (Bundle 1.) |
+| `CERTCTL_BOOTSTRAP_TOKEN` (env-var fallback path) leaks | One-shot via `consumed` bool + admin-existence probe. Both arms close the path the moment any admin lands. |
 | `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` misconfigured to a wide group (e.g. `everyone`) | Unintended user becomes admin on first OIDC login. Mitigation: scope-down via `certctl-cli auth keys scope-down --suggest`. Operators configure narrow groups. The audit row on `bootstrap.oidc_first_admin` surfaces every grant. |
 | Both bootstrap strategies enabled simultaneously | Whichever fires first wins; the second sees admin-already-exists and falls through to normal mapping. No double-admin landing. |
 | `CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID` left unset with multi-IdP deploy | Hook fires on ANY provider's tokens. Mitigation: explicit gate documented in `cmd/server/main.go` startup logging; operator audit reviewed pre-tag. |
 
-### Break-glass risks (Phase 7.5)
+### Break-glass risks
 
 | Vector | Mitigation |
 |---|---|
@@ -462,7 +461,7 @@ first-admin path.
 | Operator forgets to disable post-incident | Break-glass becomes a permanent backdoor. Mitigation: WARN log at boot when ENABLED=true; audit row on every break-glass login; runbook prescribes "disable within 24h of SSO recovery." |
 | Side-channel timing on no-credential vs wrong-password vs locked | All three paths take statistically indistinguishable time via `verifyDummy()`. Pinned by the timing-statistical test. |
 | Surface fingerprinting (scanner identifies break-glass exists) | All four endpoints return 404 (NOT 403) when disabled. Surface-invisibility - identical to a non-existent route. |
-| Reserved-actor `actor-demo-anon` mutation via break-glass admin | Service layer rejects with `ErrAuthReservedActor` (HTTP 409). Same gate as the Bundle 1 RBAC path. |
+| Reserved-actor `actor-demo-anon` mutation via break-glass admin | Service layer rejects with `ErrAuthReservedActor` (HTTP 409). Same gate as the RBAC path. |
 
 ### Token-leak hygiene (the explicit grep policy)
 
@@ -473,8 +472,8 @@ NEVER appear in any log line at any level.
 The invariant is enforced by per-package `logging_test.go` files that
 redirect `slog.Default` to a buffer, run the service paths, and
 grep-assert the secret values are absent from every captured line.
-Bundle 1's `internal/auth/bootstrap/service_test.go` is the pattern.
-Phases 3, 4, and 7.5 follow the same shape:
+The pattern is `internal/auth/bootstrap/service_test.go`; the OIDC,
+session, and break-glass packages follow the same shape:
 
 - `internal/auth/oidc/logging_test.go` - token / code / verifier /
   state / nonce / cookie / client_secret / alg name absent from
@@ -486,68 +485,43 @@ Phases 3, 4, and 7.5 follow the same shape:
   Argon2id hash absent from every audit row + log line +
   HTTP-response shape (json:"-" probe via `json.Marshal`).
 
-The `details` JSONB column on `audit_events` runs through
-Bundle-6's redactor (`internal/service/audit_redact.go`) before
+The `details` JSONB column on `audit_events` runs through the
+audit redactor (`internal/service/audit_redact.go`) before
 persistence; the redactor's allow-list is conservative enough that
 adding a new token-shaped field to a new audit row defaults to
 redacted, not leaked.
 
-## Threats Bundle 1 does NOT close (Bundle 2 closure status)
+## Closed federated-identity threats
 
-The list below was the Bundle-1-era deferred-threats catalogue.
-Status updated 2026-05-10 to reflect what Bundle 2 closed and what
-remains deferred. **The label "Bundle 1 does NOT close" is preserved
-for historical traceability**; readers should consult the marker at
-the end of each item for current status.
+Each item below was an open threat under the earlier API-key-only
+deployment posture. Status reflects current closure as of v2.1.0.
 
-1. **OIDC / SAML / WebAuthn federation** - ✅ OIDC closed (Bundle 2
-   Phases 1-7); SAML deferred to v3; WebAuthn deferred to v3
-   (Decision 12 - WebAuthn pairs with break-glass for hardware-
-   token-MFA). The break-glass path (Phase 7.5) is a partial
+1. **OIDC federation** - ✅ closed. SAML and WebAuthn remain on the
+   future-work list (Decision 12 — WebAuthn pairs with break-glass
+   for hardware-token MFA). The break-glass path is a partial
    mitigation for the no-MFA case during SSO incidents.
-2. **Session management** - ✅ closed (Bundle 2 Phases 4 + 6). HMAC-
-   signed `certctl_session` cookie with length-prefixed wire format,
+2. **Session management** - ✅ closed. HMAC-signed
+   `__Host-certctl_session` cookie with length-prefixed wire format,
    1h idle / 8h absolute expiry, scheduler-driven GC, server-side
    revocation list (delete the row), GUI's "Sessions" page surfaces
    own + all-actor revocation, back-channel logout from the IdP.
-3. **Local password accounts (break-glass)** - ✅ closed (Bundle 2
-   Phase 7.5). Argon2id + lockout + default-OFF + 404-not-403
-   surface invisibility. NOT for general human auth - only the
-   "SSO is broken, need admin access right now" path. WebAuthn
-   pairing on the v3 roadmap.
-4. **Time-bound role grants / JIT elevation** - **still deferred to
-   v3.** The schema still reserves `actor_roles.expires_at` with no
-   UI/API to set it. Bundle 2 introduces session-level idle/absolute
-   expiry but does not propagate that to role grants.
-5. **MFA / hardware tokens for the operator console** - ⚠️ partial
-   closure. WebAuthn / FIDO2 second factor remains v3 (Decision 12).
-   Bundle 2's break-glass (Phase 7.5) provides a separate password
-   factor that operators can pair with OIDC, but it's not a true
-   second factor on the OIDC login path - the OIDC IdP remains the
-   sole token source on the federation path.
-6. **Rate limiting on the bootstrap endpoint** - acceptable
+3. **Local password accounts (break-glass)** - ✅ closed. Argon2id
+   + lockout + default-OFF + 404-not-403 surface invisibility. NOT
+   for general human auth - only the "SSO is broken, need admin
+   access right now" path. WebAuthn pairing on the future-work list.
+4. **OIDC first-admin bootstrap** - ✅ closed.
+   `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` +
+   `CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID` env vars + group-scoped +
+   admin-existence-probe.
+5. **Rate limiting on the bootstrap endpoint** - acceptable
    (one-shot by construction; per-IP rate limiting on the broader
-   API is in place via Bundle C's `middleware.NewRateLimiter`).
-   Bundle 2 adds the same rate-limit primitive to the break-glass
-   `/auth/breakglass/login` endpoint at 5/min.
-7. **`scope_id` FK enforcement** - **still deferred.** Operators can
-   grant a permission at scope `profile`/`p-bogus` without the
-   bogus profile existing. The gate still works (no rows match at
-   request time) but a strict 404 on grant would be cleaner.
-   `TODO(bundle-2)` comment is now `TODO(v3)`.
-8. **OIDC-first-admin bootstrap** - ✅ closed (Bundle 2 Phase 7).
-   `CERTCTL_BOOTSTRAP_ADMIN_GROUPS` + `CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID`
-   env vars + group-scoped + admin-existence-probe.
-9. **GUI E2E suite via Playwright** - **still deferred** to a
-   follow-on bundle. The Phase 8 GUI ships 28 new Vitest unit-test
-   cases (5 new test files); full Playwright E2E for the 15 flow
-   checks from the Bundle 2 prompt's Phase 8 (auth-code login +
-   group-claim parsing + revoke-revokes-session + JWKS rotation +
-   etc.) is the operator's call on whether to land before tag.
+   API is in place via `middleware.NewRateLimiter`). The break-glass
+   `/auth/breakglass/login` endpoint carries the same rate-limit
+   primitive at 5/min.
 
-## Threats Bundle 2 does NOT close
+## Future-work threats
 
-These are the v3 / future-work deferrals at the post-Bundle-2 mark:
+The following are not yet closed:
 
 1. **WebAuthn / FIDO2 second factor** - operator console is OIDC
    (or break-glass password) only. No hardware-token requirement
@@ -558,11 +532,11 @@ These are the v3 / future-work deferrals at the post-Bundle-2 mark:
    the broker pattern (run Keycloak as a SAML-to-OIDC bridge); see
    the Google Workspace runbook for the same broker shape.
 4. **Multi-tenant data isolation activation** - the schema and
-   repository layer carry tenant_id columns + the Phase 13 query-
-   coverage CI guard, but tenant ACLs are not enforced. Bundle 2
-   ships single-tenant only (`t-default` seeded). The managed-
-   service hosting work (operator decision item) is where multi-
-   tenant flips on.
+   repository layer carry tenant_id columns + a query-coverage CI
+   guard, but tenant ACLs are not enforced. v2.1.0 ships
+   single-tenant only (`t-default` seeded). The managed-service
+   hosting work (operator decision item) is where multi-tenant
+   flips on.
 5. **HSM / FIPS-validated signing key for sessions** - the session
    signing key is software-only (HMAC-SHA256, in-memory key
    material, encrypted at rest via `internal/crypto`). Operators
@@ -572,9 +546,9 @@ These are the v3 / future-work deferrals at the post-Bundle-2 mark:
    driver ships yet.
 6. **OIDC RP-initiated logout** (the "/end_session_endpoint" flow
    where certctl signs a logout token + redirects the browser to
-   the IdP). Bundle 2 implements ONLY the back-channel flow (IdP →
+   the IdP). v2.1.0 implements ONLY the back-channel flow (IdP →
    certctl). Operators wanting the full bidirectional logout pair
-   wait on a follow-on bundle.
+   wait on a follow-on release.
 7. **GUI E2E via Playwright** - tracked alongside #9 above.
 8. **Per-IdP runbook external-tester sign-off** - encouraged via
    the operator-sign-off footers in `oidc-runbooks/*.md` but NOT a
@@ -598,8 +572,8 @@ formal certification.
   append-only at the database layer.
 - **NIST SSDF PO.5.2** (separation of duties) - two-person
   integrity for compliance-tier issuance via the
-  `RequiresApproval` flow + Bundle 1 Phase 9's closure of the
-  flip-flop bypass.
+  `RequiresApproval` flow + the approval-bypass closure on
+  profile edits.
 - **FedRAMP AU-9** (audit information protection) - WORM
   enforcement + auditor-only read access (the auditor role
   cannot mutate, the WORM trigger blocks UPDATE/DELETE).
@@ -632,7 +606,7 @@ Run these periodically to verify the controls are working.
    `audit.export` ONLY. Any other permission means a role grant
    widened the auditor's surface; revoke immediately.
 
-The following checks are NEW with Bundle 2:
+The following checks were added with v2.1.0's federated-identity surface:
 
 6. `SELECT COUNT(*) FROM oidc_providers;` - confirm only the
    expected providers are configured. An unexpected row is a
@@ -666,7 +640,7 @@ The following checks are NEW with Bundle 2:
 
 ## Cross-references
 
-Bundle 1 (RBAC) anchors:
+API-key + RBAC anchors:
 
 - [`rbac.md`](rbac.md) - the operator how-to
 - [`security.md`](security.md) - the wider security posture
@@ -685,7 +659,7 @@ Bundle 1 (RBAC) anchors:
 - `migrations/000033_approval_kinds.up.sql` - approval-bypass
   closure
 
-Bundle 2 (OIDC + sessions + back-channel logout + break-glass) anchors:
+OIDC + sessions + back-channel logout + break-glass anchors:
 
 - [`oidc-runbooks/index.md`](oidc-runbooks/index.md) - per-IdP setup
   guides (Keycloak / Authentik / Okta / Auth0 / Entra ID / Google
@@ -698,7 +672,7 @@ Bundle 2 (OIDC + sessions + back-channel logout + break-glass) anchors:
   CSRF middleware, chained-auth combinator
 - `internal/auth/breakglass/` - default-OFF break-glass admin
   (Argon2id + lockout + constant-time + surface-invisibility)
-- `internal/auth/oidc/testfixtures/` - Phase 10 Keycloak
+- `internal/auth/oidc/testfixtures/` - Keycloak
   testcontainers harness (`//go:build integration`)
 - `migrations/000034_oidc_providers.up.sql` - OIDC providers +
   group-role mappings tables
@@ -711,8 +685,8 @@ Bundle 2 (OIDC + sessions + back-channel logout + break-glass) anchors:
 - `migrations/000038_breakglass_credentials.up.sql` - break-glass
   credentials table + 2 new permissions
 - `scripts/ci-guards/N-bundle-2-security-empty-preserved.sh` -
-  OpenAPI security: [] count guard
+  OpenAPI `security: []` count guard
 - `scripts/ci-guards/bundle-1-compat-regression.sh` -
-  Bundle-1-only-compat assertions (5 invariants)
+  API-key-only compat assertions (5 invariants)
 - `scripts/ci-guards/bundle-1-to-2-upgrade-regression.sh` -
-  upgrade-path assertions (6 invariants)
+  OIDC-upgrade-path assertions (6 invariants)

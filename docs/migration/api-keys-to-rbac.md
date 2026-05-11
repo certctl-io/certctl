@@ -5,7 +5,7 @@
 This is the upgrade guide for an existing certctl deployment moving
 from v2.0.x's "every API key is admin or not" model to v2.1.0's
 RBAC primitive. Everything keeps working through the upgrade - the
-Bundle 1 migration backfills every existing API key to the
+migration backfills every existing API key to the
 `r-admin` role on first boot, so the pre-existing automation that
 was using those keys does not change behavior. **However**, most
 keys do not need full admin power; this guide walks the operator
@@ -13,7 +13,7 @@ through the post-upgrade scope-down flow.
 
 ## ⚠️ SECURITY: AUDIT YOUR API KEYS
 
-Bundle 1 maps **every** existing `CERTCTL_API_KEYS_NAMED` entry
+v2.1.0 maps **every** existing `CERTCTL_API_KEYS_NAMED` entry
 (and every legacy `CERTCTL_AUTH_SECRET`-synthesized key) to the
 `r-admin` role on the first boot after migration 000029 applies.
 This is the safe-for-back-compat default - your CI / agents / scripts
@@ -29,18 +29,18 @@ release notes for v2.1.0 lead with this callout for a reason.
 ### 1. Apply the migration
 
 The migration runner is idempotent. Re-applying is a no-op if the
-schema is already at the target version. Migrations that ship in
-the Bundle 1 slice of v2.1.0:
+schema is already at the target version. The five RBAC migrations
+that ship in v2.1.0:
 
 | Migration | What it does |
 |---|---|
 | `000029_rbac.up.sql` | Creates `tenants`, `roles`, `permissions`, `role_permissions`, `actor_roles`. Seeds 7 default roles + 33-permission catalogue + the synthetic `actor-demo-anon` admin grant. Backfills every named API key into `actor_roles` with the `r-admin` role. |
 | `000030_rbac_admin_perms.up.sql` | Seeds 5 admin-only fine-grained permissions (`cert.bulk_revoke`, `crl.admin`, `scep.admin`, `est.admin`, `ca.hierarchy.manage`) into `r-admin` only. |
-| `000031_api_keys.up.sql` | Creates the `api_keys` table for runtime-minted keys (Bundle 1 Phase 6 bootstrap). |
+| `000031_api_keys.up.sql` | Creates the `api_keys` table for runtime-minted keys (day-0 bootstrap path). |
 | `000032_audit_category.up.sql` | Adds `event_category` column to `audit_events` with the closed enum (`cert_lifecycle` / `auth` / `config`). |
-| `000033_approval_kinds.up.sql` | Adds `approval_kind` + `payload` to `issuance_approval_requests` for the Phase 9 approval-bypass closure. |
+| `000033_approval_kinds.up.sql` | Adds `approval_kind` + `payload` to `issuance_approval_requests` for the approval-bypass closure. |
 
-The Bundle 1 server applies these on first boot. No operator
+The v2.1.0 server applies these on first boot. No operator
 action is required other than running the upgrade.
 
 ### 2. Verify the backfill landed
@@ -147,8 +147,8 @@ bootstrap flow + the threat model.
 
 ## What changes for code that called `IsAdmin`
 
-Pre-Bundle-1, the five admin handlers checked `auth.IsAdmin(ctx)`
-directly in the body. Bundle 1 Phase 3.5 moved those checks to
+In v2.0.x, the five admin handlers checked `auth.IsAdmin(ctx)`
+directly in the body. v2.1.0 moved those checks to
 the router via the `auth.RequirePermission` middleware (wrapped
 through the `rbacGate` helper in
 `internal/api/router/router.go`). The behavior contract is
@@ -164,9 +164,9 @@ the helper is internal), the new convention is:
    (or `migrations/000029_rbac.up.sql`'s catalogue).
 3. Grant the perm to the right default roles.
 
-The five admin-only fine-grained perms shipped in Phase 3.5 stay
-on `r-admin` only by default. Operators delegate by creating
-custom roles with the specific perm.
+The five admin-only fine-grained perms stay on `r-admin` only by
+default. Operators delegate by creating custom roles with the
+specific perm.
 
 ## Helm-specific upgrade
 
@@ -288,9 +288,7 @@ boot regardless of schema version).
 - [`docs/operator/auth-threat-model.md`](../operator/auth-threat-model.md) - 
   what the new controls defend against
 - [`docs/reference/profiles.md`](../reference/profiles.md) - the
-  Phase 9 approval-bypass closure
+  approval-bypass closure on `RequiresApproval` profile edits
 - [`docs/operator/security.md`](../operator/security.md) - the
   full security posture
-- `cowork/auth-bundle-1-prompt.md` - the design + phase plan
-- `cowork/auth-bundles-index.md` - the per-phase status tracker
 - `CHANGELOG.md` - the v2.1.0 release notes lead with this guide

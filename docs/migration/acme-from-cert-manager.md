@@ -16,7 +16,7 @@ through cert-manager 1.15+. Target audience: Kubernetes operator who
 has never deployed certctl before and wants a working
 `Certificate` → `Secret` flow on their cluster in under 30 minutes.
 
-The Phase 5 integration test (`make acme-cert-manager-test`) automates
+The cert-manager integration test (`make acme-cert-manager-test`) automates
 exactly the recipe below. The YAML snippets in this doc are byte-equal
 to the files under `deploy/test/acme-integration/` — re-running the
 test from a fresh clone produces the same results documented here.
@@ -24,7 +24,7 @@ test from a fresh clone produces the same results documented here.
 ## Prereqs
 
 - A Kubernetes cluster (kind / k3d / EKS / GKE / AKS / on-prem). For
-  local trial, `kind v0.20+` works exactly the way the Phase 5 test
+  local trial, `kind v0.20+` works exactly the way the integration test
   uses it. The kind config lives at
   [`deploy/test/acme-integration/kind-config.yaml`](../deploy/test/acme-integration/kind-config.yaml).
 - `kubectl` v1.27+, `helm` v3.13+.
@@ -37,7 +37,7 @@ test from a fresh clone produces the same results documented here.
 
   which is the same idempotent installer the integration test uses.
 - A certctl Helm chart published to a registry your cluster can pull
-  from. The Phase 5 test uses an `image.tag=test` placeholder; production
+  from. The integration test uses an `image.tag=test` placeholder; production
   deployments use the actual image tag for your release line.
 
 ## Step 1 — Deploy certctl-server
@@ -99,7 +99,7 @@ recipe lives in
 ## Step 4 — Apply the ClusterIssuer
 
 ```yaml
-# Phase 5 — sample ClusterIssuer for the certctl trust_authenticated
+# sample ClusterIssuer for the certctl trust_authenticated
 # auth mode (RFC 8555 §6 + certctl auth_mode=trust_authenticated, where
 # the JWS-authenticated ACME account is trusted to issue any identifier
 # the profile policy permits — no per-identifier ownership challenges).
@@ -169,7 +169,7 @@ HTTP-01 to work.
 ## Step 5 — Apply the Certificate
 
 ```yaml
-# Phase 5 — Certificate resource the integration test applies and
+# Certificate resource the integration test applies and
 # waits for. The certctl-test-trust ClusterIssuer (trust_authenticated
 # mode) issues the cert without any solver round-trip; the resulting
 # Secret 'test-com-tls' is asserted to carry tls.crt + tls.key.
@@ -262,4 +262,4 @@ helm uninstall certctl-test
 - [`docs/acme-traefik-walkthrough.md`](./acme-from-traefik.md) —
   Traefik-side recipe.
 - [`deploy/test/acme-integration/`](../deploy/test/acme-integration/) —
-  Phase 5 integration test (the same recipe, automated).
+  cert-manager integration test (the same recipe, automated).

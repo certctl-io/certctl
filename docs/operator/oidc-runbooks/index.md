@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-10
 
-This is the index for the per-IdP setup runbooks that ship with Auth Bundle 2 (OIDC + sessions). Pick the runbook that matches your identity provider; each one walks you through the IdP-side configuration, the certctl-side configuration, end-to-end verification, and the most common troubleshooting paths.
+This is the index for the per-IdP setup runbooks for certctl's OIDC SSO surface. Pick the runbook that matches your identity provider; each one walks you through the IdP-side configuration, the certctl-side configuration, end-to-end verification, and the most common troubleshooting paths.
 
 For the threat model behind certctl's OIDC implementation, see [`auth-threat-model.md`](../auth-threat-model.md). For the RBAC primitive that group→role mappings target, see [`rbac.md`](../rbac.md). For the underlying protocol details (PKCE, state, nonce, JWKS rotation, fail-closed semantics), see the OIDC service docstring at [`internal/auth/oidc/service.go`](../../../internal/auth/oidc/service.go).
 
@@ -35,7 +35,7 @@ These show up in every runbook; understand them once and skim the rest.
 
 **Client secret rotation.** Every IdP issues a `client_secret` for the confidential client (certctl is always a confidential client; public clients aren't supported because we have a server-side place to keep the secret). Rotating at the IdP requires the operator to PUT the new secret into certctl via the GUI's "Edit provider" dialog or `certctl_auth_update_oidc_provider` MCP tool — leaving `client_secret` empty in the update payload preserves the existing ciphertext, providing a value rotates.
 
-**JWKS cache TTL.** The certctl service caches the IdP's JWKS document for `jwks_cache_ttl_seconds` (default 3600). When the IdP rotates a signing key, in-flight logins that try to validate a new-key-signed token against the stale cache fail with `ErrJWKSUnreachable` until the next refresh. Operators have two options: wait out the TTL, or click "Refresh discovery cache" in the GUI's OIDC Provider Detail page (`POST /api/v1/auth/oidc/providers/{id}/refresh`) to force-evict the cache. The Phase 10 Keycloak integration test exercises this drill end to end.
+**JWKS cache TTL.** The certctl service caches the IdP's JWKS document for `jwks_cache_ttl_seconds` (default 3600). When the IdP rotates a signing key, in-flight logins that try to validate a new-key-signed token against the stale cache fail with `ErrJWKSUnreachable` until the next refresh. Operators have two options: wait out the TTL, or click "Refresh discovery cache" in the GUI's OIDC Provider Detail page (`POST /api/v1/auth/oidc/providers/{id}/refresh`) to force-evict the cache. The Keycloak integration test exercises this drill end to end.
 
 **Group→role mappings are fail-closed.** The certctl service refuses to mint a session for a user whose IdP-supplied groups don't match ANY configured mapping (`ErrGroupsUnmapped` → HTTP 401 to the user with a "no roles assigned" page). This is intentional — empty mapping ≠ "let everyone in," it means "this provider is not yet configured for any role." Operators add at least one mapping (typically `<engineers-group>` → `r-operator`) BEFORE rolling out OIDC to users.
 
@@ -51,5 +51,5 @@ Each per-IdP runbook ends with a **validation checklist** the operator runs agai
 
 - [RBAC operator reference](../rbac.md) — roles, permissions, scope-down + bootstrap flow.
 - [Auth threat model](../auth-threat-model.md) — API-key + OIDC + session compromise scenarios; v3 WebAuthn pairing.
-- [Security posture](../security.md) — overall auth surface incl. this Bundle 2 OIDC layer.
-- [API keys → RBAC migration](../../migration/api-keys-to-rbac.md) — the Bundle 1 upgrade flow your operator likely already ran.
+- [Security posture](../security.md) — overall auth surface including this OIDC layer.
+- [API keys → RBAC migration](../../migration/api-keys-to-rbac.md) — the v2.0.x → v2.1.0 RBAC upgrade flow your operator likely already ran.

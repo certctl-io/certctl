@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-05
 
-**Audit reference:** Bundle F / M-023. CWE-326 (Inadequate encryption strength).
+**Audit reference:** CWE-326 (Inadequate encryption strength).
 
 ## What this is
 
@@ -149,7 +149,7 @@ hop without server-side header trust.
 **Why this is the correct default:** trusting a proxy-supplied header
 for client identity opens a header-spoofing attack surface that requires
 careful design (CIDR allowlist of trusted proxies, fail-closed defaults,
-explicit operator opt-in). The Bundle F closure of M-023 ships the
+explicit operator opt-in). The legacy-clients work ships the
 TLS-bridge guidance as documentation only; a future commit can extend
 certctl with proxy-header trust if and when an operator demonstrates a
 deployment shape that requires it. Until that lands, the runbook above
@@ -204,6 +204,6 @@ own embedded-device vendors for deprecation notices.
 
 - [`docs/operator/tls.md`](tls.md) — the certctl-internal TLS configuration (HTTPS-only control plane, MinVersion pin)
 - [`docs/operator/security.md`](security.md) — overall security posture
-- [`docs/operator/database-tls.md`](database-tls.md) — Postgres TLS opt-in (Bundle B / M-018)
+- [`docs/operator/database-tls.md`](database-tls.md) — Postgres TLS opt-in
 - [`docs/reference/protocols/scep-server.md`](../reference/protocols/scep-server.md) — SCEP RFC 8894 native server reference
 - [`docs/reference/protocols/est.md`](../reference/protocols/est.md) — EST RFC 7030 server reference

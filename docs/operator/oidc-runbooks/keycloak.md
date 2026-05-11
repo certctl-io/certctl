@@ -2,7 +2,7 @@
 
 > Last reviewed: 2026-05-10
 
-This is the canonical reference runbook for wiring certctl's OIDC SSO surface against [Keycloak](https://www.keycloak.org/). Keycloak is a free / open-source identity provider that runs on-prem or self-hosted; it is also the load-bearing test fixture for Phase 10 of Auth Bundle 2 (`internal/auth/oidc/testfixtures/keycloak.go`), so the certctl-side validation pipeline is exhaustively exercised against it.
+This is the canonical reference runbook for wiring certctl's OIDC SSO surface against [Keycloak](https://www.keycloak.org/). Keycloak is a free / open-source identity provider that runs on-prem or self-hosted; it is also the load-bearing test fixture for certctl's OIDC integration tests (`internal/auth/oidc/testfixtures/keycloak.go`), so the certctl-side validation pipeline is exhaustively exercised against it.
 
 If your IdP is something else (Okta, Auth0, Azure AD, Authentik, Google Workspace), see the per-IdP siblings in [this directory](index.md). The mental model + certctl-side wiring are identical; only the IdP-side console differs.
 
@@ -10,7 +10,7 @@ If your IdP is something else (Okta, Auth0, Azure AD, Authentik, Google Workspac
 
 **On the Keycloak side:**
 
-- Keycloak ≥ 25.0 (older versions work but the screen flows differ slightly — the Phase 10 fixture pins 25.0).
+- Keycloak ≥ 25.0 (older versions work but the screen flows differ slightly — the integration test fixture pins 25.0).
 - Admin access to a realm — either an existing tenant realm or a fresh one created for certctl. Don't share Keycloak's `master` realm; create a dedicated realm.
 - Network reachability from certctl-server to the Keycloak `https://<keycloak-host>/realms/<realm-name>` discovery endpoint. The certctl service fetches `/.well-known/openid-configuration` at provider creation and at every `RefreshKeys` call.
 - Keycloak's signing alg set to RS256 (default) or any of: RS512, ES256, ES384, EdDSA. HS256/HS384/HS512 + `none` are rejected by certctl's IdP-downgrade-attack defense at provider creation time.
@@ -19,11 +19,11 @@ If your IdP is something else (Okta, Auth0, Azure AD, Authentik, Google Workspac
 
 - `CERTCTL_CONFIG_ENCRYPTION_KEY` set to a stable secret (production deployments only — the encryption-at-rest layer for the OIDC client_secret depends on it).
 - An admin actor holding `auth.oidc.create` + `auth.oidc.edit` (held by `r-admin` by default; granted via `certctl_auth_assign_role_to_key` MCP tool or the GUI's Auth → Keys page).
-- Bundle 2 server build ≥ v2.1.0 (or post-`5204f1b` master).
+- Server build ≥ v2.1.0.
 
 ## IdP-side configuration
 
-The same configuration you'll do by hand here is what the Phase 10 testcontainers fixture imports from `internal/auth/oidc/testfixtures/keycloak-realm.json` — read that file alongside this runbook to see the exact JSON shape Keycloak persists.
+The same configuration you'll do by hand here is what the testcontainers fixture imports from `internal/auth/oidc/testfixtures/keycloak-realm.json` — read that file alongside this runbook to see the exact JSON shape Keycloak persists.
 
 ### 1. Create or pick a realm
 
@@ -194,7 +194,7 @@ Operator action when Keycloak rotates its realm signing key:
 2. In certctl: GUI → **Auth → OIDC Providers → Keycloak → Refresh discovery cache** button. Or the CLI / MCP equivalent: `POST /api/v1/auth/oidc/providers/<id>/refresh`.
 3. Run another login. The new ID token is signed under the new key; the certctl service validates it against the freshly-fetched JWKS doc.
 
-The Phase 10 integration test `TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey` exercises this exact flow end to end.
+The Keycloak integration test `TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey` exercises this exact flow end to end.
 
 ## Troubleshooting
 
@@ -214,7 +214,7 @@ The user authenticated successfully but their groups didn't match any configured
 - The group-membership mapper is configured correctly (Clients → certctl → Client scopes → certctl-dedicated → mappers → groups → "Full group path: off" matters).
 - The group name in your certctl mapping exactly matches what Keycloak emits — case-sensitive, no leading slash if "Full group path: off".
 
-You can confirm what Keycloak is actually emitting by decoding the ID token at jwt.io against the Keycloak public key, or by enabling certctl's debug logging on the OIDC service for one login (logs are scrubbed of token contents per the Phase 3 token-leak hygiene contract; debug logs surface only the resolved group list and the mapping decision).
+You can confirm what Keycloak is actually emitting by decoding the ID token at jwt.io against the Keycloak public key, or by enabling certctl's debug logging on the OIDC service for one login (logs are scrubbed of token contents per the OIDC service's token-leak hygiene contract; debug logs surface only the resolved group list and the mapping decision).
 
 **"id_token verify failed: token used before issued"**
 Clock skew between Keycloak and certctl-server. Either align both to NTP, or bump `iat_window_seconds` on the OIDC provider config (default 300 = 5 minutes). The certctl service caps `iat_window_seconds` at 600.
@@ -226,7 +226,7 @@ The user clicked the OIDC login button, then the browser tab idled past the 10-m
 Either the user double-submitted a callback URL (clicked it twice from email or browser history), or a CSRF attempt. The pre-login row is single-use; second consumption returns `ErrPreLoginNotFound`. Have them retry from the login page.
 
 **Sessions revoked but the user can still hit the API.**
-Check the Phase 4 session contract: the cookie is HMAC-validated on every request, but the actual database row is what `Revoke` deletes. If your reverse proxy is caching the response or the `certctl_session` cookie wasn't actually cleared on the client, the cookie will hit the server's session middleware which will return 401 on the missing-row lookup. The middleware never serves stale data; the issue is upstream of certctl in this case.
+Check the session contract: the cookie is HMAC-validated on every request, but the actual database row is what `Revoke` deletes. If your reverse proxy is caching the response or the `__Host-certctl_session` cookie wasn't actually cleared on the client, the cookie will hit the server's session middleware which will return 401 on the missing-row lookup. The middleware never serves stale data; the issue is upstream of certctl in this case.
 
 ## Validation checklist
 

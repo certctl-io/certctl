@@ -149,7 +149,7 @@ curl -X POST https://<your-certctl-host>:8443/api/v1/auth/oidc/group-mappings \
   }'
 ```
 
-Repeat for every group you want to map. **Document the GUID-to-name mapping in your operator runbook** — without it, the next operator looking at certctl's mappings page sees a wall of GUIDs with no way to know which is which. Consider naming the mapping descriptively if your group-mapping schema supports it (Bundle 2 doesn't yet — group-mapping descriptions are a parking-lot item for a follow-on bundle).
+Repeat for every group you want to map. **Document the GUID-to-name mapping in your operator runbook** — without it, the next operator looking at certctl's mappings page sees a wall of GUIDs with no way to know which is which. Consider naming the mapping descriptively if your group-mapping schema supports it (v2.1.0 doesn't yet — group-mapping descriptions are a parking-lot item for a follow-on release).
 
 ## Verification
 

@@ -112,7 +112,7 @@ End-to-end login + audit + Sessions checks are identical to Keycloak.
 
 **Okta-specific:** the audit row's `details.subject` will be Okta's user UID (a 20-char alphanumeric string starting with `00u`), stable across email changes. The certctl `users` table's `oidc_subject` column will hold this UID.
 
-**Optional Okta smoke test in CI:** Phase 10 ships an opt-in smoke test at `internal/auth/oidc/integration_okta_smoke_test.go` (build tags `integration && okta_smoke`). Set `OKTA_ISSUER` + `OKTA_CLIENT_ID` + `OKTA_CLIENT_SECRET` env vars and run `make okta-smoke-test` to drive a discovery + RefreshKeys round-trip against your live tenant. Pre-reqs: enable the Resource Owner Password (ROPC) grant on the application (Sign-On tab → Grant types → Resource Owner Password) for the smoke test only; production certctl uses auth-code-with-PKCE.
+**Optional Okta smoke test in CI:** certctl ships an opt-in smoke test at `internal/auth/oidc/integration_okta_smoke_test.go` (build tags `integration && okta_smoke`). Set `OKTA_ISSUER` + `OKTA_CLIENT_ID` + `OKTA_CLIENT_SECRET` env vars and run `make okta-smoke-test` to drive a discovery + RefreshKeys round-trip against your live tenant. Pre-reqs: enable the Resource Owner Password (ROPC) grant on the application (Sign-On tab → Grant types → Resource Owner Password) for the smoke test only; production certctl uses auth-code-with-PKCE.
 
 **JWKS-rotation drill:** Okta auto-rotates signing keys every ~3 months and publishes the new key alongside the old in the JWKS doc for ~1 month overlap. Manual rotation: **Security → API → Authorization Servers → default → Keys → "Generate new key"**. After rotation, click "Refresh discovery cache" in certctl's GUI; new tokens validate immediately.
 

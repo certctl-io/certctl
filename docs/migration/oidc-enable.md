@@ -1,10 +1,10 @@
-# Enable OIDC SSO on a Bundle-1-merged deployment
+# Enable OIDC SSO
 
 > Last reviewed: 2026-05-10
 
-This guide walks an operator already running certctl with Bundle 1 (RBAC primitive on top of API-key auth) through enabling OIDC SSO from Bundle 2. The path is additive: API-key auth keeps working unchanged; OIDC sits alongside as a second authentication surface for human users.
+This guide walks an operator already running certctl with API-key auth + RBAC through enabling OIDC SSO. The path is additive: API-key auth keeps working unchanged; OIDC sits alongside as a second authentication surface for human users.
 
-If you are upgrading from a pre-Bundle-1 deployment, finish [`api-keys-to-rbac.md`](api-keys-to-rbac.md) first. If you have not deployed certctl at all, start with [`getting-started/quickstart.md`](../getting-started/quickstart.md). For the canonical mental model + per-flow threat coverage, see [`security.md`](../operator/security.md) and [`auth-threat-model.md`](../operator/auth-threat-model.md).
+If you are upgrading from a pre-RBAC (v2.0.x) deployment, finish [`api-keys-to-rbac.md`](api-keys-to-rbac.md) first. If you have not deployed certctl at all, start with [`getting-started/quickstart.md`](../getting-started/quickstart.md). For the canonical mental model + per-flow threat coverage, see [`security.md`](../operator/security.md) and [`auth-threat-model.md`](../operator/auth-threat-model.md).
 
 ## What "enable OIDC" gives you
 
@@ -19,15 +19,15 @@ After this migration:
 What does NOT change:
 
 - API keys keep working. Existing automation continues to authenticate via `Authorization: Bearer` exactly as before.
-- The break-glass admin path (Phase 7.5) stays default-OFF.
+- The break-glass admin path stays default-OFF.
 - The auditor split + approval workflow + RBAC primitive are unchanged.
 
 ## Pre-requisites
 
 **On certctl side:**
 
-- Server build ≥ v2.1.0 (the post-Bundle-2 master). Confirm via `curl https://<your-host>:8443/api/v1/version`.
-- `CERTCTL_CONFIG_ENCRYPTION_KEY` set in the server environment. This is the passphrase that encrypts the OIDC `client_secret` at rest. Use a stable, secrets-manager-stored value at least 32 random bytes long. **The server refuses to start if the key is missing AND any source='database' rows already exist** (per Bundle B / M-001 / CWE-311 closure). Set this before doing anything else.
+- Server build ≥ v2.1.0. Confirm via `curl https://<your-host>:8443/api/v1/version`.
+- `CERTCTL_CONFIG_ENCRYPTION_KEY` set in the server environment. This is the passphrase that encrypts the OIDC `client_secret` at rest. Use a stable, secrets-manager-stored value at least 32 random bytes long. **The server refuses to start if the key is missing AND any source='database' rows already exist** (CWE-311 fail-closed gate). Set this before doing anything else.
 - An admin actor available to drive the configuration. The actor needs the `auth.oidc.create` + `auth.oidc.edit` permissions; `r-admin` carries both by default. Get one via the day-0 bootstrap path if you don't have one yet.
 - HTTPS-only control plane (post-v2.2 milestone — this is the default). The OIDC redirect URI MUST be `https://`.
 
@@ -40,7 +40,7 @@ What does NOT change:
 
 ### 1. Pin `CERTCTL_CONFIG_ENCRYPTION_KEY`
 
-If your deployment already has it set (the Bundle B M-001 fail-closed gate enforces this for any source='database' issuer/target row), skip this step. If you don't:
+If your deployment already has it set (the CWE-311 fail-closed gate enforces this for any source='database' issuer/target row), skip this step. If you don't:
 
 ```bash
 # Generate a 32-byte random key + base64-encode it.
@@ -55,7 +55,7 @@ Then make the server consume it at boot:
 export CERTCTL_CONFIG_ENCRYPTION_KEY="$(cat /etc/certctl/config-encryption-key)"
 ```
 
-Restart the server. Confirm the boot log does NOT show the `ErrEncryptionKeyRequired` warning. If it does, the server refuses to start because there's pre-existing source='database' material that needs to be re-sealed; see the pre-Bundle-B migration notes for re-encryption flow.
+Restart the server. Confirm the boot log does NOT show the `ErrEncryptionKeyRequired` warning. If it does, the server refuses to start because there's pre-existing source='database' material that needs to be re-sealed; see [`docs/operator/security.md`](../operator/security.md) for the re-encryption flow.
 
 ### 2. Pick an IdP runbook + complete the IdP-side configuration
 
@@ -211,10 +211,10 @@ The user clicked the OIDC login button, then the browser tab idled past the 10-m
 Either the user double-submitted a callback URL (clicked it twice from email or browser history), or a CSRF attempt. The pre-login row is single-use; second consumption returns `ErrPreLoginNotFound`. Have them retry from the login page.
 
 **`Sessions revoked but the user can still hit the API.`**
-Check the Phase 4 session contract: the cookie is HMAC-validated on every request, but the actual database row is what `Revoke` deletes. If your reverse proxy is caching the response or the `certctl_session` cookie wasn't actually cleared on the client, the cookie hits the server's session middleware which returns 401 on the missing-row lookup. The middleware never serves stale data; the issue is upstream of certctl in this case.
+Check the session contract: the cookie is HMAC-validated on every request, but the actual database row is what `Revoke` deletes. If your reverse proxy is caching the response or the `__Host-certctl_session` cookie wasn't actually cleared on the client, the cookie hits the server's session middleware which returns 401 on the missing-row lookup. The middleware never serves stale data; the issue is upstream of certctl in this case.
 
 **JWKS rotation: an IdP rotated its signing key and existing users start failing login.**
-Click **Refresh discovery cache** on the OIDC provider detail page (or `POST /api/v1/auth/oidc/providers/<id>/refresh`). The certctl service re-fetches discovery + JWKS. New tokens validate immediately. The Phase 10 integration test exercises this drill end to end.
+Click **Refresh discovery cache** on the OIDC provider detail page (or `POST /api/v1/auth/oidc/providers/<id>/refresh`). The certctl service re-fetches discovery + JWKS. New tokens validate immediately. The Keycloak integration test exercises this drill end to end.
 
 **Database row count drift.**
 After OIDC is live, expect to see new rows under:
@@ -231,12 +231,12 @@ All ten of these tables are tenant-scoped (`tenant_id` column); single-tenant de
 
 - Run [`docs/operator/oidc-runbooks/<your-idp>.md`](../operator/oidc-runbooks/index.md) end to end to fill in the validation checklist + sign-off line.
 - Read [`docs/operator/auth-benchmarks.md`](../operator/auth-benchmarks.md) for the steady-state + cold-cache performance baselines.
-- Review the [`auth-threat-model.md`](../operator/auth-threat-model.md) Bundle 2 sections to understand the failure modes the OIDC + sessions surface defends against.
+- Review the [`auth-threat-model.md`](../operator/auth-threat-model.md) OIDC + sessions + break-glass sections to understand the failure modes the federated-identity surface defends against.
 - Schedule a rotation reminder for the OIDC `client_secret` (typically 6-12 months; the IdP doesn't auto-rotate it). Edit the provider via the GUI when the time comes; leaving `client_secret` blank in the edit form preserves the existing ciphertext, providing a value rotates.
 
-## `__Host-` cookie rename (Audit 2026-05-10 MED-14, BREAKING)
+## `__Host-` cookie rename (BREAKING)
 
-Post-Bundle-2 deploys carrying the 2026-05-10 audit-fix wave include a wire-format change to the three auth cookies: they now carry the `__Host-` prefix. The cookie names are:
+v2.1.0 carries a wire-format change to the three auth cookies: they now carry the `__Host-` prefix. The cookie names are:
 
 - `__Host-certctl_session` (was `certctl_session`)
 - `__Host-certctl_csrf` (was `certctl_csrf`)
@@ -253,7 +253,7 @@ If you have GUI customizations that read `document.cookie` directly, update them
 ## Cross-references
 
 - [`docs/operator/oidc-runbooks/index.md`](../operator/oidc-runbooks/index.md) — per-IdP setup guides.
-- [`docs/operator/security.md`](../operator/security.md) — overall auth surface incl. this Bundle 2 OIDC layer.
+- [`docs/operator/security.md`](../operator/security.md) — overall auth surface including this OIDC layer.
 - [`docs/operator/auth-threat-model.md`](../operator/auth-threat-model.md) — threat model.
 - [`docs/operator/auth-benchmarks.md`](../operator/auth-benchmarks.md) — performance baselines.
 - [`docs/reference/auth-standards-implemented.md`](../reference/auth-standards-implemented.md) — RFC + CWE evidence list.
