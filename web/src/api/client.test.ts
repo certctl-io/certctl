@@ -120,6 +120,10 @@ function mockErrorResponse(status: number, body: { message?: string; error?: str
     status,
     json: () => Promise.resolve(body),
     statusText: 'Error',
+    // Audit 2026-05-10 HIGH-8 closure landed a WWW-Authenticate-header
+    // read in the 401 path (src/api/client.ts L144). The mock needs a
+    // headers.get() so the read doesn't throw against an undefined.
+    headers: { get: () => null } as unknown as Headers,
   } as Response);
 }
 
