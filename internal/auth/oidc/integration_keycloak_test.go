@@ -436,7 +436,13 @@ func TestKeycloakIntegration_AuthCodeFlow_HappyPath(t *testing.T) {
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
 
 	// Complete the OIDC handshake.
-	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "", "10.0.0.1", "integration-test/1.0")
+	// Keycloak's discovery doc advertises authorization_response_iss_
+	// parameter_supported=true (RFC 9207). The Audit 2026-05-10 MED-17
+	// callback path requires a non-empty `iss` query param that matches
+	// the provider's IssuerURL; pass fx.IssuerURL here so the check
+	// passes (the synthetic callback simulates what a real browser
+	// would have received as the `iss=...` query param).
+	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, fx.IssuerURL, "10.0.0.1", "integration-test/1.0")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -495,7 +501,8 @@ func TestKeycloakIntegration_LogoutRevokesSession(t *testing.T) {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, "", "ip", "ua")
+	// RFC 9207 iss param required per Keycloak's discovery doc (MED-17).
+	res, err := svc.HandleCallback(ctx, preLoginCookie, code, state, fx.IssuerURL, "ip", "ua")
 	if err != nil {
 		t.Fatalf("HandleCallback: %v", err)
 	}
@@ -538,7 +545,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 		t.Fatalf("pre-rotate HandleAuthRequest: %v", err)
 	}
 	preCode, preState := driveAuthCodeFlow(t, preAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, "", "ip", "ua"); err != nil {
+	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, fx.IssuerURL, "ip", "ua"); err != nil {
 		t.Fatalf("pre-rotate HandleCallback: %v", err)
 	}
 
@@ -557,7 +564,7 @@ func TestKeycloakIntegration_JWKSRotation_RefreshKeysPicksUpNewKey(t *testing.T)
 		t.Fatalf("post-rotate HandleAuthRequest: %v", err)
 	}
 	postCode, postState := driveAuthCodeFlow(t, postAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	if _, err := svc.HandleCallback(ctx, postCookie, postCode, postState, "", "ip", "ua"); err != nil {
+	if _, err := svc.HandleCallback(ctx, postCookie, postCode, postState, fx.IssuerURL, "ip", "ua"); err != nil {
 		t.Fatalf("post-rotate HandleCallback: %v (rotation broke validation?)", err)
 	}
 }
@@ -582,7 +589,7 @@ func TestKeycloakIntegration_UnmappedGroupsFailsClosed(t *testing.T) {
 		t.Fatalf("HandleAuthRequest: %v", err)
 	}
 	code, state := driveAuthCodeFlow(t, authURL, testfixtures.ViewerUser, testfixtures.ViewerPassword)
-	_, err = svc.HandleCallback(ctx, preCookie, code, state, "", "ip", "ua")
+	_, err = svc.HandleCallback(ctx, preCookie, code, state, fx.IssuerURL, "ip", "ua")
 	if !errors.Is(err, oidc.ErrGroupsUnmapped) {
 		t.Errorf("HandleCallback err = %v, want ErrGroupsUnmapped (fail-closed for unmapped groups)", err)
 	}

@@ -73,7 +73,7 @@ func TestKeycloakIntegration_MED6_AutoRefreshOnKidMiss(t *testing.T) {
 		t.Fatalf("pre-rotate HandleAuthRequest: %v", err)
 	}
 	preCode, preState := driveAuthCodeFlow(t, preAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, "", "ip", "ua"); err != nil {
+	if _, err := svc.HandleCallback(ctx, preCookie, preCode, preState, fx.IssuerURL, "ip", "ua"); err != nil {
 		t.Fatalf("pre-rotate HandleCallback (priming): %v", err)
 	}
 
@@ -92,7 +92,7 @@ func TestKeycloakIntegration_MED6_AutoRefreshOnKidMiss(t *testing.T) {
 		t.Fatalf("post-rotate HandleAuthRequest: %v", err)
 	}
 	postCode, postState := driveAuthCodeFlow(t, postAuthURL, testfixtures.EngineerUser, testfixtures.EngineerPassword)
-	res, err := svc.HandleCallback(ctx, postCookie, postCode, postState, "", "ip", "ua")
+	res, err := svc.HandleCallback(ctx, postCookie, postCode, postState, fx.IssuerURL, "ip", "ua")
 	if err != nil {
 		t.Fatalf("post-rotate HandleCallback (expected MED-6 auto-refresh): %v", err)
 	}
