@@ -1329,6 +1329,40 @@ func main() {
 		// HTTP surface. 4 endpoints (1 public login + 3 admin CRUD).
 		// All endpoints return 404 when CERTCTL_BREAKGLASS_ENABLED=false.
 		AuthBreakglass: breakglassHandler,
+
+		// Audit 2026-05-10 MED-11 — federated-user admin surface.
+		AuthUsers: handler.NewAuthUsersHandler(
+			oidcUserRepo,
+			sessionService, // satisfies UserSessionsRevoker via RevokeAllForActor
+			auditService,
+			authdomainAlias.DefaultTenantID,
+		),
+
+		// Audit 2026-05-10 MED-12 — runtime config read endpoint.
+		AuthRuntimeConfig: handler.NewAuthRuntimeConfigHandler(
+			func() map[string]string {
+				// Lazy build — re-read cfg.Auth.* values on every call so
+				// post-startup re-evaluation reflects any (future) mutation.
+				return map[string]string{
+					"CERTCTL_AUTH_TYPE":                  string(cfg.Auth.Type),
+					"CERTCTL_SESSION_SAMESITE":           cfg.Auth.Session.SameSite,
+					"CERTCTL_OIDC_BCL_MAX_AGE_SECONDS":   strconv.Itoa(cfg.Auth.OIDCBCLMaxAgeSeconds),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_UA":   strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireUA),
+					"CERTCTL_OIDC_PRELOGIN_REQUIRE_IP":   strconv.FormatBool(cfg.Auth.OIDCPreLoginRequireIP),
+					"CERTCTL_BREAKGLASS_ENABLED":         strconv.FormatBool(cfg.Auth.Breakglass.Enabled),
+					"CERTCTL_BREAKGLASS_LOCKOUT_THRESHOLD": strconv.Itoa(cfg.Auth.Breakglass.LockoutThreshold),
+					"CERTCTL_DEMO_MODE_ACK":              strconv.FormatBool(cfg.Auth.DemoModeAck),
+					"CERTCTL_TRUSTED_PROXIES_COUNT":      strconv.Itoa(len(cfg.Auth.TrustedProxies)),
+					"CERTCTL_BOOTSTRAP_TOKEN_SET":        strconv.FormatBool(cfg.Auth.BootstrapToken != ""),
+					"CERTCTL_BOOTSTRAP_OIDC_PROVIDER_ID": cfg.Auth.BootstrapOIDCProviderID,
+					"CERTCTL_BOOTSTRAP_ADMIN_GROUPS_COUNT": strconv.Itoa(len(cfg.Auth.BootstrapAdminGroups)),
+				}
+			},
+			auditService,
+		),
+
+		// Audit 2026-05-10 MED-7 — per-provider JWKS health surface.
+		AuthOIDCJWKSStatus: handler.NewAuthOIDCJWKSStatusHandler(oidcService, auditService),
 		// Auth — RBAC primitive (Bundle 1 Phase 4). Wires the postgres
 		// auth repos + service-layer Authorizer / RoleService /
 		// ActorRoleService / PermissionService into the HTTP surface

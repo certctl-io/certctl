@@ -303,6 +303,21 @@ type HandlerRegistry struct {
 	// Optional — when nil the routes are not registered.
 	AuthBreakglass *handler.AuthBreakglassHandler
 
+	// AuthUsers handles the MED-11 federated-user admin surface
+	// (GET /api/v1/auth/users; DELETE /api/v1/auth/users/{id}).
+	// Optional — when nil the routes are not registered.
+	AuthUsers *handler.AuthUsersHandler
+
+	// AuthRuntimeConfig handles the MED-12 admin-only runtime
+	// config read endpoint (GET /api/v1/auth/runtime-config).
+	// Optional — when nil the route is not registered.
+	AuthRuntimeConfig *handler.AuthRuntimeConfigHandler
+
+	// AuthOIDCJWKSStatus handles the MED-7 per-provider JWKS health
+	// endpoint (GET /api/v1/auth/oidc/providers/{id}/jwks-status).
+	// Optional — when nil the route is not registered.
+	AuthOIDCJWKSStatus *handler.AuthOIDCJWKSStatusHandler
+
 	// IntermediateCAs handles the admin-gated CA-hierarchy management
 	// surface under /api/v1/issuers/{id}/intermediates and
 	// /api/v1/intermediates/{id}. Rank 8 of the 2026-05-03 deep-
@@ -463,6 +478,28 @@ func (r *Router) RegisterHandlers(reg HandlerRegistry) {
 		// config. Returns discovery + JWKS + alg-downgrade + iss-param
 		// reachability without persisting.
 		r.Register("POST /api/v1/auth/oidc/test", rbacGate(reg.Checker, "auth.oidc.create", reg.AuthSessionOIDC.TestProvider))
+
+		// Audit 2026-05-10 MED-7 — JWKS health surface.
+		if reg.AuthOIDCJWKSStatus != nil {
+			r.Register("GET /api/v1/auth/oidc/providers/{id}/jwks-status",
+				rbacGate(reg.Checker, "auth.oidc.list", reg.AuthOIDCJWKSStatus.Status))
+		}
+
+		// Audit 2026-05-10 MED-11 — federated-user admin surface.
+		if reg.AuthUsers != nil {
+			r.Register("GET /api/v1/auth/users",
+				rbacGate(reg.Checker, "auth.user.read", reg.AuthUsers.List))
+			r.Register("DELETE /api/v1/auth/users/{id}",
+				rbacGate(reg.Checker, "auth.user.deactivate", reg.AuthUsers.Deactivate))
+		}
+
+		// Audit 2026-05-10 MED-12 — auth runtime config read.
+		// Gated auth.role.assign (admin-class) so non-admins can't
+		// enumerate the deployment's auth knobs.
+		if reg.AuthRuntimeConfig != nil {
+			r.Register("GET /api/v1/auth/runtime-config",
+				rbacGate(reg.Checker, "auth.role.assign", reg.AuthRuntimeConfig.Get))
+		}
 
 		// Group-mapping CRUD.
 		r.Register("GET /api/v1/auth/oidc/group-mappings", rbacGate(reg.Checker, "auth.oidc.list", reg.AuthSessionOIDC.ListGroupMappings))

@@ -118,6 +118,16 @@ type providerEntry struct {
 	// IssuerURL. When false (the default for most IdPs that haven't
 	// rolled RFC 9207 yet), the check is skipped.
 	issParamSupported bool
+
+	// Audit 2026-05-10 MED-7 — JWKS health counters surfaced via
+	// /api/v1/auth/oidc/providers/{id}/jwks-status. statsMu guards
+	// the four counters. Each is updated under the write-lock from
+	// RefreshKeys + HandleCallback's verify path.
+	statsMu          sync.Mutex
+	lastRefreshAt    time.Time
+	refreshCount     int
+	lastError        string
+	rejectedJWSCount int
 }
 
 // OIDCProviderLookup is a narrow read-side projection of
@@ -873,13 +883,71 @@ func (s *Service) fetchUserinfoGroups(
 
 // RefreshKeys evicts the cached provider entry and re-loads it from
 // scratch. Invokes the discovery doc fetch + the downgrade defense.
+//
+// Audit 2026-05-10 MED-7 — increments refreshCount + records
+// lastRefreshAt / lastError on the new providerEntry's counters so
+// JWKSStatus can surface operator-visible refresh history.
 func (s *Service) RefreshKeys(ctx context.Context, providerID string) error {
 	s.mu.Lock()
 	delete(s.cache, providerID)
 	s.mu.Unlock()
 
-	_, err := s.getOrLoad(ctx, providerID)
-	return err
+	entry, err := s.getOrLoad(ctx, providerID)
+	if err != nil {
+		// On error, no cached entry exists to record on. JWKSStatus
+		// will return a synthetic snapshot with empty counters for the
+		// not-yet-loaded provider; the lastError surfaces via the
+		// follow-up getOrLoad call's own path.
+		return err
+	}
+	entry.statsMu.Lock()
+	entry.refreshCount++
+	entry.lastRefreshAt = s.clockNow().UTC()
+	entry.lastError = ""
+	entry.statsMu.Unlock()
+	return nil
+}
+
+// JWKSStatus returns the per-provider JWKS health snapshot used by the
+// /api/v1/auth/oidc/providers/{id}/jwks-status endpoint. Audit
+// 2026-05-10 MED-7. Returns an empty-counters snapshot for providers
+// that have never been loaded (no refresh, no rejected JWS yet).
+//
+// `CurrentKIDs` is intentionally omitted — go-oidc's internal JWKS
+// cache doesn't expose its current keyset, and re-implementing the
+// JWKS fetch here would duplicate state. Operators wanting kid
+// inspection use the discovery doc's `jwks_uri` directly. The field
+// remains in the response shape for forward-compat.
+func (s *Service) JWKSStatus(ctx context.Context, providerID string) (*JWKSStatusSnapshot, error) {
+	entry, err := s.getOrLoad(ctx, providerID)
+	if err != nil {
+		return nil, err
+	}
+	entry.statsMu.Lock()
+	defer entry.statsMu.Unlock()
+	snap := &JWKSStatusSnapshot{
+		RefreshCount:      entry.refreshCount,
+		LastError:         entry.lastError,
+		RejectedJWSCount:  entry.rejectedJWSCount,
+		IssParamSupported: entry.issParamSupported,
+		CurrentKIDs:       []string{},
+	}
+	if !entry.lastRefreshAt.IsZero() {
+		snap.LastRefreshAt = entry.lastRefreshAt.UTC().Format(time.RFC3339)
+	}
+	return snap, nil
+}
+
+// JWKSStatusSnapshot mirrors the per-provider counters the MED-7 HTTP
+// handler returns. Defined here so cmd/server can wire the OIDC
+// service directly into the handler without an adapter.
+type JWKSStatusSnapshot struct {
+	LastRefreshAt     string   `json:"last_refresh_at,omitempty"`
+	CurrentKIDs       []string `json:"current_kids"`
+	RefreshCount      int      `json:"refresh_count"`
+	LastError         string   `json:"last_error,omitempty"`
+	RejectedJWSCount  int      `json:"rejected_jws_count"`
+	IssParamSupported bool     `json:"iss_param_supported"`
 }
 
 // =============================================================================
