@@ -240,6 +240,26 @@ var (
 	// CERTCTL_OIDC_PRELOGIN_REQUIRE_IP=false to disable.
 	ErrPreLoginIPMismatch = errors.New("oidc: pre-login row client IP does not match callback request")
 
+	// ErrPreLoginUAMissing: the pre-login row carries a User-Agent
+	// binding (MED-16) but the /auth/oidc/callback request omitted
+	// the User-Agent header. Audit 2026-05-11 A-6 closure — the
+	// original MED-16 logic short-circuited the compare when the
+	// request side was empty, which let an attacker bypass the
+	// binding by sending a callback with no User-Agent (trivial:
+	// curl, many programmatic clients omit the header by default).
+	// Distinguished from ErrPreLoginUAMismatch so the audit row
+	// can tell a binding violation apart from a missing-header
+	// bypass attempt. HTTP 400. Operators on enterprise proxies
+	// that strip the User-Agent header in transit can disable the
+	// check with CERTCTL_OIDC_PRELOGIN_REQUIRE_UA=false.
+	ErrPreLoginUAMissing = errors.New("oidc: pre-login row has User-Agent binding but callback omitted User-Agent header")
+
+	// ErrPreLoginIPMissing: symmetric to ErrPreLoginUAMissing for
+	// the source IP binding. Reachable when XFF-trust gating zeros
+	// the resolved client IP for a request whose pre-login row
+	// captured one. Audit 2026-05-11 A-6 closure.
+	ErrPreLoginIPMissing = errors.New("oidc: pre-login row has client-IP binding but callback request had no resolvable client IP")
+
 	// ErrAudienceMismatch: ID token `aud` doesn't include the
 	// configured client_id. HTTP 400.
 	ErrAudienceMismatch = errors.New("oidc: audience mismatch")
@@ -523,12 +543,33 @@ func (s *Service) HandleCallback(
 	// 000044 have NULL → empty string), and (c) the incoming request
 	// carries a non-empty value too. Constant-time compares for both
 	// legs to avoid leaking UA/IP length differences via timing.
-	if s.preLoginRequireUA && storedUA != "" && userAgent != "" {
+	// Audit 2026-05-11 A-6 — strict-when-stored. The original MED-16
+	// closure short-circuited the compare when the request side was
+	// empty (`userAgent != ""` / `ip != ""`), which was an
+	// attacker-controllable bypass: an attacker forging a callback
+	// request can simply omit the User-Agent header (curl does this by
+	// default; many programmatic HTTP clients omit it) and the binding
+	// check skips silently. Now: when the pre-login row carries a
+	// binding, the request MUST present a matching value; an empty
+	// request value with a non-empty stored value rejects with
+	// ErrPreLoginUA{IP}Missing (distinct from the mismatch leg so the
+	// audit row can tell them apart). Legacy-row compat — pre-migration
+	// rows with `storedUA == ""` / `storedIP == ""` — still passes
+	// unchecked; that window is bounded by the 10-minute pre-login TTL,
+	// so within 10 minutes of the MED-16 deploy the strict path is
+	// universal.
+	if s.preLoginRequireUA && storedUA != "" {
+		if userAgent == "" {
+			return nil, ErrPreLoginUAMissing
+		}
 		if subtle.ConstantTimeCompare([]byte(userAgent), []byte(storedUA)) != 1 {
 			return nil, ErrPreLoginUAMismatch
 		}
 	}
-	if s.preLoginRequireIP && storedIP != "" && ip != "" {
+	if s.preLoginRequireIP && storedIP != "" {
+		if ip == "" {
+			return nil, ErrPreLoginIPMissing
+		}
 		if subtle.ConstantTimeCompare([]byte(ip), []byte(storedIP)) != 1 {
 			return nil, ErrPreLoginIPMismatch
 		}

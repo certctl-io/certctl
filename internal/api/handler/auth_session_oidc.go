@@ -1275,6 +1275,14 @@ func classifyOIDCFailure(err error) string {
 	// detail subject to change.
 	case errors.Is(err, oidcsvc.ErrUserDeactivated):
 		return "user_deactivated"
+	// Audit 2026-05-11 A-6 — strict-when-stored. Distinguishes the
+	// new "request omitted the bound header" reject path from the
+	// existing "header was supplied but didn't match" path so SIEM
+	// rules can alert specifically on attempted bypasses.
+	case errors.Is(err, oidcsvc.ErrPreLoginUAMissing):
+		return "prelogin_ua_missing"
+	case errors.Is(err, oidcsvc.ErrPreLoginIPMissing):
+		return "prelogin_ip_missing"
 	}
 	msg := strings.ToLower(err.Error())
 	switch {

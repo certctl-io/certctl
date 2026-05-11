@@ -123,6 +123,27 @@
   inputs render an explicit decode-error fallback — silent failure on
   the payload preview is what produced this bug in the first place.
 
+- **Strict pre-login UA/IP binding (Audit 2026-05-11 A-6).**
+  The MED-16 closure left a request-side empty-header bypass: when the
+  pre-login row carried a User-Agent or client-IP binding but the
+  `/auth/oidc/callback` request omitted the corresponding value, the
+  binding check was silently skipped. `curl` doesn't send User-Agent
+  by default; many programmatic clients omit it. An attacker who
+  acquired a pre-login cookie could replay it without the bound
+  header and bypass the RFC 9700 §4.7.1 defense. The check is now
+  strict-when-stored — an empty request-side value with a non-empty
+  stored binding rejects with HTTP 400 and the new audit failure
+  categories `prelogin_ua_missing` / `prelogin_ip_missing` (distinct
+  from the existing `*_mismatch` categories so SIEM rules can alert
+  specifically on bypass attempts). **Operator advisory:** environments
+  where the User-Agent is stripped in transit (some debug proxies, a
+  handful of CDN configurations) must set
+  `CERTCTL_OIDC_PRELOGIN_REQUIRE_UA=false` to keep logins working;
+  symmetric `CERTCTL_OIDC_PRELOGIN_REQUIRE_IP=false` exists for the
+  IP-side. The legacy-row compat window — pre-migration rows with no
+  stored binding — still passes through unchecked, but that window is
+  bounded by the 10-minute pre-login TTL.
+
 - **Pre-login cookie Path widened from `/auth/oidc/` to `/` (Audit MED-14
   follow-on).** Required to satisfy the `__Host-` prefix's `Path=/` rule. The
   cookie lifetime is unchanged (10 minutes) and only the callback handler
