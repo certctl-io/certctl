@@ -1624,6 +1624,25 @@ type AuthConfig struct {
 	// Setting: CERTCTL_DEMO_MODE_ACK environment variable.
 	DemoModeAck bool
 
+	// DemoModeResidualStrict refuses startup when Auth.Type != none
+	// and `actor-demo-anon` has residual role grants in actor_roles.
+	// Default false (emit WARN log + audit row instead). Audit
+	// 2026-05-11 A-8 closure — closes the deferred Phase 2 leg of
+	// HIGH-12 (cowork/auth-bundles-fixes-2026-05-10/11-high-12-...).
+	//
+	// Note: migration 000029 unconditionally seeds the
+	// `ar-demo-anon-admin` grant of `r-admin` to `actor-demo-anon`
+	// for every install, so production deploys will see this WARN
+	// out of the box. The intended workflow at production cutover is:
+	//   1. POST /api/v1/auth/demo-residual/cleanup (or run the
+	//      DELETE FROM actor_roles WHERE actor_id='actor-demo-anon'
+	//      SQL emitted by the WARN).
+	//   2. Optionally set this flag for subsequent boots to refuse
+	//      startup if the rows somehow get re-seeded.
+	//
+	// Setting: CERTCTL_DEMO_MODE_RESIDUAL_STRICT environment variable.
+	DemoModeResidualStrict bool
+
 	// OIDCBCLMaxAgeSeconds is the iat-freshness skew window for OIDC
 	// back-channel-logout tokens. logout_tokens with iat outside the
 	// window are rejected with audit outcome=iat_stale (in the past)
@@ -1897,6 +1916,10 @@ func Load() (*Config, error) {
 			// Audit 2026-05-10 HIGH-12 closure: required-true to allow
 			// CERTCTL_AUTH_TYPE=none with a non-loopback listen address.
 			DemoModeAck: getEnvBool("CERTCTL_DEMO_MODE_ACK", false),
+			// Audit 2026-05-11 A-8 closure: when true, the preflight
+			// residual-grants detector refuses startup if actor-demo-anon
+			// has any actor_roles rows. Default false (WARN-only).
+			DemoModeResidualStrict: getEnvBool("CERTCTL_DEMO_MODE_RESIDUAL_STRICT", false),
 			// LOW-5: XFF trust allowlist (CIDRs). Empty = ignore XFF.
 			TrustedProxies: getEnvList("CERTCTL_TRUSTED_PROXIES", nil),
 			// NamedKeys is populated from CERTCTL_API_KEYS_NAMED below so Load()

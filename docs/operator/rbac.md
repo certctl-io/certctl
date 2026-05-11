@@ -1,6 +1,12 @@
 # RBAC operator reference
 
-> Last reviewed: 2026-05-09
+> Last reviewed: 2026-05-11
+>
+> Audit 2026-05-11 A-8 follow-on: demo-mode residual-grants detector
+> + cleanup endpoint shipped. New env var:
+> `CERTCTL_DEMO_MODE_RESIDUAL_STRICT` (default `false`). Operator
+> workflow at
+> [`security.md#demo-to-production-cutover-audit-2026-05-11-a-8`](security.md#demo-to-production-cutover-audit-2026-05-11-a-8).
 
 This is the operator-facing reference for the role-based access
 control primitive that ships with Bundle 1 (auth bundle 1) of certctl.
