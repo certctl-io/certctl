@@ -268,6 +268,16 @@ ON CONFLICT (role_id, permission_id, scope_type, scope_id) DO NOTHING;
 -- The row exists unconditionally; the env-var check happens in code.
 -- Reserved system actor: API rejects mutations / deletions targeting
 -- this id with 409 Conflict.
+-- v2.1.0 Phase-9 cold-DB-smoke fix: this ON CONFLICT used to reference
+-- UNIQUE (actor_id, actor_type, role_id, tenant_id), the constraint
+-- created by this migration. Migration 000043 (Audit 2026-05-10 HIGH-10
+-- closure) drops that constraint and re-creates it with scope_type +
+-- scope_id columns. On a re-run of this migration (which the naive
+-- file-walking RunMigrations does on every server boot), the original
+-- ON CONFLICT spec no longer matches an existing constraint and
+-- Postgres errors out. Pin the conflict target to `id` (the PK column,
+-- unconditionally present in both pre- and post-000043 schemas) so the
+-- seed stays idempotent across migration-ordering changes downstream.
 INSERT INTO actor_roles (id, actor_id, actor_type, role_id, granted_at, granted_by, tenant_id)
 VALUES (
     'ar-demo-anon-admin',
@@ -278,6 +288,6 @@ VALUES (
     'system',
     't-default'
 )
-ON CONFLICT (actor_id, actor_type, role_id, tenant_id) DO NOTHING;
+ON CONFLICT (id) DO NOTHING;
 
 COMMIT;
