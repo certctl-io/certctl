@@ -13,7 +13,11 @@ certctl is a self-hosted platform that automates the entire TLS certificate life
 
 The CA/Browser Forum's [Ballot SC-081v3](https://cabforum.org/2025/04/11/ballot-sc081v3-introduce-schedule-of-reducing-validity-and-data-reuse-periods/) caps public TLS certificates at **200 days by March 2026**, **100 days by 2027**, and **47 days by 2029**. At 47-day lifespans, a team managing 100 certificates is processing 7+ renewals per week, every week, forever. Manual workflows stop being a choice.
 
-> **Status: Early-access.** The certificate lifecycle core is production-quality, including [RBAC](docs/operator/rbac.md). v2.1.0 adds [OIDC SSO](docs/operator/oidc-runbooks/index.md), server-side sessions, and break-glass admin. Production welcome — [file issues](https://github.com/certctl-io/certctl/issues) when something's off, especially against your IdP.
+> **Status: Early-access.** The certificate lifecycle core is production-quality, including [RBAC](docs/operator/rbac.md).
+
+> v2.1.0 adds [OIDC SSO](docs/operator/oidc-runbooks/index.md), server-side sessions, and break-glass admin.
+
+> Production welcome — [file issues](https://github.com/certctl-io/certctl/issues) when something's off, especially against your IdP.
 
 > **Actively maintained, shipping weekly.** [Open an issue](https://github.com/certctl-io/certctl/issues) if something breaks. CI runs the full test suite with race detection, static analysis, and vulnerability scanning on every commit.
 
