@@ -43,7 +43,7 @@ For the connector reference (12 issuers, 15 targets, 6 notifiers) see [`docs/ref
 <td><a href="docs/screenshots/v2-certificates.png"><img src="docs/screenshots/v2-certificates.png" width="400" alt="Certificates"></a><br><b>Certificates</b><br><sub>Inventory with bulk ops, status filters, owner/team columns</sub></td>
 </tr>
 <tr>
-<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="400" alt="Issuers"></a><br><b>Issuers</b><br><sub>Catalog with 10 CA types, GUI config, test connection</sub></td>
+<td><a href="docs/screenshots/v2-issuers.png"><img src="docs/screenshots/v2-issuers.png" width="400" alt="Issuers"></a><br><b>Issuers</b><br><sub>Catalog with 12 CA types, GUI config, test connection</sub></td>
 <td><a href="docs/screenshots/v2-jobs.png"><img src="docs/screenshots/v2-jobs.png" width="400" alt="Jobs"></a><br><b>Jobs</b><br><sub>Issuance, renewal, deployment queue with approval workflow</sub></td>
 </tr>
 </table>
@@ -67,7 +67,7 @@ certctl handles the full certificate lifecycle in one self-hosted control plane:
 - **Run as an EST server** for HTTPS-based PKCS#10 enrollment. 802.1X / Wi-Fi authentication, IoT device enrollment, RFC 9266 channel binding. See [`docs/reference/protocols/est.md`](docs/reference/protocols/est.md).
 - **Manage multi-level CA hierarchies** with name constraints, path-length enforcement, and end-to-end RFC 5280 path validation. Root → intermediate → issuing chains, admin-gated CRUD, drain-first retirement. Patterns documented for 4-level boundary CAs, 3-level policy CAs with per-BU `PermittedDNSDomains`, and 2-level internal PKI. See [`docs/reference/intermediate-ca-hierarchy.md`](docs/reference/intermediate-ca-hierarchy.md).
 - **Gate high-stakes issuance** behind two-person-integrity approval. Flag a profile as `RequiresApproval`, the request lands in a queue, a non-requester approves, the scheduler dispatches. Profile-edit changes on approval-tier profiles route through the same gate so the flip-flop bypass is closed. See [`docs/operator/approval-workflow.md`](docs/operator/approval-workflow.md).
-- **Authorize with role-based access control.** Seven default roles (admin, operator, viewer, agent, mcp, cli, auditor) over a 33-permission canonical catalogue with global / per-profile / per-issuer scope. Auditor role is read-only on the audit trail (`audit.read` + `audit.export`, nothing else) so a regulator's key cannot read certificates or mutate config. Day-0 admin via a one-shot `CERTCTL_BOOTSTRAP_TOKEN` endpoint that closes itself the moment any admin lands. Privilege-escalation guard requires `auth.role.assign` to grant or revoke a role. See [`docs/operator/rbac.md`](docs/operator/rbac.md), [`docs/operator/auth-threat-model.md`](docs/operator/auth-threat-model.md), and the v2.0.x → v2.1.0 [migration guide](docs/migration/api-keys-to-rbac.md).
+- **Authorize with role-based access control.** Seven default roles (admin, operator, viewer, agent, mcp, cli, auditor) over a fine-grained permission catalogue with global / per-profile / per-issuer scope. Auditor role is read-only on the audit trail (`audit.read` + `audit.export`, nothing else) so a regulator's key cannot read certificates or mutate config. Day-0 admin via a one-shot `CERTCTL_BOOTSTRAP_TOKEN` endpoint that closes itself the moment any admin lands. Privilege-escalation guard requires `auth.role.assign` to grant or revoke a role. See [`docs/operator/rbac.md`](docs/operator/rbac.md), [`docs/operator/auth-threat-model.md`](docs/operator/auth-threat-model.md), and the v2.0.x → v2.1.0 [migration guide](docs/migration/api-keys-to-rbac.md).
 - **Sign in with OIDC SSO** against any standards-compliant identity provider. Per-IdP setup runbooks for Keycloak, Authentik, Okta, Auth0, Microsoft Entra ID, and Google Workspace. Group-claim → role mapping for automatic provisioning; client_secret encrypted at rest (AES-256-GCM); JWKS auto-refresh on `kid` miss; PKCE-S256 required; RFC 9700 §4.7.1 pre-login UA/IP binding; RFC 9207 `iss` URL-param check on callback. Server mints HMAC-signed session cookies with the `__Host-` prefix (browser-enforced subdomain-takeover defense), CSRF rotation on every privileged write, and idle + absolute expiry. [RFC OIDC Back-Channel Logout 1.0](docs/reference/auth-standards-implemented.md) revokes sessions on IdP-driven logout. Argon2id break-glass admin path for SSO-outage recovery — disabled by default; 404-invisible to scanners when `CERTCTL_BREAKGLASS_ENABLED=false`. See [`docs/operator/oidc-runbooks/index.md`](docs/operator/oidc-runbooks/index.md) for the per-IdP onboarding guides and [`docs/migration/oidc-enable.md`](docs/migration/oidc-enable.md) for enabling SSO on an existing deploy.
 - **Discover** existing certs across your fleet via filesystem scanning on agents, network TLS probing across CIDR ranges, and cloud secret manager imports (AWS Secrets Manager, Azure Key Vault, GCP Secret Manager). Triage workflow for claim / dismiss / investigate.
 - **Revoke** with full RFC 5280 reason codes, DER CRL generation per issuer (scheduler-pre-generated and ETag-cached), and an embedded RFC 6960 OCSP responder with dedicated per-issuer responder certs. Single + bulk revocation. See [`docs/reference/protocols/crl-ocsp.md`](docs/reference/protocols/crl-ocsp.md).
@@ -76,7 +76,7 @@ certctl handles the full certificate lifecycle in one self-hosted control plane:
 
 ## Architecture and security
 
-Go 1.25 control plane with handler → service → repository layering. PostgreSQL 16 backend (35+ tables, idempotent migrations). Pull-only deployment model — the server never initiates outbound connections. Agents poll for work and generate ECDSA P-256 keys locally so private keys never touch the control plane. For network appliances and agentless servers, a proxy agent in the same network zone handles deployment via the target's API (WinRM, iControl REST, SSH/SFTP). See the [Architecture Guide](docs/reference/architecture.md) for full system diagrams.
+Go 1.25 control plane with handler → service → repository layering. PostgreSQL 16 backend with idempotent migrations. Pull-only deployment model — the server never initiates outbound connections. Agents poll for work and generate ECDSA P-256 keys locally so private keys never touch the control plane. For network appliances and agentless servers, a proxy agent in the same network zone handles deployment via the target's API (WinRM, iControl REST, SSH/SFTP). See the [Architecture Guide](docs/reference/architecture.md) for full system diagrams.
 
 Security: three authentication paths — API keys (SHA-256 hashed + constant-time compared), [OIDC SSO](docs/operator/oidc-runbooks/index.md) (Keycloak / Authentik / Okta / Auth0 / Entra ID / Google Workspace), and Argon2id [break-glass admin](docs/operator/security.md) for SSO-outage recovery. Successful OIDC login mints an HMAC-signed server-side session with `__Host-` cookies, CSRF rotation on every privileged write, and [RFC OIDC Back-Channel Logout](docs/reference/auth-standards-implemented.md) for IdP-driven session revoke. Role-based authorization on every gated handler with global / per-profile / per-issuer scope. Auditor split keeps regulator-class actors strictly read-only on the audit trail. Day-0 admin via a one-shot bootstrap token; granting or revoking roles requires the dedicated `auth.role.assign` permission. CORS deny-by-default. Shell injection prevention on all connector scripts. SSRF protection (reserved IP filtering) on the network scanner. Issuer + target + OIDC client_secret credentials encrypted at rest with AES-256-GCM. HTTPS-only control plane with TLS 1.3 pinned and a fail-closed startup gate that refuses to boot if the TLS bundle is unusable. Every API call recorded to an immutable audit trail with actor attribution, body hash, and latency tracking. CI runs race detection, static analysis, and vulnerability scanning on every commit. See [`docs/operator/security.md`](docs/operator/security.md) for the full posture and [`docs/operator/auth-threat-model.md`](docs/operator/auth-threat-model.md) for what's defended vs deferred.
 
@@ -90,7 +90,7 @@ cd certctl
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
 ```
 
-Wait ~30 seconds, then open **https://localhost:8443** in your browser. The shipped demo overlay seeds 32 certificates across 10 issuers, 8 agents, and 180 days of realistic history. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
+Wait ~30 seconds, then open **https://localhost:8443** in your browser. The shipped demo overlay seeds 180 days of realistic history across 13 issuers, 8 agents, managed + discovered certs, jobs, deploys, audit, and notification events. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
 
 For a clean install without demo data, drop the `-f deploy/docker-compose.demo.yml` flag and run `docker compose -f deploy/docker-compose.yml up -d --build`. The four compose files (`docker-compose.yml` base, `docker-compose.demo.yml` overlay, `docker-compose.dev.yml` for PgAdmin + debug logging, `docker-compose.test.yml` for integration tests) are documented at [`deploy/ENVIRONMENTS.md`](deploy/ENVIRONMENTS.md).
 
@@ -113,8 +113,8 @@ Detects your OS and architecture, downloads the binary, configures systemd (Linu
 
 ```bash
 helm install certctl deploy/helm/certctl/ \
-  --set server.apiKey=your-api-key \
-  --set postgres.password=your-db-password
+  --set server.auth.apiKey=your-api-key \
+  --set postgresql.password=your-db-password
 ```
 
 Production-ready chart with Server Deployment, PostgreSQL StatefulSet, Agent DaemonSet, health probes, security contexts (non-root, read-only rootfs), and optional Ingress. See [values.yaml](deploy/helm/certctl/values.yaml).
@@ -149,7 +149,7 @@ Every `v*` tag publishes signed, attested artefacts (Cosign keyless OIDC + SLSA 
 ```bash
 make build              # Build server + agent binaries
 make test               # Run tests
-make lint               # golangci-lint (11 linters)
+make lint               # golangci-lint (govet + staticcheck + contextcheck + unused)
 govulncheck ./...       # Vulnerability scan
 make docker-up          # Start Docker Compose stack
 ```
