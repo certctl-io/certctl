@@ -32,7 +32,9 @@ Catch drift across the four product surfaces — OpenAPI spec, HTTP router, MCP 
 
 ### Operational guards
 
-`cold-db-compose-smoke.sh` (wipe postgres volume, bring stack up cold, issue/renew/revoke, audit-row check). `doc-rot-detector.sh` (every doc reviewed within 120 days). These pin the operational reality, not the source shape.
+`doc-rot-detector.sh` (every doc reviewed within 120 days) pins the operational reality, not the source shape.
+
+The cold-DB compose smoke (wipe postgres volume, bring stack up cold, issue/renew/revoke, audit-row check) lives directly in `.github/workflows/ci.yml::cold-db-compose-smoke` — not as a script. It is intentionally not operator-runnable: the gate's value is that CI owns the cold-DB state, the operator never has to remember to run it. Master branch-protection enforces the job as a required check; that is the manual action, and it happens once.
 
 ## When the build is red
 

@@ -210,22 +210,10 @@ jobs:
         # Contract: each guard MUST exit 0 on clean repo, non-zero with
         # ::error:: prefix on regression. See scripts/ci-guards/README.md.
         #
-        # SKIP cold-db-compose-smoke.sh — it needs Docker + a fresh
-        # postgres volume, which only exists in the dedicated
-        # `cold-db-compose-smoke` job below. Including it in this loop
-        # would always fail (no Docker on the runners that don't bring
-        # up compose).
         run: |
           set -e
           fail=0
           for g in scripts/ci-guards/*.sh; do
-            case "$(basename "$g")" in
-              cold-db-compose-smoke.sh)
-                echo "::group::$(basename "$g") (skipped — runs in dedicated job)"
-                echo "::endgroup::"
-                continue
-                ;;
-            esac
             echo "::group::$(basename "$g")"
             if ! bash "$g"; then
               fail=1
@@ -258,13 +246,108 @@ jobs:
         # 15-min wall-clock cap covers cold image pull + compose-up +
         # full issue/renew/revoke probe + teardown. Increase only if
         # the underlying steps legitimately grow.
+        #
+        # The smoke is inlined here on purpose — it is NOT a script in
+        # scripts/ci-guards/, because there is no value in a developer
+        # running this locally. The whole point of the gate is that CI
+        # owns the cold-DB state; the operator never has to remember to
+        # run it. Master branch-protection enforces this job as a
+        # required check; that is the manual action, and it happens
+        # once.
         timeout-minutes: 15
-        run: bash scripts/ci-guards/cold-db-compose-smoke.sh
+        working-directory: deploy
+        env:
+          STARTUP_TIMEOUT_SECONDS: 300
+        run: |
+          set -e
+          set -o pipefail
+
+          SERVER_URL="https://localhost:8443"
+          CACERT_PATH="${GITHUB_WORKSPACE}/deploy/test/certs/ca.crt"
+
+          log() { echo "[cold-db-smoke] $*"; }
+
+          wait_for_service_healthy() {
+            local svc="$1" deadline=$(( $(date +%s) + STARTUP_TIMEOUT_SECONDS ))
+            while [ "$(date +%s)" -lt "$deadline" ]; do
+              local state
+              state="$(docker compose ps --format json "$svc" 2>/dev/null | python3 -c '
+          import json, sys
+          try:
+              line = sys.stdin.read().strip()
+              if not line:
+                  print("not-up"); sys.exit(0)
+              rows = json.loads(line) if line.startswith("[") else [json.loads(l) for l in line.splitlines() if l.strip()]
+              if not rows:
+                  print("not-up")
+              else:
+                  print(rows[0].get("Health", rows[0].get("State", "?")))
+          except Exception as e:
+              print(f"err: {e}")
+          ')"
+              if [ "$state" = "healthy" ] || [ "$state" = "running" ]; then
+                log "  $svc → $state"; return 0
+              fi
+              sleep 2
+            done
+            log "  $svc did NOT reach healthy within ${STARTUP_TIMEOUT_SECONDS}s (last: $state)"
+            return 1
+          }
+
+          http_call() {
+            local method="$1" path="$2" data="${3:-}"
+            local args=(--silent --show-error --max-time 30 -X "$method" "$SERVER_URL$path")
+            [ -f "$CACERT_PATH" ] && args+=(--cacert "$CACERT_PATH") || args+=(--insecure)
+            [ -n "${KEY:-}" ] && args+=(-H "Authorization: Bearer $KEY")
+            [ -n "$data" ] && args+=(-H "Content-Type: application/json" -d "$data")
+            curl "${args[@]}"
+          }
+
+          log "1/7 down -v --remove-orphans"
+          docker compose down -v --remove-orphans 2>&1 | tail -3 || true
+
+          log "2/7 up -d (cold boot)"
+          docker compose up -d 2>&1 | tail -3
+
+          log "3/7 wait for healthchecks"
+          wait_for_service_healthy postgres
+          wait_for_service_healthy certctl-server
+          wait_for_service_healthy certctl-agent || log "  (agent skipped — non-demo compose)"
+
+          log "4/7 minting day-0 admin"
+          TOKEN="$(openssl rand -base64 32 | tr -d '\n')"
+          echo "CERTCTL_BOOTSTRAP_TOKEN=$TOKEN" > /tmp/_smoke.env
+          docker compose --env-file /tmp/_smoke.env up -d --force-recreate certctl-server 2>&1 | tail -2
+          sleep 5
+          wait_for_service_healthy certctl-server
+          BODY="$(http_call POST /api/v1/auth/bootstrap "{\"token\":\"$TOKEN\",\"actor_name\":\"smoke-admin\"}")"
+          KEY="$(echo "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["key_value"])')"
+          [ -n "$KEY" ] || { log "bootstrap failed: $BODY"; exit 1; }
+
+          log "5/7 issuing test cert"
+          ISSUE='{"common_name":"smoke-test.local","profile_id":"profile-default","environment":"test","owner_id":"o-platform"}'
+          R="$(http_call POST /api/v1/certificates "$ISSUE")"
+          CID="$(echo "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or d.get("certificate",{}).get("id",""))')"
+          [ -n "$CID" ] || { log "issue failed: $R"; exit 1; }
+
+          log "6/7 renewing $CID"
+          http_call POST "/api/v1/certificates/$CID/renew" >/dev/null
+
+          log "7/7 revoking + asserting audit rows"
+          http_call POST "/api/v1/certificates/$CID/revoke" '{"reason":"smoke-test"}' >/dev/null
+          AUD="$(http_call GET '/api/v1/audit?limit=50')"
+          for action in cert.issued cert.renewed cert.revoked; do
+            if ! echo "$AUD" | python3 -c "import json,sys; d=json.load(sys.stdin); evs=d.get('events') or d.get('audit',{}).get('events') or []; sys.exit(0 if any(e.get('action')=='$action' for e in evs) else 1)"; then
+              log "MISSING audit row: $action"; echo "$AUD" | head -200; exit 1
+            fi
+          done
+          log "PASS — tearing down"
+          docker compose down -v 2>&1 | tail -2
 
       - name: Dump compose logs on failure
         if: failure()
+        working-directory: deploy
         run: |
-          cd deploy
           for svc in postgres certctl-server certctl-agent certctl-tls-init; do
             echo "==== $svc ===="
             docker compose logs --no-color --tail 200 "$svc" || true

@@ -92,7 +92,8 @@ These guards catch defect classes BEFORE they get audit findings — they pin in
 |---|---|---|
 | `complete-path-config-coverage` | post-v2.1.0 / item-1 | "Lying field" — `CERTCTL_*` env var defined in `internal/config/config.go` that no consumer outside `internal/config/` actually reads. Operator-facing config that the docs claim works but the code never honors. Companion Go test at `internal/config/coverage_test.go`. |
 | `doc-rot-detector` | post-v2.1.0 / item-5 | Docs older than 90 days warn (yellow), older than 120 days fail (red). Uses HEAD commit timestamp for reproducibility. `docs/archive/` allowlisted in bulk. |
-| `cold-db-compose-smoke` | post-v2.1.0 / item-6 | Migration-on-cold-DB regression (canonical: 2026-05-09 migration 000045 broken INSERT, commit `6444e13`). Wipes the postgres volume, brings the stack up cold, issue/renew/revoke + 3 audit rows. **Runs in its own GitHub Actions job** (`cold-db-compose-smoke`), NOT the generic regression-guards loop — needs Docker. |
+
+The cold-DB compose smoke (post-v2.1.0 / item-6) is NOT a script in this directory — it is inlined directly into `.github/workflows/ci.yml::cold-db-compose-smoke` because there is no value in a developer running it locally (the whole point of the gate is that CI owns the cold-DB state). To inspect or modify the smoke logic, read that workflow job; there is intentionally no `scripts/ci-guards/cold-db-compose-smoke.sh`.
 
 The fourth Bundle artifact (`internal/ciparity/`) is Go tests, not shell guards — runs under the standard Go test step. Pins the MCP tool catalogue floor + naming convention; reports CLI/MCP/OpenAPI surface counts as a trend metric.
 
