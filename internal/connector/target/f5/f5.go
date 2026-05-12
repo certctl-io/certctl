@@ -27,7 +27,7 @@ type Config struct {
 	Password   string `json:"password"`    // Administrative password
 	Partition  string `json:"partition"`   // F5 partition name (default "Common")
 	SSLProfile string `json:"ssl_profile"` // SSL client profile name to update
-	Insecure   bool   `json:"insecure"`    // Skip TLS verification for mgmt interface (default true)
+	Insecure   bool   `json:"insecure"`    // Skip TLS verification for mgmt interface. Default false (TLS verified). Operators with self-signed F5 mgmt certs must explicitly set "insecure": true.
 	Timeout    int    `json:"timeout"`     // HTTP timeout in seconds (default 30)
 }
 
@@ -42,9 +42,14 @@ func (c *Config) applyDefaults() {
 	if c.Timeout == 0 {
 		c.Timeout = 30
 	}
-	// Insecure defaults to true because F5 management interfaces commonly use
-	// self-signed certificates. See TICKET-016 precedent for InsecureSkipVerify
-	// documentation. Operators running proper mgmt certs can set insecure=false.
+	// Insecure has no override in applyDefaults — runtime default is the Go
+	// zero-value (false), which means InsecureSkipVerify=false and TLS is
+	// VERIFIED. Operators with self-signed F5 management certs must opt in
+	// by passing "insecure": true explicitly in the connector config. The
+	// `S2 (F5 insecure-by-default)` finding from the 2026-05-12 audit was
+	// based on a misleading legacy comment, not actual code behavior — this
+	// closure (Bundle 1 / 2026-05-12) corrects the comments to match the
+	// code default. See TICKET-016 precedent for InsecureSkipVerify framing.
 }
 
 // SSLProfileInfo contains information about an F5 SSL client profile.
@@ -122,9 +127,10 @@ func New(config *Config, logger *slog.Logger) (*Connector, error) {
 		Transport: &http.Transport{
 			TLSClientConfig: &tls.Config{
 				// F5 management interfaces commonly use self-signed certificates.
-				// InsecureSkipVerify is controlled by the config.Insecure field
-				// (default true). Operators with proper management certs can set
-				// insecure=false. See TICKET-016 for security rationale.
+				// InsecureSkipVerify is controlled by config.Insecure (default
+				// false → TLS verified). Operators with self-signed mgmt certs
+				// must opt in by passing "insecure": true in the connector
+				// config. See TICKET-016 for security rationale.
 				InsecureSkipVerify: config.Insecure, //nolint:gosec // configurable, documented
 			},
 		},

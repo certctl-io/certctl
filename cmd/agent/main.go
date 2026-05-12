@@ -699,6 +699,26 @@ func (a *Agent) executeDeploymentJob(ctx context.Context, job JobItem) {
 			return
 		}
 
+		// Bundle 1 / RT-C1 closure (2026-05-12): defense in depth. The server
+		// runs internal/connector/target/configcheck.Validate on the way IN
+		// (Create/Update), and rejects shell metacharacters in command-bearing
+		// fields. Re-run the connector's full ValidateConfig here on the way
+		// OUT, before any DeployCertificate call. This catches (a) configs
+		// that pre-date the server-side guard, (b) corruption/tampering of
+		// the encrypted config blob, and (c) per-connector filesystem
+		// invariants (cert dir exists, paths writable) that the server can't
+		// check because the filesystem is on the agent host.
+		if err := connector.ValidateConfig(ctx, job.TargetConfig); err != nil {
+			a.logger.Error("connector config validation failed",
+				"job_id", job.ID,
+				"target_type", job.TargetType,
+				"error", err)
+			if reportErr := a.reportJobStatus(ctx, job.ID, "Failed", fmt.Sprintf("%s config validation failed: %v", job.TargetType, err)); reportErr != nil {
+				a.logger.Error("failed to report job status to server", "job_id", job.ID, "status", "Failed", "error", reportErr)
+			}
+			return
+		}
+
 		deployReq := target.DeploymentRequest{
 			CertPEM:      certOnly,
 			KeyPEM:       keyPEM,

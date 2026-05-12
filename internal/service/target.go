@@ -8,10 +8,17 @@ import (
 	"log/slog"
 	"time"
 
+	"github.com/certctl-io/certctl/internal/connector/target/configcheck"
 	"github.com/certctl-io/certctl/internal/crypto"
 	"github.com/certctl-io/certctl/internal/domain"
 	"github.com/certctl-io/certctl/internal/repository"
 )
+
+// ErrInvalidConnectorConfig is returned by Create / Update / CreateTarget /
+// UpdateTarget when configcheck.Validate rejects the target's config JSON
+// (e.g., shell metacharacters in reload_command). The HTTP handler should
+// map this to 400 via errors.Is. Bundle 1 / RT-C1 closure 2026-05-12.
+var ErrInvalidConnectorConfig = errors.New("invalid connector config")
 
 // ErrAgentNotFound is returned by [TargetService.CreateTarget] when the caller
 // references an agent_id that is empty or does not correspond to a registered
@@ -121,6 +128,14 @@ func (s *TargetService) Create(ctx context.Context, target *domain.DeploymentTar
 		return fmt.Errorf("unsupported target type: %s", target.Type)
 	}
 
+	// Bundle 1 / RT-C1 closure: reject shell-metacharacter injection in
+	// command-bearing config fields BEFORE encryption + storage. Without
+	// this, target.edit (default r-operator grant) → agent sh -c becomes
+	// an RCE chain. See internal/connector/target/configcheck/configcheck.go.
+	if err := configcheck.Validate(string(target.Type), target.Config); err != nil {
+		return fmt.Errorf("%w: %v", ErrInvalidConnectorConfig, err)
+	}
+
 	if target.ID == "" {
 		target.ID = generateID("target")
 	}
@@ -175,6 +190,13 @@ func (s *TargetService) Update(ctx context.Context, id string, target *domain.De
 		mergedConfig, err := s.mergeRedactedConfig(ctx, id, target.Config)
 		if err != nil {
 			return fmt.Errorf("failed to merge config: %w", err)
+		}
+
+		// Bundle 1 / RT-C1 closure: validate the POST-MERGE config to catch
+		// injection attempts even when the redacted-merge path is used.
+		// Validation runs on the same bytes that will be encrypted + stored.
+		if err := configcheck.Validate(string(target.Type), mergedConfig); err != nil {
+			return fmt.Errorf("%w: %v", ErrInvalidConnectorConfig, err)
 		}
 
 		// Encrypt the merged config
@@ -299,6 +321,13 @@ func (s *TargetService) CreateTarget(ctx context.Context, target domain.Deployme
 		return nil, fmt.Errorf("unsupported target type: %s", target.Type)
 	}
 
+	// Bundle 1 / RT-C1 closure: reject shell-metacharacter injection in
+	// command-bearing config fields BEFORE encryption + storage. Mirrors
+	// Create() above so the HTTP handler entry point is also gated.
+	if err := configcheck.Validate(string(target.Type), target.Config); err != nil {
+		return nil, fmt.Errorf("%w: %v", ErrInvalidConnectorConfig, err)
+	}
+
 	// C-002: enforce agent_id FK at service layer so we return a clean 400
 	// instead of bubbling a Postgres 23503 foreign-key violation out as 500.
 	// The schema (migrations/000001 line 104) declares agent_id TEXT NOT NULL
@@ -370,6 +399,12 @@ func (s *TargetService) UpdateTarget(ctx context.Context, id string, target doma
 		mergedConfig, err := s.mergeRedactedConfig(ctx, id, target.Config)
 		if err != nil {
 			return nil, fmt.Errorf("failed to merge config: %w", err)
+		}
+
+		// Bundle 1 / RT-C1 closure: validate the POST-MERGE config (same
+		// reasoning as Update() above).
+		if err := configcheck.Validate(string(target.Type), mergedConfig); err != nil {
+			return nil, fmt.Errorf("%w: %v", ErrInvalidConnectorConfig, err)
 		}
 
 		encrypted, _, encErr := crypto.EncryptIfKeySet(mergedConfig, s.encryptionKey)

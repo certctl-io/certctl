@@ -28,6 +28,46 @@ a single shared primitive:
 This document describes the operator-visible surface. The Go-level
 contract lives at `internal/deploy/doc.go`.
 
+## 1.6. Per-target guarantee matrix
+
+Added 2026-05-12 (Bundle 1 / CLAIM-M2 closure). The README previously
+claimed "every deploy goes through atomic-write + ownership-preservation
++ SHA-256 idempotency + per-target Prometheus counters + pre-deploy
+snapshot + on-failure rollback." That claim is true for the file-based
+deploy primitive only. Cloud / API targets use vendor-SDK semantics and
+do not share the same primitive. This matrix is the authoritative
+per-target answer.
+
+Legend: ✓ = supported / always on. ✗ = not applicable to this target
+family. ◐ = partial / vendor-specific equivalent. preview = ships but
+the production code path is a stub (see CLAIM-H4).
+
+| Target | Atomic write | Owner/perms preserved | SHA-256 idempotency | Pre-deploy snapshot | On-failure rollback | Post-deploy TLS verify | Prometheus counters | Server+agent shell-injection validation |
+|---|:-:|:-:|:-:|:-:|:-:|:-:|:-:|:-:|
+| NGINX            | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Apache           | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| HAProxy          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| Caddy            | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (no operator commands) |
+| Traefik          | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| Envoy            | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| Postfix / Dovecot| ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ |
+| SSH known-hosts  | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (no TLS endpoint) | ✓ | ✓ |
+| JavaKeystore     | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ (file format, no socket) | ✓ | ✓ |
+| IIS              | ◐ (Windows cert store API) | ✓ | ✓ | ✓ | ✓ | ✓ | ✓ | ✗ |
+| WinCertStore     | ◐ (Windows cert store API) | ✓ | ✓ | ✓ | ✓ | ✗ | ✓ | ✗ |
+| F5 BIG-IP        | ✓ (iControl REST transaction) | ✗ (no FS) | ◐ (cert object name) | ◐ (transaction rollback) | ✓ (transaction rollback) | ✓ (mgmt API GET) | ✓ | ✗ |
+| AWS ACM          | ✗ (SDK call) | ✗ (no FS) | ◐ (ACM-side replace) | ✗ | ◐ (re-import old ARN) | ✗ | ✓ | ✗ |
+| Azure Key Vault  | ✗ (SDK call) | ✗ (no FS) | ◐ (KV-side versioning) | ✗ | ◐ (KV versioning) | ✗ | ✓ | ✗ |
+| Kubernetes Secrets | preview | preview | preview | preview | preview | preview | preview | ✗ |
+
+**Notes on the matrix:**
+
+- **Atomic write / owner-perms / SHA-256 idempotency / snapshot / rollback** are properties of the shared `deploy.Apply` primitive in `internal/deploy/`. They apply to file-based targets where certctl writes to disk.
+- **Cloud / API targets** (AWS ACM, Azure Key Vault) use the vendor SDK's import / replace operation. The vendor handles versioning and atomicity at their layer. certctl tracks the operation outcome via Prometheus counters; "rollback" in this row means "re-import the previous cert ARN" rather than the file-primitive's `os.Rename` rollback.
+- **F5** uses iControl REST transactions for atomicity (deploy-hardening I docs above). It does not touch a filesystem; the snapshot/rollback semantics live in the F5 transaction protocol.
+- **Kubernetes Secrets** ships but the production client (`realK8sClient`) returns `"real Kubernetes client not implemented"` for all methods (see `internal/connector/target/k8ssecret/k8ssecret.go:395+`). Operators evaluating against a real cluster should treat this connector as preview until the production client lands.
+- **Server+agent shell-injection validation** (Bundle 1 / RT-C1 closure 2026-05-12) is on for every connector that accepts operator-supplied command strings: `reload_command`, `validate_command`, `restart_command`. Validation runs at API ingestion (`internal/service/target.go::Create` + `::Update` + `::CreateTarget` + `::UpdateTarget` via `internal/connector/target/configcheck`) AND on the agent before deploy (`cmd/agent/main.go` post-`createTargetConnector`, calling each connector's full `ValidateConfig` method). Connectors that do not accept operator shell strings (Caddy / Traefik / Envoy / cloud targets) skip this check by design.
+
 ## 1.5. Audit closure status (2026-05-02 deployment-target audit)
 
 The 2026-05-02 deployment-target coverage audit
