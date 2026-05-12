@@ -43,7 +43,6 @@ const mcpBaselineFloor = 150
 var (
 	mcpToolNameRe = regexp.MustCompile(`^certctl_[a-z][a-z0-9_]*[a-z0-9]$`)
 	mcpNameDeclRe = regexp.MustCompile(`Name:\s*"(certctl_[a-z0-9_]+)"`)
-	methodPathRe  = regexp.MustCompile(`^(GET|POST|PUT|DELETE|PATCH|OPTIONS|HEAD) /`)
 	openapiPathRe = regexp.MustCompile(`^  (/[^:]+):\s*$`)
 	openapiVerbRe = regexp.MustCompile(`^    (get|post|put|delete|patch|options|head):\s*$`)
 	caseLiteralRe = regexp.MustCompile(`case\s+"([a-z\-]+)":`)
