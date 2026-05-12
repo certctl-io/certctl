@@ -12,15 +12,23 @@ Additional Use Grant: You may make use of the Licensed Work, including in
                       your own customers, provided that you may not offer
                       the Licensed Work as a Commercial Certificate Service.
 
-                      A "Commercial Certificate Service" is a product or
-                      service whose principal value to a third party is the
+                      A "Commercial Certificate Service" is any product
+                      or service that provides third parties with access
+                      to or control of any substantial set of the
                       certificate management functionality of the Licensed
                       Work — including but not limited to lifecycle
                       management, discovery, monitoring, alerting, renewal
-                      automation, deployment, and revocation — where the
-                      third party accesses or controls that functionality
-                      and compensation is received for that access or
-                      control.
+                      automation, deployment, revocation, certificate
+                      authority operation, certificate issuance,
+                      certificate signing, or any combination thereof —
+                      where compensation, in any form, is received in
+                      connection with such access or control. This
+                      restriction applies irrespective of whether such
+                      functionality is the principal, ancillary,
+                      supporting, or one of several values provided by the
+                      product or service, and irrespective of whether the
+                      Licensed Work is presented under its original name,
+                      a modified name, or no name at all.
 
                       For the avoidance of doubt:
 
@@ -36,12 +44,17 @@ Additional Use Grant: You may make use of the Licensed Work, including in
 
                       (b) for the purposes of this Additional Use Grant,
                           "third party" excludes (i) your employees, (ii)
-                          your contractors acting on your behalf, and (iii)
-                          your Affiliates. "Affiliate" means any entity
-                          that controls, is controlled by, or is under
-                          common control with, you, where "control" means
-                          ownership of more than fifty percent (50%) of
-                          the voting interests of the entity;
+                          your contractors acting on your behalf, and
+                          (iii) your Affiliates. "Affiliate" means any
+                          entity that (1) directly or indirectly controls
+                          you, (2) is directly or indirectly controlled by
+                          you, or (3) is directly or indirectly under
+                          common control with you, where "control" means
+                          either (A) ownership of more than fifty percent
+                          (50%) of the voting interests of the entity, or
+                          (B) the power to direct the management and
+                          policies of the entity, whether through voting
+                          securities, contract, or otherwise;
 
                       (c) the restriction on offering a Commercial
                           Certificate Service applies regardless of whether
@@ -67,16 +80,34 @@ works, redistribute, and make non-production use of the Licensed Work. The
 Licensor may make an Additional Use Grant, above, permitting limited production
 use.
 
-Effective on the Change Date, or the fourth anniversary of the first publicly
-available distribution of a specific version of the Licensed Work under this
-License, whichever comes first, the Licensor hereby grants you rights under
+Effective on the Change Date, the Licensor hereby grants you rights under
 the terms of the Change License, and the rights granted in the paragraph
 above terminate.
 
 If your use of the Licensed Work does not comply with the requirements
 currently in effect as described in this License, you must purchase a
 commercial license from the Licensor, its affiliated entities, or authorized
-resellers, or you must refrain from using the Licensed Work.
+resellers, or you must refrain from using the Licensed Work. Rights granted
+under any commercial license from the Licensor are personal to the licensee
+and may not be sublicensed, transferred, assigned, or resold to any third
+party without the Licensor's prior written consent. Any attempted sublicense,
+transfer, assignment, or resale in violation of this provision is void.
+
+Restricted Activities. Notwithstanding any other provision of this License,
+you may not:
+
+  (i)   provide the Licensed Work or substantially similar functionality
+        to third parties as a hosted, managed, embedded, bundled, or
+        integrated service, except as expressly permitted in the
+        Additional Use Grant;
+
+  (ii)  move, change, disable, circumvent, or work around any license,
+        security, attribution, audit-trail, or feature-gating
+        functionality contained in the Licensed Work; or
+
+  (iii) alter or remove any license, copyright, attribution, trademark,
+        or other notice from the Licensed Work, its derivatives, or any
+        substantial portion thereof.
 
 All copies of the original and modified Licensed Work, and derivative works
 of the Licensed Work, are subject to this License. This License applies
@@ -110,8 +141,12 @@ the Licensor or to any repository hosting the Licensed Work is provided at
 the submitter's sole risk, confers no rights or obligations on the
 Licensor, and is not incorporated into the Licensed Work.
 
-This License does not grant you any right in any trademark or logo of the
-Licensor or its Affiliates.
+Trademark and naming. This License does not grant you any right in any
+trademark, service mark, trade name, or logo of the Licensor or its
+Affiliates. Forks, derivative works, and modifications of the Licensed Work
+must not use the name "certctl," any name confusingly similar to "certctl,"
+or any Licensor trademark in their distributed form, marketing materials,
+package metadata, or service offerings.
 
 Governing law and venue. This License shall be governed by and construed in
 accordance with the laws of the State of Florida, USA, without giving
