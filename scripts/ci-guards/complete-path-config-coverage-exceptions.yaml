@@ -1,0 +1,24 @@
+# scripts/ci-guards/complete-path-config-coverage-exceptions.yaml
+#
+# Allowlist for the complete-path config-coverage guard
+# (scripts/ci-guards/complete-path-config-coverage.sh).
+#
+# Each entry exempts a CERTCTL_* env var from the "must have a consumer
+# outside internal/config/" rule. Every row MUST carry:
+#
+#   - name: "CERTCTL_NAME"
+#     justification: "one-line reason this is documented but not consumed"
+#     expires: "YYYY-MM-DD"        # required; the guard rejects exceptions
+#                                  # whose expiration date has passed
+#
+# Discipline: when an exception is added, it gets a hard expiration date
+# (usually 90 days out). When it expires, the guard fails until either
+# (a) the env var is wired to a real consumer, (b) the env var is
+# removed, or (c) the row is re-justified with a new expiration. Keeps
+# the allowlist from becoming a dumping ground.
+#
+# DO NOT add entries here to silence the guard on a real defect. If the
+# env var should be wired and isn't, that's the bug — fix it instead of
+# allowlisting.
+
+exceptions: []
