@@ -151,6 +151,20 @@ services:
       # compat. Production deploys override CERTCTL_AUTH_TYPE +
       # KEYGEN_MODE + DEMO_SEED via their own compose.
       CERTCTL_DEMO_SEED: "true"
+      # Bootstrap token interpolation surface (Auditable Codebase Bundle
+      # cold-DB smoke closure, 2026-05-12). Pre-fix, the `env-file +
+      # --force-recreate certctl-server` pattern documented in
+      # cowork/manual-testing-bundle-2.html (and used by the cold-DB
+      # smoke job in .github/workflows/ci.yml::cold-db-compose-smoke)
+      # set CERTCTL_BOOTSTRAP_TOKEN in compose's own interpolation
+      # environment but the container never received it because this
+      # block didn't reference the variable. Wiring it as an explicit
+      # interpolation (default empty) makes the documented manual flow
+      # actually work end-to-end. Empty value = bootstrap strategy
+      # disabled (server returns 410 Gone on POST /api/v1/auth/bootstrap),
+      # which is the safe default — only set the var when you intend to
+      # mint a day-0 admin via the bootstrap path.
+      CERTCTL_BOOTSTRAP_TOKEN: ${CERTCTL_BOOTSTRAP_TOKEN:-}
     ports:
       - "8443:8443"
     volumes:
