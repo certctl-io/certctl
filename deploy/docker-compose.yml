@@ -130,6 +130,15 @@ services:
       CERTCTL_SERVER_TLS_KEY_PATH: /etc/certctl/tls/server.key
       CERTCTL_LOG_LEVEL: info
       CERTCTL_AUTH_TYPE: none
+      # Audit 2026-05-10 HIGH-12 closure: when AUTH_TYPE=none AND the
+      # server binds to a non-loopback address (SERVER_HOST=0.0.0.0
+      # above), every request is served as the synthetic actor
+      # `actor-demo-anon`. The server fail-fasts at startup unless
+      # DEMO_MODE_ACK=true acknowledges that posture. This compose IS
+      # the bundled demo path (see DEMO_SEED comment below), so the
+      # ACK is correct here. Production deploys override AUTH_TYPE +
+      # KEYGEN_MODE + DEMO_SEED + DEMO_MODE_ACK via their own compose.
+      CERTCTL_DEMO_MODE_ACK: "true"
       CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
       CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI with seeded demo targets
       CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}  # AES-256-GCM for dynamic issuer/target config
