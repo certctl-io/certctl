@@ -1,6 +1,6 @@
 # CI Pipeline — Operator Guide
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-12
 
 > Authoritative guide to certctl's CI pipeline shape.
 > Per the ci-pipeline-cleanup spec, Phase 12.

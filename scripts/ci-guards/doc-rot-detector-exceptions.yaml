@@ -1,0 +1,26 @@
+# scripts/ci-guards/doc-rot-detector-exceptions.yaml
+#
+# Allowlist for the doc-rot detector
+# (scripts/ci-guards/doc-rot-detector.sh).
+#
+# Two entry shapes:
+#
+# A. Directory bulk-allowlist (path ends with "/"):
+#
+#      - path: "docs/archive/"
+#        justification: "frozen historical content; intentionally not reviewed"
+#
+# B. Per-doc allowlist with expiration:
+#
+#      - path: "docs/reference/some-doc.md"
+#        justification: "why this doc is exempt from the age check"
+#        expires: "YYYY-MM-DD"     # required for per-doc; the guard
+#                                  # rejects entries whose expires date
+#                                  # has passed.
+#
+# DO NOT add per-doc entries here to silence the gate on a doc that's
+# legitimately drifted. If the doc is wrong, fix it.
+
+exceptions:
+  - path: "docs/archive/"
+    justification: "frozen historical content (per the 2026-05-04 docs overhaul) — intentionally not subject to the freshness gate"

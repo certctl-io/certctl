@@ -53,7 +53,11 @@ Current helpers:
 4. CI auto-picks up new scripts via the `for g in scripts/ci-guards/*.sh`
    loop in the `Regression guards` step — no ci.yml change required.
 
-## The 22 guards in this directory
+## Guards in this directory
+
+Count: re-derive on demand via `ls scripts/ci-guards/*.sh | wc -l`. The table below names each one — keep it in sync as guards are added.
+
+### Per-finding regression guards
 
 | ID | Finding | Catches |
 |---|---|---|
@@ -79,6 +83,18 @@ Current helpers:
 | `bundle-8-M-009-bare-usemutation` | M-009 + M-029 mutation contract | Bare `useMutation()` outside `useTrackedMutation` wrapper |
 | `H-1-encryption-key-min-length` | H-1 closure follow-up (post-Phase-5 surfacing) | `CERTCTL_CONFIG_ENCRYPTION_KEY` literal in any `deploy/docker-compose*.yml` shorter than the 32-byte floor enforced by `internal/config/config.go::Validate()` |
 | `test-compose-scep-coherence` | post-Phase-5 surfacing of dead SCEP test config | `CERTCTL_SCEP_ENABLED=true` in test compose without (a) a CI job that runs the SCEP integration test, (b) the `ra.crt` + `ra.key` + `intune_trust_anchor.pem` fixtures committed to `deploy/test/fixtures/`, AND (c) the matching volume mount |
+
+### Forward-looking guards (Auditable Codebase Bundle, post-v2.1.0 anti-rot)
+
+These guards catch defect classes BEFORE they get audit findings — they pin invariants on the codebase that the v2.0 audit history showed are easy to lose.
+
+| ID | Item | Catches |
+|---|---|---|
+| `complete-path-config-coverage` | post-v2.1.0 / item-1 | "Lying field" — `CERTCTL_*` env var defined in `internal/config/config.go` that no consumer outside `internal/config/` actually reads. Operator-facing config that the docs claim works but the code never honors. Companion Go test at `internal/config/coverage_test.go`. |
+| `doc-rot-detector` | post-v2.1.0 / item-5 | Docs older than 90 days warn (yellow), older than 120 days fail (red). Uses HEAD commit timestamp for reproducibility. `docs/archive/` allowlisted in bulk. |
+| `cold-db-compose-smoke` | post-v2.1.0 / item-6 | Migration-on-cold-DB regression (canonical: 2026-05-09 migration 000045 broken INSERT, commit `6444e13`). Wipes the postgres volume, brings the stack up cold, issue/renew/revoke + 3 audit rows. **Runs in its own GitHub Actions job** (`cold-db-compose-smoke`), NOT the generic regression-guards loop — needs Docker. |
+
+The fourth Bundle artifact (`internal/ciparity/`) is Go tests, not shell guards — runs under the standard Go test step. Pins the MCP tool catalogue floor + naming convention; reports CLI/MCP/OpenAPI surface counts as a trend metric.
 
 ## Guards explicitly NOT here
 

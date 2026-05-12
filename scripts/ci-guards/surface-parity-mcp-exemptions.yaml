@@ -1,0 +1,34 @@
+# scripts/ci-guards/surface-parity-mcp-exemptions.yaml
+#
+# Allowlist for OpenAPI operations that are intentionally NOT mirrored
+# in the MCP tool catalogue. Consumed by
+# internal/api/router/surface_parity_test.go::TestSurfaceParity_*.
+#
+# The current MCP parity tests are informational (per frozen decision
+# 0.9). This file exists so when those tests are promoted to hard
+# gates, the carve-outs are already documented and the promotion is
+# mechanical.
+#
+# Each entry shape:
+#
+#   - operation: "METHOD /api/v1/path"
+#     justification: "one-line reason this is legitimately HTTP-only"
+#     expires: "YYYY-MM-DD"        # required; 90-day default
+#
+# Categories of legitimate carve-outs (DO add these when the test is
+# promoted to fail-on-miss):
+#
+#   - ACME wire protocol (RFC 8555 + RFC 9773 ARI)
+#   - SCEP wire protocol (RFC 8894)
+#   - EST wire protocol (RFC 7030)
+#   - OCSP responder
+#   - CRL distribution
+#   - Healthcheck / readiness / version endpoints
+#   - OIDC callback / back-channel-logout
+#   - SPA fallback for the embedded web UI
+#
+# DO NOT add entries here to silence the test on an oversight. If an
+# operation should have an MCP tool and doesn't, that's the bug — add
+# the tool.
+
+exceptions: []

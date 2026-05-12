@@ -1,6 +1,6 @@
 # certctl Documentation
 
-> Last reviewed: 2026-05-05
+> Last reviewed: 2026-05-12
 
 The full docs index, organized by audience. Pick the section that matches what you need to do; each link below opens a focused doc rather than a wall of text.
 
@@ -112,6 +112,7 @@ You're contributing to certctl, running tests locally, or trying to understand t
 | [GUI QA checklist](contributor/gui-qa-checklist.md) | Manual GUI verification pass for release |
 | [Release sign-off](contributor/release-sign-off.md) | Release-day checklist — code state, automated gates, manual QA, artefact verification |
 | [CI pipeline](contributor/ci-pipeline.md) | CI shape, regression guards, adding new checks |
+| [CI guards](contributor/ci-guards.md) | Per-class CI guards (code-shape, contract-parity, build/dep, operational); how to add one |
 
 ## Archive
 

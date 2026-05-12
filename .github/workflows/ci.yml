@@ -106,8 +106,10 @@ jobs:
         run: go test -race ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/scheduler/... ./internal/connector/... ./internal/crypto/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -timeout 300s
 
       - name: Go Test with Coverage
+        # internal/ciparity/... — post-v2.1.0 anti-rot item 2 surface-
+        # parity tests; stdlib-only so they always pass in this job.
         run: |
-          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/api/router/... ./internal/auth/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... -count=1 -cover -coverprofile=coverage.out
+          go test ./internal/service/... ./internal/api/handler/... ./internal/api/middleware/... ./internal/api/router/... ./internal/auth/... ./internal/integration/... ./internal/connector/issuer/... ./internal/connector/target/... ./internal/connector/notifier/... ./internal/connector/discovery/... ./internal/crypto/... ./internal/mcp/... ./internal/cli/... ./internal/domain/... ./internal/validation/... ./internal/tlsprobe/... ./internal/ciparity/... -count=1 -cover -coverprofile=coverage.out
 
       - name: Check Coverage Thresholds
         # ci-pipeline-cleanup Phase 2: per-package floors moved to
@@ -207,10 +209,23 @@ jobs:
         # Adding a new guard: drop a new <id>.sh; this loop auto-picks it up.
         # Contract: each guard MUST exit 0 on clean repo, non-zero with
         # ::error:: prefix on regression. See scripts/ci-guards/README.md.
+        #
+        # SKIP cold-db-compose-smoke.sh — it needs Docker + a fresh
+        # postgres volume, which only exists in the dedicated
+        # `cold-db-compose-smoke` job below. Including it in this loop
+        # would always fail (no Docker on the runners that don't bring
+        # up compose).
         run: |
           set -e
           fail=0
           for g in scripts/ci-guards/*.sh; do
+            case "$(basename "$g")" in
+              cold-db-compose-smoke.sh)
+                echo "::group::$(basename "$g") (skipped — runs in dedicated job)"
+                echo "::endgroup::"
+                continue
+                ;;
+            esac
             echo "::group::$(basename "$g")"
             if ! bash "$g"; then
               fail=1
@@ -218,6 +233,42 @@ jobs:
             echo "::endgroup::"
           done
           exit $fail
+
+  cold-db-compose-smoke:
+    # Per post-v2.1.0 anti-rot item 6 (Auditable Codebase Bundle).
+    #
+    # Catches migration-on-cold-DB regressions: wipe the postgres
+    # volume, bring the stack up cold, mint a day-0 admin, issue +
+    # renew + revoke a test certificate, assert audit rows, tear down.
+    # Targets the bug class that the warm-DB integration suite misses
+    # (canonical case: 2026-05-09 migration 000045 broken INSERT,
+    # fixed in commit 6444e13).
+    name: Cold-DB compose smoke
+    runs-on: ubuntu-latest
+    needs: go-build-and-test
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Show Docker versions
+        run: |
+          docker --version
+          docker compose version
+
+      - name: Cold-DB compose smoke
+        # 15-min wall-clock cap covers cold image pull + compose-up +
+        # full issue/renew/revoke probe + teardown. Increase only if
+        # the underlying steps legitimately grow.
+        timeout-minutes: 15
+        run: bash scripts/ci-guards/cold-db-compose-smoke.sh
+
+      - name: Dump compose logs on failure
+        if: failure()
+        run: |
+          cd deploy
+          for svc in postgres certctl-server certctl-agent certctl-tls-init; do
+            echo "==== $svc ===="
+            docker compose logs --no-color --tail 200 "$svc" || true
+          done
 
   frontend-build:
     name: Frontend Build
