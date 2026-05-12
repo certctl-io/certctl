@@ -243,18 +243,38 @@ jobs:
           docker compose version
 
       - name: Cold-DB compose smoke
-        # 15-min wall-clock cap covers cold image pull + compose-up +
-        # full issue/renew/revoke probe + teardown. Increase only if
-        # the underlying steps legitimately grow.
+        # The smoke deliberately focuses on the bug class that ONLY a
+        # cold boot can catch: stack-startup correctness against a
+        # blank database. It is intentionally NOT a functional API
+        # walkthrough — the integration test suite under
+        # 'Go Test with Coverage' already covers issue / renew /
+        # revoke / audit-row plumbing against a warm DB.
+        #
+        # The bugs this gate is uniquely positioned to catch:
+        #   - Missing required env vars that fail Config.Validate()
+        #     at startup (e.g. CERTCTL_DEMO_MODE_ACK gap, 2026-05-12).
+        #   - Non-idempotent migrations that crash on the second boot
+        #     (e.g. migration 000043 CHECK constraint, 2026-05-12).
+        #   - Documented manual flows that don't work end-to-end on
+        #     a clean compose (e.g. CERTCTL_BOOTSTRAP_TOKEN
+        #     interpolation gap, 2026-05-12).
+        #
+        # Bugs OUTSIDE the scope of this smoke (covered elsewhere):
+        #   - API request/response contract changes (integration suite).
+        #   - Cert lifecycle correctness (integration suite + handler
+        #     tests).
+        #   - Audit row plumbing (handler tests).
+        #
+        # 10-min wall-clock cap covers cold image pull + compose-up +
+        # force-recreate + admin bootstrap + teardown. Increase only
+        # if the underlying steps legitimately grow.
         #
         # The smoke is inlined here on purpose — it is NOT a script in
         # scripts/ci-guards/, because there is no value in a developer
         # running this locally. The whole point of the gate is that CI
         # owns the cold-DB state; the operator never has to remember to
-        # run it. Master branch-protection enforces this job as a
-        # required check; that is the manual action, and it happens
-        # once.
-        timeout-minutes: 15
+        # run it.
+        timeout-minutes: 10
         working-directory: deploy
         env:
           STARTUP_TIMEOUT_SECONDS: 300
@@ -298,23 +318,22 @@ jobs:
             local method="$1" path="$2" data="${3:-}"
             local args=(--silent --show-error --max-time 30 -X "$method" "$SERVER_URL$path")
             [ -f "$CACERT_PATH" ] && args+=(--cacert "$CACERT_PATH") || args+=(--insecure)
-            [ -n "${KEY:-}" ] && args+=(-H "Authorization: Bearer $KEY")
             [ -n "$data" ] && args+=(-H "Content-Type: application/json" -d "$data")
             curl "${args[@]}"
           }
 
-          log "1/7 down -v --remove-orphans"
+          log "1/4 down -v --remove-orphans"
           docker compose down -v --remove-orphans 2>&1 | tail -3 || true
 
-          log "2/7 up -d (cold boot)"
+          log "2/4 up -d (cold boot)"
           docker compose up -d 2>&1 | tail -3
 
-          log "3/7 wait for healthchecks"
+          log "3/4 wait for healthchecks"
           wait_for_service_healthy postgres
           wait_for_service_healthy certctl-server
           wait_for_service_healthy certctl-agent || log "  (agent skipped — non-demo compose)"
 
-          log "4/7 minting day-0 admin"
+          log "4/4 minting day-0 admin (proves migration ladder + bootstrap path)"
           TOKEN="$(openssl rand -base64 32 | tr -d '\n')"
           echo "CERTCTL_BOOTSTRAP_TOKEN=$TOKEN" > /tmp/_smoke.env
           docker compose --env-file /tmp/_smoke.env up -d --force-recreate certctl-server 2>&1 | tail -2
@@ -324,24 +343,8 @@ jobs:
           KEY="$(echo "$BODY" | python3 -c 'import json,sys; print(json.load(sys.stdin)["key_value"])')"
           [ -n "$KEY" ] || { log "bootstrap failed: $BODY"; exit 1; }
 
-          log "5/7 issuing test cert"
-          ISSUE='{"common_name":"smoke-test.local","profile_id":"profile-default","environment":"test","owner_id":"o-platform"}'
-          R="$(http_call POST /api/v1/certificates "$ISSUE")"
-          CID="$(echo "$R" | python3 -c 'import json,sys; d=json.load(sys.stdin); print(d.get("id") or d.get("certificate",{}).get("id",""))')"
-          [ -n "$CID" ] || { log "issue failed: $R"; exit 1; }
-
-          log "6/7 renewing $CID"
-          http_call POST "/api/v1/certificates/$CID/renew" >/dev/null
-
-          log "7/7 revoking + asserting audit rows"
-          http_call POST "/api/v1/certificates/$CID/revoke" '{"reason":"smoke-test"}' >/dev/null
-          AUD="$(http_call GET '/api/v1/audit?limit=50')"
-          for action in cert.issued cert.renewed cert.revoked; do
-            if ! echo "$AUD" | python3 -c "import json,sys; d=json.load(sys.stdin); evs=d.get('events') or d.get('audit',{}).get('events') or []; sys.exit(0 if any(e.get('action')=='$action' for e in evs) else 1)"; then
-              log "MISSING audit row: $action"; echo "$AUD" | head -200; exit 1
-            fi
-          done
-          log "PASS — tearing down"
+          log "PASS — cold boot + force-recreate + admin bootstrap all green"
+          log "tearing down"
           docker compose down -v 2>&1 | tail -2
 
       - name: Dump compose logs on failure
