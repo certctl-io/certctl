@@ -15,22 +15,45 @@
 -- already understands the tuple shape (role_permissions carries the
 -- same columns); the actor-role addition gives operators a second
 -- knob without forcing them to fork roles.
+--
+-- Idempotency note (2026-05-12 cold-DB smoke closure): the
+-- certctl-server boot sequence runs every *.up.sql on every start
+-- (internal/repository/postgres/db.go::RunMigrations has no
+-- schema_migrations tracker — see CLAUDE.md "Idempotent migrations"
+-- architecture decision). All non-IF-NOT-EXISTS operations below
+-- must be wrapped in DO blocks that skip when the object already
+-- exists. The canonical pattern lives in
+-- migrations/000033_approval_kinds.up.sql.
 -- =============================================================================
+
+BEGIN;
 
 ALTER TABLE actor_roles
     ADD COLUMN IF NOT EXISTS scope_type TEXT NOT NULL DEFAULT 'global',
     ADD COLUMN IF NOT EXISTS scope_id   TEXT;
 
-ALTER TABLE actor_roles
-    ADD CONSTRAINT actor_roles_scope_type_enum
-        CHECK (scope_type IN ('global', 'profile', 'issuer'));
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'actor_roles_scope_type_enum') THEN
+        ALTER TABLE actor_roles
+            ADD CONSTRAINT actor_roles_scope_type_enum
+                CHECK (scope_type IN ('global', 'profile', 'issuer'));
+    END IF;
+END$$;
 
-ALTER TABLE actor_roles
-    ADD CONSTRAINT actor_roles_scope_id_required_when_not_global
-        CHECK (
-            (scope_type = 'global' AND scope_id IS NULL) OR
-            (scope_type IN ('profile', 'issuer') AND scope_id IS NOT NULL)
-        );
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'actor_roles_scope_id_required_when_not_global') THEN
+        ALTER TABLE actor_roles
+            ADD CONSTRAINT actor_roles_scope_id_required_when_not_global
+                CHECK (
+                    (scope_type = 'global' AND scope_id IS NULL) OR
+                    (scope_type IN ('profile', 'issuer') AND scope_id IS NOT NULL)
+                );
+    END IF;
+END$$;
 
 -- The (actor_id, actor_type, role_id, tenant_id) uniqueness must
 -- relax: an operator can grant the same role to the same actor at
@@ -38,9 +61,17 @@ ALTER TABLE actor_roles
 ALTER TABLE actor_roles
     DROP CONSTRAINT IF EXISTS actor_roles_actor_id_actor_type_role_id_tenant_id_key;
 
-ALTER TABLE actor_roles
-    ADD CONSTRAINT actor_roles_actor_role_scope_unique
-        UNIQUE (actor_id, actor_type, role_id, scope_type, scope_id, tenant_id);
+DO $$
+BEGIN
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint
+                   WHERE conname = 'actor_roles_actor_role_scope_unique') THEN
+        ALTER TABLE actor_roles
+            ADD CONSTRAINT actor_roles_actor_role_scope_unique
+                UNIQUE (actor_id, actor_type, role_id, scope_type, scope_id, tenant_id);
+    END IF;
+END$$;
 
 CREATE INDEX IF NOT EXISTS idx_actor_roles_scope
     ON actor_roles(scope_type, scope_id) WHERE scope_id IS NOT NULL;
+
+COMMIT;
