@@ -10,17 +10,16 @@ no longer resolves, this is the explanation.
 ## What changed
 
 Every commit's `author` and `committer` metadata was rewritten to a
-single canonical identity (`shankar0123 <skreddy040@gmail.com>`). Where
-the original author was an AI/automation identity (Claude, Copilot,
-cowork agent, certctl-bot, etc.), a `Co-authored-by:` trailer was
-appended to the commit message preserving the original identity. The
-intent is a uniform single-author authorship layer + preserved
-attribution of AI involvement.
+single canonical identity (`shankar0123 <skreddy040@gmail.com>`). The
+14 pre-rewrite author identities — operator name variants plus
+AI/automation identities (Claude, Copilot, cowork agent, certctl-bot,
+etc.) — collapsed to that one canonical author.
 
 No source-code content was changed by the rewrite. Every line of code
 in every commit is byte-for-byte identical to its pre-rewrite version.
-Only `author` / `committer` metadata and (for ~129 AI-touched commits)
-a `Co-authored-by:` trailer line were touched.
+Only the `author` and `committer` metadata fields were touched; commit
+messages, subject lines, milestone IDs (M49, L-1, etc.), and every
+other line of every commit's body are preserved verbatim.
 
 ## Why
 
@@ -41,15 +40,18 @@ Two reasons:
 
 ## What is preserved
 
-The exact pre-rewrite history is preserved on origin at the tag
-**`archive/pre-author-normalization-2026-05-13`**. If you need to
-reference an original commit SHA from before the rewrite — for example
-in a blog post, an external citation, or a pre-rewrite release artifact
-— check that tag. The tag is immutable; we will not move or delete it.
+A complete off-platform bundle backup of the pre-rewrite tree is held
+by the operator (off-repo, not pushed). It contains every original
+commit SHA, every original author identity, and the full ref graph as
+it existed before the rewrite. The bundle is the immutable
+preservation record and is recoverable forever.
 
-A separate off-platform bundle backup of the pre-rewrite tree is also
-held by the operator (off-repo, not pushed). Both artifacts ensure the
-original history is recoverable forever.
+An `archive/pre-author-normalization-2026-05-13` tag briefly existed
+on origin pointing at the pre-rewrite tip but was removed when the
+operator opted to clean the contributor graph of pre-rewrite
+authorship signal. The bundle remains as the canonical archive — any
+forensic question about pre-rewrite state can be answered by loading
+the bundle into a fresh clone (`git clone pre-rewrite-2026-05-13.bundle`).
 
 ## Recovering after the rewrite
 
@@ -67,22 +69,18 @@ This force-aligns your local tree with the new origin. Any local
 branches you had based on pre-rewrite history will need rebasing onto
 the new master.
 
-If you want to inspect the pre-rewrite state for any reason:
-
-```bash
-git fetch origin archive/pre-author-normalization-2026-05-13
-git checkout archive/pre-author-normalization-2026-05-13
-```
+If you need to inspect the pre-rewrite state for a forensic or
+diligence question, contact the operator directly — the off-platform
+bundle is the canonical archive and is available on request.
 
 ## Container images and release tarballs
 
 ghcr.io container images that were published before the rewrite
 (`ghcr.io/certctl-io/certctl-{server,agent}:<old-tag>`) remain pullable
 indefinitely. Their OCI source-SHA labels reference commit SHAs that
-now only resolve via the `archive/` tag — the images themselves still
-work; only the source-SHA back-reference points at the archive. New
-release images published after the rewrite reference current SHAs
-normally.
+no longer resolve in the public origin — the images themselves still
+work; only the source-SHA back-reference is now orphan. New release
+images published after the rewrite reference current SHAs normally.
 
 If you downloaded a release tarball before the rewrite, the tarball's
 contents are unchanged; only its associated `git` SHA differs from the
