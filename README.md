@@ -101,9 +101,10 @@ Wait ~30 seconds, then open **https://localhost:8443** in your browser. The demo
 
 ```bash
 cp .env.example deploy/.env       # or root .env if running outside compose
-$EDITOR deploy/.env                # set POSTGRES_PASSWORD, CERTCTL_AUTH_SECRET,
+"${EDITOR:-nano}" deploy/.env     # set POSTGRES_PASSWORD, CERTCTL_AUTH_SECRET,
                                    # CERTCTL_API_KEY, CERTCTL_CONFIG_ENCRYPTION_KEY,
                                    # CERTCTL_AGENT_ID — all via openssl rand
+                                   # (replace nano with your preferred editor)
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
 
