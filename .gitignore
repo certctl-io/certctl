@@ -88,3 +88,8 @@ Thumbs.db
 # CERTCTL_TEST_CA_BUNDLE=./certs/ca.crt. Material is regenerated on every
 # `docker compose up` and never belongs in git.
 /deploy/test/certs/
+
+# Phase 1 RED-1 closure (2026-05-13): the f5-mock-icontrol Dockerfile
+# rebuilds from source via multi-stage build (deploy/test/f5-mock-icontrol/
+# Dockerfile line 13). The compiled ELF must not be tracked.
+deploy/test/f5-mock-icontrol/f5-mock-icontrol

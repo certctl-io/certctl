@@ -39,10 +39,10 @@ jobs:
         os: [linux, darwin]
         arch: [amd64, arm64]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Set up Go
-        uses: actions/setup-go@v5
+        uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff  # v5
         with:
           go-version: ${{ env.GO_VERSION }}
 
@@ -123,7 +123,7 @@ jobs:
           cat "${OUTPUT_NAME}.sha256"
 
       - name: Upload build artefacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02  # v4
         with:
           name: binary-${{ steps.build.outputs.output_name }}
           path: |
@@ -151,7 +151,7 @@ jobs:
       hashes: ${{ steps.hashes.outputs.hashes }}
     steps:
       - name: Download binary artefacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093  # v4
         with:
           pattern: binary-*
           path: artifacts
@@ -191,7 +191,7 @@ jobs:
             checksums.txt
 
       - name: Upload artefacts to GitHub Release
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         if: startsWith(github.ref, 'refs/tags/')
         with:
           files: |
@@ -212,7 +212,7 @@ jobs:
       actions: read
       id-token: write
       contents: write
-    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@v2.1.0
+    uses: slsa-framework/slsa-github-generator/.github/workflows/generator_generic_slsa3.yml@f7dd8c54c2067bafc12ca7a55595d5ee9b75204a  # v2.1.0
     with:
       base64-subjects: "${{ needs.aggregate-checksums.outputs.hashes }}"
       upload-assets: true
@@ -235,10 +235,10 @@ jobs:
       id-token: write  # Cosign keyless OIDC identity token
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Log in to GitHub Container Registry
-        uses: docker/login-action@v3
+        uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9  # v3
         with:
           registry: ${{ env.REGISTRY }}
           username: ${{ github.actor }}
@@ -249,14 +249,14 @@ jobs:
         run: echo "VERSION=${GITHUB_REF#refs/tags/}" >> "$GITHUB_OUTPUT"
 
       - name: Set up Docker Buildx
-        uses: docker/setup-buildx-action@v3
+        uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f  # v3
 
       - name: Install Cosign
         uses: sigstore/cosign-installer@cad07c2e89fa2edd6e2d7bab4c1aa38e53f76003  # v4.1.1
 
       - name: Build and push server image
         id: server-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
           file: ./Dockerfile
@@ -291,7 +291,7 @@ jobs:
 
       - name: Build and push agent image
         id: agent-push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8  # v6
         with:
           context: .
           file: ./Dockerfile.agent
@@ -334,7 +334,7 @@ jobs:
       contents: write
 
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5  # v4
 
       - name: Extract version from tag
         id: version
@@ -351,7 +351,7 @@ jobs:
         # README is the source of truth for those, and inlining them in every
         # release page produces the kind of "every release looks identical"
         # noise that gives operators no signal about what actually changed.
-        uses: softprops/action-gh-release@v2
+        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65  # v2
         with:
           # Pin the release title to the tag name. softprops/action-gh-release@v2
           # falls back to the most recent commit subject when `name:` is omitted,
