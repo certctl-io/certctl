@@ -583,10 +583,33 @@ func main() {
 		SameSite: sameSiteMode,
 		Secure:   true,
 	})
+	// Bundle 5 closure (audit S1): wire the per-source-IP rate limiter
+	// for POST /auth/breakglass/login. 5 attempts / minute / IP, 50 000
+	// key cap. Pre-Bundle-5 the handler docstring claimed this rate
+	// limit but no limiter was installed; the route bypasses the global
+	// RPS middleware because it's mounted via r.mux.Handle in the
+	// AuthExemptRouterRoutes path. The service-layer Argon2id lockout
+	// state machine remains the second line of defense.
+	breakglassHandler.SetLoginRateLimiter(
+		ratelimit.NewSlidingWindowLimiter(5, time.Minute, 50_000),
+	)
 	if cfg.Auth.Breakglass.Enabled {
 		logger.Warn("CERTCTL_BREAKGLASS_ENABLED=true — break-glass admin path is ACTIVE; this bypasses SSO. Disable in steady-state.",
 			"lockout_threshold", cfg.Auth.Breakglass.LockoutThreshold,
 			"lockout_duration", cfg.Auth.Breakglass.LockoutDuration.String())
+	}
+
+	// Bundle 5 closure (audit RT-L2): operator-visible startup warning
+	// when CERTCTL_ACME_INSECURE=true disables ACME directory TLS
+	// verification. Pre-Bundle-5 this knob silently disabled TLS
+	// verification for every ACME issuance call without surfacing any
+	// signal at boot; the only mention lived in a values.yaml comment.
+	// Pebble / step-ca / dev ACME proxies use self-signed certs so the
+	// knob has legitimate dev uses, but a production deploy that flips
+	// it (typically copy-pasting from a Pebble integration runbook)
+	// gets MITM exposure on every CA round-trip. Loud at boot now.
+	if cfg.ACME.Insecure {
+		logger.Warn("CERTCTL_ACME_INSECURE=true — ACME directory TLS verification is DISABLED. Every ACME round-trip skips certificate chain validation; production deploys MUST unset this. Acceptable only for dev / Pebble / step-ca with operator-supplied self-signed roots.")
 	}
 
 	policyService := service.NewPolicyService(policyRepo, auditService)

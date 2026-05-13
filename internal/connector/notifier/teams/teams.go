@@ -8,7 +8,14 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/certctl-io/certctl/internal/validation"
 )
+
+// teamsClientTimeout bounds every outbound Teams webhook request and
+// its resolution/dial phase. Shared by the SSRF-safe transport dialer
+// (Bundle 5 R7 closure) and the http.Client.
+const teamsClientTimeout = 10 * time.Second
 
 // Config holds configuration for the Microsoft Teams notifier.
 type Config struct {
@@ -23,11 +30,35 @@ type Notifier struct {
 }
 
 // New creates a new Teams notifier.
+//
+// Bundle 5 closure (audit R7): SSRF-safe transport — see the parallel
+// rationale in internal/connector/notifier/slack.New. Webhook URLs are
+// operator-configured via the dynamic-config GUI and must not pivot
+// into cloud metadata services or in-cluster reserved ranges.
 func New(config Config) *Notifier {
+	transport := &http.Transport{
+		DialContext:           validation.SafeHTTPDialContext(teamsClientTimeout),
+		MaxIdleConns:          10,
+		IdleConnTimeout:       90 * time.Second,
+		TLSHandshakeTimeout:   10 * time.Second,
+		ExpectContinueTimeout: 1 * time.Second,
+	}
 	return &Notifier{
 		config: config,
 		httpClient: &http.Client{
-			Timeout: 10 * time.Second,
+			Timeout:   teamsClientTimeout,
+			Transport: transport,
+		},
+	}
+}
+
+// newForTest bypasses the SSRF dial-time guard for unit tests that hit
+// httptest.NewServer (binds to 127.0.0.1). Production uses `New`.
+func newForTest(config Config) *Notifier {
+	return &Notifier{
+		config: config,
+		httpClient: &http.Client{
+			Timeout: teamsClientTimeout,
 		},
 	}
 }

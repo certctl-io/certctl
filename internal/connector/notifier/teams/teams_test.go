@@ -34,7 +34,8 @@ func TestTeams_SendSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := New(Config{WebhookURL: server.URL})
+	// Bundle 5 R7: bypass the SSRF dial-time guard for httptest's 127.0.0.1 server.
+	n := newForTest(Config{WebhookURL: server.URL})
 	err := n.Send(context.Background(), "team@example.com", "Renewal Failed", "Certificate mc-api-prod renewal failed after 3 attempts")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -70,7 +71,7 @@ func TestTeams_SendHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := New(Config{WebhookURL: server.URL})
+	n := newForTest(Config{WebhookURL: server.URL})
 	err := n.Send(context.Background(), "", "Test", "body")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -81,7 +82,7 @@ func TestTeams_SendHTTPError(t *testing.T) {
 }
 
 func TestTeams_SendConnectionError(t *testing.T) {
-	n := New(Config{WebhookURL: "http://127.0.0.1:1"})
+	n := newForTest(Config{WebhookURL: "http://127.0.0.1:1"})
 	err := n.Send(context.Background(), "", "Test", "body")
 	if err == nil {
 		t.Fatal("expected connection error, got nil")

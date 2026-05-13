@@ -32,6 +32,7 @@ import (
 	"github.com/certctl-io/certctl/internal/auth/breakglass"
 	bgdomain "github.com/certctl-io/certctl/internal/auth/breakglass/domain"
 	sessiondomain "github.com/certctl-io/certctl/internal/auth/session/domain"
+	"github.com/certctl-io/certctl/internal/ratelimit"
 )
 
 // =============================================================================
@@ -51,14 +52,42 @@ type BreakglassService interface {
 }
 
 // AuthBreakglassHandler ships the Phase 7.5 surface.
+//
+// Bundle 5 closure (S1): the docstring at the top of this file claimed
+// the login endpoint was "Rate-limited at 5/minute per source IP via
+// the existing rate limiter middleware" but no per-route limiter was
+// wired — `/auth/breakglass/login` is registered via `r.mux.Handle`
+// in router.go::AuthExemptRouterRoutes and bypasses the global RPS
+// middleware that wraps `r.Register`-mounted routes. The login handler
+// now owns its own SlidingWindowLimiter (5 attempts / minute / source
+// IP, 50 000 key cap) so the documented behavior actually ships.
+//
+// Wired at startup via SetLoginRateLimiter (called from cmd/server/main.go
+// alongside the other per-handler rate limiters that close audit
+// findings H-9 / H-12 / Bundle 3 D7 / etc.). Defense-in-depth: even
+// when the limiter is nil (legacy / test), the service-layer Argon2id
+// lockout state machine still protects against brute force — but a
+// nil limiter is a misconfiguration the integration test catches.
 type AuthBreakglassHandler struct {
 	svc         BreakglassService
 	cookieAttrs SessionCookieAttrs
+	// loginLimiter rate-limits POST /auth/breakglass/login by source IP.
+	// nil-safe: when unset, the handler skips the limiter check and
+	// relies on the service-layer Argon2id lockout. Production deploys
+	// MUST set this via SetLoginRateLimiter.
+	loginLimiter *ratelimit.SlidingWindowLimiter
 }
 
 // NewAuthBreakglassHandler constructs the handler.
 func NewAuthBreakglassHandler(svc BreakglassService, cookieAttrs SessionCookieAttrs) *AuthBreakglassHandler {
 	return &AuthBreakglassHandler{svc: svc, cookieAttrs: cookieAttrs}
+}
+
+// SetLoginRateLimiter wires the per-source-IP rate limiter the Login
+// handler enforces. Bundle 5 closure (S1) — see the AuthBreakglassHandler
+// type docstring for the full rationale.
+func (h *AuthBreakglassHandler) SetLoginRateLimiter(l *ratelimit.SlidingWindowLimiter) {
+	h.loginLimiter = l
 }
 
 // =============================================================================
@@ -98,6 +127,22 @@ func (h *AuthBreakglassHandler) Login(w http.ResponseWriter, r *http.Request) {
 	}
 
 	ip := clientIPFromRequest(r)
+
+	// Bundle 5 closure (S1): per-source-IP rate limit. 5 attempts /
+	// minute / IP (default; configurable via the constructor at
+	// cmd/server/main.go). Returns 429 with no body so the response
+	// shape matches the rest of the auth surface (scanner-unfriendly).
+	// Audited by the service layer on the next attempt — we don't
+	// audit the rate-limit hit itself here because that would let an
+	// attacker flood the audit table with rate-limit rows from a
+	// single IP.
+	if h.loginLimiter != nil {
+		if err := h.loginLimiter.Allow(ip, time.Now()); err != nil {
+			Error(w, http.StatusTooManyRequests, "too many requests")
+			return
+		}
+	}
+
 	res, err := h.svc.Authenticate(r.Context(), req.ActorID, req.Password, ip, r.UserAgent())
 	if err != nil {
 		// All authenticate errors map to the SAME 401 + same body.

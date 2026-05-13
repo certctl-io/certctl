@@ -1038,14 +1038,31 @@ The HTTP middleware stack processes requests in the following order (see `cmd/se
 4. **BodyLimit** - request body size cap via `http.MaxBytesReader`
 5. **RateLimiter** - token bucket rate limiting (optional, when enabled)
 6. **CORS** - cross-origin request handling (deny-by-default)
-7. **Auth** - API key validation (or none in development; JWT/OIDC via authenticating gateway, see below — not in-process)
+7. **Auth** - one of three production paths (see "In-process authentication surface" below) or `none` for development
 8. **AuditLog** - records every API call to the audit trail (requires auth context for actor)
 
-### Authenticating-gateway pattern (JWT, OIDC, mTLS)
+### In-process authentication surface
 
-certctl's in-process authentication surface is intentionally narrow: `api-key` for production deployments and `none` for development. There is no in-process JWT, OIDC, mTLS, or SAML middleware. (`CERTCTL_AUTH_TYPE=jwt` was accepted pre-G-1 but silently routed through the api-key bearer middleware — a security finding masquerading as a config option, removed at the v2.x boundary; see [`upgrade-to-v2-jwt-removal.md`](upgrade-to-v2-jwt-removal.md) if you previously set it.)
+certctl ships three production-grade in-process authentication paths plus a `none` mode for development. Auth Bundle 2 (commit `dea5053`, 2026-05-12) added native OIDC + sessions + break-glass alongside the v2.0.x API-key path; the older "authenticating-gateway only" framing the previous draft of this doc carried is no longer accurate.
 
-For deployments that need JWT/OIDC/mTLS, the standard pattern is to put an authenticating gateway in front of certctl and configure `CERTCTL_AUTH_TYPE=none` on the upstream certctl process. The gateway terminates the federated identity protocol, validates tokens / certificates / SAML assertions, and proxies the authenticated request to certctl as a same-origin call on a private network. This separation gives operators the full breadth of the modern identity ecosystem (oauth2-proxy, Envoy `ext_authz`, Traefik `ForwardAuth`, Pomerium, Authelia, Caddy `forward_auth`, Apache `mod_auth_openidc`, nginx `auth_request`) without certctl itself having to track signing-key rotation, claim mapping, audience validation, and the rest of the JWT/OIDC surface area. Operators wanting per-request actor attribution past the gateway boundary forward the gateway-resolved identity (e.g., `X-Auth-Request-User` from oauth2-proxy) and run a small authorization layer at the gateway that enforces the bearer-key contract certctl actually uses.
+| `CERTCTL_AUTH_TYPE` | What it authenticates | When to use |
+|---|---|---|
+| `api-key` (default) | `Authorization: Bearer <key>` matched against SHA-256-hashed `CERTCTL_AUTH_SECRET` / `CERTCTL_API_KEYS_NAMED` rows. | Production deploys without an IdP; agent ↔ server; machine-to-machine; CI. |
+| `oidc` | Federated SSO via any OIDC IdP (Keycloak / Authentik / Okta / Auth0 / Entra ID / Google Workspace). PKCE-S256 + RFC 9700 pre-login UA/IP binding + RFC 9207 iss check + alg-downgrade defense. Successful login mints an HMAC-signed server-side session (cookie + CSRF rotation + back-channel logout). | Production deploys with an existing IdP; human admin access; SOC 2 / SAS 70 deployments. |
+| `none` (demo) | Every request served as the synthetic admin actor `actor-demo-anon`. | Demo / evaluation only. The fail-closed `CERTCTL_DEMO_MODE_ACK=true` requirement (Audit 2026-05-10 HIGH-12) prevents accidental production use; the boot-time WARN banner (Bundle 2) makes the posture unmissable. |
+
+Side surfaces:
+- **Day-0 bootstrap** via `CERTCTL_BOOTSTRAP_TOKEN` + `POST /api/v1/auth/bootstrap` mints the first admin actor + API key one-shot; the endpoint closes itself the moment any admin exists.
+- **Break-glass admin** (Auth Bundle 2 Phase 7.5) — Argon2id-hashed local-password recovery for SSO-outage. Default-OFF (`CERTCTL_BREAKGLASS_ENABLED=false`); surface returns 404 to scanners when disabled. Rate-limited at 5/min per source IP at the route (Bundle 5 closure).
+- **RBAC enforcement** on every gated handler via `auth.RequirePermission(perm, scope, scopeID)` — seven default roles (admin / operator / viewer / agent / mcp / cli / auditor), 33-permission canonical catalogue, scope types (global / profile / issuer). Auditor split is load-bearing: `r-auditor` holds only `audit.read` + `audit.export`.
+
+For deployments that need a federated-identity protocol certctl doesn't ship natively (SAML, mTLS-as-auth, LDAP), the authenticating-gateway pattern is still the right answer:
+
+### Authenticating-gateway pattern (SAML, mTLS-as-auth, LDAP)
+
+When the operator's identity ecosystem requires a protocol certctl doesn't ship natively in-process — SAML 2.0, mTLS-as-authentication (TLS client cert binding to actor), LDAP-direct, Kerberos — the standard pattern is to put an authenticating gateway in front of certctl and configure `CERTCTL_AUTH_TYPE=none` on the upstream. The gateway terminates the federated identity protocol, validates tokens / certificates / SAML assertions, and proxies the authenticated request to certctl as a same-origin call on a private network. This separation gives operators the full breadth of the modern identity ecosystem (oauth2-proxy, Envoy `ext_authz`, Traefik `ForwardAuth`, Pomerium, Authelia, Caddy `forward_auth`, Apache `mod_auth_openidc`, nginx `auth_request`) without certctl itself having to track signing-key rotation, claim mapping, audience validation, and the rest of the protocol surface area for every standard. Operators wanting per-request actor attribution past the gateway boundary forward the gateway-resolved identity (e.g., `X-Auth-Request-User` from oauth2-proxy) and run a small authorization layer at the gateway that enforces the bearer-key contract certctl actually uses.
+
+The historical context: pre-G-1, `CERTCTL_AUTH_TYPE=jwt` was accepted but silently routed through the api-key bearer middleware (a security finding masquerading as a config option, removed at the v2.x boundary; see [`upgrade-to-v2-jwt-removal.md`](upgrade-to-v2-jwt-removal.md) if you previously set it). Native OIDC arrived later via Auth Bundle 2 — operators on the pre-Bundle-2 "gateway-only for OIDC" pattern can keep it (it still works) or migrate to native OIDC per [`docs/migration/oidc-enable.md`](../migration/oidc-enable.md).
 
 ### Concurrency Safety
 

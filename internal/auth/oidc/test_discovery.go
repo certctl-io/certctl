@@ -9,9 +9,19 @@ import (
 	"context"
 	"fmt"
 	"net/http"
+	"time"
 
 	gooidc "github.com/coreos/go-oidc/v3/oidc"
+
+	"github.com/certctl-io/certctl/internal/validation"
 )
+
+// oidcOutboundTimeout bounds every test-discovery HTTP call (discovery
+// document fetch + JWKS reachability probe + userinfo if configured).
+// Shared by the SSRF-safe transport dialer (Bundle 5 R6 closure) and
+// the http.Client so the dial budget and the read/write budget land
+// on the same wall-clock horizon.
+const oidcOutboundTimeout = 10 * time.Second
 
 // TestDiscoveryResult is the report TestDiscovery returns. The HTTP
 // layer marshals this verbatim. Each field is independently observable
@@ -134,12 +144,35 @@ func (s *Service) TestDiscovery(ctx context.Context, issuerURL string) (*TestDis
 // Kept distinct from go-oidc's internal JWKS fetcher because we want
 // to surface the HTTP status to the operator without requiring a
 // token-verify round-trip.
+//
+// Bundle 5 closure (audit R6): the GET runs through an SSRF-safe
+// http.Client whose transport's DialContext is wrapped in
+// validation.SafeHTTPDialContext. Pre-Bundle-5 the discovery probe
+// used http.DefaultClient and could be pointed at reserved-address
+// ranges via DNS rebinding (operator pastes a JWKS URI from the
+// dynamic-config GUI; admin RBAC for OIDC providers is sensitive but
+// not a system-wide super-admin gate). Now the dial-time guard re-
+// resolves the target host and rejects loopback / link-local /
+// private + cloud-metadata before any HTTP byte goes out. The
+// 10-second timeout matches the package-wide oidcOutboundTimeout
+// budget so token endpoint + JWKS + userinfo probes share the same
+// wall-clock horizon.
 var jwksReachable = func(ctx context.Context, jwksURI string) (bool, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodGet, jwksURI, nil)
 	if err != nil {
 		return false, err
 	}
-	resp, err := http.DefaultClient.Do(req)
+	client := &http.Client{
+		Timeout: oidcOutboundTimeout,
+		Transport: &http.Transport{
+			DialContext:           validation.SafeHTTPDialContext(oidcOutboundTimeout),
+			MaxIdleConns:          10,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+	resp, err := client.Do(req)
 	if err != nil {
 		return false, err
 	}

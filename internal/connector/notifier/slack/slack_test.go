@@ -34,7 +34,11 @@ func TestSlack_SendSuccess(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := New(Config{WebhookURL: server.URL})
+	// Bundle 5 closure (R7): production `New` installs the SSRF dial-time
+	// guard which refuses httptest.NewServer's 127.0.0.1 bind. The
+	// unexported `newForTest` constructor bypasses the guard for unit
+	// tests that exercise the rest of the notifier path.
+	n := newForTest(Config{WebhookURL: server.URL})
 	err := n.Send(context.Background(), "ops@example.com", "Cert Expiring", "mc-api-prod expires in 7 days")
 	if err != nil {
 		t.Fatalf("unexpected error: %v", err)
@@ -57,7 +61,7 @@ func TestSlack_SendWithOverrides(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := New(Config{
+	n := newForTest(Config{
 		WebhookURL:      server.URL,
 		ChannelOverride: "#alerts",
 		Username:        "certctl-bot",
@@ -86,7 +90,7 @@ func TestSlack_SendHTTPError(t *testing.T) {
 	}))
 	defer server.Close()
 
-	n := New(Config{WebhookURL: server.URL})
+	n := newForTest(Config{WebhookURL: server.URL})
 	err := n.Send(context.Background(), "", "Test", "body")
 	if err == nil {
 		t.Fatal("expected error, got nil")
@@ -97,7 +101,7 @@ func TestSlack_SendHTTPError(t *testing.T) {
 }
 
 func TestSlack_SendConnectionError(t *testing.T) {
-	n := New(Config{WebhookURL: "http://127.0.0.1:1"})
+	n := newForTest(Config{WebhookURL: "http://127.0.0.1:1"})
 	err := n.Send(context.Background(), "", "Test", "body")
 	if err == nil {
 		t.Fatal("expected connection error, got nil")
