@@ -41,7 +41,7 @@ The 15 loops live in `internal/scheduler/scheduler.go`. Each is a `func (s *Sche
 Bundle 4 does NOT introduce leader election. It introduces:
 
 1. **Documented HA truth table** (this page) — operators know exactly which loops are safe to multi-replica and which produce operator-observable duplicates.
-2. **Migration HA** via `pg_advisory_lock` + `schema_migrations` audit table (see `internal/repository/postgres/db.go::RunMigrations`). Pre-Bundle-4 every replica race-ran all 45 migrations on boot. Post-Bundle-4 the first replica acquires the lock, applies migrations, populates `schema_migrations`, releases the lock. Subsequent replicas block at the lock, then observe the audit table and skip every already-applied file.
+2. **Migration HA** via `pg_advisory_lock` + `schema_migrations` audit table (see `internal/repository/postgres/db.go::RunMigrations`). Pre-Bundle-4 every replica race-ran the full migrations directory on boot (count via `ls migrations/*.up.sql | wc -l`). Post-Bundle-4 the first replica acquires the lock, applies migrations, populates `schema_migrations`, releases the lock. Subsequent replicas block at the lock, then observe the audit table and skip every already-applied file.
 3. **Rate-limit scope statement** at `docs/operator/rate-limit-scope.md` — process-local per-replica, restart-safe.
 
 ## What Bundle 4 does NOT close (deferred, tracked in WORKSPACE-ROADMAP.md)
