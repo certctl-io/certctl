@@ -2633,6 +2633,70 @@ func (c *Config) Validate() error {
 		}
 	}
 
+	// Bundle 2 (2026-05-12) — fail-closed startup guards for placeholder
+	// credentials shipped by the demo overlay (docker-compose.demo.yml).
+	//
+	// Rationale: pre-Bundle-2 the base docker-compose.yml file interpolated
+	// these strings as the default value when an operator didn't set
+	// CERTCTL_AUTH_SECRET / CERTCTL_API_KEY / CERTCTL_CONFIG_ENCRYPTION_KEY
+	// in deploy/.env. The result: `docker compose up` produced a working
+	// stack with documented "weak" credentials that nobody actually
+	// remembered to rotate before going to production. The Bundle 2 compose
+	// split moved those defaults into the demo overlay; the guards below
+	// catch any path that still surfaces them in a non-demo deploy (e.g.
+	// the .env-example was committed unedited, or a custom compose copied
+	// the placeholder verbatim).
+	//
+	// All three sentinels exactly match the literal strings shipped in
+	// deploy/docker-compose.demo.yml. The demo overlay also sets
+	// DemoModeAck=true, so the demo path itself is exempt and these
+	// strings only fail in production.
+	const (
+		placeholderAPISecret     = "change-me-in-production"
+		placeholderEncryptionKey = "change-me-32-char-encryption-key"
+	)
+	if !c.Auth.DemoModeAck {
+		// HIGH-6 closure (Audit Bundle 2): placeholder API-key secret.
+		if c.Auth.Type == string(AuthTypeAPIKey) && c.Auth.Secret == placeholderAPISecret {
+			return fmt.Errorf(
+				"CERTCTL_AUTH_SECRET is set to the demo placeholder %q — refuse to start. "+
+					"Generate a real value with: openssl rand -base64 32. "+
+					"This guard exempts demo mode (CERTCTL_DEMO_MODE_ACK=true); production "+
+					"deploys MUST rotate.",
+				placeholderAPISecret)
+		}
+		// HIGH-6 closure (Audit Bundle 2): placeholder encryption key.
+		if c.Encryption.ConfigEncryptionKey == placeholderEncryptionKey {
+			return fmt.Errorf(
+				"CERTCTL_CONFIG_ENCRYPTION_KEY is set to the demo placeholder %q — refuse to start. "+
+					"Generate a real value with: openssl rand -base64 32 (must be ≥ 32 bytes). "+
+					"This guard exempts demo mode (CERTCTL_DEMO_MODE_ACK=true); production "+
+					"deploys MUST rotate before any issuer/target credentials are encrypted at rest "+
+					"with the placeholder passphrase.",
+				placeholderEncryptionKey)
+		}
+		// LOW-5 closure (Audit Bundle 2): CORS wildcard in non-demo mode.
+		// Wildcard CORS combined with credentialed cookies (the session
+		// auth Bundle 2 ships) is a CSRF cross-origin escalation channel
+		// (CWE-942 + CWE-352). The auth-exempt routes already route through
+		// middleware.NewCORS with the operator's allowlist; "*" in the
+		// allowlist short-circuits the entire defense. Demo mode is
+		// exempt because the demo synthetic actor has no real credentials
+		// worth stealing, and demo screencaps frequently want to exercise
+		// the dashboard from a Mermaid-rendered URL or whatever.
+		for _, origin := range c.CORS.AllowedOrigins {
+			if origin == "*" {
+				return fmt.Errorf(
+					"CERTCTL_CORS_ORIGINS contains \"*\" wildcard — refuse to start. " +
+						"Wildcard CORS combined with credentialed cookies is a cross-origin " +
+						"CSRF / session-theft channel (CWE-942 + CWE-352). Set a concrete " +
+						"allowlist (e.g. CERTCTL_CORS_ORIGINS=https://dashboard.example.com) " +
+						"or set CERTCTL_DEMO_MODE_ACK=true if this is a demo deploy that " +
+						"has no real session credentials worth defending.")
+			}
+		}
+	}
+
 	// Validate keygen mode
 	validKeygenModes := map[string]bool{
 		"agent":  true,

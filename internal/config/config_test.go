@@ -1526,3 +1526,159 @@ func TestValidate_SCEPDisabled_EmptyRAPair_Accepts(t *testing.T) {
 		t.Errorf("Validate() = %v, want nil for SCEP disabled with empty RA pair", err)
 	}
 }
+
+// Bundle 2 closure (2026-05-12) — fail-closed startup guards against
+// placeholder credentials shipped by the demo overlay
+// (deploy/docker-compose.demo.yml). The literal strings below MUST stay
+// in sync with the sentinels in internal/config/config.go::Validate; the
+// demo overlay also writes these exact values into its env block, so any
+// drift between the three locations would silently break the closure.
+
+// TestValidate_Bundle2_PlaceholderAuthSecret_Refused pins the contract
+// that the placeholder string "change-me-in-production" in
+// CERTCTL_AUTH_SECRET hard-fails Validate() outside demo mode.
+func TestValidate_Bundle2_PlaceholderAuthSecret_Refused(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Auth.Type = "api-key"
+	cfg.Auth.Secret = "change-me-in-production"
+	cfg.Auth.DemoModeAck = false
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; expected refusal on placeholder CERTCTL_AUTH_SECRET")
+	}
+	for _, want := range []string{"CERTCTL_AUTH_SECRET", "change-me-in-production", "openssl rand"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() error = %q; missing operator guidance substring %q", err, want)
+		}
+	}
+}
+
+// TestValidate_Bundle2_PlaceholderAuthSecret_DemoAckExempt pins that
+// the demo overlay (which sets the placeholder + DemoModeAck=true) is
+// exempt — without this exemption the demo path would fail to boot.
+func TestValidate_Bundle2_PlaceholderAuthSecret_DemoAckExempt(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	// Demo overlay sets AUTH_TYPE=none (so the placeholder doesn't even
+	// hit the api-key branch), but cover the api-key + ack edge case too
+	// in case an operator manually flips the demo overlay's AUTH_TYPE.
+	cfg.Auth.Type = "api-key"
+	cfg.Auth.Secret = "change-me-in-production"
+	cfg.Auth.DemoModeAck = true
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept placeholder secret", err)
+	}
+}
+
+// TestValidate_Bundle2_PlaceholderEncryptionKey_Refused pins the
+// contract that "change-me-32-char-encryption-key" hard-fails Validate()
+// outside demo mode. Note: this string is exactly 32 bytes, so it
+// passes the H-1 length floor; the only thing catching it is the
+// Bundle 2 value-equality guard.
+func TestValidate_Bundle2_PlaceholderEncryptionKey_Refused(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = "change-me-32-char-encryption-key"
+	cfg.Auth.DemoModeAck = false
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; expected refusal on placeholder CERTCTL_CONFIG_ENCRYPTION_KEY")
+	}
+	for _, want := range []string{"CERTCTL_CONFIG_ENCRYPTION_KEY", "change-me-32-char-encryption-key", "openssl rand"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() error = %q; missing operator guidance substring %q", err, want)
+		}
+	}
+}
+
+// TestValidate_Bundle2_PlaceholderEncryptionKey_DemoAckExempt covers
+// the demo overlay's posture (placeholder + DemoModeAck=true).
+func TestValidate_Bundle2_PlaceholderEncryptionKey_DemoAckExempt(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.Encryption.ConfigEncryptionKey = "change-me-32-char-encryption-key"
+	cfg.Auth.DemoModeAck = true
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept placeholder encryption key", err)
+	}
+}
+
+// TestValidate_Bundle2_RealEncryptionKey_NotMistakenForPlaceholder
+// pins that a real `openssl rand -base64 32` output sails through.
+// Defense against an over-broad match (e.g. accidentally rejecting any
+// key starting with "change-me-").
+func TestValidate_Bundle2_RealEncryptionKey_NotMistakenForPlaceholder(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	// 44-char base64 sample — same shape `openssl rand -base64 32` produces.
+	cfg.Encryption.ConfigEncryptionKey = "Tc1hZ4n3Ph5gC8e2zR0qV6jX9mYwL1pK4wB7uE3nQ5o="
+	cfg.Auth.DemoModeAck = false
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned %v; want nil for realistic operator key", err)
+	}
+}
+
+// TestValidate_Bundle2_CORSWildcard_Refused pins the LOW-5 closure:
+// CERTCTL_CORS_ORIGINS containing "*" hard-fails Validate() outside
+// demo mode. Wildcard CORS + session cookies = CWE-942 + CWE-352.
+func TestValidate_Bundle2_CORSWildcard_Refused(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.CORS.AllowedOrigins = []string{"*"}
+	cfg.Auth.DemoModeAck = false
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; expected refusal on wildcard CORS")
+	}
+	for _, want := range []string{"CERTCTL_CORS_ORIGINS", "wildcard", "CSRF"} {
+		if !strings.Contains(err.Error(), want) {
+			t.Errorf("Validate() error = %q; missing operator guidance substring %q", err, want)
+		}
+	}
+}
+
+// TestValidate_Bundle2_CORSWildcard_DemoAckExempt covers the demo
+// posture (operators frequently want unrestricted CORS for dashboard
+// screencaps + curl-from-any-origin diagnostics).
+func TestValidate_Bundle2_CORSWildcard_DemoAckExempt(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.CORS.AllowedOrigins = []string{"*"}
+	cfg.Auth.DemoModeAck = true
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned %v with DemoModeAck=true; demo path must accept wildcard CORS", err)
+	}
+}
+
+// TestValidate_Bundle2_CORSWildcard_MixedAllowlistStillRefused pins
+// that "*" mixed into an otherwise-concrete allowlist still trips the
+// guard. The wildcard short-circuits the entire allowlist in
+// middleware.NewCORS, so leaving "*" alongside legit origins is just
+// as dangerous as "*" alone.
+func TestValidate_Bundle2_CORSWildcard_MixedAllowlistStillRefused(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.CORS.AllowedOrigins = []string{"https://dashboard.example.com", "*", "https://other.example.com"}
+	cfg.Auth.DemoModeAck = false
+
+	err := cfg.Validate()
+	if err == nil {
+		t.Fatal("Validate() returned nil; expected refusal on wildcard mixed into allowlist")
+	}
+	if !strings.Contains(err.Error(), "wildcard") {
+		t.Errorf("Validate() error = %q; want wildcard mention", err)
+	}
+}
+
+// TestValidate_Bundle2_CORSConcreteAllowlist_Accepted pins that a real
+// operator allowlist sails through (no false-positive on substring match
+// or similar over-broad matching).
+func TestValidate_Bundle2_CORSConcreteAllowlist_Accepted(t *testing.T) {
+	cfg := validBaseConfigForEncryption(t)
+	cfg.CORS.AllowedOrigins = []string{"https://dashboard.example.com", "https://admin.example.com"}
+	cfg.Auth.DemoModeAck = false
+
+	if err := cfg.Validate(); err != nil {
+		t.Errorf("Validate() returned %v; want nil for concrete CORS allowlist", err)
+	}
+}

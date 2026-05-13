@@ -102,6 +102,19 @@ func main() {
 		"server_host", cfg.Server.Host,
 		"server_port", cfg.Server.Port)
 
+	// Bundle 2 (2026-05-12) — visible demo-mode banner at boot.
+	//
+	// When CERTCTL_DEMO_MODE_ACK=true the HIGH-12 startup guard already
+	// passed and the server is about to serve every request as the
+	// synthetic admin actor `actor-demo-anon`. Operators have lost
+	// production deploys to this posture more than once (last incident:
+	// 2026-04-19, a screenshot run that kept running for three days);
+	// the per-startup banner makes the posture unmissable in any log
+	// scraper, dashboard, or `journalctl --since boot` review.
+	if cfg.Auth.DemoModeAck {
+		logger.Warn("⚠ DEMO MODE ACTIVE — CERTCTL_DEMO_MODE_ACK=true is set; every request is served as the synthetic admin actor `actor-demo-anon` (no authentication enforced). This deployment MUST NOT hold production keys, certificates, or audit history. To promote to production: (1) unset CERTCTL_DEMO_MODE_ACK; (2) set CERTCTL_AUTH_TYPE=api-key or oidc; (3) set CERTCTL_AUTH_SECRET to a fresh `openssl rand -base64 32`; (4) set CERTCTL_KEYGEN_MODE=agent; (5) rotate CERTCTL_CONFIG_ENCRYPTION_KEY to a fresh `openssl rand -base64 32` (≥ 32 bytes, not the change-me placeholder); (6) restart the server. See docs/operator/security.md for the full posture.")
+	}
+
 	// Bundle-5 / Audit H-007: deprecation WARN when the agent bootstrap
 	// token is unset. Pre-Bundle-5 there was no token at all; the v2.0.x
 	// default keeps the warn-mode pass-through so existing demo deploys

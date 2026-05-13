@@ -62,7 +62,9 @@ A compose file defines **services** (containers), **networks** (how they talk to
 ## Base Environment
 
 **File:** `docker-compose.yml`
-**When to use:** Production deployments, first-time setup, or any time you want a clean dashboard with the onboarding wizard.
+**When to use:** Production deployments and any time you want a clean, production-shaped stack with real authentication enforced.
+
+**Bundle 2 closure (2026-05-12):** the base compose was split from the demo overlay. Pre-Bundle-2 this file IS the demo path (auth=none, keygen=server, demo-seed=true, change-me placeholder credentials baked in). Operators reading "drop the demo overlay for a clean install" were not getting a clean install — they were getting a demo stack with the overlay's data layer stripped off. Post-Bundle-2 the base ships production-shaped: `CERTCTL_AUTH_TYPE` defaults to `api-key`, `CERTCTL_KEYGEN_MODE` defaults to `agent`, demo-mode + demo-seed default to false, and every credential placeholder is rejected at startup. The demo path is now a single overlay flag away (`-f deploy/docker-compose.demo.yml`).
 
 ### What it runs
 
@@ -79,8 +81,19 @@ Three services on a private bridge network:
 ```bash
 git clone https://github.com/certctl-io/certctl.git
 cd certctl
+
+# Required: provide real credentials. Without this step the server fail-fasts
+# at startup on the Bundle 2 placeholder-credential guards.
+cp .env.example deploy/.env
+$EDITOR deploy/.env
+# Set: POSTGRES_PASSWORD, CERTCTL_AUTH_SECRET, CERTCTL_API_KEY,
+#      CERTCTL_CONFIG_ENCRYPTION_KEY (all via `openssl rand -base64 32`),
+#      CERTCTL_AGENT_ID (returned from `POST /api/v1/agents`).
+
 docker compose -f deploy/docker-compose.yml up -d --build
 ```
+
+If you just want to kick the tires without writing a `.env`, use the demo overlay instead — see [Demo Overlay](#demo-overlay) below.
 
 `--build` compiles the Go server and agent from source, including the React frontend. Without it, Docker may reuse a stale image from a previous build.
 
@@ -132,14 +145,16 @@ certctl-server:
     postgres:
       condition: service_healthy
   environment:
-    CERTCTL_DATABASE_URL: postgres://certctl:${POSTGRES_PASSWORD:-certctl}@postgres:5432/certctl?sslmode=disable
+    CERTCTL_DATABASE_URL: postgres://certctl:${POSTGRES_PASSWORD}@postgres:5432/certctl?sslmode=disable
     CERTCTL_SERVER_HOST: 0.0.0.0
     CERTCTL_SERVER_PORT: 8443
     CERTCTL_LOG_LEVEL: info
-    CERTCTL_AUTH_TYPE: none
-    CERTCTL_KEYGEN_MODE: server
+    # Bundle 2 (2026-05-12): no auth-type / keygen-mode override here.
+    # Code defaults (api-key + agent) take effect; the demo overlay flips
+    # both to demo-mode (none + server).
+    CERTCTL_AUTH_SECRET: ${CERTCTL_AUTH_SECRET}
     CERTCTL_NETWORK_SCAN_ENABLED: "true"
-    CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}
+    CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY}
 ```
 
 The server is the control plane. It serves the REST API, the React dashboard, runs 7 background scheduler loops (renewal, job processing, health checks, notifications, short-lived cert expiry, network scanning, digest emails), and manages the issuer/target registry.
@@ -147,9 +162,10 @@ The server is the control plane. It serves the REST API, the React dashboard, ru
 Key environment variables explained:
 
 - `CERTCTL_DATABASE_URL` references the `postgres` service by hostname. Docker's internal DNS resolves `postgres` to the container's IP on the bridge network. `sslmode=disable` is appropriate because traffic stays on the private Docker network.
-- `CERTCTL_AUTH_TYPE: none` disables API key authentication so you can explore immediately. For production, set `api-key` and configure `CERTCTL_AUTH_SECRET`.
-- `CERTCTL_KEYGEN_MODE: server` means the server generates private keys. This is convenient for demos but insecure for production. In production, set `agent` so keys are generated on agent machines and never transmitted.
-- `CERTCTL_CONFIG_ENCRYPTION_KEY` enables AES-256-GCM encryption for issuer and target configurations stored in the database (credentials, API keys). Without this, the dynamic configuration GUI (adding issuers/targets from the dashboard) won't encrypt sensitive fields. For production, generate a strong random key.
+- `CERTCTL_AUTH_TYPE` defaults to `api-key` in the code (`internal/config/config.go`); the base compose does NOT override it. To run demo-mode auth (every request served as the synthetic admin actor), layer the demo overlay on top.
+- `CERTCTL_AUTH_SECRET` is the API-key value the server accepts. The Bundle 2 fail-closed guard rejects the literal placeholder `change-me-in-production` outside demo mode. Generate with `openssl rand -base64 32`.
+- `CERTCTL_KEYGEN_MODE` defaults to `agent` in the code (the base compose does NOT override it). Production deploys leave it there so private keys stay on agent infrastructure; the demo overlay flips it to `server` so the demo can issue + hold the key on the server box without an agent dance.
+- `CERTCTL_CONFIG_ENCRYPTION_KEY` enables AES-256-GCM encryption for issuer and target configurations stored in the database (credentials, API keys). Required for any deploy that adds issuers via the GUI. The Bundle 2 fail-closed guard rejects the literal placeholder `change-me-32-char-encryption-key` outside demo mode. Generate with `openssl rand -base64 32` (≥ 32 bytes).
 - `CERTCTL_NETWORK_SCAN_ENABLED` activates the scheduler loop that probes TLS endpoints on your network to discover certificates you might not be managing.
 
 **Expert note:** The healthcheck hits `GET /health` every 10 seconds with 5 retries. The `depends_on: condition: service_healthy` on the agent means Docker holds agent startup until this check passes. Resource limits (`cpus: '1.0'`, `memory: 512M`) prevent the server from consuming unbounded resources in shared environments.
@@ -162,8 +178,12 @@ certctl-agent:
     certctl-server:
       condition: service_healthy
   environment:
-    CERTCTL_SERVER_URL: http://certctl-server:8443
-    CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
+    CERTCTL_SERVER_URL: https://certctl-server:8443
+    # Bundle 2 (2026-05-12): no placeholder fallbacks. Operators MUST
+    # set CERTCTL_API_KEY + CERTCTL_AGENT_ID in deploy/.env. The agent
+    # binary fail-fasts at startup when CERTCTL_AGENT_ID is unset.
+    CERTCTL_API_KEY: ${CERTCTL_API_KEY}
+    CERTCTL_AGENT_ID: ${CERTCTL_AGENT_ID}
     CERTCTL_AGENT_NAME: docker-agent
     CERTCTL_LOG_LEVEL: info
     CERTCTL_DISCOVERY_DIRS: /var/lib/certctl/keys
@@ -194,13 +214,18 @@ docker compose -f deploy/docker-compose.yml down -v
 ## Demo Overlay
 
 **File:** `docker-compose.demo.yml`
-**When to use:** Demos, screenshots, stakeholder presentations, or any time you want a populated dashboard on first boot.
+**When to use:** Demos, screenshots, stakeholder presentations, or any time you want a one-command zero-config evaluation stack with a populated dashboard.
 
 ### What it adds
 
-One env var: `CERTCTL_DEMO_SEED=true` on the `certctl-server` service. The server applies `migrations/seed_demo.sql` at boot via `postgres.RunDemoSeed` AFTER the baseline migrations + `seed.sql` are in place. The demo seed file inserts 180 days of simulated operational history: teams, owners, certificates across multiple issuers, agents on different platforms, jobs with realistic timestamps, discovery scan results, audit events, policies, and profiles.
+Bundle 2 closure (2026-05-12) moved every demo-mode env var out of the base compose into this overlay. The overlay now carries:
 
-Pre-U-3 the overlay used to mount `seed_demo.sql` into PostgreSQL's `/docker-entrypoint-initdb.d/` and rely on initdb-time application. That worked only because the production stack also mounted the migrations there, so the schema existed when initdb ran. Once U-3 dropped the production initdb mounts (single source of truth: server runs `RunMigrations` + `RunSeed` at boot), the demo seed could no longer be applied at initdb time — the tables it references wouldn't exist yet. Post-U-3 the overlay is a 27-line override file with no `image:` / `build:` of its own; it MUST be passed alongside the base, or compose errors with `service "certctl-server" has neither an image nor a build context specified`.
+- `CERTCTL_AUTH_TYPE=none` + `CERTCTL_DEMO_MODE_ACK=true` — demo-mode synthetic admin actor (`actor-demo-anon`). The server emits a prominent ⚠ DEMO MODE WARN banner at boot with a production-promotion checklist (`cmd/server/main.go`).
+- `CERTCTL_KEYGEN_MODE=server` — demo-only server-side keygen.
+- `CERTCTL_DEMO_SEED=true` — the server applies `migrations/seed_demo.sql` at boot via `postgres.RunDemoSeed`, inserting 180 days of simulated operational history (teams, owners, certificates, agents, jobs, discovery results, audit events, policies, profiles).
+- Fixed weak `POSTGRES_PASSWORD=certctl`, `CERTCTL_AUTH_SECRET=change-me-in-production`, `CERTCTL_CONFIG_ENCRYPTION_KEY=change-me-32-char-encryption-key`, `CERTCTL_API_KEY=change-me-in-production`, `CERTCTL_AGENT_ID=agent-demo-1` — placeholder credentials the Bundle 2 fail-closed `Validate()` rejects outside demo mode, but the demo overlay's `DEMO_MODE_ACK=true` unlocks them.
+
+Pre-U-3 the overlay used to mount `seed_demo.sql` into PostgreSQL's `/docker-entrypoint-initdb.d/` and rely on initdb-time application. That worked only because the production stack also mounted the migrations there, so the schema existed when initdb ran. Once U-3 dropped the production initdb mounts (single source of truth: server runs `RunMigrations` + `RunSeed` at boot), the demo seed could no longer be applied at initdb time — the tables it references wouldn't exist yet. Post-U-3 the overlay is an override file with no `image:` / `build:` of its own; it MUST be passed alongside the base, or compose errors with `service "certctl-server" has neither an image nor a build context specified`.
 
 ### Starting it
 
@@ -382,7 +407,7 @@ Every `CERTCTL_*` environment variable is read by the server's `internal/config/
 | `CERTCTL_SERVER_HOST` | `0.0.0.0` | Listen address |
 | `CERTCTL_SERVER_PORT` | `8443` | Listen port |
 | `CERTCTL_LOG_LEVEL` | `info` | Log verbosity: `debug`, `info`, `warn`, `error` |
-| `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key` or `none` |
+| `CERTCTL_AUTH_TYPE` | `api-key` | Auth mode: `api-key`, `none`, or `oidc` (Auth Bundle 2). |
 | `CERTCTL_AUTH_SECRET` | (none) | API key(s), comma-separated for rotation |
 | `CERTCTL_KEYGEN_MODE` | `agent` | Key generation: `agent` (production) or `server` (demo) |
 | `CERTCTL_CONFIG_ENCRYPTION_KEY` | (none) | AES-256-GCM key for encrypting issuer/target configs in DB |
@@ -400,7 +425,7 @@ Every `CERTCTL_*` environment variable is read by the server's `internal/config/
 | `CERTCTL_SERVER_URL` | (required) | Server API URL |
 | `CERTCTL_API_KEY` | (none) | API key for authenticating with server |
 | `CERTCTL_AGENT_NAME` | (hostname) | Display name in dashboard |
-| `CERTCTL_AGENT_ID` | (auto-generated) | Stable agent identifier |
+| `CERTCTL_AGENT_ID` | (none — required) | Stable agent identifier returned from `POST /api/v1/agents`. The agent binary fail-fasts at startup if unset. |
 | `CERTCTL_KEYGEN_MODE` | `agent` | Must match server setting |
 | `CERTCTL_LOG_LEVEL` | `info` | Log verbosity |
 | `CERTCTL_KEY_DIR` | `/var/lib/certctl/keys` | Directory for private key storage (0600 perms) |

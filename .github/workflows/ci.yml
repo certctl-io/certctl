@@ -322,21 +322,36 @@ jobs:
             curl "${args[@]}"
           }
 
+          # Bundle 2 closure (2026-05-12): the base compose is now
+          # production-shaped — auth=api-key + agent-keygen + fail-closed
+          # placeholder guards. The cold-DB smoke layers in the demo
+          # overlay so the boot path remains zero-config: the overlay
+          # supplies AUTH_TYPE=none + DEMO_MODE_ACK=true + the matching
+          # placeholder creds the fail-closed guards accept under
+          # DEMO_MODE_ACK. The agent service in the overlay also
+          # pre-seeds CERTCTL_AGENT_ID=agent-demo-1 so the bundled
+          # agent doesn't restart-loop. The smoke's purpose (catch
+          # migration-on-cold-DB regressions + verify bootstrap-token
+          # endpoint mints a day-0 admin against a freshly migrated
+          # schema) is orthogonal to whether the auth posture is
+          # demo-mode or api-key, so the overlay is acceptable here.
+          COMPOSE_FILES=(-f docker-compose.yml -f docker-compose.demo.yml)
+
           log "1/4 down -v --remove-orphans"
-          docker compose down -v --remove-orphans 2>&1 | tail -3 || true
+          docker compose "${COMPOSE_FILES[@]}" down -v --remove-orphans 2>&1 | tail -3 || true
 
           log "2/4 up -d (cold boot)"
-          docker compose up -d 2>&1 | tail -3
+          docker compose "${COMPOSE_FILES[@]}" up -d 2>&1 | tail -3
 
           log "3/4 wait for healthchecks"
           wait_for_service_healthy postgres
           wait_for_service_healthy certctl-server
-          wait_for_service_healthy certctl-agent || log "  (agent skipped — non-demo compose)"
+          wait_for_service_healthy certctl-agent || log "  (agent skipped)"
 
           log "4/4 minting day-0 admin (proves migration ladder + bootstrap path)"
           TOKEN="$(openssl rand -base64 32 | tr -d '\n')"
           echo "CERTCTL_BOOTSTRAP_TOKEN=$TOKEN" > /tmp/_smoke.env
-          docker compose --env-file /tmp/_smoke.env up -d --force-recreate certctl-server 2>&1 | tail -2
+          docker compose "${COMPOSE_FILES[@]}" --env-file /tmp/_smoke.env up -d --force-recreate certctl-server 2>&1 | tail -2
           sleep 5
           wait_for_service_healthy certctl-server
           BODY="$(http_call POST /api/v1/auth/bootstrap "{\"token\":\"$TOKEN\",\"actor_name\":\"smoke-admin\"}")"
@@ -345,7 +360,7 @@ jobs:
 
           log "PASS — cold boot + force-recreate + admin bootstrap all green"
           log "tearing down"
-          docker compose down -v 2>&1 | tail -2
+          docker compose "${COMPOSE_FILES[@]}" down -v 2>&1 | tail -2
 
       - name: Dump compose logs on failure
         if: failure()
@@ -353,7 +368,7 @@ jobs:
         run: |
           for svc in postgres certctl-server certctl-agent certctl-tls-init; do
             echo "==== $svc ===="
-            docker compose logs --no-color --tail 200 "$svc" || true
+            docker compose -f docker-compose.yml -f docker-compose.demo.yml logs --no-color --tail 200 "$svc" || true
           done
 
   frontend-build:

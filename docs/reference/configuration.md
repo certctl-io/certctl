@@ -80,7 +80,7 @@ For the full deploy contract see
 
 | Variable | Default | Description |
 |---|---|---|
-| `CERTCTL_AGENT_ID` | (none — required) | The agent's unique ID, issued by `POST /api/v1/agents/register` and bundled into the agent's registration response. Pass via this env var when the agent runs as a systemd unit / container without the `-agent-id` CLI flag. |
+| `CERTCTL_AGENT_ID` | (none — required) | The agent's unique ID, issued by `POST /api/v1/agents` (requires `CERTCTL_AGENT_BOOTSTRAP_TOKEN` when configured) and returned in the registration response body. Pass via this env var when the agent runs as a systemd unit / container without the `-agent-id` CLI flag. The bundled `install-agent.sh` does NOT auto-register — operators pre-register an agent via the REST endpoint (or the dashboard), then pass the returned ID to the script via `--agent-id`. |
 
 ## Auth (RBAC + OIDC + sessions + break-glass)
 

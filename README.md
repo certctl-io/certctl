@@ -88,15 +88,27 @@ Security: three authentication paths — API keys (SHA-256 hashed + constant-tim
 
 ### Docker Compose (recommended)
 
+**Demo path — zero config, populated dashboard:**
+
 ```bash
 git clone https://github.com/certctl-io/certctl.git
 cd certctl
 docker compose -f deploy/docker-compose.yml -f deploy/docker-compose.demo.yml up -d --build
 ```
 
-Wait ~30 seconds, then open **https://localhost:8443** in your browser. The shipped demo overlay seeds 180 days of realistic history across 13 issuers, 8 agents, managed + discovered certs, jobs, deploys, audit, and notification events. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
+Wait ~30 seconds, then open **https://localhost:8443** in your browser. The demo overlay flips the base into demo-mode auth (every request served as the synthetic admin actor `actor-demo-anon` — the server emits a prominent ⚠ DEMO MODE banner at boot reminding you this posture is for evaluation only) and seeds 180 days of realistic history across 13 issuers, 8 agents, managed + discovered certs, jobs, deploys, audit, and notification events. The `certctl-tls-init` init container self-signs an ECDSA-P256 cert on first boot — accept the browser warning for the demo, or feed the generated `ca.crt` to your client.
 
-For a clean install without demo data, drop the `-f deploy/docker-compose.demo.yml` flag and run `docker compose -f deploy/docker-compose.yml up -d --build`. The four compose files (`docker-compose.yml` base, `docker-compose.demo.yml` overlay, `docker-compose.dev.yml` for PgAdmin + debug logging, `docker-compose.test.yml` for integration tests) are documented at [`deploy/ENVIRONMENTS.md`](deploy/ENVIRONMENTS.md).
+**Production path — `.env` required, fail-closed on placeholders:**
+
+```bash
+cp .env.example deploy/.env       # or root .env if running outside compose
+$EDITOR deploy/.env                # set POSTGRES_PASSWORD, CERTCTL_AUTH_SECRET,
+                                   # CERTCTL_API_KEY, CERTCTL_CONFIG_ENCRYPTION_KEY,
+                                   # CERTCTL_AGENT_ID — all via openssl rand
+docker compose -f deploy/docker-compose.yml up -d --build
+```
+
+The base compose alone (no demo overlay) ships production-shaped: default `auth-type=api-key`, default `keygen-mode=agent`, no demo seed, no demo-mode synthetic admin. The fail-closed startup guards in `internal/config/config.go::Validate` refuse to boot when any of the change-me-... placeholder credentials reach config outside of demo mode (Bundle 2 closure, 2026-05-12). The four compose files (`docker-compose.yml` base, `docker-compose.demo.yml` overlay, `docker-compose.dev.yml` for PgAdmin + debug logging, `docker-compose.test.yml` for integration tests) are documented at [`deploy/ENVIRONMENTS.md`](deploy/ENVIRONMENTS.md).
 
 ```bash
 curl --cacert $(docker compose -f deploy/docker-compose.yml exec -T certctl-server cat /etc/certctl/tls/ca.crt) https://localhost:8443/health

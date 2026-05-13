@@ -1,3 +1,49 @@
+# =============================================================================
+# certctl base compose — PRODUCTION-SHAPED (Bundle 2, 2026-05-12)
+# =============================================================================
+#
+# This base file ships a SAFE-BY-DEFAULT control plane:
+#
+#   - CERTCTL_AUTH_TYPE defaults to api-key (the code default; not overridden
+#     here). The server REFUSES to start with auth=none on a non-loopback
+#     bind unless CERTCTL_DEMO_MODE_ACK=true (Audit 2026-05-10 HIGH-12 +
+#     Bundle 2 closure: see internal/config/config.go::Validate).
+#   - CERTCTL_KEYGEN_MODE defaults to agent (the code default).
+#   - CERTCTL_DEMO_SEED defaults to false (the code default; the 180-day
+#     simulated history seed only runs under the demo overlay).
+#   - Default placeholder credentials (`change-me-...` sentinels) are NOT
+#     interpolated by this compose. The server REFUSES to start when those
+#     placeholder strings reach config (Bundle 2 fail-closed guards) unless
+#     DEMO_MODE_ACK=true. Operators MUST set:
+#         POSTGRES_PASSWORD               (openssl rand -hex 32)
+#         CERTCTL_AUTH_SECRET             (openssl rand -hex 32)
+#         CERTCTL_CONFIG_ENCRYPTION_KEY   (openssl rand -base64 32)
+#         CERTCTL_API_KEY                 (matches CERTCTL_AUTH_SECRET or one
+#                                          of its rotation siblings)
+#         CERTCTL_AGENT_ID                (returned from POST /api/v1/agents)
+#     in deploy/.env or the shell environment. See deploy/.env.example.
+#
+# USAGE
+# -----
+#
+# Production-shaped (this base alone):
+#   docker compose -f deploy/docker-compose.yml up -d
+#
+# Bundled demo (zero-config, populated dashboard, demo-mode auth):
+#   docker compose -f deploy/docker-compose.yml \
+#                  -f deploy/docker-compose.demo.yml up -d
+#
+# The demo overlay (docker-compose.demo.yml) layers in the demo-mode env
+# vars (AUTH_TYPE=none + DEMO_MODE_ACK=true + KEYGEN_MODE=server +
+# DEMO_SEED=true + the change-me placeholder creds). It exists so the
+# `docker compose up` smoke + screenshot path stays one command — but it
+# ALSO carries the operator-visible warning banner the server emits at
+# boot when DEMO_MODE_ACK=true.
+#
+# Pre-Bundle-2 this base file WAS the demo path. The split happened in
+# 2026-05-12; the README quickstart, deploy/ENVIRONMENTS.md, and the
+# cold-DB compose smoke in .github/workflows/ci.yml were updated in the
+# same commit to point at the new layout.
 services:
   # HTTPS-Everywhere Phase 3 — self-signed TLS bootstrap (init container).
   # Generates a CN=certctl-server ECDSA-P256 (SHA-256 signature) cert with
@@ -82,7 +128,12 @@ services:
     environment:
       POSTGRES_DB: certctl
       POSTGRES_USER: certctl
-      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-certctl}
+      # Bundle 2 closure: no `:-certctl` fallback. Operators MUST set
+      # POSTGRES_PASSWORD in deploy/.env or the shell environment. The
+      # demo overlay (docker-compose.demo.yml) supplies a fixed weak
+      # default for screenshot/demo use; production deploys never
+      # depend on that fallback.
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
@@ -123,34 +174,30 @@ services:
       # on the docker bridge network keeps sslmode=disable acceptable; for
       # external/managed Postgres operators MUST override CERTCTL_DATABASE_URL
       # with sslmode=verify-full and provide the CA bundle. See docs/database-tls.md.
-      CERTCTL_DATABASE_URL: ${CERTCTL_DATABASE_URL:-postgres://certctl:${POSTGRES_PASSWORD:-certctl}@postgres:5432/certctl?sslmode=disable}
+      CERTCTL_DATABASE_URL: ${CERTCTL_DATABASE_URL:-postgres://certctl:${POSTGRES_PASSWORD}@postgres:5432/certctl?sslmode=disable}
       CERTCTL_SERVER_HOST: 0.0.0.0
       CERTCTL_SERVER_PORT: 8443
       CERTCTL_SERVER_TLS_CERT_PATH: /etc/certctl/tls/server.crt
       CERTCTL_SERVER_TLS_KEY_PATH: /etc/certctl/tls/server.key
       CERTCTL_LOG_LEVEL: info
-      CERTCTL_AUTH_TYPE: none
-      # Audit 2026-05-10 HIGH-12 closure: when AUTH_TYPE=none AND the
-      # server binds to a non-loopback address (SERVER_HOST=0.0.0.0
-      # above), every request is served as the synthetic actor
-      # `actor-demo-anon`. The server fail-fasts at startup unless
-      # DEMO_MODE_ACK=true acknowledges that posture. This compose IS
-      # the bundled demo path (see DEMO_SEED comment below), so the
-      # ACK is correct here. Production deploys override AUTH_TYPE +
-      # KEYGEN_MODE + DEMO_SEED + DEMO_MODE_ACK via their own compose.
-      CERTCTL_DEMO_MODE_ACK: "true"
-      CERTCTL_KEYGEN_MODE: server  # Demo uses server-side keygen; production should use "agent"
-      CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI with seeded demo targets
-      CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY:-change-me-32-char-encryption-key}  # AES-256-GCM for dynamic issuer/target config
-      # Bundle 1 follow-on: this compose IS the bundled demo path
-      # (CERTCTL_AUTH_TYPE=none + KEYGEN_MODE=server above), so the
-      # demo seed runs by default. seed_demo.sql pre-seeds the
-      # agent-demo-1 row that the bundled certctl-agent below needs
-      # to authenticate. The docker-compose.demo.yml overlay still
-      # works (it sets the same flag) and remains for backward
-      # compat. Production deploys override CERTCTL_AUTH_TYPE +
-      # KEYGEN_MODE + DEMO_SEED via their own compose.
-      CERTCTL_DEMO_SEED: "true"
+      # Bundle 2 closure (compose split). The base compose no longer
+      # sets CERTCTL_AUTH_TYPE / CERTCTL_KEYGEN_MODE / DEMO_MODE_ACK /
+      # DEMO_SEED — the code defaults take over (auth-type api-key,
+      # keygen agent, demo-mode false, demo-seed false). The demo
+      # overlay (docker-compose.demo.yml) is what flips this baseline
+      # into the populated-dashboard demo path; without that overlay
+      # the server boots production-shaped and refuses to start unless
+      # the operator has supplied CERTCTL_AUTH_SECRET +
+      # CERTCTL_CONFIG_ENCRYPTION_KEY.
+      #
+      # Audit 2026-05-10 HIGH-12: when DEMO_MODE_ACK=true (set by the
+      # demo overlay) AND the listener binds to a non-loopback address,
+      # every request is served as the synthetic admin actor
+      # `actor-demo-anon`. The server emits a prominent boot-time WARN
+      # banner with a production-promotion checklist in that case.
+      CERTCTL_AUTH_SECRET: ${CERTCTL_AUTH_SECRET}
+      CERTCTL_NETWORK_SCAN_ENABLED: "true"  # Enable network scan GUI
+      CERTCTL_CONFIG_ENCRYPTION_KEY: ${CERTCTL_CONFIG_ENCRYPTION_KEY}  # AES-256-GCM for dynamic issuer/target config
       # Bootstrap token interpolation surface (Auditable Codebase Bundle
       # cold-DB smoke closure, 2026-05-12). Pre-fix, the `env-file +
       # --force-recreate certctl-server` pattern documented in
@@ -214,18 +261,19 @@ services:
     environment:
       CERTCTL_SERVER_URL: https://certctl-server:8443
       CERTCTL_SERVER_CA_BUNDLE_PATH: /etc/certctl/tls/ca.crt
-      CERTCTL_API_KEY: ${CERTCTL_API_KEY:-change-me-in-production}
-      # Bundle 1 follow-on: pre-Bundle-1 the bundled agent had no
-      # CERTCTL_AGENT_ID set, hit cmd/agent/main.go's fail-fast guard
-      # ("agent-id flag or CERTCTL_AGENT_ID env var is required"), and
-      # restart-looped silently on every fresh `docker compose up`.
-      # Latent since 2026-03-14 (commit d395776). seed_demo.sql now
-      # pre-seeds the matching agents row; the demo runs with
-      # CERTCTL_AUTH_TYPE=none on the server so the api_key Bearer
-      # token is irrelevant here. Production deploys override
-      # CERTCTL_AGENT_ID with the value returned from
-      # POST /api/v1/agents during registration.
-      CERTCTL_AGENT_ID: ${CERTCTL_AGENT_ID:-agent-demo-1}
+      # Bundle 2 closure (compose split). No placeholder fallbacks.
+      # Operators MUST set CERTCTL_API_KEY (matching one of the server's
+      # CERTCTL_AUTH_SECRET rotation values) and CERTCTL_AGENT_ID
+      # (returned from `POST /api/v1/agents` during agent enrollment).
+      # Without an agent ID, cmd/agent/main.go fails fast at startup
+      # with "agent-id flag or CERTCTL_AGENT_ID env var is required" —
+      # the cold-DB compose smoke in .github/workflows/ci.yml tolerates
+      # the agent restart loop because the smoke targets server boot
+      # only. The demo overlay (docker-compose.demo.yml) supplies a
+      # pre-seeded agent-demo-1 row + matching env vars so the demo
+      # path stays one-command.
+      CERTCTL_API_KEY: ${CERTCTL_API_KEY}
+      CERTCTL_AGENT_ID: ${CERTCTL_AGENT_ID}
       CERTCTL_AGENT_NAME: docker-agent
       CERTCTL_LOG_LEVEL: info
       CERTCTL_DISCOVERY_DIRS: /var/lib/certctl/keys  # Agent scans this directory for existing certificates
