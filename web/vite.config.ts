@@ -1,4 +1,5 @@
 import { defineConfig } from 'vite'
+import { configDefaults } from 'vitest/config'
 import react from '@vitejs/plugin-react'
 
 // C-1 closure (cat-u-vite_dev_proxy_plaintext_drift): pre-C-1 the dev
@@ -25,5 +26,11 @@ export default defineConfig({
     globals: true,
     environment: 'jsdom',
     setupFiles: ['./src/test/setup.ts'],
+    // Exclude Playwright e2e specs from the Vitest run. The harness in
+    // src/__tests__/e2e/ uses @playwright/test's test.describe(), which
+    // throws "did not expect test.describe() to be called here" under
+    // Vitest. Playwright runs them via `npm run e2e` against
+    // web/playwright.config.ts (testDir: './src/__tests__/e2e').
+    exclude: [...configDefaults.exclude, 'src/__tests__/e2e/**'],
   },
 })
