@@ -76,6 +76,22 @@ services:
       # sentinels outside demo mode, but DEMO_MODE_ACK=true unlocks them.
       CERTCTL_CONFIG_ENCRYPTION_KEY: change-me-32-char-encryption-key
       CERTCTL_AUTH_SECRET: change-me-in-production
+      # Cold-DB smoke fix (2026-05-13): the base compose builds the
+      # database URL via compose-level `${POSTGRES_PASSWORD}` interpolation
+      # (deploy/docker-compose.yml line ~177), which reads the SHELL env —
+      # NOT the postgres service's `environment:` block above (that one
+      # feeds the postgres container's initdb only). In a zero-env-var
+      # CI run the shell var is blank, producing
+      # `postgres://certctl:@postgres:5432/...` and a SCRAM rejection
+      # against a database that initdb seeded with password `certctl`.
+      # Pinning the full URL here closes the gap: the demo overlay is
+      # now fully self-sufficient (matches the file's docstring claim)
+      # and the cold-DB smoke passes against a fresh GitHub-runner clone
+      # with no .env file or exported shell vars. Production deploys
+      # override CERTCTL_DATABASE_URL via the base compose's
+      # `${CERTCTL_DATABASE_URL:-...}` default, so this literal is
+      # overlay-scoped and never leaks into a production posture.
+      CERTCTL_DATABASE_URL: postgres://certctl:certctl@postgres:5432/certctl?sslmode=disable
       # 180-day simulated history seed applied at boot.
       CERTCTL_DEMO_SEED: "true"
 
