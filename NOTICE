@@ -1,0 +1,18 @@
+certctl
+Copyright 2026 certctl LLC.
+
+This product is distributed under the Business Source License 1.1.
+See LICENSE at the repository root for the full license text and
+the Additional Use Grant carve-outs.
+
+This product links third-party Go modules and JavaScript packages
+whose own license terms apply to those components. The full
+inventory of third-party dependencies and their respective licenses
+is enumerated in THIRD_PARTY_NOTICES.md at the repository root.
+
+Effective March 14, 2076, the BSL 1.1 license converts to the
+Apache License 2.0 per the Change Date in LICENSE.
+
+For inquiries about commercial licensing terms outside the
+Additional Use Grant — including the Commercial Certificate
+Service restriction — contact certctl@proton.me.
